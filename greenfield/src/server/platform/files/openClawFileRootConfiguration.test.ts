@@ -29,7 +29,7 @@ async function fixture() {
 }
 
 describe("reviewed OpenClaw file root", () => {
-    test("returns only the fixed read-only legacy manifest", async () => {
+    test("returns only the fixed legacy-editable manifest", async () => {
         const { openClawRoot, productionRoot } = await fixture();
 
         expect(
@@ -42,11 +42,13 @@ describe("reviewed OpenClaw file root", () => {
                     contentPolicy: "redacted-config-json",
                     maximumSizeBytes: 1_048_576,
                     segments: ["openclaw.json"],
+                    writable: true,
                 },
                 {
                     contentPolicy: "raw",
                     maximumSizeBytes: 1_048_576,
                     segments: ["hooks", "transforms", "agentmail.ts"],
+                    writable: true,
                 },
             ],
             path: openClawRoot,
@@ -81,11 +83,13 @@ describe("reviewed OpenClaw file root", () => {
                         contentPolicy: "raw",
                         maximumSizeBytes: 1_048_576,
                         segments: ["openclaw.json"],
+                        writable: true,
                     },
                     {
                         contentPolicy: "raw",
                         maximumSizeBytes: 1_048_576,
                         segments: ["credentials.json"],
+                        writable: true,
                     },
                 ],
                 path: "/srv/openclaw",

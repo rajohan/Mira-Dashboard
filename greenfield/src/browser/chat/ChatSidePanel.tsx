@@ -102,6 +102,11 @@ function Plan({ plan }: Readonly<{ plan: ChatActivePlanView }>) {
     return (
         <section aria-label={`Active plan: ${plan.title}`} className="shrink-0 space-y-2">
             <Heading level={3}>{plan.title}</Heading>
+            {plan.description === undefined ? null : (
+                <Text size="sm" tone="muted">
+                    {plan.description}
+                </Text>
+            )}
             <ol className="space-y-1.5">
                 {plan.items.map((item) => (
                     <li className="flex items-start gap-2 text-sm" key={item.id}>

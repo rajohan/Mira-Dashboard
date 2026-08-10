@@ -296,6 +296,15 @@ export const procedureExpectedErrorPolicy = freezeProcedureExpectedErrorPolicy({
         "SERVICE_UNAVAILABLE",
         "UNAUTHORIZED",
     ],
+    "files.prepareReveal": [
+        "BAD_REQUEST",
+        "CONFLICT",
+        "FORBIDDEN",
+        "NOT_FOUND",
+        "SERVICE_UNAVAILABLE",
+        "TOO_MANY_REQUESTS",
+        "UNAUTHORIZED",
+    ],
     "files.prepareUpload": [
         "BAD_REQUEST",
         "CONFLICT",

@@ -8,6 +8,7 @@ import {
 import type { WorkspaceFileClient } from "./workspaceFileClient.ts";
 import {
     prepareWorkspaceFilePreview,
+    revealWorkspaceFileSecrets,
     uploadWorkspaceFile,
     validateWorkspaceFileSelection,
 } from "./workspaceFileTransfers.ts";
@@ -97,6 +98,83 @@ describe("workspace file transfers", () => {
 
         expect(result).toEqual({ ticket });
         expect(fetcher).not.toHaveBeenCalled();
+    });
+
+    test("reveals config through an uncached mutation and binds its write ticket", async () => {
+        const secretEntry: WorkspaceFileEntry = {
+            ...entry,
+            name: "openclaw.json",
+            requiresSecretReveal: true,
+        };
+        const revealTicket = {
+            ...contentTicket(),
+            fileName: secretEntry.name,
+            mimeType: "application/json",
+            sizeBytes: new TextEncoder().encode('{"token":"secret"}').byteLength,
+        };
+        const mutation = jest.fn((...arguments_: unknown[]) =>
+            arguments_[0] === "files.prepareReveal"
+                ? Promise.resolve(revealTicket)
+                : Promise.resolve({
+                      expiresAtMs: Date.now() + 60_000,
+                      ticketId,
+                      uploadUrl: `/api/files/uploads/${ticketId}`,
+                  })
+        );
+        const fetcher = jest.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+            if (init?.method === "PUT") {
+                return Promise.resolve(
+                    Response.json(
+                        {
+                            acceptedAtMs: Date.now(),
+                            jobRunId: "file-write-job",
+                            ticketId,
+                        },
+                        { status: 202 }
+                    )
+                );
+            }
+            expect(init).toMatchObject({ cache: "no-store" });
+            return Promise.resolve(new Response('{"token":"secret"}'));
+        });
+
+        const revealed = await revealWorkspaceFileSecrets(
+            client({ mutation }),
+            secretEntry,
+            new AbortController().signal,
+            fetcher
+        );
+        expect(revealed).toMatchObject({
+            content: '{"token":"secret"}',
+            revealTicketId: ticketId,
+            secretsRevealed: true,
+        });
+        expect(mutation).toHaveBeenCalledWith(
+            "files.prepareReveal",
+            { resourceId: entryId },
+            expect.anything()
+        );
+
+        await uploadWorkspaceFile(
+            client({ mutation }),
+            {
+                expectedRevision: revision,
+                file: new File(["{}"], "openclaw.json", {
+                    type: "application/json",
+                }),
+                kind: "replace",
+                mimeType: "application/json",
+                revealTicketId: revealed.revealTicketId,
+                resourceId: entryId,
+            },
+            new AbortController().signal,
+            fetcher
+        );
+        expect(mutation).toHaveBeenLastCalledWith(
+            "files.prepareWrite",
+            expect.objectContaining({ revealTicketId: ticketId }),
+            expect.anything()
+        );
     });
 
     test("prepares and accepts one exact same-origin upload", async () => {

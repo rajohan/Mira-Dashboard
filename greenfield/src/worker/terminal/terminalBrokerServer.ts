@@ -27,6 +27,7 @@ import {
     type WorkerTerminalSessionBroker,
 } from "./terminalSessionBroker.ts";
 
+const terminalBrokerControlFlushTimeoutMs = 5000;
 const requestIdSchema = v.pipe(
     boundedNonBlankStringSchema(64, "Terminal broker request is invalid"),
     v.regex(/^[A-Za-z0-9_-]+$/u, "Terminal broker request is invalid")
@@ -134,6 +135,14 @@ export interface TerminalBrokerIpcListener {
     close(): Promise<void>;
 }
 
+export interface TerminalBrokerServerTimer {
+    cancel(): void;
+}
+
+export interface TerminalBrokerServerScheduler {
+    schedule(callback: () => void, delayMs: number): TerminalBrokerServerTimer;
+}
+
 export interface TerminalBrokerIpcLifecycle {
     listen(input: {
         readonly onConnection: (connection: TerminalBrokerByteConnection) => void;
@@ -146,6 +155,7 @@ export interface TerminalBrokerServerOptions {
     readonly expectedUserId: number;
     readonly lifecycle: TerminalBrokerIpcLifecycle;
     readonly projectLocalDirectory: string;
+    readonly scheduler?: TerminalBrokerServerScheduler;
     readonly socketPath: string;
     readonly socketPathOperations: TerminalBrokerSocketPathOperations;
 }
@@ -234,28 +244,77 @@ function failureReason(error: unknown): string {
     return error instanceof WorkerTerminalBrokerError ? error.reason : "unavailable";
 }
 
+function defaultScheduler(): TerminalBrokerServerScheduler {
+    return Object.freeze({
+        schedule(callback: () => void, delayMs: number) {
+            const timer = setTimeout(callback, delayMs);
+            return Object.freeze({ cancel: () => clearTimeout(timer) });
+        },
+    });
+}
+
 function createConnectionHandler(
     broker: WorkerTerminalSessionBroker,
-    connection: TerminalBrokerByteConnection
+    connection: TerminalBrokerByteConnection,
+    scheduler: TerminalBrokerServerScheduler
 ): void {
     const decoder = new TerminalBrokerFrameDecoder();
     let attachment: WorkerTerminalAttachment | undefined;
     let closed = false;
     let deferredInputDrain = false;
     let inputInProgress = false;
+    let outputBackpressured = false;
+    let pendingClose:
+        | {
+              timer?: TerminalBrokerServerTimer;
+          }
+        | undefined;
     let processing: Promise<unknown> = Promise.resolve();
 
-    const close = (): void => {
+    const finalize = (): void => {
         if (closed) return;
         closed = true;
+        pendingClose?.timer?.cancel();
+        pendingClose = undefined;
         attachment?.detach();
         attachment = undefined;
         connection.close();
     };
+    const closeAfterDrain = (): void => {
+        if (closed || pendingClose !== undefined) return;
+        if (!outputBackpressured) {
+            finalize();
+            return;
+        }
+        const requestedClose: { timer?: TerminalBrokerServerTimer } = {};
+        pendingClose = requestedClose;
+        const timer = scheduler.schedule(() => {
+            if (pendingClose === requestedClose) finalize();
+        }, terminalBrokerControlFlushTimeoutMs);
+        if (pendingClose === requestedClose) requestedClose.timer = timer;
+        else timer.cancel();
+    };
+    const sendFrame = (data: Uint8Array): "accepted" | "backpressured" | "closed" => {
+        if (closed || pendingClose !== undefined) {
+            return "accepted";
+        }
+        let disposition: "accepted" | "backpressured" | "closed";
+        try {
+            disposition = connection.send(data);
+        } catch {
+            disposition = "closed";
+        }
+        if (disposition === "closed") {
+            finalize();
+            return "accepted";
+        }
+        if (disposition === "backpressured") outputBackpressured = true;
+        return disposition;
+    };
     const send = (message: unknown): "accepted" | "backpressured" | "closed" =>
-        connection.send(jsonControl(message));
+        sendFrame(jsonControl(message));
     const sink: WorkerTerminalRelaySink = {
-        close,
+        close: closeAfterDrain,
         sendControl(event) {
             if (event.type === "input-drain" && inputInProgress) {
                 deferredInputDrain = true;
@@ -264,7 +323,7 @@ function createConnectionHandler(
             return send(event);
         },
         sendOutput(sequence, data) {
-            return connection.send(encodeTerminalBrokerOutput(sequence, data));
+            return sendFrame(encodeTerminalBrokerOutput(sequence, data));
         },
     };
 
@@ -272,12 +331,18 @@ function createConnectionHandler(
         if (frame.kind !== "control") throw new TerminalBrokerProtocolError();
         const request = v.parse(lifecycleRequestSchema, frame.message);
         if (request.type === "attach") {
-            attachment = await broker.attach({
+            if (closed) return;
+            const attached = await broker.attach({
                 owner: request.owner,
                 rawToken: request.rawToken,
                 sessionId: request.sessionId,
                 sink,
             });
+            if (closed) {
+                attached.detach();
+                return;
+            }
+            attachment = attached;
             return;
         }
         try {
@@ -300,11 +365,12 @@ function createConnectionHandler(
                 type: "failure",
             });
         } finally {
-            close();
+            closeAfterDrain();
         }
     }
 
     async function attached(frame: TerminalBrokerFrame): Promise<void> {
+        if (closed || pendingClose !== undefined) return;
         const current = attachment;
         if (current === undefined) return lifecycle(frame);
         if (frame.kind === "input") {
@@ -333,12 +399,15 @@ function createConnectionHandler(
         else if (message.type === "ping") current.ping();
         else if (message.type === "detach") current.detach();
         else await current.terminate();
-        if (message.type === "detach" || message.type === "terminate-attached") close();
+        if (message.type === "detach" || message.type === "terminate-attached") {
+            closeAfterDrain();
+        }
     }
 
     connection.setHandlers({
-        onClose: close,
+        onClose: finalize,
         onData(data) {
+            if (closed || pendingClose !== undefined) return;
             processing = processing
                 .then(async () => {
                     for (const frame of decoder.push(data)) await attached(frame);
@@ -347,12 +416,18 @@ function createConnectionHandler(
                 .catch((error: unknown) => {
                     if (!closed) {
                         send({ reason: failureReason(error), type: "failure" });
-                        close();
+                        closeAfterDrain();
                     }
                     return false;
                 });
         },
         onDrain() {
+            if (closed) return;
+            outputBackpressured = false;
+            if (pendingClose !== undefined) {
+                finalize();
+                return;
+            }
             attachment?.resumeOutput();
         },
     });
@@ -367,8 +442,10 @@ export async function startTerminalBrokerServer(
     options: TerminalBrokerServerOptions
 ): Promise<TerminalBrokerServer> {
     await prepareSocketPath(options);
+    const scheduler = options.scheduler ?? defaultScheduler();
     const listener = await options.lifecycle.listen({
-        onConnection: (connection) => createConnectionHandler(options.broker, connection),
+        onConnection: (connection) =>
+            createConnectionHandler(options.broker, connection, scheduler),
         socketPath: options.socketPath,
     });
     try {

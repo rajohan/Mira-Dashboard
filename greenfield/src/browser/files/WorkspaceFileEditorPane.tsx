@@ -38,6 +38,8 @@ export interface WorkspaceFilePanePreview {
     readonly error?: string;
     readonly loading: boolean;
     readonly prepared?: WorkspaceFilePreparedPreview;
+    readonly revealError?: string;
+    readonly revealLoading?: boolean;
 }
 
 interface WorkspaceFileEditorPaneProps {
@@ -45,6 +47,7 @@ interface WorkspaceFileEditorPaneProps {
     readonly onDownload: () => Promise<void>;
     readonly onRefreshPreview: () => Promise<void>;
     readonly onReplace: () => void;
+    readonly onRevealSecrets: () => Promise<void>;
     readonly onSaveText: (content: string) => Promise<WorkspaceFileWriteStatus>;
     readonly onWriteComplete: (status: WorkspaceFileWriteStatus) => void;
     readonly preview: WorkspaceFilePanePreview;
@@ -199,6 +202,7 @@ export function WorkspaceFileEditorPane({
     onDownload,
     onRefreshPreview,
     onReplace,
+    onRevealSecrets,
     onSaveText,
     onWriteComplete,
     preview,
@@ -223,7 +227,13 @@ export function WorkspaceFileEditorPane({
         entry.kind === "file" &&
         entry.previewKind === "text" &&
         entry.writable &&
+        (entry.requiresSecretReveal !== true ||
+            preview.prepared?.secretsRevealed === true) &&
         preview.prepared?.content !== undefined;
+    const canReplace =
+        entry.writable &&
+        (entry.requiresSecretReveal !== true ||
+            preview.prepared?.secretsRevealed === true);
 
     async function save() {
         if (!canEdit || !changed || json?.valid === false || saving) return;
@@ -260,6 +270,19 @@ export function WorkspaceFileEditorPane({
                         <Badge variant={entry.writable ? "success" : "default"}>
                             {entry.writable ? "Writable" : "Read only"}
                         </Badge>
+                        {entry.requiresSecretReveal === true && (
+                            <Badge
+                                variant={
+                                    preview.prepared?.secretsRevealed === true
+                                        ? "warning"
+                                        : "default"
+                                }
+                            >
+                                {preview.prepared?.secretsRevealed === true
+                                    ? "Secrets revealed"
+                                    : "Secrets masked"}
+                            </Badge>
+                        )}
                         {entry.mimeType !== undefined && <Badge>{entry.mimeType}</Badge>}
                     </div>
                     {entry.modifiedAtMs !== undefined && (
@@ -312,6 +335,19 @@ export function WorkspaceFileEditorPane({
                                 )}
                             </>
                         )}
+                        {entry.requiresSecretReveal === true &&
+                            preview.prepared?.secretsRevealed !== true && (
+                                <Button
+                                    busy={preview.revealLoading === true}
+                                    busyLabel="Revealing secrets…"
+                                    onClick={() => void onRevealSecrets()}
+                                    size="sm"
+                                    variant="secondary"
+                                >
+                                    <Icon icon={Eye} size="sm" tone="inherit" />
+                                    Reveal secrets
+                                </Button>
+                            )}
                         <Button
                             busy={downloading}
                             busyLabel="Preparing download…"
@@ -322,7 +358,7 @@ export function WorkspaceFileEditorPane({
                             <Icon icon={Download} size="sm" tone="inherit" />
                             Download
                         </Button>
-                        {entry.writable && (
+                        {canReplace && (
                             <Button onClick={onReplace} size="sm" variant="secondary">
                                 <Icon icon={Upload} size="sm" tone="inherit" />
                                 Replace file
@@ -343,6 +379,7 @@ export function WorkspaceFileEditorPane({
             </header>
 
             <Alert message={preview.error} />
+            <Alert message={preview.revealError} />
             <Alert message={saveError} onDismiss={() => setSaveError(undefined)} />
             <div className="bg-primary-950/70 min-h-0 flex-1 overflow-auto">
                 {preview.loading && (
@@ -356,8 +393,12 @@ export function WorkspaceFileEditorPane({
                     <>
                         {preview.prepared.ticket.previewKind === "text" &&
                             mode === "edit" && (
-                                <Form className="p-4" onSubmit={save}>
+                                <Form
+                                    className="flex h-full min-h-0 flex-col p-4"
+                                    onSubmit={save}
+                                >
                                     <FormField
+                                        className="flex min-h-0 flex-1 flex-col"
                                         description="Saving replaces the version you opened. If the file changed first, you will be asked to refresh."
                                         error={
                                             json?.valid === false ? json.error : undefined
@@ -365,7 +406,7 @@ export function WorkspaceFileEditorPane({
                                         label="File contents"
                                     >
                                         <Textarea
-                                            className="mt-2 min-h-[28rem] resize-none font-mono text-sm leading-6"
+                                            className="mt-2 min-h-0! flex-1 resize-none font-mono text-sm leading-6"
                                             onChange={(event) =>
                                                 setDraft(event.currentTarget.value)
                                             }
@@ -373,7 +414,7 @@ export function WorkspaceFileEditorPane({
                                             value={draft}
                                         />
                                     </FormField>
-                                    <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+                                    <div className="mt-3 flex shrink-0 flex-wrap items-center justify-end gap-2">
                                         {changed && (
                                             <Text size="sm" tone="warning">
                                                 Unsaved changes

@@ -257,7 +257,8 @@ describe("chat contract adapter", () => {
             adaptChatRuntimeEvent(sessionKey, "5", {
                 ...base,
                 kind: "provider-noop",
-                providerSequence: 9,
+                providerSequenceEnd: 9,
+                providerSequenceStart: 9,
                 reason: "ignored",
             })
         ).toMatchObject({ cursor: 5, kind: "noop" });
@@ -317,8 +318,17 @@ describe("chat contract adapter", () => {
 
     test("projects provider-origin runs without fabricating local admission identity", () => {
         const externalRun: ChatExternalRun = {
+            abortBoundary: {
+                attemptId: "abort-attempt",
+                attemptedAtMs: timestampMs - 1,
+                baselineObservationEpoch: 6,
+                baselineUpdatedAtMs: timestampMs - 1,
+                settlement: "unknown",
+            },
             continuity: "interrupted",
             hasUnprojectedActivity: false,
+            observationEpoch: 7,
+            observedAtMs: timestampMs,
             parts: [
                 {
                     kind: "assistant",
@@ -349,6 +359,7 @@ describe("chat contract adapter", () => {
         };
 
         const projection = projectChatExternalRun(externalRun);
+        expect(projection.abortBoundary).toEqual(externalRun.abortBoundary);
         expect(projection.message).toMatchObject({
             id: `external:${sessionKey}:provider-run-1`,
             parts: [
@@ -385,6 +396,8 @@ describe("chat contract adapter", () => {
         const projection = projectChatExternalRun({
             continuity: "complete",
             hasUnprojectedActivity: false,
+            observationEpoch: 1,
+            observedAtMs: timestampMs,
             parts: [
                 {
                     kind: "thinking",
@@ -436,10 +449,37 @@ describe("chat contract adapter", () => {
         );
     });
 
+    test("projects a complete provider plan even when unrelated activity is truncated", () => {
+        const projection = projectChatExternalRun({
+            continuity: "complete",
+            hasUnprojectedActivity: true,
+            observationEpoch: 2,
+            observedAtMs: timestampMs,
+            plan: {
+                explanation: "Why the provider is doing this work.",
+                phase: "update",
+                steps: [{ status: "in_progress", text: "Inspect runtime" }],
+            },
+            projectionTruncated: true,
+            providerRunId: "provider-truncated-with-plan",
+            sessionKey,
+            source: "provider-runtime",
+            text: "Partial response",
+            updatedAtMs: timestampMs,
+        });
+
+        expect(projection.plan).toMatchObject({
+            description: "Why the provider is doing this work.",
+            items: [{ label: "Inspect runtime", status: "in-progress" }],
+        });
+    });
+
     test("keeps truncated assistant text authoritative and folds synthetic tool lifecycle", () => {
         const projection = projectChatExternalRun({
             continuity: "complete",
             hasUnprojectedActivity: true,
+            observationEpoch: 1,
+            observedAtMs: timestampMs,
             parts: [
                 { kind: "assistant", sequence: 1, text: "stale tail" },
                 {

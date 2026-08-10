@@ -304,6 +304,7 @@ export function ReportBrowser() {
             >
                 <FormField label="Report type">
                     <Input
+                        className="mt-2"
                         maxLength={100}
                         onChange={(event) => setKindDraft(event.currentTarget.value)}
                         placeholder="Example: heartbeat"
@@ -312,6 +313,7 @@ export function ReportBrowser() {
                 </FormField>
                 <FormField label="Source">
                     <Input
+                        className="mt-2"
                         maxLength={200}
                         onChange={(event) => setSourceDraft(event.currentTarget.value)}
                         placeholder="Example: openclaw"
@@ -320,12 +322,13 @@ export function ReportBrowser() {
                 </FormField>
                 <FormField label="Status">
                     <Select
+                        className="mt-2"
                         onChange={setStatusDraft}
                         options={reportStatusOptions}
                         value={statusDraft}
                     />
                 </FormField>
-                <div className="flex gap-2">
+                <div className="flex min-h-10 items-center gap-2">
                     <Button size="sm" type="submit">
                         <Icon icon={Filter} size="sm" tone="inherit" />
                         Apply

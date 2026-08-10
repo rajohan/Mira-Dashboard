@@ -52,11 +52,13 @@ function openClawFixture() {
                         contentPolicy: "redacted-config-json",
                         maximumSizeBytes: 1_048_576,
                         segments: ["openclaw.json"],
+                        writable: true,
                     },
                     {
                         contentPolicy: "raw",
                         maximumSizeBytes: 1_048_576,
                         segments: ["hooks", "transforms", "agentmail.ts"],
+                        writable: true,
                     },
                 ],
                 path: root,
@@ -139,7 +141,7 @@ describe("descriptor workspace file reader", () => {
             rootListing.entries.map(({ kind, name, writable }) => [kind, name, writable])
         ).toEqual([
             ["directory", "hooks", false],
-            ["file", "openclaw.json", false],
+            ["file", "openclaw.json", true],
         ]);
         expect(JSON.stringify(rootListing)).not.toContain(root);
         expect(JSON.stringify(rootListing)).not.toContain("credentials");
@@ -169,12 +171,29 @@ describe("descriptor workspace file reader", () => {
         expect(text).toContain("ws://localhost:18789");
         expect(text).not.toContain("raw-gateway-secret");
         expect(text).not.toContain("raw-plugin-secret");
+        expect(described).toMatchObject({
+            requiresSecretReveal: true,
+            writable: true,
+            writeMaximumSizeBytes: 1_048_576,
+        });
+        const revealed = await reader.describe(locator, undefined, "reveal-secrets");
+        const revealedResult = await reader.read(
+            locator,
+            revealed.revision,
+            undefined,
+            undefined,
+            "reveal-secrets"
+        );
+        expect(new TextDecoder().decode(revealedResult.bytes)).toContain(
+            "raw-gateway-secret"
+        );
 
         const transformLocator = {
             rootId: "openclaw-config",
             segments: ["hooks", "transforms", "agentmail.ts"],
         } as const;
         const transform = await reader.describe(transformLocator);
+        expect(transform.writable).toBe(true);
         const transformResult = await reader.read(
             transformLocator,
             transform.revision,
@@ -270,6 +289,19 @@ describe("descriptor workspace file reader", () => {
             .catch((error: unknown) => error);
         expect(reason(caught)).toBe("unavailable");
         expect(String(caught)).not.toContain("raw-secret");
+        const listing = await reader.list({
+            rootId: "openclaw-config",
+            segments: [],
+        });
+        expect(
+            listing.entries.find(({ name }) => name === "openclaw.json")
+        ).toMatchObject({ requiresSecretReveal: true, writable: true });
+        const revealed = await reader.describe(
+            { rootId: "openclaw-config", segments: ["openclaw.json"] },
+            undefined,
+            "reveal-secrets"
+        );
+        expect(revealed.previewKind).toBe("text");
     });
 
     test("rejects an oversized exact manifest file", async () => {

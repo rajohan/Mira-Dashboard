@@ -13,6 +13,7 @@ import {
 function validEnvironment(): Record<string, unknown> {
     return {
         MIRA_DASHBOARD_LOG_LEVEL: "warn",
+        MIRA_DASHBOARD_OPENCLAW_ROOT: "/srv/openclaw",
         MIRA_DASHBOARD_PROJECT_ROOT: "/srv/mira-dashboard",
         MIRA_DASHBOARD_WORKSPACE_ROOT: "/srv/mira-workspace",
         NODE_ENV: "production",
@@ -43,6 +44,7 @@ describe("worker application configuration", () => {
             gatewayUrl: "ws://127.0.0.1:18789/",
             logLevel: "info",
             nodeEnvironment: "production",
+            openClawRoot: "/srv/openclaw",
             projectRoot: "/srv/mira-dashboard",
             workspaceRoot: "/srv/mira-workspace",
         });
@@ -125,6 +127,8 @@ describe("worker application configuration", () => {
             ["MIRA_DASHBOARD_LOG_LEVEL", "verbose", "invalid"],
             ["MIRA_DASHBOARD_PROJECT_ROOT", "relative", "invalid"],
             ["MIRA_DASHBOARD_PROJECT_ROOT", undefined, "missing"],
+            ["MIRA_DASHBOARD_OPENCLAW_ROOT", "relative", "invalid"],
+            ["MIRA_DASHBOARD_OPENCLAW_ROOT", undefined, "missing"],
             ["MIRA_DASHBOARD_WORKSPACE_ROOT", "relative", "invalid"],
             ["MIRA_DASHBOARD_WORKSPACE_ROOT", undefined, "missing"],
             ["OPENCLAW_GATEWAY_TOKEN", undefined, "missing"],

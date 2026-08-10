@@ -270,6 +270,7 @@ class DirectProcessController implements ProductionServiceController {
                 ...common,
                 env: {
                     MIRA_DASHBOARD_LOG_LEVEL: "debug",
+                    MIRA_DASHBOARD_OPENCLAW_ROOT: openClawRoot,
                     MIRA_DASHBOARD_PROJECT_ROOT: this.#projectRoot,
                     NODE_ENV: "production",
                     ...gatewayTestEnvironment,

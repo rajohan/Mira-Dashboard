@@ -192,6 +192,9 @@ export const workspaceFileEntrySchema = v.strictObject({
     ),
     name: workspaceFileNameSchema,
     previewKind: v.optional(workspaceFilePreviewKindSchema),
+    requiresSecretReveal: v.optional(
+        v.boolean("Workspace file secret policy is invalid")
+    ),
     resourceId: workspaceFileResourceIdSchema,
     revision: workspaceFileRevisionSchema,
     sizeBytes: v.optional(workspaceFileMetadataSizeSchema),
@@ -213,6 +216,11 @@ export const listWorkspaceFilesOutputSchema = v.strictObject({
 /** Requests one short-lived actor-bound raw read URL. */
 export const prepareWorkspaceFileContentInputSchema = v.strictObject({
     disposition: workspaceFileDispositionSchema,
+    resourceId: workspaceFileResourceIdSchema,
+});
+
+/** Explicit recent-auth request for an uncached raw view of one masked config. */
+export const prepareWorkspaceFileRevealInputSchema = v.strictObject({
     resourceId: workspaceFileResourceIdSchema,
 });
 
@@ -241,6 +249,7 @@ export const workspaceFileContentTicketSchema = v.strictObject({
 export const prepareWorkspaceFileWriteInputSchema = v.strictObject({
     expectedRevision: workspaceFileRevisionSchema,
     mimeType: workspaceFileMimeTypeSchema,
+    revealTicketId: v.optional(workspaceFileTicketIdSchema),
     resourceId: workspaceFileResourceIdSchema,
     sizeBytes: workspaceFileUploadSizeSchema,
 });
@@ -312,6 +321,9 @@ export type ListWorkspaceFilesOutput = v.InferOutput<
 >;
 export type PrepareWorkspaceFileContentInput = v.InferOutput<
     typeof prepareWorkspaceFileContentInputSchema
+>;
+export type PrepareWorkspaceFileRevealInput = v.InferOutput<
+    typeof prepareWorkspaceFileRevealInputSchema
 >;
 export type WorkspaceFileContentTicket = v.InferOutput<
     typeof workspaceFileContentTicketSchema
@@ -432,6 +444,29 @@ export const workspaceFileProcedureContracts = [
         outputSchemaId: "files.prepareWrite.output",
         summary:
             "Reserves a CAS-bound worker write without granting web filesystem authority.",
+        transport: mutationTransport,
+    },
+    {
+        access: fileWriteAccess,
+        domain: "files",
+        errorReasons: ["mfa_enrollment_required", "step_up_required"],
+        errors: [
+            "BAD_REQUEST",
+            "CONFLICT",
+            "FORBIDDEN",
+            "NOT_FOUND",
+            "SERVICE_UNAVAILABLE",
+            "TOO_MANY_REQUESTS",
+            "UNAUTHORIZED",
+        ],
+        input: prepareWorkspaceFileRevealInputSchema,
+        inputSchemaId: "files.prepareReveal.input",
+        kind: "mutation",
+        name: "files.prepareReveal",
+        output: workspaceFileContentTicketSchema,
+        outputSchemaId: "files.prepareReveal.output",
+        summary:
+            "Issues one uncached actor-bound raw config view after recent authentication.",
         transport: mutationTransport,
     },
     {

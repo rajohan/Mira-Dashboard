@@ -23,13 +23,14 @@ import type {
     DashboardAuthenticatedPath,
     DashboardNavigationPath,
 } from "../lib/dashboardRoutes.ts";
+import { MonitoringRouteLayout } from "../monitoring/MonitoringRouteLayout.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { IconOnlyButton } from "../ui/IconOnlyButton.tsx";
 import { NavigationLink } from "../ui/NavigationLink.tsx";
 import { DashboardHeaderControls } from "./DashboardHeaderControls.tsx";
 import {
+    dashboardContentContainerClassName,
     dashboardMainClassName,
-    dashboardPageContainerClassName,
 } from "./dashboardShellLayout.ts";
 
 interface NavigationItem {
@@ -69,10 +70,13 @@ function Navigation({ currentPath, onNavigate }: NavigationProps) {
     return (
         <nav aria-label="Main navigation" className="flex-1 p-2">
             {navigationItems.map((item) => {
-                const active = currentPath === item.to;
+                const active =
+                    currentPath === item.to ||
+                    (item.to === "/reports" && currentPath === "/incidents");
                 return (
                     <NavigationLink
                         active={active}
+                        current={currentPath === item.to}
                         key={item.to}
                         onClick={onNavigate}
                         to={item.to}
@@ -145,8 +149,6 @@ export function DashboardShell() {
     const currentTitle =
         authenticatedRouteTitles.find((item) => item.to === location.pathname)?.label ??
         "Mira Dashboard";
-    const fullHeightCanvas =
-        location.pathname === "/chat" || location.pathname === "/terminal";
     return (
         <div className="bg-primary-900 text-primary-50 flex h-full overflow-hidden">
             <a
@@ -214,14 +216,16 @@ export function DashboardShell() {
                     id="dashboard-content"
                 >
                     <div
-                        className={cn(
-                            "w-full",
-                            fullHeightCanvas
-                                ? "h-full min-h-0"
-                                : dashboardPageContainerClassName
-                        )}
+                        className={dashboardContentContainerClassName(location.pathname)}
                     >
-                        <Outlet />
+                        {location.pathname === "/reports" ||
+                        location.pathname === "/incidents" ? (
+                            <MonitoringRouteLayout pathname={location.pathname}>
+                                <Outlet />
+                            </MonitoringRouteLayout>
+                        ) : (
+                            <Outlet />
+                        )}
                     </div>
                 </main>
             </div>

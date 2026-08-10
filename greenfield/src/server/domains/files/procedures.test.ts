@@ -41,6 +41,7 @@ function service(overrides: Partial<WorkspaceFilesService> = {}): WorkspaceFiles
                 ],
             }),
         prepareContent: () => Promise.reject(new Error("unused")),
+        prepareReveal: () => Promise.reject(new Error("unused")),
         prepareUpload: () =>
             Promise.resolve({
                 expiresAtMs: 1_900_000_000_000,
@@ -137,6 +138,45 @@ describe("workspace files procedures", () => {
                 sizeBytes: 1,
             })
         ).toMatchObject({ ticketId });
+    });
+
+    test("requires recent MFA before revealing one masked config", async () => {
+        let calls = 0;
+        const stale = await caller(
+            createTestSessionAuthentication(["files:write"]),
+            {
+                prepareReveal: () => {
+                    calls += 1;
+                    throw new Error("must not run");
+                },
+            },
+            "step-up-required"
+        );
+        await expectCode(() => stale.prepareReveal({ resourceId }), "FORBIDDEN");
+        expect(calls).toBe(0);
+
+        const allowed = await caller(createTestSessionAuthentication(["files:write"]), {
+            prepareReveal: (_actor, input) => {
+                calls += 1;
+                expect(input).toEqual({ resourceId });
+                return Promise.resolve({
+                    disposition: "preview",
+                    expiresAtMs: 1_900_000_000_000,
+                    fileName: "openclaw.json",
+                    mimeType: "application/json",
+                    previewKind: "text",
+                    revision: "a".repeat(64),
+                    sizeBytes: 2,
+                    ticketId,
+                    url: `/api/files/content/${ticketId}`,
+                });
+            },
+        });
+        expect(await allowed.prepareReveal({ resourceId })).toMatchObject({
+            fileName: "openclaw.json",
+            ticketId,
+        });
+        expect(calls).toBe(1);
     });
 
     test("maps sanitized domain failures to declared transport errors", async () => {

@@ -8,6 +8,7 @@ import {
     listWorkspaceFilesInputSchema,
     listWorkspaceFilesOutputSchema,
     prepareWorkspaceFileContentInputSchema,
+    prepareWorkspaceFileRevealInputSchema,
     prepareWorkspaceFileUploadInputSchema,
     prepareWorkspaceFileWriteInputSchema,
     workspaceFileContentTicketSchema,
@@ -19,6 +20,7 @@ import {
     type ListWorkspaceFilesInput,
     type ListWorkspaceFilesOutput,
     type PrepareWorkspaceFileContentInput,
+    type PrepareWorkspaceFileRevealInput,
     type PrepareWorkspaceFileUploadInput,
     type PrepareWorkspaceFileWriteInput,
     type WorkspaceFileContentTicket,
@@ -29,6 +31,7 @@ import {
 import { WorkspaceFileError, workspaceFileError } from "./errors.ts";
 import type {
     WorkspaceFileDirectorySnapshot,
+    WorkspaceFileContentAccess,
     WorkspaceFileLocator,
     WorkspaceFileNode,
     WorkspaceFileReadRange,
@@ -109,6 +112,11 @@ export interface WorkspaceFilesService {
         input: PrepareWorkspaceFileContentInput,
         signal?: AbortSignal
     ) => Promise<WorkspaceFileContentTicket>;
+    readonly prepareReveal: (
+        actor: WorkspaceFileActor,
+        input: PrepareWorkspaceFileRevealInput,
+        signal?: AbortSignal
+    ) => Promise<WorkspaceFileContentTicket>;
     readonly prepareUpload: (
         actor: WorkspaceFileActor,
         input: PrepareWorkspaceFileUploadInput,
@@ -133,19 +141,29 @@ interface ExpiringActorRecord {
 }
 
 interface ResourceRecord extends ExpiringActorRecord {
+    readonly directorySnapshotKey?: string;
     readonly id: string;
     readonly kind: "directory" | "file";
     readonly locator: WorkspaceFileLocator;
     readonly rootIndexKey?: string;
 }
 
+interface ResourceRecordOptions {
+    readonly directorySnapshotKey?: string;
+    readonly expiresAtMs?: number;
+    readonly rootIndexKey?: string;
+}
+
 interface DirectoryPageSnapshot {
     readonly directory: ListWorkspaceFilesOutput["directory"];
+    readonly directorySnapshotKey: string;
     readonly entries: readonly ListWorkspaceFilesOutput["entries"][number][];
+    readonly expiresAtMs: number;
 }
 
 interface CursorRecord extends ExpiringActorRecord {
     readonly directoryId: string;
+    readonly directorySnapshotKey: string;
     readonly id: string;
     readonly limit: number;
     nextCursorId?: string;
@@ -154,6 +172,7 @@ interface CursorRecord extends ExpiringActorRecord {
 }
 
 interface ContentTicketRecord extends ExpiringActorRecord {
+    readonly contentAccess: WorkspaceFileContentAccess;
     readonly locator: WorkspaceFileLocator;
     readonly ticket: WorkspaceFileContentTicket;
 }
@@ -184,6 +203,15 @@ function actorKey(actor: WorkspaceFileActor): string {
     return `${actor.id}\0${actor.authenticatorId}`;
 }
 
+function directorySnapshotKey(key: string, directoryId: string): string {
+    return `${key}\0${directoryId}`;
+}
+
+function abortIfRequested(signal?: AbortSignal): void {
+    if (signal?.aborted !== true) return;
+    throw signal.reason ?? new DOMException("Workspace files aborted", "AbortError");
+}
+
 function auditActor(actor: WorkspaceFileActor): WorkspaceFileWriteAuditContext["actor"] {
     return Object.freeze({
         authenticatorId: actor.authenticatorId,
@@ -196,6 +224,14 @@ function displayPath(locator: WorkspaceFileLocator): string {
     const value = `/${locator.segments.join("/")}`;
     if (value.length > 4096) throw new WorkspaceFileError("too-large");
     return value;
+}
+
+function sameLocator(left: WorkspaceFileLocator, right: WorkspaceFileLocator): boolean {
+    return (
+        left.rootId === right.rootId &&
+        left.segments.length === right.segments.length &&
+        left.segments.every((segment, index) => segment === right.segments[index])
+    );
 }
 
 function completeFileNode(node: WorkspaceFileNode): asserts node is WorkspaceFileNode & {
@@ -238,6 +274,9 @@ function entryOutput(
         ...(node.modifiedAtMs === undefined ? {} : { modifiedAtMs: node.modifiedAtMs }),
         name: node.name,
         ...(node.previewKind === undefined ? {} : { previewKind: node.previewKind }),
+        ...(node.requiresSecretReveal === undefined
+            ? {}
+            : { requiresSecretReveal: node.requiresSecretReveal }),
         resourceId,
         revision: node.revision,
         ...(node.sizeBytes === undefined ? {} : { sizeBytes: node.sizeBytes }),
@@ -267,6 +306,10 @@ export function createWorkspaceFilesService(
 
     const resources = new Map<string, ResourceRecord>();
     const rootResourceIds = new Map<string, string>();
+    const materializedDirectorySnapshots = new Set<string>();
+    const directorySnapshotResourceIds = new Map<string, Set<string>>();
+    const directorySnapshotCursorIds = new Map<string, Set<string>>();
+    const directoryRefreshGenerations = new Map<string, symbol>();
     const cursors = new Map<string, CursorRecord>();
     const contentTickets = new Map<string, ContentTicketRecord>();
     const uploadTickets = new Map<string, UploadTicketRecord>();
@@ -281,19 +324,96 @@ export function createWorkspaceFilesService(
         return now;
     }
 
-    function deleteResource(record: ResourceRecord): void {
+    function deleteResourceRecord(record: ResourceRecord): void {
         resources.delete(record.id);
-        if (record.rootIndexKey !== undefined) {
+        if (record.directorySnapshotKey !== undefined) {
+            const resourceIds = directorySnapshotResourceIds.get(
+                record.directorySnapshotKey
+            );
+            resourceIds?.delete(record.id);
+            if (resourceIds?.size === 0) {
+                directorySnapshotResourceIds.delete(record.directorySnapshotKey);
+            }
+        }
+        if (
+            record.rootIndexKey !== undefined &&
+            rootResourceIds.get(record.rootIndexKey) === record.id
+        ) {
             rootResourceIds.delete(record.rootIndexKey);
         }
     }
 
+    function deleteDirectorySnapshot(
+        initialSnapshotKey: string,
+        preservedGenerationKey?: string
+    ): void {
+        const pending = [initialSnapshotKey];
+        const visited = new Set<string>();
+        while (pending.length > 0) {
+            const snapshotKey = pending.pop()!;
+            if (visited.has(snapshotKey)) continue;
+            visited.add(snapshotKey);
+            materializedDirectorySnapshots.delete(snapshotKey);
+            if (snapshotKey !== preservedGenerationKey) {
+                directoryRefreshGenerations.delete(snapshotKey);
+            }
+            const resourceIds = directorySnapshotResourceIds.get(snapshotKey);
+            directorySnapshotResourceIds.delete(snapshotKey);
+            for (const resourceId of resourceIds ?? []) {
+                const resource = resources.get(resourceId);
+                if (resource === undefined) continue;
+                deleteResourceRecord(resource);
+                if (resource.kind !== "directory") continue;
+                const childSnapshotKey = directorySnapshotKey(
+                    resource.actorKey,
+                    resource.id
+                );
+                if (
+                    materializedDirectorySnapshots.has(childSnapshotKey) ||
+                    directoryRefreshGenerations.has(childSnapshotKey)
+                ) {
+                    pending.push(childSnapshotKey);
+                }
+            }
+            const cursorIds = directorySnapshotCursorIds.get(snapshotKey);
+            directorySnapshotCursorIds.delete(snapshotKey);
+            for (const cursorId of cursorIds ?? []) {
+                cursors.delete(cursorId);
+            }
+        }
+    }
+
+    function deleteResource(record: ResourceRecord): void {
+        deleteResourceRecord(record);
+        if (record.kind !== "directory") return;
+        const ownedSnapshotKey = directorySnapshotKey(record.actorKey, record.id);
+        if (
+            materializedDirectorySnapshots.has(ownedSnapshotKey) ||
+            directoryRefreshGenerations.has(ownedSnapshotKey)
+        ) {
+            deleteDirectorySnapshot(ownedSnapshotKey);
+        }
+    }
+
+    function deleteExpiredResource(record: ResourceRecord): void {
+        if (record.directorySnapshotKey === undefined) {
+            deleteResource(record);
+            return;
+        }
+        deleteDirectorySnapshot(record.directorySnapshotKey, record.directorySnapshotKey);
+    }
+
     function sweep(now: number): void {
         for (const record of resources.values()) {
-            if (record.expiresAtMs <= now) deleteResource(record);
+            if (record.expiresAtMs <= now) deleteExpiredResource(record);
         }
-        for (const [id, record] of cursors) {
-            if (record.expiresAtMs <= now) cursors.delete(id);
+        for (const record of cursors.values()) {
+            if (record.expiresAtMs <= now) {
+                deleteDirectorySnapshot(
+                    record.directorySnapshotKey,
+                    record.directorySnapshotKey
+                );
+            }
         }
         for (const [id, record] of contentTickets) {
             if (record.expiresAtMs <= now) contentTickets.delete(id);
@@ -338,19 +458,104 @@ export function createWorkspaceFilesService(
         locator: WorkspaceFileLocator,
         kind: ResourceRecord["kind"],
         now: number,
-        rootIndexKey?: string
+        options: ResourceRecordOptions = {}
     ): ResourceRecord {
         const record: ResourceRecord = {
             actorKey: key,
-            expiresAtMs: now + workspaceFileLimits.referenceTtlMs,
+            ...(options.directorySnapshotKey === undefined
+                ? {}
+                : { directorySnapshotKey: options.directorySnapshotKey }),
+            expiresAtMs: options.expiresAtMs ?? now + workspaceFileLimits.referenceTtlMs,
             id: nextId(),
             kind,
             locator,
-            ...(rootIndexKey === undefined ? {} : { rootIndexKey }),
+            ...(options.rootIndexKey === undefined
+                ? {}
+                : { rootIndexKey: options.rootIndexKey }),
         };
         resources.set(record.id, record);
-        if (rootIndexKey !== undefined) rootResourceIds.set(rootIndexKey, record.id);
+        if (record.directorySnapshotKey !== undefined) {
+            const resourceIds =
+                directorySnapshotResourceIds.get(record.directorySnapshotKey) ??
+                new Set<string>();
+            resourceIds.add(record.id);
+            directorySnapshotResourceIds.set(record.directorySnapshotKey, resourceIds);
+        }
+        if (options.rootIndexKey !== undefined) {
+            rootResourceIds.set(options.rootIndexKey, record.id);
+        }
         return record;
+    }
+
+    function directorySnapshotReferenceCount(initialSnapshotKey: string): number {
+        let count = 0;
+        const pending = [initialSnapshotKey];
+        const visited = new Set<string>();
+        while (pending.length > 0) {
+            const snapshotKey = pending.pop()!;
+            if (visited.has(snapshotKey)) continue;
+            visited.add(snapshotKey);
+            const resourceIds = directorySnapshotResourceIds.get(snapshotKey);
+            count += resourceIds?.size ?? 0;
+            for (const resourceId of resourceIds ?? []) {
+                const resource = resources.get(resourceId);
+                if (resource === undefined) continue;
+                if (resource.kind !== "directory") continue;
+                const childSnapshotKey = directorySnapshotKey(
+                    resource.actorKey,
+                    resource.id
+                );
+                if (materializedDirectorySnapshots.has(childSnapshotKey)) {
+                    pending.push(childSnapshotKey);
+                }
+            }
+            count += directorySnapshotCursorIds.get(snapshotKey)?.size ?? 0;
+        }
+        return count;
+    }
+
+    function replaceDirectorySnapshot(
+        key: string,
+        directoryId: string,
+        count: number,
+        now: number
+    ): string {
+        sweep(now);
+        const snapshotKey = directorySnapshotKey(key, directoryId);
+        const reclaimed = directorySnapshotReferenceCount(snapshotKey);
+        if (count < 0 || referenceCount() - reclaimed > maximumReferences - count) {
+            throw new WorkspaceFileError("capacity");
+        }
+        deleteDirectorySnapshot(snapshotKey, snapshotKey);
+        materializedDirectorySnapshots.add(snapshotKey);
+        return snapshotKey;
+    }
+
+    function beginDirectoryRefresh(snapshotKey: string): symbol {
+        if (
+            !directoryRefreshGenerations.has(snapshotKey) &&
+            directoryRefreshGenerations.size >= maximumReferences
+        ) {
+            throw new WorkspaceFileError("capacity");
+        }
+        const generation = Symbol();
+        directoryRefreshGenerations.set(snapshotKey, generation);
+        return generation;
+    }
+
+    function requireCurrentDirectoryRefresh(
+        snapshotKey: string,
+        generation: symbol
+    ): void {
+        if (directoryRefreshGenerations.get(snapshotKey) !== generation) {
+            throw new WorkspaceFileError("conflict");
+        }
+    }
+
+    function finishDirectoryRefresh(snapshotKey: string, generation: symbol): void {
+        if (directoryRefreshGenerations.get(snapshotKey) === generation) {
+            directoryRefreshGenerations.delete(snapshotKey);
+        }
     }
 
     function resolveResource(
@@ -360,18 +565,18 @@ export function createWorkspaceFilesService(
     ): ResourceRecord {
         const key = actorKey(actor);
         const now = checkedNow();
+        sweep(now);
         const record = resources.get(id);
         if (record === undefined || record.actorKey !== key) {
             throw new WorkspaceFileError("not-found");
         }
         if (record.expiresAtMs <= now) {
-            deleteResource(record);
+            deleteExpiredResource(record);
             throw new WorkspaceFileError("not-found");
         }
         if (kind !== undefined && record.kind !== kind) {
             throw new WorkspaceFileError("not-file");
         }
-        sweep(now);
         return record;
     }
 
@@ -380,27 +585,45 @@ export function createWorkspaceFilesService(
         directoryId: string,
         snapshot: WorkspaceFileDirectorySnapshot,
         now: number,
-        limit: number
+        limit: number,
+        directoryExpiresAtMs: number
     ): DirectoryPageSnapshot {
-        reserveCapacity(
+        const expiresAtMs = Math.min(
+            now + workspaceFileLimits.referenceTtlMs,
+            directoryExpiresAtMs
+        );
+        const directorySnapshotKey = replaceDirectorySnapshot(
+            key,
+            directoryId,
             snapshot.entries.length + (snapshot.entries.length > limit ? 1 : 0),
             now
         );
-        const entries = snapshot.entries.map((node) => {
-            const resource = createResource(key, node.locator, node.kind, now);
-            return entryOutput(node, resource.id);
-        });
-        return {
-            directory: {
-                displayPath: displayPath(snapshot.directory.locator),
-                name: snapshot.directory.name,
-                resourceId: directoryId,
-                revision: snapshot.directory.revision,
-                rootId: snapshot.directory.locator.rootId,
-                writable: snapshot.directory.writable,
-            },
-            entries,
-        };
+        try {
+            const entries = snapshot.entries.map((node) => {
+                const resource = createResource(key, node.locator, node.kind, now, {
+                    directorySnapshotKey,
+                    expiresAtMs,
+                });
+                return entryOutput(node, resource.id);
+            });
+            const prepared = {
+                directory: {
+                    displayPath: displayPath(snapshot.directory.locator),
+                    name: snapshot.directory.name,
+                    resourceId: directoryId,
+                    revision: snapshot.directory.revision,
+                    rootId: snapshot.directory.locator.rootId,
+                    writable: snapshot.directory.writable,
+                },
+                directorySnapshotKey,
+                entries,
+                expiresAtMs,
+            } satisfies DirectoryPageSnapshot;
+            return prepared;
+        } catch (error) {
+            deleteDirectorySnapshot(directorySnapshotKey, directorySnapshotKey);
+            throw error;
+        }
     }
 
     function createCursor(
@@ -408,19 +631,24 @@ export function createWorkspaceFilesService(
         directoryId: string,
         snapshot: DirectoryPageSnapshot,
         offset: number,
-        limit: number,
-        now: number
+        limit: number
     ): CursorRecord {
         const record: CursorRecord = {
             actorKey: key,
             directoryId,
-            expiresAtMs: now + workspaceFileLimits.referenceTtlMs,
+            directorySnapshotKey: snapshot.directorySnapshotKey,
+            expiresAtMs: snapshot.expiresAtMs,
             id: nextId(),
             limit,
             offset,
             snapshot,
         };
         cursors.set(record.id, record);
+        const cursorIds =
+            directorySnapshotCursorIds.get(snapshot.directorySnapshotKey) ??
+            new Set<string>();
+        cursorIds.add(record.id);
+        directorySnapshotCursorIds.set(snapshot.directorySnapshotKey, cursorIds);
         return record;
     }
 
@@ -438,7 +666,7 @@ export function createWorkspaceFilesService(
         if (end < snapshot.entries.length) {
             if (sourceCursor?.nextCursorId === undefined) {
                 reserveCapacity(1, now);
-                nextCursor = createCursor(key, directoryId, snapshot, end, limit, now).id;
+                nextCursor = createCursor(key, directoryId, snapshot, end, limit).id;
                 if (sourceCursor !== undefined) sourceCursor.nextCursorId = nextCursor;
             } else {
                 nextCursor = sourceCursor.nextCursorId;
@@ -491,7 +719,11 @@ export function createWorkspaceFilesService(
         record: ContentTicketRecord,
         signal?: AbortSignal
     ): Promise<WorkspaceFileContentMetadata> {
-        const node = await dependencies.reader.describe(record.locator, signal);
+        const node = await dependencies.reader.describe(
+            record.locator,
+            signal,
+            record.contentAccess
+        );
         if (!sameContentMetadata(node, record.ticket)) {
             throw new WorkspaceFileError("conflict");
         }
@@ -503,6 +735,55 @@ export function createWorkspaceFilesService(
             revision: record.ticket.revision,
             sizeBytes: record.ticket.sizeBytes,
         };
+    }
+
+    async function createContentTicket(
+        actor: WorkspaceFileActor,
+        resourceId: string,
+        disposition: WorkspaceFileContentTicket["disposition"],
+        contentAccess: WorkspaceFileContentAccess,
+        signal?: AbortSignal
+    ): Promise<WorkspaceFileContentTicket> {
+        const resource = resolveResource(actor, resourceId, "file");
+        let node: WorkspaceFileNode;
+        try {
+            node = await dependencies.reader.describe(
+                resource.locator,
+                signal,
+                contentAccess
+            );
+        } catch (error) {
+            throw workspaceFileError(error);
+        }
+        completeFileNode(node);
+        if (contentAccess === "reveal-secrets" && node.requiresSecretReveal !== true) {
+            throw new WorkspaceFileError("access-denied");
+        }
+        if (node.sizeBytes > workspaceFileLimits.maximumDownloadBytes) {
+            throw new WorkspaceFileError("too-large");
+        }
+        const now = checkedNow();
+        reserveCapacity(1, now);
+        const ticketId = nextId();
+        const ticket = v.parse(workspaceFileContentTicketSchema, {
+            disposition,
+            expiresAtMs: now + workspaceFileLimits.contentTicketTtlMs,
+            fileName: node.name,
+            mimeType: node.mimeType,
+            previewKind: node.previewKind,
+            revision: node.revision,
+            sizeBytes: node.sizeBytes,
+            ticketId,
+            url: `/api/files/content/${ticketId}`,
+        });
+        contentTickets.set(ticketId, {
+            actorKey: actorKey(actor),
+            contentAccess,
+            expiresAtMs: ticket.expiresAtMs,
+            locator: resource.locator,
+            ticket,
+        });
+        return ticket;
     }
 
     function createUploadTicket(
@@ -595,6 +876,10 @@ export function createWorkspaceFilesService(
             disposed = true;
             resources.clear();
             rootResourceIds.clear();
+            materializedDirectorySnapshots.clear();
+            directorySnapshotResourceIds.clear();
+            directorySnapshotCursorIds.clear();
+            directoryRefreshGenerations.clear();
             cursors.clear();
             contentTickets.clear();
             uploadTickets.clear();
@@ -676,12 +961,14 @@ export function createWorkspaceFilesService(
             const now = checkedNow();
             if (input.cursor !== undefined) {
                 const cursor = cursors.get(input.cursor);
-                if (
-                    cursor === undefined ||
-                    cursor.actorKey !== key ||
-                    cursor.expiresAtMs <= now
-                ) {
-                    cursors.delete(input.cursor);
+                if (cursor === undefined || cursor.actorKey !== key) {
+                    throw new WorkspaceFileError("not-found");
+                }
+                if (cursor.expiresAtMs <= now) {
+                    deleteDirectorySnapshot(
+                        cursor.directorySnapshotKey,
+                        cursor.directorySnapshotKey
+                    );
                     throw new WorkspaceFileError("not-found");
                 }
                 if (
@@ -691,6 +978,20 @@ export function createWorkspaceFilesService(
                     throw new WorkspaceFileError("conflict");
                 }
                 sweep(now);
+                const directory = resources.get(cursor.directoryId);
+                if (
+                    cursors.get(cursor.id) !== cursor ||
+                    directory === undefined ||
+                    directory.actorKey !== key ||
+                    directory.kind !== "directory" ||
+                    directory.expiresAtMs <= now
+                ) {
+                    deleteDirectorySnapshot(
+                        cursor.directorySnapshotKey,
+                        cursor.directorySnapshotKey
+                    );
+                    throw new WorkspaceFileError("not-found");
+                }
                 return page(
                     key,
                     input.directoryId,
@@ -702,14 +1003,46 @@ export function createWorkspaceFilesService(
                 );
             }
             const resource = resolveResource(actor, input.directoryId, "directory");
-            let snapshot: WorkspaceFileDirectorySnapshot;
+            const snapshotKey = directorySnapshotKey(key, resource.id);
+            const refreshGeneration = beginDirectoryRefresh(snapshotKey);
             try {
-                snapshot = await dependencies.reader.list(resource.locator, signal);
-            } catch (error) {
-                throw workspaceFileError(error);
+                let snapshot: WorkspaceFileDirectorySnapshot;
+                try {
+                    snapshot = await dependencies.reader.list(resource.locator, signal);
+                } catch (error) {
+                    throw workspaceFileError(error);
+                }
+                abortIfRequested(signal);
+                requireCurrentDirectoryRefresh(snapshotKey, refreshGeneration);
+                const refreshedNow = checkedNow();
+                sweep(refreshedNow);
+                if (resources.get(resource.id) !== resource) {
+                    if (resource.expiresAtMs <= refreshedNow) {
+                        throw new WorkspaceFileError("not-found");
+                    }
+                    requireCurrentDirectoryRefresh(snapshotKey, refreshGeneration);
+                    throw new WorkspaceFileError("conflict");
+                }
+                requireCurrentDirectoryRefresh(snapshotKey, refreshGeneration);
+                if (resource.actorKey !== key || resource.kind !== "directory") {
+                    throw new WorkspaceFileError("conflict");
+                }
+                if (resource.expiresAtMs <= refreshedNow) {
+                    deleteExpiredResource(resource);
+                    throw new WorkspaceFileError("not-found");
+                }
+                const prepared = createSnapshot(
+                    key,
+                    resource.id,
+                    snapshot,
+                    refreshedNow,
+                    input.limit,
+                    resource.expiresAtMs
+                );
+                return page(key, resource.id, prepared, 0, input.limit, refreshedNow);
+            } finally {
+                finishDirectoryRefresh(snapshotKey, refreshGeneration);
             }
-            const prepared = createSnapshot(key, resource.id, snapshot, now, input.limit);
-            return page(key, resource.id, prepared, 0, input.limit, now);
         },
         listRoots(actor, signal) {
             const key = actorKey(actor);
@@ -735,7 +1068,7 @@ export function createWorkspaceFilesService(
                         { rootId: policy.id, segments: [] },
                         "directory",
                         now,
-                        indexKey
+                        { rootIndexKey: indexKey }
                     );
                 }
                 roots.push({
@@ -757,38 +1090,23 @@ export function createWorkspaceFilesService(
         },
         async prepareContent(actor, rawInput, signal) {
             const input = v.parse(prepareWorkspaceFileContentInputSchema, rawInput);
-            const resource = resolveResource(actor, input.resourceId, "file");
-            let node: WorkspaceFileNode;
-            try {
-                node = await dependencies.reader.describe(resource.locator, signal);
-            } catch (error) {
-                throw workspaceFileError(error);
-            }
-            completeFileNode(node);
-            if (node.sizeBytes > workspaceFileLimits.maximumDownloadBytes) {
-                throw new WorkspaceFileError("too-large");
-            }
-            const now = checkedNow();
-            reserveCapacity(1, now);
-            const ticketId = nextId();
-            const ticket = v.parse(workspaceFileContentTicketSchema, {
-                disposition: input.disposition,
-                expiresAtMs: now + workspaceFileLimits.contentTicketTtlMs,
-                fileName: node.name,
-                mimeType: node.mimeType,
-                previewKind: node.previewKind,
-                revision: node.revision,
-                sizeBytes: node.sizeBytes,
-                ticketId,
-                url: `/api/files/content/${ticketId}`,
-            });
-            contentTickets.set(ticketId, {
-                actorKey: actorKey(actor),
-                expiresAtMs: ticket.expiresAtMs,
-                locator: resource.locator,
-                ticket,
-            });
-            return ticket;
+            return createContentTicket(
+                actor,
+                input.resourceId,
+                input.disposition,
+                "default",
+                signal
+            );
+        },
+        async prepareReveal(actor, rawInput, signal) {
+            const input = v.parse(prepareWorkspaceFileRevealInputSchema, rawInput);
+            return createContentTicket(
+                actor,
+                input.resourceId,
+                "preview",
+                "reveal-secrets",
+                signal
+            );
         },
         async prepareUpload(actor, rawInput, signal) {
             const input = v.parse(prepareWorkspaceFileUploadInputSchema, rawInput);
@@ -829,8 +1147,31 @@ export function createWorkspaceFilesService(
             }
             completeFileNode(node);
             if (!node.writable) throw new WorkspaceFileError("access-denied");
+            if (
+                node.writeMaximumSizeBytes !== undefined &&
+                input.sizeBytes > node.writeMaximumSizeBytes
+            ) {
+                throw new WorkspaceFileError("too-large");
+            }
             if (node.revision !== input.expectedRevision) {
                 throw new WorkspaceFileError("conflict");
+            }
+            if (node.requiresSecretReveal === true) {
+                if (input.revealTicketId === undefined) {
+                    throw new WorkspaceFileError("access-denied");
+                }
+                const reveal = resolveContentRecord(actor, input.revealTicketId);
+                if (
+                    reveal.contentAccess !== "reveal-secrets" ||
+                    !sameLocator(reveal.locator, resource.locator)
+                ) {
+                    throw new WorkspaceFileError("access-denied");
+                }
+                if (reveal.ticket.revision !== input.expectedRevision) {
+                    throw new WorkspaceFileError("conflict");
+                }
+            } else if (input.revealTicketId !== undefined) {
+                throw new WorkspaceFileError("invalid-input");
             }
             const now = checkedNow();
             return createUploadTicket(actorKey(actor), now, {
@@ -850,7 +1191,8 @@ export function createWorkspaceFilesService(
                     record.locator,
                     record.ticket.revision,
                     range,
-                    signal
+                    signal,
+                    record.contentAccess
                 );
             } catch (error) {
                 throw workspaceFileError(error);

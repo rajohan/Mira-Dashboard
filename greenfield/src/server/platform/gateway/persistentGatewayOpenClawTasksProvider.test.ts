@@ -94,7 +94,8 @@ describe("persistent Gateway OpenClaw tasks provider", () => {
                     {
                         createdAt: 1000,
                         id: "task-running",
-                        sessionKey: "agent:main:main",
+                        ownerKey: "",
+                        sessionKey: "",
                         startedAt: 1100,
                         status: "running",
                         taskId: "task-running",
@@ -134,7 +135,6 @@ describe("persistent Gateway OpenClaw tasks provider", () => {
                 {
                     createdAtMs: 1000,
                     id: "task-running",
-                    sessionKey: "agent:main:main",
                     startedAtMs: 1100,
                     status: "running",
                     taskId: "task-running",
@@ -164,7 +164,9 @@ describe("persistent Gateway OpenClaw tasks provider", () => {
                     task: {
                         createdAt: 1000,
                         id: "task-1",
+                        ownerKey: "",
                         prompt: "Inspect the deployment",
+                        sessionKey: "",
                         startedAt: 1100,
                         status: "running",
                         taskId: "task-1",

@@ -25,6 +25,8 @@ const supportedUploadMimeTypes = new Set<string>(uploadContract.requestBody.cont
 
 export interface WorkspaceFilePreparedPreview {
     readonly content?: string;
+    readonly revealTicketId?: string;
+    readonly secretsRevealed?: true;
     readonly ticket: WorkspaceFileContentTicket;
 }
 
@@ -161,6 +163,16 @@ export async function prepareWorkspaceFilePreview(
         { disposition: "preview", resourceId: entry.resourceId },
         { signal }
     );
+    return materializeWorkspaceFilePreview(ticket, entry, signal, fetcher);
+}
+
+async function materializeWorkspaceFilePreview(
+    ticket: WorkspaceFileContentTicket,
+    entry: WorkspaceFileEntry,
+    signal: AbortSignal,
+    fetcher: WorkspaceFileFetch,
+    secretsRevealed = false
+): Promise<WorkspaceFilePreparedPreview> {
     if (
         ticket.expiresAtMs <= Date.now() ||
         ticket.revision !== entry.revision ||
@@ -168,7 +180,14 @@ export async function prepareWorkspaceFilePreview(
     ) {
         throw new WorkspaceFileTransferError("protocol");
     }
-    if (ticket.previewKind !== "text") return { ticket };
+    if (ticket.previewKind !== "text") {
+        return {
+            ...(secretsRevealed
+                ? { revealTicketId: ticket.ticketId, secretsRevealed: true as const }
+                : {}),
+            ticket,
+        };
+    }
 
     let response: Response;
     try {
@@ -184,7 +203,39 @@ export async function prepareWorkspaceFilePreview(
     if (!response.ok) {
         throw new WorkspaceFileTransferError(transferCategoryForStatus(response.status));
     }
-    return { content: await readBoundedText(response, ticket.sizeBytes), ticket };
+    return {
+        content: await readBoundedText(response, ticket.sizeBytes),
+        ...(secretsRevealed
+            ? { revealTicketId: ticket.ticketId, secretsRevealed: true as const }
+            : {}),
+        ticket,
+    };
+}
+
+/**
+ * Performs one recent-auth mutation and materializes the raw config only in
+ * local component state. Neither the request nor its response enters Query cache.
+ * @param client Files-only validated browser client.
+ * @param entry Exact masked config revision selected by the operator.
+ * @param signal Auth-generation-scoped cancellation signal.
+ * @param fetcher Injectable same-origin raw transport.
+ * @returns Prepared uncached raw text plus the reveal ticket needed for replacement.
+ */
+export async function revealWorkspaceFileSecrets(
+    client: WorkspaceFileClient,
+    entry: WorkspaceFileEntry,
+    signal: AbortSignal,
+    fetcher: WorkspaceFileFetch = globalThis.fetch
+): Promise<WorkspaceFilePreparedPreview> {
+    if (entry.requiresSecretReveal !== true) {
+        throw new WorkspaceFileTransferError("invalid");
+    }
+    const ticket = await client.mutation(
+        "files.prepareReveal",
+        { resourceId: entry.resourceId },
+        { signal }
+    );
+    return materializeWorkspaceFilePreview(ticket, entry, signal, fetcher, true);
 }
 
 function activateDownload(ticket: WorkspaceFileContentTicket): void {
@@ -263,6 +314,7 @@ export async function uploadWorkspaceFile(
               file: File;
               kind: "replace";
               mimeType?: string;
+              revealTicketId?: string;
               resourceId: string;
           }>,
     signal: AbortSignal,
@@ -300,6 +352,9 @@ export async function uploadWorkspaceFile(
                   {
                       expectedRevision: input.expectedRevision,
                       mimeType,
+                      ...(input.revealTicketId === undefined
+                          ? {}
+                          : { revealTicketId: input.revealTicketId }),
                       resourceId: input.resourceId,
                       sizeBytes: input.file.size,
                   },

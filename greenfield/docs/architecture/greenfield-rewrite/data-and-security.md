@@ -476,12 +476,19 @@ proxy mode names exact proxies and requires them to overwrite forwarded identity
   keeps descriptor-anchored containment for each operation. Terminal uses the same named root only
   to select the interactive shell's initial working directory: it is not a filesystem sandbox, and
   the shell may leave it wherever the worker's OS identity has access.
-- Files' separate web-only `MIRA_DASHBOARD_OPENCLAW_ROOT` is not a recursive OpenClaw browser. Its
+- Files' separate web-and-worker `MIRA_DASHBOARD_OPENCLAW_ROOT` is not a recursive OpenClaw browser. Its
   descriptor adapter synthesizes a tree from the exact reviewed `openclaw.json` and
   `hooks/transforms/agentmail.ts` manifest, verifies same-owner/same-device regular files, rejects
   links, world-writable nodes, traversal, and oversized content, and redacts configuration JSON
-  before ticket creation or range selection. The root is read-only and offers no raw-secret reveal;
-  the worker does not parse, open, or receive this root.
+  before default ticket creation or range selection. Raw configuration is available only through
+  an explicit recent-MFA mutation and a short-lived actor-bound no-store ticket; the browser keeps
+  it out of Query caches, and config replacement requires that same reveal ticket and revision.
+  The worker receives the root only as a descriptor-anchored replacement manifest for those two
+  exact existing files, with bounded size, CAS, ownership/mode checks, fsync, and atomic exchange.
+  It cannot create, delete, rename, or replace any unreviewed OpenClaw path through the Files job
+  protocol. Atomic exchange creates a private stage file beside the target, so the worker unit
+  deliberately retains its prior writable OpenClaw namespace rather than claiming an exact-file
+  systemd exception that Linux VFS cannot enforce; the descriptor manifest is the write boundary.
 - Dashboard's worker-owned rotation engine uses an exact reviewed per-file manifest for Dashboard,
   OpenClaw, and managed application/container logs rather than treating a directory as a recursive
   wildcard. Ubuntu system logrotate remains responsible only for the exact `rsyslog`, `apport`,

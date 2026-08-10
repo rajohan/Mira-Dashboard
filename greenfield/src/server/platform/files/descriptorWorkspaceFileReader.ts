@@ -7,6 +7,7 @@ import { redactConfigJsonText } from "../../../shared/configRedaction.ts";
 import { WorkspaceFileError } from "../../domains/files/errors.ts";
 import type {
     WorkspaceFileDirectorySnapshot,
+    WorkspaceFileContentAccess,
     WorkspaceFileLocator,
     WorkspaceFileManifestEntry,
     WorkspaceFileNode,
@@ -189,6 +190,7 @@ function isManifestEntry(value: unknown): value is WorkspaceFileManifestEntry {
         ) &&
         (candidate.contentPolicy === "raw" ||
             candidate.contentPolicy === "redacted-config-json") &&
+        typeof candidate.writable === "boolean" &&
         typeof maximumSizeBytes === "number" &&
         Number.isSafeInteger(maximumSizeBytes) &&
         maximumSizeBytes >= 1 &&
@@ -227,6 +229,7 @@ function compileManifest(
                 contentPolicy: entry.contentPolicy,
                 maximumSizeBytes: entry.maximumSizeBytes,
                 segments: Object.freeze([...entry.segments]),
+                writable: entry.writable,
             })
         );
         for (let index = 0; index < entry.segments.length; index += 1) {
@@ -568,9 +571,16 @@ function stableManifestBytes(
     root: OpenRoot,
     fd: number,
     stat: Fs.BigIntStats,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    contentAccess: WorkspaceFileContentAccess = "default"
 ): Uint8Array | undefined {
     const entry = manifestEntry(root, locator.segments);
+    if (contentAccess === "reveal-secrets") {
+        if (entry?.contentPolicy !== "redacted-config-json") {
+            throw new WorkspaceFileError("access-denied");
+        }
+        return undefined;
+    }
     if (entry?.contentPolicy !== "redacted-config-json") return undefined;
     const sizeBytes = numberSize(stat);
     if (sizeBytes > entry.maximumSizeBytes) {
@@ -609,6 +619,7 @@ function nodeFromStat(
         };
     }
     const sizeBytes = presentation.sizeBytes ?? numberSize(stat);
+    const entry = manifestEntry(root, locator.segments);
     return {
         kind: "file",
         locator,
@@ -620,9 +631,13 @@ function nodeFromStat(
             : { previewKind: presentation.previewKind }),
         modifiedAtMs: modifiedAtMs(stat),
         name,
+        ...(entry?.contentPolicy === "redacted-config-json"
+            ? { requiresSecretReveal: true }
+            : {}),
         revision: workspaceFileRevisionForStat(root.id, locator.segments, stat),
         sizeBytes,
-        writable: root.writable,
+        ...(entry === undefined ? {} : { writeMaximumSizeBytes: entry.maximumSizeBytes }),
+        writable: entry?.writable ?? root.writable,
     };
 }
 
@@ -631,7 +646,8 @@ function openedFilePresentation(
     root: OpenRoot,
     fd: number,
     stat: Fs.BigIntStats,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    contentAccess: WorkspaceFileContentAccess = "default"
 ): {
     readonly mimeType: string;
     readonly previewKind: WorkspaceFilePreviewKind;
@@ -639,7 +655,7 @@ function openedFilePresentation(
 } {
     const fileName = locator.segments.at(-1);
     if (fileName === undefined) throw new WorkspaceFileError("not-file");
-    const redacted = stableManifestBytes(locator, root, fd, stat, signal);
+    const redacted = stableManifestBytes(locator, root, fd, stat, signal, contentAccess);
     const sizeBytes = redacted?.byteLength ?? numberSize(stat);
     const bytes = redacted ?? readPrefix(fd, sizeBytes);
     return {
@@ -667,12 +683,31 @@ async function inspectChild(
         if (!manifestNodeIsSafe(root, locator.segments, stat)) {
             return undefined;
         }
-        const presentation =
+        let presentation = extensionPresentation(name, numberSize(stat));
+        if (
             stat.isFile() &&
             manifestEntry(root, locator.segments)?.contentPolicy ===
                 "redacted-config-json"
-                ? openedFilePresentation(locator, root, handle.fd, stat, signal)
-                : extensionPresentation(name, numberSize(stat));
+        ) {
+            try {
+                presentation = openedFilePresentation(
+                    locator,
+                    root,
+                    handle.fd,
+                    stat,
+                    signal
+                );
+            } catch (error) {
+                if (
+                    !(error instanceof WorkspaceFileError) ||
+                    error.reason !== "unavailable"
+                ) {
+                    throw error;
+                }
+                // Keep the reviewed file selectable so recent-auth reveal can repair
+                // invalid JSON without exposing any raw bytes in the directory list.
+            }
+        }
         return nodeFromStat(locator, name, root, stat, presentation);
     } catch (error) {
         const code = (error as NodeJS.ErrnoException).code;
@@ -806,7 +841,7 @@ export function createDescriptorWorkspaceFileReader(
         if (disposed) throw new WorkspaceFileError("unavailable");
     };
     return Object.freeze<WorkspaceFileReader>({
-        async describe(locator, signal) {
+        async describe(locator, signal, contentAccess = "default") {
             requireAvailable();
             abortIfRequested(signal);
             const opened = await openLocator(locator, roots);
@@ -825,7 +860,8 @@ export function createDescriptorWorkspaceFileReader(
                         opened.root,
                         opened.fd,
                         opened.stat,
-                        signal
+                        signal,
+                        contentAccess
                     )
                 );
             } finally {
@@ -898,7 +934,8 @@ export function createDescriptorWorkspaceFileReader(
             locator,
             expectedRevision,
             range,
-            signal
+            signal,
+            contentAccess = "default"
         ): Promise<WorkspaceFileReadResult> {
             requireAvailable();
             abortIfRequested(signal);
@@ -920,7 +957,8 @@ export function createDescriptorWorkspaceFileReader(
                     opened.root,
                     opened.fd,
                     opened.stat,
-                    signal
+                    signal,
+                    contentAccess
                 );
                 const sizeBytes = redactedBytes?.byteLength ?? numberSize(opened.stat);
                 if (sizeBytes > workspaceFileLimits.maximumDownloadBytes) {

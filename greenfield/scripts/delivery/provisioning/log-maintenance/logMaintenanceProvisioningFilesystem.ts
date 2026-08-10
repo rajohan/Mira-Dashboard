@@ -1,9 +1,18 @@
 import { constants, type BigIntStats } from "node:fs";
-import { lstat, open, realpath, rename, unlink, type FileHandle } from "node:fs/promises";
+import {
+    lstat,
+    mkdir,
+    open,
+    realpath,
+    rename,
+    unlink,
+    type FileHandle,
+} from "node:fs/promises";
 import path from "node:path";
 
 import {
     logMaintenanceProvisioningArtifacts,
+    logMaintenanceProvisioningCreatedDirectories,
     type LogMaintenanceProvisioningArtifactPolicy,
 } from "./policy.ts";
 
@@ -38,6 +47,12 @@ interface OpenedDirectory {
     readonly inode: bigint;
     readonly path: string;
     readonly userId: number;
+}
+
+interface PendingDirectoryCreation {
+    readonly expectedPath: string;
+    readonly mode: number;
+    readonly parent: OpenedDirectory;
 }
 
 interface ExistingFileSnapshot {
@@ -154,6 +169,75 @@ async function validateOpenedDirectory(directory: OpenedDirectory): Promise<void
         !validOwnedDirectory(held, directory.userId, directory.groupId) ||
         !validOwnedDirectory(atPath, directory.userId, directory.groupId)
     ) {
+        throw installationFailure();
+    }
+}
+
+async function openExistingOwnedDirectory(
+    parent: OpenedDirectory,
+    expectedPath: string,
+    userId: number,
+    groupId: number
+): Promise<OpenedDirectory | undefined> {
+    const segment = path.basename(expectedPath);
+    const anchoredPath = path.join(`/proc/self/fd/${parent.handle.fd}`, segment);
+    try {
+        await lstat(anchoredPath, { bigint: true });
+    } catch (error) {
+        if (errorCode(error) === "ENOENT") return undefined;
+        throw installationFailure();
+    }
+    return openOwnedDirectory(anchoredPath, expectedPath, userId, groupId);
+}
+
+async function openOrCreateOwnedDirectory(
+    parent: OpenedDirectory,
+    expectedPath: string,
+    userId: number,
+    groupId: number,
+    creationMode: number
+): Promise<OpenedDirectory> {
+    const segment = path.basename(expectedPath);
+    const anchoredPath = path.join(`/proc/self/fd/${parent.handle.fd}`, segment);
+    const existing = await openExistingOwnedDirectory(
+        parent,
+        expectedPath,
+        userId,
+        groupId
+    );
+    if (existing !== undefined) return existing;
+
+    let created = false;
+    try {
+        await mkdir(anchoredPath, { mode: creationMode });
+        created = true;
+        await parent.handle.sync();
+    } catch (error) {
+        if (errorCode(error) !== "EEXIST") throw installationFailure();
+    }
+    const directory = await openOwnedDirectory(
+        anchoredPath,
+        expectedPath,
+        userId,
+        groupId
+    );
+    if (!created) return directory;
+    try {
+        const before = await directory.handle.stat({ bigint: true });
+        await directory.handle.chmod(creationMode);
+        await directory.handle.sync();
+        const after = await directory.handle.stat({ bigint: true });
+        if (
+            !sameDirectoryIdentity(before, directory) ||
+            !sameDirectoryIdentity(after, directory) ||
+            (after.mode & 0o7777n) !== BigInt(creationMode)
+        ) {
+            throw installationFailure();
+        }
+        await validateOpenedDirectory(directory);
+        return directory;
+    } catch {
+        await closeHandle(directory.handle);
         throw installationFailure();
     }
 }
@@ -406,6 +490,7 @@ async function openDestinationDirectories(
 }> {
     const directories: OpenedDirectory[] = [];
     const byPath = new Map<string, OpenedDirectory>();
+    const pendingCreations = new Map<string, PendingDirectoryCreation>();
     const root = await openOwnedDirectory(
         destinationRoot,
         destinationRoot,
@@ -414,6 +499,12 @@ async function openDestinationDirectories(
     );
     directories.push(root);
     byPath.set(destinationRoot, root);
+    const creatableDirectories = new Map(
+        logMaintenanceProvisioningCreatedDirectories.map((directory) => [
+            destinationBelowRoot(destinationRoot, directory.destinationPath),
+            directory.mode,
+        ])
+    );
     try {
         for (const file of files) {
             const targetDirectory = path.dirname(
@@ -429,22 +520,77 @@ async function openDestinationDirectories(
             }
             let current = root;
             let currentPath = destinationRoot;
-            for (const segment of relative.split(path.sep).filter(Boolean)) {
+            const segments = relative.split(path.sep).filter(Boolean);
+            for (const [index, segment] of segments.entries()) {
                 currentPath = path.join(currentPath, segment);
                 const existing = byPath.get(currentPath);
                 if (existing) {
                     current = existing;
                     continue;
                 }
-                current = await openOwnedDirectory(
-                    path.join(`/proc/self/fd/${current.handle.fd}`, segment),
+                const pending = pendingCreations.get(currentPath);
+                if (pending !== undefined) {
+                    if (index !== segments.length - 1) throw installationFailure();
+                    continue;
+                }
+                const opened = await openExistingOwnedDirectory(
+                    current,
                     currentPath,
                     userId,
                     groupId
                 );
-                directories.push(current);
-                byPath.set(currentPath, current);
+                if (opened !== undefined) {
+                    current = opened;
+                    directories.push(current);
+                    byPath.set(currentPath, current);
+                    continue;
+                }
+                const mode = creatableDirectories.get(currentPath);
+                if (mode === undefined || index !== segments.length - 1) {
+                    throw installationFailure();
+                }
+                pendingCreations.set(
+                    currentPath,
+                    Object.freeze({ expectedPath: currentPath, mode, parent: current })
+                );
             }
+        }
+        for (const directory of directories) {
+            await validateOpenedDirectory(directory);
+        }
+        for (const file of files) {
+            const destination = destinationBelowRoot(
+                destinationRoot,
+                file.destinationPath
+            );
+            const targetDirectory = path.dirname(destination);
+            const directory = byPath.get(targetDirectory);
+            if (directory === undefined) {
+                if (!pendingCreations.has(targetDirectory)) {
+                    throw installationFailure();
+                }
+                continue;
+            }
+            await existingFileSnapshot(
+                path.join(
+                    `/proc/self/fd/${directory.handle.fd}`,
+                    path.basename(destination)
+                ),
+                directory,
+                file.mode
+            );
+        }
+        for (const creation of pendingCreations.values()) {
+            await validateOpenedDirectory(creation.parent);
+            const created = await openOrCreateOwnedDirectory(
+                creation.parent,
+                creation.expectedPath,
+                userId,
+                groupId,
+                creation.mode
+            );
+            directories.push(created);
+            byPath.set(creation.expectedPath, created);
         }
         return Object.freeze({
             directories: Object.freeze(directories),
@@ -460,8 +606,9 @@ async function openDestinationDirectories(
 
 /**
  * Installs all three manifest-bound files through held destination descriptors.
- * Every target is individually replaced atomically, and every preflight completes
- * before the first destination mutation. No service or policy daemon is activated.
+ * Source verification and a non-mutating preflight of every existing destination
+ * directory and target file complete before the one reviewed support directory may
+ * be created. Every file is replaced atomically; no service or policy daemon is activated.
  * @param destinationRoot `/` in production or one explicit test-only filesystem root.
  * @param files Exact ordered source bytes and manifest hashes.
  * @param testHooks Deterministic mutation boundaries for adversarial tests.

@@ -216,6 +216,7 @@ export function IncidentBrowser() {
             >
                 <FormField label="Problem type">
                     <Input
+                        className="mt-2"
                         maxLength={100}
                         onChange={(event) => setKindDraft(event.currentTarget.value)}
                         placeholder="Example: filesystem"
@@ -224,6 +225,7 @@ export function IncidentBrowser() {
                 </FormField>
                 <FormField label="Check">
                     <Input
+                        className="mt-2"
                         maxLength={200}
                         onChange={(event) => setMonitorDraft(event.currentTarget.value)}
                         placeholder="Example: ops-check"
@@ -232,6 +234,7 @@ export function IncidentBrowser() {
                 </FormField>
                 <FormField label="Status">
                     <Select
+                        className="mt-2"
                         onChange={setStateDraft}
                         options={incidentFilters}
                         value={stateDraft}
@@ -239,12 +242,13 @@ export function IncidentBrowser() {
                 </FormField>
                 <FormField label="Severity">
                     <Select
+                        className="mt-2"
                         onChange={setSeverityDraft}
                         options={severityFilters}
                         value={severityDraft}
                     />
                 </FormField>
-                <div className="flex gap-2">
+                <div className="flex min-h-10 items-center gap-2">
                     <Button size="sm" type="submit">
                         <Icon icon={Filter} size="sm" tone="inherit" />
                         Apply

@@ -141,6 +141,71 @@ describe("persistent Gateway chat provider", () => {
         ]);
     });
 
+    test("normalizes Codex commentary and provider reasoning blocks as thinking without changing final text", async () => {
+        const commentary = "Inspecting the runtime before answering.";
+        const harness = createHarness({
+            "chat.history": {
+                messages: [
+                    {
+                        content: [{ text: commentary, type: "text" }],
+                        id: "codex-commentary",
+                        openclawStreamFallback: {
+                            itemId: "commentary-item-1",
+                            replacementText: commentary,
+                            source: "segment",
+                        },
+                        role: "assistant",
+                    },
+                    {
+                        content: [
+                            {
+                                text: "Synthetic provider reasoning.",
+                                type: "reasoning_text",
+                            },
+                        ],
+                        id: "synthetic-reasoning",
+                        role: "assistant",
+                    },
+                    {
+                        content: [{ text: "The final answer.", type: "text" }],
+                        id: "codex-final",
+                        role: "assistant",
+                    },
+                ],
+                offset: 0,
+                sessionKey,
+            },
+        });
+
+        const history = await harness.provider.history({
+            limit: 3,
+            maxChars: 32 * 1024,
+            offset: 0,
+            sessionKey,
+        });
+
+        expect(history.messages.map(({ content }) => content)).toEqual([
+            {
+                kind: "complete",
+                parts: [{ id: "1", kind: "thinking", text: commentary }],
+            },
+            {
+                kind: "complete",
+                parts: [
+                    {
+                        id: "1",
+                        kind: "thinking",
+                        text: "Synthetic provider reasoning.",
+                    },
+                ],
+            },
+            {
+                kind: "complete",
+                parts: [{ id: "1", kind: "text", text: "The final answer." }],
+            },
+        ]);
+    });
+
     test("projects history into bounded local media and sanitized diagnostics", async () => {
         const harness = createHarness({
             "chat.history": {
@@ -254,6 +319,7 @@ describe("persistent Gateway chat provider", () => {
         ]);
         expect(history.inFlightRun).toEqual({
             plan: {
+                explanation: "Provider-only metadata is intentionally ignored",
                 steps: [
                     { status: "completed", text: "Inspect context" },
                     { status: "in_progress", text: "Answer safely" },
@@ -1382,11 +1448,15 @@ describe("persistent Gateway chat provider", () => {
                 event: "agent",
                 payload: {
                     data: {
+                        explanation: "Why this plan is useful.",
                         phase: "update",
+                        private: "must not cross",
+                        source: "provider-private-source",
                         steps: [
                             { status: "completed", step: "Inspect context" },
                             { status: "in_progress", step: "Render activity" },
                         ],
+                        title: "Provider-private title",
                     },
                     runId: "provider-plan-run",
                     seq: 3,
@@ -1400,6 +1470,7 @@ describe("persistent Gateway chat provider", () => {
 
         expect(projected).toEqual([
             {
+                explanation: "Why this plan is useful.",
                 kind: "plan",
                 phase: "update",
                 providerRunId: "provider-plan-run",
@@ -1412,6 +1483,45 @@ describe("persistent Gateway chat provider", () => {
                 ],
             },
         ]);
+        expect(JSON.stringify(projected)).not.toContain("provider-private");
+    });
+
+    test("rejects malformed known plan updates instead of advancing as noops", async () => {
+        const harness = createHarness({});
+        const projected: unknown[] = [];
+        await harness.provider.subscribeChat({
+            onEvent: (event) => {
+                projected.push(event);
+            },
+            onGap: () => {},
+            onReconciliationRequired: () => {},
+            runWatermarks: [],
+            sessionKey,
+        });
+        const failure = await captureFailure(() =>
+            harness.deliverChat({
+                connectionGeneration: 1,
+                frame: {
+                    event: "agent",
+                    payload: {
+                        data: {
+                            explanation: "x".repeat(4001),
+                            phase: "update",
+                            steps: [{ status: "pending", step: "Wait" }],
+                        },
+                        runId: "provider-malformed-plan",
+                        seq: 1,
+                        sessionKey,
+                        stream: "plan",
+                        ts: 10,
+                    },
+                },
+                receivedAtMs: 20,
+            })
+        );
+
+        expect(failure).toBeInstanceOf(ChatProviderUnavailableError);
+        expect(projected).toEqual([]);
     });
 
     test("projects pinned shared-sequence assistant and chat events with overlap-safe modes", async () => {
@@ -1602,6 +1712,145 @@ describe("persistent Gateway chat provider", () => {
             ["merge", "Inspecting context"],
             ["append", "."],
             ["replace", "Final thought"],
+        ]);
+    });
+
+    test("projects assistant commentary as thinking without reclassifying final answers", async () => {
+        const harness = createHarness({});
+        const projected: unknown[] = [];
+        await harness.provider.subscribeChat({
+            onEvent: (event) => {
+                projected.push(event);
+            },
+            onGap: () => {},
+            onReconciliationRequired: () => {},
+            runWatermarks: [],
+            sessionKey,
+        });
+        const deliver = async (
+            data: Readonly<Record<string, unknown>>,
+            seq: number
+        ): Promise<void> =>
+            harness.deliverChat({
+                connectionGeneration: 1,
+                frame: {
+                    event: "agent",
+                    payload: {
+                        data,
+                        runId: "assistant-phase-run",
+                        seq,
+                        sessionKey,
+                        stream: "assistant",
+                        ts: seq,
+                    },
+                },
+                receivedAtMs: seq,
+            });
+
+        await deliver({ phase: "commentary", text: "Inspecting" }, 1);
+        await deliver({ delta: " context", phase: "commentary" }, 2);
+        await deliver({ phase: "commentary", replace: true, text: "Checked context" }, 3);
+        await deliver({ phase: "final_answer", text: "Finished." }, 4);
+        await deliver({ text: "Finished without an explicit phase." }, 5);
+
+        expect(projected).toEqual([
+            {
+                kind: "delta",
+                mode: "merge",
+                providerRunId: "assistant-phase-run",
+                providerSequence: 1,
+                receivedAtMs: 1,
+                sessionKey,
+                stream: "thinking",
+                text: "Inspecting",
+            },
+            {
+                kind: "delta",
+                mode: "append",
+                providerRunId: "assistant-phase-run",
+                providerSequence: 2,
+                receivedAtMs: 2,
+                sessionKey,
+                stream: "thinking",
+                text: " context",
+            },
+            {
+                kind: "delta",
+                mode: "replace",
+                providerRunId: "assistant-phase-run",
+                providerSequence: 3,
+                receivedAtMs: 3,
+                sessionKey,
+                stream: "thinking",
+                text: "Checked context",
+            },
+            {
+                kind: "delta",
+                mode: "merge",
+                providerRunId: "assistant-phase-run",
+                providerSequence: 4,
+                receivedAtMs: 4,
+                sessionKey,
+                stream: "assistant",
+                text: "Finished.",
+            },
+            {
+                kind: "delta",
+                mode: "merge",
+                providerRunId: "assistant-phase-run",
+                providerSequence: 5,
+                receivedAtMs: 5,
+                sessionKey,
+                stream: "assistant",
+                text: "Finished without an explicit phase.",
+            },
+        ]);
+    });
+
+    test("projects Codex preamble progress items onto the thinking stream", async () => {
+        const harness = createHarness({});
+        const projected: unknown[] = [];
+        await harness.provider.subscribeChat({
+            onEvent: (event) => {
+                projected.push(event);
+            },
+            onGap: () => {},
+            onReconciliationRequired: () => {},
+            runWatermarks: [],
+            sessionKey,
+        });
+
+        await harness.deliverChat({
+            connectionGeneration: 1,
+            frame: {
+                event: "agent",
+                payload: {
+                    data: {
+                        kind: "preamble",
+                        phase: "update",
+                        progressText: "Checking the live session.",
+                    },
+                    runId: "codex-preamble-run",
+                    seq: 1,
+                    sessionKey,
+                    stream: "item",
+                    ts: 1,
+                },
+            },
+            receivedAtMs: 2,
+        });
+
+        expect(projected).toEqual([
+            {
+                kind: "delta",
+                mode: "merge",
+                providerRunId: "codex-preamble-run",
+                providerSequence: 1,
+                receivedAtMs: 2,
+                sessionKey,
+                stream: "thinking",
+                text: "Checking the live session.",
+            },
         ]);
     });
 

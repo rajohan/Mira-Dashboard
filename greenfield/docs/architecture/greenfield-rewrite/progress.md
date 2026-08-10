@@ -1249,17 +1249,26 @@ full-browser parity, production rehearsal, cutover, and legacy deletion remain o
 ### 2026-08-09 — Phase 5 Files, Logs, and interactive Terminal verticals
 
 - Files exposes the writable named `workspace` root selected by
-  `MIRA_DASHBOARD_WORKSPACE_ROOT` plus a separate read-only `openclaw-config` root selected by the
-  web-only `MIRA_DASHBOARD_OPENCLAW_ROOT`; host paths never cross the browser contract, and
+  `MIRA_DASHBOARD_WORKSPACE_ROOT` plus a separate fixed-manifest `openclaw-config` root selected by
+  the web-and-worker `MIRA_DASHBOARD_OPENCLAW_ROOT`; host paths never cross the browser contract, and
   production Dashboard state cannot be selected as either root. The OpenClaw root enumerates only
   `openclaw.json` and `hooks/transforms/agentmail.ts` plus their directory prefixes. Sessions,
   credentials, tokens, and every unreviewed sibling remain invisible. `openclaw.json` is parsed and
-  redacted inside the descriptor adapter before ticket metadata or bytes leave it; invalid JSON
-  fails closed, and this read-only slice deliberately has no raw reveal. Descriptor-anchored reads
+  redacted inside the descriptor adapter before default ticket metadata or bytes leave it. An
+  explicit recent-MFA mutation issues a short-lived actor-bound no-store reveal ticket, keeps raw
+  content outside Query caches, and binds any subsequent CAS replacement to that exact revealed
+  revision. Invalid JSON remains unavailable through the default redacted read but can still be
+  explicitly revealed and repaired. `agentmail.ts` is editable without a secret reveal. Both files
+  allow replacement only; the OpenClaw root offers no create, delete, rename, or recursive browse.
+  Descriptor-anchored reads
   reject traversal, links, devices, ownership/mode drift, oversized content, and revision drift. Short-lived
   actor-bound tickets carry raw `GET`/`HEAD` previews and downloads plus bounded streamed `PUT`
   uploads. Upload bytes spool beneath protected Dashboard state, while only the worker performs
-  descriptor-anchored create/replace, mandatory CAS, fsync, and atomic rename. The `/files`
+  descriptor-anchored create/replace, mandatory CAS, fsync, and atomic rename. The worker's separate
+  replacement manifest admits only those two OpenClaw paths and enforces per-file size and owner/mode
+  checks. Because atomic exchange needs to create a stage file in the target directory, systemd
+  cannot express an exact-file writable exception; the descriptor manifest is the enforced write
+  boundary for this root. The `/files`
   browser route provides bounded paginated browsing, previews, download, upload, replacement, and
   reconciliation without treating an uncertain response as permission to redispatch.
 - Logs exposes a path-free catalog for exact Dashboard files, exact host text logs, and bounded

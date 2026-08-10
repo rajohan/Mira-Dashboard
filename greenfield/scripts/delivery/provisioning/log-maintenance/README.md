@@ -1,8 +1,10 @@
 # Fixed Ubuntu logrotate broker artifacts
 
 These root-owned artifacts are intentionally not installed or activated by a source build.
-The reviewed root installer verifies a frozen commit-addressed release twice, preflights
-all destinations, and replaces each file atomically with these exact ownership and modes:
+The reviewed root installer verifies a frozen commit-addressed release twice, completes a
+non-mutating descriptor-anchored preflight of every existing destination directory and
+target file, then creates `/usr/local/libexec` as `root:root 0755` when it is absent, and
+replaces each file atomically with these exact ownership and modes:
 
 | Source artifact                           | Destination                                                     | Owner/mode       |
 | ----------------------------------------- | --------------------------------------------------------------- | ---------------- |
@@ -18,9 +20,10 @@ bun scripts/delivery/provisioning/log-maintenance/installLogMaintenanceProvision
   --release-id=<commit>
 ```
 
-The command only installs manifest-bound files. It does not reload systemd or polkit,
-create or modify groups, enable units, or start services. Those activation steps remain a
-separate reviewed deployment transition after the installed bytes have been inspected.
+The command only creates the exact reviewed support directory when needed and installs
+manifest-bound files. It does not reload systemd or polkit, create or modify groups,
+enable units, or start services. Those activation steps remain a separate reviewed
+deployment transition after the installed bytes have been inspected.
 
 Create the fixed `mira-dashboard-log-maintenance` group and grant it only to the worker
 runtime identity before reloading systemd and polkit. The web process must never join this

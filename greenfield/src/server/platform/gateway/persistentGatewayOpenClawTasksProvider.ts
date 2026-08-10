@@ -59,6 +59,8 @@ const boundedTaskBody = (maximum: number) =>
         v.maxLength(maximum),
         v.check((text) => !text.includes("\0"))
     );
+const optionalBlankTaskIdentity = (maximum: number) =>
+    v.optional(v.union([v.literal(""), boundedTaskText(maximum)]));
 const upstreamTimestampSchema = v.union([
     v.pipe(v.number(), v.safeInteger(), v.minValue(0)),
     v.pipe(v.string(), v.minLength(1), v.maxLength(64)),
@@ -81,13 +83,13 @@ const upstreamTaskSummarySchema = v.strictObject({
     id: boundedTaskText(256),
     kind: v.optional(boundedTaskText(256)),
     lastToolName: v.optional(boundedTaskText(200)),
-    ownerKey: v.optional(boundedTaskText(256)),
+    ownerKey: optionalBlankTaskIdentity(256),
     parentTaskId: v.optional(boundedTaskText(256)),
     progressSummary: v.optional(boundedTaskBody(4000)),
     prompt: v.optional(boundedTaskBody(4000)),
     runId: v.optional(boundedTaskText(256)),
     runtime: v.optional(boundedTaskText(256)),
-    sessionKey: v.optional(boundedTaskText(512)),
+    sessionKey: optionalBlankTaskIdentity(512),
     sourceId: v.optional(boundedTaskText(256)),
     startedAt: v.optional(upstreamTimestampSchema),
     status: upstreamTaskStatusSchema,
@@ -182,7 +184,13 @@ function projectTask(
         "title",
         "toolUseCount",
     ] as const) {
-        if (value[field] !== undefined) projected[field] = value[field];
+        const fieldValue = value[field];
+        if (
+            fieldValue !== undefined &&
+            !((field === "ownerKey" || field === "sessionKey") && fieldValue === "")
+        ) {
+            projected[field] = fieldValue;
+        }
     }
     for (const [upstreamField, localField] of [
         ["createdAt", "createdAtMs"],

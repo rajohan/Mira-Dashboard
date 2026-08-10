@@ -98,17 +98,18 @@ async function releaseFixture(): Promise<string> {
     return releaseRoot;
 }
 
-async function destinationFixture(): Promise<string> {
+async function destinationFixture(
+    options: Readonly<{ readonly includeLibexec?: boolean }> = {}
+): Promise<string> {
     const destinationRoot = await mkdtemp(
         path.join(tmpdir(), "mira-log-maintenance-destination-")
     );
     temporaryRoots.push(destinationRoot);
     await chmod(destinationRoot, 0o700);
-    for (const directory of [
-        "etc/polkit-1/rules.d",
-        "etc/systemd/system",
-        "usr/local/libexec",
-    ]) {
+    const directories = ["etc/polkit-1/rules.d", "etc/systemd/system"];
+    if (options.includeLibexec === false) directories.push("usr/local");
+    else directories.push("usr/local/libexec");
+    for (const directory of directories) {
         await mkdir(path.join(destinationRoot, directory), {
             mode: 0o755,
             recursive: true,
@@ -155,6 +156,72 @@ describe("root log-maintenance provisioning installer", () => {
                 typeof process.getgid === "function" ? process.getgid() : -1
             );
         }
+    });
+
+    test("creates and validates the reviewed libexec target on a fresh host", async () => {
+        const releaseRoot = await releaseFixture();
+        const destinationRoot = await destinationFixture({ includeLibexec: false });
+        const libexec = path.join(destinationRoot, "usr/local/libexec");
+
+        expect(
+            await runInstallLogMaintenanceProvisioningCli(argumentsFor(releaseRoot), {
+                destinationRoot,
+                requireRoot: () => {},
+            })
+        ).toEqual({ releaseId, status: "INSTALLED" });
+
+        const status = await lstat(libexec);
+        expect(status.isDirectory()).toBeTrue();
+        expect(status.isSymbolicLink()).toBeFalse();
+        expect(status.mode & 0o7777).toBe(0o755);
+        expect(
+            await readFile(path.join(libexec, "mira-dashboard-log-maintenance"))
+        ).toEqual(
+            await readFile(
+                path.join(
+                    releaseRoot,
+                    "scripts/delivery/provisioning/log-maintenance/mira-dashboard-log-maintenance"
+                )
+            )
+        );
+    });
+
+    test("preflights every existing destination before creating libexec", async () => {
+        const releaseRoot = await releaseFixture();
+        const destinationRoot = await destinationFixture({ includeLibexec: false });
+        const libexec = path.join(destinationRoot, "usr/local/libexec");
+        await chmod(path.join(destinationRoot, "etc/systemd/system"), 0o777);
+
+        const failure = await rejectionError(
+            runInstallLogMaintenanceProvisioningCli(argumentsFor(releaseRoot), {
+                destinationRoot,
+                requireRoot: () => {},
+            })
+        );
+        expect(failure.message).toBe("Log maintenance provisioning installation failed");
+        const missing = await rejectionError(lstat(libexec));
+        expect((missing as NodeJS.ErrnoException).code).toBe("ENOENT");
+    });
+
+    test("preflights a later existing target file before creating libexec", async () => {
+        const releaseRoot = await releaseFixture();
+        const destinationRoot = await destinationFixture({ includeLibexec: false });
+        const libexec = path.join(destinationRoot, "usr/local/libexec");
+        const systemdTarget = path.join(
+            destinationRoot,
+            "etc/systemd/system/mira-dashboard-log-maintenance@.service"
+        );
+        await writeFile(systemdTarget, "unsafe", { mode: 0o600 });
+
+        const failure = await rejectionError(
+            runInstallLogMaintenanceProvisioningCli(argumentsFor(releaseRoot), {
+                destinationRoot,
+                requireRoot: () => {},
+            })
+        );
+        expect(failure.message).toBe("Log maintenance provisioning installation failed");
+        const missing = await rejectionError(lstat(libexec));
+        expect((missing as NodeJS.ErrnoException).code).toBe("ENOENT");
     });
 
     test("fails before replacement for untrusted destinations and target swaps", async () => {

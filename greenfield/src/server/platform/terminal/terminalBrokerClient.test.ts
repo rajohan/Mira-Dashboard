@@ -165,8 +165,55 @@ describe("terminal broker web client", () => {
         expect(JSON.stringify(failure)).not.toContain("private/path");
     });
 
+    test("closes an attached channel when aborted before broker readiness", async () => {
+        const channel = new FakeChannel();
+        const attachSent = Promise.withResolvers<void>();
+        channel.onSend = (data) => {
+            if (decodeSingleControl(data).type === "attach") attachSent.resolve();
+        };
+        let closed = 0;
+        const controller = new AbortController();
+        const client = createTerminalBrokerClient({
+            transport: {
+                connect: () => Promise.resolve(channel),
+                request: () => Promise.reject(new Error("unused")),
+            },
+        });
+        const attaching = client.attach({
+            callbacks: {
+                onClose: () => {
+                    closed += 1;
+                },
+                onControl: () => {},
+                onInputDrain: () => {},
+                onOutput: () => "accepted",
+            },
+            connectionToken: `${"a".repeat(32)}.${"b".repeat(64)}`,
+            owner,
+            sessionId,
+            signal: controller.signal,
+        });
+        await attachSent.promise;
+
+        controller.abort(new DOMException("private abort reason", "AbortError"));
+
+        let failure: unknown;
+        try {
+            await attaching;
+        } catch (error) {
+            failure = error;
+        }
+        expect(failure).toMatchObject({
+            message: "Terminal broker operation failed",
+            reason: "unavailable",
+        });
+        expect(closed).toBe(1);
+        expect(channel.closeCalls).toBe(1);
+    });
+
     test("presents the raw token once, relays raw frames, and pauses incoming output", async () => {
         const channel = new FakeChannel();
+        const controller = new AbortController();
         const controls: unknown[] = [];
         const outputs: { data: Uint8Array; sequence: number }[] = [];
         let closed = 0;
@@ -209,6 +256,7 @@ describe("terminal broker web client", () => {
             connectionToken: rawToken,
             owner,
             sessionId,
+            signal: controller.signal,
         });
         channel.onSend = undefined;
         const attach = decodeSingleControl(channel.sent[0] ?? new Uint8Array());
@@ -218,6 +266,8 @@ describe("terminal broker web client", () => {
             resumed: false,
             type: "ready",
         });
+        controller.abort();
+        expect(channel.closeCalls).toBe(0);
 
         const output = encodeTerminalBrokerOutput(7, new Uint8Array([27, 91, 109, 255]));
         channel.emit(output.slice(0, 5));

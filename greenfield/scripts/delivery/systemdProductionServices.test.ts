@@ -287,16 +287,21 @@ describe("production user-systemd service control", () => {
         expect(web).toContain(
             "--preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT,MIRA_DASHBOARD_OPENCLAW_ROOT,MIRA_DASHBOARD_WORKSPACE_ROOT"
         );
-        expect(worker).not.toContain("MIRA_DASHBOARD_OPENCLAW_ROOT");
+        expect(worker).toContain("Environment=MIRA_DASHBOARD_OPENCLAW_ROOT=%h/.openclaw");
         expect(worker).toContain(
-            "--preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT,MIRA_DASHBOARD_WORKSPACE_ROOT"
+            "--preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT,MIRA_DASHBOARD_OPENCLAW_ROOT,MIRA_DASHBOARD_WORKSPACE_ROOT"
         );
         expect(web).toContain("MemoryMax=1G");
         expect(web).toContain("TasksMax=96");
         expect(web).toContain("ReadOnlyPaths=%h/.openclaw");
         expect(web).toContain("PrivateTmp=true\nBindReadOnlyPaths=-/tmp/openclaw");
         expect(web).not.toContain("\nBindPaths=-/tmp/openclaw");
+        // Atomic replacement creates a stage file beside its target before
+        // renameat2 exchange. A read-only OpenClaw root with exact-file
+        // exceptions would therefore fail at runtime; the descriptor writer's
+        // reviewed replacement manifest is the write boundary instead.
         expect(worker).not.toContain("ReadOnlyPaths=%h/.openclaw");
+        expect(worker).not.toContain("ReadWritePaths=%h/.openclaw");
         expect(worker).toContain("PrivateTmp=true\nBindPaths=-/tmp/openclaw");
         expect(worker).not.toContain("BindReadOnlyPaths=-/tmp/openclaw");
         expect(web).toContain("CPUQuota=100%");

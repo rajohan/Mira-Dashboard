@@ -87,7 +87,7 @@ export function SourceSurface({
             tabIndex={0}
         >
             <pre
-                className={`source-viewer-source min-h-full min-w-full py-4 font-mono text-sm leading-6 tab-4 ${
+                className={`source-viewer-source min-h-full min-w-full bg-transparent py-4 font-mono text-sm leading-6 tab-4 ${
                     wrapLongLines
                         ? "source-viewer-source-wrapped"
                         : "source-viewer-source-unwrapped"

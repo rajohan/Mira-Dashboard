@@ -161,6 +161,88 @@ describe("descriptor workspace file structural writer", () => {
         expect(result.revision).not.toBe(expectedRevision);
     });
 
+    test("limits an OpenClaw writer root to exact bounded replacements", async () => {
+        const parent = Fs.mkdtempSync(Path.join(Os.tmpdir(), "mira-openclaw-writer-"));
+        const root = Path.join(parent, "openclaw");
+        const spool = Path.join(parent, "spool");
+        Fs.mkdirSync(Path.join(root, "hooks", "transforms"), {
+            mode: 0o700,
+            recursive: true,
+        });
+        Fs.chmodSync(root, 0o700);
+        Fs.mkdirSync(spool, { mode: 0o700 });
+        Fs.writeFileSync(Path.join(root, "openclaw.json"), "old", { mode: 0o600 });
+        Fs.writeFileSync(Path.join(root, "credentials.json"), "keep", {
+            mode: 0o600,
+        });
+        directories.push(parent);
+        const writer = createDescriptorWorkspaceFileStructuralWriter({
+            roots: [
+                {
+                    id: "openclaw-config",
+                    path: root,
+                    replacementManifest: [
+                        { maximumSizeBytes: 16, segments: ["openclaw.json"] },
+                        {
+                            maximumSizeBytes: 16,
+                            segments: ["hooks", "transforms", "agentmail.ts"],
+                        },
+                    ],
+                    writable: true,
+                },
+            ],
+            spoolRoot: spool,
+        });
+        writers.push(writer);
+
+        const allowedSpoolId = "56565656-5656-4656-8656-565656565656";
+        const allowedSha = stageUpload(spool, allowedSpoolId, "new");
+        await writer.apply({
+            expectedRevision: workspaceFileRevisionForStat(
+                "openclaw-config",
+                ["openclaw.json"],
+                Fs.statSync(Path.join(root, "openclaw.json"), { bigint: true })
+            ),
+            fileName: "openclaw.json",
+            locator: { rootId: "openclaw-config", segments: ["openclaw.json"] },
+            mimeType: "application/json",
+            operation: "replace",
+            sha256: allowedSha,
+            sizeBytes: 3,
+            spoolId: allowedSpoolId,
+            ticketId: "57575757-5757-4757-8757-575757575757",
+        });
+        expect(Fs.readFileSync(Path.join(root, "openclaw.json"), "utf8")).toBe("new");
+
+        const deniedSpoolId = "58585858-5858-4858-8858-585858585858";
+        const deniedSha = stageUpload(spool, deniedSpoolId, "leak");
+        expect(
+            await captureFailure(() =>
+                writer.apply({
+                    expectedRevision: workspaceFileRevisionForStat(
+                        "openclaw-config",
+                        ["credentials.json"],
+                        Fs.statSync(Path.join(root, "credentials.json"), {
+                            bigint: true,
+                        })
+                    ),
+                    fileName: "credentials.json",
+                    locator: {
+                        rootId: "openclaw-config",
+                        segments: ["credentials.json"],
+                    },
+                    mimeType: "application/json",
+                    operation: "replace",
+                    sha256: deniedSha,
+                    sizeBytes: 4,
+                    spoolId: deniedSpoolId,
+                    ticketId: "59595959-5959-4959-8959-595959595959",
+                })
+            )
+        ).toMatchObject({ reason: "access-denied" });
+        expect(Fs.readFileSync(Path.join(root, "credentials.json"), "utf8")).toBe("keep");
+    });
+
     test("atomically rolls back when the target changes after CAS verification", async () => {
         const parent = Fs.mkdtempSync(Path.join(Os.tmpdir(), "mira-files-cas-race-"));
         const root = Path.join(parent, "workspace");

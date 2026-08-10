@@ -57,11 +57,15 @@ export interface WorkspaceFilesViewProps {
         entry: WorkspaceFileEntry
     ) => Promise<WorkspaceFilePreparedPreview>;
     readonly onRefresh: () => void;
+    readonly onReveal: (
+        entry: WorkspaceFileEntry
+    ) => Promise<WorkspaceFilePreparedPreview>;
     readonly onSelectRoot: (rootId: string) => void;
     readonly onUpload: (
         file: File,
         replacedEntry: WorkspaceFileEntry | undefined,
-        parentDirectoryId?: string
+        parentDirectoryId?: string,
+        revealTicketId?: string
     ) => Promise<WorkspaceFileWriteStatus>;
     readonly refreshing?: boolean;
     readonly roots: readonly WorkspaceFileRoot[];
@@ -122,6 +126,7 @@ export function WorkspaceFilesView({
     onOpenDirectory,
     onPreview,
     onRefresh,
+    onReveal,
     onSelectRoot,
     onUpload,
     refreshing = false,
@@ -230,6 +235,39 @@ export function WorkspaceFilesView({
         }
     }
 
+    async function revealSecrets(selection: WorkspaceFilePaneSelection): Promise<void> {
+        const requestSequence = previewRequestSequence.current + 1;
+        previewRequestSequence.current = requestSequence;
+        setActionError(undefined);
+        setSelected((current) =>
+            current?.selection.entry.resourceId === selection.entry.resourceId
+                ? {
+                      preview: { ...current.preview, revealLoading: true },
+                      selection,
+                  }
+                : current
+        );
+        try {
+            const prepared = await onReveal(selection.entry);
+            if (previewRequestSequence.current !== requestSequence) return;
+            setSelected({ preview: { loading: false, prepared }, selection });
+        } catch (error) {
+            if (previewRequestSequence.current !== requestSequence) return;
+            setSelected((current) =>
+                current?.selection.entry.resourceId === selection.entry.resourceId
+                    ? {
+                          preview: {
+                              ...current.preview,
+                              revealError: workspaceFileFailureMessage(error),
+                              revealLoading: false,
+                          },
+                          selection,
+                      }
+                    : current
+            );
+        }
+    }
+
     function completeUpload(writeStatus: WorkspaceFileWriteStatus) {
         setUploadIntent(undefined);
         setStatus(writeStatusMessage(writeStatus));
@@ -256,6 +294,7 @@ export function WorkspaceFilesView({
                     key={`${activeSelected.selection.entry.resourceId}:${activeSelected.selection.entry.revision}:${activeSelected.preview.prepared?.ticket.ticketId ?? "loading"}`}
                     onDownload={() => download(activeSelected.selection.entry)}
                     onRefreshPreview={() => prepareSelection(activeSelected.selection)}
+                    onRevealSecrets={() => revealSecrets(activeSelected.selection)}
                     onReplace={() =>
                         setUploadIntent({
                             entry: activeSelected.selection.entry,
@@ -269,7 +308,8 @@ export function WorkspaceFilesView({
                                 type: entry.mimeType ?? "text/plain",
                             }),
                             entry,
-                            activeSelected.selection.parentDirectoryId
+                            activeSelected.selection.parentDirectoryId,
+                            activeSelected.preview.prepared?.revealTicketId
                         );
                     }}
                     onWriteComplete={completeUpload}
@@ -322,7 +362,7 @@ export function WorkspaceFilesView({
     }
 
     return (
-        <div className="flex min-h-0 flex-col gap-4">
+        <div className="flex h-full min-h-0 flex-col gap-4">
             <Card aria-labelledby="workspace-files-location-heading" className="p-4">
                 <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
                     <div className="min-w-0 flex-1">
@@ -444,7 +484,7 @@ export function WorkspaceFilesView({
                 variant={status?.variant ?? "success"}
             />
 
-            <Card className="flex min-h-[42rem] min-w-0 flex-col overflow-hidden p-0 lg:h-[calc(100vh-19rem)] lg:flex-row">
+            <Card className="flex min-h-[42rem] min-w-0 flex-col overflow-hidden p-0 lg:min-h-0 lg:flex-1 lg:flex-row">
                 <aside className="border-primary-700 flex max-h-96 min-h-0 w-full shrink-0 flex-col border-b lg:max-h-none lg:w-72 lg:border-r lg:border-b-0">
                     <div className="border-primary-700 flex items-center gap-2 border-b px-4 py-3">
                         <Icon icon={FolderTree} size="sm" />
@@ -508,7 +548,10 @@ export function WorkspaceFilesView({
                         replacedEntry,
                         replacedEntry === undefined
                             ? directory.resourceId
-                            : activeSelected?.selection.parentDirectoryId
+                            : activeSelected?.selection.parentDirectoryId,
+                        replacedEntry === undefined
+                            ? undefined
+                            : activeSelected?.preview.prepared?.revealTicketId
                     )
                 }
             />

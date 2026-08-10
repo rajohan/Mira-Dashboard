@@ -4,6 +4,7 @@ import * as v from "valibot";
 
 import { utf8ByteLength } from "../shared/encoding.ts";
 import {
+    chatAbortInputSchema,
     chatRuntimeInputSchema,
     chatRuntimeOutputSchema,
     chatSendInputSchema,
@@ -11,30 +12,21 @@ import {
 import {
     chatMessageSchema,
     chatExternalRunSchema,
+    chatPlanExplanationMaximumCodeUnits,
     chatRuntimeEventSchema,
     chatSendInputMaximumBytes,
-    mergeChatStreamText,
 } from "./chatModel.ts";
 
 const runId = "019fe5a1-6cb9-7e51-ad2a-bf1f69861218";
 
 describe("chat model contract", () => {
-    test("uses one exact overlap-safe merge rule", () => {
-        expect(mergeChatStreamText("previous", "")).toBe("previous");
-        expect(mergeChatStreamText("", "next")).toBe("next");
-        expect(mergeChatStreamText("Fixture ", "Fixture complete.")).toBe(
-            "Fixture complete."
-        );
-        expect(mergeChatStreamText("abc", "bc")).toBe("abc");
-        expect(mergeChatStreamText("abc", "def")).toBe("abcdef");
-    });
-
     test("rejects provider sequence zero on points and ranges", () => {
         expect(
             v.safeParse(chatRuntimeEventSchema, {
                 kind: "provider-noop",
                 occurredAtMs: 1,
-                providerSequence: 0,
+                providerSequenceEnd: 1,
+                providerSequenceStart: 0,
                 reason: "ignored",
                 runId,
                 sequence: 1,
@@ -213,6 +205,68 @@ describe("chat model contract", () => {
                 ])
             ).success
         ).toBeFalse();
+        expect(
+            v.safeParse(chatExternalRunSchema, {
+                ...external([{ status: "pending", text: "Work" }]),
+                plan: {
+                    explanation: "界".repeat(chatPlanExplanationMaximumCodeUnits),
+                    phase: "update",
+                    steps: [{ status: "pending", text: "Work" }],
+                },
+            }).success
+        ).toBeTrue();
+        expect(
+            v.safeParse(chatExternalRunSchema, {
+                ...external([{ status: "pending", text: "Work" }]),
+                plan: {
+                    explanation: "x".repeat(chatPlanExplanationMaximumCodeUnits + 1),
+                    phase: "update",
+                    steps: [{ status: "pending", text: "Work" }],
+                },
+            }).success
+        ).toBeFalse();
+    });
+
+    test("bounds external abort attempts and their projected server baseline", () => {
+        // oxlint-disable-next-line unicorn/consistent-function-scoping -- Fixture is scoped to this policy case.
+        const external = (attemptId: string) => ({
+            abortBoundary: {
+                attemptId,
+                attemptedAtMs: 1000,
+                baselineObservationEpoch: 1,
+                baselineUpdatedAtMs: 1000,
+                settlement: "unknown",
+            },
+            continuity: "complete",
+            hasUnprojectedActivity: false,
+            observationEpoch: 1,
+            observedAtMs: 1000,
+            providerRunId: "provider-run",
+            sessionKey: "agent:main:main",
+            source: "provider-runtime",
+            text: "working",
+            updatedAtMs: 1000,
+        });
+        expect(
+            v.safeParse(chatAbortInputSchema, {
+                abortAttemptId: "a".repeat(64),
+                providerRunId: "provider-run",
+                sessionKey: "agent:main:main",
+            }).success
+        ).toBeTrue();
+        expect(
+            v.safeParse(chatAbortInputSchema, {
+                abortAttemptId: "a".repeat(65),
+                providerRunId: "provider-run",
+                sessionKey: "agent:main:main",
+            }).success
+        ).toBeFalse();
+        expect(
+            v.safeParse(chatExternalRunSchema, external("attempt\nleak")).success
+        ).toBeFalse();
+        expect(
+            v.safeParse(chatExternalRunSchema, external("a".repeat(64))).success
+        ).toBeTrue();
     });
 
     test("uses zero only as the unknown browser generation and positive server generations", () => {

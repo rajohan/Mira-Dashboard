@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { chatAttachmentLimits } from "../../../contracts/chatMedia.ts";
+import { chatPlanExplanationMaximumCodeUnits } from "../../../contracts/chatModel.ts";
 import {
     assertPersistentGatewayAdminParameters,
     assertPersistentGatewayChatReadParameters,
@@ -693,6 +694,35 @@ describe("persistent Gateway protocol-v4 boundary", () => {
             },
         });
         expect(JSON.stringify(projectedBulkEvent)).not.toContain(privateBulkValue);
+        const planEvent = parsePersistentGatewayPrivateChatEvent({
+            event: "agent",
+            payload: {
+                data: {
+                    explanation: "界".repeat(chatPlanExplanationMaximumCodeUnits),
+                    phase: "update",
+                    privateValue: privateBulkValue,
+                    source: "provider-private-source",
+                    steps: [{ status: "pending", step: "Inspect" }],
+                    title: "Provider-private title",
+                },
+                runId: "provider-plan-projected",
+                seq: 2,
+                sessionKey: "agent:main:main",
+                stream: "plan",
+                ts: 1000,
+            },
+            type: "event",
+        });
+        expect(planEvent).toMatchObject({
+            payload: {
+                data: {
+                    explanation: "界".repeat(chatPlanExplanationMaximumCodeUnits),
+                    phase: "update",
+                    steps: [{ status: "pending", step: "Inspect" }],
+                },
+            },
+        });
+        expect(JSON.stringify(planEvent)).not.toContain("provider-private");
         expect(
             parsePersistentGatewayPrivateChatEvent({
                 event: "agent",
@@ -722,6 +752,53 @@ describe("persistent Gateway protocol-v4 boundary", () => {
                 ts: 1000,
             },
         });
+        const unsupportedPrivateValue = "Bearer unsupported-private-agent-frame";
+        const unsupportedAgentEvent = parsePersistentGatewayPrivateChatEvent({
+            event: "agent",
+            payload: {
+                agentId: "main",
+                data: {
+                    hook: "before_model",
+                    privateValue: unsupportedPrivateValue,
+                },
+                isHeartbeat: false,
+                runId: "provider-run-codex-hook",
+                seq: 3,
+                sessionKey: "agent:main:main",
+                stream: "codex_app_server.hook",
+                ts: 1001,
+            },
+            type: "event",
+        });
+        expect(unsupportedAgentEvent).toEqual({
+            event: "agent",
+            payload: {
+                agentId: "main",
+                data: {},
+                runId: "provider-run-codex-hook",
+                seq: 3,
+                sessionKey: "agent:main:main",
+                stream: "unsupported",
+                ts: 1001,
+            },
+        });
+        expect(JSON.stringify(unsupportedAgentEvent)).not.toContain(
+            unsupportedPrivateValue
+        );
+        expect(
+            parsePersistentGatewayPrivateChatEvent({
+                event: "agent",
+                payload: {
+                    data: "malformed known stream data",
+                    runId: "provider-run-malformed-assistant",
+                    seq: 4,
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                    ts: 1002,
+                },
+                type: "event",
+            })
+        ).toBeUndefined();
         expect(
             parsePersistentGatewayPrivateChatEvent({
                 event: "agent",
@@ -773,6 +850,36 @@ describe("persistent Gateway protocol-v4 boundary", () => {
                 sessionKey: "agent:main:main",
                 stream: "thinking",
                 ts: 1000,
+            },
+        });
+        expect(
+            parsePersistentGatewayPrivateChatEvent({
+                event: "agent",
+                payload: {
+                    data: {
+                        kind: "preamble",
+                        progressText: "Checking the live session.",
+                    },
+                    runId: "provider-run-preamble",
+                    seq: 3,
+                    sessionKey: "agent:main:main",
+                    stream: "item",
+                    ts: 1001,
+                },
+                type: "event",
+            })
+        ).toEqual({
+            event: "agent",
+            payload: {
+                data: {
+                    kind: "preamble",
+                    progressText: "Checking the live session.",
+                },
+                runId: "provider-run-preamble",
+                seq: 3,
+                sessionKey: "agent:main:main",
+                stream: "item",
+                ts: 1001,
             },
         });
         expect(

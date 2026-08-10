@@ -202,7 +202,7 @@ input[type="search"]::-webkit-search-cancel-button {
 /* CSP-safe, AA-adjusted Monokai Sublime palette based on the legacy Files viewer. */
 .source-viewer-source {
     color: #f8f8f2;
-    background: #23241f;
+    background: transparent;
 }
 
 .source-viewer-source-wrapped {
@@ -249,7 +249,7 @@ input[type="search"]::-webkit-search-cancel-button {
     color: #858c99; /* Legacy #6b7280 lifted to AA contrast at 14px. */
     text-align: right;
     vertical-align: top;
-    background: #23241f;
+    background: #0b0b0c;
     content: counter(source-viewer-line-number);
     user-select: none;
 }

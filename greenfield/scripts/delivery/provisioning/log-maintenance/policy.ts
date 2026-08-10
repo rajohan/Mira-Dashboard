@@ -23,6 +23,11 @@ export const logMaintenanceProvisioningArtifacts = Object.freeze([
 export type LogMaintenanceProvisioningArtifactPolicy =
     (typeof logMaintenanceProvisioningArtifacts)[number];
 
+/** Exact host directory the installer may create when absent on a fresh host. */
+export const logMaintenanceProvisioningCreatedDirectories = Object.freeze([
+    Object.freeze({ destinationPath: "/usr/local/libexec", mode: 0o755 }),
+] as const);
+
 /** Reviewed non-installed support files shipped with the root installer. */
 export const logMaintenanceProvisioningSupportArtifactPaths = Object.freeze([
     "scripts/delivery/provisioning/log-maintenance/README.md",

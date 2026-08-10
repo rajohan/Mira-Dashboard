@@ -23,13 +23,21 @@ function entry(name: string, mimeType: string, sizeBytes: number): WorkspaceFile
     };
 }
 
-function renderEditor(selectedEntry: WorkspaceFileEntry, content: string) {
+function renderEditor(
+    selectedEntry: WorkspaceFileEntry,
+    content: string,
+    options: {
+        readonly onRevealSecrets?: () => Promise<void>;
+        readonly secretsRevealed?: boolean;
+    } = {}
+) {
     return render(
         <WorkspaceFileEditorPane
             downloading={false}
             onDownload={jest.fn(() => Promise.resolve())}
             onRefreshPreview={jest.fn(() => Promise.resolve())}
             onReplace={jest.fn()}
+            onRevealSecrets={options.onRevealSecrets ?? jest.fn(() => Promise.resolve())}
             onSaveText={jest.fn(() =>
                 Promise.resolve({
                     jobRunId: "file-write-job",
@@ -42,6 +50,12 @@ function renderEditor(selectedEntry: WorkspaceFileEntry, content: string) {
                 loading: false,
                 prepared: {
                     content,
+                    ...(options.secretsRevealed
+                        ? {
+                              revealTicketId: "55555555-5555-4555-8555-555555555555",
+                              secretsRevealed: true as const,
+                          }
+                        : {}),
                     ticket: {
                         disposition: "preview",
                         expiresAtMs: 1_900_000_000_000,
@@ -64,6 +78,68 @@ function renderEditor(selectedEntry: WorkspaceFileEntry, content: string) {
 }
 
 describe("WorkspaceFileEditorPane viewers", () => {
+    test("requires explicit secret reveal before config editing or replacement", async () => {
+        const onRevealSecrets = jest.fn(() => Promise.resolve());
+        const selectedEntry = {
+            ...entry("openclaw.json", "application/json", 18),
+            requiresSecretReveal: true,
+        };
+        const user = userEvent.setup();
+        const { rerender } = renderEditor(selectedEntry, '{"token":"masked"}', {
+            onRevealSecrets,
+        });
+
+        expect(screen.getByText("Secrets masked")).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+        expect(screen.queryByRole("button", { name: "Replace file" })).toBeNull();
+        await user.click(screen.getByRole("button", { name: "Reveal secrets" }));
+        expect(onRevealSecrets).toHaveBeenCalledTimes(1);
+
+        rerender(
+            <WorkspaceFileEditorPane
+                downloading={false}
+                onDownload={jest.fn(() => Promise.resolve())}
+                onRefreshPreview={jest.fn(() => Promise.resolve())}
+                onReplace={jest.fn()}
+                onRevealSecrets={onRevealSecrets}
+                onSaveText={jest.fn(() =>
+                    Promise.resolve({
+                        jobRunId: "file-write-job",
+                        status: "accepted" as const,
+                        ticketId: "22222222-2222-4222-8222-222222222222",
+                    })
+                )}
+                onWriteComplete={jest.fn()}
+                preview={{
+                    loading: false,
+                    prepared: {
+                        content: '{"token":"secret"}',
+                        revealTicketId: "55555555-5555-4555-8555-555555555555",
+                        secretsRevealed: true,
+                        ticket: {
+                            disposition: "preview",
+                            expiresAtMs: 1_900_000_000_000,
+                            fileName: selectedEntry.name,
+                            mimeType: selectedEntry.mimeType!,
+                            previewKind: "text",
+                            revision,
+                            sizeBytes: selectedEntry.sizeBytes!,
+                            ticketId: "55555555-5555-4555-8555-555555555555",
+                            url: "/api/files/content/55555555-5555-4555-8555-555555555555",
+                        },
+                    },
+                }}
+                selection={{
+                    entry: selectedEntry,
+                    parentDirectoryId: "44444444-4444-4444-8444-444444444444",
+                }}
+            />
+        );
+        expect(screen.getByText("Secrets revealed")).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Replace file" })).toBeTruthy();
+    });
+
     test("keeps a long file name on one line with only refresh below the actions", () => {
         const selectedEntry = entry(
             "this-is-a-very-long-workspace-configuration-file-name-that-must-not-move-preview-actions.ts",

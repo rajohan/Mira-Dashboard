@@ -2031,11 +2031,23 @@ describe("persistent native Gateway transport", () => {
             type: "event",
         });
         socket.receive({
+            event: "agent",
+            payload: {
+                data: { hook: "before_model", privateValue: "not projected" },
+                runId: "run-contiguous",
+                seq: 2,
+                sessionKey: "agent:main:main",
+                stream: "codex_app_server.hook",
+                ts: 1001,
+            },
+            type: "event",
+        });
+        socket.receive({
             event: "chat",
             payload: {
                 deltaText: "second",
                 runId: "run-contiguous",
-                seq: 2,
+                seq: 3,
                 sessionKey: "agent:main:main",
                 state: "delta",
             },
@@ -2046,7 +2058,7 @@ describe("persistent native Gateway transport", () => {
             payload: {
                 message: { role: "assistant", text: "done" },
                 runId: "run-contiguous",
-                seq: 3,
+                seq: 4,
                 sessionKey: "agent:main:main",
                 state: "final",
             },
@@ -2105,6 +2117,7 @@ describe("persistent native Gateway transport", () => {
             ["run-contiguous", 1],
             ["run-contiguous", 2],
             ["run-contiguous", 3],
+            ["run-contiguous", 4],
             ["run-mid-gap", 1],
         ]);
         expect(gaps).toHaveLength(2);

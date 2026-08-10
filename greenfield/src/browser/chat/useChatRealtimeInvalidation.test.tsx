@@ -16,7 +16,9 @@ import {
     chatHistoryQueryKey,
     chatRuntimeQueryKey,
     openClawTaskDetailQueryKey,
+    openClawTaskDetailQueryRoot,
     openClawTaskListQueryKey,
+    openClawTaskListSessionQueryKey,
 } from "./chatQueries.ts";
 import { createChatRuntimeStore, type ChatRuntimeStore } from "./chatRuntimeStore.ts";
 import { useChatRealtimeInvalidation } from "./useChatRealtimeInvalidation.ts";
@@ -75,6 +77,82 @@ function change(
 }
 
 describe("chat realtime invalidation", () => {
+    test("bounds a marker burst and carries trailing dirtiness into one backed-off refresh", async () => {
+        jest.useFakeTimers();
+        const queryClient = createDashboardQueryClient();
+        const realtimeClient = new ControlledDashboardRealtimeClient();
+        const store = createChatRuntimeStore();
+        const gates = [Promise.withResolvers<void>(), Promise.withResolvers<void>()];
+        let invocation = 0;
+        const invalidate = jest
+            .spyOn(queryClient, "invalidateQueries")
+            .mockImplementation(() => {
+                const gate = gates[invocation];
+                invocation += 1;
+                return gate?.promise ?? Promise.resolve();
+            });
+        const view = render(
+            <QueryClientProvider client={queryClient}>
+                <DashboardRealtimeProvider client={realtimeClient}>
+                    <Probe store={store} />
+                </DashboardRealtimeProvider>
+            </QueryClientProvider>
+        );
+        try {
+            await act(async () => {
+                realtimeClient.emit(change(chatHistoryRealtimeTopic));
+                await Promise.resolve();
+            });
+            expect(invalidate).toHaveBeenCalledTimes(1);
+
+            await act(async () => {
+                for (let index = 0; index < 100; index += 1) {
+                    realtimeClient.emit(change(chatHistoryRealtimeTopic));
+                }
+                gates[0]!.resolve();
+                await Promise.resolve();
+                await Promise.resolve();
+            });
+            expect(invalidate).toHaveBeenCalledTimes(2);
+
+            await act(async () => {
+                realtimeClient.emit(change(chatHistoryRealtimeTopic));
+                realtimeClient.emit(change(chatRealtimeTopic));
+                realtimeClient.emit(change(openClawTasksRealtimeTopic));
+                gates[1]!.resolve();
+                await Promise.resolve();
+                await Promise.resolve();
+            });
+            expect(invalidate).toHaveBeenCalledTimes(2);
+
+            await act(async () => {
+                jest.advanceTimersByTime(1000);
+                await Promise.resolve();
+                await Promise.resolve();
+            });
+            expect(invalidate).toHaveBeenCalledTimes(6);
+            const backedOffKeys = invalidate.mock.calls
+                .slice(2)
+                .map(([filters]) => filters?.queryKey);
+            expect(backedOffKeys).toContainEqual(chatHistoryQueryKey(sessionKey));
+            expect(backedOffKeys).toContainEqual(chatRuntimeQueryKey(sessionKey));
+            expect(backedOffKeys).toContainEqual(
+                openClawTaskListSessionQueryKey(sessionKey)
+            );
+            expect(backedOffKeys).toContainEqual(openClawTaskDetailQueryRoot);
+            expect(
+                invalidate.mock.calls.every(
+                    ([, options]) => options?.cancelRefetch === false
+                )
+            ).toBeTrue();
+        } finally {
+            for (const gate of gates) gate.resolve();
+            view.unmount();
+            queryClient.clear();
+            jest.useRealTimers();
+        }
+    });
+
     test("routes runtime, history, and OpenClaw task topics without accepting Dashboard task changes", async () => {
         const queryClient = createDashboardQueryClient();
         const realtimeClient = new ControlledDashboardRealtimeClient();

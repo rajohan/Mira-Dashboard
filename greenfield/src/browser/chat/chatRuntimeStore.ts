@@ -1,5 +1,6 @@
 import { Store } from "@tanstack/react-store";
 
+import { mergeChatStreamText } from "../../shared/chatStreamText.ts";
 import type {
     ChatActivePlanView,
     ChatDisplayMessage,
@@ -84,6 +85,7 @@ export type ChatRuntimeEvent =
           readonly text: string;
       })
     | (ChatRuntimeEventBase & {
+          readonly explanation?: string;
           readonly kind: "plan";
           readonly steps: readonly Readonly<{
               status: "completed" | "in_progress" | "pending";
@@ -152,13 +154,23 @@ export interface ChatRuntimeSnapshotProjection {
 
 /** Provider-origin projection that intentionally has no local run or user identity. */
 export interface ChatExternalRunProjection {
+    readonly abortBoundary?: Readonly<{
+        readonly attemptId: string;
+        readonly attemptedAtMs: number;
+        readonly baselineObservationEpoch: number;
+        readonly baselineUpdatedAtMs: number;
+        readonly settlement: "not-aborted" | "pending" | "unknown";
+    }>;
     readonly continuity: "complete" | "interrupted";
     readonly hasUnprojectedActivity: boolean;
     readonly message: ChatDisplayMessage;
+    readonly observationEpoch: number;
+    readonly observedAtMs: number;
     readonly plan?: ChatActivePlanView;
     readonly projectionTruncated: boolean;
     readonly providerRunId: string;
     readonly source: "provider-in-flight" | "provider-runtime";
+    readonly updatedAtMs: number;
 }
 
 function emptySession(): ChatSessionRuntime {
@@ -267,6 +279,9 @@ function planAfterEvent(
 ): ChatActivePlanView | undefined {
     if (event.kind === "plan") {
         return {
+            ...((event.explanation ?? run.plan?.description) === undefined
+                ? {}
+                : { description: event.explanation ?? run.plan?.description }),
             items: event.steps.map((step, index) => ({
                 id: `${event.runId}:plan:${index}`,
                 label: step.text,
@@ -280,6 +295,81 @@ function planAfterEvent(
         return undefined;
     }
     return run.plan;
+}
+
+function mergeTruncatedExternalParts(
+    known: readonly ChatMessagePart[],
+    incoming: readonly ChatMessagePart[]
+): readonly ChatMessagePart[] {
+    const merged = [...known];
+    for (const part of incoming) {
+        if (part.kind === "control") {
+            if (
+                !merged.some(
+                    (candidate) =>
+                        candidate.kind === "control" && candidate.text === part.text
+                )
+            ) {
+                merged.push(part);
+            }
+            continue;
+        }
+        if (part.kind === "tool") {
+            const index = merged.findIndex(
+                (candidate) =>
+                    candidate.kind === "tool" && candidate.callId === part.callId
+            );
+            if (index === -1) {
+                merged.push(part);
+                continue;
+            }
+            const previous = merged[index];
+            if (previous?.kind !== "tool") continue;
+            merged[index] = {
+                ...previous,
+                ...part,
+                ...((part.input ?? previous.input) === undefined
+                    ? {}
+                    : { input: part.input ?? previous.input }),
+                ...((part.output ?? previous.output) === undefined
+                    ? {}
+                    : { output: part.output ?? previous.output }),
+            };
+            continue;
+        }
+        if (part.kind === "thinking") {
+            const knownThinking = merged
+                .filter((candidate) => candidate.kind === "thinking")
+                .map(({ text }) => text)
+                .join("");
+            const nextThinking = mergeChatStreamText(knownThinking, part.text);
+            const suffix = nextThinking.startsWith(knownThinking)
+                ? nextThinking.slice(knownThinking.length)
+                : part.text;
+            if (suffix === "") continue;
+            const index = merged.length - 1;
+            const previous = merged.at(-1);
+            if (previous?.kind !== "thinking") {
+                merged.push({ ...part, text: suffix });
+                continue;
+            }
+            merged[index] = {
+                ...part,
+                text: mergeChatStreamText(previous.text, suffix),
+            };
+            continue;
+        }
+        const knownText = merged
+            .filter((candidate) => candidate.kind === "text")
+            .map(({ text }) => text)
+            .join("");
+        const nextText = mergeChatStreamText(knownText, part.text);
+        const suffix = nextText.startsWith(knownText)
+            ? nextText.slice(knownText.length)
+            : part.text;
+        if (suffix !== "") merged.push({ kind: "text", text: suffix });
+    }
+    return merged;
 }
 
 function applyRunEvent(run: ChatRuntimeRun, event: ChatRuntimeEvent): ChatRuntimeRun {
@@ -852,18 +942,33 @@ export class ChatRuntimeStore extends Store<ChatRuntimeState> {
     ): void {
         this.setState((state) => {
             const session = state.sessions[sessionKey] ?? emptySession();
+            const externalRuns = Object.fromEntries(
+                projections.map((projection) => {
+                    const existing = session.externalRuns[projection.providerRunId];
+                    if (!projection.projectionTruncated || existing === undefined) {
+                        return [projection.providerRunId, projection] as const;
+                    }
+                    const parts = mergeTruncatedExternalParts(
+                        existing.message.parts,
+                        projection.message.parts
+                    );
+                    const preserved: ChatExternalRunProjection = {
+                        ...projection,
+                        message: { ...projection.message, parts },
+                        ...((projection.plan ?? existing.plan) === undefined
+                            ? {}
+                            : { plan: projection.plan ?? existing.plan }),
+                    };
+                    return [projection.providerRunId, preserved] as const;
+                })
+            );
             return {
                 ...state,
                 sessions: {
                     ...state.sessions,
                     [sessionKey]: {
                         ...session,
-                        externalRuns: Object.fromEntries(
-                            projections.map((projection) => [
-                                projection.providerRunId,
-                                projection,
-                            ])
-                        ),
+                        externalRuns,
                         externalRunsTruncated: truncated,
                     },
                 },

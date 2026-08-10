@@ -26,6 +26,7 @@ export interface WorkspaceFileManifestEntry {
     readonly contentPolicy: WorkspaceFileManifestContentPolicy;
     readonly maximumSizeBytes: number;
     readonly segments: readonly string[];
+    readonly writable: boolean;
 }
 
 /** Server-reviewed root configuration shared by descriptor readers and worker writers. */
@@ -42,10 +43,15 @@ export interface WorkspaceFileNode {
     readonly modifiedAtMs?: number;
     readonly name: string;
     readonly previewKind?: WorkspaceFilePreviewKind;
+    readonly requiresSecretReveal?: boolean;
     readonly revision: string;
     readonly sizeBytes?: number;
+    readonly writeMaximumSizeBytes?: number;
     readonly writable: boolean;
 }
+
+/** Internal content policy selected only after the service authorizes a reveal. */
+export type WorkspaceFileContentAccess = "default" | "reveal-secrets";
 
 export interface WorkspaceFileDirectorySnapshot {
     readonly directory: WorkspaceFileNode & { readonly kind: "directory" };
@@ -70,7 +76,8 @@ export interface WorkspaceFileReadResult {
 export interface WorkspaceFileReader {
     readonly describe: (
         locator: WorkspaceFileLocator,
-        signal?: AbortSignal
+        signal?: AbortSignal,
+        contentAccess?: WorkspaceFileContentAccess
     ) => Promise<WorkspaceFileNode>;
     readonly dispose: () => Promise<void> | void;
     readonly list: (
@@ -81,7 +88,8 @@ export interface WorkspaceFileReader {
         locator: WorkspaceFileLocator,
         expectedRevision: string,
         range: WorkspaceFileReadRange | undefined,
-        signal?: AbortSignal
+        signal?: AbortSignal,
+        contentAccess?: WorkspaceFileContentAccess
     ) => Promise<WorkspaceFileReadResult>;
     readonly roots: () => readonly WorkspaceFileRootPolicy[];
 }

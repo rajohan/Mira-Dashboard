@@ -12,7 +12,7 @@ import { createDashboardRouter } from "./router.tsx";
 import type { DashboardWebAuthnClient } from "./security/webauthn/webauthnClient.ts";
 import { noOpDashboardRealtimeClient } from "./test/realtime.ts";
 
-const { render, screen, waitFor } = await import("@testing-library/react");
+const { act, render, screen, waitFor } = await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
 const userEvent = userEventModule.default;
 const unexpectedWebAuthnClient: DashboardWebAuthnClient = Object.freeze({
@@ -31,6 +31,7 @@ describe("Dashboard browser application", () => {
         let logoutCalls = 0;
         let notificationCalls = 0;
         let cacheStatusCalls = 0;
+        let settleLogout: ((result: { readonly isOk: true }) => void) | undefined;
         const readinessFetch = jest
             .spyOn(globalThis, "fetch")
             .mockResolvedValue(Response.json({ status: "ready" }));
@@ -43,7 +44,9 @@ describe("Dashboard browser application", () => {
                 }
                 if (path === "auth.logout") {
                     logoutCalls += 1;
-                    return Promise.resolve({ isOk: true });
+                    return new Promise((resolve) => {
+                        settleLogout = resolve;
+                    });
                 }
                 return Promise.reject(new TypeError(`Unexpected mutation: ${path}`));
             },
@@ -224,13 +227,19 @@ describe("Dashboard browser application", () => {
                 })
             );
             await userEvent.click(screen.getByRole("button", { name: "Log out" }));
-            await waitFor(() => expect(logoutCalls).toBe(1));
-            await waitFor(() =>
-                expect(queryClient.getQueryData(authStatusQueryKey)).toEqual({
-                    state: "anonymous",
-                })
-            );
-            await waitFor(() => expect(router.state.location.pathname).toBe("/login"));
+            expect(logoutCalls).toBe(1);
+            expect(settleLogout).toBeDefined();
+            await act(async () => {
+                settleLogout?.({ isOk: true });
+                for (let attempt = 0; attempt < 100; attempt += 1) {
+                    if (router.state.location.pathname === "/login") break;
+                    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+                }
+            });
+            expect(queryClient.getQueryData(authStatusQueryKey)).toEqual({
+                state: "anonymous",
+            });
+            expect(router.state.location.pathname).toBe("/login");
             expect(
                 await screen.findByRole("heading", { level: 1, name: "Sign in" })
             ).toBeTruthy();

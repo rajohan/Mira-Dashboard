@@ -199,9 +199,12 @@ describe("chat runtime store", () => {
                     sequence: 1,
                     sessionKey,
                 },
+                observationEpoch: 1,
+                observedAtMs: occurredAtMs,
                 projectionTruncated: false,
                 providerRunId: "provider-before-reset",
                 source: "provider-runtime",
+                updatedAtMs: occurredAtMs,
             },
         ]);
 
@@ -440,7 +443,7 @@ describe("chat runtime store", () => {
         expect(store.state.sessions[sessionKey]).toBeUndefined();
     });
 
-    test("authoritatively installs and removes provider-origin messages and plans", () => {
+    test("preserves known provider detail through truncated catch-up and keeps authoritative removal", () => {
         const store = createChatRuntimeStore();
         store.installExternalRuns(sessionKey, [
             {
@@ -449,12 +452,26 @@ describe("chat runtime store", () => {
                 message: {
                     attachments: [],
                     id: `external:${sessionKey}:provider-1`,
-                    parts: [{ kind: "text", text: "External activity" }],
+                    parts: [
+                        { kind: "text", text: "External activity" },
+                        {
+                            kind: "thinking",
+                            status: "running",
+                            text: "Inspecting",
+                        },
+                        {
+                            callId: "tool-1",
+                            kind: "tool",
+                            name: "lookup",
+                            status: "running",
+                        },
+                    ],
                     role: "assistant",
                     sequence: 1,
                     sessionKey,
                 },
                 plan: {
+                    description: "Explain the active work.",
                     items: [
                         {
                             id: "provider:provider-1:plan:0",
@@ -465,15 +482,139 @@ describe("chat runtime store", () => {
                     runId: "provider:provider-1",
                     title: "OpenClaw plan",
                 },
+                observationEpoch: 1,
+                observedAtMs: occurredAtMs,
                 projectionTruncated: false,
                 providerRunId: "provider-1",
                 source: "provider-runtime",
+                updatedAtMs: occurredAtMs,
             },
         ]);
 
         expect(chatRuntimeMessages(store.state, sessionKey)).toHaveLength(1);
         expect(chatRuntimePlans(store.state, sessionKey)).toHaveLength(1);
         expect(store.state.sessions[sessionKey]?.runs).toEqual({});
+
+        store.installExternalRuns(sessionKey, [
+            {
+                continuity: "interrupted",
+                hasUnprojectedActivity: true,
+                message: {
+                    attachments: [],
+                    id: `external:${sessionKey}:provider-1`,
+                    parts: [
+                        {
+                            callId: "tool-1",
+                            kind: "tool",
+                            name: "lookup",
+                            output: "done",
+                            status: "completed",
+                        },
+                        {
+                            callId: "tool-2",
+                            kind: "tool",
+                            name: "inspect",
+                            output: "new detail",
+                            status: "completed",
+                        },
+                        {
+                            kind: "thinking",
+                            status: "running",
+                            text: "InspectingNew reasoning",
+                        },
+                        { kind: "text", text: "External activity updated" },
+                        {
+                            kind: "control",
+                            text: "Some OpenClaw activity details were not returned.",
+                            tone: "warning",
+                        },
+                    ],
+                    role: "assistant",
+                    sequence: 1,
+                    sessionKey,
+                },
+                observationEpoch: 2,
+                observedAtMs: occurredAtMs + 1,
+                projectionTruncated: true,
+                providerRunId: "provider-1",
+                source: "provider-in-flight",
+                updatedAtMs: occurredAtMs + 1,
+            },
+        ]);
+        const preserved = store.state.sessions[sessionKey]?.externalRuns["provider-1"];
+        expect(preserved).toMatchObject({
+            continuity: "interrupted",
+            observationEpoch: 2,
+            plan: {
+                description: "Explain the active work.",
+                items: [{ label: "External step" }],
+            },
+            projectionTruncated: true,
+            source: "provider-in-flight",
+        });
+        expect(preserved?.message.parts).toEqual([
+            { kind: "text", text: "External activity" },
+            { kind: "thinking", status: "running", text: "Inspecting" },
+            {
+                callId: "tool-1",
+                kind: "tool",
+                name: "lookup",
+                output: "done",
+                status: "completed",
+            },
+            {
+                callId: "tool-2",
+                kind: "tool",
+                name: "inspect",
+                output: "new detail",
+                status: "completed",
+            },
+            { kind: "thinking", status: "running", text: "New reasoning" },
+            { kind: "text", text: " updated" },
+            {
+                kind: "control",
+                text: "Some OpenClaw activity details were not returned.",
+                tone: "warning",
+            },
+        ]);
+        store.installExternalRuns(sessionKey, [
+            {
+                ...preserved!,
+                message: {
+                    ...preserved!.message,
+                    parts: [
+                        {
+                            kind: "thinking",
+                            status: "running",
+                            text: "InspectingNew reasoning",
+                        },
+                    ],
+                },
+            },
+        ]);
+        expect(
+            store.state.sessions[sessionKey]?.externalRuns[
+                "provider-1"
+            ]?.message.parts.filter(({ kind }) => kind === "thinking")
+        ).toEqual([
+            { kind: "thinking", status: "running", text: "Inspecting" },
+            { kind: "thinking", status: "running", text: "New reasoning" },
+        ]);
+
+        store.installExternalRuns(sessionKey, [
+            {
+                ...preserved!,
+                message: { ...preserved!.message, parts: [] },
+                plan: undefined,
+                projectionTruncated: false,
+            },
+        ]);
+        expect(
+            store.state.sessions[sessionKey]?.externalRuns["provider-1"]?.plan
+        ).toBeUndefined();
+        expect(
+            store.state.sessions[sessionKey]?.externalRuns["provider-1"]?.message.parts
+        ).toEqual([]);
 
         store.installExternalRuns(sessionKey, []);
         expect(chatRuntimeMessages(store.state, sessionKey)).toEqual([]);
@@ -617,9 +758,12 @@ describe("chat runtime store", () => {
                     sequence: 1,
                     sessionKey,
                 },
+                observationEpoch: 1,
+                observedAtMs: occurredAtMs - 1,
                 projectionTruncated: false,
                 providerRunId: "without-timestamp",
                 source: "provider-runtime",
+                updatedAtMs: occurredAtMs - 1,
             },
             {
                 continuity: "complete",
@@ -633,9 +777,12 @@ describe("chat runtime store", () => {
                     sessionKey,
                     timestampMs: occurredAtMs,
                 },
+                observationEpoch: 1,
+                observedAtMs: occurredAtMs,
                 projectionTruncated: false,
                 providerRunId: "with-timestamp",
                 source: "provider-runtime",
+                updatedAtMs: occurredAtMs,
             },
         ]);
         expect(chatRuntimeMessages(store.state, sessionKey).map(({ id }) => id)).toEqual([

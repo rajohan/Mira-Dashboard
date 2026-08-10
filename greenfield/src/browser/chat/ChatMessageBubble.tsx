@@ -388,7 +388,9 @@ export function ChatMessageBubble({
         ) &&
         (message.runId === undefined || !activeRunIds.includes(message.runId)) &&
         (message.clientRunId === undefined ||
-            !activeRunIds.includes(message.clientRunId));
+            !activeRunIds.includes(message.clientRunId)) &&
+        (message.providerRunId === undefined ||
+            !activeRunIds.includes(message.providerRunId));
     const readAloudAvailable =
         message.role === "assistant" &&
         messageFinished &&

@@ -411,7 +411,13 @@ The future repository root ships new `systemd/` web and worker units as part of 
 release. The legacy units were deliberately not copied: they change into a `backend` working
 directory, execute retired `dist/*Start.js` entrypoints, and retain pre-measurement multi-gigabyte
 limits. The replacement units invoke the exact project-local Bun runtime and release pointers,
-bind logs beneath project state, and enforce the measured web/worker resource ceilings.
+bind logs beneath project state, and enforce the measured web/worker resource ceilings. Both units
+preserve the explicit `MIRA_DASHBOARD_OPENCLAW_ROOT`; web treats it as a fixed descriptor-read
+manifest, while worker uses a separate exact replacement manifest for `openclaw.json` and
+`hooks/transforms/agentmail.ts`. The worker's atomic replacement needs target-directory write access
+for its private stage file and `renameat2` exchange, so the unit does not advertise an exact-file
+`ReadWritePaths` sandbox that would fail at runtime. Descriptor validation, per-file bounds, CAS,
+and the fixed worker manifest are the write boundary.
 
 Persistent state remains inside the existing Dashboard project layout at
 `<project-root>/production/state`, but outside every immutable release directory. Production

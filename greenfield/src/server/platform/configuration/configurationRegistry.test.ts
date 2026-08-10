@@ -131,6 +131,7 @@ describe("application configuration registry", () => {
         expect(Object.keys(workerEnvironment)).toEqual([
             "NODE_ENV",
             "MIRA_DASHBOARD_PROJECT_ROOT",
+            "MIRA_DASHBOARD_OPENCLAW_ROOT",
             "MIRA_DASHBOARD_WORKSPACE_ROOT",
             "OPENCLAW_GATEWAY_URL",
             "OPENCLAW_GATEWAY_TOKEN",

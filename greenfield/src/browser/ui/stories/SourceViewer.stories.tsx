@@ -104,7 +104,7 @@ export const LongLinesWrapByDefault: Story = {
         await expect(code.textContent).toBe(longSource);
         await expect(highlighted.querySelectorAll(".source-viewer-line")).toHaveLength(5);
         await expect(highlighted.querySelector("[style]")).toBeNull();
-        await expect(getComputedStyle(source).backgroundColor).toBe("rgb(35, 36, 31)");
+        await expect(getComputedStyle(source).backgroundColor).toBe("rgba(0, 0, 0, 0)");
         await expect(getComputedStyle(source).color).toBe("rgb(248, 248, 242)");
         await expect(getComputedStyle(keyword).color).toBe("rgb(255, 54, 125)");
         await expect(getComputedStyle(string).color).toBe("rgb(230, 219, 116)");

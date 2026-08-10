@@ -22,6 +22,7 @@ import {
 } from "./worker.ts";
 
 const projectRoot = "/srv/mira-dashboard";
+const openClawRoot = "/srv/openclaw";
 const workspaceRoot = "/srv/mira-workspace";
 const releaseId = "b".repeat(40);
 const revision = "a".repeat(40);
@@ -188,6 +189,7 @@ function processFixture(
             logger,
             observedGatewayTransport,
             observedWorkspaceRoot,
+            observedOpenClawRoot,
             observedLogMaintenance
         ) {
             expect(observedLayout).toBe(layout);
@@ -197,6 +199,21 @@ function processFixture(
             expect(observedWorkspaceRoot).toEqual({
                 id: "workspace",
                 path: workspaceRoot,
+                writable: true,
+            });
+            expect(observedOpenClawRoot).toEqual({
+                id: "openclaw-config",
+                path: openClawRoot,
+                replacementManifest: [
+                    {
+                        maximumSizeBytes: 1_048_576,
+                        segments: ["openclaw.json"],
+                    },
+                    {
+                        maximumSizeBytes: 1_048_576,
+                        segments: ["hooks", "transforms", "agentmail.ts"],
+                    },
+                ],
                 writable: true,
             });
             expect(observedLogMaintenance).toBe(logMaintenance);
@@ -222,6 +239,32 @@ function processFixture(
         resolveProjectLayout(observedProjectRoot) {
             events.push(`layout:${observedProjectRoot}`);
             return Promise.resolve(layout);
+        },
+        resolveOpenClawFileRoot(observedOpenClawRoot, observedProductionRoot) {
+            expect(observedOpenClawRoot).toBe(openClawRoot);
+            expect(observedProductionRoot).toBe(layout.production.root);
+            events.push(`openclaw:${observedOpenClawRoot}`);
+            return Promise.resolve(
+                Object.freeze({
+                    id: "openclaw-config",
+                    path: openClawRoot,
+                    replacementManifest: Object.freeze([
+                        Object.freeze({
+                            maximumSizeBytes: 1_048_576,
+                            segments: Object.freeze(["openclaw.json"]),
+                        }),
+                        Object.freeze({
+                            maximumSizeBytes: 1_048_576,
+                            segments: Object.freeze([
+                                "hooks",
+                                "transforms",
+                                "agentmail.ts",
+                            ]),
+                        }),
+                    ]),
+                    writable: true,
+                })
+            );
         },
         resolveWorkspaceFileRoot(observedWorkspaceRoot, observedProductionRoot) {
             expect(observedWorkspaceRoot).toBe(workspaceRoot);
@@ -293,6 +336,7 @@ const processOptions = Object.freeze({
     configurationSource: {
         MIRA_DASHBOARD_LOG_LEVEL: "debug",
         MIRA_DASHBOARD_PROJECT_ROOT: projectRoot,
+        MIRA_DASHBOARD_OPENCLAW_ROOT: openClawRoot,
         MIRA_DASHBOARD_WORKSPACE_ROOT: workspaceRoot,
         NODE_ENV: "production",
         OPENCLAW_GATEWAY_TOKEN: "worker-gateway-token-test-value",
@@ -356,6 +400,7 @@ describe("Dashboard worker process", () => {
             `layout:${projectRoot}`,
             `release:worker:${layout.production.releases}:${release.releaseRoot}`,
             `workspace:${workspaceRoot}`,
+            `openclaw:${openClawRoot}`,
             `logs:worker:${layout.production.state.logs}`,
             "signals-create",
             "terminal-broker-start",

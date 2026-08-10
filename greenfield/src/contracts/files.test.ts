@@ -60,6 +60,17 @@ describe("workspace files contracts", () => {
                 kind: "mutation",
                 name: "files.prepareWrite",
             },
+            {
+                access: {
+                    capabilities: ["files:write"],
+                    kind: "recent-auth",
+                    principalKinds: ["session"],
+                    whenMfaDisabled: "deny",
+                    whenMfaEnabled: "mfa",
+                },
+                kind: "mutation",
+                name: "files.prepareReveal",
+            },
             expect.objectContaining({ kind: "mutation", name: "files.prepareUpload" }),
             expect.objectContaining({ kind: "query", name: "files.getWriteStatus" }),
         ]);

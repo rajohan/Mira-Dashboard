@@ -420,6 +420,30 @@ describe("chat message bubble", () => {
         ).toBeNull();
     });
 
+    test("does not offer read aloud for a text-only streaming provider run", () => {
+        render(
+            <ChatMessageBubble
+                activeRunIds={["provider-run-active"]}
+                display={display}
+                message={{
+                    attachments: [],
+                    id: "streaming-provider-text",
+                    parts: [{ kind: "text", text: "Partial provider answer" }],
+                    providerRunId: "provider-run-active",
+                    role: "assistant",
+                    sequence: 1,
+                    sessionKey: "agent:main:main",
+                }}
+                onReadAloud={jest.fn()}
+                onStopReadAloud={jest.fn()}
+                readAloud={{ phase: "idle" }}
+            />
+        );
+        expect(
+            screen.queryByRole("button", { name: "Read Mira message aloud" })
+        ).toBeNull();
+    });
+
     test("fetches only sanctioned bounded historical text previews", async () => {
         const originalFetch = globalThis.fetch;
         const fetchMock = jest.fn((_input: RequestInfo | URL) =>

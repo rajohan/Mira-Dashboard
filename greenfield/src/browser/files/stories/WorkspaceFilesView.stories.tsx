@@ -165,6 +165,7 @@ const meta = {
         onOpenDirectory: fn(),
         onPreview,
         onRefresh: fn(),
+        onReveal: fn(() => Promise.reject(new Error("Reveal is unavailable"))),
         onSelectRoot: fn(),
         onUpload: fn(() =>
             Promise.resolve({
@@ -259,6 +260,30 @@ export const BoundedInventory: Story = {
             canvas.getByText(/Preview files without losing your place/u)
         ).toBeVisible();
     },
+};
+
+export const EditorActionsStayInViewport: Story = {
+    parameters: { layout: "fullscreen" },
+    play: async ({ canvasElement }) => {
+        const canvas = within(canvasElement);
+        await userEvent.click(canvas.getByRole("button", { name: "README.md" }));
+        await expect(
+            await canvas.findByRole("heading", { name: "README.md" })
+        ).toBeVisible();
+        await userEvent.click(canvas.getByRole("button", { name: "Edit" }));
+
+        const save = canvas.getByRole("button", { name: "Save" });
+        await waitFor(() =>
+            expect(save.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+                canvasElement.getBoundingClientRect().bottom + 1
+            )
+        );
+    },
+    render: (arguments_) => (
+        <div className="h-screen overflow-hidden p-4">
+            <WorkspaceFilesView {...arguments_} />
+        </div>
+    ),
 };
 
 export const PreviewPersistsWhileFolderLoads: Story = {

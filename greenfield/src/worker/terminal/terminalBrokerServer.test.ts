@@ -9,14 +9,17 @@ import {
     startTerminalBrokerServer,
     type TerminalBrokerByteConnection,
     type TerminalBrokerIpcLifecycle,
+    type TerminalBrokerServerScheduler,
     type TerminalBrokerSocketMetadata,
     type TerminalBrokerSocketPathOperations,
     TerminalBrokerSocketSecurityError,
 } from "./terminalBrokerServer.ts";
-import type {
-    WorkerTerminalAttachment,
-    WorkerTerminalRelaySink,
-    WorkerTerminalSessionBroker,
+import {
+    createWorkerTerminalSessionBroker,
+    type WorkerPtyRequest,
+    type WorkerTerminalAttachment,
+    type WorkerTerminalRelaySink,
+    type WorkerTerminalSessionBroker,
 } from "./terminalSessionBroker.ts";
 
 const projectDirectory = "/srv/mira/state/terminal";
@@ -78,9 +81,14 @@ class FakeConnection implements TerminalBrokerByteConnection {
     public readonly sent: Uint8Array[] = [];
     public closeCalls = 0;
     public disposition: "accepted" | "backpressured" | "closed" = "accepted";
+    public onSend: ((data: Uint8Array) => void) | undefined;
+    public readonly pending: Uint8Array[] = [];
+    public peerClosed = false;
 
     public close(): void {
         this.closeCalls += 1;
+        this.peerClosed = true;
+        this.pending.length = 0;
     }
 
     public emit(data: Uint8Array): void {
@@ -88,20 +96,52 @@ class FakeConnection implements TerminalBrokerByteConnection {
     }
 
     public emitClose(): void {
+        this.peerClosed = true;
         this.handlers?.onClose();
     }
 
     public emitDrain(): void {
+        if (this.peerClosed) return;
+        this.sent.push(...this.pending.splice(0));
         this.handlers?.onDrain();
     }
 
     public send(data: Uint8Array) {
+        if (this.peerClosed) return "closed" as const;
+        this.onSend?.(data);
+        if (this.peerClosed) return "closed" as const;
+        if (this.disposition === "backpressured") {
+            this.pending.push(new Uint8Array(data));
+            return this.disposition;
+        }
+        if (this.disposition === "closed") {
+            this.peerClosed = true;
+            return this.disposition;
+        }
         this.sent.push(new Uint8Array(data));
         return this.disposition;
     }
 
     public setHandlers(handlers: NonNullable<FakeConnection["handlers"]>): void {
         this.handlers = handlers;
+    }
+}
+
+class ManualCloseScheduler implements TerminalBrokerServerScheduler {
+    public readonly entries: Array<{
+        readonly callback: () => void;
+        cancelled: boolean;
+        readonly delayMs: number;
+    }> = [];
+
+    public schedule(callback: () => void, delayMs: number) {
+        const entry = { callback, cancelled: false, delayMs };
+        this.entries.push(entry);
+        return {
+            cancel() {
+                entry.cancelled = true;
+            },
+        };
     }
 }
 
@@ -243,6 +283,76 @@ function decodeControl(frame: Uint8Array) {
     return decoded.message;
 }
 
+function realBrokerHarness() {
+    const nowMs = 1_800_000_000_000;
+    const exit = Promise.withResolvers<{
+        exitCode: number;
+        signalCode: NodeJS.Signals | null;
+    }>();
+    let ptyRequest: WorkerPtyRequest | undefined;
+    let terminateCalls = 0;
+    const broker = createWorkerTerminalSessionBroker({
+        nowMs: () => nowMs,
+        pty(request) {
+            ptyRequest = request;
+            return {
+                exited: exit.promise,
+                resize() {},
+                sendSignal: () => Promise.resolve("sent"),
+                terminate() {
+                    terminateCalls += 1;
+                    const result = {
+                        exitCode: 143,
+                        signalCode: "SIGTERM" as const,
+                    };
+                    exit.resolve(result);
+                    return Promise.resolve(result);
+                },
+                writeInput(data) {
+                    return { acceptedBytes: data.byteLength, status: "accepted" };
+                },
+            };
+        },
+        scheduler: {
+            schedule() {
+                return { cancel() {} };
+            },
+        },
+    });
+    const prefix = "1".padStart(32, "0");
+    const validator = "11".padStart(64, "0");
+    const validatorHash = new Bun.CryptoHasher("sha256")
+        .update(`mira-dashboard:terminal:v1:${prefix}:${validator}`)
+        .digest("hex");
+    return {
+        broker,
+        emitExit(result: { exitCode: number; signalCode: NodeJS.Signals | null }) {
+            exit.resolve(result);
+        },
+        emitOutput(data: Uint8Array) {
+            return ptyRequest?.callbacks.onOutput(data);
+        },
+        get terminateCalls() {
+            return terminateCalls;
+        },
+        rawToken: `${prefix}.${validator}`,
+        reserve: () =>
+            broker.reserve({
+                absoluteStartingDirectory: "/",
+                dimensions: { columns: 100, rows: 30 },
+                location: { path: "/", rootId: "dashboard" },
+                owner,
+                sessionId,
+                ticket: {
+                    afterSequence: 0,
+                    expiresAtMs: nowMs + 60_000,
+                    prefix,
+                    validatorHash,
+                },
+            }),
+    };
+}
+
 async function flush(): Promise<void> {
     for (let index = 0; index < 10; index += 1) await Promise.resolve();
 }
@@ -377,6 +487,225 @@ describe("terminal broker Unix IPC server", () => {
         expect(harness.broker.resumeCalls).toBe(1);
         attachedConnection.emitClose();
         expect(harness.broker.detachCalls).toBe(1);
+        await server.close();
+    });
+
+    test("detaches a late attachment when its connection closes before attach resolves", async () => {
+        const harness = safeOptions();
+        const attachStarted = Promise.withResolvers<void>();
+        const delayedAttachment = Promise.withResolvers<WorkerTerminalAttachment>();
+        let attachCalls = 0;
+        let detachCalls = 0;
+        const broker: WorkerTerminalSessionBroker = {
+            ...harness.broker.broker,
+            attach() {
+                attachCalls += 1;
+                attachStarted.resolve();
+                return delayedAttachment.promise;
+            },
+        };
+        const server = await startTerminalBrokerServer({
+            ...harness.options,
+            broker,
+        });
+        const attachFrame = encodeTerminalBrokerControl({
+            owner,
+            rawToken: `${"a".repeat(32)}.${"b".repeat(64)}`,
+            sessionId,
+            type: "attach",
+        });
+        const preClosedConnection = new FakeConnection();
+        harness.lifecycle.onConnection?.(preClosedConnection);
+        preClosedConnection.emit(attachFrame);
+        preClosedConnection.emitClose();
+        await flush();
+        expect(attachCalls).toBe(0);
+
+        const connection = new FakeConnection();
+        harness.lifecycle.onConnection?.(connection);
+        connection.emit(attachFrame);
+        await attachStarted.promise;
+
+        connection.emitClose();
+        delayedAttachment.resolve({
+            detach() {
+                detachCalls += 1;
+            },
+            input(data) {
+                return { acceptedBytes: data.byteLength, status: "accepted" };
+            },
+            ping() {},
+            resize() {},
+            resumeOutput() {},
+            signal: () => Promise.resolve("sent"),
+            terminate: () => Promise.resolve(),
+        });
+        await flush();
+
+        expect(attachCalls).toBe(1);
+        expect(detachCalls).toBe(1);
+        expect(connection.closeCalls).toBe(1);
+        expect(connection.sent).toHaveLength(0);
+        connection.emitClose();
+        await flush();
+        expect(detachCalls).toBe(1);
+        await server.close();
+    });
+
+    test("preserves a real PTY when the peer closes while broker attachment is pending", async () => {
+        const harness = safeOptions();
+        const realBroker = realBrokerHarness();
+        await realBroker.reserve();
+        const server = await startTerminalBrokerServer({
+            ...harness.options,
+            broker: realBroker.broker,
+        });
+        const connection = new FakeConnection();
+        connection.onSend = (data) => {
+            if (decodeControl(data).type === "ready") connection.emitClose();
+        };
+        harness.lifecycle.onConnection?.(connection);
+
+        connection.emit(
+            encodeTerminalBrokerControl({
+                owner,
+                rawToken: realBroker.rawToken,
+                sessionId,
+                type: "attach",
+            })
+        );
+        await flush();
+
+        expect(connection.sent).toHaveLength(0);
+        expect(connection.closeCalls).toBe(1);
+        expect(realBroker.terminateCalls).toBe(0);
+        expect(await realBroker.broker.getActive(owner)).toMatchObject({
+            state: "awaiting-reconnect",
+        });
+        await server.close();
+    });
+
+    test("preserves replay when an established IPC send reports closed", async () => {
+        const harness = safeOptions();
+        const realBroker = realBrokerHarness();
+        await realBroker.reserve();
+        const server = await startTerminalBrokerServer({
+            ...harness.options,
+            broker: realBroker.broker,
+        });
+        const connection = new FakeConnection();
+        harness.lifecycle.onConnection?.(connection);
+        connection.emit(
+            encodeTerminalBrokerControl({
+                owner,
+                rawToken: realBroker.rawToken,
+                sessionId,
+                type: "attach",
+            })
+        );
+        await flush();
+        connection.disposition = "closed";
+
+        expect(realBroker.emitOutput(new Uint8Array([4, 5, 6]))).toBe("accepted");
+        await flush();
+
+        expect(connection.closeCalls).toBe(1);
+        expect(realBroker.terminateCalls).toBe(0);
+        expect(await realBroker.broker.getActive(owner)).toMatchObject({
+            nextSequence: 2,
+            replayAvailableFromSequence: 1,
+            state: "awaiting-reconnect",
+        });
+        await server.close();
+    });
+
+    test("flushes backpressured PTY output and exit before closing worker IPC", async () => {
+        const harness = safeOptions();
+        const realBroker = realBrokerHarness();
+        const closeScheduler = new ManualCloseScheduler();
+        await realBroker.reserve();
+        const server = await startTerminalBrokerServer({
+            ...harness.options,
+            broker: realBroker.broker,
+            scheduler: closeScheduler,
+        });
+        const connection = new FakeConnection();
+        harness.lifecycle.onConnection?.(connection);
+        connection.emit(
+            encodeTerminalBrokerControl({
+                owner,
+                rawToken: realBroker.rawToken,
+                sessionId,
+                type: "attach",
+            })
+        );
+        await flush();
+        expect(decodeControl(connection.sent[0] ?? new Uint8Array()).type).toBe("ready");
+        connection.disposition = "backpressured";
+
+        expect(realBroker.emitOutput(new Uint8Array([7, 8, 9]))).toBe("accepted");
+        realBroker.emitExit({ exitCode: 0, signalCode: null });
+        await flush();
+
+        expect(connection.sent).toHaveLength(1);
+        expect(connection.pending).toHaveLength(2);
+        expect(connection.closeCalls).toBe(0);
+        expect(closeScheduler.entries).toHaveLength(1);
+        expect(closeScheduler.entries[0]?.delayMs).toBe(5000);
+
+        connection.emitDrain();
+
+        const outputDecoder = new TerminalBrokerFrameDecoder();
+        expect(outputDecoder.push(connection.sent[1] ?? new Uint8Array())).toEqual([
+            { data: new Uint8Array([7, 8, 9]), kind: "output", sequence: 1 },
+        ]);
+        expect(decodeControl(connection.sent[2] ?? new Uint8Array())).toMatchObject({
+            exitCode: 0,
+            type: "exit",
+        });
+        expect(connection.closeCalls).toBe(1);
+        expect(closeScheduler.entries[0]?.cancelled).toBeTrue();
+        closeScheduler.entries[0]?.callback();
+        connection.emitClose();
+        expect(connection.closeCalls).toBe(1);
+        await server.close();
+    });
+
+    test("fails closed once when terminal completion cannot drain before timeout", async () => {
+        const harness = safeOptions();
+        const realBroker = realBrokerHarness();
+        const closeScheduler = new ManualCloseScheduler();
+        await realBroker.reserve();
+        const server = await startTerminalBrokerServer({
+            ...harness.options,
+            broker: realBroker.broker,
+            scheduler: closeScheduler,
+        });
+        const connection = new FakeConnection();
+        harness.lifecycle.onConnection?.(connection);
+        connection.emit(
+            encodeTerminalBrokerControl({
+                owner,
+                rawToken: realBroker.rawToken,
+                sessionId,
+                type: "attach",
+            })
+        );
+        await flush();
+        connection.disposition = "backpressured";
+        expect(realBroker.emitOutput(new Uint8Array([1]))).toBe("accepted");
+        realBroker.emitExit({ exitCode: 0, signalCode: null });
+        await flush();
+        const timeout = closeScheduler.entries[0];
+        expect(timeout?.delayMs).toBe(5000);
+
+        timeout?.callback();
+        connection.handlers?.onDrain();
+        connection.emitClose();
+
+        expect(timeout?.cancelled).toBeTrue();
+        expect(connection.pending).toHaveLength(0);
+        expect(connection.closeCalls).toBe(1);
         await server.close();
     });
 });

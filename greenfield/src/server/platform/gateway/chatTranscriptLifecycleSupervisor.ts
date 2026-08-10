@@ -36,6 +36,21 @@ const defaultScheduler: ChatTranscriptLifecycleSupervisorScheduler = Object.free
     },
 });
 
+interface QueuedTransportBoundary {
+    readonly connectionGeneration: number;
+    readonly occurredAtMs: number;
+}
+
+function transportBoundaryIsNewer(
+    candidate: QueuedTransportBoundary,
+    baseline: QueuedTransportBoundary
+): boolean {
+    return candidate.connectionGeneration > baseline.connectionGeneration
+        ? true
+        : candidate.connectionGeneration === baseline.connectionGeneration &&
+              candidate.occurredAtMs > baseline.occurredAtMs;
+}
+
 /**
  * Bridges lossy native session lifecycle signals into the durable chat fence.
  *
@@ -56,8 +71,11 @@ export function createChatTranscriptLifecycleSupervisor(
     const scheduler = options.scheduler ?? defaultScheduler;
     const noRetryHandle = Symbol("no-chat-lifecycle-retry");
     let active = Promise.resolve();
-    let allBoundaryQueued = false;
+    let activeAllBoundary: QueuedTransportBoundary | undefined;
+    let activeAllBoundaryWriteStarted = false;
+    let lossBoundaryGeneration: number | undefined;
     let lastState: PersistentGatewayConnectionSnapshot | undefined;
+    let pendingAllBoundary: QueuedTransportBoundary | undefined;
     let retryHandle: unknown = noRetryHandle;
     let stopped = false;
 
@@ -89,36 +107,61 @@ export function createChatTranscriptLifecycleSupervisor(
         }, retryDelayMs);
         scheduler.unref?.(retryHandle);
     }
-    const queueAllBoundary = (occurredAtMs: number): void => {
-        if (stopped || allBoundaryQueued) return;
-        allBoundaryQueued = true;
+    const queueAllBoundary = (boundary: QueuedTransportBoundary): void => {
+        if (stopped) return;
+        if (activeAllBoundary !== undefined) {
+            if (!activeAllBoundaryWriteStarted) {
+                if (transportBoundaryIsNewer(boundary, activeAllBoundary)) {
+                    activeAllBoundary = boundary;
+                }
+                return;
+            }
+            const retained = pendingAllBoundary ?? activeAllBoundary;
+            if (transportBoundaryIsNewer(boundary, retained)) {
+                pendingAllBoundary = boundary;
+            }
+            return;
+        }
+        activeAllBoundary = boundary;
         queueMicrotask(() => {
             if (stopped) {
-                allBoundaryQueued = false;
+                activeAllBoundary = undefined;
+                pendingAllBoundary = undefined;
                 return;
             }
             enqueue(async () => {
+                activeAllBoundaryWriteStarted = true;
+                const queuedBoundary = activeAllBoundary;
+                if (queuedBoundary === undefined) return;
                 try {
-                    await options.lifecycle.markTransportBoundary(occurredAtMs);
+                    await options.lifecycle.markTransportBoundary(
+                        queuedBoundary.occurredAtMs
+                    );
                 } finally {
-                    allBoundaryQueued = false;
+                    activeAllBoundaryWriteStarted = false;
+                    activeAllBoundary = undefined;
+                    const followUp = pendingAllBoundary;
+                    pendingAllBoundary = undefined;
+                    if (!stopped && followUp !== undefined) {
+                        queueAllBoundary(followUp);
+                    }
                 }
             });
         });
     };
 
     const unsubscribe = options.transport.subscribe({
-        onEvent({ frame, receivedAtMs }) {
+        onEvent({ connectionGeneration, frame, receivedAtMs }) {
             if (stopped || frame.event !== "sessions.changed") return;
             const lifecycle = frame.sessionLifecycle;
             if (lifecycle === undefined || lifecycle.sessionKey === undefined) {
-                queueAllBoundary(receivedAtMs);
+                queueAllBoundary({ connectionGeneration, occurredAtMs: receivedAtMs });
                 return;
             }
             enqueue(() => options.lifecycle.observeLifecycleEvent(lifecycle));
         },
-        onEventGap() {
-            queueAllBoundary(nowMs());
+        onEventGap({ connectionGeneration }) {
+            queueAllBoundary({ connectionGeneration, occurredAtMs: nowMs() });
         },
         onState(snapshot) {
             if (stopped) return;
@@ -131,7 +174,29 @@ export function createChatTranscriptLifecycleSupervisor(
                 snapshot.phase === "connected" &&
                 previous.connectionGeneration > 0 &&
                 snapshot.connectionGeneration > previous.connectionGeneration;
-            if (disconnected || replacedConnection) queueAllBoundary(nowMs());
+            if (disconnected) {
+                lossBoundaryGeneration = previous.connectionGeneration;
+                queueAllBoundary({
+                    connectionGeneration: previous.connectionGeneration,
+                    occurredAtMs: nowMs(),
+                });
+                return;
+            }
+            if (replacedConnection) {
+                const closesObservedLoss =
+                    previous.phase !== "connected" &&
+                    lossBoundaryGeneration !== undefined &&
+                    previous.connectionGeneration >= lossBoundaryGeneration;
+                lossBoundaryGeneration = undefined;
+                if (!closesObservedLoss) {
+                    queueAllBoundary({
+                        connectionGeneration: snapshot.connectionGeneration,
+                        occurredAtMs: nowMs(),
+                    });
+                }
+                return;
+            }
+            if (snapshot.phase === "connected") lossBoundaryGeneration = undefined;
         },
     });
     const previous = active;

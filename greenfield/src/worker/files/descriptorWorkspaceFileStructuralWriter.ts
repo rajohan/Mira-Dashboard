@@ -74,6 +74,10 @@ export interface WorkerWorkspaceFileWriteCommand {
 export interface WorkerWorkspaceFileRootConfiguration {
     readonly id: string;
     readonly path: string;
+    readonly replacementManifest?: readonly {
+        readonly maximumSizeBytes: number;
+        readonly segments: readonly string[];
+    }[];
     readonly writable: boolean;
 }
 
@@ -102,6 +106,7 @@ export interface DescriptorWorkspaceFileStructuralWriter {
 interface OpenRoot extends WorkerWorkspaceFileRootConfiguration {
     readonly device: bigint;
     readonly fd: number;
+    readonly ownerId: bigint;
 }
 
 interface OpenDirectory {
@@ -122,6 +127,42 @@ interface HashedChild {
 }
 
 type OpenReplacement = HashedChild;
+
+function validReplacementManifest(value: unknown): boolean {
+    if (!Array.isArray(value) || value.length === 0 || value.length > 16) {
+        return false;
+    }
+    const seenPaths = new Set<string>();
+    for (const entry of value as unknown[]) {
+        if (typeof entry !== "object" || entry === null) return false;
+        const candidate = entry as Record<string, unknown>;
+        const maximumSizeBytes = candidate["maximumSizeBytes"];
+        const rawSegments = candidate["segments"];
+        if (
+            typeof maximumSizeBytes !== "number" ||
+            !Number.isSafeInteger(maximumSizeBytes) ||
+            maximumSizeBytes < 1 ||
+            maximumSizeBytes > workspaceFileLimits.maximumUploadBytes ||
+            !Array.isArray(rawSegments) ||
+            rawSegments.length === 0 ||
+            rawSegments.length > 256
+        ) {
+            return false;
+        }
+        const segments = rawSegments as unknown[];
+        if (
+            segments.some(
+                (segment) => typeof segment !== "string" || !isVisibleSegment(segment)
+            )
+        ) {
+            return false;
+        }
+        const pathKey = JSON.stringify(segments);
+        if (seenPaths.has(pathKey)) return false;
+        seenPaths.add(pathKey);
+    }
+    return true;
+}
 
 function failure(
     reason: WorkspaceFileStructuralWriteErrorReason,
@@ -252,6 +293,20 @@ function validateCommand(
     ) {
         throw failure("invalid-input");
     }
+    if (root.replacementManifest !== undefined) {
+        const reviewed = root.replacementManifest.find(
+            ({ segments }) =>
+                segments.length === locator.segments.length &&
+                segments.every((segment, index) => segment === locator.segments[index])
+        );
+        if (
+            command.operation !== "replace" ||
+            reviewed === undefined ||
+            command.sizeBytes > reviewed.maximumSizeBytes
+        ) {
+            throw failure("access-denied");
+        }
+    }
     return root;
 }
 
@@ -268,7 +323,12 @@ async function openDirectory(
                 Fs.constants.O_RDONLY | Fs.constants.O_DIRECTORY | Fs.constants.O_NOFOLLOW
             );
             const stat = await handle.stat({ bigint: true });
-            if (!stat.isDirectory() || stat.dev !== root.device) {
+            if (
+                !stat.isDirectory() ||
+                stat.dev !== root.device ||
+                (root.replacementManifest !== undefined &&
+                    (stat.uid !== root.ownerId || (stat.mode & 0o002n) !== 0n))
+            ) {
                 throw failure("access-denied");
             }
             handles.push(handle);
@@ -573,7 +633,13 @@ async function replacementStat(
             Fs.constants.O_RDONLY | Fs.constants.O_NOFOLLOW | Fs.constants.O_NONBLOCK
         );
         const stat = await handle.stat({ bigint: true });
-        if (!stat.isFile() || stat.nlink !== 1n || stat.dev !== directory.root.device) {
+        if (
+            !stat.isFile() ||
+            stat.nlink !== 1n ||
+            stat.dev !== directory.root.device ||
+            (directory.root.replacementManifest !== undefined &&
+                (stat.uid !== directory.root.ownerId || (stat.mode & 0o002n) !== 0n))
+        ) {
             throw failure("access-denied");
         }
         if (stat.size > BigInt(workspaceFileLimits.maximumDownloadBytes)) {
@@ -923,7 +989,9 @@ export function createDescriptorWorkspaceFileStructuralWriter(
             if (
                 typeof configuration.id !== "string" ||
                 !rootIdPattern.test(configuration.id) ||
-                typeof configuration.writable !== "boolean"
+                typeof configuration.writable !== "boolean" ||
+                (configuration.replacementManifest !== undefined &&
+                    !validReplacementManifest(configuration.replacementManifest))
             ) {
                 throw new TypeError("Workspace file writer root metadata is invalid");
             }
@@ -953,6 +1021,7 @@ export function createDescriptorWorkspaceFileStructuralWriter(
                 ...configuration,
                 device: stat.dev,
                 fd,
+                ownerId,
                 path: rootPath,
             });
         }

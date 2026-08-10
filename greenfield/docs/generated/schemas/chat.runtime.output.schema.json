@@ -12,6 +12,56 @@
       "items": {
         "type": "object",
         "properties": {
+          "abortBoundary": {
+            "type": "object",
+            "properties": {
+              "attemptId": {
+                "type": "string",
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "\\S",
+                "allOf": [
+                  {
+                    "pattern": "^[^\\u0000]*$"
+                  },
+                  {
+                    "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                  }
+                ]
+              },
+              "attemptedAtMs": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8640000000000000
+              },
+              "baselineObservationEpoch": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "baselineUpdatedAtMs": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8640000000000000
+              },
+              "settlement": {
+                "enum": [
+                  "not-aborted",
+                  "pending",
+                  "unknown"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "attemptId",
+              "attemptedAtMs",
+              "baselineObservationEpoch",
+              "baselineUpdatedAtMs",
+              "settlement"
+            ],
+            "additionalProperties": false
+          },
           "continuity": {
             "enum": [
               "complete",
@@ -21,6 +71,18 @@
           },
           "hasUnprojectedActivity": {
             "type": "boolean"
+          },
+          "observationEpoch": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "default": 0
+          },
+          "observedAtMs": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 8640000000000000,
+            "default": 0
           },
           "parts": {
             "type": "array",
@@ -238,6 +300,17 @@
           "plan": {
             "type": "object",
             "properties": {
+              "explanation": {
+                "type": "string",
+                "maxLength": 4000,
+                "minLength": 1,
+                "pattern": "\\S",
+                "allOf": [
+                  {
+                    "pattern": "^[^\\u0000]*$"
+                  }
+                ]
+              },
               "phase": {
                 "const": "update"
               },
@@ -767,6 +840,17 @@
                     "minimum": 1,
                     "maximum": 4096
                   },
+                  "explanation": {
+                    "type": "string",
+                    "maxLength": 4000,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "allOf": [
+                      {
+                        "pattern": "^[^\\u0000]*$"
+                      }
+                    ]
+                  },
                   "kind": {
                     "const": "plan"
                   },
@@ -847,7 +931,12 @@
                   "kind": {
                     "const": "provider-noop"
                   },
-                  "providerSequence": {
+                  "providerSequenceEnd": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  },
+                  "providerSequenceStart": {
                     "type": "integer",
                     "minimum": 1,
                     "maximum": 9007199254740991
@@ -861,7 +950,8 @@
                   "runId",
                   "sequence",
                   "kind",
-                  "providerSequence",
+                  "providerSequenceEnd",
+                  "providerSequenceStart",
                   "reason"
                 ],
                 "additionalProperties": false
@@ -1332,6 +1422,17 @@
           "plan": {
             "type": "object",
             "properties": {
+              "explanation": {
+                "type": "string",
+                "maxLength": 4000,
+                "minLength": 1,
+                "pattern": "\\S",
+                "allOf": [
+                  {
+                    "pattern": "^[^\\u0000]*$"
+                  }
+                ]
+              },
               "phase": {
                 "const": "update"
               },

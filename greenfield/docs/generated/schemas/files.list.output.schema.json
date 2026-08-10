@@ -110,6 +110,9 @@
             ],
             "type": "string"
           },
+          "requiresSecretReveal": {
+            "type": "boolean"
+          },
           "resourceId": {
             "type": "string",
             "minLength": 36,

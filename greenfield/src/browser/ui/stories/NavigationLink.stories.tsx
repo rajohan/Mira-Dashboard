@@ -30,6 +30,7 @@ const meta = {
     args: {
         active: true,
         children: "Agents",
+        current: true,
         onClick: fn(),
         to: "/agents",
     },
@@ -65,6 +66,7 @@ export const ActiveTanStackRoute: Story = {
 export const Inactive: Story = {
     args: {
         active: false,
+        current: false,
     },
     parameters: {
         tanstack: {

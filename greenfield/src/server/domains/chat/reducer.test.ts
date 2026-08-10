@@ -435,7 +435,8 @@ describe("chat runtime reducer", () => {
             event({
                 kind: "provider-noop",
                 occurredAtMs: 1001,
-                providerSequence: 1,
+                providerSequenceEnd: 1,
+                providerSequenceStart: 1,
                 reason: "ignored",
                 runId,
                 sequence: 2,
@@ -547,6 +548,7 @@ describe("chat runtime reducer", () => {
         const planned = reduceChatRuntimeSnapshot(
             initial,
             event({
+                explanation: "Keep this explanation.",
                 kind: "plan",
                 occurredAtMs: 1001,
                 phase: "update",
@@ -556,23 +558,39 @@ describe("chat runtime reducer", () => {
             }),
             run({ updatedAtMs: 1001 })
         );
-        const terminal = reduceChatRuntimeSnapshot(
+        const stepOnlyUpdate = reduceChatRuntimeSnapshot(
             planned,
             event({
-                kind: "terminal",
+                kind: "plan",
                 occurredAtMs: 1002,
-                outcome: "completed",
+                phase: "update",
                 runId,
                 sequence: 3,
+                steps: [{ status: "completed", text: "Work" }],
+            }),
+            run({ updatedAtMs: 1002 })
+        );
+        const terminal = reduceChatRuntimeSnapshot(
+            stepOnlyUpdate,
+            event({
+                kind: "terminal",
+                occurredAtMs: 1003,
+                outcome: "completed",
+                runId,
+                sequence: 4,
             }),
             run({
                 state: "completed",
-                terminalAtMs: 1002,
-                updatedAtMs: 1002,
+                terminalAtMs: 1003,
+                updatedAtMs: 1003,
             })
         );
 
         expect(planned.plan?.steps).toHaveLength(1);
+        expect(stepOnlyUpdate.plan).toMatchObject({
+            explanation: "Keep this explanation.",
+            steps: [{ status: "completed", text: "Work" }],
+        });
         expect(terminal.plan).toBeUndefined();
     });
 

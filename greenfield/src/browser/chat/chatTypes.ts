@@ -164,6 +164,7 @@ export interface ChatPlanItemView {
 }
 
 export interface ChatActivePlanView {
+    readonly description?: string;
     readonly items: readonly ChatPlanItemView[];
     readonly runId: string;
     readonly title: string;

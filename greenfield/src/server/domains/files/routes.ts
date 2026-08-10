@@ -7,6 +7,7 @@ import {
     listWorkspaceFilesInputSchema,
     listWorkspaceFilesOutputSchema,
     prepareWorkspaceFileContentInputSchema,
+    prepareWorkspaceFileRevealInputSchema,
     prepareWorkspaceFileUploadInputSchema,
     prepareWorkspaceFileWriteInputSchema,
     workspaceFileContentTicketSchema,
@@ -194,6 +195,21 @@ export const workspaceFileRoutes = {
                 );
             } catch (error) {
                 return throwFailure(error);
+            }
+        }),
+    prepareReveal: writeProcedure
+        .input(prepareWorkspaceFileRevealInputSchema)
+        .output(workspaceFileContentTicketSchema)
+        .mutation(async ({ ctx, input, signal }) => {
+            authorizeWrite(ctx);
+            try {
+                return await service(ctx).prepareReveal(
+                    actor(ctx.sessionIdentity),
+                    input,
+                    signal
+                );
+            } catch (error) {
+                return throwFailure(error, { capacityIsRateLimit: true });
             }
         }),
     prepareUpload: writeProcedure

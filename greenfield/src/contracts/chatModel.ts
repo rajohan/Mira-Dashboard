@@ -55,21 +55,6 @@ export const chatExternalRunsPerProcessMaximum = 32;
 export const chatDeltaCoalescingMilliseconds = 150;
 export const chatMessageTextMaximumCodeUnits = 256 * 1024;
 
-/**
- * Converges mirrored cumulative and incremental provider text without repeating
- * an already-rendered suffix. The rule is intentionally shared by server and
- * browser reducers so restart snapshots and live projection stay identical.
- * @param previous Previously projected text.
- * @param next Newly observed cumulative or incremental text.
- * @returns The converged projection text.
- */
-export function mergeChatStreamText(previous: string, next: string): string {
-    if (next.length === 0) return previous;
-    if (previous.length === 0 || next.startsWith(previous)) return next;
-    if (previous.endsWith(next)) return previous;
-    return previous + next;
-}
-
 export const chatRunStates = [
     "active",
     "admitted",
@@ -389,6 +374,11 @@ const chatRuntimeEventBase = {
 };
 
 export const chatPlanStepStatuses = ["completed", "in_progress", "pending"] as const;
+export const chatPlanExplanationMaximumCodeUnits = 4000;
+export const chatPlanExplanationSchema = boundedNonBlankTextSchema(
+    chatPlanExplanationMaximumCodeUnits,
+    "Chat plan explanation is invalid"
+);
 export const chatPlanStepSchema = v.strictObject({
     status: v.picklist(chatPlanStepStatuses, "Chat plan step status is invalid"),
     text: boundedNonBlankTextSchema(1000, "Chat plan step text is invalid"),
@@ -476,6 +466,7 @@ const chatRuntimeEventVariantSchema = v.variant("kind", [
     }),
     v.strictObject({
         ...chatRuntimeEventBase,
+        explanation: v.optional(chatPlanExplanationSchema),
         kind: v.literal("plan"),
         phase: v.literal("update"),
         providerSequence: v.optional(chatProviderSequenceSchema),
@@ -484,7 +475,8 @@ const chatRuntimeEventVariantSchema = v.variant("kind", [
     v.strictObject({
         ...chatRuntimeEventBase,
         kind: v.literal("provider-noop"),
-        providerSequence: chatProviderSequenceSchema,
+        providerSequenceEnd: chatProviderSequenceSchema,
+        providerSequenceStart: chatProviderSequenceSchema,
         reason: v.literal("ignored"),
     }),
     v.strictObject({
@@ -533,7 +525,13 @@ export function chatRuntimeEventToolStateIsConsistent(
 export function chatRuntimeEventProviderRangeIsConsistent(
     event: v.InferOutput<typeof chatRuntimeEventVariantSchema>
 ): boolean {
-    if (event.kind !== "assistant" && event.kind !== "thinking") return true;
+    if (
+        event.kind !== "assistant" &&
+        event.kind !== "thinking" &&
+        event.kind !== "provider-noop"
+    ) {
+        return true;
+    }
     return (
         (event.providerSequenceStart === undefined &&
             event.providerSequenceEnd === undefined) ||
@@ -642,6 +640,7 @@ const chatRuntimeSnapshotObjectSchema = v.strictObject({
     parts: chatRuntimeProjectionPartsSchema,
     plan: v.optional(
         v.strictObject({
+            explanation: v.optional(chatPlanExplanationSchema),
             phase: v.literal("update"),
             steps: chatPlanStepsSchema,
         })
@@ -673,14 +672,46 @@ export const chatRuntimeSnapshotSchema = v.pipe(
 export type ChatRuntimeSnapshot = v.InferOutput<typeof chatRuntimeSnapshotSchema>;
 
 const chatExternalPlanSchema = v.strictObject({
+    explanation: v.optional(chatPlanExplanationSchema),
     phase: v.literal("update"),
     steps: chatPlanStepsSchema,
 });
 
+export const chatAbortAttemptIdSchema = boundedControlSafeTextSchema(
+    64,
+    "Chat abort attempt id is invalid"
+);
+
+const chatExternalAbortBoundarySchema = v.strictObject({
+    attemptId: chatAbortAttemptIdSchema,
+    attemptedAtMs: timestampMillisecondsSchema(
+        "External chat abort attempt timestamp is invalid"
+    ),
+    baselineObservationEpoch: nonnegativeSafeIntegerSchema(
+        "External chat abort observation epoch is invalid"
+    ),
+    baselineUpdatedAtMs: timestampMillisecondsSchema(
+        "External chat abort baseline is invalid"
+    ),
+    settlement: v.picklist(["not-aborted", "pending", "unknown"]),
+});
+
 /** Honest provider-origin projection with no fabricated local actor or UUID admission. */
 const chatExternalRunObjectSchema = v.strictObject({
+    /** Server-owned observation fence for one exact provider abort attempt. */
+    abortBoundary: v.optional(chatExternalAbortBoundarySchema),
     continuity: v.picklist(["complete", "interrupted"]),
     hasUnprojectedActivity: v.boolean(),
+    /** Process-local receipt/start epoch; processing completion never advances it. */
+    observationEpoch: v.optional(
+        nonnegativeSafeIntegerSchema("External chat observation epoch is invalid"),
+        0
+    ),
+    /** Trusted provider receipt or history-request start time, never completion time. */
+    observedAtMs: v.optional(
+        timestampMillisecondsSchema("External chat observation timestamp is invalid"),
+        0
+    ),
     /** Ordered provider activity retained even when no local admission exists. */
     parts: v.optional(chatRuntimeProjectionPartsSchema),
     plan: v.optional(chatExternalPlanSchema),

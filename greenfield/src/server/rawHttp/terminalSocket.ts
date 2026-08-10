@@ -1047,7 +1047,21 @@ export function createTerminalSocketBoundary(
                 connection.shutdown();
                 return { kind: "response", response: brokerResponse(error) };
             }
-            if (connection.finalized || request.signal.aborted || shuttingDown) {
+            if (connection.finalized) {
+                connection.shutdown();
+                return {
+                    kind: "response",
+                    response: noStoreResponse("Interactive terminal unavailable", 503),
+                };
+            }
+            if (request.signal.aborted) {
+                connection.networkClosed();
+                return {
+                    kind: "response",
+                    response: noStoreResponse("Interactive terminal unavailable", 503),
+                };
+            }
+            if (shuttingDown) {
                 connection.shutdown();
                 return {
                     kind: "response",
@@ -1066,7 +1080,7 @@ export function createTerminalSocketBoundary(
                 });
             } catch {
                 connections.delete(connection);
-                connection.shutdown();
+                connection.networkClosed();
                 return {
                     kind: "response",
                     response: noStoreResponse("Interactive terminal unavailable", 503),
@@ -1074,7 +1088,7 @@ export function createTerminalSocketBoundary(
             }
             if (!upgraded) {
                 connections.delete(connection);
-                connection.shutdown();
+                connection.networkClosed();
                 return {
                     kind: "response",
                     response: noStoreResponse("Invalid WebSocket upgrade", 400),

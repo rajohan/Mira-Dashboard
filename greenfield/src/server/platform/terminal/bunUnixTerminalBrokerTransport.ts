@@ -17,6 +17,15 @@ export interface BunUnixTerminalBrokerTransportOptions {
     readonly socketPath: string;
 }
 
+export interface BunUnixTerminalBrokerSocketConnector {
+    connect(input: {
+        readonly onClose: () => void;
+        readonly onData: (data: Uint8Array) => void;
+        readonly onDrain: () => void;
+        readonly socketPath: string;
+    }): Promise<Bun.Socket<unknown>>;
+}
+
 function transportFailure(cause?: unknown): Error {
     return new Error(
         "Terminal broker transport failed",
@@ -76,7 +85,7 @@ async function assertSocketSecurity(
     }
 }
 
-class BunTerminalBrokerClientChannel implements TerminalBrokerClientChannel {
+export class BunTerminalBrokerClientChannel implements TerminalBrokerClientChannel {
     readonly #socket: Bun.Socket<unknown>;
     #closed = false;
     #handlers: Parameters<TerminalBrokerClientChannel["setHandlers"]>[0] = {
@@ -94,7 +103,11 @@ class BunTerminalBrokerClientChannel implements TerminalBrokerClientChannel {
         if (this.#closed) return;
         this.#closed = true;
         this.#pending = new Uint8Array();
-        this.#socket.close();
+        try {
+            this.#socket.close();
+        } finally {
+            this.#handlers.onClose();
+        }
     }
 
     public notifyClose(): void {
@@ -111,7 +124,7 @@ class BunTerminalBrokerClientChannel implements TerminalBrokerClientChannel {
     public notifyDrain(): void {
         if (this.#closed) return;
         this.#flushPending();
-        if (this.#pending.byteLength === 0) this.#handlers.onDrain();
+        if (!this.#closed && this.#pending.byteLength === 0) this.#handlers.onDrain();
     }
 
     public pause(): void {
@@ -164,34 +177,41 @@ class BunTerminalBrokerClientChannel implements TerminalBrokerClientChannel {
     }
 }
 
-async function connectChannel(
+const defaultSocketConnector: BunUnixTerminalBrokerSocketConnector = Object.freeze({
+    connect(input: Parameters<BunUnixTerminalBrokerSocketConnector["connect"]>[0]) {
+        return Bun.connect<{ readonly marker: "terminal-broker" }>({
+            data: { marker: "terminal-broker" },
+            socket: {
+                binaryType: "uint8array",
+                close: input.onClose,
+                data(_socket, data) {
+                    input.onData(data);
+                },
+                drain: input.onDrain,
+                error: input.onClose,
+            },
+            unix: input.socketPath,
+        });
+    },
+});
+
+export async function connectBunTerminalBrokerChannel(
     socketPath: string,
     timeoutMs: number,
+    connector: BunUnixTerminalBrokerSocketConnector = defaultSocketConnector,
     signal?: AbortSignal
 ): Promise<BunTerminalBrokerClientChannel> {
     if (signal?.aborted) throw transportFailure(signal.reason);
     let channel: BunTerminalBrokerClientChannel | undefined;
+    let connection: Promise<Bun.Socket<unknown>> | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let abort: (() => void) | undefined;
     try {
-        const connection = Bun.connect<{ readonly marker: "terminal-broker" }>({
-            data: { marker: "terminal-broker" },
-            socket: {
-                binaryType: "uint8array",
-                close() {
-                    channel?.notifyClose();
-                },
-                data(_socket, data) {
-                    channel?.notifyData(data);
-                },
-                drain() {
-                    channel?.notifyDrain();
-                },
-                error() {
-                    channel?.notifyClose();
-                },
-            },
-            unix: socketPath,
+        connection = connector.connect({
+            onClose: () => channel?.notifyClose(),
+            onData: (data) => channel?.notifyData(data),
+            onDrain: () => channel?.notifyDrain(),
+            socketPath,
         });
         const deadline = new Promise<never>((_resolve, reject) => {
             timer = setTimeout(() => reject(transportFailure()), timeoutMs);
@@ -205,11 +225,71 @@ async function connectChannel(
         channel = new BunTerminalBrokerClientChannel(socket);
         return channel;
     } catch (error) {
-        channel?.close();
+        if (channel === undefined && connection !== undefined) {
+            void connection.then(
+                (socket) => {
+                    try {
+                        socket.close();
+                    } catch {
+                        // The abandoned connection has no remaining authority to retain.
+                    }
+                    return true;
+                },
+                () => false
+            );
+        } else {
+            channel?.close();
+        }
         throw transportFailure(error);
     } finally {
         if (timer !== undefined) clearTimeout(timer);
         if (abort !== undefined) signal?.removeEventListener("abort", abort);
+    }
+}
+
+export async function requestBunTerminalBrokerResponse(
+    channel: TerminalBrokerClientChannel,
+    frame: Uint8Array
+): Promise<readonly Uint8Array[]> {
+    const chunks: Uint8Array[] = [];
+    let settled = false;
+    let total = 0;
+    const closeChannel = (): void => {
+        try {
+            channel.close();
+        } catch {
+            // The transport failure remains authoritative over cleanup errors.
+        }
+    };
+    try {
+        const response = new Promise<readonly Uint8Array[]>((resolve, reject) => {
+            channel.setHandlers({
+                onClose() {
+                    if (settled) return;
+                    settled = true;
+                    resolve(Object.freeze([...chunks]));
+                },
+                onData(data) {
+                    if (settled) return;
+                    if (data.byteLength > terminalBrokerReadChunkMaximumBytes - total) {
+                        settled = true;
+                        reject(transportFailure());
+                        closeChannel();
+                        return;
+                    }
+                    total += data.byteLength;
+                    chunks.push(new Uint8Array(data));
+                },
+                onDrain: () => {},
+            });
+        });
+        if (channel.send(frame) === "closed") throw transportFailure();
+        return await response;
+    } catch (error) {
+        settled = true;
+        throw transportFailure(error);
+    } finally {
+        closeChannel();
     }
 }
 
@@ -224,38 +304,19 @@ export function createBunUnixTerminalBrokerTransport(
 
     async function connect(signal?: AbortSignal) {
         await assertSocketSecurity(options, expectedUserId);
-        return connectChannel(options.socketPath, connectTimeoutMs, signal);
+        return connectBunTerminalBrokerChannel(
+            options.socketPath,
+            connectTimeoutMs,
+            defaultSocketConnector,
+            signal
+        );
     }
 
     return Object.freeze({
         connect,
         async request(frame: Uint8Array, signal?: AbortSignal) {
             const channel = await connect(signal);
-            const chunks: Uint8Array[] = [];
-            let total = 0;
-            try {
-                const response = new Promise<readonly Uint8Array[]>((resolve, reject) => {
-                    channel.setHandlers({
-                        onClose: () => resolve(Object.freeze(chunks)),
-                        onData(data) {
-                            total += data.byteLength;
-                            if (total > terminalBrokerReadChunkMaximumBytes) {
-                                channel.close();
-                                reject(transportFailure());
-                                return;
-                            }
-                            chunks.push(new Uint8Array(data));
-                        },
-                        onDrain: () => {},
-                    });
-                });
-                if (channel.send(frame) === "closed") throw transportFailure();
-                return await response;
-            } catch (error) {
-                throw transportFailure(error);
-            } finally {
-                channel.close();
-            }
+            return requestBunTerminalBrokerResponse(channel, frame);
         },
     });
 }

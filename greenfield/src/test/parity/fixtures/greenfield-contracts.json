@@ -252,6 +252,10 @@
         },
         {
             "kind": "mutation",
+            "name": "files.prepareReveal"
+        },
+        {
+            "kind": "mutation",
             "name": "files.prepareUpload"
         },
         {

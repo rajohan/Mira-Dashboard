@@ -263,23 +263,35 @@ export function createTerminalBrokerClient(
             let inputDrainNeeded = false;
             let resolveReady: (() => void) | undefined;
             let rejectReady: ((error: TerminalSessionBrokerError) => void) | undefined;
+            let abortListener: (() => void) | undefined;
             const ready = new Promise<void>((resolve, reject) => {
                 resolveReady = resolve;
                 rejectReady = reject;
             });
-            const close = (): void => {
+            const removeAbortListener = (): void => {
+                if (abortListener === undefined) return;
+                abortSignal?.removeEventListener("abort", abortListener);
+                abortListener = undefined;
+            };
+            const close = (
+                failure = new TerminalSessionBrokerError("unavailable")
+            ): void => {
                 if (closed) return;
                 closed = true;
+                removeAbortListener();
                 pendingInputAcknowledgements.length = 0;
                 pendingInputAcknowledgementBytes = 0;
                 pendingTransportBackpressureAcknowledgements = 0;
                 transportInputBackpressured = false;
                 ptyInputBackpressured = false;
                 inputDrainNeeded = false;
-                rejectReady?.(new TerminalSessionBrokerError("unavailable"));
+                rejectReady?.(failure);
                 rejectReady = undefined;
-                callbacks.onClose();
-                channel.close();
+                try {
+                    callbacks.onClose();
+                } finally {
+                    channel.close();
+                }
             };
             const publishInputDrainIfReady = (): void => {
                 if (
@@ -341,6 +353,7 @@ export function createTerminalBrokerClient(
                                     ptyInputBackpressured = true;
                                 }
                             }
+                            if (event.type === "ready") removeAbortListener();
                             callbacks.onControl(event);
                             if (event.type === "ready") {
                                 resolveReady?.();
@@ -368,17 +381,21 @@ export function createTerminalBrokerClient(
                     publishInputDrainIfReady();
                 },
             });
-            const attachDisposition = channel.send(
-                control({
-                    owner,
-                    rawToken: input.connectionToken,
-                    sessionId,
-                    type: "attach",
-                })
-            );
-            if (attachDisposition === "closed") {
-                close();
-                throw new TerminalSessionBrokerError("unavailable");
+            if (abortSignal !== undefined) {
+                abortListener = () => close(brokerFailure(abortSignal.reason));
+                abortSignal.addEventListener("abort", abortListener, { once: true });
+                if (abortSignal.aborted) abortListener();
+            }
+            if (!closed) {
+                const attachDisposition = channel.send(
+                    control({
+                        owner,
+                        rawToken: input.connectionToken,
+                        sessionId,
+                        type: "attach",
+                    })
+                );
+                if (attachDisposition === "closed") close();
             }
             await ready;
 

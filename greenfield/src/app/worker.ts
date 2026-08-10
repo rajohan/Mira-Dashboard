@@ -38,6 +38,7 @@ import {
     createDescriptorWorkspaceFileStructuralWriter,
     type WorkerWorkspaceFileRootConfiguration,
 } from "../worker/files/descriptorWorkspaceFileStructuralWriter.ts";
+import { resolveReviewedWorkerOpenClawFileRoot } from "../worker/files/openClawFileRootConfiguration.ts";
 import { resolveReviewedWorkerWorkspaceFileRoot } from "../worker/files/workspaceFileRootConfiguration.ts";
 import {
     createFixedSystemLogrotateBroker,
@@ -92,6 +93,7 @@ export interface DashboardWorkerProcessDependencies {
         logger: StructuredLogger,
         persistentGatewayTransport: PersistentGatewayTaskNotificationTransport,
         workspaceRoot: WorkerWorkspaceFileRootConfiguration,
+        openClawRoot: WorkerWorkspaceFileRootConfiguration,
         logMaintenance: LogMaintenanceExecutor
     ) => DashboardWorkerRuntime;
     readonly createTerminationController: () => ProcessTerminationController;
@@ -103,6 +105,7 @@ export interface DashboardWorkerProcessDependencies {
     readonly resolveProjectLayout: (
         projectRoot: string
     ) => Promise<DashboardProjectLayout>;
+    readonly resolveOpenClawFileRoot: typeof resolveReviewedWorkerOpenClawFileRoot;
     readonly resolveWorkspaceFileRoot: typeof resolveReviewedWorkerWorkspaceFileRoot;
     readonly startTerminalBroker: (
         options: WorkerTerminalBrokerLifecycleOptions
@@ -170,10 +173,11 @@ const defaultDependencies = Object.freeze({
         _logger,
         gatewayTransport,
         workspaceRoot,
+        openClawRoot,
         logMaintenance
     ) => {
         const writer = createDescriptorWorkspaceFileStructuralWriter({
-            roots: [workspaceRoot],
+            roots: [workspaceRoot, openClawRoot],
             spoolRoot: layout.production.state.workspaceFileUploads,
         });
         return createDashboardWorkerRuntime({
@@ -197,6 +201,7 @@ const defaultDependencies = Object.freeze({
     loadRelease: (releasesDirectory, releaseRoot, processRole) =>
         loadRuntimeRelease(releasesDirectory, releaseRoot, processRole),
     resolveProjectLayout: resolveDashboardProjectLayout,
+    resolveOpenClawFileRoot: resolveReviewedWorkerOpenClawFileRoot,
     resolveWorkspaceFileRoot: resolveReviewedWorkerWorkspaceFileRoot,
     startLogMaintenanceAvailability: startLogMaintenanceAvailabilityPublisher,
     startTerminalBroker: startWorkerTerminalBrokerLifecycle,
@@ -248,6 +253,10 @@ export async function runDashboardWorkerProcess(
         configuration.workspaceRoot,
         layout.production.root
     );
+    const openClawRoot = await dependencies.resolveOpenClawFileRoot(
+        configuration.openClawRoot,
+        layout.production.root
+    );
     const destination = dependencies.createLogDestination(
         layout.production.state.logs,
         "worker"
@@ -280,6 +289,7 @@ export async function runDashboardWorkerProcess(
             logger,
             gatewayTransport,
             workspaceRoot,
+            openClawRoot,
             logMaintenance
         );
         const runtimeCompletion = runtime.completion.then(

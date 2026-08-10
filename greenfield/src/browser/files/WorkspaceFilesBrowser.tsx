@@ -23,6 +23,7 @@ import {
 import {
     downloadWorkspaceFile,
     prepareWorkspaceFilePreview,
+    revealWorkspaceFileSecrets,
     uploadWorkspaceFile,
 } from "./workspaceFileTransfers.ts";
 import type { WorkspaceFileTreeSnapshot } from "./WorkspaceFileTree.tsx";
@@ -157,7 +158,8 @@ export function WorkspaceFilesBrowser() {
     async function upload(
         file: File,
         replacedEntry: WorkspaceFileEntry | undefined,
-        parentDirectoryId?: string
+        parentDirectoryId?: string,
+        revealTicketId?: string
     ) {
         const result = await boundary.run((signal) =>
             replacedEntry === undefined
@@ -173,6 +175,7 @@ export function WorkspaceFilesBrowser() {
                           file,
                           kind: "replace",
                           mimeType: replacedEntry.mimeType,
+                          ...(revealTicketId === undefined ? {} : { revealTicketId }),
                           resourceId: replacedEntry.resourceId,
                       },
                       signal
@@ -255,6 +258,11 @@ export function WorkspaceFilesBrowser() {
                 )
             }
             onRefresh={() => void directoryQuery.refetch()}
+            onReveal={(entry) =>
+                boundary.run((signal) =>
+                    revealWorkspaceFileSecrets(client, entry, signal)
+                )
+            }
             onSelectRoot={(rootId) => navigate({ breadcrumbs: [], rootId })}
             onUpload={upload}
             refreshing={directoryQuery.isRefetching}

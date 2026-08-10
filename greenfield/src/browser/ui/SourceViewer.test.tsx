@@ -27,6 +27,7 @@ describe("SourceViewer", () => {
         expect(screen.getByRole("button", { name: "Copy dashboard.ts" })).toBeTruthy();
         expect(screen.getByRole("switch", { name: "Wrap lines" })).toBeChecked();
         expect(screen.getByTestId("source-viewer-source")).toHaveClass(
+            "bg-transparent",
             "source-viewer-source-wrapped"
         );
         const highlighted = await screen.findByTestId("syntax-highlighted-source");

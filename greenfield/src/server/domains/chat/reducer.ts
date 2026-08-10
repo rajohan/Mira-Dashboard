@@ -2,13 +2,13 @@ import * as v from "valibot";
 
 import {
     chatRuntimeSnapshotSchema,
-    mergeChatStreamText,
     type ChatRunState,
     type ChatRunSummary,
     type ChatRuntimeEvent,
     type ChatRuntimeProjectionPart,
     type ChatRuntimeSnapshot,
 } from "../../../contracts/chatModel.ts";
+import { mergeChatStreamText } from "../../../shared/chatStreamText.ts";
 import { ChatRunTransitionError } from "./errors.ts";
 
 const terminalStates: ReadonlySet<ChatRunState> = new Set([
@@ -195,7 +195,15 @@ export function reduceChatRuntimeSnapshot(
     }
     let plan = previous?.plan;
     if (event.kind === "terminal") plan = undefined;
-    if (event.kind === "plan") plan = { phase: event.phase, steps: event.steps };
+    if (event.kind === "plan") {
+        plan = {
+            ...((event.explanation ?? plan?.explanation) === undefined
+                ? {}
+                : { explanation: event.explanation ?? plan?.explanation }),
+            phase: event.phase,
+            steps: event.steps,
+        };
+    }
     const firstSequence = previous?.firstSequence ?? event.sequence;
     const projectionTruncated = previous?.projectionTruncated ?? false;
 

@@ -318,6 +318,9 @@ export function adaptChatRuntimeEvent(
         case "plan": {
             return {
                 ...base,
+                ...(event.explanation === undefined
+                    ? {}
+                    : { explanation: event.explanation }),
                 kind: "plan",
                 steps: event.steps,
             };
@@ -495,6 +498,9 @@ export function projectChatRuntimeSnapshot(
             ? {}
             : {
                   plan: {
+                      ...(snapshot.plan.explanation === undefined
+                          ? {}
+                          : { description: snapshot.plan.explanation }),
                       items: snapshot.plan.steps.map((step, index) => ({
                           id: `${snapshot.run.id}:plan:${index}`,
                           label: step.text,
@@ -615,6 +621,7 @@ export function projectChatExternalRun(run: ChatExternalRun): ChatExternalRunPro
         });
     }
     return {
+        ...(run.abortBoundary === undefined ? {} : { abortBoundary: run.abortBoundary }),
         continuity: run.continuity,
         hasUnprojectedActivity: run.hasUnprojectedActivity,
         message: {
@@ -627,9 +634,15 @@ export function projectChatExternalRun(run: ChatExternalRun): ChatExternalRunPro
             sessionKey: run.sessionKey,
             timestampMs: run.updatedAtMs,
         },
-        ...(!run.projectionTruncated && run.plan !== undefined
-            ? {
+        observationEpoch: run.observationEpoch,
+        observedAtMs: run.observedAtMs,
+        ...(run.plan === undefined
+            ? {}
+            : {
                   plan: {
+                      ...(run.plan.explanation === undefined
+                          ? {}
+                          : { description: run.plan.explanation }),
                       items: run.plan.steps.map((step, index) => ({
                           id: `provider:${run.providerRunId}:plan:${index}`,
                           label: step.text,
@@ -641,10 +654,10 @@ export function projectChatExternalRun(run: ChatExternalRun): ChatExternalRunPro
                       runId: `provider:${run.providerRunId}`,
                       title: "OpenClaw plan",
                   },
-              }
-            : {}),
+              }),
         projectionTruncated: run.projectionTruncated,
         providerRunId: run.providerRunId,
         source: run.source,
+        updatedAtMs: run.updatedAtMs,
     };
 }

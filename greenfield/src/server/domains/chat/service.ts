@@ -57,11 +57,11 @@ import {
     chatRunEventMaximum,
     chatRuntimeProjectionPartsMaximum,
     chatRuntimeResponseMaximumBytes,
-    mergeChatStreamText,
     type ChatExternalRun,
     type ChatMessage,
     type ChatRuntimeProjectionPart,
 } from "../../../contracts/chatModel.ts";
+import { mergeChatStreamText } from "../../../shared/chatStreamText.ts";
 import { utf8ByteLength } from "../../../shared/encoding.ts";
 import { type ChatCoalescerScheduler, ChatRuntimeEventCoalescer } from "./coalescer.ts";
 import {
@@ -73,7 +73,11 @@ import {
     ChatRunTransitionError,
     ChatTranscriptUnavailableError,
 } from "./errors.ts";
-import { ChatHistoryService, type ChatHistoryObservationPort } from "./history.ts";
+import {
+    ChatHistoryService,
+    type ChatHistoryObservationPort,
+    type ChatProviderObservationBoundary,
+} from "./history.ts";
 import {
     ChatAttachmentTicketError,
     type ChatAttachmentTicketConsumer,
@@ -115,12 +119,20 @@ export const chatCompanionAskRateWindowMilliseconds = 60_000;
 export const chatCompanionRateActorMaximum = 64;
 /** Interrupted provider-only projections expire unless history refreshes them. */
 export const chatExternalRunStaleMilliseconds = 15 * 60 * 1000;
+const externalPendingAssistantAppendMaximumCodeUnits = 64 * 1024;
+type LocalChatAbortInput = Extract<ChatAbortInput, { readonly runId: string }>;
+type ExternalChatAbortInput = Extract<ChatAbortInput, { readonly providerRunId: string }>;
 
 interface ChatCompanionAskAdmission {
     controller: AbortController;
     generation: number;
     promise: Promise<ChatCompanionAskOutput>;
     released: boolean;
+}
+
+interface ChatAbortOperation {
+    readonly abortAttemptId?: string;
+    readonly promise: Promise<ChatAbortOutput>;
 }
 
 export type ChatServiceErrorReason =
@@ -282,6 +294,9 @@ function providerEventDraft(event: ChatProviderEvent): ChatRuntimeEventDraft {
         }
         case "plan": {
             return {
+                ...(event.explanation === undefined
+                    ? {}
+                    : { explanation: event.explanation }),
                 kind: "plan",
                 occurredAtMs: event.receivedAtMs,
                 phase: "update",
@@ -310,7 +325,8 @@ function providerEventDraft(event: ChatProviderEvent): ChatRuntimeEventDraft {
             return {
                 kind: "provider-noop",
                 occurredAtMs: event.receivedAtMs,
-                providerSequence: event.providerSequence,
+                providerSequenceEnd: event.providerSequence,
+                providerSequenceStart: event.providerSequence,
                 reason: "ignored",
             };
         }
@@ -349,6 +365,32 @@ function compareExternalRuns(left: ChatExternalRun, right: ChatExternalRun): num
     );
 }
 
+function externalAbortBoundaryFields(
+    run: ChatExternalRun | undefined
+): Readonly<{ abortBoundary?: ChatExternalRun["abortBoundary"] }> {
+    return run?.abortBoundary === undefined ? {} : { abortBoundary: run.abortBoundary };
+}
+
+function externalObservationIsStrictlyNewer(
+    run: ChatExternalRun,
+    observation: ChatProviderObservationBoundary
+): boolean {
+    return (
+        observation.epoch > run.observationEpoch &&
+        observation.observedAtMs >= run.observedAtMs
+    );
+}
+
+function externalLiveObservationIsNewer(
+    run: ChatExternalRun,
+    observation: ChatProviderObservationBoundary
+): boolean {
+    return (
+        observation.epoch > run.observationEpoch &&
+        observation.observedAtMs >= run.observedAtMs
+    );
+}
+
 function compactExternalRun(run: ChatExternalRun): ChatExternalRun {
     if (
         run.text.length === 0 &&
@@ -358,8 +400,11 @@ function compactExternalRun(run: ChatExternalRun): ChatExternalRun {
         return run;
     }
     return v.parse(chatExternalRunSchema, {
+        ...externalAbortBoundaryFields(run),
         continuity: run.continuity,
         hasUnprojectedActivity: true,
+        observationEpoch: run.observationEpoch,
+        observedAtMs: run.observedAtMs,
         projectionTruncated: true,
         providerRunId: run.providerRunId,
         sessionKey: run.sessionKey,
@@ -395,8 +440,11 @@ function boundExternalRunProjection(run: ChatExternalRun): ChatExternalRun {
     }
     if (!chatExternalRunFitsBudget(base)) {
         const fallback: ChatExternalRun = {
+            ...externalAbortBoundaryFields(run),
             continuity: run.continuity,
             hasUnprojectedActivity: true,
+            observationEpoch: run.observationEpoch,
+            observedAtMs: run.observedAtMs,
             projectionTruncated: true,
             providerRunId: run.providerRunId,
             sessionKey: run.sessionKey,
@@ -646,8 +694,11 @@ function budgetExternalRuns(
         while (lower <= upper) {
             const middle = Math.floor((lower + upper) / 2);
             const candidateRun = v.parse(chatExternalRunSchema, {
+                ...externalAbortBoundaryFields(full),
                 continuity: full.continuity,
                 hasUnprojectedActivity: true,
+                observationEpoch: full.observationEpoch,
+                observedAtMs: full.observedAtMs,
                 projectionTruncated: true,
                 providerRunId: full.providerRunId,
                 sessionKey: full.sessionKey,
@@ -693,7 +744,7 @@ function budgetExternalRuns(
 
 class ChatServiceImplementation implements ChatService, ChatHistoryObservationPort {
     readonly #abortAcknowledgedRuns = new Set<string>();
-    readonly #abortOperations = new Map<string, Promise<ChatAbortOutput>>();
+    readonly #abortOperations = new Map<string, ChatAbortOperation>();
     readonly #attachmentConsumer: ChatAttachmentTicketConsumer;
     readonly #attachmentPreparer: ChatAttachmentTicketPreparer;
     readonly #blockedRuns = new Set<string>();
@@ -705,6 +756,19 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
     readonly #companionResets = new Map<string, Promise<ChatCompanionResetOutput>>();
     readonly #externalRuns = new Map<string, Map<string, ChatExternalRun>>();
     readonly #externalCoalescers = new Map<string, ChatRuntimeEventCoalescer>();
+    readonly #externalObservationKinds = new Map<
+        string,
+        Map<
+            string,
+            Readonly<{
+                epoch: number;
+                historyCatchUpSignaled?: boolean;
+                historyReplayRemainder?: string | null;
+                kind: "history" | "live";
+                pendingAssistantAppend?: string;
+            }>
+        >
+    >();
     readonly #externalTruncatedSessions = new Set<string>();
     readonly #historyService: ChatHistoryService;
     readonly #nowMs: () => number;
@@ -727,6 +791,7 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
     readonly #unsubscribeTranscriptLifecycle: (() => void) | undefined;
     #companionAskCount = 0;
     #disposed = false;
+    #externalObservationEpoch = 0;
 
     public constructor(options: ChatServiceOptions) {
         this.#attachmentConsumer = options.attachmentConsumer;
@@ -753,10 +818,22 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
                 ? {}
                 : { maximum: options.subscriptionMaximum }),
             nowMs: this.#nowMs,
-            onEvent: (event) => this.#handleProviderEvent(event),
-            onGap: (gap) => this.#handleProviderGap(gap),
+            onEvent: (event) =>
+                this.#handleProviderEvent(
+                    event,
+                    this.#beginExternalObservation(event.receivedAtMs)
+                ),
+            onGap: (gap) =>
+                this.#handleProviderGap(
+                    gap,
+                    this.#beginExternalObservation(this.#nowMs())
+                ),
             onReconciliationRequired: (sessionKey, reason) =>
-                this.#handleSessionReconciliation(sessionKey, reason),
+                this.#handleSessionReconciliation(
+                    sessionKey,
+                    reason,
+                    this.#beginExternalObservation(this.#nowMs())
+                ),
             provider: options.provider,
             watermarks: (sessionKey) =>
                 this.#repository.listProviderRunWatermarks(sessionKey),
@@ -772,6 +849,22 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
         } catch {
             // Failure reporting has no authority to replace the original failure.
         }
+    }
+
+    #beginExternalObservation(observedAtMs: number): ChatProviderObservationBoundary {
+        if (
+            this.#externalObservationEpoch >= Number.MAX_SAFE_INTEGER ||
+            !Number.isSafeInteger(observedAtMs) ||
+            observedAtMs < 0
+        ) {
+            throw new ChatServiceError("capacity");
+        }
+        this.#externalObservationEpoch += 1;
+        return { epoch: this.#externalObservationEpoch, observedAtMs };
+    }
+
+    public beginObservation(_sessionKey: string): ChatProviderObservationBoundary {
+        return this.#beginExternalObservation(this.#nowMs());
     }
 
     #companionGeneration(sessionKey: string): number {
@@ -808,6 +901,7 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
             await this.#settleReservation(localRunId, "commit");
         }
         this.#externalRuns.delete(change.sessionKey);
+        this.#externalObservationKinds.delete(change.sessionKey);
         this.#externalTruncatedSessions.delete(change.sessionKey);
         try {
             await this.#closeExternalCoalescer(change.sessionKey);
@@ -833,8 +927,36 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
     #deleteExternalRun(sessionKey: string, providerRunId: string): boolean {
         const runs = this.#externalRuns.get(sessionKey);
         if (runs === undefined || !runs.delete(providerRunId)) return false;
+        const observationKinds = this.#externalObservationKinds.get(sessionKey);
+        observationKinds?.delete(providerRunId);
+        if (observationKinds?.size === 0) {
+            this.#externalObservationKinds.delete(sessionKey);
+        }
         if (runs.size === 0) this.#externalRuns.delete(sessionKey);
         return true;
+    }
+
+    #recordExternalObservationKind(
+        sessionKey: string,
+        providerRunId: string,
+        epoch: number,
+        kind: "history" | "live",
+        historyReplayRemainder?: string | null,
+        historyCatchUpSignaled = false,
+        pendingAssistantAppend?: string
+    ): void {
+        let observations = this.#externalObservationKinds.get(sessionKey);
+        if (observations === undefined) {
+            observations = new Map();
+            this.#externalObservationKinds.set(sessionKey, observations);
+        }
+        observations.set(providerRunId, {
+            epoch,
+            ...(historyCatchUpSignaled ? { historyCatchUpSignaled: true } : {}),
+            ...(historyReplayRemainder === undefined ? {} : { historyReplayRemainder }),
+            kind,
+            ...(pendingAssistantAppend === undefined ? {} : { pendingAssistantAppend }),
+        });
     }
 
     #externalRunCount(): number {
@@ -866,6 +988,14 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
                 .toSorted(compareExternalRuns)[0];
             if (oldest === undefined) break;
             this.#evictExternalRun(oldest);
+        }
+    }
+
+    async #signalExternalRuntimeChanged(): Promise<void> {
+        try {
+            await this.#repository.signalRuntimeChanged();
+        } catch (error) {
+            this.#reportAsyncFailure(error);
         }
     }
 
@@ -903,7 +1033,7 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
             if (run.continuity !== "interrupted" || run.updatedAtMs > cutoff) {
                 continue;
             }
-            runs.delete(providerRunId);
+            this.#deleteExternalRun(sessionKey, providerRunId);
             changed = true;
         }
         if (!changed) return;
@@ -915,9 +1045,33 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
         }
     }
 
-    async #projectExternalEvent(event: ChatProviderEvent): Promise<void> {
+    async #projectExternalEvent(
+        event: ChatProviderEvent,
+        observation: ChatProviderObservationBoundary
+    ): Promise<void> {
         const providerRunId = providerEventRunId(event);
+        const runs = this.#externalRuns.get(event.sessionKey);
+        const previous = runs?.get(providerRunId);
+        if (
+            previous !== undefined &&
+            !externalLiveObservationIsNewer(previous, observation)
+        ) {
+            await (event.kind === "terminal"
+                ? this.#repository.signalHistoryChanged()
+                : this.#externalCoalescer(event.sessionKey).push(
+                      providerEventDraft(event)
+                  ));
+            return;
+        }
         if (event.kind === "terminal") {
+            if (
+                previous?.abortBoundary !== undefined &&
+                (observation.epoch <= previous.abortBoundary.baselineObservationEpoch ||
+                    observation.observedAtMs <= previous.abortBoundary.attemptedAtMs)
+            ) {
+                await this.#repository.signalHistoryChanged();
+                return;
+            }
             await this.#flushExternalCoalescer(event.sessionKey);
             const projectionChanged = this.#deleteExternalRun(
                 event.sessionKey,
@@ -934,8 +1088,6 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
             }
             return;
         }
-        const runs = this.#externalRuns.get(event.sessionKey);
-        const previous = runs?.get(providerRunId);
         let text = previous?.text ?? "";
         let parts: readonly ChatRuntimeProjectionPart[] =
             previous?.parts ??
@@ -944,16 +1096,87 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
             previous === undefined && event.providerSequence > 1;
         let hasUnprojectedActivity =
             previous?.hasUnprojectedActivity ?? beganAfterProviderSequenceOne;
-        let projectionTruncated = previous?.projectionTruncated ?? false;
+        let projectionTruncated =
+            (previous?.projectionTruncated ?? false) || beganAfterProviderSequenceOne;
         let plan = previous?.plan;
-        if (event.kind === "delta" && event.stream === "assistant") {
-            const previousText = text;
-            text = event.text;
-            if (event.mode === "append") text = previousText + event.text;
-            if (event.mode === "merge") {
-                text = mergeChatStreamText(previousText, event.text);
+        const previousObservationKind = this.#externalObservationKinds
+            .get(event.sessionKey)
+            ?.get(providerRunId);
+        let historyReplayRemainder =
+            observation.observedAtMs === previous?.observedAtMs
+                ? previousObservationKind?.historyReplayRemainder
+                : undefined;
+        let assistantAppendText = event.kind === "delta" ? event.text : "";
+        let suppressAssistantAppend = false;
+        let historyCatchUpSignaled =
+            previousObservationKind?.historyCatchUpSignaled ?? false;
+        let pendingAssistantAppend = previousObservationKind?.pendingAssistantAppend;
+        let signalHistoryCatchUp = false;
+        if (
+            event.kind === "delta" &&
+            event.stream === "assistant" &&
+            event.mode !== "append"
+        ) {
+            historyReplayRemainder = undefined;
+            historyCatchUpSignaled = false;
+            pendingAssistantAppend = undefined;
+        }
+        if (
+            event.kind === "delta" &&
+            event.stream === "assistant" &&
+            event.mode === "append" &&
+            pendingAssistantAppend !== undefined
+        ) {
+            pendingAssistantAppend = safeCodeUnitPrefix(
+                pendingAssistantAppend + event.text,
+                externalPendingAssistantAppendMaximumCodeUnits
+            );
+            suppressAssistantAppend = true;
+        } else if (
+            event.kind === "delta" &&
+            event.stream === "assistant" &&
+            event.mode === "append" &&
+            historyReplayRemainder !== undefined
+        ) {
+            if (historyReplayRemainder === null) {
+                suppressAssistantAppend = true;
+            } else if (historyReplayRemainder.startsWith(event.text)) {
+                historyReplayRemainder = historyReplayRemainder.slice(event.text.length);
+                suppressAssistantAppend = true;
+            } else if (event.text.startsWith(historyReplayRemainder)) {
+                assistantAppendText = event.text.slice(historyReplayRemainder.length);
+                historyReplayRemainder = "";
+            } else {
+                historyReplayRemainder = null;
+                suppressAssistantAppend = true;
             }
-            parts = updateExternalStreamPart(parts, event);
+            if (suppressAssistantAppend && historyReplayRemainder === null) {
+                pendingAssistantAppend = safeCodeUnitPrefix(
+                    event.text,
+                    externalPendingAssistantAppendMaximumCodeUnits
+                );
+            }
+            if (pendingAssistantAppend !== undefined && !historyCatchUpSignaled) {
+                historyCatchUpSignaled = true;
+                signalHistoryCatchUp = true;
+            }
+        }
+        if (event.kind === "delta" && event.stream === "assistant") {
+            if (!suppressAssistantAppend) {
+                const projectedEvent =
+                    assistantAppendText === event.text
+                        ? event
+                        : { ...event, text: assistantAppendText };
+                const previousText = text;
+                text = projectedEvent.text;
+                if (projectedEvent.mode === "append") {
+                    text = previousText + projectedEvent.text;
+                }
+                if (projectedEvent.mode === "merge") {
+                    text = mergeChatStreamText(previousText, projectedEvent.text);
+                }
+                parts = updateExternalStreamPart(parts, projectedEvent);
+            }
         } else if (event.kind === "delta" && event.stream === "thinking") {
             parts = updateExternalStreamPart(parts, event);
         } else if (event.kind === "tool") {
@@ -961,7 +1184,13 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
         } else if (event.kind === "item") {
             parts = updateExternalItemPart(parts, event);
         } else if (event.kind === "plan") {
-            plan = { phase: "update", steps: [...event.steps] };
+            plan = {
+                ...((event.explanation ?? plan?.explanation) === undefined
+                    ? {}
+                    : { explanation: event.explanation ?? plan?.explanation }),
+                phase: "update",
+                steps: [...event.steps],
+            };
         }
         if (text.length > chatMessageTextMaximumCodeUnits) {
             text = safeCodeUnitPrefix(text, chatMessageTextMaximumCodeUnits);
@@ -996,10 +1225,16 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
             projectionTruncated = true;
         }
         const candidate = {
+            ...externalAbortBoundaryFields(previous),
             continuity:
                 previous?.continuity ??
                 (beganAfterProviderSequenceOne ? "interrupted" : "complete"),
             hasUnprojectedActivity,
+            observationEpoch: Math.max(
+                previous?.observationEpoch ?? 0,
+                observation.epoch
+            ),
+            observedAtMs: Math.max(previous?.observedAtMs ?? 0, observation.observedAtMs),
             parts: [...parts],
             ...(plan === undefined ? {} : { plan }),
             projectionTruncated,
@@ -1007,14 +1242,22 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
             sessionKey: event.sessionKey,
             source: "provider-runtime" as const,
             text,
-            updatedAtMs: Math.max(
-                previous?.updatedAtMs ?? 0,
-                event.receivedAtMs,
-                this.#nowMs()
-            ),
+            updatedAtMs: Math.max(previous?.updatedAtMs ?? 0, event.receivedAtMs),
         };
         this.#storeExternalRun(boundExternalRunProjection(candidate));
+        this.#recordExternalObservationKind(
+            event.sessionKey,
+            providerRunId,
+            observation.epoch,
+            "live",
+            historyReplayRemainder,
+            historyCatchUpSignaled,
+            pendingAssistantAppend
+        );
         await this.#externalCoalescer(event.sessionKey).push(providerEventDraft(event));
+        if (signalHistoryCatchUp) {
+            await this.#repository.signalHistoryChanged();
+        }
     }
 
     async #acknowledgeEventAlias(
@@ -1043,7 +1286,10 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
         return coalescer;
     }
 
-    async #handleProviderEvent(event: ChatProviderEvent): Promise<void> {
+    async #handleProviderEvent(
+        event: ChatProviderEvent,
+        observation: ChatProviderObservationBoundary
+    ): Promise<void> {
         if (this.#disposed) return;
         const providerRunId = providerEventRunId(event);
         const run = this.#repository.findByProviderCorrelation(
@@ -1059,7 +1305,7 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
             ) {
                 return;
             }
-            await this.#projectExternalEvent(event);
+            await this.#projectExternalEvent(event, observation);
             return;
         }
         if (this.#blockedRuns.has(run.id)) return;
@@ -1110,7 +1356,10 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
         this.#startReconciliation(localRunId);
     }
 
-    async #handleProviderGap(gap: ChatProviderEventGap): Promise<void> {
+    async #handleProviderGap(
+        gap: ChatProviderEventGap,
+        observation: ChatProviderObservationBoundary
+    ): Promise<void> {
         const run = this.#repository.findByProviderCorrelation(
             gap.sessionKey,
             gap.providerRunId
@@ -1130,8 +1379,17 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
                 ?.get(gap.providerRunId);
             this.#storeExternalRun(
                 boundExternalRunProjection({
+                    ...externalAbortBoundaryFields(previous),
                     continuity: "interrupted",
                     hasUnprojectedActivity: true,
+                    observationEpoch: Math.max(
+                        previous?.observationEpoch ?? 0,
+                        observation.epoch
+                    ),
+                    observedAtMs: Math.max(
+                        previous?.observedAtMs ?? 0,
+                        observation.observedAtMs
+                    ),
                     ...(previous?.parts === undefined ? {} : { parts: previous.parts }),
                     ...(previous?.plan === undefined ? {} : { plan: previous.plan }),
                     providerRunId: gap.providerRunId,
@@ -1153,7 +1411,8 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
 
     async #handleSessionReconciliation(
         sessionKey: string,
-        reason: ChatProviderReconciliationReason
+        reason: ChatProviderReconciliationReason,
+        observation: ChatProviderObservationBoundary
     ): Promise<void> {
         const candidates = this.#repository
             .listRecoveryCandidates()
@@ -1165,6 +1424,7 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
         } else {
             for (const { run } of candidates) this.#startReconciliation(run.id);
         }
+        await this.#repository.signalHistoryChanged();
         const external = this.#externalRuns.get(sessionKey);
         if (external !== undefined) {
             await this.#flushExternalCoalescer(sessionKey);
@@ -1173,6 +1433,8 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
                     ...run,
                     continuity: "interrupted",
                     hasUnprojectedActivity: true,
+                    observationEpoch: Math.max(run.observationEpoch, observation.epoch),
+                    observedAtMs: Math.max(run.observedAtMs, observation.observedAtMs),
                     projectionTruncated: true,
                     updatedAtMs: Math.max(run.updatedAtMs, this.#nowMs()),
                 });
@@ -1430,7 +1692,8 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
 
     public async observeInFlightRun(
         sessionKey: string,
-        inFlightRun: ChatProviderInFlightRun | undefined
+        inFlightRun: ChatProviderInFlightRun | undefined,
+        observation: ChatProviderObservationBoundary
     ): Promise<void> {
         if (inFlightRun === undefined) {
             await this.#flushExternalCoalescer(sessionKey);
@@ -1438,8 +1701,16 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
             let changed = false;
             if (runs !== undefined) {
                 for (const [providerRunId, run] of runs) {
-                    if (run.source === "provider-in-flight") {
-                        runs.delete(providerRunId);
+                    if (
+                        run.source === "provider-in-flight" &&
+                        externalObservationIsStrictlyNewer(run, observation) &&
+                        (run.abortBoundary === undefined ||
+                            (observation.epoch >
+                                run.abortBoundary.baselineObservationEpoch &&
+                                observation.observedAtMs >
+                                    run.abortBoundary.attemptedAtMs))
+                    ) {
+                        this.#deleteExternalRun(sessionKey, providerRunId);
                         changed = true;
                     }
                 }
@@ -1464,19 +1735,52 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
         );
         if (local !== undefined) return;
         const previous = this.#externalRuns.get(sessionKey)?.get(inFlightRun.runId);
+        if (
+            previous !== undefined &&
+            (!externalObservationIsStrictlyNewer(previous, observation) ||
+                (previous.abortBoundary !== undefined &&
+                    (observation.epoch <=
+                        previous.abortBoundary.baselineObservationEpoch ||
+                        observation.observedAtMs <=
+                            previous.abortBoundary.attemptedAtMs)))
+        ) {
+            return;
+        }
         const mergedParts = mergeExternalInFlightParts(previous, inFlightRun.text);
+        const representedSuffix =
+            previous === undefined || !inFlightRun.text.startsWith(previous.text)
+                ? undefined
+                : inFlightRun.text.slice(previous.text.length);
+        const historyReplayRemainder =
+            representedSuffix === undefined || representedSuffix === ""
+                ? null
+                : representedSuffix;
         const planSteps = inFlightRun.plan?.steps ?? previous?.plan?.steps;
+        const planExplanation =
+            inFlightRun.plan?.explanation ?? previous?.plan?.explanation;
         this.#storeExternalRun(
             boundExternalRunProjection({
-                continuity: previous?.continuity ?? "complete",
+                ...externalAbortBoundaryFields(previous),
+                continuity: "complete",
                 hasUnprojectedActivity:
                     (previous?.hasUnprojectedActivity ?? false) ||
                     mergedParts.projectionTruncated,
+                observationEpoch: Math.max(
+                    previous?.observationEpoch ?? 0,
+                    observation.epoch
+                ),
+                observedAtMs: Math.max(
+                    previous?.observedAtMs ?? 0,
+                    observation.observedAtMs
+                ),
                 parts: [...mergedParts.parts],
                 ...(planSteps === undefined
                     ? {}
                     : {
                           plan: {
+                              ...(planExplanation === undefined
+                                  ? {}
+                                  : { explanation: planExplanation }),
                               phase: "update",
                               steps: [...planSteps],
                           },
@@ -1491,12 +1795,20 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
                 updatedAtMs: Math.max(previous?.updatedAtMs ?? 0, this.#nowMs()),
             })
         );
+        this.#recordExternalObservationKind(
+            sessionKey,
+            inFlightRun.runId,
+            observation.epoch,
+            "history",
+            historyReplayRemainder
+        );
         await this.#repository.signalRuntimeChanged();
     }
 
     public async observeHistoryMessages(
         sessionKey: string,
-        messages: readonly ChatMessage[]
+        messages: readonly ChatMessage[],
+        observation: ChatProviderObservationBoundary
     ): Promise<void> {
         const runs = this.#externalRuns.get(sessionKey);
         if (runs === undefined) return;
@@ -1510,6 +1822,17 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
         );
         let changed = false;
         for (const providerRunId of finalIdentities) {
+            const run = runs.get(providerRunId);
+            if (
+                run !== undefined &&
+                (!externalObservationIsStrictlyNewer(run, observation) ||
+                    (run.abortBoundary !== undefined &&
+                        (observation.epoch <=
+                            run.abortBoundary.baselineObservationEpoch ||
+                            observation.observedAtMs <= run.abortBoundary.attemptedAtMs)))
+            ) {
+                continue;
+            }
             changed = this.#deleteExternalRun(sessionKey, providerRunId) || changed;
         }
         if (!changed) return;
@@ -1728,7 +2051,7 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
     }
 
     async #abortOnce(
-        input: ChatAbortInput,
+        input: LocalChatAbortInput,
         signal?: AbortSignal
     ): Promise<ChatAbortOutput> {
         await this.#touchSubscription(input.sessionKey);
@@ -1804,6 +2127,122 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
         }
     }
 
+    async #abortExternalOnce(
+        input: ExternalChatAbortInput,
+        signal?: AbortSignal
+    ): Promise<ChatAbortOutput> {
+        await this.#touchSubscription(input.sessionKey);
+        await this.#flushExternalCoalescer(input.sessionKey);
+        const externalRun = this.#externalRuns
+            .get(input.sessionKey)
+            ?.get(input.providerRunId);
+        if (externalRun === undefined) {
+            throw new ChatServiceError("not-found");
+        }
+        const previousBoundary = externalRun.abortBoundary;
+        if (previousBoundary?.attemptId === input.abortAttemptId) {
+            if (previousBoundary.settlement === "not-aborted") {
+                return v.parse(chatAbortOutputSchema, {
+                    aborted: false,
+                    abortAttemptId: input.abortAttemptId,
+                    providerRunId: input.providerRunId,
+                });
+            }
+            throw new ChatServiceError("unknown-outcome");
+        }
+        if (
+            previousBoundary !== undefined &&
+            previousBoundary.settlement !== "not-aborted" &&
+            (externalRun.observationEpoch <= previousBoundary.baselineObservationEpoch ||
+                externalRun.observedAtMs <= previousBoundary.attemptedAtMs ||
+                externalRun.updatedAtMs <= previousBoundary.baselineUpdatedAtMs)
+        ) {
+            throw new ChatServiceError("conflict");
+        }
+        const abortBoundary = {
+            attemptId: input.abortAttemptId,
+            attemptedAtMs: this.#nowMs(),
+            baselineObservationEpoch: this.#externalObservationEpoch,
+            baselineUpdatedAtMs: externalRun.updatedAtMs,
+            settlement: "pending" as const,
+        };
+        this.#storeExternalRun(
+            boundExternalRunProjection({ ...externalRun, abortBoundary })
+        );
+        await this.#signalExternalRuntimeChanged();
+        const currentBoundaryRun = (): ChatExternalRun | undefined => {
+            const current = this.#externalRuns
+                .get(input.sessionKey)
+                ?.get(input.providerRunId);
+            return current?.abortBoundary?.attemptId === input.abortAttemptId &&
+                current.abortBoundary.attemptedAtMs === abortBoundary.attemptedAtMs &&
+                current.abortBoundary.baselineObservationEpoch ===
+                    abortBoundary.baselineObservationEpoch &&
+                current.abortBoundary.baselineUpdatedAtMs ===
+                    abortBoundary.baselineUpdatedAtMs
+                ? current
+                : undefined;
+        };
+        try {
+            const acknowledgement = await this.#provider.abort(
+                {
+                    preserveSideRuns: false,
+                    providerRunId: input.providerRunId,
+                    sessionKey: input.sessionKey,
+                },
+                signal
+            );
+            const current = currentBoundaryRun();
+            if (acknowledgement.aborted && current !== undefined) {
+                this.#deleteExternalRun(input.sessionKey, input.providerRunId);
+                await this.#signalExternalRuntimeChanged();
+                if (!this.#externalRuns.has(input.sessionKey)) {
+                    await this.#closeExternalCoalescer(input.sessionKey);
+                }
+            } else if (!acknowledgement.aborted && current !== undefined) {
+                this.#storeExternalRun(
+                    boundExternalRunProjection({
+                        ...current,
+                        abortBoundary: {
+                            ...abortBoundary,
+                            settlement: "not-aborted",
+                        },
+                    })
+                );
+                await this.#signalExternalRuntimeChanged();
+            }
+            return v.parse(chatAbortOutputSchema, {
+                aborted: acknowledgement.aborted,
+                abortAttemptId: input.abortAttemptId,
+                providerRunId: input.providerRunId,
+            });
+        } catch (error) {
+            if (error instanceof ChatProviderUnknownOutcomeError) {
+                const current = currentBoundaryRun();
+                if (current !== undefined) {
+                    this.#storeExternalRun(
+                        boundExternalRunProjection({
+                            ...current,
+                            abortBoundary: {
+                                ...abortBoundary,
+                                settlement: "unknown",
+                            },
+                        })
+                    );
+                    await this.#signalExternalRuntimeChanged();
+                }
+                throw new ChatServiceError("unknown-outcome", { cause: error });
+            }
+            const current = currentBoundaryRun();
+            if (current !== undefined) {
+                const { abortBoundary: _failedBoundary, ...withoutBoundary } = current;
+                this.#storeExternalRun(boundExternalRunProjection(withoutBoundary));
+                await this.#signalExternalRuntimeChanged();
+            }
+            throw this.#serviceFailure(error);
+        }
+    }
+
     public abort(
         rawInput: ChatAbortInput,
         signal?: AbortSignal
@@ -1816,13 +2255,32 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
                 new ChatServiceError("invalid-input", { cause: error })
             );
         }
-        const operationKey = JSON.stringify([input.runId, input.sessionKey]);
+        const operationKey = JSON.stringify([
+            "runId" in input ? "local" : "provider",
+            "runId" in input ? input.runId : input.providerRunId,
+            input.sessionKey,
+        ]);
         const current = this.#abortOperations.get(operationKey);
-        if (current !== undefined) return current;
-        const operation = this.#abortOnce(input, signal);
-        this.#abortOperations.set(operationKey, operation);
+        if (current !== undefined) {
+            if (
+                "providerRunId" in input &&
+                current.abortAttemptId !== input.abortAttemptId
+            ) {
+                return Promise.reject(new ChatServiceError("conflict"));
+            }
+            return current.promise;
+        }
+        const operation =
+            "runId" in input
+                ? this.#abortOnce(input, signal)
+                : this.#abortExternalOnce(input, signal);
+        const trackedOperation: ChatAbortOperation = {
+            ...("providerRunId" in input ? { abortAttemptId: input.abortAttemptId } : {}),
+            promise: operation,
+        };
+        this.#abortOperations.set(operationKey, trackedOperation);
         const clearOperation = (): void => {
-            if (this.#abortOperations.get(operationKey) === operation) {
+            if (this.#abortOperations.get(operationKey) === trackedOperation) {
                 this.#abortOperations.delete(operationKey);
             }
         };
@@ -2161,6 +2619,7 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
         this.#companionAskCount = 0;
         this.#companionGenerations.clear();
         this.#externalRuns.clear();
+        this.#externalObservationKinds.clear();
         this.#externalTruncatedSessions.clear();
         await this.#subscriptions.dispose();
     }

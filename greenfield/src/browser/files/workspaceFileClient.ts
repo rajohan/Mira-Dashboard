@@ -4,6 +4,7 @@ import type {
     ListWorkspaceFilesInput,
     ListWorkspaceFilesOutput,
     PrepareWorkspaceFileContentInput,
+    PrepareWorkspaceFileRevealInput,
     PrepareWorkspaceFileUploadInput,
     PrepareWorkspaceFileWriteInput,
     WorkspaceFileContentTicket,
@@ -16,6 +17,11 @@ import type { DashboardTrpcClient } from "../api/trpcClient.ts";
 /** Browser-owned procedure surface for the workspace-files vertical. */
 export interface WorkspaceFileClient {
     readonly mutation: {
+        (
+            name: "files.prepareReveal",
+            input: PrepareWorkspaceFileRevealInput,
+            options?: TRPCRequestOptions
+        ): Promise<WorkspaceFileContentTicket>;
         (
             name: "files.prepareUpload",
             input: PrepareWorkspaceFileUploadInput,

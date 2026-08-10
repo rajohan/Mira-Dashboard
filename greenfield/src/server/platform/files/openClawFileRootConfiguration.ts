@@ -12,11 +12,13 @@ const openClawManifest = Object.freeze([
         contentPolicy: "redacted-config-json",
         maximumSizeBytes: workspaceFileLimits.maximumTextPreviewBytes,
         segments: Object.freeze(["openclaw.json"]),
+        writable: true,
     }),
     Object.freeze({
         contentPolicy: "raw",
         maximumSizeBytes: workspaceFileLimits.maximumTextPreviewBytes,
         segments: Object.freeze(["hooks", "transforms", "agentmail.ts"]),
+        writable: true,
     }),
 ] satisfies readonly WorkspaceFileManifestEntry[]);
 
@@ -50,6 +52,7 @@ export function assertReviewedOpenClawFileRoot(
                 candidate !== undefined &&
                 candidate.contentPolicy === reviewed.contentPolicy &&
                 candidate.maximumSizeBytes === reviewed.maximumSizeBytes &&
+                candidate.writable === reviewed.writable &&
                 sameSegments(candidate.segments, reviewed.segments)
             );
         })
@@ -73,7 +76,7 @@ function pathsOverlap(left: string, right: string): boolean {
  * Only the fixed manifest is returned; callers never derive this path from HOME.
  * @param openClawRoot Explicit configured OpenClaw home.
  * @param productionRoot Canonical Dashboard production root to fence out.
- * @returns Fixed read-only manifest configuration.
+ * @returns Fixed manifest whose two reviewed files allow CAS replacement only.
  */
 export async function resolveReviewedOpenClawFileRoot(
     openClawRoot: string,

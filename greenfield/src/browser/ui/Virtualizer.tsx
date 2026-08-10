@@ -15,6 +15,8 @@ import {
 
 const defaultInitialRect = Object.freeze({ height: 480, width: 960 });
 const defaultFollowEndThresholdPx = 32;
+const exactEndTolerancePx = 1;
+const overlayScrollbarHitAreaPx = 16;
 const structuralFollowMaximumFrames = 12;
 const structuralFollowStableFrames = 2;
 const nestedScrollRegionSelector = "[data-virtualizer-scroll-region]";
@@ -115,19 +117,31 @@ function isKeyboardScroll(event: KeyboardEvent, container: HTMLDivElement): bool
     return !isNestedScrollRegionTarget(event.target);
 }
 
+function nestedScrollRegionForTarget(target: EventTarget | null): Element | null {
+    return target instanceof Element ? target.closest(nestedScrollRegionSelector) : null;
+}
+
 function isNestedScrollRegionTarget(target: EventTarget | null): boolean {
+    return nestedScrollRegionForTarget(target) !== null;
+}
+
+function nestedScrollRegionConsumesUpwardWheel(target: EventTarget | null): boolean {
+    const region = nestedScrollRegionForTarget(target);
     return (
-        target instanceof Element && target.closest(nestedScrollRegionSelector) !== null
+        region instanceof HTMLElement &&
+        region.scrollHeight > region.clientHeight &&
+        region.scrollTop > 0
     );
 }
 
 function isScrollbarPointer(event: PointerEvent, container: HTMLDivElement): boolean {
+    if (event.target !== container || container.scrollHeight <= container.clientHeight) {
+        return false;
+    }
+    const rightEdge = container.getBoundingClientRect().right;
     const scrollbarWidth = container.offsetWidth - container.clientWidth;
-    return (
-        scrollbarWidth > 0 &&
-        event.target === container &&
-        event.clientX >= container.getBoundingClientRect().right - scrollbarWidth
-    );
+    const hitAreaWidth = scrollbarWidth > 0 ? scrollbarWidth : overlayScrollbarHitAreaPx;
+    return event.clientX >= rightEdge - hitAreaWidth && event.clientX <= rightEdge;
 }
 
 function sameKeys(
@@ -188,6 +202,9 @@ function useFollowToEndController<TItemElement extends Element>({
     const previousScrollTop = useRef(0);
     const stableFrames = useRef(0);
     const structuralFollow = useRef(false);
+    const scrollbarGestureActive = useRef(false);
+    const scrollbarGestureMovedUp = useRef(false);
+    const middleAutoscrollPending = useRef(false);
     const userScrollIntent = useRef(false);
     const wasFollowingWhenHidden = useRef(false);
     const followingReference = useRef(following);
@@ -220,6 +237,8 @@ function useFollowToEndController<TItemElement extends Element>({
         if (element === null) return;
         element.scrollTop = element.scrollHeight;
         previousScrollTop.current = element.scrollTop;
+        middleAutoscrollPending.current = false;
+        scrollbarGestureMovedUp.current = false;
         userScrollIntent.current = false;
         setFollowState(true);
         setAtEnd(true);
@@ -275,6 +294,8 @@ function useFollowToEndController<TItemElement extends Element>({
     }
 
     function followLatest(): void {
+        middleAutoscrollPending.current = false;
+        scrollbarGestureMovedUp.current = false;
         userScrollIntent.current = false;
         setFollowState(true);
         setAtEnd(true);
@@ -290,28 +311,53 @@ function useFollowToEndController<TItemElement extends Element>({
         const element = scrollContainerRef.current;
         if (!enabled || element === null) return;
         const threshold = options?.scrollEndThreshold ?? defaultFollowEndThresholdPx;
-        const nextAtEnd =
-            element.scrollHeight - element.scrollTop - element.clientHeight <= threshold;
+        const distanceFromEnd =
+            element.scrollHeight - element.scrollTop - element.clientHeight;
+        const nextAtEnd = distanceFromEnd <= threshold;
+        const nextAtExactEnd = Math.abs(distanceFromEnd) <= exactEndTolerancePx;
         const moved = Math.abs(element.scrollTop - previousScrollTop.current) > 1;
         const movedUp = element.scrollTop + 1 < previousScrollTop.current;
+        const upwardGestureActive =
+            userScrollIntent.current ||
+            middleAutoscrollPending.current ||
+            scrollbarGestureActive.current;
         const structuralCorrectionPending =
-            movedUp && structuralFollow.current && frame.current !== undefined;
-        if (movedUp && userScrollIntent.current) {
+            movedUp &&
+            structuralFollow.current &&
+            frame.current !== undefined &&
+            !upwardGestureActive;
+        const preserveGestureDetach =
+            !nextAtExactEnd &&
+            (middleAutoscrollPending.current ||
+                (scrollbarGestureActive.current && scrollbarGestureMovedUp.current));
+        if (movedUp && !structuralCorrectionPending && !nextAtExactEnd) {
+            cancelScheduledFollow();
+            userScrollIntent.current = false;
+            middleAutoscrollPending.current = false;
+            if (scrollbarGestureActive.current) {
+                scrollbarGestureMovedUp.current = true;
+            }
+            setFollowState(false);
+        } else if (
+            moved &&
+            userScrollIntent.current &&
+            !structuralCorrectionPending &&
+            !nextAtExactEnd
+        ) {
             cancelScheduledFollow();
             userScrollIntent.current = false;
             setFollowState(false);
-        } else if (nextAtEnd) {
+        } else if (
+            nextAtEnd &&
+            !preserveGestureDetach &&
+            (followingReference.current || nextAtExactEnd)
+        ) {
             userScrollIntent.current = false;
+            if (nextAtExactEnd) {
+                middleAutoscrollPending.current = false;
+                scrollbarGestureMovedUp.current = false;
+            }
             setFollowState(true);
-        } else if (moved && userScrollIntent.current && !structuralCorrectionPending) {
-            cancelScheduledFollow();
-            userScrollIntent.current = false;
-            setFollowState(false);
-        } else if (movedUp && !structuralCorrectionPending) {
-            // TanStack and the browser may move scrollTop while reconciling
-            // measured row sizes. Keep an existing follow anchor unless an
-            // explicit wheel/touch/key/scrollbar gesture preceded the move.
-            scheduleFollow(true);
         }
         previousScrollTop.current = element.scrollTop;
         setAtEnd(nextAtEnd);
@@ -382,6 +428,9 @@ function useFollowToEndController<TItemElement extends Element>({
 
         if (scopeChanged) {
             previousScrollTop.current = 0;
+            middleAutoscrollPending.current = false;
+            scrollbarGestureActive.current = false;
+            scrollbarGestureMovedUp.current = false;
             userScrollIntent.current = false;
             setFollowState(true);
             setAtEnd(true);
@@ -430,23 +479,38 @@ function useFollowToEndController<TItemElement extends Element>({
             if (awayFromEnd) handleUserScrollIntent(true);
         };
         const onPointerDown = (event: PointerEvent) => {
+            if (event.button === 1) {
+                if (isNestedScrollRegionTarget(event.target)) return;
+                middleAutoscrollPending.current = true;
+                handleUserScrollIntent(true);
+                return;
+            }
             if (!isScrollbarPointer(event, element)) return;
             activeScrollbarPointerId = event.pointerId;
+            scrollbarGestureActive.current = true;
+            scrollbarGestureMovedUp.current = false;
             onScrollbarGestureChange(true);
             handleUserScrollIntent(true);
         };
         const onPointerEnd = (event: PointerEvent) => {
             if (event.pointerId !== activeScrollbarPointerId) return;
             activeScrollbarPointerId = undefined;
-            onScrollbarGestureChange(false);
             clearUnusedUserScrollIntent();
+            // Reconcile while the gesture is still marked active so a release
+            // inside the end threshold cannot undo an upward thumb drag.
             handleScroll();
+            scrollbarGestureActive.current = false;
+            scrollbarGestureMovedUp.current = false;
+            onScrollbarGestureChange(false);
         };
         const onScroll = () => handleScroll();
         const onTouchMove = () => handleUserScrollIntent(false);
         const onTouchEnd = () => clearUnusedUserScrollIntent();
         const onWheel = (event: WheelEvent) => {
-            if (event.deltaY < 0 && !isNestedScrollRegionTarget(event.target)) {
+            if (
+                event.deltaY < 0 &&
+                !nestedScrollRegionConsumesUpwardWheel(event.target)
+            ) {
                 handleUserScrollIntent(true);
             }
         };
@@ -479,6 +543,8 @@ function useFollowToEndController<TItemElement extends Element>({
             if (activeScrollbarPointerId !== undefined) {
                 onScrollbarGestureChange(false);
             }
+            scrollbarGestureActive.current = false;
+            scrollbarGestureMovedUp.current = false;
             element.removeEventListener("keydown", onKeyDown);
             element.removeEventListener("pointerdown", onPointerDown);
             element.removeEventListener("scroll", onScroll);

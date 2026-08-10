@@ -16,7 +16,7 @@ interface BunTerminalBrokerSocketData {
     marker: "terminal-broker";
 }
 
-class BunTerminalBrokerByteConnection implements TerminalBrokerByteConnection {
+export class BunTerminalBrokerByteConnection implements TerminalBrokerByteConnection {
     readonly #socket: Bun.Socket<unknown>;
     #closed = false;
     #handlers: Parameters<TerminalBrokerByteConnection["setHandlers"]>[0] = {
@@ -34,7 +34,11 @@ class BunTerminalBrokerByteConnection implements TerminalBrokerByteConnection {
         if (this.#closed) return;
         this.#closed = true;
         this.#pending = new Uint8Array();
-        this.#socket.close();
+        try {
+            this.#socket.close();
+        } finally {
+            this.#handlers.onClose();
+        }
     }
 
     public notifyClose(): void {

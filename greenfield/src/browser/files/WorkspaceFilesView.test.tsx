@@ -77,6 +77,7 @@ function properties() {
             })
         ),
         onRefresh: jest.fn(),
+        onReveal: jest.fn(() => Promise.reject(new Error("Reveal is not expected"))),
         onSelectRoot: jest.fn(),
         onUpload: jest.fn(
             (
@@ -109,6 +110,14 @@ describe("WorkspaceFilesView", () => {
         const props = properties();
         const user = userEvent.setup();
         render(<WorkspaceFilesView {...props} />);
+
+        const fileTree = screen.getByRole("navigation", {
+            name: "Workspace file tree",
+        });
+        expect(fileTree.closest("aside")?.parentElement).toHaveClass(
+            "lg:min-h-0",
+            "lg:flex-1"
+        );
 
         const path = screen.getByRole("navigation", { name: "Workspace file path" });
         const breadcrumbButton = within(path).getByRole("button", {
@@ -364,7 +373,8 @@ describe("WorkspaceFilesView", () => {
             expect(props.onUpload).toHaveBeenCalledWith(
                 file,
                 undefined,
-                directory.resourceId
+                directory.resourceId,
+                undefined
             )
         );
         expect(await screen.findByText(/Your change is queued/u)).toBeTruthy();

@@ -15,6 +15,7 @@ import {
     chatMessageHydrationMaximumBytes,
     chatMessageSchema,
     chatMessagePartSchema,
+    chatPlanExplanationSchema,
     chatPlanStepSchema,
     type ChatMessage,
     type ChatPlanStep,
@@ -96,6 +97,7 @@ export interface PersistentGatewayChatMediaReferenceRegistrar {
 const upstreamInFlightRunSchema = v.strictObject({
     plan: v.optional(
         v.object({
+            explanation: v.optional(chatPlanExplanationSchema),
             steps: v.pipe(v.array(v.unknown()), v.maxLength(64)),
         })
     ),
@@ -485,6 +487,13 @@ function projectMessageParts(
 ): readonly unknown[] | undefined {
     const rawContent = message.content;
     const rawRole = boundedControlString(message.role, 32)?.toLowerCase();
+    const streamFallback = asRecord(message.openclawStreamFallback);
+    let commentaryText: string | undefined;
+    if (rawRole === "assistant" && streamFallback?.source === "segment") {
+        const itemId = boundedControlString(streamFallback.itemId, 256);
+        const replacementText = boundedString(streamFallback.replacementText, 256 * 1024);
+        if (itemId !== undefined) commentaryText = replacementText;
+    }
     let blocks: readonly unknown[];
     if (rawRole?.startsWith("tool") === true) {
         if (Array.isArray(rawContent)) {
@@ -565,10 +574,20 @@ function projectMessageParts(
         if (type === "text" || type === "output_text") {
             const text = boundedString(block.text, 256 * 1024);
             if (text === undefined) return undefined;
-            parts.push({ id: partId, kind: "text", text });
+            parts.push({
+                id: partId,
+                kind: commentaryText === text ? "thinking" : "text",
+                text,
+            });
             continue;
         }
-        if (type === "thinking" || type === "reasoning") {
+        if (
+            type === "thinking" ||
+            type === "reasoning" ||
+            type === "reasoning_text" ||
+            type === "analysis" ||
+            type === "commentary"
+        ) {
             const text = boundedString(block.thinking ?? block.text, 256 * 1024);
             if (text === undefined) return undefined;
             parts.push({ id: partId, kind: "thinking", text });
@@ -816,6 +835,12 @@ function projectPlanSteps(
     return Object.freeze(steps);
 }
 
+function projectPlanExplanation(value: unknown): string | undefined {
+    return value === undefined
+        ? undefined
+        : parseOrUnavailable(chatPlanExplanationSchema, value);
+}
+
 function projectToolEvent(
     event: PersistentGatewayDeliveredChatEvent,
     data: Readonly<Record<string, unknown>>
@@ -928,13 +953,16 @@ function projectProviderEvent(
     if (payload.stream === "assistant") {
         const hasExplicitDelta = typeof data.delta === "string";
         const text = projectChatDeltaText(hasExplicitDelta ? data.delta : data.text);
+        let mode: "append" | "merge" | "replace" = "merge";
+        if (data.replace === true) mode = "replace";
+        else if (hasExplicitDelta) mode = "append";
         return text === undefined
             ? projectNoopEvent(event)
             : Object.freeze({
                   ...eventBase(event),
                   kind: "delta",
-                  mode: hasExplicitDelta ? "append" : "merge",
-                  stream: "assistant",
+                  mode,
+                  stream: data.phase === "commentary" ? "thinking" : "assistant",
                   text,
               });
     }
@@ -954,19 +982,31 @@ function projectProviderEvent(
         });
     }
     if (payload.stream === "tool") return projectToolEvent(event, data);
-    if (payload.stream === "item") return projectItemEvent(event, data);
+    if (payload.stream === "item") {
+        if (data.kind === "preamble") {
+            const text = projectChatDeltaText(data.progressText);
+            if (text !== undefined) {
+                return Object.freeze({
+                    ...eventBase(event),
+                    kind: "delta",
+                    mode: "merge",
+                    stream: "thinking",
+                    text,
+                });
+            }
+        }
+        return projectItemEvent(event, data);
+    }
     if (payload.stream === "plan") {
         if (data.phase !== "update") return projectNoopEvent(event);
-        try {
-            return Object.freeze({
-                ...eventBase(event),
-                kind: "plan",
-                phase: "update",
-                steps: projectPlanSteps(data.steps),
-            });
-        } catch {
-            return projectNoopEvent(event);
-        }
+        const explanation = projectPlanExplanation(data.explanation);
+        return Object.freeze({
+            ...eventBase(event),
+            ...(explanation === undefined ? {} : { explanation }),
+            kind: "plan",
+            phase: "update",
+            steps: projectPlanSteps(data.steps),
+        });
     }
     if (payload.stream === "run_status") {
         const phase = boundedControlString(data.phase, 64)?.replaceAll("_", "-");
@@ -1046,6 +1086,14 @@ class PersistentGatewayChatProviderImplementation implements ChatProvider {
                               ? {}
                               : {
                                     plan: Object.freeze({
+                                        ...(upstream.inFlightRun.plan.explanation ===
+                                        undefined
+                                            ? {}
+                                            : {
+                                                  explanation:
+                                                      upstream.inFlightRun.plan
+                                                          .explanation,
+                                              }),
                                         steps: projectPlanSteps(
                                             upstream.inFlightRun.plan.steps
                                         ),

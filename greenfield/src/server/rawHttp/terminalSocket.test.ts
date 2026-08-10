@@ -183,6 +183,7 @@ function request(
         readonly headers?: Readonly<Record<string, string | undefined>>;
         readonly method?: string;
         readonly path?: string;
+        readonly signal?: AbortSignal;
     } = {}
 ): Request {
     const headers = new Headers({
@@ -201,7 +202,7 @@ function request(
     }
     return new Request(
         `https://dashboard.test${overrides.path ?? `/api/terminal/sessions/${sessionId}/socket`}`,
-        { headers, method: overrides.method ?? "GET" }
+        { headers, method: overrides.method ?? "GET", signal: overrides.signal }
     );
 }
 
@@ -403,6 +404,82 @@ describe("terminal WebSocket raw boundary", () => {
         if (result.kind === "response") expect(result.response.status).toBe(503);
         expect(upgrade.data).toBeUndefined();
         expect(relay.calls).toContain("terminate");
+    });
+
+    test("detaches an attached PTY when the WebSocket upgrade is rejected", async () => {
+        const cases = [
+            {
+                expectedStatus: 400,
+                upgrade: () => false,
+            },
+            {
+                expectedStatus: 503,
+                upgrade: () => {
+                    throw new Error("upgrade failed");
+                },
+            },
+        ] as const;
+
+        for (const candidate of cases) {
+            const relay = relayFixture();
+            const broker = brokerFixture(relay.relay);
+            const boundary = createTerminalSocketBoundary({
+                authenticateCredential: () => authenticatedResolution(),
+                authenticationLifecycle: authenticationLifecycle(),
+                broker: broker.broker,
+                nowMs: () => nowMs,
+            });
+
+            const result = await boundary.handle(request(), terminalUrl(), {
+                upgrade: candidate.upgrade,
+            });
+
+            expect(result.kind).toBe("response");
+            if (result.kind === "response") {
+                expect(result.response.status).toBe(candidate.expectedStatus);
+            }
+            expect(relay.calls).toContain("detach");
+            expect(relay.calls).not.toContain("terminate");
+        }
+    });
+
+    test("detaches an attached PTY when the upgrade request is aborted", async () => {
+        const controller = new AbortController();
+        const relay = relayFixture();
+        const baseBroker = brokerFixture(relay.relay).broker;
+        const broker: InteractiveTerminalBrokerClient = Object.freeze({
+            ...baseBroker,
+            async attach(
+                input: Parameters<InteractiveTerminalBrokerClient["attach"]>[0]
+            ) {
+                controller.abort();
+                return baseBroker.attach(input);
+            },
+        });
+        const boundary = createTerminalSocketBoundary({
+            authenticateCredential: () => authenticatedResolution(),
+            authenticationLifecycle: authenticationLifecycle(),
+            broker,
+            nowMs: () => nowMs,
+        });
+        let upgraded = false;
+
+        const result = await boundary.handle(
+            request({ signal: controller.signal }),
+            terminalUrl(),
+            {
+                upgrade() {
+                    upgraded = true;
+                    return true;
+                },
+            }
+        );
+
+        expect(result.kind).toBe("response");
+        if (result.kind === "response") expect(result.response.status).toBe(503);
+        expect(upgraded).toBeFalse();
+        expect(relay.calls).toContain("detach");
+        expect(relay.calls).not.toContain("terminate");
     });
 
     test("rejects cross-origin, query-secret, and malformed upgrades before consuming a ticket", async () => {

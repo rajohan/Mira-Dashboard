@@ -163,13 +163,13 @@ export const applicationConfigurationRegistry: readonly ApplicationConfiguration
             browserExposure: "none",
             defaultValue: null,
             description:
-                "Explicit reviewed OpenClaw home used only by the fixed read-only Files manifest.",
+                "Explicit reviewed OpenClaw home used only by the fixed Files manifest and worker replacement allowlist.",
             environmentName: "MIRA_DASHBOARD_OPENCLAW_ROOT",
             field: "openClawRoot",
             operationalEffect:
-                "Selects the descriptor-rooted OpenClaw Config tree; arbitrary OpenClaw state remains opaque.",
+                "Selects the descriptor-rooted OpenClaw Config tree; only reviewed config can be explicitly revealed, only two files can be replaced, and arbitrary OpenClaw state remains opaque.",
             restartRequired: true,
-            roles: Object.freeze(["web"]),
+            roles: Object.freeze(["web", "worker"]),
             secret: false,
             validationConstraints: `Non-root normalized absolute path, at most ${applicationConfigurationLimits.openClawRootMaximumLength} code units; startup requires a canonical owner-controlled mode-0700 directory disjoint from Dashboard production state.`,
             valueType: "absolute-path",

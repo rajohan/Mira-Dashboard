@@ -9,6 +9,9 @@ import { createDescriptorWorkspaceFileUploadSpool } from "../../platform/files/d
 import { captureFailure } from "../../test/support/promise.ts";
 import { WorkspaceFileError } from "./errors.ts";
 import type {
+    WorkspaceFileDirectorySnapshot,
+    WorkspaceFileNode,
+    WorkspaceFileReader,
     WorkspaceFileWriteAuditContext,
     WorkspaceFileWriteCommand,
     WorkspaceFileWriteScheduler,
@@ -39,6 +42,7 @@ function fixture(
         readonly getStatus?: WorkspaceFileWriteScheduler["getStatus"];
         readonly includeOpenClaw?: boolean;
         readonly listActiveSpoolIds?: WorkspaceFileWriteScheduler["listActiveSpoolIds"];
+        readonly reader?: WorkspaceFileReader;
     } = {}
 ) {
     const parent = Fs.mkdtempSync(Path.join(Os.tmpdir(), "mira-files-service-"));
@@ -98,38 +102,42 @@ function fixture(
             );
         },
     };
-    const reader = createDescriptorWorkspaceFileReader({
-        roots: [
-            {
-                id: "workspace",
-                label: "Workspace",
-                path: root,
-                writable: true,
-            },
-            ...(options.includeOpenClaw === true
-                ? [
-                      {
-                          id: "openclaw-config",
-                          label: "OpenClaw Config",
-                          manifest: [
-                              {
-                                  contentPolicy: "redacted-config-json" as const,
-                                  maximumSizeBytes: 1_048_576,
-                                  segments: ["openclaw.json"],
-                              },
-                              {
-                                  contentPolicy: "raw" as const,
-                                  maximumSizeBytes: 1_048_576,
-                                  segments: ["hooks", "transforms", "agentmail.ts"],
-                              },
-                          ],
-                          path: openClawRoot,
-                          writable: false,
-                      },
-                  ]
-                : []),
-        ],
-    });
+    const reader =
+        options.reader ??
+        createDescriptorWorkspaceFileReader({
+            roots: [
+                {
+                    id: "workspace",
+                    label: "Workspace",
+                    path: root,
+                    writable: true,
+                },
+                ...(options.includeOpenClaw === true
+                    ? [
+                          {
+                              id: "openclaw-config",
+                              label: "OpenClaw Config",
+                              manifest: [
+                                  {
+                                      contentPolicy: "redacted-config-json" as const,
+                                      maximumSizeBytes: 1_048_576,
+                                      segments: ["openclaw.json"],
+                                      writable: true,
+                                  },
+                                  {
+                                      contentPolicy: "raw" as const,
+                                      maximumSizeBytes: 1_048_576,
+                                      segments: ["hooks", "transforms", "agentmail.ts"],
+                                      writable: true,
+                                  },
+                              ],
+                              path: openClawRoot,
+                              writable: false,
+                          },
+                      ]
+                    : []),
+            ],
+        });
     const spool = createDescriptorWorkspaceFileUploadSpool(spoolRoot, {
         nowMs: () => now,
     });
@@ -152,6 +160,85 @@ function fixture(
             now = value;
         },
         spoolRoot,
+    };
+}
+
+function largeDirectoryReader(entryCount: number): WorkspaceFileReader {
+    const directory = Object.freeze<WorkspaceFileNode>({
+        kind: "directory",
+        locator: { rootId: "workspace", segments: [] },
+        name: "Workspace",
+        revision: "0".repeat(64),
+        writable: true,
+    });
+    const entries = Object.freeze(
+        Array.from({ length: entryCount }, (_, index) => {
+            const name = `file-${String(index).padStart(4, "0")}.txt`;
+            return Object.freeze<WorkspaceFileNode>({
+                kind: "file",
+                locator: { rootId: "workspace", segments: [name] },
+                mimeType: "text/plain",
+                name,
+                previewKind: "text",
+                revision: String(index + 1)
+                    .padStart(64, "0")
+                    .slice(-64),
+                sizeBytes: 1,
+                writable: true,
+            });
+        })
+    );
+    const reader: WorkspaceFileReader = {
+        describe(locator) {
+            const node =
+                locator.segments.length === 0
+                    ? directory
+                    : entries.find((entry) => entry.name === locator.segments.at(-1));
+            if (node === undefined) throw new WorkspaceFileError("not-found");
+            return Promise.resolve(node);
+        },
+        dispose() {},
+        list() {
+            return Promise.resolve({
+                directory: { ...directory, kind: "directory" as const },
+                entries,
+            });
+        },
+        read() {
+            return Promise.reject(new WorkspaceFileError("not-found"));
+        },
+        roots() {
+            return [{ id: "workspace", label: "Workspace", writable: true }];
+        },
+    };
+    return Object.freeze(reader);
+}
+
+function directorySnapshot(
+    prefix: string,
+    revision: string
+): WorkspaceFileDirectorySnapshot {
+    return {
+        directory: {
+            kind: "directory",
+            locator: { rootId: "workspace", segments: [] },
+            name: "Workspace",
+            revision,
+            writable: true,
+        },
+        entries: [1, 2].map((index) => ({
+            kind: "file" as const,
+            locator: {
+                rootId: "workspace",
+                segments: [`${prefix}-${index}.txt`],
+            },
+            mimeType: "text/plain",
+            name: `${prefix}-${index}.txt`,
+            previewKind: "text" as const,
+            revision: String(index).repeat(64),
+            sizeBytes: 1,
+            writable: true,
+        })),
     };
 }
 
@@ -209,6 +296,438 @@ describe("workspace files service", () => {
         ).toMatchObject({ reason: "conflict" });
     });
 
+    test("does not let another actor invalidate the owner's cursor", async () => {
+        const { root, service } = fixture();
+        Fs.writeFileSync(Path.join(root, "a.txt"), "a");
+        Fs.writeFileSync(Path.join(root, "b.txt"), "b");
+        const roots = await service.listRoots(actor);
+        const directoryId = roots.roots[0]!.resourceId;
+        const first = await service.list(actor, { directoryId, limit: 1 });
+
+        expect(
+            await captureFailure(() =>
+                service.list(otherActor, {
+                    cursor: first.nextCursor,
+                    directoryId,
+                    limit: 1,
+                })
+            )
+        ).toMatchObject({ reason: "not-found" });
+
+        const second = await service.list(actor, {
+            cursor: first.nextCursor,
+            directoryId,
+            limit: 1,
+        });
+        expect(second.entries[0]?.name).toBe("b.txt");
+    });
+
+    test("replaces a near-capacity directory snapshot when its first page refreshes", async () => {
+        const { service } = fixture({
+            reader: largeDirectoryReader(workspaceFileLimits.maximumDirectoryEntries - 1),
+        });
+        const roots = await service.listRoots(actor);
+        const directoryId = roots.roots[0]!.resourceId;
+        const first = await service.list(actor, {
+            directoryId,
+            limit: workspaceFileLimits.listPageMaximum,
+        });
+        const firstEntryId = first.entries[0]!.resourceId;
+        const contentTicket = await service.prepareContent(actor, {
+            disposition: "preview",
+            resourceId: firstEntryId,
+        });
+        expect(first.entries).toHaveLength(workspaceFileLimits.listPageMaximum);
+        expect(first.nextCursor).toBeDefined();
+
+        const refreshed = await service.list(actor, {
+            directoryId,
+            limit: workspaceFileLimits.listPageMaximum,
+        });
+        expect(refreshed.entries).toHaveLength(workspaceFileLimits.listPageMaximum);
+        expect(refreshed.entries[0]!.resourceId).not.toBe(firstEntryId);
+        expect(refreshed.nextCursor).toBeDefined();
+        expect(await service.inspectContent(actor, contentTicket.ticketId)).toMatchObject(
+            {
+                fileName: first.entries[0]!.name,
+                revision: first.entries[0]!.revision,
+            }
+        );
+
+        expect(
+            await captureFailure(() =>
+                service.list(actor, {
+                    cursor: first.nextCursor,
+                    directoryId,
+                    limit: workspaceFileLimits.listPageMaximum,
+                })
+            )
+        ).toMatchObject({ reason: "not-found" });
+        expect(
+            await captureFailure(() =>
+                service.prepareContent(actor, {
+                    disposition: "preview",
+                    resourceId: firstEntryId,
+                })
+            )
+        ).toMatchObject({ reason: "not-found" });
+
+        const next = await service.list(actor, {
+            cursor: refreshed.nextCursor,
+            directoryId,
+            limit: workspaceFileLimits.listPageMaximum,
+        });
+        expect(next.entries).toHaveLength(workspaceFileLimits.listPageMaximum);
+    });
+
+    test("cascades parent replacement through a materialized child snapshot", async () => {
+        const rootDirectory: WorkspaceFileNode & { readonly kind: "directory" } = {
+            kind: "directory",
+            locator: { rootId: "workspace", segments: [] },
+            name: "Workspace",
+            revision: "0".repeat(64),
+            writable: true,
+        };
+        const childDirectory: WorkspaceFileNode & { readonly kind: "directory" } = {
+            kind: "directory",
+            locator: { rootId: "workspace", segments: ["child"] },
+            name: "child",
+            revision: "1".repeat(64),
+            writable: true,
+        };
+        const childEntries = Array.from(
+            { length: workspaceFileLimits.maximumDirectoryEntries },
+            (_, index) => {
+                const name = `file-${String(index).padStart(4, "0")}.txt`;
+                return {
+                    kind: "file" as const,
+                    locator: {
+                        rootId: "workspace",
+                        segments: ["child", name],
+                    },
+                    mimeType: "text/plain",
+                    name,
+                    previewKind: "text" as const,
+                    revision: (index % 16).toString(16).repeat(64),
+                    sizeBytes: 1,
+                    writable: true,
+                };
+            }
+        );
+        const rootEntries = childEntries.map((entry) => ({
+            ...entry,
+            locator: {
+                rootId: "workspace",
+                segments: [entry.name],
+            },
+        }));
+        let rootReads = 0;
+        const reader: WorkspaceFileReader = {
+            describe(locator) {
+                if (locator.segments.length === 0) return Promise.resolve(rootDirectory);
+                if (locator.segments.length === 1) {
+                    return Promise.resolve(childDirectory);
+                }
+                const node = childEntries.find(
+                    (entry) => entry.name === locator.segments.at(-1)
+                );
+                if (node === undefined) throw new WorkspaceFileError("not-found");
+                return Promise.resolve(node);
+            },
+            dispose() {},
+            list(locator) {
+                if (locator.segments.length > 0) {
+                    return Promise.resolve({
+                        directory: childDirectory,
+                        entries: childEntries,
+                    });
+                }
+                rootReads += 1;
+                return Promise.resolve({
+                    directory: rootDirectory,
+                    entries: rootReads === 2 ? rootEntries : [childDirectory],
+                });
+            },
+            read() {
+                return Promise.reject(new WorkspaceFileError("not-found"));
+            },
+            roots() {
+                return [{ id: "workspace", label: "Workspace", writable: true }];
+            },
+        };
+        const { service } = fixture({ reader });
+        const roots = await service.listRoots(actor);
+        const directoryId = roots.roots[0]!.resourceId;
+        const firstRoot = await service.list(actor, { directoryId, limit: 1 });
+        const firstChild = await service.list(actor, {
+            directoryId: firstRoot.entries[0]!.resourceId,
+            limit: workspaceFileLimits.listPageMaximum,
+        });
+        const secondRoot = await service.list(actor, { directoryId, limit: 1 });
+        expect(secondRoot.entries[0]?.name).toBe("file-0000.txt");
+        expect(secondRoot.nextCursor).toBeDefined();
+
+        expect(
+            await captureFailure(() =>
+                service.list(actor, {
+                    cursor: firstChild.nextCursor,
+                    directoryId: firstRoot.entries[0]!.resourceId,
+                    limit: workspaceFileLimits.listPageMaximum,
+                })
+            )
+        ).toMatchObject({ reason: "not-found" });
+
+        const thirdRoot = await service.list(actor, { directoryId, limit: 1 });
+        const secondChild = await service.list(actor, {
+            directoryId: thirdRoot.entries[0]!.resourceId,
+            limit: workspaceFileLimits.listPageMaximum,
+        });
+        expect(secondChild.entries).toHaveLength(workspaceFileLimits.listPageMaximum);
+        expect(secondChild.nextCursor).toBeDefined();
+    });
+
+    test("expires every cursor with its snapshot resources", async () => {
+        const { root, service, setNow } = fixture();
+        Fs.writeFileSync(Path.join(root, "a.txt"), "a");
+        Fs.writeFileSync(Path.join(root, "b.txt"), "b");
+        Fs.writeFileSync(Path.join(root, "c.txt"), "c");
+        const initialNow = 1_800_000_000_000;
+        const roots = await service.listRoots(actor);
+        const directoryId = roots.roots[0]!.resourceId;
+        setNow(initialNow + workspaceFileLimits.referenceTtlMs - 2);
+        const first = await service.list(actor, { directoryId, limit: 1 });
+
+        setNow(initialNow + workspaceFileLimits.referenceTtlMs - 1);
+        const second = await service.list(actor, {
+            cursor: first.nextCursor,
+            directoryId,
+            limit: 1,
+        });
+        const contentTicket = await service.prepareContent(actor, {
+            disposition: "preview",
+            resourceId: second.entries[0]!.resourceId,
+        });
+
+        setNow(initialNow + workspaceFileLimits.referenceTtlMs);
+        expect(
+            await captureFailure(() =>
+                service.list(actor, {
+                    cursor: second.nextCursor,
+                    directoryId,
+                    limit: 1,
+                })
+            )
+        ).toMatchObject({ reason: "not-found" });
+        expect(await service.inspectContent(actor, contentTicket.ticketId)).toMatchObject(
+            { fileName: "b.txt" }
+        );
+    });
+
+    test("keeps a newer concurrent refresh when an older read completes last", async () => {
+        const firstRead = Promise.withResolvers<WorkspaceFileDirectorySnapshot>();
+        const secondRead = Promise.withResolvers<WorkspaceFileDirectorySnapshot>();
+        const olderSnapshot = directorySnapshot("older", "a".repeat(64));
+        const newerSnapshot = directorySnapshot("newer", "b".repeat(64));
+        const nodes = new Map(
+            [...olderSnapshot.entries, ...newerSnapshot.entries].map((node) => [
+                node.name,
+                node,
+            ])
+        );
+        let listCalls = 0;
+        const reader: WorkspaceFileReader = {
+            describe(locator) {
+                const node =
+                    locator.segments.length === 0
+                        ? newerSnapshot.directory
+                        : nodes.get(locator.segments.at(-1)!);
+                if (node === undefined) throw new WorkspaceFileError("not-found");
+                return Promise.resolve(node);
+            },
+            dispose() {},
+            list() {
+                listCalls += 1;
+                if (listCalls === 1) return firstRead.promise;
+                if (listCalls === 2) return secondRead.promise;
+                return Promise.reject(new Error("Unexpected directory read"));
+            },
+            read() {
+                return Promise.reject(new WorkspaceFileError("not-found"));
+            },
+            roots() {
+                return [{ id: "workspace", label: "Workspace", writable: true }];
+            },
+        };
+        const { service } = fixture({ reader });
+        const roots = await service.listRoots(actor);
+        const directoryId = roots.roots[0]!.resourceId;
+        const older = service.list(actor, { directoryId, limit: 1 });
+        const newer = service.list(actor, { directoryId, limit: 1 });
+        expect(listCalls).toBe(2);
+
+        secondRead.resolve(newerSnapshot);
+        const newerPage = await newer;
+        firstRead.resolve(olderSnapshot);
+
+        expect(await captureFailure(() => older)).toMatchObject({
+            reason: "conflict",
+        });
+        expect(newerPage.entries[0]?.name).toBe("newer-1.txt");
+        const ticket = await service.prepareContent(actor, {
+            disposition: "preview",
+            resourceId: newerPage.entries[0]!.resourceId,
+        });
+        expect(ticket.fileName).toBe("newer-1.txt");
+        const next = await service.list(actor, {
+            cursor: newerPage.nextCursor,
+            directoryId,
+            limit: 1,
+        });
+        expect(next.entries[0]?.name).toBe("newer-2.txt");
+    });
+
+    test("does not publish an aborted directory refresh", async () => {
+        const pendingRefresh = Promise.withResolvers<WorkspaceFileDirectorySnapshot>();
+        const olderSnapshot = directorySnapshot("older", "a".repeat(64));
+        const newerSnapshot = directorySnapshot("newer", "b".repeat(64));
+        let listCalls = 0;
+        const reader: WorkspaceFileReader = {
+            describe(locator) {
+                const node = [...olderSnapshot.entries, ...newerSnapshot.entries].find(
+                    (entry) => entry.name === locator.segments.at(-1)
+                );
+                return Promise.resolve(node ?? olderSnapshot.directory);
+            },
+            dispose() {},
+            list() {
+                listCalls += 1;
+                return listCalls === 1
+                    ? Promise.resolve(olderSnapshot)
+                    : pendingRefresh.promise;
+            },
+            read() {
+                return Promise.reject(new WorkspaceFileError("not-found"));
+            },
+            roots() {
+                return [{ id: "workspace", label: "Workspace", writable: true }];
+            },
+        };
+        const { service } = fixture({ reader });
+        const roots = await service.listRoots(actor);
+        const directoryId = roots.roots[0]!.resourceId;
+        const first = await service.list(actor, { directoryId, limit: 1 });
+        const controller = new AbortController();
+        const refresh = service.list(actor, { directoryId, limit: 1 }, controller.signal);
+        const abortReason = new Error("Directory refresh cancelled");
+
+        pendingRefresh.resolve(newerSnapshot);
+        controller.abort(abortReason);
+
+        expect(await captureFailure(() => refresh)).toBe(abortReason);
+        const second = await service.list(actor, {
+            cursor: first.nextCursor,
+            directoryId,
+            limit: 1,
+        });
+        expect(second.entries[0]?.name).toBe("older-2.txt");
+    });
+
+    test("rejects a refresh whose directory authority expires while reading", async () => {
+        const pendingRefresh = Promise.withResolvers<WorkspaceFileDirectorySnapshot>();
+        const snapshot = directorySnapshot("entry", "a".repeat(64));
+        const { service, setNow } = fixture({
+            reader: {
+                describe() {
+                    return Promise.resolve(snapshot.directory);
+                },
+                dispose() {},
+                list() {
+                    return pendingRefresh.promise;
+                },
+                read() {
+                    return Promise.reject(new WorkspaceFileError("not-found"));
+                },
+                roots() {
+                    return [{ id: "workspace", label: "Workspace", writable: true }];
+                },
+            },
+        });
+        const initialNow = 1_800_000_000_000;
+        const roots = await service.listRoots(actor);
+        const directoryId = roots.roots[0]!.resourceId;
+        const refresh = service.list(actor, { directoryId, limit: 1 });
+
+        setNow(initialNow + workspaceFileLimits.referenceTtlMs);
+        pendingRefresh.resolve(snapshot);
+
+        expect(await captureFailure(() => refresh)).toMatchObject({
+            reason: "not-found",
+        });
+        const refreshedRoots = await service.listRoots(actor);
+        expect(refreshedRoots.roots[0]!.resourceId).not.toBe(directoryId);
+    });
+
+    test("rejects a child refresh revoked by a newer parent snapshot", async () => {
+        const childRefresh = Promise.withResolvers<WorkspaceFileDirectorySnapshot>();
+        const rootSnapshot = directorySnapshot("unused", "0".repeat(64));
+        const childDirectory: WorkspaceFileNode & { readonly kind: "directory" } = {
+            kind: "directory",
+            locator: { rootId: "workspace", segments: ["child"] },
+            name: "child",
+            revision: "1".repeat(64),
+            writable: true,
+        };
+        let rootReads = 0;
+        const reader: WorkspaceFileReader = {
+            describe(locator) {
+                return Promise.resolve(
+                    locator.segments.length === 0
+                        ? rootSnapshot.directory
+                        : childDirectory
+                );
+            },
+            dispose() {},
+            list(locator) {
+                if (locator.segments.length > 0) return childRefresh.promise;
+                rootReads += 1;
+                return Promise.resolve({
+                    directory: rootSnapshot.directory,
+                    entries: rootReads === 1 ? [childDirectory] : [],
+                });
+            },
+            read() {
+                return Promise.reject(new WorkspaceFileError("not-found"));
+            },
+            roots() {
+                return [{ id: "workspace", label: "Workspace", writable: true }];
+            },
+        };
+        const { service } = fixture({ reader });
+        const roots = await service.listRoots(actor);
+        const directoryId = roots.roots[0]!.resourceId;
+        const parent = await service.list(actor, { directoryId, limit: 1 });
+        const childDirectoryId = parent.entries[0]!.resourceId;
+        const inFlightChild = service.list(actor, {
+            directoryId: childDirectoryId,
+            limit: 1,
+        });
+
+        await service.list(actor, { directoryId, limit: 1 });
+        childRefresh.resolve({
+            directory: childDirectory,
+            entries: rootSnapshot.entries,
+        });
+
+        expect(await captureFailure(() => inFlightChild)).toMatchObject({
+            reason: "conflict",
+        });
+        expect(
+            await captureFailure(() =>
+                service.list(actor, { directoryId: childDirectoryId, limit: 1 })
+            )
+        ).toMatchObject({ reason: "not-found" });
+    });
+
     test("binds content tickets to actor, revision, disposition, and expiry", async () => {
         const { root, service, setNow } = fixture();
         Fs.writeFileSync(Path.join(root, "notes.md"), "abcdef");
@@ -250,7 +769,7 @@ describe("workspace files service", () => {
         ).toMatchObject({ reason: "expired" });
     });
 
-    test("publishes the redacted OpenClaw tree while denying every write path", async () => {
+    test("requires explicit reveal for config edits and allows only reviewed hook replacement", async () => {
         const { service } = fixture({ includeOpenClaw: true });
         const roots = await service.listRoots(actor);
         expect(
@@ -269,6 +788,10 @@ describe("workspace files service", () => {
             limit: 10,
         });
         const config = listing.entries.find(({ name }) => name === "openclaw.json")!;
+        expect(config).toMatchObject({
+            requiresSecretReveal: true,
+            writable: true,
+        });
         const ticket = await service.prepareContent(actor, {
             disposition: "preview",
             resourceId: config.resourceId,
@@ -291,6 +814,45 @@ describe("workspace files service", () => {
                 })
             )
         ).toMatchObject({ reason: "access-denied" });
+        const revealed = await service.prepareReveal(actor, {
+            resourceId: config.resourceId,
+        });
+        const raw = await service.readContent(actor, revealed.ticketId, undefined);
+        expect(new TextDecoder().decode(raw.bytes)).toContain("service-raw-secret");
+        expect(
+            await service.prepareWrite(actor, {
+                expectedRevision: config.revision,
+                mimeType: "application/json",
+                revealTicketId: revealed.ticketId,
+                resourceId: config.resourceId,
+                sizeBytes: 2,
+            })
+        ).toMatchObject({ uploadUrl: expect.stringContaining("/api/files/uploads/") });
+
+        const hooks = listing.entries.find(({ name }) => name === "hooks")!;
+        const hooksListing = await service.list(actor, {
+            directoryId: hooks.resourceId,
+            limit: 10,
+        });
+        const transforms = hooksListing.entries.find(
+            ({ name }) => name === "transforms"
+        )!;
+        const transformsListing = await service.list(actor, {
+            directoryId: transforms.resourceId,
+            limit: 10,
+        });
+        const agentmail = transformsListing.entries.find(
+            ({ name }) => name === "agentmail.ts"
+        )!;
+        expect(agentmail).toMatchObject({ writable: true });
+        expect(
+            await service.prepareWrite(actor, {
+                expectedRevision: agentmail.revision,
+                mimeType: "text/plain",
+                resourceId: agentmail.resourceId,
+                sizeBytes: 12,
+            })
+        ).toMatchObject({ uploadUrl: expect.stringContaining("/api/files/uploads/") });
         expect(
             await captureFailure(() =>
                 service.prepareUpload(actor, {
