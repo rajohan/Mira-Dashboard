@@ -100,6 +100,83 @@ describe("workspace file transfers", () => {
         expect(fetcher).not.toHaveBeenCalled();
     });
 
+    test("forwards an oversized reveal authority without materializing raw config", async () => {
+        const oversizedTextBytes = workspaceFileLimits.maximumTextPreviewBytes + 1;
+        const uploadTicketId = "44444444-4444-4444-8444-444444444444";
+        const secretEntry: WorkspaceFileEntry = {
+            ...entry,
+            mimeType: "application/json",
+            name: "openclaw.json",
+            previewKind: "download-only",
+            requiresSecretReveal: true,
+            sizeBytes: oversizedTextBytes,
+        };
+        const revealTicket: WorkspaceFileContentTicket = {
+            ...contentTicket(),
+            fileName: secretEntry.name,
+            mimeType: "application/json",
+            previewKind: "download-only",
+            sizeBytes: oversizedTextBytes,
+        };
+        const mutation = jest.fn((...arguments_: unknown[]) =>
+            arguments_[0] === "files.prepareReveal"
+                ? Promise.resolve(revealTicket)
+                : Promise.resolve({
+                      expiresAtMs: Date.now() + 60_000,
+                      ticketId: uploadTicketId,
+                      uploadUrl: `/api/files/uploads/${uploadTicketId}`,
+                  })
+        );
+        const fetcher = jest.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+            expect(init?.method).toBe("PUT");
+            return Promise.resolve(
+                Response.json(
+                    {
+                        acceptedAtMs: Date.now(),
+                        jobRunId: "oversized-config-repair",
+                        ticketId: uploadTicketId,
+                    },
+                    { status: 202 }
+                )
+            );
+        });
+
+        const revealed = await revealWorkspaceFileSecrets(
+            client({ mutation }),
+            secretEntry,
+            new AbortController().signal,
+            fetcher
+        );
+        expect(revealed).toEqual({
+            revealTicketId: ticketId,
+            secretsRevealed: true,
+            ticket: revealTicket,
+        });
+        expect(fetcher).not.toHaveBeenCalled();
+
+        await uploadWorkspaceFile(
+            client({ mutation }),
+            {
+                expectedRevision: revision,
+                file: new File(["{}"], "openclaw.json", {
+                    type: "application/json",
+                }),
+                kind: "replace",
+                mimeType: "application/json",
+                revealTicketId: revealed.revealTicketId,
+                resourceId: entryId,
+            },
+            new AbortController().signal,
+            fetcher
+        );
+        expect(mutation).toHaveBeenLastCalledWith(
+            "files.prepareWrite",
+            expect.objectContaining({ revealTicketId: ticketId }),
+            expect.anything()
+        );
+        expect(fetcher).toHaveBeenCalledTimes(1);
+    });
+
     test("reveals config through an uncached mutation and binds its write ticket", async () => {
         const secretEntry: WorkspaceFileEntry = {
             ...entry,

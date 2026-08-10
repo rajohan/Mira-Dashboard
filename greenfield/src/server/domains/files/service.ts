@@ -38,11 +38,13 @@ import type {
     WorkspaceFileReadResult,
     WorkspaceFileReader,
     WorkspaceFileSpoolReceipt,
+    WorkspaceFileUploadContentPolicy,
     WorkspaceFileUploadSpool,
     WorkspaceFileWriteAuditContext,
     WorkspaceFileWriteCommand,
     WorkspaceFileWriteScheduler,
 } from "./ports.ts";
+import { rejectRedactionSentinel } from "./uploadContentGuard.ts";
 
 export interface WorkspaceFileActor {
     readonly authenticatorId: string;
@@ -192,6 +194,7 @@ interface UploadTicketRecord extends ExpiringActorRecord {
     readonly id: string;
     reconciliation?: Promise<WorkspaceFileUploadAccepted | undefined>;
     state: UploadTicketState;
+    readonly uploadContentPolicy?: WorkspaceFileUploadContentPolicy;
 }
 
 function actorKey(actor: WorkspaceFileActor): string {
@@ -794,7 +797,8 @@ export function createWorkspaceFilesService(
     function createUploadTicket(
         key: string,
         now: number,
-        command: Omit<WorkspaceFileWriteCommand, "sha256" | "spoolId" | "ticketId">
+        command: Omit<WorkspaceFileWriteCommand, "sha256" | "spoolId" | "ticketId">,
+        uploadContentPolicy?: WorkspaceFileUploadContentPolicy
     ): WorkspaceFileUploadTicket {
         reserveCapacity(1, now);
         const ticketId = nextId();
@@ -805,6 +809,7 @@ export function createWorkspaceFilesService(
             expiresAtMs,
             id: ticketId,
             state: { kind: "prepared" },
+            ...(uploadContentPolicy === undefined ? {} : { uploadContentPolicy }),
         });
         return v.parse(workspaceFileUploadTicketSchema, {
             expiresAtMs,
@@ -897,15 +902,21 @@ export function createWorkspaceFilesService(
             reserveCapacity(0, checkedNow());
             const spoolId = nextId();
             record.state = { kind: "receiving", spoolId };
+            let guardedBody: ReadableStream<Uint8Array> | undefined;
             let receipt: Awaited<ReturnType<WorkspaceFileUploadSpool["receive"]>>;
             try {
+                guardedBody =
+                    record.uploadContentPolicy === "reject-redaction-sentinel"
+                        ? rejectRedactionSentinel(body)
+                        : undefined;
                 receipt = await dependencies.spool.receive({
-                    body,
+                    body: guardedBody ?? body,
                     expectedBytes: record.command.sizeBytes,
                     signal,
                     spoolId,
                 });
             } catch (error) {
+                await guardedBody?.cancel(error).catch(() => {});
                 record.state = { kind: "prepared" };
                 throw workspaceFileError(error);
             }
@@ -1231,9 +1242,26 @@ export function createWorkspaceFilesService(
         async prepareWrite(actor, rawInput, signal) {
             const input = v.parse(prepareWorkspaceFileWriteInputSchema, rawInput);
             const resource = resolveResource(actor, input.resourceId, "file");
+            let reveal: ContentTicketRecord | undefined;
+            if (input.revealTicketId !== undefined) {
+                reveal = resolveContentRecord(actor, input.revealTicketId);
+                if (
+                    reveal.contentAccess !== "reveal-secrets" ||
+                    !sameLocator(reveal.locator, resource.locator)
+                ) {
+                    throw new WorkspaceFileError("access-denied");
+                }
+                if (reveal.ticket.revision !== input.expectedRevision) {
+                    throw new WorkspaceFileError("conflict");
+                }
+            }
             let node: WorkspaceFileNode;
             try {
-                node = await dependencies.reader.describe(resource.locator, signal);
+                node = await dependencies.reader.describe(
+                    resource.locator,
+                    signal,
+                    reveal === undefined ? "default" : "reveal-secrets"
+                );
             } catch (error) {
                 throw workspaceFileError(error);
             }
@@ -1252,31 +1280,26 @@ export function createWorkspaceFilesService(
                 throw new WorkspaceFileError("conflict");
             }
             if (node.requiresSecretReveal === true) {
-                if (input.revealTicketId === undefined) {
+                if (reveal === undefined) {
                     throw new WorkspaceFileError("access-denied");
                 }
-                const reveal = resolveContentRecord(actor, input.revealTicketId);
-                if (
-                    reveal.contentAccess !== "reveal-secrets" ||
-                    !sameLocator(reveal.locator, resource.locator)
-                ) {
-                    throw new WorkspaceFileError("access-denied");
-                }
-                if (reveal.ticket.revision !== input.expectedRevision) {
-                    throw new WorkspaceFileError("conflict");
-                }
-            } else if (input.revealTicketId !== undefined) {
+            } else if (reveal !== undefined) {
                 throw new WorkspaceFileError("invalid-input");
             }
             const now = checkedNow();
-            return createUploadTicket(actorKey(actor), now, {
-                expectedRevision: input.expectedRevision,
-                fileName: node.name,
-                locator: resource.locator,
-                mimeType: input.mimeType,
-                operation: "replace",
-                sizeBytes: input.sizeBytes,
-            });
+            return createUploadTicket(
+                actorKey(actor),
+                now,
+                {
+                    expectedRevision: input.expectedRevision,
+                    fileName: node.name,
+                    locator: resource.locator,
+                    mimeType: input.mimeType,
+                    operation: "replace",
+                    sizeBytes: input.sizeBytes,
+                },
+                node.uploadContentPolicy
+            );
         },
         async readContent(actor, ticketId, range, signal) {
             const record = resolveContentRecord(actor, ticketId);

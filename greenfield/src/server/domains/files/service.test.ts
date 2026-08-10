@@ -4,6 +4,7 @@ import Os from "node:os";
 import Path from "node:path";
 
 import { workspaceFileLimits } from "../../../contracts/files.ts";
+import { CONFIG_REDACTION_SENTINEL } from "../../../shared/configRedaction.ts";
 import { createDescriptorWorkspaceFileReader } from "../../platform/files/descriptorWorkspaceFileReader.ts";
 import { createDescriptorWorkspaceFileUploadSpool } from "../../platform/files/descriptorWorkspaceFileUploadSpool.ts";
 import { captureFailure } from "../../test/support/promise.ts";
@@ -12,6 +13,7 @@ import type {
     WorkspaceFileDirectorySnapshot,
     WorkspaceFileNode,
     WorkspaceFileReader,
+    WorkspaceFileUploadSpool,
     WorkspaceFileWriteAuditContext,
     WorkspaceFileWriteCommand,
     WorkspaceFileWriteScheduler,
@@ -36,6 +38,27 @@ function body(contents: string): ReadableStream<Uint8Array> {
     });
 }
 
+function chunkedBody(...contents: readonly string[]): ReadableStream<Uint8Array> {
+    return new ReadableStream({
+        start(controller) {
+            for (const content of contents) {
+                controller.enqueue(new TextEncoder().encode(content));
+            }
+            controller.close();
+        },
+    });
+}
+
+function splitSentinelBody(prefix = "", suffix = ""): ReadableStream<Uint8Array> {
+    const firstBoundary = Math.floor(CONFIG_REDACTION_SENTINEL.length / 3);
+    const secondBoundary = Math.floor((CONFIG_REDACTION_SENTINEL.length * 2) / 3);
+    return chunkedBody(
+        prefix + CONFIG_REDACTION_SENTINEL.slice(0, firstBoundary),
+        CONFIG_REDACTION_SENTINEL.slice(firstBoundary, secondBoundary),
+        CONFIG_REDACTION_SENTINEL.slice(secondBoundary) + suffix
+    );
+}
+
 function fixture(
     options: {
         readonly discardFailures?: number;
@@ -44,6 +67,7 @@ function fixture(
         readonly includeOpenClaw?: boolean;
         readonly listActiveSpoolIds?: WorkspaceFileWriteScheduler["listActiveSpoolIds"];
         readonly reader?: WorkspaceFileReader;
+        readonly receive?: WorkspaceFileUploadSpool["receive"];
         readonly reconcileEnqueue?: WorkspaceFileWriteScheduler["reconcileEnqueue"];
     } = {}
 ) {
@@ -130,14 +154,20 @@ function fixture(
                               manifest: [
                                   {
                                       contentPolicy: "redacted-config-json" as const,
-                                      maximumSizeBytes: 1_048_576,
+                                      maximumSizeBytes:
+                                          workspaceFileLimits.maximumManifestFileBytes,
                                       segments: ["openclaw.json"],
+                                      uploadContentPolicy:
+                                          "reject-redaction-sentinel" as const,
                                       writable: true,
                                   },
                                   {
                                       contentPolicy: "raw" as const,
-                                      maximumSizeBytes: 1_048_576,
+                                      maximumSizeBytes:
+                                          workspaceFileLimits.maximumManifestFileBytes,
                                       segments: ["hooks", "transforms", "agentmail.ts"],
+                                      uploadContentPolicy:
+                                          "reject-redaction-sentinel" as const,
                                       writable: true,
                                   },
                               ],
@@ -161,6 +191,9 @@ function fixture(
                 return Promise.reject(new Error("discard unavailable"));
             }
             return descriptorSpool.discard(spoolId);
+        },
+        receive(input: Parameters<WorkspaceFileUploadSpool["receive"]>[0]) {
+            return options.receive?.(input) ?? descriptorSpool.receive(input);
         },
     };
     const service = createWorkspaceFilesService({
@@ -792,7 +825,12 @@ describe("workspace files service", () => {
     });
 
     test("requires explicit reveal for config edits and allows only reviewed hook replacement", async () => {
-        const { service } = fixture({ includeOpenClaw: true });
+        const { openClawRoot, service } = fixture({ includeOpenClaw: true });
+        Fs.writeFileSync(
+            Path.join(openClawRoot, "openclaw.json.bak"),
+            '{"gateway":{"token":"previous-secret"}}',
+            { mode: 0o600 }
+        );
         const roots = await service.listRoots(actor);
         expect(
             roots.roots.map(({ id, label, writable }) => ({ id, label, writable }))
@@ -809,6 +847,8 @@ describe("workspace files service", () => {
             directoryId: openClaw.resourceId,
             limit: 10,
         });
+        expect(listing.entries.some(({ name }) => name.endsWith(".bak"))).toBe(false);
+        expect(JSON.stringify(listing)).not.toContain("previous-secret");
         const config = listing.entries.find(({ name }) => name === "openclaw.json")!;
         expect(config).toMatchObject({
             requiresSecretReveal: true,
@@ -847,9 +887,20 @@ describe("workspace files service", () => {
                 mimeType: "application/json",
                 revealTicketId: revealed.ticketId,
                 resourceId: config.resourceId,
-                sizeBytes: 2,
+                sizeBytes: workspaceFileLimits.maximumManifestFileBytes,
             })
         ).toMatchObject({ uploadUrl: expect.stringContaining("/api/files/uploads/") });
+        expect(
+            await captureFailure(() =>
+                service.prepareWrite(actor, {
+                    expectedRevision: config.revision,
+                    mimeType: "application/json",
+                    revealTicketId: revealed.ticketId,
+                    resourceId: config.resourceId,
+                    sizeBytes: workspaceFileLimits.maximumManifestFileBytes + 1,
+                })
+            )
+        ).toMatchObject({ reason: "too-large" });
 
         const hooks = listing.entries.find(({ name }) => name === "hooks")!;
         const hooksListing = await service.list(actor, {
@@ -872,9 +923,19 @@ describe("workspace files service", () => {
                 expectedRevision: agentmail.revision,
                 mimeType: "text/plain",
                 resourceId: agentmail.resourceId,
-                sizeBytes: 12,
+                sizeBytes: workspaceFileLimits.maximumManifestFileBytes,
             })
         ).toMatchObject({ uploadUrl: expect.stringContaining("/api/files/uploads/") });
+        expect(
+            await captureFailure(() =>
+                service.prepareWrite(actor, {
+                    expectedRevision: agentmail.revision,
+                    mimeType: "text/plain",
+                    resourceId: agentmail.resourceId,
+                    sizeBytes: workspaceFileLimits.maximumManifestFileBytes + 1,
+                })
+            )
+        ).toMatchObject({ reason: "too-large" });
         expect(
             await captureFailure(() =>
                 service.prepareUpload(actor, {
@@ -886,6 +947,259 @@ describe("workspace files service", () => {
             )
         ).toMatchObject({ reason: "access-denied" });
     });
+
+    test("repairs invalid config JSON only through the actor-bound reveal revision", async () => {
+        const { commands, openClawRoot, service } = fixture({
+            includeOpenClaw: true,
+        });
+        const invalidConfig = '{"gateway":{"token":"repair-secret"';
+        Fs.writeFileSync(Path.join(openClawRoot, "openclaw.json"), invalidConfig);
+        Fs.chmodSync(Path.join(openClawRoot, "openclaw.json"), 0o600);
+        const roots = await service.listRoots(actor);
+        const openClaw = roots.roots.find(({ id }) => id === "openclaw-config")!;
+        const listing = await service.list(actor, {
+            directoryId: openClaw.resourceId,
+            limit: 10,
+        });
+        const config = listing.entries.find(({ name }) => name === "openclaw.json")!;
+
+        expect(
+            await captureFailure(() =>
+                service.prepareContent(actor, {
+                    disposition: "preview",
+                    resourceId: config.resourceId,
+                })
+            )
+        ).toMatchObject({ reason: "unavailable" });
+        expect(
+            await captureFailure(() =>
+                service.prepareWrite(actor, {
+                    expectedRevision: config.revision,
+                    mimeType: "application/json",
+                    resourceId: config.resourceId,
+                    sizeBytes: 2,
+                })
+            )
+        ).toMatchObject({ reason: "unavailable" });
+
+        const reveal = await service.prepareReveal(actor, {
+            resourceId: config.resourceId,
+        });
+        const raw = await service.readContent(actor, reveal.ticketId, undefined);
+        expect(new TextDecoder().decode(raw.bytes)).toBe(invalidConfig);
+
+        const otherRoots = await service.listRoots(otherActor);
+        const otherOpenClaw = otherRoots.roots.find(
+            ({ id }) => id === "openclaw-config"
+        )!;
+        const otherListing = await service.list(otherActor, {
+            directoryId: otherOpenClaw.resourceId,
+            limit: 10,
+        });
+        const otherConfig = otherListing.entries.find(
+            ({ name }) => name === "openclaw.json"
+        )!;
+        expect(
+            await captureFailure(() =>
+                service.prepareWrite(otherActor, {
+                    expectedRevision: otherConfig.revision,
+                    mimeType: "application/json",
+                    revealTicketId: reveal.ticketId,
+                    resourceId: otherConfig.resourceId,
+                    sizeBytes: 2,
+                })
+            )
+        ).toMatchObject({ reason: "not-found" });
+
+        const repaired = '{"gateway":{"token":"repaired"}}';
+        const upload = await service.prepareWrite(actor, {
+            expectedRevision: config.revision,
+            mimeType: "application/json",
+            revealTicketId: reveal.ticketId,
+            resourceId: config.resourceId,
+            sizeBytes: Buffer.byteLength(repaired),
+        });
+        await service.acceptUpload(
+            actor,
+            upload.ticketId,
+            body(repaired),
+            "request-invalid-config-repair"
+        );
+
+        expect(commands).toHaveLength(1);
+        expect(commands[0]).toMatchObject({
+            expectedRevision: config.revision,
+            fileName: "openclaw.json",
+            locator: {
+                rootId: "openclaw-config",
+                segments: ["openclaw.json"],
+            },
+            operation: "replace",
+            sizeBytes: Buffer.byteLength(repaired),
+        });
+        expect(JSON.stringify({ commands, upload })).not.toContain("repair-secret");
+    });
+
+    test("rejects split redaction sentinels only for reviewed manifest replacements", async () => {
+        const { calls, commands, root, service, spoolRoot } = fixture({
+            includeOpenClaw: true,
+        });
+        Fs.writeFileSync(Path.join(root, "openclaw.json"), "{}");
+        const roots = await service.listRoots(actor);
+        const openClaw = roots.roots.find(({ id }) => id === "openclaw-config")!;
+        const openClawListing = await service.list(actor, {
+            directoryId: openClaw.resourceId,
+            limit: 10,
+        });
+        const config = openClawListing.entries.find(
+            ({ name }) => name === "openclaw.json"
+        )!;
+        const reveal = await service.prepareReveal(actor, {
+            resourceId: config.resourceId,
+        });
+        const configUpload = `{"token":"${CONFIG_REDACTION_SENTINEL}"}`;
+        const configTicket = await service.prepareWrite(actor, {
+            expectedRevision: config.revision,
+            mimeType: "application/json",
+            revealTicketId: reveal.ticketId,
+            resourceId: config.resourceId,
+            sizeBytes: Buffer.byteLength(configUpload),
+        });
+        expect(
+            await captureFailure(() =>
+                service.acceptUpload(
+                    actor,
+                    configTicket.ticketId,
+                    splitSentinelBody('{"token":"', '"}'),
+                    "request-config-sentinel"
+                )
+            )
+        ).toMatchObject({ reason: "invalid-input" });
+        expect(Fs.readdirSync(spoolRoot)).toHaveLength(0);
+        expect(calls).not.toContain("enqueue");
+
+        const hooks = openClawListing.entries.find(({ name }) => name === "hooks")!;
+        const hooksListing = await service.list(actor, {
+            directoryId: hooks.resourceId,
+            limit: 10,
+        });
+        const transforms = hooksListing.entries.find(
+            ({ name }) => name === "transforms"
+        )!;
+        const transformsListing = await service.list(actor, {
+            directoryId: transforms.resourceId,
+            limit: 10,
+        });
+        const agentmail = transformsListing.entries.find(
+            ({ name }) => name === "agentmail.ts"
+        )!;
+        const hookUpload = `export default "${CONFIG_REDACTION_SENTINEL}";`;
+        const hookTicket = await service.prepareWrite(actor, {
+            expectedRevision: agentmail.revision,
+            mimeType: "text/plain",
+            resourceId: agentmail.resourceId,
+            sizeBytes: Buffer.byteLength(hookUpload),
+        });
+        expect(
+            await captureFailure(() =>
+                service.acceptUpload(
+                    actor,
+                    hookTicket.ticketId,
+                    splitSentinelBody('export default "', '";'),
+                    "request-hook-sentinel"
+                )
+            )
+        ).toMatchObject({ reason: "invalid-input" });
+        expect(Fs.readdirSync(spoolRoot)).toHaveLength(0);
+        expect(calls).not.toContain("enqueue");
+
+        const workspace = roots.roots.find(({ id }) => id === "workspace")!;
+        const workspaceListing = await service.list(actor, {
+            directoryId: workspace.resourceId,
+            limit: 10,
+        });
+        const workspaceConfig = workspaceListing.entries.find(
+            ({ name }) => name === "openclaw.json"
+        )!;
+        const workspaceTicket = await service.prepareWrite(actor, {
+            expectedRevision: workspaceConfig.revision,
+            mimeType: "application/json",
+            resourceId: workspaceConfig.resourceId,
+            sizeBytes: Buffer.byteLength(CONFIG_REDACTION_SENTINEL),
+        });
+        const accepted = await service.acceptUpload(
+            actor,
+            workspaceTicket.ticketId,
+            splitSentinelBody(),
+            "request-workspace-sentinel"
+        );
+        expect(accepted).toMatchObject({ ticketId: workspaceTicket.ticketId });
+        expect(commands).toHaveLength(1);
+        expect(Fs.readdirSync(spoolRoot)).toHaveLength(1);
+    });
+
+    for (const failurePhase of ["before-read", "after-read"] as const) {
+        test(`cancels and unlocks a guarded source when the spool fails ${failurePhase}`, async () => {
+            const receiveFailure = new WorkspaceFileError("capacity");
+            let cancellationReason: unknown;
+            let receivedBodyWasLocked: boolean | undefined;
+            const { service } = fixture({
+                includeOpenClaw: true,
+                async receive(input) {
+                    receivedBodyWasLocked = input.body.locked;
+                    if (failurePhase === "after-read") {
+                        const reader = input.body.getReader();
+                        try {
+                            expect(await reader.read()).toMatchObject({ done: false });
+                        } finally {
+                            reader.releaseLock();
+                        }
+                    }
+                    throw receiveFailure;
+                },
+            });
+            const roots = await service.listRoots(actor);
+            const openClaw = roots.roots.find(({ id }) => id === "openclaw-config")!;
+            const listing = await service.list(actor, {
+                directoryId: openClaw.resourceId,
+                limit: 10,
+            });
+            const config = listing.entries.find(({ name }) => name === "openclaw.json")!;
+            const reveal = await service.prepareReveal(actor, {
+                resourceId: config.resourceId,
+            });
+            const replacement = "{}";
+            const ticket = await service.prepareWrite(actor, {
+                expectedRevision: config.revision,
+                mimeType: "application/json",
+                revealTicketId: reveal.ticketId,
+                resourceId: config.resourceId,
+                sizeBytes: Buffer.byteLength(replacement),
+            });
+            const uploadBody = new ReadableStream<Uint8Array>({
+                start(controller) {
+                    controller.enqueue(new TextEncoder().encode(replacement));
+                },
+                cancel(reason) {
+                    cancellationReason = reason;
+                },
+            });
+
+            expect(
+                await captureFailure(() =>
+                    service.acceptUpload(
+                        actor,
+                        ticket.ticketId,
+                        uploadBody,
+                        `request-${failurePhase}`
+                    )
+                )
+            ).toMatchObject({ reason: "capacity" });
+            expect(receivedBodyWasLocked).toBe(false);
+            expect(cancellationReason).toBe(receiveFailure);
+            expect(uploadBody.locked).toBe(false);
+        });
+    }
 
     test("spools an exact upload, durably enqueues once, and reconciles status", async () => {
         const { audits, commands, root, service, spoolRoot } = fixture();

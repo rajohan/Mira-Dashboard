@@ -40,14 +40,16 @@ describe("reviewed OpenClaw file root", () => {
             manifest: [
                 {
                     contentPolicy: "redacted-config-json",
-                    maximumSizeBytes: 1_048_576,
+                    maximumSizeBytes: 2_097_152,
                     segments: ["openclaw.json"],
+                    uploadContentPolicy: "reject-redaction-sentinel",
                     writable: true,
                 },
                 {
                     contentPolicy: "raw",
-                    maximumSizeBytes: 1_048_576,
+                    maximumSizeBytes: 2_097_152,
                     segments: ["hooks", "transforms", "agentmail.ts"],
+                    uploadContentPolicy: "reject-redaction-sentinel",
                     writable: true,
                 },
             ],
@@ -81,14 +83,16 @@ describe("reviewed OpenClaw file root", () => {
                 manifest: [
                     {
                         contentPolicy: "raw",
-                        maximumSizeBytes: 1_048_576,
+                        maximumSizeBytes: 2_097_152,
                         segments: ["openclaw.json"],
+                        uploadContentPolicy: "reject-redaction-sentinel",
                         writable: true,
                     },
                     {
                         contentPolicy: "raw",
-                        maximumSizeBytes: 1_048_576,
+                        maximumSizeBytes: 2_097_152,
                         segments: ["credentials.json"],
+                        uploadContentPolicy: "reject-redaction-sentinel",
                         writable: true,
                     },
                 ],

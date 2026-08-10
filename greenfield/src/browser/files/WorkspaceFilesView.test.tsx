@@ -5,9 +5,11 @@ import type {
     WorkspaceFileEntry,
     WorkspaceFileRoot,
 } from "../../contracts/files.ts";
+import { WorkspaceFileTransferError } from "./workspaceFilePresentation.ts";
 import { WorkspaceFilesView } from "./WorkspaceFilesView.tsx";
 
-const { act, render, screen, waitFor, within } = await import("@testing-library/react");
+const { act, fireEvent, render, screen, waitFor, within } =
+    await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
 const userEvent = userEventModule.default;
 
@@ -355,6 +357,131 @@ describe("WorkspaceFilesView", () => {
         expect(replaced).toEqual(entries[1]);
         expect(parentDirectoryId).toBe(root.resourceId);
         expect(await screen.findByText(/Your change is queued/u)).toBeTruthy();
+    });
+
+    test("keeps invalid masked JSON selectable and repairs it through recent-auth reveal", async () => {
+        const props = properties();
+        const configRoot: WorkspaceFileRoot = {
+            id: "openclaw-config",
+            label: "OpenClaw Config",
+            resourceId: "77777777-7777-4777-8777-777777777777",
+            writable: false,
+        };
+        const configDirectory: WorkspaceFileDirectory = {
+            displayPath: "/",
+            name: configRoot.label,
+            resourceId: configRoot.resourceId,
+            revision,
+            rootId: configRoot.id,
+            writable: false,
+        };
+        const invalidRaw = '{"gateway":';
+        const invalidConfig: WorkspaceFileEntry = {
+            kind: "file",
+            mimeType: "application/json",
+            name: "openclaw.json",
+            previewKind: "text",
+            requiresSecretReveal: true,
+            resourceId: "88888888-8888-4888-8888-888888888888",
+            revision,
+            sizeBytes: Buffer.byteLength(invalidRaw),
+            writable: true,
+        };
+        const revealTicketId = "99999999-9999-4999-8999-999999999999";
+        const onPreview = jest.fn(() =>
+            Promise.reject(new WorkspaceFileTransferError("unavailable"))
+        );
+        const onReveal = jest.fn(() =>
+            Promise.resolve({
+                content: invalidRaw,
+                revealTicketId,
+                secretsRevealed: true as const,
+                ticket: {
+                    disposition: "preview" as const,
+                    expiresAtMs: 1_900_000_000_000,
+                    fileName: invalidConfig.name,
+                    mimeType: invalidConfig.mimeType!,
+                    previewKind: "text" as const,
+                    revision,
+                    sizeBytes: invalidConfig.sizeBytes!,
+                    ticketId: revealTicketId,
+                    url: `/api/files/content/${revealTicketId}`,
+                },
+            })
+        );
+        const onUpload = jest.fn(
+            (
+                _file: File,
+                _replacedEntry: WorkspaceFileEntry | undefined,
+                _parentDirectoryId?: string,
+                _revealTicketId?: string
+            ) =>
+                Promise.resolve({
+                    jobRunId: "config-repair-job",
+                    status: "accepted" as const,
+                    ticketId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                })
+        );
+        const user = userEvent.setup();
+        render(
+            <WorkspaceFilesView
+                {...props}
+                breadcrumbs={[
+                    { label: configRoot.label, resourceId: configRoot.resourceId },
+                ]}
+                directory={configDirectory}
+                entries={[invalidConfig]}
+                hasNextPage={false}
+                onPreview={onPreview}
+                onReveal={onReveal}
+                onUpload={onUpload}
+                roots={[configRoot]}
+                selectedRootId={configRoot.id}
+                treeSnapshots={[
+                    {
+                        directory: configDirectory,
+                        entries: [invalidConfig],
+                        hasNextPage: false,
+                    },
+                ]}
+            />
+        );
+
+        const configButton = screen.getByRole("button", {
+            name: invalidConfig.name,
+        });
+        await user.click(configButton);
+        expect(
+            await screen.findByRole("heading", { name: invalidConfig.name })
+        ).toBeTruthy();
+        expect(configButton).toHaveAttribute("aria-current", "true");
+        expect(screen.getByText("Secrets masked")).toBeTruthy();
+        expect(screen.getByRole("alert")).toHaveTextContent(
+            "file service is temporarily unavailable"
+        );
+        expect(screen.getByRole("status")).toHaveTextContent(
+            "confirm MFA in Account security"
+        );
+
+        await user.click(screen.getByRole("button", { name: "Reveal secrets" }));
+        expect(await screen.findByText("Secrets revealed")).toBeTruthy();
+        await user.click(screen.getByRole("button", { name: "Edit" }));
+        const editor = screen.getByLabelText("File contents");
+        expect(editor).toHaveValue(invalidRaw);
+        expect(
+            screen.getByText("Enter valid JSON before saving this file.")
+        ).toBeTruthy();
+        await user.clear(editor);
+        fireEvent.change(editor, { target: { value: '{"gateway":{}}' } });
+        await user.click(screen.getByRole("button", { name: "Save" }));
+
+        await waitFor(() => expect(onUpload).toHaveBeenCalledTimes(1));
+        const [file, replacedEntry, parentDirectoryId, observedRevealTicketId] =
+            onUpload.mock.calls[0]!;
+        expect(await file.text()).toBe('{"gateway":{}}');
+        expect(replacedEntry).toEqual(invalidConfig);
+        expect(parentDirectoryId).toBe(configRoot.resourceId);
+        expect(observedRevealTicketId).toBe(revealTicketId);
     });
 
     test("uploads one selected file and reports the queued worker job", async () => {

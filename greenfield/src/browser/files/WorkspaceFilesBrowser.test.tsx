@@ -202,4 +202,147 @@ describe("WorkspaceFilesBrowser", () => {
         await waitFor(() => expect(screen.queryByText("Loading folder…")).toBeNull());
         expect(screen.getByRole("heading", { name: imageEntry.name })).toBeTruthy();
     });
+
+    test("navigates the reviewed nested OpenClaw hook through opaque directory ids", async () => {
+        const openClawRoot: WorkspaceFileRoot = {
+            id: "openclaw-config",
+            label: "OpenClaw Config",
+            resourceId: "66666666-6666-4666-8666-666666666666",
+            writable: false,
+        };
+        const hooksId = "77777777-7777-4777-8777-777777777777";
+        const transformsId = "88888888-8888-4888-8888-888888888888";
+        const agentmailId = "99999999-9999-4999-8999-999999999999";
+        const source = "export const transform = true;\n";
+        const pages = new Map<string, ListWorkspaceFilesOutput>([
+            [
+                openClawRoot.resourceId,
+                {
+                    directory: {
+                        displayPath: "/",
+                        name: openClawRoot.label,
+                        resourceId: openClawRoot.resourceId,
+                        revision,
+                        rootId: openClawRoot.id,
+                        writable: false,
+                    },
+                    entries: [
+                        {
+                            kind: "directory",
+                            name: "hooks",
+                            resourceId: hooksId,
+                            revision,
+                            writable: false,
+                        },
+                    ],
+                },
+            ],
+            [
+                hooksId,
+                {
+                    directory: {
+                        displayPath: "/hooks",
+                        name: "hooks",
+                        resourceId: hooksId,
+                        revision,
+                        rootId: openClawRoot.id,
+                        writable: false,
+                    },
+                    entries: [
+                        {
+                            kind: "directory",
+                            name: "transforms",
+                            resourceId: transformsId,
+                            revision,
+                            writable: false,
+                        },
+                    ],
+                },
+            ],
+            [
+                transformsId,
+                {
+                    directory: {
+                        displayPath: "/hooks/transforms",
+                        name: "transforms",
+                        resourceId: transformsId,
+                        revision,
+                        rootId: openClawRoot.id,
+                        writable: false,
+                    },
+                    entries: [
+                        {
+                            kind: "file",
+                            mimeType: "text/plain",
+                            name: "agentmail.ts",
+                            previewKind: "text",
+                            resourceId: agentmailId,
+                            revision,
+                            sizeBytes: Buffer.byteLength(source),
+                            writable: true,
+                        },
+                    ],
+                },
+            ],
+        ]);
+        const query = jest.fn((name: string, input: unknown) => {
+            if (name === "files.listRoots") {
+                return Promise.resolve({ roots: [openClawRoot] });
+            }
+            if (name === "files.list") {
+                const directoryId = (input as { readonly directoryId: string })
+                    .directoryId;
+                const page = pages.get(directoryId);
+                return page === undefined
+                    ? Promise.reject(new Error("Unknown OpenClaw directory"))
+                    : Promise.resolve(page);
+            }
+            if (name === "files.prepareContent") {
+                return Promise.resolve({
+                    disposition: "preview" as const,
+                    expiresAtMs: 1_900_000_000_000,
+                    fileName: "agentmail.ts",
+                    mimeType: "text/plain",
+                    previewKind: "text" as const,
+                    revision,
+                    sizeBytes: Buffer.byteLength(source),
+                    ticketId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                    url: "/api/files/content/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                });
+            }
+            return Promise.reject(new Error("Unexpected Files query"));
+        });
+        const client = {
+            mutation: () => Promise.reject(new Error("Unexpected Files mutation")),
+            query,
+        } as unknown as DashboardTrpcClient;
+        const fetcher = jest
+            .spyOn(globalThis, "fetch")
+            .mockResolvedValue(new Response(source));
+        const user = userEvent.setup();
+
+        try {
+            renderBrowser(client);
+            await user.click(await screen.findByRole("button", { name: "hooks" }));
+            await user.click(await screen.findByRole("button", { name: "transforms" }));
+            await user.click(await screen.findByRole("button", { name: "agentmail.ts" }));
+
+            expect(
+                await screen.findByRole("heading", { name: "agentmail.ts" })
+            ).toBeTruthy();
+            expect(
+                await screen.findByRole("region", { name: "agentmail.ts source" })
+            ).toHaveTextContent(source.trim());
+            expect(
+                query.mock.calls
+                    .filter(([name]) => name === "files.list")
+                    .map(
+                        ([, input]) =>
+                            (input as { readonly directoryId: string }).directoryId
+                    )
+            ).toEqual([openClawRoot.resourceId, hooksId, transformsId]);
+        } finally {
+            fetcher.mockRestore();
+        }
+    });
 });

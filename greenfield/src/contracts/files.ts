@@ -18,6 +18,7 @@ export const workspaceFileLimits = Object.freeze({
     maximumDirectoryEntries: 4096,
     maximumDownloadBytes: 32 * 1024 * 1024,
     maximumFileNameBytes: 255,
+    maximumManifestFileBytes: 2 * 1024 * 1024,
     maximumReferenceCount: 8192,
     maximumTextPreviewBytes: 1024 * 1024,
     maximumUploadBytes: 16 * 1024 * 1024,

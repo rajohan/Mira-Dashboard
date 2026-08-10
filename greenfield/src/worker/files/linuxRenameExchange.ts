@@ -2,6 +2,7 @@ import { dlopen, FFIType, read } from "bun:ffi";
 
 const renameNoReplaceFlag = 1;
 const renameExchangeFlag = 2;
+const renameReplaceFlag = 0;
 const childNamePattern = /^(?!\.{1,2}$)[^/\\\0]{1,255}$/u;
 
 const libc = dlopen("libc.so.6", {
@@ -20,6 +21,7 @@ export type LinuxRename = (
 
 export type LinuxRenameExchange = LinuxRename;
 export type LinuxRenameNoReplace = LinuxRename;
+export type LinuxRenameReplace = LinuxRename;
 
 const errnoCode = new Map<number, string>([
     [1, "EPERM"],
@@ -94,4 +96,13 @@ export const linuxRenameNoReplace: LinuxRenameNoReplace = (
     rightName
 ) => {
     rename(directoryFd, leftName, rightName, renameNoReplaceFlag);
+};
+
+/** Atomically replaces one exact sibling with another beneath a held directory. */
+export const linuxRenameReplace: LinuxRenameReplace = (
+    directoryFd,
+    leftName,
+    rightName
+) => {
+    rename(directoryFd, leftName, rightName, renameReplaceFlag);
 };

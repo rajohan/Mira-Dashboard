@@ -36,11 +36,13 @@ describe("reviewed worker OpenClaw file root", () => {
             path: openClawRoot,
             replacementManifest: [
                 {
-                    maximumSizeBytes: 1_048_576,
+                    backupPolicy: "sibling-dot-bak",
+                    maximumSizeBytes: 2_097_152,
                     segments: ["openclaw.json"],
                 },
                 {
-                    maximumSizeBytes: 1_048_576,
+                    backupPolicy: "sibling-dot-bak",
+                    maximumSizeBytes: 2_097_152,
                     segments: ["hooks", "transforms", "agentmail.ts"],
                 },
             ],
