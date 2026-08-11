@@ -991,12 +991,17 @@ describe("shared virtualizer follow-to-end controller", () => {
             );
 
             const renderCount = onRender.mock.calls.length;
-            Reflect.deleteProperty(SVGElement.prototype, "offsetHeight");
+            const unsupportedSvgOffsetHeight = jest.fn<() => undefined>();
+            Object.defineProperty(SVGElement.prototype, "offsetHeight", {
+                configurable: true,
+                get: unsupportedSvgOffsetHeight,
+            });
             fireEvent.click(
                 screen.getByRole("button", { name: "Remeasure SVG content" })
             );
             await flushAnimationFrames();
 
+            expect(unsupportedSvgOffsetHeight).not.toHaveBeenCalled();
             expect(onRender).toHaveBeenCalledTimes(renderCount);
             expect(screen.getByTestId("svg-follow-fixture")).toHaveAttribute(
                 "data-total-size",
