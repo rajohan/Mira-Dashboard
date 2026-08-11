@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+    chmod,
     lstat,
     mkdir,
     mkdtemp,
@@ -12,6 +13,8 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { resolveReviewedOpenClawFileRoot } from "../../src/server/platform/files/openClawFileRootConfiguration.ts";
+import { resolveReviewedWorkerOpenClawFileRoot } from "../../src/worker/files/openClawFileRootConfiguration.ts";
 import { resolveDevelopmentStackConfig } from "./developmentStackConfig.ts";
 import {
     prepareDevelopmentRuntimeState,
@@ -22,6 +25,10 @@ import {
 
 const databaseMarkerFileName = ".mira-dashboard-development-database.json";
 const repositoryRoot = path.resolve(import.meta.dir, "../..");
+
+function openClawTransformPath(openClawRoot: string): string {
+    return path.join(openClawRoot, "hooks", "transforms", "agentmail.ts");
+}
 
 async function pathExists(filePath: string): Promise<boolean> {
     return Bun.file(filePath).exists();
@@ -44,6 +51,195 @@ async function directoryExists(directoryPath: string): Promise<boolean> {
 }
 
 describe("development state", () => {
+    test("seeds both reviewed OpenClaw files with private parents on first boot", async () => {
+        const temporaryRoot = await mkdtemp(
+            path.join(tmpdir(), "mira-dashboard-development-openclaw-seed-")
+        );
+        const config = resolveDevelopmentStackConfig(
+            {
+                MIRA_DASHBOARD_PROJECT_ROOT: path.join(temporaryRoot, "project"),
+            },
+            repositoryRoot
+        );
+        const hooksRoot = path.join(config.openClawRoot, "hooks");
+        const transformsRoot = path.join(hooksRoot, "transforms");
+        const transformPath = openClawTransformPath(config.openClawRoot);
+        const userId = process.getuid?.();
+        if (userId === undefined) throw new Error("Expected a POSIX test runtime");
+
+        try {
+            await prepareDevelopmentState(config);
+            const [webRoot, workerRoot] = await Promise.all([
+                resolveReviewedOpenClawFileRoot(
+                    config.openClawRoot,
+                    path.join(config.stateRoot, "production")
+                ),
+                resolveReviewedWorkerOpenClawFileRoot(
+                    config.openClawRoot,
+                    path.join(config.stateRoot, "production")
+                ),
+            ]);
+            const writableManifestSegments =
+                webRoot.manifest
+                    ?.filter(({ writable }) => writable)
+                    .map(({ segments }) => [...segments]) ?? [];
+            expect(
+                workerRoot.replacementManifest?.map(({ segments }) => [...segments])
+            ).toEqual(writableManifestSegments);
+
+            expect(
+                await readFile(path.join(config.openClawRoot, "openclaw.json"), "utf8")
+            ).toBe("{}\n");
+            expect(await readFile(transformPath, "utf8")).toBe("");
+            for (const directoryPath of [
+                config.openClawRoot,
+                hooksRoot,
+                transformsRoot,
+            ]) {
+                const status = await lstat(directoryPath);
+                expect(status.isDirectory()).toBeTrue();
+                expect(status.isSymbolicLink()).toBeFalse();
+                expect(status.uid).toBe(userId);
+                expect(status.mode & 0o777).toBe(0o700);
+            }
+            for (const segments of writableManifestSegments) {
+                const filePath = path.join(config.openClawRoot, ...segments);
+                const status = await lstat(filePath);
+                expect(status.isFile()).toBeTrue();
+                expect(status.isSymbolicLink()).toBeFalse();
+                expect(status.nlink).toBe(1);
+                expect(status.uid).toBe(userId);
+                expect(status.mode & 0o777).toBe(0o600);
+            }
+        } finally {
+            await rm(temporaryRoot, { force: true, recursive: true });
+        }
+    });
+
+    test("reuses existing reviewed OpenClaw files without replacing their contents", async () => {
+        const temporaryRoot = await mkdtemp(
+            path.join(tmpdir(), "mira-dashboard-development-openclaw-reuse-")
+        );
+        const config = resolveDevelopmentStackConfig(
+            {
+                MIRA_DASHBOARD_PROJECT_ROOT: path.join(temporaryRoot, "project"),
+            },
+            repositoryRoot
+        );
+        const configPath = path.join(config.openClawRoot, "openclaw.json");
+        const transformPath = openClawTransformPath(config.openClawRoot);
+
+        try {
+            await prepareDevelopmentState(config);
+            await writeFile(configPath, '{"hooks":{}}\n', "utf8");
+            await writeFile(transformPath, "export const preserved = true;\n", "utf8");
+            await chmod(transformPath, 0o664);
+
+            const reused = await prepareDevelopmentState(config);
+
+            expect(reused.database).toBe("created-empty");
+            expect(await readFile(configPath, "utf8")).toBe('{"hooks":{}}\n');
+            expect(await readFile(transformPath, "utf8")).toBe(
+                "export const preserved = true;\n"
+            );
+            const transformStatus = await lstat(transformPath);
+            expect(transformStatus.mode & 0o777).toBe(0o664);
+        } finally {
+            await rm(temporaryRoot, { force: true, recursive: true });
+        }
+    });
+
+    test("rejects OpenClaw symlinks and keeps their targets untouched", async () => {
+        const temporaryRoot = await mkdtemp(
+            path.join(tmpdir(), "mira-dashboard-development-openclaw-symlink-")
+        );
+        const config = resolveDevelopmentStackConfig(
+            {
+                MIRA_DASHBOARD_PROJECT_ROOT: path.join(temporaryRoot, "project"),
+            },
+            repositoryRoot
+        );
+        const hooksRoot = path.join(config.openClawRoot, "hooks");
+        const outsideDirectory = path.join(temporaryRoot, "outside-hooks");
+        const outsideSentinel = path.join(outsideDirectory, "sentinel.txt");
+
+        try {
+            await prepareDevelopmentState(config);
+            await mkdir(outsideDirectory, { mode: 0o700 });
+            await writeFile(outsideSentinel, "outside\n", { mode: 0o600 });
+            await rm(hooksRoot, { recursive: true });
+            await symlink(outsideDirectory, hooksRoot);
+
+            const failure = await prepareDevelopmentState(config).then(
+                () => null,
+                (error: unknown) => error
+            );
+
+            expect(failure).toBeInstanceOf(Error);
+            if (!(failure instanceof Error)) {
+                throw new Error("Expected OpenClaw symlink failure");
+            }
+            expect(failure.message).toBe("Development file root is invalid");
+            expect(await readFile(outsideSentinel, "utf8")).toBe("outside\n");
+            expect(await readdir(outsideDirectory)).toEqual(["sentinel.txt"]);
+
+            await rm(hooksRoot);
+            await mkdir(path.join(hooksRoot, "transforms"), {
+                mode: 0o700,
+                recursive: true,
+            });
+            const outsideTransform = path.join(outsideDirectory, "agentmail.ts");
+            await writeFile(outsideTransform, "outside transform\n", { mode: 0o600 });
+            await symlink(outsideTransform, openClawTransformPath(config.openClawRoot));
+
+            const fileFailure = await prepareDevelopmentState(config).then(
+                () => null,
+                (error: unknown) => error
+            );
+            expect(fileFailure).toBeInstanceOf(Error);
+            if (!(fileFailure instanceof Error)) {
+                throw new Error("Expected OpenClaw file symlink failure");
+            }
+            expect(fileFailure.message).toBe("Development file root is invalid");
+            expect(await readFile(outsideTransform, "utf8")).toBe("outside transform\n");
+        } finally {
+            await rm(temporaryRoot, { force: true, recursive: true });
+        }
+    });
+
+    test("confines OpenClaw seed creation to its exact development state descendant", async () => {
+        const temporaryRoot = await mkdtemp(
+            path.join(tmpdir(), "mira-dashboard-development-openclaw-confined-")
+        );
+        const config = resolveDevelopmentStackConfig(
+            {
+                MIRA_DASHBOARD_PROJECT_ROOT: path.join(temporaryRoot, "project"),
+            },
+            repositoryRoot
+        );
+        const outsideOpenClawRoot = path.join(temporaryRoot, "outside-openclaw");
+        const forgedConfig = Object.freeze({
+            ...config,
+            openClawRoot: outsideOpenClawRoot,
+        });
+
+        try {
+            const failure = await prepareDevelopmentState(forgedConfig).then(
+                () => null,
+                (error: unknown) => error
+            );
+
+            expect(failure).toBeInstanceOf(Error);
+            if (!(failure instanceof Error)) {
+                throw new Error("Expected OpenClaw root confinement failure");
+            }
+            expect(failure.message).toBe("Development file root is invalid");
+            expect(await pathExists(outsideOpenClawRoot)).toBeFalse();
+        } finally {
+            await rm(temporaryRoot, { force: true, recursive: true });
+        }
+    });
+
     test("rolls only SQLite state when the migration fingerprint changes", async () => {
         const temporaryRoot = await mkdtemp(
             path.join(tmpdir(), "mira-dashboard-development-state-")
@@ -60,7 +256,9 @@ describe("development state", () => {
             expect(initial.database).toBe("created-empty");
             const originalKeyring = await readFile(config.keyringPath, "utf8");
             const workspaceSentinel = path.join(config.workspaceRoot, "sentinel.txt");
+            const transformPath = openClawTransformPath(config.openClawRoot);
             await writeFile(workspaceSentinel, "preserved\n", "utf8");
+            await writeFile(transformPath, "preserved transform\n", "utf8");
             await writeFile(config.databasePath, "database", { mode: 0o600 });
             await writeFile(`${config.databasePath}-wal`, "wal", { mode: 0o600 });
 
@@ -87,6 +285,7 @@ describe("development state", () => {
             expect(await pathExists(`${config.databasePath}-wal`)).toBeFalse();
             expect(await readFile(config.keyringPath, "utf8")).toBe(originalKeyring);
             expect(await readFile(workspaceSentinel, "utf8")).toBe("preserved\n");
+            expect(await readFile(transformPath, "utf8")).toBe("preserved transform\n");
             const updatedMarker = JSON.parse(
                 await readFile(databaseMarkerPath, "utf8")
             ) as { migrationFingerprint?: unknown };
@@ -388,6 +587,8 @@ describe("development state", () => {
 
         try {
             await prepareDevelopmentState(config);
+            const transformPath = openClawTransformPath(config.openClawRoot);
+            await writeFile(transformPath, "removed with state\n", "utf8");
             await resetDevelopmentState(config);
             expect(await directoryExists(config.stateRoot)).toBeFalse();
             const stateParentEntries = await readdir(path.dirname(config.stateRoot));
@@ -396,6 +597,7 @@ describe("development state", () => {
             ).toEqual([]);
             await prepareDevelopmentState(config);
             expect(await directoryExists(config.stateRoot)).toBeTrue();
+            expect(await readFile(transformPath, "utf8")).toBe("");
         } finally {
             await rm(temporaryRoot, { force: true, recursive: true });
         }

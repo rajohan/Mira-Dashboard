@@ -16,6 +16,7 @@ import path from "node:path";
 
 import { migrationManifest } from "../../src/shared/databaseMigrationManifest.ts";
 import { prepareProtectedProductionStatePath } from "../delivery/productionStateFilesystem.ts";
+import { prepareDevelopmentFileRoots } from "./developmentFileRoots.ts";
 import { readDevelopmentPrivateFile } from "./developmentPrivateFile.ts";
 import type { DevelopmentStackConfig } from "./developmentStackConfig.ts";
 import {
@@ -98,13 +99,6 @@ async function assertPrivateRealDirectory(directoryPath: string): Promise<void> 
         throw new Error("Development state path is invalid");
     }
     await chmod(directoryPath, privateDirectoryMode);
-}
-
-async function ensurePrivateDirectory(directoryPath: string): Promise<void> {
-    if (!(await pathExists(directoryPath))) {
-        await mkdir(directoryPath, { mode: privateDirectoryMode });
-    }
-    await assertPrivateRealDirectory(directoryPath);
 }
 
 function expectedMarker(config: DevelopmentStackConfig): DevelopmentStateMarker {
@@ -401,15 +395,6 @@ async function developmentKeyring(config: DevelopmentStackConfig): Promise<strin
     return keyring;
 }
 
-async function ensureDevelopmentFileRoots(config: DevelopmentStackConfig): Promise<void> {
-    await ensurePrivateDirectory(config.openClawRoot);
-    await ensurePrivateDirectory(config.workspaceRoot);
-    const openClawConfig = path.join(config.openClawRoot, "openclaw.json");
-    if (!(await pathExists(openClawConfig))) {
-        await writePrivateFile(openClawConfig, "{}\n");
-    }
-}
-
 async function prepareClaimedDevelopmentState(
     config: DevelopmentStackConfig
 ): Promise<PreparedDevelopmentState> {
@@ -424,7 +409,7 @@ async function prepareClaimedDevelopmentState(
     } else {
         database = (await pathExists(config.databasePath)) ? "reused" : "created-empty";
     }
-    await ensureDevelopmentFileRoots(config);
+    await prepareDevelopmentFileRoots(config);
     const keyring = await developmentKeyring(config);
     return Object.freeze({
         database,
