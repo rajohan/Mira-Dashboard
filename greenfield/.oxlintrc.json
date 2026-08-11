@@ -464,6 +464,26 @@
             }
         },
         {
+            "files": ["scripts/developmentFrontend.ts"],
+            "rules": {
+                "no-restricted-imports": [
+                    "error",
+                    {
+                        "patterns": [
+                            {
+                                "group": [
+                                    "**/src/app/**",
+                                    "**/src/server/**",
+                                    "**/src/worker/**"
+                                ],
+                                "message": "The Bun full-stack development frontend may import only its reviewed browser HTML root plus script, contract, and environment-neutral shared source."
+                            }
+                        ]
+                    }
+                ]
+            }
+        },
+        {
             "files": [
                 "src/app/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
                 "src/server/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",

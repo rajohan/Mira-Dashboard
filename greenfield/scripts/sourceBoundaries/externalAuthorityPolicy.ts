@@ -7,6 +7,8 @@ import {
 } from "./sourceTopologyPolicy.ts";
 
 const reviewedBareBunImportSignatures: ReadonlyMap<string, string> = new Map([
+    ["scripts/development/developmentProxy.ts", "type:Server\0type:ServerWebSocket"],
+    ["scripts/development/developmentRemoteProxy.ts", "type:ServerWebSocket"],
     ["src/server/rawHttp/authenticationCredentials.ts", "value:CookieMap"],
 ]);
 const reviewedBunFfiImportSignatures: ReadonlyMap<string, string> = new Map([

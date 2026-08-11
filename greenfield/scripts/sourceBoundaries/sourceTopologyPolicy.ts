@@ -23,9 +23,15 @@ const webApplicationFiles = new Set([
     "src/app/dashboardLogs.ts",
     "src/app/dashboardServer.ts",
     "src/app/dashboardTerminal.ts",
+    "src/app/developmentWeb.ts",
     "src/app/server.ts",
     "src/app/trpcHttpHandler.ts",
     "src/app/trpcRequestPolicy.ts",
+]);
+
+const workerApplicationFiles = new Set([
+    "src/app/developmentWorker.ts",
+    "src/app/worker.ts",
 ]);
 
 const applicationCompositionTestFiles: ReadonlySet<string> = new Set([
@@ -56,6 +62,13 @@ const reviewedApplicationServerTargets: ReadonlyMap<
         ]),
     ],
     [
+        "src/app/developmentWorker.ts",
+        new Set([
+            "src/server/domains/jobs/workerRuntime.ts",
+            "src/server/platform/release/developmentRuntimeRelease.ts",
+        ]),
+    ],
+    [
         "src/app/databaseMaintenance.ts",
         new Set([
             "src/server/database/runtime/databaseCandidateMigrationOwner.ts",
@@ -71,8 +84,24 @@ export const environmentSourceFile = "src/app/environmentSource.ts";
 /** Exact composition roots permitted to import the runtime environment source. */
 export const environmentSourceConsumers: ReadonlySet<string> = new Set([
     "src/app/dashboardServer.ts",
+    "src/app/developmentWeb.ts",
+    "src/app/developmentWorker.ts",
     "src/app/worker.ts",
 ]);
+
+const reviewedScriptBrowserTargets: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+    ["scripts/developmentFrontend.ts", new Set(["src/browser/index.html"])],
+]);
+
+/**
+ * Checks the one reviewed Bun full-stack HTML entry edge.
+ * @param importer Normalized development script path.
+ * @param target Normalized browser HTML target path.
+ * @returns Whether the exact edge is the reviewed frontend composition edge.
+ */
+export function isReviewedScriptBrowserTarget(importer: string, target: string): boolean {
+    return reviewedScriptBrowserTargets.get(importer)?.has(target) === true;
+}
 
 /**
  * Whether an application composition edge names one exact reviewed server primitive.
@@ -178,7 +207,7 @@ export function sourceRole(filePath: string): SourceRole {
     if (filePath === environmentSourceFile) return "environment-source";
     if (filePath === "src/app/databaseMaintenance.ts") return "maintenance-app";
     if (webApplicationFiles.has(filePath)) return "web-app";
-    if (filePath === "src/app/worker.ts") return "worker-app";
+    if (workerApplicationFiles.has(filePath)) return "worker-app";
     if (filePath.startsWith("src/app/")) return "unclassified-app";
     if (filePath.startsWith("src/browser/")) return "browser";
     if (filePath.startsWith("src/contracts/")) return "contracts";

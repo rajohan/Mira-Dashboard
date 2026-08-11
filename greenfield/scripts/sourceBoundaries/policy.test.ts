@@ -99,6 +99,12 @@ describe("source-boundary policy", () => {
         expect(validateSourceFile("src/app/dashboardTerminal.ts")).toBeUndefined();
         expect(
             validateSourceImport(
+                "scripts/developmentFrontend.ts",
+                staticImport("../src/browser/index.html")
+            )
+        ).toBeUndefined();
+        expect(
+            validateSourceImport(
                 "tailwind.config.ts",
                 staticImport("./src/browser/client.ts")
             )?.message
@@ -449,6 +455,14 @@ describe("source-boundary policy", () => {
     });
 
     test("allows only exact reviewed bare Bun import bindings", () => {
+        expect(
+            validateSourceImport("scripts/development/developmentRemoteProxy.ts", {
+                kind: "import",
+                importedBindings: [{ imported: "ServerWebSocket", typeOnly: true }],
+                line: 1,
+                specifier: "bun",
+            })
+        ).toBeUndefined();
         expect(
             validateSourceImport("src/server/rawHttp/authenticationCredentials.ts", {
                 kind: "import",
