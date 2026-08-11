@@ -300,7 +300,9 @@ async function prepareReviewedFile(
             created = true;
         } catch (error) {
             if (errorCode(error) !== "EEXIST") throw error;
-            handle = await open(anchoredPath, existingFileOpenFlags);
+            // EEXIST only selects reuse. The held parent and O_NOFOLLOW confine
+            // this open; its inode is matched to the anchored entry before return.
+            handle = await open(anchoredPath, existingFileOpenFlags); // lgtm[js/file-system-race]
         }
         const heldDescriptorPath = descriptorPath(handle);
         const [resolvedPath, entry, held] = await Promise.all([
