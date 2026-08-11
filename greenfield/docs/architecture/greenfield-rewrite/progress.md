@@ -1379,3 +1379,14 @@ full-browser parity, production rehearsal, cutover, and legacy deletion remain o
   Moltbook adds 2,202 gzip bytes to the initial graph and 8,485 gzip bytes across all JavaScript;
   the enforced limits advance by only 3 KiB and 10 KiB respectively, while the largest-chunk and
   stylesheet limits remain unchanged.
+
+### 2026-08-11 — Jobs and OpenClaw cron parity closed
+
+- The reviewed `/jobs` route and all fourteen legacy Jobs/Cron mappings are now recorded as
+  implemented. The existing typed `jobs.*`, `schedules.*`, and `openClawCron.*` procedures are the
+  parity replacement for Dashboard schedules, durable execution state, and OpenClaw cron inventory
+  and controls; this evidence-only closure adds no runtime behavior.
+- The replacement intentionally does not restore the legacy arbitrary JSON round-trip. Privileged
+  command and script bodies remain redacted and non-editable, delivery destinations remain
+  write-only, and OpenClaw cron updates accept only the reviewed typed fields. This secure narrowing
+  is the accepted parity behavior rather than an open route gap.

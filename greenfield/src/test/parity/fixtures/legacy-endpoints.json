@@ -366,7 +366,7 @@
             "purpose": "Lists OpenClaw cron jobs and open linked tasks.",
             "section": "Jobs And Cron",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["openClawCron.list"],
                 "phase": "phase-4"
@@ -1425,7 +1425,7 @@
             "purpose": "Deletes an OpenClaw cron job.",
             "section": "Jobs And Cron",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["openClawCron.delete"],
                 "phase": "phase-4"
@@ -1438,7 +1438,7 @@
             "purpose": "Runs an OpenClaw cron job.",
             "section": "Jobs And Cron",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["openClawCron.run"],
                 "phase": "phase-4"
@@ -1451,7 +1451,7 @@
             "purpose": "Enables/disables an OpenClaw cron job and updates its Dashboard-owned disable intent.",
             "section": "Jobs And Cron",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["openClawCron.setEnabled"],
                 "phase": "phase-4"
@@ -1464,7 +1464,7 @@
             "purpose": "Updates an OpenClaw cron job patch.",
             "section": "Jobs And Cron",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["openClawCron.update"],
                 "phase": "phase-4"

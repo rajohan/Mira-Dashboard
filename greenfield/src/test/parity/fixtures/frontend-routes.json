@@ -129,7 +129,7 @@
             "searchNormalizer": null,
             "sourceRouteName": "jobs",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "path": "/jobs",
                 "phase": "phase-3"
             }

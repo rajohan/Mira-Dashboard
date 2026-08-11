@@ -57,6 +57,7 @@ describe("reviewed pre-cutover parity inventory", () => {
             "/agents",
             "/chat",
             "/files",
+            "/jobs",
             "/login",
             "/logs",
             "/moltbook",
@@ -289,6 +290,46 @@ describe("reviewed pre-cutover parity inventory", () => {
             ["GET /api/moltbook/home", "implemented", ["moltbook.home"]],
             ["GET /api/moltbook/my-posts", "implemented", ["moltbook.listMyPosts"]],
             ["GET /api/moltbook/profile", "implemented", ["moltbook.profile"]],
+        ]);
+    });
+
+    test("keeps the reviewed jobs and cron slice closed", async () => {
+        const reviewed = await loadReviewedParityInventory();
+        const jobsRoute = reviewed.frontend.routes.find(({ path }) => path === "/jobs");
+        const jobsAndCronEndpoints = reviewed.legacyEndpoints.endpoints.filter(
+            ({ section }) => section === "Jobs And Cron"
+        );
+
+        expect(jobsRoute?.target.delivery).toBe("implemented");
+        expect(
+            jobsAndCronEndpoints.map(({ id, target }) => [
+                id,
+                target.kind === "reviewed-removal" ? target.kind : target.delivery,
+                target.kind === "procedure" ? target.names : undefined,
+            ])
+        ).toEqual([
+            ["GET /api/cron/jobs", "implemented", ["openClawCron.list"]],
+            ["GET /api/job-executions", "implemented", ["jobs.listRuns"]],
+            ["GET /api/job-executions/:id", "implemented", ["jobs.getRun"]],
+            ["GET /api/jobs", "implemented", ["schedules.list"]],
+            ["GET /api/jobs/:id", "implemented", ["schedules.get"]],
+            ["GET /api/jobs/:id/runs", "implemented", ["schedules.listRuns"]],
+            [
+                "PATCH /api/job-executions/claims",
+                "implemented",
+                ["jobs.setClaimingPaused"],
+            ],
+            ["PATCH /api/jobs/:id", "implemented", ["schedules.update"]],
+            ["POST /api/cron/jobs/:id/delete", "implemented", ["openClawCron.delete"]],
+            ["POST /api/cron/jobs/:id/run", "implemented", ["openClawCron.run"]],
+            [
+                "POST /api/cron/jobs/:id/toggle",
+                "implemented",
+                ["openClawCron.setEnabled"],
+            ],
+            ["POST /api/cron/jobs/:id/update", "implemented", ["openClawCron.update"]],
+            ["POST /api/job-executions/:id/cancel", "implemented", ["jobs.cancelRun"]],
+            ["POST /api/jobs/:id/run", "implemented", ["schedules.run"]],
         ]);
     });
 });
