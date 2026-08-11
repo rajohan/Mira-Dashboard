@@ -1390,3 +1390,14 @@ full-browser parity, production rehearsal, cutover, and legacy deletion remain o
   command and script bodies remain redacted and non-editable, delivery destinations remain
   write-only, and OpenClaw cron updates accept only the reviewed typed fields. This secure narrowing
   is the accepted parity behavior rather than an open route gap.
+
+### 2026-08-11 — Realtime transport parity closed
+
+- The legacy browser live-update row `WebSocket /ws` is now recorded as implemented by the existing
+  `events.stream` procedure. This evidence-only closure adds no runtime, browser, configuration, or
+  generated-contract behavior.
+- Behavioral parity intentionally narrows the transport: live updates use one-way typed tracked SSE,
+  while queries and actions use typed tRPC procedures. Arbitrary browser-to-Gateway WebSocket method
+  forwarding is not restored.
+- The existing stream enforces topic authorization, renewable and revocable authorization leases,
+  bounded buffering, durable replay, and schema validation.

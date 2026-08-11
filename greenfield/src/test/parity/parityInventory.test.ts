@@ -162,6 +162,31 @@ describe("reviewed pre-cutover parity inventory", () => {
         ).toEqual([]);
     });
 
+    test("keeps the reviewed Sessions and Chat slice closed", async () => {
+        const reviewed = await loadReviewedParityInventory();
+        const sessionsAndChatEndpoints = reviewed.legacyEndpoints.endpoints.filter(
+            ({ section }) => section === "Sessions And Chat"
+        );
+
+        expect(
+            sessionsAndChatEndpoints.map(({ id, target }) => [
+                id,
+                target.kind === "reviewed-removal" ? target.kind : target.delivery,
+                target.kind === "procedure" ? target.names : undefined,
+            ])
+        ).toEqual([
+            ["DELETE /api/sessions/:id", "implemented", ["gatewaySessions.delete"]],
+            ["GET /api/sessions/list", "implemented", ["gatewaySessions.list"]],
+            ["GET /api/sessions/stats", "implemented", ["gatewaySessions.list"]],
+            [
+                "POST /api/sessions/:id/action",
+                "implemented",
+                ["gatewaySessions.compact", "gatewaySessions.reset"],
+            ],
+            ["WebSocket /ws", "implemented", ["events.stream"]],
+        ]);
+    });
+
     test("keeps the reviewed Phase 5 Logs slice closed", async () => {
         const reviewed = await loadReviewedParityInventory();
         const logsRoute = reviewed.frontend.routes.find(({ path }) => path === "/logs");

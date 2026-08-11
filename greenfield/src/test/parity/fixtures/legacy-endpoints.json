@@ -2053,7 +2053,7 @@
             "purpose": "Browser Dashboard socket for Gateway-backed live updates.",
             "section": "Sessions And Chat",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["events.stream"],
                 "phase": "phase-4"
