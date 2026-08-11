@@ -104,12 +104,12 @@ export function boundedNonBlankTextSchema(
 }
 
 /**
- * Tests whether text excludes Unicode control and format code points.
+ * Tests whether text excludes Unicode control, format, line, and paragraph separators.
  * @param value Text value to inspect.
  * @returns Whether the text is safe for compact operator-facing labels and headings.
  */
 export function hasNoUnicodeControlOrFormat(value: string): boolean {
-    return !/[\p{Cc}\p{Cf}]/u.test(value);
+    return !/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(value);
 }
 
 /**

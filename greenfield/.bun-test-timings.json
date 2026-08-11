@@ -51,6 +51,7 @@
         "src/server/platform/runtime/dashboardApplicationRuntime.test.ts": 1094,
         "src/server/domains/security/mfa/loginLifecycle.totp.test.ts": 1074,
         "src/server/domains/tasks/service.test.ts": 1071,
+        "src/app/developmentProcesses.test.ts": 1049,
         "src/server/domains/security/mfa/accountLifecycle.proofs.test.ts": 964,
         "src/server/domains/security/authenticationLifecycle.password.test.ts": 923,
         "src/test/integration/outbox/sqliteOutboxScenario.test.ts": 901,

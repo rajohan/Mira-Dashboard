@@ -32,6 +32,14 @@ describe("development process support", () => {
         expect(
             developmentStartupFailureMessage("worker", new Error("unsafe\nsecond line"))
         ).toBe("Mira Dashboard development worker startup failed");
+        for (const separator of ["\u2028", "\u2029"]) {
+            expect(
+                developmentStartupFailureMessage(
+                    "worker",
+                    new Error(`unsafe${separator}second line`)
+                )
+            ).toBe("Mira Dashboard development worker startup failed");
+        }
         expect(developmentStartupFailureMessage("worker", "raw failure")).toBe(
             "Mira Dashboard development worker startup failed"
         );

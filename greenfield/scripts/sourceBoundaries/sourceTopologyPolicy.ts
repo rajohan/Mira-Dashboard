@@ -39,6 +39,7 @@ const applicationCompositionTestFiles: ReadonlySet<string> = new Set([
     "src/app/dashboardServer.test.ts",
     "src/app/dashboardServerProcess.test.ts",
     "src/app/databaseMaintenance.test.ts",
+    "src/app/developmentProcesses.test.ts",
     "src/app/trpcHttpHandler.test.ts",
     "src/app/trpcRequestPolicy.test.ts",
     "src/app/worker.test.ts",
