@@ -205,7 +205,14 @@ import {
     securityAuditEventsHaveStableOrder,
     securityAuditPageCursorIsConsistent,
 } from "../../src/contracts/securityAudit.ts";
-import { systemMetricCapacityIsConsistent } from "../../src/contracts/system.ts";
+import {
+    systemHealthDiagnosticsGatewayIsConsistent,
+    systemHealthDiagnosticsIsConsistent,
+    systemHealthDiagnosticsQueueIsConsistent,
+    systemHealthDiagnosticsSessionsAreConsistent,
+    systemHealthDiagnosticsWorkersAreConsistent,
+    systemMetricCapacityIsConsistent,
+} from "../../src/contracts/system.ts";
 import {
     canonicalizeTaskStrings,
     freezeTaskStrings,
@@ -335,6 +342,26 @@ const runtimeCheckComments = new Map<unknown, string>([
     [
         gatewayConnectionSnapshotIsConsistent,
         "Live Valibot validation additionally requires connected phase and fresh state to agree and past transport timestamps not to exceed the check time.",
+    ],
+    [
+        systemHealthDiagnosticsGatewayIsConsistent,
+        "Live Valibot validation additionally requires connected Gateway phase and fresh state to agree.",
+    ],
+    [
+        systemHealthDiagnosticsSessionsAreConsistent,
+        "Live Valibot validation additionally requires last-known-good session staleness not to precede its observation.",
+    ],
+    [
+        systemHealthDiagnosticsWorkersAreConsistent,
+        "Live Valibot validation additionally requires fresh worker count to equal its online and draining partitions, and aggregate capacity to remain a safe integer between one and sixteen slots per fresh worker.",
+    ],
+    [
+        systemHealthDiagnosticsQueueIsConsistent,
+        "Live Valibot validation additionally requires a queued run if and only if an oldest queued timestamp is present.",
+    ],
+    [
+        systemHealthDiagnosticsIsConsistent,
+        "Live Valibot validation additionally requires aggregate readiness to match every gating check, binds database/worker health to an observed queue, forbids future queue/session observations, and permits fresh sessions only with a fresh Gateway.",
     ],
     [
         chatHistoryMessagesHaveUniqueIds,

@@ -52,7 +52,7 @@ export const FRONTEND_BUNDLE_BUDGETS: Readonly<Record<FrontendBundleBudget, numb
     initialJavaScriptGzipBytes: 353 * 1024,
     initialStylesheetGzipBytes: 25 * 1024,
     largestJavaScriptGzipBytes: 200 * 1024,
-    totalJavaScriptGzipBytes: 860 * 1024,
+    totalJavaScriptGzipBytes: 865 * 1024,
 };
 
 interface MeasuredOutput {

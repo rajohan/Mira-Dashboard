@@ -1,5 +1,13 @@
 import * as v from "valibot";
 
+import { timestampMillisecondsSchema } from "../shared/dateTime.ts";
+import { nonnegativeSafeIntegerSchema } from "../shared/validation.ts";
+import {
+    gatewayConnectionFreshnessSchema,
+    gatewayConnectionPhaseSchema,
+} from "./gatewayConnection.ts";
+import { gatewaySessionProjectionMaximum } from "./gatewaySessions.ts";
+import { jobWorkerCapacityMaximum } from "./jobLimits.ts";
 import type { ProcedureContract, RawHttpContract } from "./registry.ts";
 
 /** Stable raw HTTP liveness endpoint shared by contracts and runtime dispatch. */
@@ -80,6 +88,242 @@ export const systemMetricsSchema = v.strictObject({
 
 export type SystemMetrics = v.InferOutput<typeof systemMetricsSchema>;
 
+const systemHealthDiagnosticsTimestampSchema = timestampMillisecondsSchema(
+    "System health diagnostics timestamp is invalid"
+);
+const systemHealthDiagnosticsCountSchema = nonnegativeSafeIntegerSchema(
+    "System health diagnostics count is invalid"
+);
+
+/** Sanitized process-owned Gateway state, with provider failures made explicit. */
+const systemHealthDiagnosticsGatewayVariantSchema = v.variant("status", [
+    v.strictObject({
+        freshness: gatewayConnectionFreshnessSchema,
+        phase: gatewayConnectionPhaseSchema,
+        status: v.literal("observed"),
+    }),
+    v.strictObject({ status: v.literal("unavailable") }),
+]);
+
+/** @returns Whether connected phase and fresh state agree. */
+export function systemHealthDiagnosticsGatewayIsConsistent(
+    gateway: v.InferOutput<typeof systemHealthDiagnosticsGatewayVariantSchema>
+): boolean {
+    return (
+        gateway.status === "unavailable" ||
+        (gateway.freshness === "fresh") === (gateway.phase === "connected")
+    );
+}
+
+export const systemHealthDiagnosticsGatewaySchema = v.pipe(
+    systemHealthDiagnosticsGatewayVariantSchema,
+    v.check(
+        systemHealthDiagnosticsGatewayIsConsistent,
+        "System health Gateway projection is inconsistent"
+    )
+);
+
+/** Identity-free cached Gateway-session count with explicit source freshness. */
+const systemHealthDiagnosticsSessionsVariantSchema = v.variant("state", [
+    v.strictObject({ state: v.literal("unavailable") }),
+    v.strictObject({
+        count: v.pipe(
+            systemHealthDiagnosticsCountSchema,
+            v.maxValue(
+                gatewaySessionProjectionMaximum,
+                "System health session count is outside its budget"
+            )
+        ),
+        observedAtMs: systemHealthDiagnosticsTimestampSchema,
+        state: v.literal("fresh"),
+        truncated: v.boolean(),
+    }),
+    v.strictObject({
+        count: v.pipe(
+            systemHealthDiagnosticsCountSchema,
+            v.maxValue(
+                gatewaySessionProjectionMaximum,
+                "System health session count is outside its budget"
+            )
+        ),
+        observedAtMs: systemHealthDiagnosticsTimestampSchema,
+        staleSinceMs: systemHealthDiagnosticsTimestampSchema,
+        state: v.literal("last-known-good"),
+        truncated: v.boolean(),
+    }),
+]);
+
+/** @returns Whether last-known-good session timestamps remain ordered. */
+export function systemHealthDiagnosticsSessionsAreConsistent(
+    sessions: v.InferOutput<typeof systemHealthDiagnosticsSessionsVariantSchema>
+): boolean {
+    return (
+        sessions.state !== "last-known-good" ||
+        sessions.staleSinceMs >= sessions.observedAtMs
+    );
+}
+
+export const systemHealthDiagnosticsSessionsSchema = v.pipe(
+    systemHealthDiagnosticsSessionsVariantSchema,
+    v.check(
+        systemHealthDiagnosticsSessionsAreConsistent,
+        "System health session projection is inconsistent"
+    )
+);
+
+const systemHealthDiagnosticsWorkersObjectSchema = v.strictObject({
+    capacity: systemHealthDiagnosticsCountSchema,
+    drainingCount: systemHealthDiagnosticsCountSchema,
+    freshCount: systemHealthDiagnosticsCountSchema,
+    onlineCount: systemHealthDiagnosticsCountSchema,
+});
+
+/** @returns Whether the fresh worker count matches its lifecycle partitions. */
+export function systemHealthDiagnosticsWorkersAreConsistent(
+    workers: v.InferOutput<typeof systemHealthDiagnosticsWorkersObjectSchema>
+): boolean {
+    const maximumCapacity = workers.freshCount * jobWorkerCapacityMaximum;
+    return (
+        Number.isSafeInteger(maximumCapacity) &&
+        workers.freshCount === workers.drainingCount + workers.onlineCount &&
+        workers.capacity >= workers.freshCount &&
+        workers.capacity <= maximumCapacity
+    );
+}
+
+const systemHealthDiagnosticsWorkersSchema = v.pipe(
+    systemHealthDiagnosticsWorkersObjectSchema,
+    v.check(
+        systemHealthDiagnosticsWorkersAreConsistent,
+        "System health worker projection is inconsistent"
+    )
+);
+
+/** Bounded content-free queue state, or an explicit unavailable component. */
+const systemHealthDiagnosticsQueueVariantSchema = v.variant("status", [
+    v.strictObject({
+        claimingPaused: v.boolean(),
+        oldestQueuedAtMs: v.optional(systemHealthDiagnosticsTimestampSchema),
+        runs: v.strictObject({
+            queued: systemHealthDiagnosticsCountSchema,
+            running: systemHealthDiagnosticsCountSchema,
+        }),
+        status: v.literal("observed"),
+        workers: systemHealthDiagnosticsWorkersSchema,
+    }),
+    v.strictObject({ status: v.literal("unavailable") }),
+]);
+
+/** @returns Whether queue count and oldest-row presence agree. */
+export function systemHealthDiagnosticsQueueIsConsistent(
+    queue: v.InferOutput<typeof systemHealthDiagnosticsQueueVariantSchema>
+): boolean {
+    return (
+        queue.status === "unavailable" ||
+        queue.runs.queued > 0 === (queue.oldestQueuedAtMs !== undefined)
+    );
+}
+
+export const systemHealthDiagnosticsQueueSchema = v.pipe(
+    systemHealthDiagnosticsQueueVariantSchema,
+    v.check(
+        systemHealthDiagnosticsQueueIsConsistent,
+        "System health queue projection is inconsistent"
+    )
+);
+
+const systemHealthDiagnosticsChecksSchema = v.strictObject({
+    application: v.strictObject({
+        status: v.picklist(["not-ready", "ready"]),
+    }),
+    database: v.strictObject({
+        status: v.picklist(["ready", "unavailable"]),
+    }),
+    frontend: v.strictObject({
+        status: v.picklist(["ready", "unavailable"]),
+    }),
+    release: v.strictObject({
+        status: v.picklist(["unavailable", "verified"]),
+    }),
+    worker: v.strictObject({
+        status: v.picklist(["not-ready", "ready", "unavailable"]),
+    }),
+});
+
+type SystemHealthDiagnosticsValue = {
+    readonly checkedAtMs: number;
+    readonly checks: v.InferOutput<typeof systemHealthDiagnosticsChecksSchema>;
+    readonly dependencies: {
+        readonly gateway: v.InferOutput<typeof systemHealthDiagnosticsGatewaySchema>;
+        readonly sessions: v.InferOutput<typeof systemHealthDiagnosticsSessionsSchema>;
+    };
+    readonly queue: v.InferOutput<typeof systemHealthDiagnosticsQueueSchema>;
+    readonly status: "not-ready" | "ready";
+};
+
+/** @returns Whether the aggregate state exactly reflects every gating check. */
+export function systemHealthDiagnosticsIsConsistent(
+    diagnostics: SystemHealthDiagnosticsValue
+): boolean {
+    const checks = diagnostics.checks;
+    const ready =
+        checks.application.status === "ready" &&
+        checks.database.status === "ready" &&
+        checks.frontend.status === "ready" &&
+        checks.release.status === "verified" &&
+        checks.worker.status === "ready";
+    const queueTimeIsConsistent =
+        diagnostics.queue.status === "unavailable" ||
+        diagnostics.queue.oldestQueuedAtMs === undefined ||
+        diagnostics.queue.oldestQueuedAtMs <= diagnostics.checkedAtMs;
+    const sessions = diagnostics.dependencies.sessions;
+    const gateway = diagnostics.dependencies.gateway;
+    const sessionTimeIsConsistent =
+        sessions.state === "unavailable" ||
+        (sessions.observedAtMs <= diagnostics.checkedAtMs &&
+            (sessions.state !== "last-known-good" ||
+                sessions.staleSinceMs <= diagnostics.checkedAtMs));
+    const dependencyFreshnessIsConsistent =
+        sessions.state !== "fresh" ||
+        (gateway.status === "observed" && gateway.freshness === "fresh");
+    const queueChecksAreConsistent =
+        diagnostics.queue.status === "observed"
+            ? checks.database.status === "ready" &&
+              (checks.release.status === "verified") ===
+                  (checks.worker.status !== "unavailable") &&
+              (checks.worker.status !== "ready" ||
+                  diagnostics.queue.workers.onlineCount > 0)
+            : checks.database.status === "unavailable" &&
+              checks.worker.status === "unavailable";
+    return (
+        queueTimeIsConsistent &&
+        sessionTimeIsConsistent &&
+        dependencyFreshnessIsConsistent &&
+        queueChecksAreConsistent &&
+        (diagnostics.status === "ready") === ready
+    );
+}
+
+/** Session-only readiness, dependency, and queue diagnostics without identities. */
+export const systemHealthDiagnosticsSchema = v.pipe(
+    v.strictObject({
+        checkedAtMs: systemHealthDiagnosticsTimestampSchema,
+        checks: systemHealthDiagnosticsChecksSchema,
+        dependencies: v.strictObject({
+            gateway: systemHealthDiagnosticsGatewaySchema,
+            sessions: systemHealthDiagnosticsSessionsSchema,
+        }),
+        queue: systemHealthDiagnosticsQueueSchema,
+        status: v.picklist(["not-ready", "ready"]),
+    }),
+    v.check(
+        systemHealthDiagnosticsIsConsistent,
+        "System health diagnostics aggregate is inconsistent"
+    )
+);
+
+export type SystemHealthDiagnostics = v.InferOutput<typeof systemHealthDiagnosticsSchema>;
+
 /** Public runtime identity returned by the system procedure. */
 export const runtimeIdentitySchema = v.strictObject({
     revision: v.pipe(v.string(), v.description("Full Bun Git revision.")),
@@ -144,8 +388,34 @@ export const systemMetricsContract = {
     },
 } as const satisfies ProcedureContract;
 
+/** Session-only detailed health contract without automation or control authority. */
+export const systemHealthDiagnosticsContract = {
+    access: {
+        capabilities: [],
+        capabilityPolicy: "all",
+        kind: "authenticated",
+        principalKinds: ["session"],
+    },
+    domain: "system",
+    errors: ["FORBIDDEN", "UNAUTHORIZED"],
+    input: emptyInputSchema,
+    inputSchemaId: "system.healthDiagnostics.input",
+    kind: "query",
+    name: "system.healthDiagnostics",
+    output: systemHealthDiagnosticsSchema,
+    outputSchemaId: "system.healthDiagnostics.output",
+    summary:
+        "Returns bounded readiness, dependency, and queue diagnostics without operational identities.",
+    transport: {
+        batching: "adapter-default",
+        handler: "default",
+        requestBody: "default",
+    },
+} as const satisfies ProcedureContract;
+
 /** Implemented system tRPC contracts. */
 export const systemProcedureContracts = [
+    systemHealthDiagnosticsContract,
     systemMetricsContract,
     runtimeIdentityContract,
 ] as const;

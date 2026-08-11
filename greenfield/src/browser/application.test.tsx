@@ -1,15 +1,16 @@
-import { describe, expect, jest, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 
 import { createMemoryHistory } from "@tanstack/react-router";
 
 import type { AuthStatus } from "../contracts/auth.ts";
 import { deriveGatewaySessionStats } from "../contracts/gatewaySessions.ts";
+import type { SystemHealthDiagnostics } from "../contracts/system.ts";
 import { createDashboardQueryClient } from "./api/queryClient.ts";
 import { createDashboardTrpcClient } from "./api/trpcClient.ts";
 import { DashboardBrowserApplication } from "./application.tsx";
 import { authStatusQueryKey } from "./auth/authQueries.ts";
 import { createDashboardBrowserCollections } from "./data/dashboardCollections.ts";
-import { jobQueueSummaryQueryKey } from "./jobs/jobQueries.ts";
+import { dashboardHealthDiagnosticsQueryKey } from "./layout/dashboardSystemStatus.ts";
 import { notificationLatestQueryKey } from "./notifications/notificationQueries.ts";
 import { createDashboardRouter } from "./router.tsx";
 import type { DashboardWebAuthnClient } from "./security/webauthn/webauthnClient.ts";
@@ -23,6 +24,51 @@ const unexpectedWebAuthnClient: DashboardWebAuthnClient = Object.freeze({
     register: () => Promise.reject(new TypeError("Unexpected registration")),
 });
 
+function healthDiagnostics(
+    timestampMs: number,
+    options: {
+        readonly claimingPaused?: boolean;
+        readonly workerReady?: boolean;
+    } = {}
+): SystemHealthDiagnostics {
+    const workerReady = options.workerReady ?? true;
+    return {
+        checkedAtMs: timestampMs,
+        checks: {
+            application: { status: "ready" },
+            database: { status: "ready" },
+            frontend: { status: "ready" },
+            release: { status: "verified" },
+            worker: { status: workerReady ? "ready" : "not-ready" },
+        },
+        dependencies: {
+            gateway: {
+                freshness: "fresh",
+                phase: "connected",
+                status: "observed",
+            },
+            sessions: {
+                count: 0,
+                observedAtMs: timestampMs,
+                state: "fresh",
+                truncated: false,
+            },
+        },
+        queue: {
+            claimingPaused: options.claimingPaused ?? false,
+            runs: { queued: 0, running: 0 },
+            status: "observed",
+            workers: {
+                capacity: workerReady ? 1 : 0,
+                drainingCount: 0,
+                freshCount: workerReady ? 1 : 0,
+                onlineCount: workerReady ? 1 : 0,
+            },
+        },
+        status: workerReady ? "ready" : "not-ready",
+    };
+}
+
 describe("Dashboard browser application", () => {
     test("renders the overview cache foundation and owns authenticated activity", async () => {
         const timestampMs = Date.now();
@@ -34,10 +80,9 @@ describe("Dashboard browser application", () => {
         let logoutCalls = 0;
         let notificationCalls = 0;
         let cacheStatusCalls = 0;
+        let healthUnavailable = false;
+        let healthStatusCalls = 0;
         let settleLogout: ((result: { readonly isOk: true }) => void) | undefined;
-        const readinessFetch = jest
-            .spyOn(globalThis, "fetch")
-            .mockResolvedValue(Response.json({ status: "ready" }));
         const trpcClient = createDashboardTrpcClient({
             mutation(path, input) {
                 expect(input).toEqual({});
@@ -54,17 +99,12 @@ describe("Dashboard browser application", () => {
                 return Promise.reject(new TypeError(`Unexpected mutation: ${path}`));
             },
             query(path, input) {
-                if (path === "gateway.connection.get") {
+                if (path === "system.healthDiagnostics") {
                     expect(input).toEqual({});
-                    return Promise.resolve({
-                        checkedAtMs: timestampMs,
-                        connectedAtMs: timestampMs - 1000,
-                        connectionGeneration: 1,
-                        freshness: "fresh",
-                        lastActivityAtMs: timestampMs,
-                        phase: "connected",
-                        reconnectAttempt: 0,
-                    });
+                    healthStatusCalls += 1;
+                    return healthUnavailable
+                        ? Promise.reject(new Error("Health refresh unavailable"))
+                        : Promise.resolve(healthDiagnostics(timestampMs));
                 }
                 if (path === "jobs.listRuns") {
                     expect(input).toEqual({ limit: 1 });
@@ -203,7 +243,7 @@ describe("Dashboard browser application", () => {
                 screen.getByRole("button", { name: "Notifications, none unread" })
             ).toBeTruthy();
             const statusButton = await screen.findByRole("button", {
-                name: "System status: one or more systems need attention. Open details",
+                name: "System status: all systems online. Open details",
             });
             expect(screen.getByRole("button", { name: "Log out" })).toBeTruthy();
             await userEvent.click(statusButton);
@@ -213,22 +253,26 @@ describe("Dashboard browser application", () => {
             expect(screen.getByText("Dashboard backend")).toBeTruthy();
             expect(screen.getByText("Dashboard worker")).toBeTruthy();
             expect(screen.getByText("OpenClaw Gateway")).toBeTruthy();
-            const statusValues = [
-                ...screen.getAllByText("Online ●"),
-                screen.getByText("Needs attention ○"),
-            ];
+            const statusValues = screen.getAllByText("Online ●");
             expect(statusValues).toHaveLength(3);
             for (const statusValue of statusValues) {
                 expect(statusValue).toHaveClass("text-xs", "leading-5", "font-medium");
                 expect(statusValue).not.toHaveClass("text-sm");
             }
-            expect(readinessFetch).toHaveBeenCalledWith(
-                "/api/health/ready",
-                expect.objectContaining({
-                    cache: "no-store",
-                    credentials: "same-origin",
-                })
+            expect(healthStatusCalls).toBe(1);
+            await act(async () => {
+                healthUnavailable = true;
+                await queryClient.refetchQueries({
+                    queryKey: dashboardHealthDiagnosticsQueryKey,
+                });
+            });
+            await waitFor(() =>
+                expect(statusButton).toHaveAttribute(
+                    "aria-label",
+                    "System status: last known status is stale. Open details"
+                )
             );
+            expect(screen.getAllByText("Stale ○")).toHaveLength(3);
             await userEvent.click(screen.getByRole("button", { name: "Log out" }));
             expect(logoutCalls).toBe(1);
             expect(settleLogout).toBeDefined();
@@ -250,7 +294,6 @@ describe("Dashboard browser application", () => {
             view.unmount();
             await collections.cleanup();
             queryClient.clear();
-            readinessFetch.mockRestore();
         }
     });
 
@@ -276,16 +319,12 @@ describe("Dashboard browser application", () => {
         const secondAuthenticationCheck = Promise.withResolvers<AuthStatus>();
         let authenticationCalls = 0;
         let deferAuthenticationChecks = false;
-        let gatewayStatusCalls = 0;
+        let healthStatusCalls = 0;
         let notificationCalls = 0;
-        let workerStatusCalls = 0;
         const queryClient = createDashboardQueryClient();
         const router = createDashboardRouter(
             createMemoryHistory({ initialEntries: ["/agents"] })
         );
-        const readinessFetch = jest
-            .spyOn(globalThis, "fetch")
-            .mockResolvedValue(Response.json({ status: "ready" }));
         const trpcClient = createDashboardTrpcClient({
             mutation(path) {
                 return Promise.reject(new TypeError(`Unexpected mutation: ${path}`));
@@ -307,17 +346,11 @@ describe("Dashboard browser application", () => {
                     case "agents.listTaskHistory": {
                         return Promise.resolve({ runs: [] });
                     }
-                    case "gateway.connection.get": {
-                        gatewayStatusCalls += 1;
-                        return Promise.resolve({
-                            checkedAtMs: timestampMs,
-                            connectedAtMs: timestampMs,
-                            connectionGeneration: 1,
-                            freshness: "fresh" as const,
-                            lastActivityAtMs: timestampMs,
-                            phase: "connected" as const,
-                            reconnectAttempt: 0,
-                        });
+                    case "system.healthDiagnostics": {
+                        healthStatusCalls += 1;
+                        return Promise.resolve(
+                            healthDiagnostics(timestampMs, { workerReady: false })
+                        );
                     }
                     case "gatewaySessions.list": {
                         return Promise.resolve({
@@ -331,29 +364,6 @@ describe("Dashboard browser application", () => {
                                 observedAtMs: timestampMs,
                             },
                             stats: deriveGatewaySessionStats([], timestampMs),
-                        });
-                    }
-                    case "jobs.listRuns": {
-                        workerStatusCalls += 1;
-                        return Promise.resolve({
-                            runs: [],
-                            summary: {
-                                activeResourceClasses: [],
-                                control: {
-                                    claimingPaused: false,
-                                    updatedAtMs: timestampMs,
-                                    version: 1,
-                                },
-                                stateCounts: {
-                                    cancelled: 0,
-                                    failed: 0,
-                                    queued: 0,
-                                    running: 0,
-                                    succeeded: 0,
-                                    "timed-out": 0,
-                                },
-                                workers: [],
-                            },
                         });
                     }
                     case "notifications.list": {
@@ -399,10 +409,8 @@ describe("Dashboard browser application", () => {
                 name: "Notifications",
             });
             const authenticationCallsBeforeNavigation = authenticationCalls;
-            const gatewayStatusCallsBeforeNavigation = gatewayStatusCalls;
+            const healthStatusCallsBeforeNavigation = healthStatusCalls;
             const notificationCallsBeforeNavigation = notificationCalls;
-            const readinessCallsBeforeNavigation = readinessFetch.mock.calls.length;
-            const workerStatusCallsBeforeNavigation = workerStatusCalls;
             deferAuthenticationChecks = true;
 
             await act(async () => {
@@ -425,10 +433,8 @@ describe("Dashboard browser application", () => {
             expect(notificationButton).toBeVisible();
             expect(notificationButton).toHaveAttribute("aria-expanded", "true");
             expect(notificationHeading).toBeVisible();
-            expect(gatewayStatusCalls).toBe(gatewayStatusCallsBeforeNavigation);
+            expect(healthStatusCalls).toBe(healthStatusCallsBeforeNavigation);
             expect(notificationCalls).toBe(notificationCallsBeforeNavigation);
-            expect(readinessFetch).toHaveBeenCalledTimes(readinessCallsBeforeNavigation);
-            expect(workerStatusCalls).toBe(workerStatusCallsBeforeNavigation);
 
             await act(async () => {
                 secondAuthenticationCheck.resolve(authentication);
@@ -446,42 +452,14 @@ describe("Dashboard browser application", () => {
             ).toBe(notificationButton);
             expect(notificationButton).toHaveAttribute("aria-expanded", "true");
             expect(notificationHeading).toBeVisible();
-            expect(gatewayStatusCalls).toBe(gatewayStatusCallsBeforeNavigation);
+            expect(healthStatusCalls).toBe(healthStatusCallsBeforeNavigation);
             expect(notificationCalls).toBe(notificationCallsBeforeNavigation);
-            expect(readinessFetch).toHaveBeenCalledTimes(readinessCallsBeforeNavigation);
-            expect(workerStatusCalls).toBe(workerStatusCallsBeforeNavigation);
 
             act(() => {
-                queryClient.setQueryData(jobQueueSummaryQueryKey, {
-                    runs: [],
-                    summary: {
-                        activeResourceClasses: [],
-                        control: {
-                            claimingPaused: false,
-                            updatedAtMs: timestampMs,
-                            version: 2,
-                        },
-                        stateCounts: {
-                            cancelled: 0,
-                            failed: 0,
-                            queued: 0,
-                            running: 0,
-                            succeeded: 0,
-                            "timed-out": 0,
-                        },
-                        workers: [
-                            {
-                                activeRunCount: 0,
-                                capacity: 1,
-                                heartbeatAtMs: timestampMs,
-                                id: "019fe300-0000-7000-8000-000000000001",
-                                releaseId: "a".repeat(40),
-                                startedAtMs: timestampMs,
-                                state: "online" as const,
-                            },
-                        ],
-                    },
-                });
+                queryClient.setQueryData(
+                    dashboardHealthDiagnosticsQueryKey,
+                    healthDiagnostics(timestampMs)
+                );
                 queryClient.setQueryData(notificationLatestQueryKey, {
                     notifications: [],
                     readCount: 4,
@@ -515,7 +493,6 @@ describe("Dashboard browser application", () => {
             view.unmount();
             await collections.cleanup();
             queryClient.clear();
-            readinessFetch.mockRestore();
         }
     });
 

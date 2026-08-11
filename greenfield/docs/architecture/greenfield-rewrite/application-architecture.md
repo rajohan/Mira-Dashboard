@@ -267,6 +267,31 @@ and per-cron rows. Its parity entry remains `planned` until those diagnostic cap
 repo-external OpenClaw consumer migration are preserved without loss; production's live consumer
 must not change before that cutover gate is satisfied.
 
+### Authenticated health diagnostics
+
+`system.healthDiagnostics` is the session-only replacement for the legacy detailed health route.
+It has strict empty input and no automation capability. One request reads the live application
+readiness controller, verified frontend/release composition facts, the sanitized process Gateway
+state, the identity-free cached Gateway-session count, and one deferred-transaction SQLite health
+aggregate. The release commit is used only inside the service to require a fresh online worker from
+the exact serving release; release IDs, worker IDs/PIDs, session identities, Gateway endpoints,
+payloads, and raw failures never serialize.
+
+Application, database, frontend, verified release, and exact-release worker checks gate the
+diagnostic aggregate. Gateway state, cached-session freshness, queue depth, and claim pause remain
+non-gating operational data and do not alter the public readiness probe. Queue and dependency
+failures become explicit `unavailable` components rather than healthy-looking zeroes or a failed
+whole response. The queue reader counts only indexed active states and aggregates every fresh
+worker in constant-size SQL output, independently of the bounded worker inventory used by the Jobs
+UI. The authenticated header consumes this one snapshot instead of polling raw readiness, Gateway,
+and Jobs separately. A failed background refresh retains the last validated snapshot but marks every
+previously healthy component and the aggregate as stale; it can never leave an old green status
+looking current.
+
+This secure replacement closes the legacy health row's readiness/dependency capability. The old
+route's wider application-observability counters remain tracked by the separate planned
+`GET /api/metrics` row; `system.metrics` alone does not claim that broader parity.
+
 ### Browser-managed automation security
 
 The `automationSecurity` namespace owns the complete operator-managed principal and credential

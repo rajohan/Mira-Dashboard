@@ -204,6 +204,42 @@ describe("reviewed pre-cutover parity inventory", () => {
         });
     });
 
+    test("records the identity-free health diagnostics replacement precisely", async () => {
+        const reviewed = await loadReviewedParityInventory();
+        const diagnostics = reviewed.legacyEndpoints.endpoints.find(
+            ({ id }) => id === "GET /api/health/diagnostics"
+        );
+
+        expect(diagnostics?.purpose).toContain("exact-release-worker");
+        expect(diagnostics?.purpose).toContain("identity-free");
+        expect(diagnostics?.purpose).toContain("GET /api/metrics");
+        expect(diagnostics?.target).toEqual({
+            delivery: "implemented",
+            kind: "procedure",
+            names: ["system.healthDiagnostics"],
+            phase: "phase-1",
+        });
+    });
+
+    test("keeps the wider legacy metrics capability planned explicitly", async () => {
+        const reviewed = await loadReviewedParityInventory();
+        const metrics = reviewed.legacyEndpoints.endpoints.find(
+            ({ id }) => id === "GET /api/metrics"
+        );
+
+        expect(metrics?.purpose).toContain("application observability");
+        expect(metrics?.purpose).toContain("HTTP counters");
+        expect(metrics?.purpose).toContain("polling-snapshot");
+        expect(metrics?.purpose).toContain("token projections");
+        expect(metrics?.purpose).toContain("health diagnostics");
+        expect(metrics?.target).toEqual({
+            delivery: "planned",
+            kind: "procedure",
+            names: ["system.metrics"],
+            phase: "phase-3",
+        });
+    });
+
     test("keeps the reviewed Phase 5 Logs slice closed", async () => {
         const reviewed = await loadReviewedParityInventory();
         const logsRoute = reviewed.frontend.routes.find(({ path }) => path === "/logs");

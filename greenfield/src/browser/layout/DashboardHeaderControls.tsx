@@ -7,7 +7,6 @@ import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { useObservedQueryData } from "../api/useObservedQueryState.ts";
 import { authStatusQueryKey, publishAuthenticationStatus } from "../auth/authQueries.ts";
 import { useExclusiveDashboardAction } from "../hooks/useExclusiveDashboardAction.ts";
-import { jobQueueSummaryQueryOptions } from "../jobs/jobQueries.ts";
 import { cn } from "../lib/classNames.ts";
 import { AuthenticatedNotificationCenter } from "../notifications/AuthenticatedNotificationCenter.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -16,8 +15,8 @@ import { Icon } from "../ui/Icon.tsx";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/Popover.tsx";
 import { Text } from "../ui/Text.tsx";
 import {
-    dashboardGatewayConnectionQueryOptions,
-    dashboardReadinessQueryOptions,
+    dashboardHealthDiagnosticsQueryOptions,
+    dashboardHealthSnapshotIsStale,
     projectDashboardSystemStatus,
     type DashboardSystemComponentState,
 } from "./dashboardSystemStatus.ts";
@@ -28,12 +27,14 @@ const componentLabels: Readonly<Record<DashboardSystemComponentState, string>> =
     Object.freeze({
         offline: "Needs attention",
         online: "Online",
+        stale: "Stale",
         unavailable: "Checking",
     });
 const overallLabels: Readonly<Record<DashboardSystemComponentState, string>> =
     Object.freeze({
         offline: "one or more systems need attention",
         online: "all systems online",
+        stale: "last known status is stale",
         unavailable: "status unavailable",
     });
 
@@ -44,6 +45,9 @@ function statusClassName(state: DashboardSystemComponentState): string {
         }
         case "offline": {
             return "border-red-500/40 bg-red-500/10 text-red-300 hover:bg-red-500/20";
+        }
+        case "stale": {
+            return "border-amber-500/40 bg-amber-500/10 text-amber-200 hover:bg-amber-500/20";
         }
         case "unavailable": {
             return "border-amber-500/40 bg-amber-500/10 text-amber-200 hover:bg-amber-500/20";
@@ -68,6 +72,7 @@ function StatusRow({ label, state }: StatusRowProps) {
                     "font-medium",
                     state === "online" && "text-green-300",
                     state === "offline" && "text-red-300",
+                    state === "stale" && "text-amber-200",
                     state === "unavailable" && "text-amber-200"
                 )}
                 size="sm"
@@ -92,15 +97,16 @@ function AuthenticatedDashboardHeaderControls() {
     const client = useDashboardTrpcClient();
     const navigate = useNavigate();
     const queryClient = useQueryClient();
-    const readiness = useQuery(dashboardReadinessQueryOptions());
-    const gateway = useQuery(dashboardGatewayConnectionQueryOptions(client));
-    const worker = useQuery(jobQueueSummaryQueryOptions(client));
-    const status = projectDashboardSystemStatus({
-        backendReady:
-            readiness.data === undefined ? undefined : readiness.data.status === "ready",
-        gateway: gateway.data,
-        workerSummary: worker.data,
-    });
+    const health = useQuery(dashboardHealthDiagnosticsQueryOptions(client));
+    const status = projectDashboardSystemStatus(
+        health.data,
+        dashboardHealthSnapshotIsStale({
+            fetchStatus: health.fetchStatus,
+            hasData: health.data !== undefined,
+            isError: health.isError,
+            isStale: health.isStale,
+        })
+    );
     const overallLabel = overallLabels[status.overall];
 
     async function logout(): Promise<void> {

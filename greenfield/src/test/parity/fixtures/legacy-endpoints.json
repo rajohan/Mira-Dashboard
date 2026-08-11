@@ -546,10 +546,10 @@
             "id": "GET /api/health/diagnostics",
             "method": "GET",
             "path": "/api/health/diagnostics",
-            "purpose": "Authenticated readiness details and dependency status.",
+            "purpose": "Authenticated readiness details and dependency status. The replacement preserves application, database, frontend, verified-release, exact-release-worker, Gateway, cached-session, and queue health through a bounded identity-free projection; wider legacy application observability remains tracked separately by GET /api/metrics.",
             "section": "Health",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["system.healthDiagnostics"],
                 "phase": "phase-1"
@@ -705,7 +705,7 @@
             "id": "GET /api/metrics",
             "method": "GET",
             "path": "/api/metrics",
-            "purpose": "Reads host metrics.",
+            "purpose": "Reads legacy host and application observability, HTTP counters, polling-snapshot state, token projections, and the wider counters deferred from legacy health diagnostics. The bounded system.metrics host gauges are implemented, but this row remains planned until the complete capability is preserved.",
             "section": "Backups, Cache, Metrics, Ops",
             "target": {
                 "delivery": "planned",

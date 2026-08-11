@@ -1,52 +1,94 @@
 import { describe, expect, test } from "bun:test";
 
-import type { GatewayConnectionSnapshot } from "../../contracts/gatewayConnection.ts";
-import type { JobQueueSummary } from "../../contracts/jobs.ts";
-import { projectDashboardSystemStatus } from "./dashboardSystemStatus.ts";
+import type { SystemHealthDiagnostics } from "../../contracts/system.ts";
+import {
+    dashboardHealthSnapshotIsStale,
+    projectDashboardSystemStatus,
+} from "./dashboardSystemStatus.ts";
 
 const observedAtMs = 1_800_000_000_000;
-const gateway = Object.freeze({
+const diagnostics = Object.freeze({
     checkedAtMs: observedAtMs,
-    connectedAtMs: observedAtMs - 1000,
-    connectionGeneration: 2,
-    freshness: "fresh",
-    lastActivityAtMs: observedAtMs,
-    phase: "connected",
-    reconnectAttempt: 0,
-} satisfies GatewayConnectionSnapshot);
-const workerSummary = Object.freeze({
-    activeResourceClasses: [],
-    control: { claimingPaused: false, updatedAtMs: observedAtMs, version: 1 },
-    stateCounts: {
-        cancelled: 0,
-        failed: 0,
-        queued: 0,
-        running: 0,
-        succeeded: 0,
-        "timed-out": 0,
+    checks: {
+        application: { status: "ready" },
+        database: { status: "ready" },
+        frontend: { status: "ready" },
+        release: { status: "verified" },
+        worker: { status: "ready" },
     },
-    workers: [
-        {
-            activeRunCount: 0,
-            capacity: 1,
-            heartbeatAtMs: observedAtMs,
-            id: "019fe300-0000-7000-8000-000000000001",
-            releaseId: "a".repeat(40),
-            startedAtMs: observedAtMs - 60_000,
-            state: "online",
+    dependencies: {
+        gateway: {
+            freshness: "fresh",
+            phase: "connected",
+            status: "observed",
         },
-    ],
-} satisfies JobQueueSummary);
+        sessions: {
+            count: 1,
+            observedAtMs,
+            state: "fresh",
+            truncated: false,
+        },
+    },
+    queue: {
+        claimingPaused: false,
+        runs: { queued: 0, running: 0 },
+        status: "observed",
+        workers: {
+            capacity: 1,
+            drainingCount: 0,
+            freshCount: 1,
+            onlineCount: 1,
+        },
+    },
+    status: "ready",
+} as const satisfies SystemHealthDiagnostics);
 
 describe("Dashboard system status projection", () => {
-    test("reports online only when every bounded observation is online", () => {
+    test("marks only retained snapshots without a current observation stale", () => {
         expect(
-            projectDashboardSystemStatus({
-                backendReady: true,
-                gateway,
-                workerSummary,
+            dashboardHealthSnapshotIsStale({
+                fetchStatus: "idle",
+                hasData: false,
+                isError: true,
+                isStale: true,
             })
-        ).toEqual({
+        ).toBe(false);
+        expect(
+            dashboardHealthSnapshotIsStale({
+                fetchStatus: "fetching",
+                hasData: true,
+                isError: false,
+                isStale: true,
+            })
+        ).toBe(false);
+        expect(
+            dashboardHealthSnapshotIsStale({
+                fetchStatus: "idle",
+                hasData: true,
+                isError: false,
+                isStale: true,
+            })
+        ).toBe(true);
+        expect(
+            dashboardHealthSnapshotIsStale({
+                fetchStatus: "paused",
+                hasData: true,
+                isError: false,
+                isStale: false,
+            })
+        ).toBe(true);
+        expect(
+            dashboardHealthSnapshotIsStale({
+                fetchStatus: "idle",
+                hasData: true,
+                isError: true,
+                isStale: false,
+            })
+        ).toBe(true);
+    });
+
+    test("reports online only when every bounded observation is online", () => {
+        expect(projectDashboardSystemStatus(diagnostics)).toEqual({
             backend: "online",
             gateway: "online",
             overall: "online",
@@ -54,8 +96,8 @@ describe("Dashboard system status projection", () => {
         });
     });
 
-    test("does not treat missing observations as healthy", () => {
-        expect(projectDashboardSystemStatus({})).toEqual({
+    test("does not treat a missing diagnostic snapshot as healthy", () => {
+        expect(projectDashboardSystemStatus(undefined)).toEqual({
             backend: "unavailable",
             gateway: "unavailable",
             overall: "unavailable",
@@ -63,16 +105,52 @@ describe("Dashboard system status projection", () => {
         });
     });
 
-    test("surfaces a paused worker or degraded Gateway as attention", () => {
+    test("marks retained healthy data stale after a failed background refresh", () => {
+        expect(projectDashboardSystemStatus(diagnostics, true)).toEqual({
+            backend: "stale",
+            gateway: "stale",
+            overall: "stale",
+            worker: "stale",
+        });
+    });
+
+    test("surfaces paused claiming or a degraded Gateway as attention", () => {
         expect(
             projectDashboardSystemStatus({
-                backendReady: true,
-                gateway: { ...gateway, freshness: "stale", phase: "degraded" },
-                workerSummary: {
-                    ...workerSummary,
-                    control: { ...workerSummary.control, claimingPaused: true },
+                ...diagnostics,
+                dependencies: {
+                    ...diagnostics.dependencies,
+                    gateway: {
+                        freshness: "stale",
+                        phase: "degraded",
+                        status: "observed",
+                    },
                 },
+                queue: { ...diagnostics.queue, claimingPaused: true },
             })
         ).toMatchObject({ gateway: "offline", overall: "offline", worker: "offline" });
+    });
+
+    test("keeps unavailable backend checks distinct from an observed offline process", () => {
+        expect(
+            projectDashboardSystemStatus({
+                ...diagnostics,
+                checks: {
+                    ...diagnostics.checks,
+                    database: { status: "unavailable" },
+                },
+                status: "not-ready",
+            })
+        ).toMatchObject({ backend: "unavailable", overall: "unavailable" });
+        expect(
+            projectDashboardSystemStatus({
+                ...diagnostics,
+                checks: {
+                    ...diagnostics.checks,
+                    application: { status: "not-ready" },
+                },
+                status: "not-ready",
+            })
+        ).toMatchObject({ backend: "offline", overall: "offline" });
     });
 });

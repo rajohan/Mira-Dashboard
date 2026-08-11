@@ -12,6 +12,7 @@ import {
     isNull,
     lt,
     lte,
+    min,
     or,
     sql,
     type SQL,
@@ -137,6 +138,31 @@ export interface JobQueueState {
     readonly oldestQueuedAt?: Date;
     readonly stateCounts: Readonly<Record<JobRunState, number>>;
     readonly workers: readonly JobQueueWorkerRecord[];
+}
+
+/** Constant-size queue and worker aggregates consumed only by health diagnostics. */
+export interface JobHealthState {
+    readonly control: JobWorkerControlRecord;
+    readonly oldestQueuedAt?: Date;
+    readonly queuedRunCount: number;
+    readonly runningRunCount: number;
+    readonly workers: {
+        readonly capacity: number;
+        readonly drainingCount: number;
+        readonly exactReleaseOnline: boolean;
+        readonly freshCount: number;
+        readonly onlineCount: number;
+    };
+}
+
+export interface ReadJobHealthStateInput {
+    readonly expectedReleaseId?: string;
+    readonly minimumHeartbeatAt: Date;
+}
+
+/** Narrow aggregate reader kept separate from the ordinary job-service repository port. */
+export interface JobHealthStateReader {
+    readHealthState(input: ReadJobHealthStateInput): JobHealthState;
 }
 
 export interface ListJobRunEventsInput {
@@ -1081,6 +1107,55 @@ class DrizzleJobReader implements JobRepositoryReader {
                 activeRunCount: activeCountByWorker.get(worker.id) ?? 0,
                 worker,
             })),
+        };
+    }
+
+    public readHealthState(input: ReadJobHealthStateInput): JobHealthState {
+        const queued = this.database
+            .select({ oldestQueuedAt: min(jobRuns.queuedAt), value: count() })
+            .from(jobRuns)
+            .where(eq(jobRuns.state, "queued"))
+            .get();
+        const runningRunCount =
+            this.database
+                .select({ value: count() })
+                .from(jobRuns)
+                .where(eq(jobRuns.state, "running"))
+                .get()?.value ?? 0;
+        const exactReleaseOnlineCount =
+            input.expectedReleaseId === undefined
+                ? sql<number>`0`
+                : sql<number>`coalesce(sum(case when ${workerInstances.state} = 'online' and ${workerInstances.releaseId} = ${input.expectedReleaseId} then 1 else 0 end), 0)`;
+        const workers = this.database
+            .select({
+                capacity: sql<number>`coalesce(sum(${workerInstances.capacity}), 0)`,
+                drainingCount: sql<number>`coalesce(sum(case when ${workerInstances.state} = 'draining' then 1 else 0 end), 0)`,
+                exactReleaseOnlineCount,
+                freshCount: count(),
+                onlineCount: sql<number>`coalesce(sum(case when ${workerInstances.state} = 'online' then 1 else 0 end), 0)`,
+            })
+            .from(workerInstances)
+            .where(
+                and(
+                    inArray(workerInstances.state, ["draining", "online"]),
+                    gte(workerInstances.heartbeatAt, input.minimumHeartbeatAt)
+                )
+            )
+            .get();
+        return {
+            control: this.readWorkerControl(),
+            ...(queued?.oldestQueuedAt === null || queued?.oldestQueuedAt === undefined
+                ? {}
+                : { oldestQueuedAt: queued.oldestQueuedAt }),
+            queuedRunCount: queued?.value ?? 0,
+            runningRunCount,
+            workers: {
+                capacity: workers?.capacity ?? 0,
+                drainingCount: workers?.drainingCount ?? 0,
+                exactReleaseOnline: (workers?.exactReleaseOnlineCount ?? 0) > 0,
+                freshCount: workers?.freshCount ?? 0,
+                onlineCount: workers?.onlineCount ?? 0,
+            },
         };
     }
 
@@ -2625,7 +2700,7 @@ class DrizzleJobWriter extends DrizzleJobReader {
 export function createJobRepository(
     database: SQLiteBunDatabase,
     writeAdmission: ImmediateDatabaseWriteAdmission
-): JobRepository {
+): JobRepository & JobHealthStateReader {
     // Drizzle exposes the synchronous transaction overload through a conditional
     // return type that cannot preserve our generic callback without this narrowing.
     const runTransaction = database.transaction.bind(database) as unknown as <T>(
@@ -2703,6 +2778,8 @@ export function createJobRepository(
             read((reader) => reader.readClaimCancellation(input)),
         readActionPayloadRunSnapshots: (input: ReadActionPayloadRunSnapshotsInput) =>
             read((reader) => reader.readActionPayloadRunSnapshots(input)),
+        readHealthState: (input: ReadJobHealthStateInput) =>
+            read((reader) => reader.readHealthState(input)),
         readQueueState: (input: ReadQueueStateInput) =>
             read((reader) => reader.readQueueState(input)),
         readWorkerControl: () => read((reader) => reader.readWorkerControl()),

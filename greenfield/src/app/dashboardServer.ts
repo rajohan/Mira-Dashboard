@@ -97,6 +97,7 @@ import { createRequestAuthenticator } from "../server/domains/security/requestAu
 import { createRequestAuthenticationRepository } from "../server/domains/security/requestAuthenticationRepository.ts";
 import { createSecurityAuditLifecycleService } from "../server/domains/security/securityAuditLifecycle.ts";
 import { createSecurityAuditLifecycleRepository } from "../server/domains/security/securityAuditLifecycleRepository.ts";
+import { createSystemHealthDiagnosticsService } from "../server/domains/system/healthDiagnosticsService.ts";
 import { createTaskRepository } from "../server/domains/tasks/repository.ts";
 import { createTaskService } from "../server/domains/tasks/service.ts";
 import { createElevenLabsSpeechProvider } from "../server/platform/chat/elevenLabsSpeechProvider.ts";
@@ -200,6 +201,7 @@ export interface DashboardServerOptions extends Omit<
     | "openClawCronService"
     | "openClawTasksService"
     | "securityAuditLifecycle"
+    | "systemHealthDiagnosticsService"
     | "taskService"
     | "terminalService"
     | "terminalSocketBoundary"
@@ -225,6 +227,8 @@ export interface DashboardServerOptions extends Omit<
     readonly openClawFileRoot?: WorkspaceFileRootConfiguration;
     readonly recentAuthenticationWindowMs?: number;
     readonly sessionIdleDurationMs?: number;
+    /** Verified immutable release used to require a matching fresh worker. */
+    readonly verifiedReleaseId?: string;
     /** Optional only for isolated composition tests; production supplies both paths. */
     readonly terminalBrokerDirectory?: string;
     readonly terminalBrokerSocket?: string;
@@ -816,6 +820,17 @@ export async function createDashboardServer(
                 ? {}
                 : { transcriptLifecycle: chatTranscriptLifecycle }),
         });
+        const systemHealthDiagnosticsService = createSystemHealthDiagnosticsService({
+            ...(options.verifiedReleaseId === undefined
+                ? {}
+                : { expectedWorkerReleaseId: options.verifiedReleaseId }),
+            frontendReady: options.frontendAssets !== undefined,
+            gatewayConnectionService,
+            gatewaySessionsReader: gatewaySessionsService,
+            jobHealthReader: jobRepository,
+            ...(domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }),
+            readiness: options.readiness,
+        });
         const agentService = createAgentService({
             ...(domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }),
             gatewaySessionsService,
@@ -1078,6 +1093,7 @@ export async function createDashboardServer(
             port: options.port,
             readiness: options.readiness,
             securityAuditLifecycle,
+            systemHealthDiagnosticsService,
             taskService,
             ...(terminalComposition === undefined
                 ? {}
@@ -1291,6 +1307,7 @@ export async function runDashboardWebProcess(
             terminalBrokerSocket: layout.production.state.terminalBrokerSocket,
             totpSecretCipher,
             trustedProxyAddresses: configuration.trustedProxyAddresses,
+            verifiedReleaseId: release.manifest.source.commitSha,
             webAuthnRelyingParty: configuration.webAuthnRelyingParty,
             workspaceFileRoot,
             workspaceFileUploadSpoolRoot: layout.production.state.workspaceFileUploads,

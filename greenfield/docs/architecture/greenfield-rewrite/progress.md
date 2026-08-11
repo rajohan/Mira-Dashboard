@@ -1433,3 +1433,23 @@ full-browser parity, production rehearsal, cutover, and legacy deletion remain o
   replaced. Legacy still carries payload-bearing cache diagnostics and identifiable task,
   Dashboard-job, and per-cron rows. Its parity entry is returned to `planned` until those
   diagnostic capabilities and the repo-external consumer migration are preserved without loss.
+
+### 2026-08-11 — Authenticated health diagnostics parity closed
+
+- `system.healthDiagnostics` now returns one strict session-only, identity-free snapshot of live
+  application readiness, database access, immutable frontend/release verification, an online
+  worker from the exact serving release, sanitized Gateway state, cached session-count freshness,
+  and bounded queue aggregates. Anonymous callers are unauthorized and automation principals are
+  forbidden before any dependency read.
+- One dedicated deferred-transaction repository read counts only queued/running jobs and computes
+  constant-size aggregates across every fresh worker. It therefore neither groups retained
+  terminal history nor inherits the Jobs UI's 32-worker response cap. Database, Gateway, session,
+  and queue failures remain explicit unavailable data without leaking identities or raw errors.
+- Database, frontend, verified release, application state, and exact-release worker gate the
+  diagnostic status. Gateway degradation, stale session data, and claim pause remain visible but
+  do not alter the public readiness probe. The authenticated header now uses this single query
+  instead of separate readiness, Gateway, and Jobs requests; background failures retain the last
+  validated rows with an explicit stale marker instead of leaving an old green state current.
+- The legacy `GET /api/health/diagnostics` row is recorded as implemented by this secure
+  replacement. The legacy route's wider application counters remain part of the separately planned
+  `GET /api/metrics` capability and are not claimed by this slice.
