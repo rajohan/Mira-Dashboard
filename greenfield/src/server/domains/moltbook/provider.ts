@@ -16,6 +16,24 @@ const moltbookApiBasePath = "/api/v1";
 const moltbookResponseMaximumBytes = 256 * 1024;
 export const moltbookRequestTimeoutMs = 20_000;
 
+const moltbookFeedEnvelopeFields = [
+    "feed_filter",
+    "feed_type",
+    "has_more",
+    "posts",
+    "tip",
+] as const;
+const moltbookHomeEnvelopeFields = [
+    "activity_on_your_posts",
+    "explore",
+    "latest_moltbook_announcement",
+    "posts_from_accounts_you_follow",
+    "what_to_do_next",
+    "your_account",
+    "your_direct_messages",
+] as const;
+const moltbookProfileEnvelopeFields = ["agent", "recentComments", "recentPosts"] as const;
+
 export class MoltbookProviderFailure extends Error {
     readonly reason: "invalid-response" | "timeout" | "unavailable";
 
@@ -74,9 +92,19 @@ function optionalRecord(value: unknown): Readonly<Record<string, unknown>> | und
     return value === undefined || value === null ? undefined : record(value);
 }
 
-function requiredArray(value: unknown): readonly unknown[] {
+function optionalArray(value: unknown): readonly unknown[] {
+    if (value === undefined || value === null) return [];
     if (!Array.isArray(value)) throw new MoltbookProviderFailure("invalid-response");
     return value;
+}
+
+function requireRecognizedEnvelopeField(
+    value: Readonly<Record<string, unknown>>,
+    fields: readonly string[]
+): void {
+    if (!fields.some((field) => Object.hasOwn(value, field))) {
+        throw new MoltbookProviderFailure("invalid-response");
+    }
 }
 
 function optionalString(value: unknown): string | undefined {
@@ -93,6 +121,27 @@ function requiredString(value: unknown): string {
     return output;
 }
 
+function homeExploreCount(value: unknown): number {
+    if (value === undefined || value === null) return 0;
+    if (Array.isArray(value)) return value.length;
+    const pointer = record(value);
+    if (requiredString(pointer.endpoint).trim() === "") {
+        throw new MoltbookProviderFailure("invalid-response");
+    }
+    optionalString(pointer.description);
+    return 0;
+}
+
+function homeFollowingPostsCount(value: unknown): number {
+    if (value === undefined || value === null) return 0;
+    if (Array.isArray(value)) return value.length;
+    const collection = record(value);
+    if (!Array.isArray(collection.posts)) {
+        throw new MoltbookProviderFailure("invalid-response");
+    }
+    return collection.posts.length;
+}
+
 function nonnegativeCount(value: unknown): number {
     if (value === undefined || value === null) return 0;
     const numeric =
@@ -103,13 +152,6 @@ function nonnegativeCount(value: unknown): number {
         throw new MoltbookProviderFailure("invalid-response");
     }
     return numeric;
-}
-
-function requiredNonnegativeCount(value: unknown): number {
-    if (value === undefined || value === null) {
-        throw new MoltbookProviderFailure("invalid-response");
-    }
-    return nonnegativeCount(value);
 }
 
 function signedInteger(value: unknown): number {
@@ -143,13 +185,6 @@ function booleanValue(value: unknown, fallback = false): boolean {
         throw new MoltbookProviderFailure("invalid-response");
     }
     return value;
-}
-
-function requiredBoolean(value: unknown): boolean {
-    if (value === undefined || value === null) {
-        throw new MoltbookProviderFailure("invalid-response");
-    }
-    return booleanValue(value);
 }
 
 async function cancelResponse(
@@ -269,12 +304,13 @@ function normalizeFeedPost(value: unknown) {
 
 function normalizeFeed(value: unknown, sort: "hot" | "new") {
     const feed = record(value);
+    requireRecognizedEnvelopeField(feed, moltbookFeedEnvelopeFields);
     return {
         ...(optionalString(feed.feed_filter) === undefined
             ? {}
             : { filter: optionalString(feed.feed_filter) }),
-        hasMore: requiredBoolean(feed.has_more),
-        posts: requiredArray(feed.posts)
+        hasMore: booleanValue(feed.has_more),
+        posts: optionalArray(feed.posts)
             .slice(0, moltbookFeedMaximumPosts)
             .map((post) => normalizeFeedPost(post)),
         sort,
@@ -330,7 +366,8 @@ function nextAction(value: unknown): string | undefined {
 
 function normalizeHome(value: unknown) {
     const home = record(value);
-    const messages = record(home.your_direct_messages);
+    requireRecognizedEnvelopeField(home, moltbookHomeEnvelopeFields);
+    const messages = optionalRecord(home.your_direct_messages);
     const account = optionalRecord(home.your_account);
     const announcement = optionalRecord(home.latest_moltbook_announcement);
     const normalizedAnnouncement =
@@ -358,25 +395,22 @@ function normalizeHome(value: unknown) {
                       : { title: optionalString(announcement.title) }),
               };
     return {
-        activityOnYourPostsCount: requiredArray(home.activity_on_your_posts).length,
-        exploreCount: requiredArray(home.explore).length,
+        activityOnYourPostsCount: optionalArray(home.activity_on_your_posts).length,
+        exploreCount: homeExploreCount(home.explore),
         ...(normalizedAnnouncement === undefined ||
         Object.keys(normalizedAnnouncement).length === 0
             ? {}
             : { latestAnnouncement: normalizedAnnouncement }),
-        nextActions: requiredArray(home.what_to_do_next)
+        nextActions: optionalArray(home.what_to_do_next)
             .map((action) => nextAction(action))
             .filter((action): action is string => action !== undefined)
             .slice(0, moltbookNextActionsMaximum),
-        pendingRequestCount: requiredNonnegativeCount(messages.pending_request_count),
-        postsFromAccountsYouFollowCount: requiredArray(
+        pendingRequestCount: nonnegativeCount(messages?.pending_request_count),
+        postsFromAccountsYouFollowCount: homeFollowingPostsCount(
             home.posts_from_accounts_you_follow
-        ).length,
-        unreadMessageCount: requiredNonnegativeCount(messages.unread_message_count),
-        unreadNotificationCount:
-            account === undefined
-                ? 0
-                : requiredNonnegativeCount(account.unread_notification_count),
+        ),
+        unreadMessageCount: nonnegativeCount(messages?.unread_message_count),
+        unreadNotificationCount: nonnegativeCount(account?.unread_notification_count),
     };
 }
 
@@ -399,11 +433,12 @@ function normalizeProfile(value: unknown) {
 
 function normalizeOwnContent(value: unknown) {
     const response = record(value);
+    requireRecognizedEnvelopeField(response, moltbookProfileEnvelopeFields);
     return {
-        comments: requiredArray(response.recentComments)
+        comments: optionalArray(response.recentComments)
             .slice(0, moltbookOwnCommentsMaximum)
             .map((comment) => normalizeOwnComment(comment)),
-        posts: requiredArray(response.recentPosts)
+        posts: optionalArray(response.recentPosts)
             .slice(0, moltbookOwnPostsMaximum)
             .map((post) => normalizeOwnPost(post)),
     };
