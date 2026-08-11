@@ -31,25 +31,13 @@ export async function startDevelopmentFrontend(
     const backendRequest = (
         request: Request,
         server: Bun.Server<DevelopmentProxySocketData>
-    ): Promise<Response> | Response =>
+    ): Promise<Response> | Response | undefined =>
         request.headers.get("upgrade")?.toLowerCase() === "websocket"
             ? proxyDevelopmentWebSocket(request, server, configuration)
             : proxyDevelopmentHttp(request, server, configuration);
 
     const frontend = Bun.serve<DevelopmentProxySocketData>({
         development: { console: true, hmr: configuration.hotReload },
-        fetch(request, bunServer) {
-            const pathname = new URL(request.url).pathname;
-            if (
-                pathname === "/api" ||
-                pathname.startsWith("/api/") ||
-                pathname === "/trpc" ||
-                pathname.startsWith("/trpc/")
-            ) {
-                return backendRequest(request, bunServer);
-            }
-            return new Response("Not found", { status: 404 });
-        },
         hostname: configuration.host,
         port: configuration.port,
         routes: {

@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { deriveDashboardProjectLayout } from "../../server/platform/filesystem/projectLayout.ts";
@@ -21,18 +23,26 @@ describe("development log maintenance", () => {
         expect(JSON.stringify(manifest)).not.toContain("/tmp/openclaw");
     });
 
-    test("never advertises fixed host policies", async () => {
-        const layout = deriveDashboardProjectLayout("/srv/mira-dashboard-dev");
+    test("advertises only managed maintenance from prepared development state", async () => {
+        const temporaryRoot = await mkdtemp(
+            path.join(tmpdir(), "mira-dashboard-development-logs-")
+        );
+        const layout = deriveDashboardProjectLayout(temporaryRoot);
+        await mkdir(layout.production.state.logMaintenance, { recursive: true });
         const executor = createDevelopmentLogMaintenanceExecutor(layout);
 
-        const policies = await executor.availablePolicies();
-        expect(policies.every((policyId) => policyId === "docker-managed")).toBeTrue();
-        const failure = await executor.run("host-rsyslog", false).then(
-            () => null,
-            (error: unknown) => error
-        );
-        expect(failure).toBeInstanceOf(Error);
-        if (!(failure instanceof Error)) throw new Error("Expected fixed-policy failure");
-        expect(failure.message).toContain("Fixed log maintenance execution failed");
+        try {
+            expect(await executor.availablePolicies()).toEqual(["docker-managed"]);
+            const failure = await executor.run("host-rsyslog", false).then(
+                () => null,
+                (error: unknown) => error
+            );
+            expect(failure).toBeInstanceOf(Error);
+            if (!(failure instanceof Error))
+                throw new Error("Expected fixed-policy failure");
+            expect(failure.message).toContain("Fixed log maintenance execution failed");
+        } finally {
+            await rm(temporaryRoot, { force: true, recursive: true });
+        }
     });
 });

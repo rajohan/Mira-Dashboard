@@ -1,8 +1,9 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, jest, test } from "bun:test";
 import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { guardedDevelopmentChildCommand } from "./developmentProcessGuard.ts";
 import {
     type DevelopmentChildProcess,
     runDevelopmentStack,
@@ -11,18 +12,24 @@ import { resolveDevelopmentStackConfig } from "./developmentStackConfig.ts";
 import { prepareDevelopmentRuntimeState } from "./developmentState.ts";
 
 const repositoryRoot = path.resolve(import.meta.dir, "../..");
+const sourceCommit = "0".repeat(40);
 
 interface FakeChild {
     readonly child: DevelopmentChildProcess;
     exit(code: number): void;
+    readonly firstSignal: Promise<number | NodeJS.Signals | undefined>;
     readonly signals: Array<number | NodeJS.Signals | undefined>;
 }
 
-function fakeChild(): FakeChild {
+function fakeChild(options: { readonly ignoreSigterm?: boolean } = {}): FakeChild {
     let exitCode: number | null = null;
     let resolveExit!: (code: number) => void;
+    let resolveFirstSignal!: (signal: number | NodeJS.Signals | undefined) => void;
     const exited = new Promise<number>((resolve) => {
         resolveExit = resolve;
+    });
+    const firstSignal = new Promise<number | NodeJS.Signals | undefined>((resolve) => {
+        resolveFirstSignal = resolve;
     });
     const signals: Array<number | NodeJS.Signals | undefined> = [];
     const exit = (code: number) => {
@@ -38,10 +45,13 @@ function fakeChild(): FakeChild {
             },
             kill(signal) {
                 signals.push(signal);
+                if (signals.length === 1) resolveFirstSignal(signal);
+                if (signal === "SIGTERM" && options.ignoreSigterm === true) return;
                 exit(0);
             },
         },
         exit,
+        firstSignal,
         signals,
     };
 }
@@ -69,7 +79,40 @@ async function expectLeaseReleased(
     await session.release();
 }
 
+describe("development process guard", () => {
+    test("rejects invalid direct-child commands and parent process IDs", () => {
+        expect(() => guardedDevelopmentChildCommand([], process.pid)).toThrow(
+            "Development child command must use an absolute executable"
+        );
+        expect(() =>
+            guardedDevelopmentChildCommand(["relative-executable"], process.pid)
+        ).toThrow("Development child command must use an absolute executable");
+        expect(() => guardedDevelopmentChildCommand(["/bin/true"], 1)).toThrow(
+            "Development child command parent PID is invalid"
+        );
+        expect(() => guardedDevelopmentChildCommand(["/bin/true"], 1.5)).toThrow(
+            "Development child command parent PID is invalid"
+        );
+    });
+});
+
 describe("development runtime lifecycle", () => {
+    test("keeps the default state root outside a top-level source checkout", () => {
+        const xdgStateRoot = path.join(tmpdir(), "mira-dashboard-development-xdg-state");
+        const config = resolveDevelopmentStackConfig(
+            {
+                MIRA_DASHBOARD_PROJECT_ROOT: repositoryRoot,
+                XDG_STATE_HOME: xdgStateRoot,
+            },
+            repositoryRoot
+        );
+
+        expect(config.stateRoot).toBe(
+            path.join(xdgStateRoot, "mira-dashboard", "development", "source-local")
+        );
+        expect(path.relative(repositoryRoot, config.stateRoot)).toStartWith("..");
+    });
+
     test("stops already-started children and releases state when a later spawn fails", async () => {
         const temporaryRoot = await mkdtemp(
             path.join(tmpdir(), "mira-dashboard-development-runtime-spawn-")
@@ -80,6 +123,7 @@ describe("development runtime lifecycle", () => {
 
         try {
             const failure = await runDevelopmentStack(config, {
+                resolveSourceCommit: () => Promise.resolve(sourceCommit),
                 spawn() {
                     spawnCalls += 1;
                     if (spawnCalls === 1) return web.child;
@@ -116,6 +160,7 @@ describe("development runtime lifecycle", () => {
 
         try {
             const running = runDevelopmentStack(config, {
+                resolveSourceCommit: () => Promise.resolve(sourceCommit),
                 spawn() {
                     const next = children[spawnCalls];
                     spawnCalls += 1;
@@ -138,6 +183,51 @@ describe("development runtime lifecycle", () => {
             expect(frontend.signals).toEqual(["SIGTERM"]);
             await expectLeaseReleased(config);
         } finally {
+            await rm(temporaryRoot, { force: true, recursive: true });
+        }
+    });
+
+    test("escalates from SIGTERM to SIGKILL after the shutdown deadline", async () => {
+        const temporaryRoot = await mkdtemp(
+            path.join(tmpdir(), "mira-dashboard-development-runtime-force-")
+        );
+        const config = await runtimeConfig(temporaryRoot);
+        const web = fakeChild();
+        const worker = fakeChild({ ignoreSigterm: true });
+        const frontend = fakeChild();
+        const children = [web, worker, frontend];
+        let resolveStarted!: () => void;
+        const started = new Promise<void>((resolve) => {
+            resolveStarted = resolve;
+        });
+        let spawnCalls = 0;
+        let running: Promise<number> | undefined;
+
+        try {
+            running = runDevelopmentStack(config, {
+                resolveSourceCommit: () => Promise.resolve(sourceCommit),
+                spawn() {
+                    const next = children[spawnCalls];
+                    spawnCalls += 1;
+                    if (spawnCalls === children.length) resolveStarted();
+                    if (next === undefined) throw new Error("Unexpected child spawn");
+                    return next.child;
+                },
+            });
+            await started;
+            jest.useFakeTimers();
+
+            web.exit(7);
+            expect(await worker.firstSignal).toBe("SIGTERM");
+            jest.advanceTimersByTime(10_000);
+
+            expect(await running).toBe(7);
+            expect(worker.signals).toEqual(["SIGTERM", "SIGKILL"]);
+            await expectLeaseReleased(config);
+        } finally {
+            for (const child of children) child.exit(0);
+            await running?.catch(() => {});
+            jest.useRealTimers();
             await rm(temporaryRoot, { force: true, recursive: true });
         }
     });

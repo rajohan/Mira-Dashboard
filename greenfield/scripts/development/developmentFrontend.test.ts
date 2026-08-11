@@ -62,41 +62,71 @@ async function stopChild(child: ReturnType<typeof Bun.spawn>): Promise<void> {
     }
 }
 
-test("serves remote Bun HMR, React Fast Refresh, and React Compiler output together", async () => {
-    const [port, remoteProxyPort, backendPort] = await reserveLoopbackPorts(3);
-    if (
-        port === undefined ||
-        remoteProxyPort === undefined ||
-        backendPort === undefined
-    ) {
-        throw new Error("Bun did not reserve the development ports");
+async function startFrontend(publicHost: string): Promise<
+    Readonly<{
+        child: ReturnType<typeof Bun.spawn>;
+        origin: string;
+        response: Response;
+    }>
+> {
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+        const [port, remoteProxyPort, backendPort] = await reserveLoopbackPorts(3);
+        if (
+            port === undefined ||
+            remoteProxyPort === undefined ||
+            backendPort === undefined
+        ) {
+            throw new Error("Bun did not reserve the development ports");
+        }
+        const origin = `http://127.0.0.1:${remoteProxyPort}`;
+        const child = Bun.spawn([process.execPath, "scripts/developmentFrontend.ts"], {
+            cwd: repositoryRoot,
+            env: {
+                DASHBOARD_API_TARGET: `http://127.0.0.1:${backendPort}`,
+                HOST: "127.0.0.1",
+                LANG: "C.UTF-8",
+                MIRA_DASHBOARD_DEV_HOT_RELOAD: "1",
+                MIRA_DASHBOARD_DEV_PUBLIC_ORIGIN: `https://${publicHost}`,
+                MIRA_DASHBOARD_DEV_REMOTE_PROXY_PORT: String(remoteProxyPort),
+                NODE_ENV: "development",
+                PATH: process.env.PATH ?? "/usr/bin:/bin",
+                PORT: String(port),
+                TZ: "UTC",
+            },
+            stderr: "pipe",
+            stdin: "ignore",
+            stdout: "ignore",
+        });
+
+        try {
+            const response = await waitForFrontend(origin, child, publicHost);
+            return Object.freeze({ child, origin, response });
+        } catch (error) {
+            await stopChild(child);
+            const stderr = await new Response(child.stderr).text();
+            const portWasClaimed = /EADDRINUSE|address already in use/iu.test(stderr);
+            if (!portWasClaimed || attempt === 3) {
+                throw new Error(
+                    `Development frontend startup failed${
+                        stderr.trim() === "" ? "" : ": listener failed"
+                    }`,
+                    { cause: error }
+                );
+            }
+        }
     }
+    throw new Error("Development frontend startup retries were exhausted");
+}
+
+test("serves remote Bun HMR, React Fast Refresh, and React Compiler output together", async () => {
     const publicHost = "dashboard.example.ts.net:3445";
-    const origin = `http://127.0.0.1:${remoteProxyPort}`;
-    const child = Bun.spawn([process.execPath, "scripts/developmentFrontend.ts"], {
-        cwd: repositoryRoot,
-        env: {
-            DASHBOARD_API_TARGET: `http://127.0.0.1:${backendPort}`,
-            HOST: "127.0.0.1",
-            LANG: "C.UTF-8",
-            MIRA_DASHBOARD_DEV_HOT_RELOAD: "1",
-            MIRA_DASHBOARD_DEV_PUBLIC_ORIGIN: `https://${publicHost}`,
-            MIRA_DASHBOARD_DEV_REMOTE_PROXY_PORT: String(remoteProxyPort),
-            NODE_ENV: "development",
-            PATH: process.env.PATH ?? "/usr/bin:/bin",
-            PORT: String(port),
-            TZ: "UTC",
-        },
-        stderr: "pipe",
-        stdin: "ignore",
-        stdout: "ignore",
-    });
+    const { child, origin, response: frontendResponse } = await startFrontend(publicHost);
 
     try {
-        const frontendResponse = await waitForFrontend(origin, child, publicHost);
         const html = await frontendResponse.text();
-        const clientScript =
-            /<script[^>]+src="([^"]+)"[^>]+data-bun-dev-server-script/u.exec(html)?.[1];
+        const clientScript = html.match(
+            /<script[^>]+src="([^"]+)"[^>]+data-bun-dev-server-script/u
+        )?.[1];
         if (clientScript === undefined) {
             throw new Error("Bun did not inject its development client script");
         }

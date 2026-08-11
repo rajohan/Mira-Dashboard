@@ -1,5 +1,4 @@
-import { lstat, readFile } from "node:fs/promises";
-
+import { readDevelopmentPrivateFile } from "./developmentPrivateFile.ts";
 import type { DevelopmentStackConfig } from "./developmentStackConfig.ts";
 
 const inheritedEnvironmentNames = [
@@ -33,16 +32,17 @@ async function gatewayToken(
     if (config.gatewayTokenFile === undefined) {
         token = environment.OPENCLAW_GATEWAY_TOKEN?.trim();
     } else {
-        const status = await lstat(config.gatewayTokenFile);
-        if (
-            !status.isFile() ||
-            status.isSymbolicLink() ||
-            status.uid !== process.getuid?.() ||
-            (status.mode & 0o077) !== 0
-        ) {
-            throw new Error("Development Gateway token file is invalid");
+        let tokenFileContents: string;
+        try {
+            tokenFileContents = await readDevelopmentPrivateFile(
+                config.gatewayTokenFile,
+                { forbiddenModeBits: 0o077, maximumBytes: 4097 }
+            );
+        } catch (error) {
+            throw new Error("Development Gateway token file is invalid", {
+                cause: error,
+            });
         }
-        const tokenFileContents = await readFile(config.gatewayTokenFile, "utf8");
         token = tokenFileContents.trim();
     }
     if (

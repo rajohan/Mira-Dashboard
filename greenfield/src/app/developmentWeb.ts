@@ -6,6 +6,10 @@ import { createDevelopmentRuntimeRelease } from "../server/platform/release/deve
 import { createDashboardApplicationRuntime } from "../server/platform/runtime/applicationRuntime.ts";
 import type { FrontendAssetHandler } from "../server/rawHttp/frontendAssets.ts";
 import {
+    developmentStartupFailureMessage,
+    parseDevelopmentSourceCommit,
+} from "../shared/developmentProcessSupport.ts";
+import {
     type DashboardWebProcessDependencies,
     createDefaultDashboardWebProcessDependencies,
     runDashboardWebProcess,
@@ -13,13 +17,6 @@ import {
 import { environmentSource } from "./environmentSource.ts";
 
 const noFrontendAssets: FrontendAssetHandler = () => Promise.resolve(undefined);
-
-function developmentSourceCommit(arguments_: readonly string[]): string {
-    if (arguments_.length !== 1 || !/^[\da-f]{40}$/u.test(arguments_[0] ?? "")) {
-        throw new TypeError("Development web requires one exact source commit");
-    }
-    return arguments_[0]!;
-}
 
 /**
  * Runs the source-watched web composition against isolated development state.
@@ -32,7 +29,7 @@ export async function runDevelopmentWebProcess(
     const repositoryRoot = await realpath(path.resolve(import.meta.dir, "../.."));
     const release = createDevelopmentRuntimeRelease(
         repositoryRoot,
-        developmentSourceCommit(arguments_)
+        parseDevelopmentSourceCommit(arguments_, "web")
     );
     const defaults = createDefaultDashboardWebProcessDependencies();
     const dependencies = Object.freeze({
@@ -67,8 +64,8 @@ export async function runDevelopmentWebProcess(
 if (import.meta.main) {
     try {
         await runDevelopmentWebProcess();
-    } catch {
-        process.stderr.write("Mira Dashboard development web startup failed\n");
+    } catch (error) {
+        process.stderr.write(`${developmentStartupFailureMessage("web", error)}\n`);
         process.exitCode = 1;
     }
 }

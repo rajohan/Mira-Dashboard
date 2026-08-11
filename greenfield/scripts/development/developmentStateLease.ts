@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { link, lstat, open, readFile, readdir, rm } from "node:fs/promises";
 import path from "node:path";
 
+import { readDevelopmentPrivateFile } from "./developmentPrivateFile.ts";
 import type { DevelopmentStackConfig } from "./developmentStackConfig.ts";
 
 const leaseFilePattern =
@@ -127,27 +128,23 @@ async function readLeaseMarker(
     config: DevelopmentStackConfig,
     fileName: string
 ): Promise<DevelopmentStateLeaseMarker> {
-    const match = leaseFilePattern.exec(fileName);
+    const match = fileName.match(leaseFilePattern);
     if (match === null) throw new Error("Development state lease name is invalid");
     const processId = Number(match[1]);
     const token = match[2]!;
     const leasePath = path.join(config.stateRoot, fileName);
+    const invalidLeaseMessage = `Development state lease is invalid: ${fileName}`;
     let parsed: unknown;
     try {
-        const status = await lstat(leasePath);
-        if (
-            !status.isFile() ||
-            status.isSymbolicLink() ||
-            status.uid !== process.getuid?.() ||
-            (status.mode & 0o777) !== privateFileMode ||
-            status.size < 2 ||
-            status.size > 4096
-        ) {
-            throw new Error("invalid lease");
-        }
-        parsed = JSON.parse(await readFile(leasePath, "utf8")) as unknown;
+        parsed = JSON.parse(
+            await readDevelopmentPrivateFile(leasePath, {
+                exactMode: privateFileMode,
+                maximumBytes: 4096,
+                minimumBytes: 2,
+            })
+        ) as unknown;
     } catch (error) {
-        throw new Error("Development state lease is invalid", { cause: error });
+        throw new Error(invalidLeaseMessage, { cause: error });
     }
     const marker = parsed as Partial<DevelopmentStateLeaseMarker>;
     if (
@@ -164,7 +161,7 @@ async function readLeaseMarker(
         !Number.isSafeInteger(marker.startedAtMs) ||
         marker.startedAtMs < 0
     ) {
-        throw new Error("Development state lease is invalid");
+        throw new Error(invalidLeaseMessage);
     }
     return marker as DevelopmentStateLeaseMarker;
 }
@@ -219,16 +216,12 @@ async function validateStateOwnerMarker(config: DevelopmentStackConfig): Promise
     const markerPath = path.join(config.stateRoot, stateMarkerFileName);
     let parsed: unknown;
     try {
-        const status = await lstat(markerPath);
-        if (
-            !status.isFile() ||
-            status.isSymbolicLink() ||
-            status.uid !== process.getuid?.() ||
-            (status.mode & 0o777) !== privateFileMode
-        ) {
-            throw new Error("invalid state marker");
-        }
-        parsed = JSON.parse(await readFile(markerPath, "utf8")) as unknown;
+        parsed = JSON.parse(
+            await readDevelopmentPrivateFile(markerPath, {
+                exactMode: privateFileMode,
+                maximumBytes: 4096,
+            })
+        ) as unknown;
     } catch (error) {
         throw new Error("Development state marker is invalid", { cause: error });
     }

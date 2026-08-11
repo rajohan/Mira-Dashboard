@@ -21,6 +21,7 @@ export interface DevelopmentChildProcess {
 }
 
 export interface DevelopmentRuntimeDependencies {
+    readonly resolveSourceCommit: (repositoryRoot: string) => Promise<string>;
     readonly spawn: (
         command: readonly string[],
         options: {
@@ -39,6 +40,7 @@ interface DevelopmentStopController {
 }
 
 const defaultDependencies: DevelopmentRuntimeDependencies = Object.freeze({
+    resolveSourceCommit: readSourceCommit,
     spawn(
         command: readonly string[],
         options: {
@@ -205,10 +207,11 @@ async function coordinateDevelopmentChildren(
     await stopController.settling;
     if (stopController.forceRequested) await settleChildren(children, true);
     if (stopController.stopRequested) return 0;
+    const reportedExitCode = exited.code || 1;
     process.stderr.write(
-        `Development ${exited.processName} process exited with code ${exited.code}\n`
+        `Development ${exited.processName} process exited with code ${reportedExitCode}\n`
     );
-    return exited.code || 1;
+    return reportedExitCode;
 }
 
 async function runPreparedDevelopmentStack(
@@ -263,7 +266,9 @@ export async function runDevelopmentStackWithPreparedState(
     process.on("SIGINT", stopController.requestStop);
     process.on("SIGTERM", stopController.requestStop);
     try {
-        const sourceCommit = await readSourceCommit(config.repositoryRoot);
+        const sourceCommit = await dependencies.resolveSourceCommit(
+            config.repositoryRoot
+        );
         if (stopController.stopRequested) return 0;
         return await runPreparedDevelopmentStack(
             config,
@@ -296,7 +301,9 @@ export async function runDevelopmentStack(
         | Awaited<ReturnType<typeof prepareDevelopmentRuntimeState>>
         | undefined;
     try {
-        const sourceCommit = await readSourceCommit(config.repositoryRoot);
+        const sourceCommit = await dependencies.resolveSourceCommit(
+            config.repositoryRoot
+        );
         if (stopController.stopRequested) return 0;
         stateSession = await prepareDevelopmentRuntimeState(config);
         return await runPreparedDevelopmentStack(

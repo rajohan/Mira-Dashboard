@@ -8,7 +8,10 @@ import {
     guardedDevelopmentPrivilegedCommand,
 } from "./developmentProcessGuard.ts";
 import { remoteDevelopmentStateRoot } from "./developmentRuntime.ts";
-import { acquireDevelopmentTailscaleRouteLock } from "./developmentTailscaleLock.ts";
+import {
+    acquireDevelopmentTailscaleRouteLock,
+    type DevelopmentTailscaleRouteLock,
+} from "./developmentTailscaleLock.ts";
 
 interface TailscaleStatus {
     readonly Self?: {
@@ -42,6 +45,10 @@ export interface DevelopmentTailscaleCommandAdapter {
     ) => Promise<DevelopmentTailscaleStatus>;
     readonly run: (command: readonly string[]) => Promise<string>;
 }
+
+export type DevelopmentTailscaleRouteLockAcquirer = (
+    httpsPort: number
+) => Promise<DevelopmentTailscaleRouteLock>;
 
 const commandTimeoutMs = 15_000;
 const commandForceKillGraceMs = 2000;
@@ -240,9 +247,10 @@ const defaultCommandAdapter: DevelopmentTailscaleCommandAdapter = Object.freeze(
 
 async function withDevelopmentTailscaleRouteLock<T>(
     httpsPort: number,
-    operation: () => Promise<T>
+    operation: () => Promise<T>,
+    acquireRouteLock: DevelopmentTailscaleRouteLockAcquirer
 ): Promise<T> {
-    const lock = await acquireDevelopmentTailscaleRouteLock(httpsPort);
+    const lock = await acquireRouteLock(httpsPort);
     try {
         return await operation();
     } finally {
@@ -298,15 +306,19 @@ async function enableDevelopmentServeLocked(
  * @param httpsPort Dedicated remote HTTPS port.
  * @param proxyPort Loopback remote-proxy port.
  * @param commands Validated command adapter.
+ * @param acquireRouteLock Host lock adapter, injectable for isolated unit tests.
  * @returns Verified route status and whether this invocation created the route.
  */
 export async function enableDevelopmentServe(
     httpsPort: number,
     proxyPort: number,
-    commands: DevelopmentTailscaleCommandAdapter = defaultCommandAdapter
+    commands: DevelopmentTailscaleCommandAdapter = defaultCommandAdapter,
+    acquireRouteLock: DevelopmentTailscaleRouteLockAcquirer = acquireDevelopmentTailscaleRouteLock
 ): Promise<Readonly<{ didCreate: boolean; status: DevelopmentTailscaleStatus }>> {
-    return withDevelopmentTailscaleRouteLock(httpsPort, () =>
-        enableDevelopmentServeLocked(httpsPort, proxyPort, commands)
+    return withDevelopmentTailscaleRouteLock(
+        httpsPort,
+        () => enableDevelopmentServeLocked(httpsPort, proxyPort, commands),
+        acquireRouteLock
     );
 }
 
@@ -331,8 +343,10 @@ async function disableDevelopmentServe(
     httpsPort: number,
     proxyPort: number
 ): Promise<DevelopmentTailscaleStatus> {
-    return withDevelopmentTailscaleRouteLock(httpsPort, () =>
-        disableDevelopmentServeLocked(httpsPort, proxyPort)
+    return withDevelopmentTailscaleRouteLock(
+        httpsPort,
+        () => disableDevelopmentServeLocked(httpsPort, proxyPort),
+        acquireDevelopmentTailscaleRouteLock
     );
 }
 

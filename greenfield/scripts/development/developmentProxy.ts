@@ -10,8 +10,9 @@ import {
 const canonicalSessionCookie = "__Host-mira_dashboard_session";
 const canonicalPendingLoginCookie = "__Host-mira_dashboard_pending_login";
 const terminalSocketPath =
-    /^\/api\/terminal\/sessions\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/socket$/u;
+    /^\/api\/terminal\/sessions\/[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/socket$/u;
 const terminalConnectionToken = /^[0-9a-f]{32}\.[0-9a-f]{64}$/u;
+export const developmentProxyQueuedMessageMaximum = 1024;
 const hopByHopHeaders = [
     "connection",
     "keep-alive",
@@ -190,15 +191,20 @@ export async function proxyDevelopmentHttp(
         configuration,
         target
     );
-    const upstream = await fetch(target, {
-        body: request.body,
-        decompress: false,
-        duplex: "half",
-        headers,
-        method: request.method,
-        redirect: "manual",
-        signal: request.signal,
-    });
+    let upstream: Response;
+    try {
+        upstream = await fetch(target, {
+            body: request.body,
+            decompress: false,
+            duplex: "half",
+            headers,
+            method: request.method,
+            redirect: "manual",
+            signal: request.signal,
+        });
+    } catch {
+        return new Response("Development backend unavailable", { status: 502 });
+    }
     return new Response(upstream.body, {
         headers: responseHeaders(upstream, configuration),
         status: upstream.status,
@@ -231,7 +237,7 @@ export function proxyDevelopmentWebSocket(
     request: Request,
     server: Server<DevelopmentProxySocketData>,
     configuration: DevelopmentProxyConfiguration
-): Response {
+): Response | undefined {
     const url = new URL(request.url);
     const protocols = terminalProtocols(request);
     if (
@@ -267,9 +273,8 @@ export function proxyDevelopmentWebSocket(
             "sec-websocket-protocol": terminalWebSocketProtocol,
         },
     });
-    return upgraded
-        ? new Response(undefined, { status: 204 })
-        : new Response("WebSocket upgrade failed", { status: 400 });
+    if (upgraded) return;
+    return new Response("WebSocket upgrade failed", { status: 400 });
 }
 
 function copiedBinaryMessage(message: Uint8Array): Uint8Array {
@@ -337,7 +342,11 @@ function enqueueBrowserMessage(
     message: string | Uint8Array
 ): void {
     const bytes = messageBytes(message);
-    if (socket.data.browserPendingBytes + bytes > terminalSocketBufferedMaximumBytes) {
+    if (
+        socket.data.browserPendingMessages.length >=
+            developmentProxyQueuedMessageMaximum ||
+        socket.data.browserPendingBytes + bytes > terminalSocketBufferedMaximumBytes
+    ) {
         closeProxySocket(socket, 1011, "Proxy backpressure exceeded");
         return;
     }
@@ -425,6 +434,8 @@ function enqueueBackendMessage(
     const bytes = messageBytes(message);
     if (
         bytes > terminalClientMessageMaximumBytes ||
+        socket.data.backendPendingMessages.length >=
+            developmentProxyQueuedMessageMaximum ||
         socket.data.backendPendingBytes + bytes > terminalSocketBufferedMaximumBytes
     ) {
         closeProxySocket(socket, 1009, "Proxy input buffer exceeded");
@@ -496,11 +507,17 @@ export function developmentWebSocketHandler(
             const publicOrigin = new URL(configuration.publicOrigin);
             headers.set("x-forwarded-host", publicOrigin.host);
             headers.set("x-forwarded-proto", publicOrigin.protocol.slice(0, -1));
-            const backend = new WebSocket(socket.data.backendUrl, {
-                headers: Object.fromEntries(headers),
-                perMessageDeflate: false,
-                protocols: [...socket.data.protocols],
-            });
+            let backend: WebSocket;
+            try {
+                backend = new WebSocket(socket.data.backendUrl, {
+                    headers: Object.fromEntries(headers),
+                    perMessageDeflate: false,
+                    protocols: [...socket.data.protocols],
+                });
+            } catch {
+                closeProxySocket(socket);
+                return;
+            }
             socket.data.backend = backend;
             backend.binaryType = "arraybuffer";
             backend.addEventListener("open", () => {

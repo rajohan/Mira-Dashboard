@@ -3,12 +3,20 @@ import { describe, expect, jest, test } from "bun:test";
 import {
     developmentServeStatus,
     type DevelopmentTailscaleCommandAdapter,
+    type DevelopmentTailscaleRouteLockAcquirer,
     enableDevelopmentServe,
     tailscaleDnsName,
 } from "./developmentTailscale.ts";
 
 const remoteProxyPort = 3207;
 const httpsPort = 3445;
+const noOpRouteLock: DevelopmentTailscaleRouteLockAcquirer = (port) =>
+    Promise.resolve(
+        Object.freeze({
+            httpsPort: port,
+            release: () => Promise.resolve(),
+        })
+    );
 
 function serveStatus(enabled: boolean) {
     return Object.freeze({
@@ -121,7 +129,12 @@ describe("development Tailscale route", () => {
             run,
         };
 
-        const result = await enableDevelopmentServe(httpsPort, remoteProxyPort, commands);
+        const result = await enableDevelopmentServe(
+            httpsPort,
+            remoteProxyPort,
+            commands,
+            noOpRouteLock
+        );
         expect(result).toEqual({ didCreate: false, status: serveStatus(true) });
         expect(run).not.toHaveBeenCalled();
     });
@@ -134,7 +147,12 @@ describe("development Tailscale route", () => {
             run,
         };
 
-        const result = await enableDevelopmentServe(httpsPort, remoteProxyPort, commands);
+        const result = await enableDevelopmentServe(
+            httpsPort,
+            remoteProxyPort,
+            commands,
+            noOpRouteLock
+        );
         expect(result).toEqual({ didCreate: true, status: serveStatus(true) });
         expect(run).toHaveBeenCalledWith([
             "sudo",
@@ -161,10 +179,26 @@ describe("development Tailscale route", () => {
                 return Promise.resolve("");
             },
         };
+        let lockHeld = false;
+        const acquireRouteLock: DevelopmentTailscaleRouteLockAcquirer = (port) => {
+            if (lockHeld) {
+                return Promise.reject(
+                    new Error(`Tailscale development route ${port} is already in use`)
+                );
+            }
+            lockHeld = true;
+            return Promise.resolve({
+                httpsPort: port,
+                release() {
+                    lockHeld = false;
+                    return Promise.resolve();
+                },
+            });
+        };
 
         const results = await Promise.allSettled([
-            enableDevelopmentServe(lockPort, remoteProxyPort, commands),
-            enableDevelopmentServe(lockPort, remoteProxyPort, commands),
+            enableDevelopmentServe(lockPort, remoteProxyPort, commands, acquireRouteLock),
+            enableDevelopmentServe(lockPort, remoteProxyPort, commands, acquireRouteLock),
         ]);
 
         const fulfilled = results.filter(
@@ -205,7 +239,8 @@ describe("development Tailscale route", () => {
         const failure = await enableDevelopmentServe(
             httpsPort,
             remoteProxyPort,
-            commands
+            commands,
+            noOpRouteLock
         ).then(
             () => null,
             (error: unknown) => error

@@ -16,6 +16,7 @@ import path from "node:path";
 
 import { migrationManifest } from "../../src/shared/databaseMigrationManifest.ts";
 import { prepareProtectedProductionStatePath } from "../delivery/productionStateFilesystem.ts";
+import { readDevelopmentPrivateFile } from "./developmentPrivateFile.ts";
 import type { DevelopmentStackConfig } from "./developmentStackConfig.ts";
 import {
     acquireDevelopmentStateLease,
@@ -212,16 +213,12 @@ async function readDatabaseMarker(
     const markerPath = path.join(config.stateRoot, databaseMarkerFileName);
     let parsed: unknown;
     try {
-        const status = await lstat(markerPath);
-        if (
-            !status.isFile() ||
-            status.isSymbolicLink() ||
-            status.uid !== process.getuid?.() ||
-            (status.mode & 0o777) !== privateFileMode
-        ) {
-            throw new Error("invalid marker");
-        }
-        parsed = JSON.parse(await readFile(markerPath, "utf8")) as unknown;
+        parsed = JSON.parse(
+            await readDevelopmentPrivateFile(markerPath, {
+                exactMode: privateFileMode,
+                maximumBytes: 4096,
+            })
+        ) as unknown;
     } catch {
         throw new Error("Development database marker is invalid");
     }
@@ -388,16 +385,15 @@ async function developmentKeyring(config: DevelopmentStackConfig): Promise<strin
     if (!(await pathExists(config.keyringPath))) {
         await writePrivateFile(config.keyringPath, `${serializedKeyring()}\n`);
     }
-    const status = await lstat(config.keyringPath);
-    if (
-        !status.isFile() ||
-        status.isSymbolicLink() ||
-        status.uid !== process.getuid?.()
-    ) {
-        throw new Error("Development TOTP keyring is invalid");
+    let keyringContents: string;
+    try {
+        keyringContents = await readDevelopmentPrivateFile(config.keyringPath, {
+            chmodMode: privateFileMode,
+            maximumBytes: 4096,
+        });
+    } catch (error) {
+        throw new Error("Development TOTP keyring is invalid", { cause: error });
     }
-    await chmod(config.keyringPath, privateFileMode);
-    const keyringContents = await readFile(config.keyringPath, "utf8");
     const keyring = keyringContents.trim();
     if (!validSerializedKeyring(keyring)) {
         throw new Error("Development TOTP keyring is invalid");

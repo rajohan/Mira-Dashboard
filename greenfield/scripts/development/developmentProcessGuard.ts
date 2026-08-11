@@ -8,6 +8,12 @@ export function guardedDevelopmentChildCommand(
     command: readonly string[],
     parentProcessId = process.pid
 ): readonly string[] {
+    if (command.length === 0 || !command[0]?.startsWith("/")) {
+        throw new TypeError("Development child command must use an absolute executable");
+    }
+    if (!Number.isSafeInteger(parentProcessId) || parentProcessId <= 1) {
+        throw new TypeError("Development child command parent PID is invalid");
+    }
     const setpriv = Bun.which("setpriv");
     const shell = Bun.which("sh");
     if (setpriv === null || shell === null) {

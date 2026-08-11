@@ -79,12 +79,18 @@ bun run dev:remote:disable
 
 ## Persistent Isolated State
 
-Local and remote state default to:
+When the source checkout is nested beneath the Dashboard project root, local and remote state
+default to:
 
 ```text
 <project-root>/development/state/source-local/
 <project-root>/development/state/source-remote/
 ```
+
+If the repository itself is the project root, that location would overlap the source tree. The local
+root then falls back to
+`${XDG_STATE_HOME:-~/.local/state}/mira-dashboard/development/source-local/`, with the remote root as
+its `source-remote` sibling. An explicit `MIRA_DASHBOARD_DEV_STATE_ROOT` still takes precedence.
 
 Each owner-marked root contains the Dashboard database, a persistent TOTP keyring, writable
 workspace/OpenClaw roots, logs, job output, uploads, and terminal-broker state. Dev cookies are

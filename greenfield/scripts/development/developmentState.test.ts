@@ -209,6 +209,41 @@ describe("development state", () => {
         }
     });
 
+    test("names the invalid lease file in parse and marker diagnostics", async () => {
+        const temporaryRoot = await mkdtemp(
+            path.join(tmpdir(), "mira-dashboard-development-invalid-lease-")
+        );
+        const config = resolveDevelopmentStackConfig(
+            {
+                MIRA_DASHBOARD_PROJECT_ROOT: path.join(temporaryRoot, "project"),
+            },
+            repositoryRoot
+        );
+        const token = "b".repeat(32);
+        const invalidLeaseName = `.mira-dashboard-development-lease-2147483647-${token}.json`;
+        const invalidLeasePath = path.join(config.stateRoot, invalidLeaseName);
+
+        try {
+            await prepareDevelopmentState(config);
+            for (const contents of ["{\n", "{}\n"]) {
+                await writeFile(invalidLeasePath, contents, { mode: 0o600 });
+                const failure = await prepareDevelopmentRuntimeState(config).then(
+                    () => null,
+                    (error: unknown) => error
+                );
+                expect(failure).toBeInstanceOf(Error);
+                if (!(failure instanceof Error)) {
+                    throw new Error("Expected invalid lease failure");
+                }
+                expect(failure.message).toBe(
+                    `Development state lease is invalid: ${invalidLeaseName}`
+                );
+            }
+        } finally {
+            await rm(temporaryRoot, { force: true, recursive: true });
+        }
+    });
+
     test("refuses a forged database path outside the exact state descendant", async () => {
         const temporaryRoot = await mkdtemp(
             path.join(tmpdir(), "mira-dashboard-development-database-path-")

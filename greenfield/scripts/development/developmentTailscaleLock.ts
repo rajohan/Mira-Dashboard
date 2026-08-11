@@ -17,6 +17,10 @@ export interface DevelopmentTailscaleRouteLock {
     release(): Promise<void>;
 }
 
+export interface DevelopmentTailscaleRouteLockDependencies {
+    readonly runtimeDirectory: () => Promise<string>;
+}
+
 function errorCode(error: unknown): unknown {
     return typeof error === "object" && error !== null
         ? Object.getOwnPropertyDescriptor(error, "code")?.value
@@ -44,6 +48,10 @@ async function privateRuntimeDirectory(): Promise<string> {
     }
     return runtimeDirectory;
 }
+
+const defaultDependencies: DevelopmentTailscaleRouteLockDependencies = Object.freeze({
+    runtimeDirectory: privateRuntimeDirectory,
+});
 
 async function prepareLockFile(lockPath: string): Promise<void> {
     try {
@@ -101,15 +109,17 @@ async function stopLockHolder(child: ReturnType<typeof Bun.spawn>): Promise<void
 /**
  * Acquires one host-local advisory lock for a Tailscale HTTPS port.
  * @param httpsPort Validated Tailscale Serve port.
+ * @param dependencies Host runtime-directory adapter, injectable for isolated tests.
  * @returns A parent-death-guarded lock held until its idempotent release resolves.
  */
 export async function acquireDevelopmentTailscaleRouteLock(
-    httpsPort: number
+    httpsPort: number,
+    dependencies: DevelopmentTailscaleRouteLockDependencies = defaultDependencies
 ): Promise<DevelopmentTailscaleRouteLock> {
     if (!Number.isSafeInteger(httpsPort) || httpsPort < 1 || httpsPort > 65_535) {
         throw new TypeError("Tailscale development route lock port is invalid");
     }
-    const runtimeDirectory = await privateRuntimeDirectory();
+    const runtimeDirectory = await dependencies.runtimeDirectory();
     const lockPath = path.join(
         runtimeDirectory,
         `mira-dashboard-development-tailscale-${httpsPort}.lock`
@@ -156,6 +166,7 @@ export async function acquireDevelopmentTailscaleRouteLock(
         ready.value === undefined ||
         new TextDecoder().decode(ready.value) !== "LOCKED\n"
     ) {
+        await stopLockHolder(child);
         const [exitCode, stderr] = await Promise.all([
             child.exited,
             new Response(child.stderr).text(),

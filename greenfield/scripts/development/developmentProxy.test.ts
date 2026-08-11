@@ -1,6 +1,6 @@
 import { describe, expect, jest, test } from "bun:test";
 
-import type { ServerWebSocket } from "bun";
+import type { Server, ServerWebSocket } from "bun";
 
 import {
     terminalClientMessageMaximumBytes,
@@ -12,10 +12,12 @@ import {
     type DevelopmentProxyConfiguration,
     type DevelopmentProxySocketData,
     developmentProxyCloseCode,
+    developmentProxyQueuedMessageMaximum,
     developmentWebSocketHandler,
     isDevelopmentBackendPath,
     namespacedDevelopmentSetCookie,
     proxyDevelopmentHttp,
+    proxyDevelopmentWebSocket,
 } from "./developmentProxy.ts";
 
 const namespace = "__Host-mira_dashboard_dev_3105";
@@ -36,6 +38,13 @@ function socketData(): DevelopmentProxySocketData {
         browserPendingMessages: [],
         protocols: [terminalWebSocketProtocol, `${"0".repeat(32)}.${"1".repeat(64)}`],
     };
+}
+
+function developmentWebSocketRequest(
+    pathname: string,
+    headers: Record<string, string>
+): Request {
+    return new Request(`https://dashboard.example.ts.net:3445${pathname}`, { headers });
 }
 
 describe("development proxy", () => {
@@ -113,6 +122,95 @@ describe("development proxy", () => {
         }
     });
 
+    test("returns a sanitized response when the HTTP backend is unavailable", async () => {
+        const fetchSpy = jest
+            .spyOn(globalThis, "fetch")
+            .mockRejectedValue(new Error("private upstream failure"));
+        try {
+            const response = await proxyDevelopmentHttp(
+                new Request("https://dashboard.example.ts.net:3445/api/unavailable"),
+                { requestIP: () => null },
+                configuration
+            );
+
+            expect(response.status).toBe(502);
+            expect(await response.text()).toBe("Development backend unavailable");
+        } finally {
+            fetchSpy.mockRestore();
+        }
+    });
+
+    test("upgrades exact UUIDv7 terminal paths and rejects obsolete UUIDv4 paths", () => {
+        const token = `${"0".repeat(32)}.${"1".repeat(64)}`;
+        const upgrade = jest.fn(() => true);
+        const server = {
+            requestIP: () => null,
+            upgrade,
+        } as unknown as Server<DevelopmentProxySocketData>;
+        const request = (sessionId: string) =>
+            new Request(
+                `https://dashboard.example.ts.net:3445/api/terminal/sessions/${sessionId}/socket`,
+                {
+                    headers: {
+                        origin: configuration.publicOrigin,
+                        "sec-websocket-protocol": `${terminalWebSocketProtocol}, ${token}`,
+                    },
+                }
+            );
+
+        expect(
+            proxyDevelopmentWebSocket(
+                request("019fef32-73a5-7b32-a5d6-7ebf92eb45fd"),
+                server,
+                configuration
+            )
+        ).toBeUndefined();
+        expect(upgrade).toHaveBeenCalledTimes(1);
+        expect(
+            proxyDevelopmentWebSocket(
+                request("019fef32-73a5-4b32-a5d6-7ebf92eb45fd"),
+                server,
+                configuration
+            )?.status
+        ).toBe(400);
+        expect(upgrade).toHaveBeenCalledTimes(1);
+    });
+
+    test("rejects invalid terminal upgrade origins, paths, and protocols", () => {
+        const validPath =
+            "/api/terminal/sessions/019fef32-73a5-7b32-a5d6-7ebf92eb45fd/socket";
+        const validProtocol = `${terminalWebSocketProtocol}, ${"0".repeat(32)}.${"1".repeat(64)}`;
+        const upgrade = jest.fn(() => true);
+        const server = {
+            requestIP: () => null,
+            upgrade,
+        } as unknown as Server<DevelopmentProxySocketData>;
+        const invalidRequests = [
+            developmentWebSocketRequest(validPath, {
+                origin: "https://unexpected.example.ts.net",
+                "sec-websocket-protocol": validProtocol,
+            }),
+            developmentWebSocketRequest("/api/not-terminal", {
+                origin: configuration.publicOrigin,
+                "sec-websocket-protocol": validProtocol,
+            }),
+            developmentWebSocketRequest(validPath, {
+                origin: configuration.publicOrigin,
+            }),
+            developmentWebSocketRequest(validPath, {
+                origin: configuration.publicOrigin,
+                "sec-websocket-protocol": `${terminalWebSocketProtocol}, malformed-token`,
+            }),
+        ];
+
+        for (const invalidRequest of invalidRequests) {
+            expect(
+                proxyDevelopmentWebSocket(invalidRequest, server, configuration)?.status
+            ).toBe(400);
+        }
+        expect(upgrade).not.toHaveBeenCalled();
+    });
+
     test("uses terminal contract limits and drains bounded browser output", () => {
         const handler = developmentWebSocketHandler(configuration);
         expect(handler.maxPayloadLength).toBe(terminalClientMessageMaximumBytes);
@@ -178,6 +276,45 @@ describe("development proxy", () => {
         expect(backendSend).not.toHaveBeenCalled();
         expect(backendClose).toHaveBeenCalledWith(1011, "Upstream backpressure exceeded");
         expect(browserClose).toHaveBeenCalledWith(1011, "Upstream backpressure exceeded");
+    });
+
+    test("bounds pre-open input queues even when messages contain no bytes", () => {
+        const handler = developmentWebSocketHandler(configuration);
+        const data = socketData();
+        const backendClose = jest.fn();
+        data.backend = {
+            close: backendClose,
+            readyState: WebSocket.CONNECTING,
+        } as unknown as WebSocket;
+        const browserClose = jest.fn();
+        const socket = {
+            close: browserClose,
+            data,
+            readyState: WebSocket.OPEN,
+        } as unknown as ServerWebSocket<DevelopmentProxySocketData>;
+
+        for (let index = 0; index <= developmentProxyQueuedMessageMaximum; index += 1) {
+            void handler.message(socket, "");
+        }
+
+        expect(backendClose).toHaveBeenCalledWith(1009, "Proxy input buffer exceeded");
+        expect(browserClose).toHaveBeenCalledWith(1009, "Proxy input buffer exceeded");
+        expect(data.backendPendingMessages).toEqual([]);
+    });
+
+    test("closes the browser socket when the backend socket cannot be constructed", () => {
+        const handler = developmentWebSocketHandler(configuration);
+        const data = { ...socketData(), backendUrl: "not-a-websocket-url" };
+        const close = jest.fn();
+        const socket = {
+            close,
+            data,
+            readyState: WebSocket.OPEN,
+        } as unknown as ServerWebSocket<DevelopmentProxySocketData>;
+
+        expect(() => handler.open?.(socket)).not.toThrow();
+        expect(close).toHaveBeenCalledWith(1011, "Proxy unavailable");
+        expect(data.backend).toBeUndefined();
     });
 
     test("maps reserved and abnormal upstream close codes to a valid server error", () => {

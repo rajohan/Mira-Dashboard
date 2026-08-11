@@ -37,7 +37,7 @@ function loopbackApiTarget(value: string | undefined): Readonly<{
     target: string;
 }> {
     const configured = value?.trim() || `http://127.0.0.1:${defaultBackendPort}`;
-    const match = /^http:\/\/127\.0\.0\.1:(\d{1,5})\/?$/u.exec(configured);
+    const match = configured.match(/^http:\/\/127\.0\.0\.1:(\d{1,5})\/?$/u);
     if (match === null) {
         throw new TypeError(
             "DASHBOARD_API_TARGET must be an explicit loopback HTTP origin"

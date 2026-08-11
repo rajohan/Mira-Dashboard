@@ -56,7 +56,11 @@ async function main(): Promise<number> {
     if (command === "--reset-database") {
         const removed = await resetDevelopmentDatabase(config);
         process.stdout.write(
-            `${removed ? "Removed" : "Reset"} development database: ${config.databasePath}\n`
+            `${
+                removed
+                    ? `Removed development database: ${config.databasePath}`
+                    : `No existing development database: ${config.databasePath}`
+            }\n`
         );
         return 0;
     }

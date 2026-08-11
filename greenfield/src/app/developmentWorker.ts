@@ -6,6 +6,10 @@ import {
     createSystemJobWorkerSideEffects,
 } from "../server/domains/jobs/workerRuntime.ts";
 import { createDevelopmentRuntimeRelease } from "../server/platform/release/developmentRuntimeRelease.ts";
+import {
+    developmentStartupFailureMessage,
+    parseDevelopmentSourceCommit,
+} from "../shared/developmentProcessSupport.ts";
 import { developmentTaskNotificationLoop } from "../worker/developmentTaskNotifications.ts";
 import { createDescriptorWorkspaceFileStructuralWriter } from "../worker/files/descriptorWorkspaceFileStructuralWriter.ts";
 import { createDevelopmentLogMaintenanceExecutor } from "../worker/logs/developmentLogMaintenance.ts";
@@ -15,13 +19,6 @@ import {
     createDefaultDashboardWorkerProcessDependencies,
     runDashboardWorkerProcess,
 } from "./worker.ts";
-
-function developmentSourceCommit(arguments_: readonly string[]): string {
-    if (arguments_.length !== 1 || !/^[\da-f]{40}$/u.test(arguments_[0] ?? "")) {
-        throw new TypeError("Development worker requires one exact source commit");
-    }
-    return arguments_[0]!;
-}
 
 /**
  * Runs the source-watched worker composition against isolated development state.
@@ -34,7 +31,7 @@ export async function runDevelopmentWorkerProcess(
     const repositoryRoot = await realpath(path.resolve(import.meta.dir, "../.."));
     const release = createDevelopmentRuntimeRelease(
         repositoryRoot,
-        developmentSourceCommit(arguments_)
+        parseDevelopmentSourceCommit(arguments_, "worker")
     );
     const defaults = createDefaultDashboardWorkerProcessDependencies();
     const dependencies = Object.freeze({
@@ -84,8 +81,8 @@ export async function runDevelopmentWorkerProcess(
 if (import.meta.main) {
     try {
         await runDevelopmentWorkerProcess();
-    } catch {
-        process.stderr.write("Mira Dashboard development worker startup failed\n");
+    } catch (error) {
+        process.stderr.write(`${developmentStartupFailureMessage("worker", error)}\n`);
         process.exitCode = 1;
     }
 }

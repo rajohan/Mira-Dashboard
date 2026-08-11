@@ -64,6 +64,52 @@ function absoluteNonRootPath(
     return resolved;
 }
 
+function pathContains(parent: string, candidate: string): boolean {
+    const relative = path.relative(parent, candidate);
+    return (
+        relative === "" ||
+        (relative !== ".." &&
+            !relative.startsWith(`..${path.sep}`) &&
+            !path.isAbsolute(relative))
+    );
+}
+
+function pathsOverlap(left: string, right: string): boolean {
+    return pathContains(left, right) || pathContains(right, left);
+}
+
+function defaultDevelopmentStateRoot(
+    environment: Readonly<Record<string, string | undefined>>,
+    repositoryRoot: string,
+    hostProjectRoot: string
+): string {
+    const projectStateRoot = path.join(
+        hostProjectRoot,
+        "development",
+        "state",
+        "source-local"
+    );
+    if (!pathsOverlap(repositoryRoot, projectStateRoot)) return projectStateRoot;
+    const xdgStateRoot = absoluteNonRootPath(
+        "XDG_STATE_HOME",
+        environment.XDG_STATE_HOME,
+        path.join(os.homedir(), ".local", "state")
+    );
+    if (xdgStateRoot === undefined) throw new Error("XDG state root is missing");
+    const fallback = path.join(
+        xdgStateRoot,
+        "mira-dashboard",
+        "development",
+        "source-local"
+    );
+    if (pathsOverlap(repositoryRoot, fallback)) {
+        throw new TypeError(
+            "MIRA_DASHBOARD_DEV_STATE_ROOT must be configured outside the repository"
+        );
+    }
+    return fallback;
+}
+
 function configurationFlag(name: string, value: string | undefined): boolean {
     const configured = value?.trim();
     if (configured === undefined || configured === "" || configured === "1") {
@@ -163,10 +209,13 @@ export function resolveDevelopmentStackConfig(
     );
     if (hostProjectRoot === undefined)
         throw new Error("Dashboard project root is missing");
+    const configuredStateRoot = environment.MIRA_DASHBOARD_DEV_STATE_ROOT?.trim();
     const stateRoot = absoluteNonRootPath(
         "MIRA_DASHBOARD_DEV_STATE_ROOT",
-        environment.MIRA_DASHBOARD_DEV_STATE_ROOT,
-        path.join(hostProjectRoot, "development", "state", "source-local")
+        configuredStateRoot,
+        configuredStateRoot
+            ? undefined
+            : defaultDevelopmentStateRoot(environment, root, hostProjectRoot)
     );
     if (stateRoot === undefined) throw new Error("Development state root is missing");
     const origin = publicOrigin(

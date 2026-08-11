@@ -22,7 +22,9 @@ interface DevelopmentLogLayout {
 
 function runtimeOwnerId(): number {
     if (process.platform !== "linux" || typeof process.getuid !== "function") {
-        throw new Error("Development log maintenance is unavailable");
+        throw new Error(
+            "Development log maintenance requires Linux with process.getuid support"
+        );
     }
     return process.getuid();
 }
