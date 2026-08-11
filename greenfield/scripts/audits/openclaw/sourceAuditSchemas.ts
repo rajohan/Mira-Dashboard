@@ -1445,6 +1445,208 @@ export const tasksFixtureSchema = v.strictObject({
     uiProjection: taskUiProjectionSchema,
 });
 
+const settingsMethodAccessSchema = v.tuple([
+    v.strictObject({
+        controlPlaneWrite: v.literal(false),
+        name: v.literal("config.get"),
+        scope: v.literal("operator.read"),
+    }),
+    v.strictObject({
+        controlPlaneWrite: v.literal(true),
+        name: v.literal("config.patch"),
+        scope: v.literal("operator.admin"),
+    }),
+    v.strictObject({
+        controlPlaneWrite: v.literal(false),
+        name: v.literal("skills.status"),
+        scope: v.literal("operator.read"),
+    }),
+    v.strictObject({
+        controlPlaneWrite: v.literal(false),
+        name: v.literal("skills.update"),
+        scope: v.literal("operator.admin"),
+    }),
+]);
+
+/** Exact installed-OpenClaw settings, agent-access, and RPC source facts. */
+export const settingsFixtureSchema = v.strictObject({
+    agentAccess: v.strictObject({
+        configPatchArrayReplacement: v.strictObject({
+            destructiveRemovalRequiresDeclaredPath: v.literal(true),
+            exactPathTemplates: v.tuple([
+                v.literal("agents.entries.<agentId>.tools.alsoAllow"),
+                v.literal("agents.entries.<agentId>.tools.deny"),
+            ]),
+            listedPathReplacesArray: v.literal(true),
+            pathComparison: v.literal("normalized-exact"),
+        }),
+        coreCatalog: v.strictObject({
+            canonicalSchedulerTool: v.literal("automations"),
+            legacySchedulerAliases: v.tuple([v.literal("cron")]),
+            reviewedToolIds: v.tuple([
+                v.literal("automations"),
+                v.literal("browser"),
+                v.literal("edit"),
+                v.literal("exec"),
+                v.literal("gateway"),
+                v.literal("image"),
+                v.literal("image_generate"),
+                v.literal("memory_search"),
+                v.literal("message"),
+                v.literal("music_generate"),
+                v.literal("nodes"),
+                v.literal("read"),
+                v.literal("sessions_history"),
+                v.literal("sessions_list"),
+                v.literal("tts"),
+                v.literal("video_generate"),
+                v.literal("web_fetch"),
+                v.literal("web_search"),
+                v.literal("write"),
+            ]),
+        }),
+        entries: v.strictObject({
+            blockedObjectKeysRejected: v.literal(true),
+            defaultEntryCount: v.literal(1),
+            idCaseInsensitive: v.literal(true),
+            idMaximumLength: v.literal(64),
+            idMinimumLength: v.literal(1),
+            idPattern: v.literal("^[a-z0-9_][a-z0-9_-]{0,63}$"),
+            inlineIdOmitted: v.literal(true),
+            storagePath: v.literal("agents.entries"),
+            storageShape: v.literal("record-by-id"),
+        }),
+        toolsPolicy: v.strictObject({
+            nonEmptyAllowAndAlsoAllowConflictRejected: v.literal(true),
+            optionalStringArrayFields: v.tuple([
+                v.literal("allow"),
+                v.literal("alsoAllow"),
+                v.literal("deny"),
+            ]),
+        }),
+    }),
+    configGet: v.strictObject({
+        handlerValidatesParams: v.literal(true),
+        method: v.literal("config.get"),
+        requestParams: v.tuple([]),
+        response: v.strictObject({
+            invalidSnapshotClearsConfigPayloads: v.literal(true),
+            pluginMetadataOmitted: v.literal(true),
+            redactedSnapshotFields: v.tuple([
+                v.literal("config"),
+                v.literal("parsed"),
+                v.literal("raw"),
+                v.literal("resolved"),
+                v.literal("runtimeConfig"),
+                v.literal("sourceConfig"),
+            ]),
+            revisionHashFields: v.tuple([
+                v.literal("appliedConfigHash"),
+                v.literal("configRevisionHash"),
+            ]),
+            snapshotHashPreserved: v.literal(true),
+            uiHintsDriveRedaction: v.literal(true),
+        }),
+    }),
+    configPatch: v.strictObject({
+        baseHash: v.strictObject({
+            blankIsAbsent: v.literal(true),
+            generalWritesRequireHash: v.literal(true),
+            hashlessLastWriterWinsPaths: v.tuple([v.literal("ui.prefs")]),
+            mismatchRejected: v.literal(true),
+            protocolOptional: v.literal(true),
+            writeUsesSnapshotHash: v.literal(true),
+        }),
+        handlerValidatesParams: v.literal(true),
+        method: v.literal("config.patch"),
+        redaction: v.strictObject({
+            getAndWriteResponsesRedacted: v.literal(true),
+            patchRestoresSensitiveValuesFromSnapshot: v.literal(true),
+            reservedOrUnrestorableSentinelRejected: v.literal(true),
+            sentinel: v.literal("__OPENCLAW_REDACTED__"),
+        }),
+        requestParams: v.tuple([
+            v.literal("baseHash"),
+            v.literal("deliveryContext"),
+            v.literal("note"),
+            v.literal("raw"),
+            v.literal("replacePaths"),
+            v.literal("restartDelayMs"),
+            v.literal("sessionKey"),
+        ]),
+        restart: v.strictObject({
+            changedPathsDriveRequirement: v.literal(true),
+            directRestartConditional: v.literal(true),
+            sentinelPersistenceBestEffort: v.literal(true),
+            sentinelResultFields: v.tuple([v.literal("payload"), v.literal("persisted")]),
+        }),
+        write: v.strictObject({
+            arraysMergeById: v.literal(true),
+            noChangeReturnsNoop: v.literal(true),
+            rawFormat: v.literal("json5-object"),
+            replacePathsSupported: v.literal(true),
+        }),
+    }),
+    domain: v.literal("settings"),
+    methodAccess: settingsMethodAccessSchema,
+    schemaVersion: fixtureSchemaVersion,
+    skillsStatus: v.strictObject({
+        row: v.strictObject({
+            disabledFrom: v.literal("skills.entries[skillKey].enabled-equals-false"),
+            eligibleRequiresNotDisabled: v.literal(true),
+            reviewedFields: v.tuple([
+                v.literal("baseDir"),
+                v.literal("bundled"),
+                v.literal("description"),
+                v.literal("disabled"),
+                v.literal("eligible"),
+                v.literal("filePath"),
+                v.literal("name"),
+                v.literal("skillKey"),
+                v.literal("source"),
+            ]),
+        }),
+        handlerValidatesParams: v.literal(true),
+        method: v.literal("skills.status"),
+        requestParams: v.tuple([v.literal("agentId")]),
+        workspace: v.strictObject({
+            defaultAgentResolved: v.literal(true),
+            remoteEligibilityIncluded: v.literal(true),
+            unknownExplicitAgentRejected: v.literal(true),
+            upstreamHostPathFields: v.tuple([
+                v.literal("managedSkillsDir"),
+                v.literal("skills[].baseDir"),
+                v.literal("skills[].filePath"),
+                v.literal("workspaceDir"),
+            ]),
+        }),
+    }),
+    skillsUpdate: v.strictObject({
+        handler: v.strictObject({
+            afterWriteMode: v.literal("auto"),
+            configMutationUsesRetry: v.literal(true),
+            localEntryPath: v.literal("skills.entries[skillKey]"),
+            responseConfigRedacted: v.literal(true),
+            resultFields: v.tuple([
+                v.literal("config"),
+                v.literal("ok"),
+                v.literal("skillKey"),
+            ]),
+        }),
+        handlerValidatesParams: v.literal(true),
+        method: v.literal("skills.update"),
+        request: v.strictObject({
+            baseHashAccepted: v.literal(false),
+            localParams: v.tuple([
+                v.literal("apiKey"),
+                v.literal("enabled"),
+                v.literal("env"),
+                v.literal("skillKey"),
+            ]),
+        }),
+    }),
+});
+
 export const sourceIdentitySchema = v.strictObject({
     builtAt: timestampSchema,
     commit: commitSchema,
@@ -1457,13 +1659,22 @@ export const sourceArtifactSchema = v.strictObject({
     bytes: positiveSafeIntegerSchema,
     path: sourcePathSchema,
     role: v.picklist([
+        "agent-config-schema",
+        "agent-tools-schema",
+        "automations-tool-name",
         "build-info",
         "chat-run-projection",
         "chat-send-handler",
         "chat-streaming",
+        "config-base-hash",
+        "config-get-response",
+        "config-handlers",
+        "config-merge-patch",
+        "config-redaction",
         "control-ui-chat",
         "control-ui-plan-renderer",
         "control-ui-plan-rail",
+        "core-tool-catalog",
         "cron-delivery-merge",
         "cron-delivery-normalization",
         "cron-events",
@@ -1499,18 +1710,21 @@ export const sourceArtifactSchema = v.strictObject({
         "session-row-projection",
         "session-subscription-events",
         "sessions-handlers",
+        "skills-handlers",
+        "skills-status",
         "subagent-control",
         "system-info-handler",
         "task-registry",
         "task-summary",
         "tasks-handlers",
+        "tool-policy-normalization",
     ]),
     sha256: sha256Schema,
 });
 
 const sourceArtifactsSchema = v.pipe(
     v.array(sourceArtifactSchema),
-    v.length(47),
+    v.length(59),
     v.check(
         (artifacts) => isSortedAndUnique(artifacts.map((artifact) => artifact.role)),
         "Source artifact roles must be sorted and unique"
@@ -1529,6 +1743,7 @@ const fixtureManifestEntrySchema = v.strictObject({
         "cron.json",
         "gateway.json",
         "sessions.json",
+        "settings.json",
         "tasks.json",
     ]),
     sha256: sha256Schema,
@@ -1537,7 +1752,7 @@ const fixtureManifestEntrySchema = v.strictObject({
 export const fixtureManifestSchema = v.strictObject({
     components: v.pipe(
         v.array(fixtureManifestEntrySchema),
-        v.length(6),
+        v.length(7),
         v.check(
             (components) =>
                 isSortedAndUnique(components.map((component) => component.file)),
@@ -1563,6 +1778,7 @@ export const sourceAuditResultSchema = v.pipe(
         cron: cronFixtureSchema,
         gateway: gatewayFixtureSchema,
         sessions: sessionsFixtureSchema,
+        settings: settingsFixtureSchema,
         tasks: tasksFixtureSchema,
         source: sourceIdentitySchema,
         sourceArtifacts: sourceArtifactsSchema,
@@ -1579,6 +1795,7 @@ export type CronFixture = v.InferOutput<typeof cronFixtureSchema>;
 export type FixtureManifest = v.InferOutput<typeof fixtureManifestSchema>;
 export type GatewayFixture = v.InferOutput<typeof gatewayFixtureSchema>;
 export type SessionsFixture = v.InferOutput<typeof sessionsFixtureSchema>;
+export type SettingsFixture = v.InferOutput<typeof settingsFixtureSchema>;
 export type TasksFixture = v.InferOutput<typeof tasksFixtureSchema>;
 export type SourceArtifact = v.InferOutput<typeof sourceArtifactSchema>;
 export type SourceAuditResult = v.InferOutput<typeof sourceAuditResultSchema>;

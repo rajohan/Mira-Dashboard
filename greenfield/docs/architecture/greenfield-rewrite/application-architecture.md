@@ -427,6 +427,26 @@ disable intents expose non-atomic external/local outcomes for reconciliation and
 worker's task-notification sender is a separate purpose-specific `chat.send` port with durable
 idempotency; it is not the Phase 4 chat runtime.
 
+OpenClaw settings use another dedicated, source-audited adapter rather than the generic persistent
+request API. Only `config.get` and `skills.status` enter its read method set, and only
+`config.patch` enters its fresh one-shot write method set. The pinned `skills.update` behavior is
+source-audited as comparison evidence but deliberately excluded because it has no base-hash CAS.
+The domain provider exposes only a bounded secret-free configuration projection, canonical
+agent-level overrides for a fixed core-tool subset, and a path-free bounded skill inventory that
+retains safe configured-only entries. Configuration changes and skill toggles are exact typed
+intents; both become server-built `config.patch` writes. Every write refetches authoritative state,
+validates the submitted hash and affected state, builds the narrow provider patch server-side, and
+treats any post-dispatch loss of authority or authoritative-readback mismatch as an explicit
+unknown outcome.
+The provider never accepts an arbitrary Gateway method, raw configuration document, JSON Patch,
+host path, policy array, or skill metadata mutation from the browser. Agent-tool controls target
+canonical `agents.entries` keys and replace only exact `alsoAllow`/`deny` arrays while preserving
+unknown siblings; explicit or ambiguous policy remains visibly locked rather than being rewritten.
+Browser reads are session-only; writes require recent MFA again after fail-closed audit admission
+and at the actual post-handshake pre-dispatch boundary.
+Configuration export and Gateway restart deliberately remain separate later boundaries: the former
+needs an actor-bound no-store raw ticket, while the latter needs a durable worker-owned action.
+
 ### Current-protocol Control UI projections
 
 The 2026-08-06 OpenClaw audit separates protocol authority from Control UI projection through 23

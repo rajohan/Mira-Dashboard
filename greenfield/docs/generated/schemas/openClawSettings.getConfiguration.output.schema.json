@@ -1,0 +1,378 @@
+{
+  "$id": "urn:mira-dashboard:openClawSettings.getConfiguration.output",
+  "type": "object",
+  "properties": {
+    "agentAccess": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^(?!(?:__proto__|constructor|prototype)$)[a-z0-9_][a-z0-9_-]{0,63}$"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "\\S",
+            "allOf": [
+              {
+                "pattern": "^[^\\u0000]*$"
+              },
+              {
+                "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+              }
+            ]
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "editable": {
+                  "type": "boolean"
+                },
+                "id": {
+                  "enum": [
+                    "automations",
+                    "browser",
+                    "edit",
+                    "exec",
+                    "gateway",
+                    "image",
+                    "image_generate",
+                    "memory_search",
+                    "message",
+                    "music_generate",
+                    "nodes",
+                    "read",
+                    "sessions_history",
+                    "sessions_list",
+                    "tts",
+                    "video_generate",
+                    "web_fetch",
+                    "web_search",
+                    "write"
+                  ],
+                  "type": "string"
+                },
+                "override": {
+                  "enum": [
+                    "allow",
+                    "deny",
+                    "inherit"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "editable",
+                "id",
+                "override"
+              ],
+              "additionalProperties": false
+            },
+            "$comment": "Live Valibot validation additionally requires every OpenClaw agent row to contain the complete canonical reviewed tool set in exact order."
+          }
+        },
+        "required": [
+          "id",
+          "tools"
+        ],
+        "additionalProperties": false
+      },
+      "maxItems": 32,
+      "$comment": "Live Valibot validation additionally requires OpenClaw agent IDs to be unique and strictly ordered."
+    },
+    "agentAccessTruncated": {
+      "type": "boolean"
+    },
+    "channels": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9._-]*$",
+            "allOf": [
+              {
+                "pattern": "^[^\\u0000]*$"
+              },
+              {
+                "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+              }
+            ]
+          }
+        },
+        "required": [
+          "enabled",
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "maxItems": 64,
+      "$comment": "Live Valibot validation additionally requires configured OpenClaw channel IDs to be unique and strictly ordered."
+    },
+    "hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "heartbeat": {
+      "type": "object",
+      "properties": {
+        "everySeconds": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 86400
+        },
+        "target": {
+          "type": "string",
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "\\S",
+          "allOf": [
+            {
+              "pattern": "^[^\\u0000]*$"
+            },
+            {
+              "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+            }
+          ]
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "issueCount": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "lastTouchedAt": {
+      "type": "string",
+      "maxLength": 64,
+      "minLength": 1,
+      "pattern": "\\S",
+      "allOf": [
+        {
+          "pattern": "^[^\\u0000]*$"
+        },
+        {
+          "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+        }
+      ]
+    },
+    "lastTouchedVersion": {
+      "type": "string",
+      "maxLength": 64,
+      "minLength": 1,
+      "pattern": "\\S",
+      "allOf": [
+        {
+          "pattern": "^[^\\u0000]*$"
+        },
+        {
+          "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+        }
+      ]
+    },
+    "models": {
+      "type": "object",
+      "properties": {
+        "fallbacks": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "pattern": "\\S",
+            "allOf": [
+              {
+                "pattern": "^[^\\u0000]*$"
+              },
+              {
+                "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+              }
+            ]
+          },
+          "maxItems": 16,
+          "uniqueItems": true
+        },
+        "primary": {
+          "type": "string",
+          "maxLength": 200,
+          "minLength": 1,
+          "pattern": "\\S",
+          "allOf": [
+            {
+              "pattern": "^[^\\u0000]*$"
+            },
+            {
+              "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+            }
+          ]
+        }
+      },
+      "required": [
+        "fallbacks"
+      ],
+      "additionalProperties": false
+    },
+    "security": {
+      "type": "object",
+      "properties": {
+        "authProfileCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "commandRestartEnabled": {
+          "type": "boolean"
+        },
+        "ownerAllowFromCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "redactionMode": {
+          "type": "string",
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "\\S",
+          "allOf": [
+            {
+              "pattern": "^[^\\u0000]*$"
+            },
+            {
+              "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+            }
+          ]
+        }
+      },
+      "required": [
+        "authProfileCount",
+        "commandRestartEnabled",
+        "ownerAllowFromCount"
+      ],
+      "additionalProperties": false
+    },
+    "sessionReset": {
+      "type": "object",
+      "properties": {
+        "idleMinutes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10080
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "tools": {
+      "type": "object",
+      "properties": {
+        "agentToAgentEnabled": {
+          "type": "boolean"
+        },
+        "elevatedEnabled": {
+          "type": "boolean"
+        },
+        "execAsk": {
+          "enum": [
+            "off",
+            "on-miss",
+            "always"
+          ],
+          "type": "string"
+        },
+        "execSecurity": {
+          "enum": [
+            "allowlist",
+            "deny",
+            "full"
+          ],
+          "type": "string"
+        },
+        "profile": {
+          "type": "string",
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "\\S",
+          "allOf": [
+            {
+              "pattern": "^[^\\u0000]*$"
+            },
+            {
+              "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+            }
+          ]
+        },
+        "sessionsVisibility": {
+          "enum": [
+            "agent",
+            "all",
+            "self",
+            "tree"
+          ],
+          "type": "string"
+        },
+        "webFetchEnabled": {
+          "type": "boolean"
+        },
+        "webSearchEnabled": {
+          "type": "boolean"
+        },
+        "webSearchProvider": {
+          "type": "string",
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "\\S",
+          "allOf": [
+            {
+              "pattern": "^[^\\u0000]*$"
+            },
+            {
+              "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+            }
+          ]
+        }
+      },
+      "required": [
+        "agentToAgentEnabled",
+        "elevatedEnabled",
+        "execAsk",
+        "execSecurity",
+        "webFetchEnabled",
+        "webSearchEnabled"
+      ],
+      "additionalProperties": false
+    },
+    "valid": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "agentAccess",
+    "agentAccessTruncated",
+    "channels",
+    "hash",
+    "heartbeat",
+    "issueCount",
+    "models",
+    "security",
+    "sessionReset",
+    "tools",
+    "valid"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

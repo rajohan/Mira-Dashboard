@@ -38,6 +38,125 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
             commit: sourceCommit,
             version: sourceVersion,
         })}\n`,
+        "zod-schema-fixture.js": `
+            //#region src/config/zod-schema.agents.ts
+            const AgentEntryConfigSchema = preprocess((value, ctx) => {
+                if (value && typeof value === "object" && !Array.isArray(value)) for (const key of Object.getOwnPropertyNames(value)) {
+                    if (!isBlockedObjectKey(key)) continue;
+                    ctx.addIssue({
+                        message: "agent entries must not contain blocked object keys"
+                    });
+                }
+                return value;
+            }, AgentEntrySchema.omit({ id: true }));
+            const AgentsSchema = object({
+                defaults: lazy(() => AgentDefaultsSchema).optional(),
+                entries: record(string().regex(/^[a-z0-9_][a-z0-9_-]{0,63}$/i, "Invalid agent id"), AgentEntryConfigSchema).optional()
+            }).strict().superRefine((value, ctx) => {
+                const defaultCount = Object.values(value.entries ?? {}).filter((agent) => agent.default === true).length;
+                if (defaultCount !== 1) ctx.addIssue({
+                    message: "agents.entries must contain exactly one default=true entry"
+                });
+            }).optional();
+            const BindingMatchSchema = object({});
+        `,
+        "zod-schema.agent-runtime-fixture.js": `
+            const ToolPolicySchema = object({
+                allow: array(string()).optional(),
+                alsoAllow: array(string()).optional(),
+                deny: array(string()).optional()
+            }).strict().optional();
+            const CommonToolPolicyFields = {
+                profile: ToolProfileSchema,
+                allow: array(string()).optional(),
+                alsoAllow: array(string()).optional(),
+                deny: array(string()).optional(),
+                byProvider: record(string(), ToolPolicyWithProfileSchema).optional(),
+                toolsBySender: ToolPolicyBySenderSchema
+            };
+            const MessageToolConfigSchema = object({});
+            const AgentToolsSchema = object({
+                ...CommonToolPolicyFields
+            }).strict().superRefine((value, ctx) => {
+                addAllowAlsoAllowConflictIssue(value, ctx,
+                    "agent tools cannot set both allow and alsoAllow in the same scope (merge alsoAllow into allow, or remove allow and use profile + alsoAllow)");
+            }).optional();
+            const MemorySearchSchema = object({});
+            const AgentEntrySchema = object({
+                id: string(),
+                tools: AgentToolsSchema
+            }).strict();
+            const ToolsSchema = object({});
+        `,
+        "automations-tool-name-fixture.js": `
+            const AUTOMATIONS_TOOL_NAME = "automations";
+            const LEGACY_AUTOMATIONS_TOOL_NAMES = ["cron"];
+            function isAutomationsToolName(name) {
+                return name === "automations" || LEGACY_AUTOMATIONS_TOOL_NAMES.includes(name);
+            }
+        `,
+        "tool-catalog-fixture.js": `
+            const CORE_TOOL_DEFINITIONS = [
+                { id: "read" },
+                { id: "write" },
+                { id: "edit" },
+                { id: "exec" },
+                { id: "web_search" },
+                { id: "web_fetch" },
+                { id: "memory_search" },
+                { id: "sessions_list" },
+                { id: "sessions_history" },
+                { id: "browser" },
+                { id: "message" },
+                { id: AUTOMATIONS_TOOL_NAME },
+                { id: "gateway" },
+                { id: "nodes" },
+                { id: "image" },
+                { id: "image_generate" },
+                { id: "music_generate" },
+                { id: "video_generate" },
+                { id: "tts" }
+            ];
+            const CORE_TOOL_BY_ID = new Map(CORE_TOOL_DEFINITIONS.map((tool) => [tool.id, tool]));
+            function isKnownCoreToolId(toolId) {
+                return CORE_TOOL_BY_ID.has(toolId);
+            }
+        `,
+        "tool-policy-fixture.js": `
+            const TOOL_NAME_ALIASES = {
+                bash: "exec",
+                cron: "automations"
+            };
+            function normalizeToolName(name) {
+                const normalized = normalizeLowercaseStringOrEmpty(name);
+                return TOOL_NAME_ALIASES[normalized] ?? normalized;
+            }
+            function normalizeToolList(list) {
+                if (!list) return [];
+                return list.map(normalizeToolName).filter(Boolean);
+            }
+        `,
+        "merge-patch-fixture.js": `
+            function isMergePatchObjectKeyAllowed(key, parentPath) { return true; }
+            function mergeObjectArraysById(base, patch, options, arrayPath) {}
+            function applyMergePatch(base, patch, options = {}) {
+                if (!isPlainObject(patch)) return patch;
+                const result = isPlainObject(base) ? { ...base } : {};
+                for (const [key, value] of Object.entries(patch)) {
+                    const path = formatMergePatchPath(options.path, key);
+                    if (options.mergeObjectArraysById && Array.isArray(result[key]) && Array.isArray(value)) {
+                        if (options.replaceArrayPaths?.has(path)) {
+                            result[key] = value;
+                            continue;
+                        }
+                        const mergedArray = mergeObjectArraysById(result[key], value, options, path);
+                        if (mergedArray) result[key] = mergedArray;
+                    }
+                }
+                return result;
+            }
+            //#endregion
+        `,
         "index-fixture.d.ts": `
             declare const PROTOCOL_VERSION: 4;
             declare const ChatEventSchema: unknown;
@@ -216,6 +335,246 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
                 "system-event": () => {},
             };
         `,
+        "base-hash-fixture.js": `
+            function resolveBaseHashParam(params) {
+                const raw = params?.baseHash;
+                if (typeof raw !== "string") return null;
+                const trimmed = raw.trim();
+                return trimmed ? trimmed : null;
+            }
+        `,
+        "config-get-response-fixture.js": `
+            function createConfigGetResponse(snapshot, uiHints) {
+                return {
+                    ...redactConfigSnapshot(snapshot, uiHints),
+                    configRevisionHash: hashRuntimeConfigValue(snapshot.sourceConfig),
+                    appliedConfigHash: getRuntimeConfigAppliedHash()
+                };
+            }
+            async function readConfigGetResponse(params) {
+                return createConfigGetResponse(await readConfigFileSnapshot(), params.loadUiHints());
+            }
+        `,
+        "redact-snapshot-fixture.js": `
+            const REDACTED_SENTINEL = "__OPENCLAW_REDACTED__";
+            function redactConfigSnapshot(snapshot, uiHints) {
+                if (!snapshot.valid) {
+                    const redactedConfig = {};
+                    const redactedResolved = {};
+                    return {
+                        ...snapshot,
+                        sourceConfig: redactedResolved,
+                        runtimeConfig: redactedConfig,
+                        config: redactedConfig,
+                        raw: null,
+                        parsed: null,
+                        resolved: redactedResolved
+                    };
+                }
+                const redactedConfig = redactObject(snapshot.config, uiHints);
+                const redactedParsed = snapshot.parsed ? redactObject(snapshot.parsed, uiHints) : snapshot.parsed;
+                let redactedRaw = snapshot.raw;
+                const redactedResolved = redactConfigObject(snapshot.resolved, uiHints);
+                const { pluginMetadataSnapshot: _pluginMetadataSnapshot, ...publicSnapshot } = snapshot;
+                return {
+                    ...publicSnapshot,
+                    sourceConfig: redactedResolved,
+                    runtimeConfig: redactedConfig,
+                    config: redactedConfig,
+                    raw: redactedRaw,
+                    parsed: redactedParsed,
+                    resolved: redactedResolved
+                };
+            }
+            /**
+            * Deep-walk \`incoming\` and restore sensitive values.
+            */
+            function restoreRedactedValues(incoming, original, hints) {
+                const restored = incoming;
+                assertNoRedactedSentinel(restored, "");
+                return { ok: true, result: restored };
+            }
+            function restoreOriginalValueOrThrow(params) {
+                if (Object.hasOwn(params.original, params.key)) return params.original[params.key];
+                throw new RedactionError(params.path);
+            }
+        `,
+        "config-fixture.js": `
+            async function commitGatewayConfigWrite(params) {
+                return replaceConfigFile({
+                    nextConfig: params.nextConfig,
+                    baseHash: resolveConfigSnapshotHash(params.snapshot) ?? void 0
+                });
+            }
+            async function tryWriteRestartSentinelPayload(payload) { return true; }
+            async function resolveGatewayConfigRestartWriteResult(params) {
+                const sentinelPersisted = await tryWriteRestartSentinelPayload(payload);
+                const restart = restartRequirement.scheduleDirectRestart ? scheduleGatewaySigusr1Restart({
+                    changedPaths: params.changedPaths
+                }) : void 0;
+                return { payload, sentinelPersisted, restart };
+            }
+            function formatConfigPatchPath(parentPath, key) {
+                return parentPath ? \`\${parentPath}.\${key}\` : key;
+            }
+            function normalizeConfigPatchReplacePath(value) {
+                const trimmed = value.trim();
+                if (trimmed.endsWith("[]")) return trimmed.slice(0, -2).replace(/\\[\\d+\\](?=\\.)/g, "[]");
+                return trimmed.replace(/\\[\\d+\\](?=\\.)/g, "[]");
+            }
+            function normalizeConfigPatchReplacePaths(values) {
+                if (!values) return new Set();
+                return new Set(values.filter((value) => typeof value === "string").map(normalizeConfigPatchReplacePath).filter((value) => value.length > 0));
+            }
+            function collectDestructiveArrayPatchPaths(params) {
+                return [];
+            }
+            function rejectDestructiveArrayPatchWithoutIntent(params) {
+                const unconfirmedPaths = collectDestructiveArrayPatchPaths({}).filter((path) => !params.replacePaths.has(path));
+                return unconfirmedPaths.length > 0;
+            }
+            const HASHLESS_PATCH_LWW_PATH_PREFIXES = ["ui.prefs"];
+            function requireConfigBaseHash(params, snapshot, respond) {
+                if (baseHash !== snapshotHash) {
+                    respond(false, void 0, errorShape(ErrorCodes.INVALID_REQUEST, "config changed since last load; re-run config.get and retry"));
+                    return false;
+                }
+                return true;
+            }
+            const configHandlers = {
+                "config.get": async ({ params, respond, context }) => {
+                    if (!assertValidParams(params, validateConfigGetParams, "config.get", respond)) return;
+                    respond(true, await readConfigGetResponse({
+                        loadUiHints: () => loadSchemaWithPlugins().uiHints
+                    }), void 0);
+                },
+                "config.schema": ({ params, respond }) => {},
+                "config.patch": async ({ params, respond, client, context }) => {
+                    if (!assertValidParams(params, validateConfigPatchParams, "config.patch", respond)) return;
+                    const hashlessPatch = resolveBaseHashParam(params) === null;
+                    const parsedRes = parseConfigJson5(params.raw);
+                    const normalizedPatch = parsedRes.parsed;
+                    if (hashlessPatch && !hasHashlessPatchLwwStructure(normalizedPatch)) return;
+                    const replacePaths = readConfigPatchReplacePaths(params);
+                    const merged = applyMergePatch(snapshot.config, normalizedPatch, {
+                        mergeObjectArraysById: true,
+                        replaceArrayPaths: replacePaths
+                    });
+                    const restoredMerge = restoreRedactedValues(merged, snapshot.config, schemaPatch.uiHints);
+                    const restoredChangedPaths = diffConfigLeafPaths(snapshot.config, restoredMerge.result);
+                    if (hashlessPatch && !restoredChangedPaths.every(isHashlessPatchLwwPath)) return;
+                    if (restoredChangedPaths.length === 0) {
+                        respondConfigPatchNoop({ snapshot });
+                        return;
+                    }
+                    await respondWithConfigRestartWrite({
+                        changedPaths: restoredChangedPaths,
+                        sentinel: {
+                            persisted: sentinelPersisted,
+                            payload
+                        }
+                    });
+                },
+                "config.apply": async ({ params, respond }) => {}
+            };
+        `,
+        "skills-fixture.js": `
+            function patchSkillConfigEntry(cfg, skillKey, patch) {
+                const entries = { ...cfg.skills?.entries };
+                const current = entries[skillKey] ? { ...entries[skillKey] } : {};
+                if (typeof patch.enabled === "boolean") current.enabled = patch.enabled;
+                if (typeof patch.apiKey === "string") {
+                    const trimmed = patch.apiKey.trim();
+                    if (trimmed === "__OPENCLAW_REDACTED__") {}
+                }
+                if (patch.env && typeof patch.env === "object") current.env = patch.env;
+                entries[skillKey] = current;
+                return { ...cfg, skills: { ...cfg.skills, entries } };
+            }
+            async function updateSkillConfigEntry(params) {
+                return (await mutateConfigFileWithRetry({
+                    afterWrite: { mode: "auto" },
+                    mutate: (draft) => {
+                        const next = patchSkillConfigEntry(draft, params.skillKey, params);
+                        return next.skills?.entries?.[params.skillKey] ?? {};
+                    }
+                })).result;
+            }
+            //#endregion
+            function resolveSkillsAgentWorkspace(params, context) {
+                const cfg = context.getRuntimeConfig();
+                const agentIdRaw = params.agentId;
+                const agentId = agentIdRaw ? normalizeAgentId(agentIdRaw) : resolveDefaultAgentId(cfg);
+                if (agentIdRaw && !listAgentIds(cfg).includes(agentId)) return { ok: false };
+                return { ok: true, cfg, agentId, workspaceDir: resolveAgentWorkspaceDir(cfg, agentId) };
+            }
+            const SKILL_PROPOSAL_RESPONSE_HANDLED = Symbol();
+            function buildRemoteAwareWorkspaceSkillStatus(resolved) {
+                const nodeSkills = resolveNodeExecEligibility({ agentId: resolved.agentId });
+                return buildWorkspaceSkillStatus(resolved.workspaceDir, {
+                    remote: getRemoteSkillEligibility({ advertiseExecNode: nodeSkills.canExec })
+                });
+            }
+            const skillsHandlers = {
+                "skills.status": ({ params, respond, context }) => {
+                    if (!assertValidParams(params, validateSkillsStatusParams, "skills.status", respond)) return;
+                    const resolved = resolveSkillsAgentWorkspace(params, context);
+                    respond(true, buildRemoteAwareWorkspaceSkillStatus(resolved), void 0);
+                },
+                "skills.securityVerdicts": async () => {},
+                "skills.update": async ({ params, respond, context }) => {
+                    if (!assertValidParams(params, validateSkillsUpdateParams, "skills.update", respond)) return;
+                    if (params && typeof params === "object" && "source" in params && params.source === "clawhub") return;
+                    const p = params;
+                    const updated = await updateSkillConfigEntry(p);
+                    respond(true, {
+                        ok: true,
+                        skillKey: p.skillKey,
+                        config: redactConfigObject(updated)
+                    }, void 0);
+                }
+            };
+            //#endregion
+        `,
+        "status-fixture.js": `
+            function buildSkillStatus(indexed, context) {
+                const entry = indexed.entry;
+                const skillKey = indexed.skillKey;
+                const skillConfig = resolveSkillConfig(context.config, skillKey);
+                const disabled = skillConfig?.enabled === false;
+                const skillSource = indexed.source;
+                const bundled = indexed.bundled;
+                const blockedByAllowlist = false;
+                const requirementsSatisfied = true;
+                const eligible = !disabled && !blockedByAllowlist && requirementsSatisfied;
+                return {
+                    name: entry.skill.name,
+                    description: entry.skill.description,
+                    source: skillSource,
+                    bundled,
+                    filePath: entry.skill.filePath,
+                    baseDir: entry.skill.baseDir,
+                    skillKey,
+                    disabled,
+                    eligible,
+                };
+            }
+            function buildWorkspaceSkillStatus(workspaceDir, opts) {
+                const managedSkillsDir = opts.managedSkillsDir;
+                const agentSkillFilter = opts.agentSkillFilter;
+                const skillIndexEntries = opts.entries;
+                return {
+                    workspaceDir,
+                    managedSkillsDir,
+                    agentId: opts?.agentId,
+                    agentSkillFilter,
+                    skills: skillIndexEntries.map((entry) => buildSkillStatus(entry, {
+                        config: opts.config
+                    }))
+                };
+            }
+            //#endregion
+        `,
         "core-descriptors-fixture.js": `
             { name: "chat.abort", scope: "operator.write" },
             { name: "chat.history", scope: "operator.read" },
@@ -243,6 +602,10 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
             { name: "cron.run", scope: "operator.admin" },
             { name: "cron.runs", scope: "operator.read" },
             { name: "cron.update", scope: "operator.admin" },
+            { name: "config.get", scope: "operator.read" },
+            { name: "config.patch", scope: "operator.admin", controlPlaneWrite: true },
+            { name: "skills.status", scope: "operator.read" },
+            { name: "skills.update", scope: "operator.admin" },
         `,
         "method-scopes-fixture.js": `
             /**
@@ -297,6 +660,37 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
                 caps: Type.Optional(Type.Array(NonEmptyString, { default: [] }))
             });
             const HelloOkSchema = closedObject({});
+            /** Empty request payload for reading the current raw config. */
+            const ConfigGetParamsSchema = closedObject({});
+            /** Full raw config replacement request with optional base hash guard. */
+            const ConfigApplyLikeParamProperties = {
+\traw: NonEmptyString,
+\tbaseHash: Type.Optional(NonEmptyString),
+\tsessionKey: Type.Optional(Type.String()),
+\tdeliveryContext: Type.Optional(ConfigDeliveryContextSchema),
+\tnote: Type.Optional(Type.String()),
+\trestartDelayMs: Type.Optional(Type.Integer({ minimum: 0 }))
+            };
+            const ConfigPatchParamsSchema = closedObject({
+\t...ConfigApplyLikeParamProperties,
+\treplacePaths: Type.Optional(Type.Array(NonEmptyString, { maxItems: 256 }))
+            });
+            /** Empty request payload for fetching the generated config schema. */
+            /** Reads installed skill status, optionally for a selected agent. */
+            const SkillsStatusParamsSchema = closedObject({ agentId: Type.Optional(NonEmptyString) });
+            /** Empty request payload for listing available skill bins. */
+            const SkillsUpdateParamsSchema = Type.Union([closedObject({
+\tskillKey: NonEmptyString,
+\tenabled: Type.Optional(Type.Boolean()),
+\tapiKey: Type.Optional(Type.String()),
+\tenv: Type.Optional(Type.Record(NonEmptyString, Type.String()))
+            }), closedObject({
+\tagentId: Type.Optional(NonEmptyString),
+\tsource: Type.Literal("clawhub"),
+\tslug: Type.Optional(NonEmptyString),
+\tall: Type.Optional(Type.Boolean()),
+\tacknowledgeClawHubRisk: Type.Optional(Type.Boolean())
+            })]);
             const TaskLedgerStatusSchema = [
                 Type.Literal("queued"), Type.Literal("running"),
                 Type.Literal("completed"), Type.Literal("failed"),
@@ -1543,7 +1937,28 @@ describe("reviewed OpenClaw protocol fixtures", () => {
             "chat-delta",
             "chat-terminal",
         ]);
-        expect(reviewed.audit.sourceArtifacts).toHaveLength(47);
+        expect(reviewed.audit.sourceArtifacts).toHaveLength(59);
+        expect(reviewed.audit.settings.methodAccess).toEqual([
+            { controlPlaneWrite: false, name: "config.get", scope: "operator.read" },
+            { controlPlaneWrite: true, name: "config.patch", scope: "operator.admin" },
+            { controlPlaneWrite: false, name: "skills.status", scope: "operator.read" },
+            { controlPlaneWrite: false, name: "skills.update", scope: "operator.admin" },
+        ]);
+        expect(reviewed.audit.settings.agentAccess.entries).toEqual({
+            blockedObjectKeysRejected: true,
+            defaultEntryCount: 1,
+            idCaseInsensitive: true,
+            idMaximumLength: 64,
+            idMinimumLength: 1,
+            idPattern: "^[a-z0-9_][a-z0-9_-]{0,63}$",
+            inlineIdOmitted: true,
+            storagePath: "agents.entries",
+            storageShape: "record-by-id",
+        });
+        expect(reviewed.audit.settings.skillsUpdate.request).toEqual({
+            baseHashAccepted: false,
+            localParams: ["apiKey", "enabled", "env", "skillKey"],
+        });
         expect(reviewed.audit.sessions.adapter.event.lifecycleProjection).toEqual({
             compactIsDestructiveOnlyWhenTrue: true,
             fields: ["compacted", "reason", "sessionId", "sessionKey", "ts", "updatedAt"],
@@ -1957,6 +2372,7 @@ describe("reviewed OpenClaw protocol fixtures", () => {
                 "gateway.json",
                 "manifest.json",
                 "sessions.json",
+                "settings.json",
                 "tasks.json",
             ]) {
                 await copyFile(
@@ -2064,7 +2480,49 @@ describe("explicit OpenClaw source audit", () => {
                 "offset",
                 "total",
             ]);
-            expect(audit.sourceArtifacts).toHaveLength(47);
+            expect(audit.settings.configPatch).toMatchObject({
+                baseHash: {
+                    blankIsAbsent: true,
+                    generalWritesRequireHash: true,
+                    hashlessLastWriterWinsPaths: ["ui.prefs"],
+                    mismatchRejected: true,
+                    protocolOptional: true,
+                    writeUsesSnapshotHash: true,
+                },
+                redaction: {
+                    patchRestoresSensitiveValuesFromSnapshot: true,
+                    reservedOrUnrestorableSentinelRejected: true,
+                    sentinel: "__OPENCLAW_REDACTED__",
+                },
+            });
+            expect(audit.settings.agentAccess).toMatchObject({
+                configPatchArrayReplacement: {
+                    destructiveRemovalRequiresDeclaredPath: true,
+                    exactPathTemplates: [
+                        "agents.entries.<agentId>.tools.alsoAllow",
+                        "agents.entries.<agentId>.tools.deny",
+                    ],
+                    listedPathReplacesArray: true,
+                    pathComparison: "normalized-exact",
+                },
+                coreCatalog: {
+                    canonicalSchedulerTool: "automations",
+                    legacySchedulerAliases: ["cron"],
+                },
+                toolsPolicy: {
+                    nonEmptyAllowAndAlsoAllowConflictRejected: true,
+                    optionalStringArrayFields: ["allow", "alsoAllow", "deny"],
+                },
+            });
+            expect(audit.settings.skillsStatus.row).toMatchObject({
+                disabledFrom: "skills.entries[skillKey].enabled-equals-false",
+                eligibleRequiresNotDisabled: true,
+            });
+            expect(audit.settings.skillsUpdate.request).toEqual({
+                baseHashAccepted: false,
+                localParams: ["apiKey", "enabled", "env", "skillKey"],
+            });
+            expect(audit.sourceArtifacts).toHaveLength(59);
         });
     });
 
@@ -2116,6 +2574,168 @@ describe("explicit OpenClaw source audit", () => {
                 const error = await rejectedError(auditInstalledOpenClaw(sourceRoot));
                 expect(error.message).toContain(
                     "permission descriptor changed for system.info"
+                );
+            }
+        );
+    });
+
+    test("rejects settings permission and config safety drift", async () => {
+        await withTemporaryDirectory(
+            "mira-openclaw-settings-safety-",
+            async (temporaryRoot) => {
+                const scopeRoot = path.join(temporaryRoot, "scope");
+                await writeSyntheticOpenClawPackage(scopeRoot);
+                const descriptorPath = path.join(
+                    scopeRoot,
+                    "dist",
+                    "core-descriptors-fixture.js"
+                );
+                const descriptors = await readFile(descriptorPath, "utf8");
+                await writeFile(
+                    descriptorPath,
+                    descriptors.replace(
+                        '{ name: "config.patch", scope: "operator.admin", controlPlaneWrite: true }',
+                        '{ name: "config.patch", scope: "operator.write", controlPlaneWrite: true }'
+                    ),
+                    "utf8"
+                );
+                const scopeError = await rejectedError(auditInstalledOpenClaw(scopeRoot));
+                expect(scopeError.message).toContain(
+                    "permission descriptor changed for config.patch"
+                );
+
+                const hashRoot = path.join(temporaryRoot, "base-hash");
+                await writeSyntheticOpenClawPackage(hashRoot);
+                const configPath = path.join(hashRoot, "dist", "config-fixture.js");
+                const configSource = await readFile(configPath, "utf8");
+                await writeFile(
+                    configPath,
+                    configSource.replace(
+                        "if (baseHash !== snapshotHash)",
+                        "if (baseHash === snapshotHash)"
+                    ),
+                    "utf8"
+                );
+                const hashError = await rejectedError(auditInstalledOpenClaw(hashRoot));
+                expect(hashError.message).toContain("config.patch base hash changed");
+
+                const sentinelRoot = path.join(temporaryRoot, "sentinel");
+                await writeSyntheticOpenClawPackage(sentinelRoot);
+                const redactionPath = path.join(
+                    sentinelRoot,
+                    "dist",
+                    "redact-snapshot-fixture.js"
+                );
+                const redactionSource = await readFile(redactionPath, "utf8");
+                await writeFile(
+                    redactionPath,
+                    redactionSource.replace(
+                        'assertNoRedactedSentinel(restored, "")',
+                        "validateRestoredConfig(restored)"
+                    ),
+                    "utf8"
+                );
+                const sentinelError = await rejectedError(
+                    auditInstalledOpenClaw(sentinelRoot)
+                );
+                expect(sentinelError.message).toContain(
+                    "config redaction sentinel changed"
+                );
+            }
+        );
+    });
+
+    test("rejects drift in source-backed Agent access constraints", async () => {
+        await withTemporaryDirectory(
+            "mira-openclaw-agent-access-",
+            async (temporaryRoot) => {
+                const cases = [
+                    {
+                        expected: "agents.entries config schema changed",
+                        fileName: "zod-schema-fixture.js",
+                        from: "[a-z0-9_-]{0,63}",
+                        name: "agent-id",
+                        to: "[a-z0-9_-]{0,127}",
+                    },
+                    {
+                        expected: "agent tools policy changed",
+                        fileName: "zod-schema.agent-runtime-fixture.js",
+                        from: "agent tools cannot set both allow and alsoAllow",
+                        name: "tool-conflict",
+                        to: "agent tools may set both allow and alsoAllow",
+                    },
+                    {
+                        expected: "core gateway tool catalog entry changed",
+                        fileName: "tool-catalog-fixture.js",
+                        from: '{ id: "gateway" }',
+                        name: "core-catalog",
+                        to: '{ id: "gateway_admin" }',
+                    },
+                    {
+                        expected: "tool policy alias normalization changed",
+                        fileName: "tool-policy-fixture.js",
+                        from: "return TOOL_NAME_ALIASES[normalized] ?? normalized;",
+                        name: "cron-alias",
+                        to: "return normalized;",
+                    },
+                    {
+                        expected: "config.patch exact replacement intent changed",
+                        fileName: "config-fixture.js",
+                        from: "!params.replacePaths.has(path)",
+                        name: "replacement-intent",
+                        to: "!params.replacePaths.has(key)",
+                    },
+                    {
+                        expected: "config merge-patch array replacement changed",
+                        fileName: "merge-patch-fixture.js",
+                        from: "options.replaceArrayPaths?.has(path)",
+                        name: "array-replacement",
+                        to: "options.replaceArrayPaths?.has(key)",
+                    },
+                ] as const;
+
+                for (const driftCase of cases) {
+                    const sourceRoot = path.join(temporaryRoot, driftCase.name);
+                    await writeSyntheticOpenClawPackage(sourceRoot);
+                    const artifactPath = path.join(
+                        sourceRoot,
+                        "dist",
+                        driftCase.fileName
+                    );
+                    const source = await readFile(artifactPath, "utf8");
+                    expect(source).toContain(driftCase.from);
+                    await writeFile(
+                        artifactPath,
+                        source.replace(driftCase.from, driftCase.to),
+                        "utf8"
+                    );
+
+                    const error = await rejectedError(auditInstalledOpenClaw(sourceRoot));
+                    expect(error.message).toContain(driftCase.expected);
+                }
+            }
+        );
+    });
+
+    test("rejects expansion of the reviewed skills.update local authority", async () => {
+        await withTemporaryDirectory(
+            "mira-openclaw-skills-authority-",
+            async (sourceRoot) => {
+                await writeSyntheticOpenClawPackage(sourceRoot);
+                const protocolPath = path.join(sourceRoot, "dist", "src-fixture.js");
+                const source = await readFile(protocolPath, "utf8");
+                await writeFile(
+                    protocolPath,
+                    source.replace(
+                        "\tskillKey: NonEmptyString,\n\tenabled: Type.Optional(Type.Boolean()),",
+                        "\tskillKey: NonEmptyString,\n\tbaseHash: NonEmptyString,\n\tenabled: Type.Optional(Type.Boolean()),"
+                    ),
+                    "utf8"
+                );
+
+                const error = await rejectedError(auditInstalledOpenClaw(sourceRoot));
+                expect(error.message).toContain(
+                    "skills.update local params fields changed"
                 );
             }
         );

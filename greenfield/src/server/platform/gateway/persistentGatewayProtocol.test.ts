@@ -7,11 +7,15 @@ import {
     assertPersistentGatewayChatReadParameters,
     assertPersistentGatewayChatReadMutationParameters,
     assertPersistentGatewayChatWriteParameters,
+    assertPersistentGatewayOpenClawSettingsReadParameters,
+    assertPersistentGatewayOpenClawSettingsWriteParameters,
     assertPersistentGatewayReadWriteParameters,
     assertPersistentGatewayTaskReadParameters,
     assertPersistentGatewayTaskWriteParameters,
     createPersistentGatewayConnectFrame,
     isPersistentGatewayAdminMethod,
+    isPersistentGatewayOpenClawSettingsReadMethod,
+    isPersistentGatewayOpenClawSettingsWriteMethod,
     isPersistentGatewayReadWriteMethod,
     parsePersistentGatewayChallenge,
     parsePersistentGatewayChatSendAcknowledgement,
@@ -32,6 +36,8 @@ import {
     persistentGatewayChatReadMethods,
     persistentGatewayChatReadMutationMethods,
     persistentGatewayChatWriteMethods,
+    persistentGatewayOpenClawSettingsReadMethods,
+    persistentGatewayOpenClawSettingsWriteMethods,
     persistentGatewaySessionScopedEventsCapability,
     persistentGatewayTaskNotificationMethod,
     persistentGatewayTaskReadMethods,
@@ -188,11 +194,21 @@ describe("persistent Gateway protocol-v4 boundary", () => {
         ]);
         expect(persistentGatewayTaskReadMethods).toEqual(["tasks.get", "tasks.list"]);
         expect(persistentGatewayTaskWriteMethods).toEqual(["tasks.cancel"]);
+        expect(persistentGatewayOpenClawSettingsReadMethods).toEqual([
+            "config.get",
+            "skills.status",
+        ]);
+        expect(persistentGatewayOpenClawSettingsWriteMethods).toEqual(["config.patch"]);
         expect(isPersistentGatewayReadWriteMethod("sessions.list")).toBe(true);
         expect(isPersistentGatewayReadWriteMethod("chat.send")).toBe(false);
         expect(isPersistentGatewayReadWriteMethod("config.patch")).toBe(false);
         expect(isPersistentGatewayAdminMethod("cron.run")).toBe(true);
         expect(isPersistentGatewayAdminMethod("config.patch")).toBe(false);
+        expect(isPersistentGatewayOpenClawSettingsReadMethod("config.get")).toBe(true);
+        expect(isPersistentGatewayOpenClawSettingsWriteMethod("config.patch")).toBe(true);
+        expect(isPersistentGatewayOpenClawSettingsWriteMethod("skills.update")).toBe(
+            false
+        );
     });
 
     test("keeps persistent web reads object-bound and all controls admin-only", () => {
@@ -205,6 +221,194 @@ describe("persistent Gateway protocol-v4 boundary", () => {
         expect(() => assertPersistentGatewayAdminParameters("cron.run", null)).toThrow(
             TypeError
         );
+    });
+
+    test("strictly binds Settings methods to server-built parameters", () => {
+        expect(() =>
+            assertPersistentGatewayOpenClawSettingsReadParameters("config.get", {})
+        ).not.toThrow();
+        expect(() =>
+            assertPersistentGatewayOpenClawSettingsReadParameters("skills.status", {
+                agentId: "main",
+            })
+        ).toThrow(TypeError);
+        const baseHash = "a".repeat(64);
+        const modelPatch = {
+            baseHash,
+            note: "Updated from Mira Dashboard settings",
+            raw: JSON.stringify({
+                agents: {
+                    defaults: {
+                        model: {
+                            fallbacks: ["openai/gpt-5.6-terra"],
+                            primary: "openai/gpt-5.6-sol",
+                        },
+                    },
+                },
+            }),
+            replacePaths: ["agents.defaults.model.fallbacks"],
+        };
+        expect(() =>
+            assertPersistentGatewayOpenClawSettingsWriteParameters(
+                "config.patch",
+                modelPatch
+            )
+        ).not.toThrow();
+        const skillPatch = {
+            baseHash,
+            note: "Updated from Mira Dashboard settings",
+            raw: JSON.stringify({
+                skills: { entries: { imagegen: { enabled: false } } },
+            }),
+        };
+        expect(() =>
+            assertPersistentGatewayOpenClawSettingsWriteParameters(
+                "config.patch",
+                skillPatch
+            )
+        ).not.toThrow();
+        const agentToolPatch = {
+            baseHash,
+            note: "Updated from Mira Dashboard settings",
+            raw: JSON.stringify({
+                agents: {
+                    entries: {
+                        main: {
+                            tools: {
+                                alsoAllow: ["cron", "web_fetch"],
+                                deny: ["web_search", "custom-tool"],
+                            },
+                        },
+                    },
+                },
+            }),
+            replacePaths: [
+                "agents.entries.main.tools.alsoAllow",
+                "agents.entries.main.tools.deny",
+            ],
+        };
+        expect(() =>
+            assertPersistentGatewayOpenClawSettingsWriteParameters(
+                "config.patch",
+                agentToolPatch
+            )
+        ).not.toThrow();
+        expect(() =>
+            assertPersistentGatewayOpenClawSettingsWriteParameters("config.patch", {
+                ...agentToolPatch,
+                replacePaths: ["agents.entries.main.tools.alsoAllow"],
+            })
+        ).toThrow(TypeError);
+        for (const unsafeAgentId of ["main.with-dot", "__proto__"]) {
+            expect(() =>
+                assertPersistentGatewayOpenClawSettingsWriteParameters("config.patch", {
+                    ...agentToolPatch,
+                    raw: JSON.stringify({
+                        agents: {
+                            entries: {
+                                [unsafeAgentId]: {
+                                    tools: { alsoAllow: [], deny: [] },
+                                },
+                            },
+                        },
+                    }),
+                    replacePaths: [
+                        `agents.entries.${unsafeAgentId}.tools.alsoAllow`,
+                        `agents.entries.${unsafeAgentId}.tools.deny`,
+                    ],
+                })
+            ).toThrow(TypeError);
+        }
+        expect(() =>
+            assertPersistentGatewayOpenClawSettingsWriteParameters("config.patch", {
+                ...agentToolPatch,
+                raw: JSON.stringify({
+                    agents: {
+                        entries: {
+                            main: {
+                                default: true,
+                                tools: { alsoAllow: [], deny: [] },
+                            },
+                        },
+                    },
+                }),
+            })
+        ).toThrow(TypeError);
+        expect(() =>
+            assertPersistentGatewayOpenClawSettingsWriteParameters("config.patch", {
+                ...skillPatch,
+                raw: JSON.stringify({
+                    skills: {
+                        entries: {
+                            imagegen: { apiKey: "secret", enabled: false },
+                        },
+                    },
+                }),
+            })
+        ).toThrow(TypeError);
+        expect(() =>
+            assertPersistentGatewayOpenClawSettingsWriteParameters("config.patch", {
+                ...skillPatch,
+                raw: JSON.stringify({
+                    skills: {
+                        entries: {
+                            imagegen: { enabled: false },
+                            zotero: { enabled: true },
+                        },
+                    },
+                }),
+            })
+        ).toThrow(TypeError);
+        expect(() =>
+            assertPersistentGatewayOpenClawSettingsWriteParameters("config.patch", {
+                baseHash,
+                note: "Updated from Mira Dashboard settings",
+                raw: JSON.stringify({
+                    tools: {
+                        agentToAgent: { enabled: true },
+                        elevated: { enabled: false },
+                        exec: {
+                            ask: "on-miss",
+                            mode: null,
+                            security: "allowlist",
+                        },
+                        profile: "coding",
+                        sessions: { visibility: "agent" },
+                        web: {
+                            fetch: { enabled: true },
+                            search: { enabled: true, provider: "brave" },
+                        },
+                    },
+                }),
+            })
+        ).not.toThrow();
+        expect(() =>
+            assertPersistentGatewayOpenClawSettingsWriteParameters("config.patch", {
+                ...modelPatch,
+                replacePaths: undefined,
+            })
+        ).toThrow(TypeError);
+        expect(() =>
+            assertPersistentGatewayOpenClawSettingsWriteParameters("config.patch", {
+                baseHash,
+                note: "Updated from Mira Dashboard settings",
+                raw: JSON.stringify({ gateway: { auth: { token: "secret" } } }),
+            })
+        ).toThrow(TypeError);
+        expect(() =>
+            assertPersistentGatewayOpenClawSettingsWriteParameters("config.patch", {
+                baseHash,
+                note: "Updated from Mira Dashboard settings",
+                raw: "x".repeat(64 * 1024 + 1),
+            })
+        ).toThrow(TypeError);
+        expect(() =>
+            assertPersistentGatewayOpenClawSettingsWriteParameters("config.patch", {
+                baseHash,
+                note: "Updated from Mira Dashboard settings",
+                raw: "\u00E5".repeat(32 * 1024 + 1),
+            })
+        ).toThrow(TypeError);
     });
 
     test("strictly validates every audited chat request shape", () => {

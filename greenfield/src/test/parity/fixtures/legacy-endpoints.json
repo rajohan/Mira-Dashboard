@@ -323,10 +323,10 @@
             "id": "GET /api/config",
             "method": "GET",
             "path": "/api/config",
-            "purpose": "Reads recursively masked OpenClaw config plus hash.",
+            "purpose": "Replaces the recursively masked config read with a bounded secret-free projection of exact code-owned settings plus its concurrency hash.",
             "section": "OpenClaw Config",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["openClawSettings.getConfiguration"],
                 "phase": "phase-5"
@@ -929,20 +929,19 @@
             "purpose": "Reads Dashboard preferences plus current Gateway connection.",
             "section": "Dashboard Settings",
             "target": {
-                "delivery": "planned",
-                "kind": "procedure",
-                "names": ["settings.get"],
-                "phase": "phase-1"
+                "consumerEvidence": "no-current-consumers",
+                "kind": "reviewed-removal",
+                "reason": "No production browser route or scoped automation caller consumes the legacy host-home preference read; the replacement Settings route uses account-security and bounded OpenClaw settings services."
             }
         },
         {
             "id": "GET /api/skills",
             "method": "GET",
             "path": "/api/skills",
-            "purpose": "Lists OpenClaw skills.",
+            "purpose": "Lists a bounded sorted path-free union of discovered and safe configured-only OpenClaw skills.",
             "section": "OpenClaw Config",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["openClawSettings.listSkills"],
                 "phase": "phase-5"
@@ -1864,10 +1863,10 @@
             "id": "POST /api/skills/:name",
             "method": "POST",
             "path": "/api/skills/:name",
-            "purpose": "Toggles a skill.",
+            "purpose": "Toggles one freshly verified exact discovered or configured-only skill through a recent-MFA audited hash-fenced config patch.",
             "section": "OpenClaw Config",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["openClawSettings.setSkillEnabled"],
                 "phase": "phase-5"
@@ -1996,10 +1995,10 @@
             "id": "PUT /api/config",
             "method": "PUT",
             "path": "/api/config",
-            "purpose": "Writes config with hash check and preserves valid masked placeholders.",
+            "purpose": "Replaces loose masked-config writes with one hash-fenced server-built patch to an exact reviewed settings section or one canonical agent/tool override.",
             "section": "OpenClaw Config",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["openClawSettings.updateConfiguration"],
                 "phase": "phase-5"
@@ -2040,10 +2039,9 @@
             "purpose": "Updates the validated Dashboard preference subset atomically.",
             "section": "Dashboard Settings",
             "target": {
-                "delivery": "planned",
-                "kind": "procedure",
-                "names": ["settings.update"],
-                "phase": "phase-1"
+                "consumerEvidence": "no-current-consumers",
+                "kind": "reviewed-removal",
+                "reason": "No production browser route or scoped automation caller consumes the legacy host-home preference write; retaining dead host-home persistence would add authority without preserving active behavior."
             }
         },
         {

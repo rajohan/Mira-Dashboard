@@ -1,0 +1,319 @@
+{
+  "$id": "urn:mira-dashboard:openClawSettings.updateConfiguration.input",
+  "type": "object",
+  "properties": {
+    "baseHash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "confirmation": {
+      "const": "apply-reviewed-settings"
+    },
+    "update": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "agentId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^(?!(?:__proto__|constructor|prototype)$)[a-z0-9_][a-z0-9_-]{0,63}$"
+            },
+            "override": {
+              "enum": [
+                "allow",
+                "deny",
+                "inherit"
+              ],
+              "type": "string"
+            },
+            "section": {
+              "const": "agent-tool-access"
+            },
+            "toolId": {
+              "enum": [
+                "automations",
+                "browser",
+                "edit",
+                "exec",
+                "gateway",
+                "image",
+                "image_generate",
+                "memory_search",
+                "message",
+                "music_generate",
+                "nodes",
+                "read",
+                "sessions_history",
+                "sessions_list",
+                "tts",
+                "video_generate",
+                "web_fetch",
+                "web_search",
+                "write"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "agentId",
+            "override",
+            "section",
+            "toolId"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "channels": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "id": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "minLength": 1,
+                    "pattern": "^[a-z0-9][a-z0-9._-]*$",
+                    "allOf": [
+                      {
+                        "pattern": "^[^\\u0000]*$"
+                      },
+                      {
+                        "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "enabled",
+                  "id"
+                ],
+                "additionalProperties": false
+              },
+              "maxItems": 64,
+              "$comment": "Live Valibot validation additionally requires configured OpenClaw channel IDs to be unique and strictly ordered."
+            },
+            "section": {
+              "const": "channels"
+            }
+          },
+          "required": [
+            "channels",
+            "section"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "everySeconds": {
+              "type": "integer",
+              "minimum": 10,
+              "maximum": 86400
+            },
+            "section": {
+              "const": "heartbeat"
+            },
+            "target": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "allOf": [
+                    {
+                      "pattern": "^[^\\u0000]*$"
+                    },
+                    {
+                      "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                    }
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "everySeconds",
+            "section",
+            "target"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "fallbacks": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 200,
+                "minLength": 1,
+                "pattern": "\\S",
+                "allOf": [
+                  {
+                    "pattern": "^[^\\u0000]*$"
+                  },
+                  {
+                    "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                  }
+                ]
+              },
+              "maxItems": 16,
+              "uniqueItems": true
+            },
+            "primary": {
+              "type": "string",
+              "maxLength": 200,
+              "minLength": 1,
+              "pattern": "\\S",
+              "allOf": [
+                {
+                  "pattern": "^[^\\u0000]*$"
+                },
+                {
+                  "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                }
+              ]
+            },
+            "section": {
+              "const": "models"
+            }
+          },
+          "required": [
+            "fallbacks",
+            "primary",
+            "section"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "idleMinutes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10080
+            },
+            "section": {
+              "const": "session-reset"
+            }
+          },
+          "required": [
+            "idleMinutes",
+            "section"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "section": {
+              "const": "tools"
+            },
+            "settings": {
+              "type": "object",
+              "properties": {
+                "agentToAgentEnabled": {
+                  "type": "boolean"
+                },
+                "elevatedEnabled": {
+                  "type": "boolean"
+                },
+                "execAsk": {
+                  "enum": [
+                    "off",
+                    "on-miss",
+                    "always"
+                  ],
+                  "type": "string"
+                },
+                "execSecurity": {
+                  "enum": [
+                    "allowlist",
+                    "deny",
+                    "full"
+                  ],
+                  "type": "string"
+                },
+                "profile": {
+                  "type": "string",
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "allOf": [
+                    {
+                      "pattern": "^[^\\u0000]*$"
+                    },
+                    {
+                      "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                    }
+                  ]
+                },
+                "sessionsVisibility": {
+                  "enum": [
+                    "agent",
+                    "all",
+                    "self",
+                    "tree"
+                  ],
+                  "type": "string"
+                },
+                "webFetchEnabled": {
+                  "type": "boolean"
+                },
+                "webSearchEnabled": {
+                  "type": "boolean"
+                },
+                "webSearchProvider": {
+                  "type": "string",
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "allOf": [
+                    {
+                      "pattern": "^[^\\u0000]*$"
+                    },
+                    {
+                      "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "agentToAgentEnabled",
+                "elevatedEnabled",
+                "execAsk",
+                "execSecurity",
+                "webFetchEnabled",
+                "webSearchEnabled"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "section",
+            "settings"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+  "required": [
+    "baseHash",
+    "confirmation",
+    "update"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

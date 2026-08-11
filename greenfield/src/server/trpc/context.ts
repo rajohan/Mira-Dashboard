@@ -10,6 +10,7 @@ import type { LogsService } from "../domains/logs/service.ts";
 import type { MonitoringCatalogService } from "../domains/monitoring/catalogService.ts";
 import type { MonitoringService } from "../domains/monitoring/service.ts";
 import type { OpenClawCronService } from "../domains/openClawCron/service.ts";
+import type { OpenClawSettingsService } from "../domains/openClawSettings/service.ts";
 import type { OpenClawTasksService } from "../domains/openClawTasks/service.ts";
 import type { AuthenticationLifecycleService } from "../domains/security/authenticationLifecycle.ts";
 import {
@@ -56,6 +57,7 @@ export interface RequestContextOptions {
     readonly monitoringCatalogService: MonitoringCatalogService["Service"];
     readonly monitoringService: MonitoringService["Service"];
     readonly openClawCronService: OpenClawCronService;
+    readonly openClawSettingsService: OpenClawSettingsService;
     readonly openClawTasksService?: OpenClawTasksService;
     readonly pendingLoginCredential: PendingLoginCredential;
     readonly request: Request;
@@ -87,6 +89,7 @@ export interface RequestContext {
     readonly monitoringCatalogService: MonitoringCatalogService["Service"];
     readonly monitoringService: MonitoringService["Service"];
     readonly openClawCronService: OpenClawCronService;
+    readonly openClawSettingsService: OpenClawSettingsService;
     readonly openClawTasksService?: OpenClawTasksService;
     readonly pendingLoginCredential: PendingLoginCredential;
     readonly requestId: string;
@@ -135,6 +138,7 @@ export async function createRequestContext(
         monitoringCatalogService: options.monitoringCatalogService,
         monitoringService: options.monitoringService,
         openClawCronService: options.openClawCronService,
+        openClawSettingsService: options.openClawSettingsService,
         ...(options.openClawTasksService === undefined
             ? {}
             : { openClawTasksService: options.openClawTasksService }),

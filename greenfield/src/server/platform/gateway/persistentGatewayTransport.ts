@@ -14,6 +14,8 @@ import {
     assertPersistentGatewayChatReadParameters,
     assertPersistentGatewayChatReadMutationParameters,
     assertPersistentGatewayChatWriteParameters,
+    assertPersistentGatewayOpenClawSettingsReadParameters,
+    assertPersistentGatewayOpenClawSettingsWriteParameters,
     assertPersistentGatewayReadWriteParameters,
     assertPersistentGatewayTaskReadParameters,
     assertPersistentGatewayTaskWriteParameters,
@@ -22,6 +24,8 @@ import {
     isPersistentGatewayChatReadMethod,
     isPersistentGatewayChatReadMutationMethod,
     isPersistentGatewayChatWriteMethod,
+    isPersistentGatewayOpenClawSettingsReadMethod,
+    isPersistentGatewayOpenClawSettingsWriteMethod,
     isPersistentGatewayReadWriteMethod,
     isPersistentGatewayTaskReadMethod,
     isPersistentGatewayTaskWriteMethod,
@@ -40,6 +44,8 @@ import {
     type PersistentGatewayEventFrame,
     type PersistentGatewayHello,
     type PersistentGatewayPrivateChatEvent,
+    type PersistentGatewayOpenClawSettingsReadMethod,
+    type PersistentGatewayOpenClawSettingsWriteMethod,
     persistentGatewayOutboundFrameMaximumBytes,
     type PersistentGatewayReadWriteMethod,
     type PersistentGatewayTaskReadMethod,
@@ -206,6 +212,15 @@ export interface PersistentGatewayRequestOptions {
     readonly timeoutMs?: number;
 }
 
+export interface PersistentGatewayOpenClawSettingsWriteOptions extends PersistentGatewayRequestOptions {
+    /** Runs after the admin handshake and immediately before the mutation frame. */
+    readonly beforeDispatch: () => Promise<void>;
+}
+
+interface PersistentGatewayOneShotRequestOptions extends PersistentGatewayRequestOptions {
+    readonly beforeDispatch?: () => Promise<void>;
+}
+
 interface GatewaySocketLaneRequestOptions extends PersistentGatewayRequestOptions {
     /** Runs synchronously only after the native socket accepted the encoded frame. */
     readonly onDispatched?: () => void;
@@ -289,6 +304,10 @@ export class PersistentGatewayUnknownOutcomeError extends Error {
 /** Audited session-generation detail allowed to cross the transport boundary. */
 export const persistentGatewaySessionChangedReason = "session-changed" as const;
 
+/** Canonicalized base-hash conflict from the installed config.patch handler. */
+export const persistentGatewayConfigurationChangedReason =
+    "configuration-changed" as const;
+
 /** Canonicalized audited cron definition-generation conflict. */
 export const persistentGatewayCronJobChangedReason = "cron-job-changed" as const;
 /** Audited INVALID_REQUEST projection used only by tasks.get. */
@@ -298,6 +317,7 @@ export const persistentGatewaySessionCompanionBusyReason =
     "session-companion-busy" as const;
 
 export type PersistentGatewayRequestReason =
+    | typeof persistentGatewayConfigurationChangedReason
     | typeof persistentGatewayCronJobChangedReason
     | typeof persistentGatewaySessionChangedReason
     | typeof persistentGatewaySessionCompanionBusyReason
@@ -600,6 +620,13 @@ function sanitizedRequestReason(
     code: PersistentGatewayErrorCode,
     message: string
 ): PersistentGatewayRequestReason | undefined {
+    if (
+        method === "config.patch" &&
+        code === "INVALID_REQUEST" &&
+        message === "config changed since last load; re-run config.get and retry"
+    ) {
+        return persistentGatewayConfigurationChangedReason;
+    }
     if (
         method === "tasks.get" &&
         code === "INVALID_REQUEST" &&
@@ -1546,6 +1573,16 @@ export interface PersistentGatewayTransport extends PersistentGatewayTransportLi
         parameters: Readonly<Record<string, unknown>>,
         options?: PersistentGatewayRequestOptions
     ): Promise<unknown>;
+    requestOpenClawSettingsRead(
+        method: PersistentGatewayOpenClawSettingsReadMethod,
+        parameters: Readonly<Record<string, unknown>>,
+        options?: PersistentGatewayRequestOptions
+    ): Promise<unknown>;
+    requestOpenClawSettingsWrite(
+        method: PersistentGatewayOpenClawSettingsWriteMethod,
+        parameters: Readonly<Record<string, unknown>>,
+        options: PersistentGatewayOpenClawSettingsWriteOptions
+    ): Promise<unknown>;
     requestChatRead(
         method: PersistentGatewayChatReadMethod,
         parameters: Readonly<Record<string, unknown>>,
@@ -1638,6 +1675,28 @@ class PersistentGatewayTransportImplementation
         }
         try {
             assertPersistentGatewayReadWriteParameters(method, parameters);
+        } catch {
+            return Promise.reject(new PersistentGatewayUnavailableError());
+        }
+        return (
+            this.#lane?.request(method, parameters, options) ??
+            Promise.reject(new PersistentGatewayUnavailableError())
+        );
+    }
+
+    requestOpenClawSettingsRead(
+        method: PersistentGatewayOpenClawSettingsReadMethod,
+        parameters: Readonly<Record<string, unknown>>,
+        options?: PersistentGatewayRequestOptions
+    ): Promise<unknown> {
+        if (
+            this.#resolved.profile !== "web-read" ||
+            !isPersistentGatewayOpenClawSettingsReadMethod(method)
+        ) {
+            return Promise.reject(new PersistentGatewayUnavailableError());
+        }
+        try {
+            assertPersistentGatewayOpenClawSettingsReadParameters(method, parameters);
         } catch {
             return Promise.reject(new PersistentGatewayUnavailableError());
         }
@@ -1797,6 +1856,33 @@ class PersistentGatewayTransportImplementation
         }
         try {
             assertPersistentGatewayAdminParameters(method, parameters);
+        } catch {
+            throw new PersistentGatewayUnavailableError();
+        }
+        this.#assertOneShotAdmission(options);
+        return this.#runOneShotRequest(
+            "admin",
+            method,
+            parameters,
+            options,
+            this.#resolved.bufferedAmountMaximumBytes,
+            this.#resolved.outboundFrameMaximumBytes
+        );
+    }
+
+    async requestOpenClawSettingsWrite(
+        method: PersistentGatewayOpenClawSettingsWriteMethod,
+        parameters: Readonly<Record<string, unknown>>,
+        options: PersistentGatewayOpenClawSettingsWriteOptions
+    ): Promise<unknown> {
+        if (
+            this.#resolved.profile !== "web-read" ||
+            !isPersistentGatewayOpenClawSettingsWriteMethod(method)
+        ) {
+            throw new PersistentGatewayUnavailableError();
+        }
+        try {
+            assertPersistentGatewayOpenClawSettingsWriteParameters(method, parameters);
         } catch {
             throw new PersistentGatewayUnavailableError();
         }
@@ -2466,9 +2552,10 @@ class PersistentGatewayTransportImplementation
             | PersistentGatewayAdminMethod
             | PersistentGatewayChatReadMutationMethod
             | PersistentGatewayChatWriteMethod
+            | PersistentGatewayOpenClawSettingsWriteMethod
             | PersistentGatewayTaskWriteMethod,
         parameters: Readonly<Record<string, unknown>>,
-        options: PersistentGatewayRequestOptions,
+        options: PersistentGatewayOneShotRequestOptions,
         bufferedAmountMaximumBytes: number,
         outboundFrameMaximumBytes: number
     ): Promise<unknown> {
@@ -2499,14 +2586,30 @@ class PersistentGatewayTransportImplementation
                     rejectOutcome(new PersistentGatewayUnavailableError());
                 },
                 onConnected: () => {
-                    void lane
-                        .request(method, parameters, {
-                            ...options,
-                            onDispatched: () => {
-                                dispatched = true;
-                            },
-                        })
-                        .then(resolveOutcome, rejectOutcome);
+                    const dispatch = (): void => {
+                        void lane
+                            .request(method, parameters, {
+                                ...options,
+                                onDispatched: () => {
+                                    dispatched = true;
+                                },
+                            })
+                            .then(resolveOutcome, rejectOutcome);
+                    };
+                    const beforeDispatch = options.beforeDispatch;
+                    if (beforeDispatch === undefined) {
+                        dispatch();
+                        return;
+                    }
+                    void (async () => {
+                        try {
+                            await beforeDispatch();
+                            if (settled) return;
+                            dispatch();
+                        } catch (error) {
+                            rejectOutcome(error);
+                        }
+                    })();
                 },
                 onChatEvent: () => {},
                 onEvent: () => {},

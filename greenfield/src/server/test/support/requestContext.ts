@@ -32,6 +32,7 @@ import {
     createTestMonitoringService,
 } from "../../domains/monitoring/testSupport/services.ts";
 import type { OpenClawCronService } from "../../domains/openClawCron/service.ts";
+import type { OpenClawSettingsService } from "../../domains/openClawSettings/service.ts";
 import type { AuthenticationLifecycleService } from "../../domains/security/authenticationLifecycle.ts";
 import type { AuthenticationResolution } from "../../domains/security/authenticationResolution.ts";
 import type {
@@ -86,6 +87,10 @@ const inertGatewaySessionsProvider: GatewaySessionsProvider = Object.freeze({
 
 function unavailableOpenClawCronCall(): Promise<never> {
     return Promise.reject(new Error("OpenClaw cron unavailable"));
+}
+
+function unavailableOpenClawSettingsCall(): Promise<never> {
+    return Promise.reject(new Error("OpenClaw settings unavailable"));
 }
 
 /**
@@ -146,6 +151,19 @@ export function createTestOpenClawCronService(): OpenClawCronService {
         run: unavailableOpenClawCronCall,
         setEnabled: unavailableOpenClawCronCall,
         update: unavailableOpenClawCronCall,
+    });
+}
+
+/**
+ * Creates a stable fail-closed OpenClaw settings service for generic request tests.
+ * @returns An inert settings service.
+ */
+export function createTestOpenClawSettingsService(): OpenClawSettingsService {
+    return Object.freeze({
+        getConfiguration: unavailableOpenClawSettingsCall,
+        listSkills: unavailableOpenClawSettingsCall,
+        setSkillEnabled: unavailableOpenClawSettingsCall,
+        updateConfiguration: unavailableOpenClawSettingsCall,
     });
 }
 
@@ -504,6 +522,7 @@ export interface TestServerSecurityServices {
     readonly monitoringCatalogService: MonitoringCatalogService["Service"];
     readonly monitoringService: MonitoringService["Service"];
     readonly openClawCronService: OpenClawCronService;
+    readonly openClawSettingsService: OpenClawSettingsService;
     readonly securityAuditLifecycle: SecurityAuditLifecycleService;
     readonly systemHealthDiagnosticsService: SystemHealthDiagnosticsService;
     readonly taskService: TaskService["Service"];
@@ -543,6 +562,8 @@ export function createTestServerSecurityServices(
         monitoringService: overrides.monitoringService ?? createTestMonitoringService(),
         openClawCronService:
             overrides.openClawCronService ?? createTestOpenClawCronService(),
+        openClawSettingsService:
+            overrides.openClawSettingsService ?? createTestOpenClawSettingsService(),
         securityAuditLifecycle:
             overrides.securityAuditLifecycle ?? createTestSecurityAuditLifecycleService(),
         systemHealthDiagnosticsService:
@@ -639,6 +660,7 @@ export function createTestRequestContext(
         readonly monitoringCatalogService?: MonitoringCatalogService["Service"];
         readonly monitoringService?: MonitoringService["Service"];
         readonly openClawCronService?: OpenClawCronService;
+        readonly openClawSettingsService?: OpenClawSettingsService;
         readonly request?: Request;
         readonly requestId?: string;
         readonly responseHeaders?: Headers;
@@ -676,6 +698,8 @@ export function createTestRequestContext(
         monitoringService: options.monitoringService ?? createTestMonitoringService(),
         openClawCronService:
             options.openClawCronService ?? createTestOpenClawCronService(),
+        openClawSettingsService:
+            options.openClawSettingsService ?? createTestOpenClawSettingsService(),
         pendingLoginCredential: credentials.pendingLogin,
         request,
         requestId: options.requestId ?? "test-request-id",

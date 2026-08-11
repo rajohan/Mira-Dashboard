@@ -215,6 +215,46 @@ test("records only classified OpenClaw cron audit settlement fields", () => {
     expect(lines[0]).not.toContain(sensitiveId);
 });
 
+test("records only classified OpenClaw settings audit settlement fields", () => {
+    const lines: string[] = [];
+    const logger = createStructuredLogger({
+        identity,
+        sink: {
+            write(line) {
+                lines.push(line);
+            },
+        },
+    });
+    const sensitiveTarget = "skill:private-skill-key";
+    const targetFingerprint = `sha256:${"c".repeat(64)}`;
+
+    logger.warn({
+        component: "openclaw-settings-audit",
+        event: "openclaw_settings.audit_settlement.failed",
+        failure: new Error(`database failed for ${sensitiveTarget}`),
+        fields: {
+            kind: "openclaw-settings-audit-settlement",
+            operation: "set-skill-enabled",
+            settlement: "partial",
+            targetFingerprint,
+        },
+        outcome: "server-error",
+    });
+
+    expect(JSON.parse(lines[0] ?? "null")).toMatchObject({
+        component: "openclaw-settings-audit",
+        event: "openclaw_settings.audit_settlement.failed",
+        fields: {
+            operation: "set-skill-enabled",
+            settlement: "partial",
+            targetFingerprint,
+        },
+        level: "warn",
+        outcome: "server-error",
+    });
+    expect(lines[0]).not.toContain(sensitiveTarget);
+});
+
 test("records only fixed log-maintenance audit settlement fields", () => {
     const lines: string[] = [];
     const logger = createStructuredLogger({

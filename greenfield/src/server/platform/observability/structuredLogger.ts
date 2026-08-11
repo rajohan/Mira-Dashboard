@@ -75,6 +75,12 @@ export type StructuredLogFields =
           readonly targetFingerprint: string;
       }
     | {
+          readonly kind: "openclaw-settings-audit-settlement";
+          readonly operation: "set-skill-enabled" | "update-configuration";
+          readonly settlement: "failed" | "partial" | "succeeded";
+          readonly targetFingerprint: string;
+      }
+    | {
           readonly kind: "http-request";
           readonly method: string;
       }
@@ -143,6 +149,7 @@ const structuredEventComponents = Object.freeze({
     "logs.maintenance.audit_settlement_failed": "logs-maintenance-audit",
     "openclaw_cron.audit_settlement.failed": "openclaw-cron-audit",
     "openclaw_cron.expiry_reconciliation.failed": "openclaw-cron-expiry",
+    "openclaw_settings.audit_settlement.failed": "openclaw-settings-audit",
     "realtime.runner.failed": "realtime-event-pump",
     "realtime.wake.failed": "realtime-event-pump",
     "runtime.logger.connected": "application-runtime",
@@ -314,6 +321,24 @@ function safeEventFields(
                     fields.operation !== "run" &&
                     fields.operation !== "set-enabled" &&
                     fields.operation !== "update") ||
+                (fields.settlement !== "failed" &&
+                    fields.settlement !== "partial" &&
+                    fields.settlement !== "succeeded") ||
+                !/^sha256:[0-9a-f]{64}$/u.test(fields.targetFingerprint)
+            ) {
+                return undefined;
+            }
+            return {
+                operation: fields.operation,
+                settlement: fields.settlement,
+                targetFingerprint: fields.targetFingerprint,
+            };
+        }
+        case "openclaw-settings-audit-settlement": {
+            if (
+                eventName !== "openclaw_settings.audit_settlement.failed" ||
+                (fields.operation !== "set-skill-enabled" &&
+                    fields.operation !== "update-configuration") ||
                 (fields.settlement !== "failed" &&
                     fields.settlement !== "partial" &&
                     fields.settlement !== "succeeded") ||

@@ -16,5 +16,6 @@
 | `/moltbook` | Browser session | Moltbook | `moltbook` | Reads the bounded worker-owned Moltbook profile, feeds, posts, and comments snapshot. |
 | `/reports` | Browser session | Reports | `monitoring` | Lists and renders durable bounded monitoring reports. |
 | `/sessions` | Browser session | Sessions | `gateway-sessions` | Shows and controls the bounded current Gateway session projection. |
+| `/settings` | Browser session | Settings | `settings` | Combines Dashboard account security with bounded secret-free OpenClaw settings. |
 | `/tasks` | Browser session | Tasks | `tasks` | Manages the durable task board, updates, labels, and assignments. |
 | `/terminal` | Browser session | Terminal | `terminal` | Runs a recent-MFA-gated interactive PTY without persisting its contents. |

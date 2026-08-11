@@ -39,6 +39,10 @@ import {
     openClawCronRouter,
 } from "../domains/openClawCron/procedures.ts";
 import {
+    openClawSettingsProcedureNames,
+    openClawSettingsRouter,
+} from "../domains/openClawSettings/procedures.ts";
+import {
     openClawTaskProcedureNames,
     openClawTasksRouter,
 } from "../domains/openClawTasks/procedures.ts";
@@ -90,6 +94,7 @@ export const appRouter = router({
     moltbook: moltbookRouter,
     notifications: notificationRouter,
     openClawCron: openClawCronRouter,
+    openClawSettings: openClawSettingsRouter,
     openClawTasks: openClawTasksRouter,
     reports: reportRouter,
     schedules: scheduleRouter,
@@ -118,6 +123,7 @@ export const appRouterProcedureNames = Object.freeze([
     ...namespacedProcedureNames("moltbook", moltbookProcedureNames),
     ...namespacedProcedureNames("notifications", notificationProcedureNames),
     ...namespacedProcedureNames("openClawCron", openClawCronProcedureNames),
+    ...namespacedProcedureNames("openClawSettings", openClawSettingsProcedureNames),
     ...namespacedProcedureNames("openClawTasks", openClawTaskProcedureNames),
     ...namespacedProcedureNames("reports", reportProcedureNames),
     ...namespacedProcedureNames("schedules", scheduleProcedureNames),

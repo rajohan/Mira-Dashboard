@@ -33,6 +33,8 @@ describe("request authentication contract", () => {
             "monitoring:write",
             "notifications:read",
             "notifications:write",
+            "openclaw-settings:read",
+            "openclaw-settings:write",
             "openclaw-tasks:read",
             "openclaw-tasks:write",
             "reports:read",

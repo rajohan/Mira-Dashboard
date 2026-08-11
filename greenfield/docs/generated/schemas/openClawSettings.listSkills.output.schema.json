@@ -1,0 +1,97 @@
+{
+  "$id": "urn:mira-dashboard:openClawSettings.listSkills.output",
+  "type": "object",
+  "properties": {
+    "skills": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "bundled": {
+            "type": "boolean"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 1,
+            "pattern": "\\S",
+            "allOf": [
+              {
+                "pattern": "^[^\\u0000]*$"
+              }
+            ]
+          },
+          "eligible": {
+            "type": "boolean"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "installed": {
+            "type": "boolean"
+          },
+          "key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+            "allOf": [
+              {
+                "pattern": "^[^\\u0000]*$"
+              },
+              {
+                "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+              }
+            ]
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "\\S",
+            "allOf": [
+              {
+                "pattern": "^[^\\u0000]*$"
+              },
+              {
+                "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+              }
+            ]
+          },
+          "source": {
+            "enum": [
+              "openclaw-bundled",
+              "openclaw-configured",
+              "openclaw-managed",
+              "openclaw-plugin",
+              "openclaw-workspace"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "bundled",
+          "eligible",
+          "enabled",
+          "installed",
+          "key",
+          "name",
+          "source"
+        ],
+        "additionalProperties": false,
+        "$comment": "Live Valibot validation additionally requires the bundled marker to be true exactly for the openclaw-bundled source. Live Valibot validation additionally requires only configured-only OpenClaw skills to be marked not installed."
+      },
+      "maxItems": 512,
+      "$comment": "Live Valibot validation additionally requires OpenClaw skill keys to be unique and strictly ordered."
+    },
+    "truncated": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "skills",
+    "truncated"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

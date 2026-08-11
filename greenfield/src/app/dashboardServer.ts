@@ -66,6 +66,12 @@ import {
     type OpenClawCronHeartbeatReader,
 } from "../server/domains/openClawCron/service.ts";
 import { createSqliteOpenClawCronIntentStore } from "../server/domains/openClawCron/sqliteIntentStore.ts";
+import { createSqliteOpenClawSettingsOperationAuditWriter } from "../server/domains/openClawSettings/operationAudit.ts";
+import {
+    OpenClawSettingsProviderError,
+    type OpenClawSettingsProvider,
+} from "../server/domains/openClawSettings/provider.ts";
+import { createOpenClawSettingsService } from "../server/domains/openClawSettings/service.ts";
 import { createOpenClawTasksRealtimePublisher } from "../server/domains/openClawTasks/realtime.ts";
 import {
     createOpenClawTasksService,
@@ -125,6 +131,7 @@ import {
 import { createGatewayCredentialVerifier } from "../server/platform/gateway/gatewayCredentialVerifier.ts";
 import { createOpenClawTasksSubscriptionSupervisor } from "../server/platform/gateway/openClawTasksSubscriptionSupervisor.ts";
 import { createPersistentGatewayChatProvider } from "../server/platform/gateway/persistentGatewayChatProvider.ts";
+import { createPersistentGatewayOpenClawSettingsProvider } from "../server/platform/gateway/persistentGatewayOpenClawSettingsProvider.ts";
 import { createPersistentGatewayOpenClawTasksProvider } from "../server/platform/gateway/persistentGatewayOpenClawTasksProvider.ts";
 import { createPersistentGatewaySessionsProvider } from "../server/platform/gateway/persistentGatewaySessionsProvider.ts";
 import { createPersistentGatewayTransport } from "../server/platform/gateway/persistentGatewayTransport.ts";
@@ -199,6 +206,7 @@ export interface DashboardServerOptions extends Omit<
     | "monitoringCatalogService"
     | "monitoringService"
     | "openClawCronService"
+    | "openClawSettingsService"
     | "openClawTasksService"
     | "securityAuditLifecycle"
     | "systemHealthDiagnosticsService"
@@ -768,6 +776,45 @@ export async function createDashboardServer(
         );
         const persistentGatewayTransport =
             options.applicationRuntime.persistentGatewayTransport;
+        const unavailableOpenClawSettingsProvider: OpenClawSettingsProvider =
+            Object.freeze({
+                getConfiguration: () =>
+                    Promise.reject(new OpenClawSettingsProviderError("unavailable")),
+                listSkills: () =>
+                    Promise.reject(new OpenClawSettingsProviderError("unavailable")),
+                setSkillEnabled: () =>
+                    Promise.reject(new OpenClawSettingsProviderError("unavailable")),
+                updateConfiguration: () =>
+                    Promise.reject(new OpenClawSettingsProviderError("unavailable")),
+            });
+        const openClawSettingsService = createOpenClawSettingsService({
+            auditWriter: createSqliteOpenClawSettingsOperationAuditWriter({
+                ...(domainNow === undefined ? {} : { clock: domainNow }),
+                database,
+                writeAdmission: databaseRuntime,
+            }),
+            onAuditSettlementFailure: ({ operation, settlement, targetFingerprint }) =>
+                options.applicationRuntime.logger.warn({
+                    component: "openclaw-settings-audit",
+                    event: "openclaw_settings.audit_settlement.failed",
+                    failure: new Error(
+                        "OpenClaw settings audit settlement append failed"
+                    ),
+                    fields: {
+                        kind: "openclaw-settings-audit-settlement",
+                        operation,
+                        settlement,
+                        targetFingerprint,
+                    },
+                    outcome: "server-error",
+                }),
+            provider:
+                persistentGatewayTransport === undefined
+                    ? unavailableOpenClawSettingsProvider
+                    : createPersistentGatewayOpenClawSettingsProvider(
+                          persistentGatewayTransport
+                      ),
+        });
         const chatRepository =
             persistentGatewayTransport === undefined
                 ? undefined
@@ -1089,6 +1136,7 @@ export async function createDashboardServer(
             monitoringCatalogService,
             monitoringService,
             openClawCronService,
+            openClawSettingsService,
             ...(openClawTasksService === undefined ? {} : { openClawTasksService }),
             port: options.port,
             readiness: options.readiness,

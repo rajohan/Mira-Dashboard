@@ -1,0 +1,366 @@
+import * as v from "valibot";
+
+import {
+    type ListOpenClawSkillsResult,
+    type OpenClawConfigurationSnapshot,
+    type SetOpenClawSkillEnabledInput,
+    type SetOpenClawSkillEnabledResult,
+    type UpdateOpenClawConfigurationInput,
+    type UpdateOpenClawConfigurationResult,
+    listOpenClawSkillsResultSchema,
+    openClawConfigurationSnapshotSchema,
+    setOpenClawSkillEnabledInputSchema,
+    setOpenClawSkillEnabledResultSchema,
+    updateOpenClawConfigurationInputSchema,
+    updateOpenClawConfigurationResultSchema,
+} from "../../../contracts/openClawSettings.ts";
+import {
+    type OpenClawSettingsAuditContext,
+    type OpenClawSettingsAuditOperation,
+    type OpenClawSettingsAuditSettlementFailure,
+    type OpenClawSettingsOperationAuditWriter,
+    openClawSettingsAuditTargetFingerprint,
+} from "./operationAudit.ts";
+import {
+    OpenClawSettingsProviderError,
+    type OpenClawSettingsProvider,
+} from "./provider.ts";
+
+export type OpenClawSettingsServiceErrorReason =
+    | "audit-unavailable"
+    | "conflict"
+    | "not-found"
+    | "provider-data-invalid"
+    | "provider-unavailable"
+    | "unknown-outcome";
+
+/** Sanitized domain failure; provider errors and configuration values never cross tRPC. */
+export class OpenClawSettingsServiceError extends Error {
+    readonly reason: OpenClawSettingsServiceErrorReason;
+
+    constructor(reason: OpenClawSettingsServiceErrorReason, options?: ErrorOptions) {
+        super("OpenClaw settings operation failed", options);
+        this.name = "OpenClawSettingsServiceError";
+        this.reason = reason;
+    }
+}
+
+export interface OpenClawSettingsControlContext extends OpenClawSettingsAuditContext {
+    /** Re-checks current session/MFA state at the provider's dispatch boundary. */
+    readonly reauthorize: () => void;
+}
+
+export interface OpenClawSettingsService {
+    readonly getConfiguration: (
+        signal?: AbortSignal
+    ) => Promise<OpenClawConfigurationSnapshot>;
+    readonly listSkills: (signal?: AbortSignal) => Promise<ListOpenClawSkillsResult>;
+    readonly setSkillEnabled: (
+        input: SetOpenClawSkillEnabledInput,
+        context: OpenClawSettingsControlContext,
+        signal?: AbortSignal
+    ) => Promise<SetOpenClawSkillEnabledResult>;
+    readonly updateConfiguration: (
+        input: UpdateOpenClawConfigurationInput,
+        context: OpenClawSettingsControlContext,
+        signal?: AbortSignal
+    ) => Promise<UpdateOpenClawConfigurationResult>;
+}
+
+export interface OpenClawSettingsServiceOptions {
+    /** Test-only opt-out; production controls fail closed without durable audit. */
+    readonly auditRequired?: boolean;
+    readonly auditWriter?: OpenClawSettingsOperationAuditWriter;
+    readonly onAuditSettlementFailure?: (
+        failure: OpenClawSettingsAuditSettlementFailure
+    ) => void;
+    readonly provider: OpenClawSettingsProvider;
+}
+
+function serviceError(error: unknown): OpenClawSettingsServiceError {
+    if (error instanceof OpenClawSettingsServiceError) return error;
+    if (!(error instanceof OpenClawSettingsProviderError)) {
+        return new OpenClawSettingsServiceError("provider-unavailable", {
+            cause: error,
+        });
+    }
+    switch (error.reason) {
+        case "conflict":
+        case "not-found":
+        case "unknown-outcome": {
+            return new OpenClawSettingsServiceError(error.reason, { cause: error });
+        }
+        case "data-invalid": {
+            return new OpenClawSettingsServiceError("provider-data-invalid", {
+                cause: error,
+            });
+        }
+        case "unavailable": {
+            return new OpenClawSettingsServiceError("provider-unavailable", {
+                cause: error,
+            });
+        }
+    }
+}
+
+function signalOptions(signal?: AbortSignal): Readonly<{ signal?: AbortSignal }> {
+    return signal === undefined ? {} : { signal };
+}
+
+/**
+ * Creates bounded Settings reads and serialized, audited recent-MFA controls.
+ * @returns The OpenClaw Settings service.
+ */
+export function createOpenClawSettingsService(
+    options: OpenClawSettingsServiceOptions
+): OpenClawSettingsService {
+    const auditRequired = options.auditRequired ?? true;
+    let mutationTail: Promise<void> = Promise.resolve();
+
+    async function recordAttempt(
+        operation: OpenClawSettingsAuditOperation,
+        targetId: string,
+        context: OpenClawSettingsAuditContext
+    ): Promise<void> {
+        if (options.auditWriter === undefined) {
+            if (!auditRequired) return;
+            throw new OpenClawSettingsServiceError("audit-unavailable");
+        }
+        try {
+            await options.auditWriter.record({
+                ...context,
+                operation,
+                settlement: "attempted",
+                targetId,
+            });
+        } catch (error) {
+            throw new OpenClawSettingsServiceError("audit-unavailable", {
+                cause: error,
+            });
+        }
+    }
+
+    async function settleAudit(
+        operation: OpenClawSettingsAuditOperation,
+        settlement: "failed" | "partial" | "succeeded",
+        targetId: string,
+        context: OpenClawSettingsAuditContext
+    ): Promise<void> {
+        try {
+            await options.auditWriter?.record({
+                ...context,
+                operation,
+                settlement,
+                targetId,
+            });
+        } catch {
+            try {
+                options.onAuditSettlementFailure?.({
+                    operation,
+                    settlement,
+                    targetFingerprint: openClawSettingsAuditTargetFingerprint(targetId),
+                });
+            } catch {
+                // Operational reporting cannot replace an already-known provider result.
+            }
+        }
+    }
+
+    async function withMutationLock<T>(
+        signal: AbortSignal | undefined,
+        operation: () => Promise<T>
+    ): Promise<T> {
+        signal?.throwIfAborted();
+        const previous = mutationTail;
+        let release!: () => void;
+        mutationTail = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        try {
+            await previous;
+            signal?.throwIfAborted();
+            return await operation();
+        } finally {
+            release();
+        }
+    }
+
+    async function withControlAudit<T>(
+        operation: OpenClawSettingsAuditOperation,
+        targetId: string,
+        context: OpenClawSettingsControlContext,
+        signal: AbortSignal | undefined,
+        execute: () => Promise<T>
+    ): Promise<T> {
+        await recordAttempt(operation, targetId, context);
+        try {
+            signal?.throwIfAborted();
+            const result = await execute();
+            await settleAudit(operation, "succeeded", targetId, context);
+            return result;
+        } catch (error) {
+            const mapped =
+                error instanceof OpenClawSettingsProviderError ||
+                error instanceof OpenClawSettingsServiceError
+                    ? serviceError(error)
+                    : error;
+            await settleAudit(
+                operation,
+                mapped instanceof OpenClawSettingsServiceError &&
+                    mapped.reason === "unknown-outcome"
+                    ? "partial"
+                    : "failed",
+                targetId,
+                context
+            );
+            throw mapped;
+        }
+    }
+
+    async function getConfiguration(
+        signal?: AbortSignal
+    ): Promise<OpenClawConfigurationSnapshot> {
+        signal?.throwIfAborted();
+        try {
+            const result = await options.provider.getConfiguration(signalOptions(signal));
+            signal?.throwIfAborted();
+            return v.parse(openClawConfigurationSnapshotSchema, result);
+        } catch (error) {
+            if (signal?.aborted) throw error;
+            if (error instanceof v.ValiError) {
+                throw new OpenClawSettingsServiceError("provider-data-invalid", {
+                    cause: error,
+                });
+            }
+            throw serviceError(error);
+        }
+    }
+
+    async function listSkills(signal?: AbortSignal): Promise<ListOpenClawSkillsResult> {
+        signal?.throwIfAborted();
+        try {
+            const result = await options.provider.listSkills(signalOptions(signal));
+            signal?.throwIfAborted();
+            return v.parse(listOpenClawSkillsResultSchema, result);
+        } catch (error) {
+            if (signal?.aborted) throw error;
+            if (error instanceof v.ValiError) {
+                throw new OpenClawSettingsServiceError("provider-data-invalid", {
+                    cause: error,
+                });
+            }
+            throw serviceError(error);
+        }
+    }
+
+    async function updateConfiguration(
+        input: UpdateOpenClawConfigurationInput,
+        context: OpenClawSettingsControlContext,
+        signal?: AbortSignal
+    ): Promise<UpdateOpenClawConfigurationResult> {
+        const parsed = v.parse(updateOpenClawConfigurationInputSchema, input);
+        const targetId =
+            parsed.update.section === "agent-tool-access"
+                ? `configuration:agent-tool-access:${parsed.update.agentId}:${parsed.update.toolId}`
+                : `configuration:${parsed.update.section}`;
+        return await withMutationLock(signal, () =>
+            withControlAudit(
+                "update-configuration",
+                targetId,
+                context,
+                signal,
+                async () => {
+                    let authorizationFailed = false;
+                    let authorizationFailure: unknown;
+                    try {
+                        const result = await options.provider.updateConfiguration({
+                            ...parsed,
+                            authorizeDispatch: async () => {
+                                await Promise.resolve();
+                                try {
+                                    signal?.throwIfAborted();
+                                    context.reauthorize();
+                                    signal?.throwIfAborted();
+                                } catch (error) {
+                                    authorizationFailed = true;
+                                    authorizationFailure = error;
+                                    throw error;
+                                }
+                            },
+                            ...signalOptions(signal),
+                        });
+                        return v.parse(updateOpenClawConfigurationResultSchema, result);
+                    } catch (error) {
+                        if (authorizationFailed && error === authorizationFailure) {
+                            throw error;
+                        }
+                        if (signal?.aborted) throw error;
+                        if (error instanceof v.ValiError) {
+                            throw new OpenClawSettingsServiceError("unknown-outcome", {
+                                cause: error,
+                            });
+                        }
+                        throw serviceError(error);
+                    }
+                }
+            )
+        );
+    }
+
+    async function setSkillEnabled(
+        input: SetOpenClawSkillEnabledInput,
+        context: OpenClawSettingsControlContext,
+        signal?: AbortSignal
+    ): Promise<SetOpenClawSkillEnabledResult> {
+        const parsed = v.parse(setOpenClawSkillEnabledInputSchema, input);
+        return await withMutationLock(signal, () =>
+            withControlAudit(
+                "set-skill-enabled",
+                `skill:${parsed.skillKey}`,
+                context,
+                signal,
+                async () => {
+                    let authorizationFailed = false;
+                    let authorizationFailure: unknown;
+                    try {
+                        const result = await options.provider.setSkillEnabled({
+                            ...parsed,
+                            authorizeDispatch: async () => {
+                                await Promise.resolve();
+                                try {
+                                    signal?.throwIfAborted();
+                                    context.reauthorize();
+                                    signal?.throwIfAborted();
+                                } catch (error) {
+                                    authorizationFailed = true;
+                                    authorizationFailure = error;
+                                    throw error;
+                                }
+                            },
+                            ...signalOptions(signal),
+                        });
+                        return v.parse(setOpenClawSkillEnabledResultSchema, result);
+                    } catch (error) {
+                        if (authorizationFailed && error === authorizationFailure) {
+                            throw error;
+                        }
+                        if (signal?.aborted) throw error;
+                        if (error instanceof v.ValiError) {
+                            throw new OpenClawSettingsServiceError("unknown-outcome", {
+                                cause: error,
+                            });
+                        }
+                        throw serviceError(error);
+                    }
+                }
+            )
+        );
+    }
+
+    return Object.freeze({
+        getConfiguration,
+        listSkills,
+        setSkillEnabled,
+        updateConfiguration,
+    });
+}

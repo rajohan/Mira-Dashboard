@@ -1,0 +1,182 @@
+{
+    "agentAccess": {
+        "configPatchArrayReplacement": {
+            "destructiveRemovalRequiresDeclaredPath": true,
+            "exactPathTemplates": [
+                "agents.entries.<agentId>.tools.alsoAllow",
+                "agents.entries.<agentId>.tools.deny"
+            ],
+            "listedPathReplacesArray": true,
+            "pathComparison": "normalized-exact"
+        },
+        "coreCatalog": {
+            "canonicalSchedulerTool": "automations",
+            "legacySchedulerAliases": ["cron"],
+            "reviewedToolIds": [
+                "automations",
+                "browser",
+                "edit",
+                "exec",
+                "gateway",
+                "image",
+                "image_generate",
+                "memory_search",
+                "message",
+                "music_generate",
+                "nodes",
+                "read",
+                "sessions_history",
+                "sessions_list",
+                "tts",
+                "video_generate",
+                "web_fetch",
+                "web_search",
+                "write"
+            ]
+        },
+        "entries": {
+            "blockedObjectKeysRejected": true,
+            "defaultEntryCount": 1,
+            "idCaseInsensitive": true,
+            "idMaximumLength": 64,
+            "idMinimumLength": 1,
+            "idPattern": "^[a-z0-9_][a-z0-9_-]{0,63}$",
+            "inlineIdOmitted": true,
+            "storagePath": "agents.entries",
+            "storageShape": "record-by-id"
+        },
+        "toolsPolicy": {
+            "nonEmptyAllowAndAlsoAllowConflictRejected": true,
+            "optionalStringArrayFields": ["allow", "alsoAllow", "deny"]
+        }
+    },
+    "configGet": {
+        "handlerValidatesParams": true,
+        "method": "config.get",
+        "requestParams": [],
+        "response": {
+            "invalidSnapshotClearsConfigPayloads": true,
+            "pluginMetadataOmitted": true,
+            "redactedSnapshotFields": [
+                "config",
+                "parsed",
+                "raw",
+                "resolved",
+                "runtimeConfig",
+                "sourceConfig"
+            ],
+            "revisionHashFields": ["appliedConfigHash", "configRevisionHash"],
+            "snapshotHashPreserved": true,
+            "uiHintsDriveRedaction": true
+        }
+    },
+    "configPatch": {
+        "baseHash": {
+            "blankIsAbsent": true,
+            "generalWritesRequireHash": true,
+            "hashlessLastWriterWinsPaths": ["ui.prefs"],
+            "mismatchRejected": true,
+            "protocolOptional": true,
+            "writeUsesSnapshotHash": true
+        },
+        "handlerValidatesParams": true,
+        "method": "config.patch",
+        "redaction": {
+            "getAndWriteResponsesRedacted": true,
+            "patchRestoresSensitiveValuesFromSnapshot": true,
+            "reservedOrUnrestorableSentinelRejected": true,
+            "sentinel": "__OPENCLAW_REDACTED__"
+        },
+        "requestParams": [
+            "baseHash",
+            "deliveryContext",
+            "note",
+            "raw",
+            "replacePaths",
+            "restartDelayMs",
+            "sessionKey"
+        ],
+        "restart": {
+            "changedPathsDriveRequirement": true,
+            "directRestartConditional": true,
+            "sentinelPersistenceBestEffort": true,
+            "sentinelResultFields": ["payload", "persisted"]
+        },
+        "write": {
+            "arraysMergeById": true,
+            "noChangeReturnsNoop": true,
+            "rawFormat": "json5-object",
+            "replacePathsSupported": true
+        }
+    },
+    "domain": "settings",
+    "methodAccess": [
+        {
+            "controlPlaneWrite": false,
+            "name": "config.get",
+            "scope": "operator.read"
+        },
+        {
+            "controlPlaneWrite": true,
+            "name": "config.patch",
+            "scope": "operator.admin"
+        },
+        {
+            "controlPlaneWrite": false,
+            "name": "skills.status",
+            "scope": "operator.read"
+        },
+        {
+            "controlPlaneWrite": false,
+            "name": "skills.update",
+            "scope": "operator.admin"
+        }
+    ],
+    "schemaVersion": 1,
+    "skillsStatus": {
+        "row": {
+            "disabledFrom": "skills.entries[skillKey].enabled-equals-false",
+            "eligibleRequiresNotDisabled": true,
+            "reviewedFields": [
+                "baseDir",
+                "bundled",
+                "description",
+                "disabled",
+                "eligible",
+                "filePath",
+                "name",
+                "skillKey",
+                "source"
+            ]
+        },
+        "handlerValidatesParams": true,
+        "method": "skills.status",
+        "requestParams": ["agentId"],
+        "workspace": {
+            "defaultAgentResolved": true,
+            "remoteEligibilityIncluded": true,
+            "unknownExplicitAgentRejected": true,
+            "upstreamHostPathFields": [
+                "managedSkillsDir",
+                "skills[].baseDir",
+                "skills[].filePath",
+                "workspaceDir"
+            ]
+        }
+    },
+    "skillsUpdate": {
+        "handler": {
+            "afterWriteMode": "auto",
+            "configMutationUsesRetry": true,
+            "localEntryPath": "skills.entries[skillKey]",
+            "responseConfigRedacted": true,
+            "resultFields": ["config", "ok", "skillKey"]
+        },
+        "handlerValidatesParams": true,
+        "method": "skills.update",
+        "request": {
+            "baseHashAccepted": false,
+            "localParams": ["apiKey", "enabled", "env", "skillKey"]
+        }
+    }
+}

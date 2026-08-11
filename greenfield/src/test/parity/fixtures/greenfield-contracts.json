@@ -403,6 +403,22 @@
             "name": "openClawCron.update"
         },
         {
+            "kind": "query",
+            "name": "openClawSettings.getConfiguration"
+        },
+        {
+            "kind": "query",
+            "name": "openClawSettings.listSkills"
+        },
+        {
+            "kind": "mutation",
+            "name": "openClawSettings.setSkillEnabled"
+        },
+        {
+            "kind": "mutation",
+            "name": "openClawSettings.updateConfiguration"
+        },
+        {
             "kind": "mutation",
             "name": "openClawTasks.cancel"
         },

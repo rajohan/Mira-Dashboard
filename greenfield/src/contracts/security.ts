@@ -109,6 +109,8 @@ export const applicationCapabilities = [
     "monitoring:write",
     "notifications:read",
     "notifications:write",
+    "openclaw-settings:read",
+    "openclaw-settings:write",
     "openclaw-tasks:read",
     "openclaw-tasks:write",
     "reports:read",

@@ -21,6 +21,10 @@
             "sha256": "91785d6d4ee208b2dace06c48473341195c5782b8a371317cc63e463e75757a1"
         },
         {
+            "file": "settings.json",
+            "sha256": "7e20bc420305290a1dfaffefc97fa5ceb1f4c344f90540caddbc6e986508e83b"
+        },
+        {
             "file": "tasks.json",
             "sha256": "0c63c4cd74037301e55fcb46bb757af9b74f3946446167037473122f3d66ed23"
         }
@@ -41,6 +45,24 @@
         "version": "2026.7.2-beta.7"
     },
     "sourceArtifacts": [
+        {
+            "bytes": 56881,
+            "path": "dist/zod-schema-CmQEPAcv.js",
+            "role": "agent-config-schema",
+            "sha256": "5cf540efa2a15e66c35fbaaec93ba6787b2ad056bbefb949179a3a52a8ce7599"
+        },
+        {
+            "bytes": 52878,
+            "path": "dist/zod-schema.agent-runtime-Cl6qhVu_.js",
+            "role": "agent-tools-schema",
+            "sha256": "709a8ef5b3bcb91b0233b2f548ee805522b18e164e01f9a0e6656d6bf08aaf0f"
+        },
+        {
+            "bytes": 952,
+            "path": "dist/automations-tool-name-CYqaxHxr.js",
+            "role": "automations-tool-name",
+            "sha256": "9bb71f1982955dfa67e15e28e4ca02883dc04fef5dcbc81638ae17854399d9f4"
+        },
         {
             "bytes": 132,
             "path": "dist/build-info.json",
@@ -66,6 +88,36 @@
             "sha256": "b5c177536b7d7c89be6327f9146a8cf8223b70bb9f202f07ade55c3bad1d9ea8"
         },
         {
+            "bytes": 363,
+            "path": "dist/base-hash-BJkn_bB6.js",
+            "role": "config-base-hash",
+            "sha256": "8bee8811b34721e103b5120346d50965670a8cee9df0dbc1cfe0fe3c12255bb9"
+        },
+        {
+            "bytes": 2032,
+            "path": "dist/config-get-response-B6lGHo0y.js",
+            "role": "config-get-response",
+            "sha256": "593c8ac59f3b9b1847f7c7131394f82ec8e4c9d126685572247cc2c410246e7a"
+        },
+        {
+            "bytes": 39600,
+            "path": "dist/config-ToQ8ZU1u.js",
+            "role": "config-handlers",
+            "sha256": "868d507ed8e8337ac53b3ce6e2fd02b87b8858fabb15c127e82203c7a849af55"
+        },
+        {
+            "bytes": 4404,
+            "path": "dist/merge-patch-DNAwVDQs.js",
+            "role": "config-merge-patch",
+            "sha256": "60118a11f4308f15649c8337aee75fabf3ecef90d69ce5fb4f14546647141dd9"
+        },
+        {
+            "bytes": 21479,
+            "path": "dist/redact-snapshot-CaQsZc2V.js",
+            "role": "config-redaction",
+            "sha256": "af96c4390304bb2d10646cdbc559b6441c09fe31f9ac9185fc7b6ad034b48ac0"
+        },
+        {
             "bytes": 527552,
             "path": "dist/control-ui/assets/chat-page-6DmC-GhZ.js",
             "role": "control-ui-chat",
@@ -82,6 +134,12 @@
             "path": "dist/control-ui/assets/chat-message-0eXitjaF.js",
             "role": "control-ui-plan-renderer",
             "sha256": "a42e193f44dd1066309961c94aafdbe116efa419aa8416a60166bc686dbefb2c"
+        },
+        {
+            "bytes": 21075,
+            "path": "dist/tool-catalog-_oP1dhDC.js",
+            "role": "core-tool-catalog",
+            "sha256": "24ca99ad523ef8834e17f56c8192316acdcb9f9760305459f1c6e91762917e63"
         },
         {
             "bytes": 59695,
@@ -294,6 +352,18 @@
             "sha256": "e910562b7368817a01f4285dbf94306bf09deb50dcec5e686a189913efa42b24"
         },
         {
+            "bytes": 88295,
+            "path": "dist/skills-KDzAh4r9.js",
+            "role": "skills-handlers",
+            "sha256": "2c950c2096db5cd9e5a1966e369b8c406388bd22d7852198096ef98bdceb10b5"
+        },
+        {
+            "bytes": 9867,
+            "path": "dist/status-B4EPm_Ck.js",
+            "role": "skills-status",
+            "sha256": "95c73881e05b0bf2d69a9ccb2ff633058ab5a1070d22d518d57b0ddaa8e07157"
+        },
+        {
             "bytes": 24828,
             "path": "dist/subagent-control-BLCfdEdC.js",
             "role": "subagent-control",
@@ -322,6 +392,12 @@
             "path": "dist/tasks-Btru2I19.js",
             "role": "tasks-handlers",
             "sha256": "5616d32c248fb98f38e1bccdc85fdb92acba492410da085a7876e29ea4a648e3"
+        },
+        {
+            "bytes": 10655,
+            "path": "dist/tool-policy-D0BPUirT.js",
+            "role": "tool-policy-normalization",
+            "sha256": "27ad84b74bbeb660d9119bb45bb87ea619bf7b5fffe4ac4da5b9f42014bc64b0"
         }
     ]
 }

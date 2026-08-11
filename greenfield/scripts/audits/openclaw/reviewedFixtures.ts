@@ -13,6 +13,7 @@ import {
     parseFixtureManifest,
     parseSourceAuditResult,
     sessionsFixtureSchema,
+    settingsFixtureSchema,
     tasksFixtureSchema,
     type FixtureManifest,
     type SourceAuditResult,
@@ -26,6 +27,7 @@ const reviewedFixtureFileNames = [
     "gateway.json",
     "manifest.json",
     "sessions.json",
+    "settings.json",
     "tasks.json",
 ] as const;
 
@@ -131,6 +133,7 @@ export async function loadReviewedOpenClawFixtures(
         cron: parseFixtureDocument(cronFixtureSchema, required("cron.json")),
         gateway: parseFixtureDocument(gatewayFixtureSchema, required("gateway.json")),
         sessions: parseFixtureDocument(sessionsFixtureSchema, required("sessions.json")),
+        settings: parseFixtureDocument(settingsFixtureSchema, required("settings.json")),
         tasks: parseFixtureDocument(tasksFixtureSchema, required("tasks.json")),
         source: manifest.source,
         sourceArtifacts: manifest.sourceArtifacts,
@@ -167,6 +170,7 @@ function fixtureComponents(audit: SourceAuditResult): readonly [string, unknown]
         ["cron.json", audit.cron],
         ["gateway.json", audit.gateway],
         ["sessions.json", audit.sessions],
+        ["settings.json", audit.settings],
         ["tasks.json", audit.tasks],
     ];
 }

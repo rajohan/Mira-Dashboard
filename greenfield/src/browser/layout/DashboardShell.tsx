@@ -12,6 +12,7 @@ import {
     MessageCircle,
     MessagesSquare,
     Newspaper,
+    Settings as SettingsIcon,
     ShieldCheck,
     SquareTerminal,
     X,
@@ -53,6 +54,7 @@ const navigationItems: readonly NavigationItem[] = Object.freeze([
     { icon: SquareTerminal, label: "Terminal", to: "/terminal" },
     { icon: Newspaper, label: "Reports", to: "/reports" },
     { icon: ShieldCheck, label: "Account security", to: "/account-security" },
+    { icon: SettingsIcon, label: "Settings", to: "/settings" },
 ]);
 const routeTitles: readonly Pick<NavigationItem, "label" | "to">[] = Object.freeze([
     ...navigationItems,

@@ -28,6 +28,35 @@ interface DistributionArtifactSpec {
 
 const distributionArtifactSpecs: readonly DistributionArtifactSpec[] = [
     {
+        fileNamePattern: /^zod-schema-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "//#region src/config/zod-schema.agents.ts",
+            "const AgentEntryConfigSchema = preprocess",
+            "const AgentsSchema = object({",
+            "entries: record(string().regex(",
+        ],
+        role: "agent-config-schema",
+    },
+    {
+        fileNamePattern: /^zod-schema\.agent-runtime-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "const ToolPolicySchema = object({",
+            "const AgentToolsSchema = object({",
+            "const AgentEntrySchema = object({",
+            "const ToolsSchema = object({",
+        ],
+        role: "agent-tools-schema",
+    },
+    {
+        fileNamePattern: /^automations-tool-name-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            'const AUTOMATIONS_TOOL_NAME = "automations"',
+            'const LEGACY_AUTOMATIONS_TOOL_NAMES = ["cron"]',
+            "function isAutomationsToolName(name)",
+        ],
+        role: "automations-tool-name",
+    },
+    {
         fileNamePattern: /^chat-abort-[A-Za-z0-9_-]+\.js$/u,
         markers: ["const plan = run?.planSnapshot", "const withoutText"],
         role: "chat-run-projection",
@@ -63,6 +92,52 @@ const distributionArtifactSpecs: readonly DistributionArtifactSpec[] = [
         role: "chat-streaming",
     },
     {
+        fileNamePattern: /^base-hash-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "function resolveBaseHashParam(params)",
+            "const raw = params?.baseHash",
+            "return trimmed ? trimmed : null",
+        ],
+        role: "config-base-hash",
+    },
+    {
+        fileNamePattern: /^config-get-response-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "function createConfigGetResponse(snapshot, uiHints)",
+            "configRevisionHash: hashRuntimeConfigValue(snapshot.sourceConfig)",
+            "appliedConfigHash: getRuntimeConfigAppliedHash()",
+        ],
+        role: "config-get-response",
+    },
+    {
+        fileNamePattern: /^config-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            'const HASHLESS_PATCH_LWW_PATH_PREFIXES = ["ui.prefs"]',
+            "const configHandlers = {",
+            '"config.get": async',
+            '"config.patch": async',
+        ],
+        role: "config-handlers",
+    },
+    {
+        fileNamePattern: /^merge-patch-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "function mergeObjectArraysById(base, patch, options, arrayPath)",
+            "function applyMergePatch(base, patch, options = {})",
+            "function isMergePatchObjectKeyAllowed(key, parentPath)",
+        ],
+        role: "config-merge-patch",
+    },
+    {
+        fileNamePattern: /^redact-snapshot-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            'const REDACTED_SENTINEL = "__OPENCLAW_REDACTED__"',
+            "function redactConfigSnapshot(snapshot, uiHints)",
+            "function restoreRedactedValues(incoming, original, hints)",
+        ],
+        role: "config-redaction",
+    },
+    {
         directory: "dist/control-ui/assets",
         fileNamePattern: /^chat-page-[A-Za-z0-9_-]+\.js$/u,
         markers: [
@@ -91,6 +166,15 @@ const distributionArtifactSpecs: readonly DistributionArtifactSpec[] = [
         fileNamePattern: /^chat-session-rail-[A-Za-z0-9_-]+\.js$/u,
         markers: ["planStatus", "steps.slice(-3)", "openclaw-chat-session-rail"],
         role: "control-ui-plan-rail",
+    },
+    {
+        fileNamePattern: /^tool-catalog-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "const CORE_TOOL_DEFINITIONS = [",
+            "const CORE_TOOL_BY_ID = new Map",
+            "function isKnownCoreToolId(toolId)",
+        ],
+        role: "core-tool-catalog",
     },
     {
         fileNamePattern: /^server-cron-[A-Za-z0-9_-]+\.js$/u,
@@ -361,6 +445,26 @@ const distributionArtifactSpecs: readonly DistributionArtifactSpec[] = [
         role: "sessions-handlers",
     },
     {
+        fileNamePattern: /^skills-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "async function updateSkillConfigEntry(params)",
+            "const skillsHandlers = {",
+            '"skills.status":',
+            '"skills.update": async',
+        ],
+        role: "skills-handlers",
+    },
+    {
+        fileNamePattern: /^status-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "function buildSkillStatus(indexed, context)",
+            "function buildWorkspaceSkillStatus(workspaceDir, opts)",
+            "filePath: entry.skill.filePath",
+            "baseDir: entry.skill.baseDir",
+        ],
+        role: "skills-status",
+    },
+    {
         fileNamePattern: /^subagent-control-[A-Za-z0-9_-]+\.js$/u,
         markers: [
             "Admin kill path for a subagent session key, bypassing caller ownership checks.",
@@ -390,6 +494,16 @@ const distributionArtifactSpecs: readonly DistributionArtifactSpec[] = [
         fileNamePattern: /^tasks-[A-Za-z0-9_-]+\.js$/u,
         markers: ["LEDGER_STATUS_TO_TASK_STATUSES", '"tasks.list"', '"tasks.cancel"'],
         role: "tasks-handlers",
+    },
+    {
+        fileNamePattern: /^tool-policy-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "const TOOL_NAME_ALIASES = {",
+            'cron: "automations"',
+            "function normalizeToolName(name)",
+            "function normalizeToolList(list)",
+        ],
+        role: "tool-policy-normalization",
     },
 ];
 
@@ -583,7 +697,7 @@ function assertRequiredMarkers(
 function assertMethodPermission(
     source: string,
     method: string,
-    scope: "operator.read" | "operator.write",
+    scope: "operator.admin" | "operator.read" | "operator.write",
     controlPlaneWrite: boolean
 ): void {
     assertMethodDescriptorScope(source, method, scope);
@@ -3531,6 +3645,597 @@ function assertGatewaySessionScopedEventsCapability(
     };
 }
 
+const reviewedAgentAccessCoreToolIds = [
+    "automations",
+    "browser",
+    "edit",
+    "exec",
+    "gateway",
+    "image",
+    "image_generate",
+    "memory_search",
+    "message",
+    "music_generate",
+    "nodes",
+    "read",
+    "sessions_history",
+    "sessions_list",
+    "tts",
+    "video_generate",
+    "web_fetch",
+    "web_search",
+    "write",
+] as const;
+
+function assertSourceMarkerExactlyOnce(
+    source: string,
+    marker: string,
+    surface: string
+): void {
+    if (source.split(marker).length !== 2) {
+        throw new Error(
+            `OpenClaw ${surface} changed outside the reviewed source-backed shape`
+        );
+    }
+}
+
+function assertAgentAccessSemantics(
+    artifacts: readonly LoadedSourceArtifact[]
+): SourceAuditResult["settings"]["agentAccess"] {
+    const agentConfigSchema = artifactByRole(artifacts, "agent-config-schema").contents;
+    const agentEntriesSchema = boundedSourceRegion(
+        agentConfigSchema,
+        "//#region src/config/zod-schema.agents.ts",
+        "const BindingMatchSchema = object({",
+        4 * 1024,
+        "agents.entries config schema"
+    );
+    assertRequiredMarkers(agentEntriesSchema, "agents.entries config schema", [
+        "const AgentEntryConfigSchema = preprocess((value, ctx) => {",
+        "if (!isBlockedObjectKey(key)) continue",
+        'message: "agent entries must not contain blocked object keys"',
+        "}, AgentEntrySchema.omit({ id: true }))",
+        "const AgentsSchema = object({",
+        'entries: record(string().regex(/^[a-z0-9_][a-z0-9_-]{0,63}$/i, "Invalid agent id"), AgentEntryConfigSchema).optional()',
+        "const defaultCount = Object.values(value.entries ?? {}).filter((agent) => agent.default === true).length",
+        "if (defaultCount !== 1)",
+        "agents.entries must contain exactly one default=true entry",
+    ]);
+
+    const agentToolsSchema = artifactByRole(artifacts, "agent-tools-schema").contents;
+    const commonToolPolicy = boundedSourceRegion(
+        agentToolsSchema,
+        "const CommonToolPolicyFields = {",
+        "const MessageToolConfigSchema = object({",
+        2 * 1024,
+        "agent common tool policy"
+    );
+    assertRequiredMarkers(commonToolPolicy, "agent common tool policy", [
+        "allow: array(string()).optional()",
+        "alsoAllow: array(string()).optional()",
+        "deny: array(string()).optional()",
+    ]);
+    const agentToolsPolicy = boundedSourceRegion(
+        agentToolsSchema,
+        "const AgentToolsSchema = object({",
+        "const MemorySearchSchema = object({",
+        4 * 1024,
+        "agent tools policy"
+    );
+    assertRequiredMarkers(agentToolsPolicy, "agent tools policy", [
+        "...CommonToolPolicyFields",
+        "addAllowAlsoAllowConflictIssue(value, ctx,",
+        '"agent tools cannot set both allow and alsoAllow in the same scope (merge alsoAllow into allow, or remove allow and use profile + alsoAllow)"',
+    ]);
+    const agentEntrySchema = boundedSourceRegion(
+        agentToolsSchema,
+        "const AgentEntrySchema = object({",
+        "const ToolsSchema = object({",
+        8 * 1024,
+        "agent entry tools schema"
+    );
+    assertRequiredMarkers(agentEntrySchema, "agent entry tools schema", [
+        "id: string()",
+        "tools: AgentToolsSchema",
+        "}).strict()",
+    ]);
+
+    const automationsIdentity = artifactByRole(
+        artifacts,
+        "automations-tool-name"
+    ).contents;
+    assertRequiredMarkers(automationsIdentity, "automations tool identity", [
+        'const AUTOMATIONS_TOOL_NAME = "automations"',
+        'const LEGACY_AUTOMATIONS_TOOL_NAMES = ["cron"]',
+        'return name === "automations" || LEGACY_AUTOMATIONS_TOOL_NAMES.includes(name)',
+    ]);
+
+    const coreToolCatalog = artifactByRole(artifacts, "core-tool-catalog").contents;
+    const coreToolDefinitions = boundedSourceRegion(
+        coreToolCatalog,
+        "const CORE_TOOL_DEFINITIONS = [",
+        "const CORE_TOOL_BY_ID = new Map",
+        32 * 1024,
+        "core tool catalog"
+    );
+    assertSourceMarkerExactlyOnce(
+        coreToolDefinitions,
+        "id: AUTOMATIONS_TOOL_NAME",
+        "core automations tool catalog entry"
+    );
+    for (const toolId of reviewedAgentAccessCoreToolIds) {
+        if (toolId === "automations") continue;
+        assertSourceMarkerExactlyOnce(
+            coreToolDefinitions,
+            `id: "${toolId}"`,
+            `core ${toolId} tool catalog entry`
+        );
+    }
+
+    const toolPolicy = artifactByRole(artifacts, "tool-policy-normalization").contents;
+    assertRequiredMarkers(toolPolicy, "tool policy alias normalization", [
+        "const TOOL_NAME_ALIASES = {",
+        'cron: "automations"',
+        "function normalizeToolName(name)",
+        "return TOOL_NAME_ALIASES[normalized] ?? normalized",
+        "return list.map(normalizeToolName).filter(Boolean)",
+    ]);
+
+    const configHandlers = artifactByRole(artifacts, "config-handlers").contents;
+    assertRequiredMarkers(configHandlers, "config.patch exact replacement intent", [
+        "function formatConfigPatchPath(parentPath, key)",
+        "return parentPath ? `${parentPath}.${key}` : key",
+        "function normalizeConfigPatchReplacePath(value)",
+        'if (trimmed.endsWith("[]")) return trimmed.slice(0, -2).replace(',
+        "return trimmed.replace(",
+        'return new Set(values.filter((value) => typeof value === "string").map(normalizeConfigPatchReplacePath).filter((value) => value.length > 0))',
+        ").filter((path) => !params.replacePaths.has(path))",
+    ]);
+    const mergePatch = artifactByRole(artifacts, "config-merge-patch").contents;
+    const applyMergePatch = boundedSourceRegion(
+        mergePatch,
+        "function applyMergePatch(base, patch, options = {}) {",
+        "//#endregion",
+        4 * 1024,
+        "config merge-patch array replacement"
+    );
+    assertRequiredMarkers(applyMergePatch, "config merge-patch array replacement", [
+        "const path = formatMergePatchPath(options.path, key)",
+        "if (options.replaceArrayPaths?.has(path)) {",
+        "result[key] = value",
+        "const mergedArray = mergeObjectArraysById(result[key], value, options, path)",
+    ]);
+
+    return {
+        configPatchArrayReplacement: {
+            destructiveRemovalRequiresDeclaredPath: true,
+            exactPathTemplates: [
+                "agents.entries.<agentId>.tools.alsoAllow",
+                "agents.entries.<agentId>.tools.deny",
+            ],
+            listedPathReplacesArray: true,
+            pathComparison: "normalized-exact",
+        },
+        coreCatalog: {
+            canonicalSchedulerTool: "automations",
+            legacySchedulerAliases: ["cron"],
+            reviewedToolIds: [...reviewedAgentAccessCoreToolIds],
+        },
+        entries: {
+            blockedObjectKeysRejected: true,
+            defaultEntryCount: 1,
+            idCaseInsensitive: true,
+            idMaximumLength: 64,
+            idMinimumLength: 1,
+            idPattern: "^[a-z0-9_][a-z0-9_-]{0,63}$",
+            inlineIdOmitted: true,
+            storagePath: "agents.entries",
+            storageShape: "record-by-id",
+        },
+        toolsPolicy: {
+            nonEmptyAllowAndAlsoAllowConflictRejected: true,
+            optionalStringArrayFields: ["allow", "alsoAllow", "deny"],
+        },
+    };
+}
+
+function assertSettingsSemantics(
+    artifacts: readonly LoadedSourceArtifact[]
+): SourceAuditResult["settings"] {
+    const agentAccess = assertAgentAccessSemantics(artifacts);
+    const descriptors = artifactByRole(artifacts, "method-descriptors").contents;
+    assertMethodPermission(descriptors, "config.get", "operator.read", false);
+    assertMethodPermission(descriptors, "config.patch", "operator.admin", true);
+    assertMethodPermission(descriptors, "skills.status", "operator.read", false);
+    assertMethodPermission(descriptors, "skills.update", "operator.admin", false);
+
+    const protocol = artifactByRole(artifacts, "protocol-schemas").contents;
+    const configGetParams = boundedSourceRegion(
+        protocol,
+        "/** Empty request payload for reading the current raw config. */",
+        "/** Full raw config replacement request with optional base hash guard. */",
+        1024,
+        "config.get params"
+    );
+    assertRequiredMarkers(configGetParams, "config.get params", [
+        "const ConfigGetParamsSchema = closedObject({});",
+    ]);
+    const configPatchParams = boundedSourceRegion(
+        protocol,
+        "const ConfigApplyLikeParamProperties = {",
+        "/** Empty request payload for fetching the generated config schema. */",
+        4 * 1024,
+        "config.patch params"
+    );
+    assertExactIndentedFields(
+        configPatchParams,
+        1,
+        [
+            "baseHash",
+            "deliveryContext",
+            "note",
+            "raw",
+            "replacePaths",
+            "restartDelayMs",
+            "sessionKey",
+        ],
+        "config.patch params"
+    );
+    assertRequiredMarkers(configPatchParams, "config.patch params", [
+        "raw: NonEmptyString",
+        "baseHash: Type.Optional(NonEmptyString)",
+        "replacePaths: Type.Optional(Type.Array(NonEmptyString, { maxItems: 256 }))",
+    ]);
+    const skillsStatusParams = boundedSourceRegion(
+        protocol,
+        "/** Reads installed skill status, optionally for a selected agent. */",
+        "/** Empty request payload for listing available skill bins. */",
+        1024,
+        "skills.status params"
+    );
+    assertRequiredMarkers(skillsStatusParams, "skills.status params", [
+        "const SkillsStatusParamsSchema = closedObject({ agentId: Type.Optional(NonEmptyString) });",
+    ]);
+    const skillsUpdateParams = boundedSourceRegion(
+        protocol,
+        "const SkillsUpdateParamsSchema = Type.Union([closedObject({",
+        "}), closedObject({",
+        2 * 1024,
+        "skills.update local params"
+    );
+    assertExactIndentedFields(
+        skillsUpdateParams,
+        1,
+        ["apiKey", "enabled", "env", "skillKey"],
+        "skills.update local params"
+    );
+    assertRequiredMarkers(skillsUpdateParams, "skills.update local params", [
+        "skillKey: NonEmptyString",
+        "enabled: Type.Optional(Type.Boolean())",
+        "apiKey: Type.Optional(Type.String())",
+        "env: Type.Optional(Type.Record(NonEmptyString, Type.String()))",
+    ]);
+
+    const baseHash = artifactByRole(artifacts, "config-base-hash").contents;
+    assertRequiredMarkers(baseHash, "config base hash normalization", [
+        "function resolveBaseHashParam(params)",
+        'if (typeof raw !== "string") return null',
+        "const trimmed = raw.trim()",
+        "return trimmed ? trimmed : null",
+    ]);
+
+    const getResponse = artifactByRole(artifacts, "config-get-response").contents;
+    assertRequiredMarkers(getResponse, "config.get response", [
+        "...redactConfigSnapshot(snapshot, uiHints)",
+        "configRevisionHash: hashRuntimeConfigValue(snapshot.sourceConfig)",
+        "appliedConfigHash: getRuntimeConfigAppliedHash()",
+        "createConfigGetResponse(await readConfigFileSnapshot(), params.loadUiHints())",
+    ]);
+
+    const redaction = artifactByRole(artifacts, "config-redaction").contents;
+    assertRequiredMarkers(redaction, "config redaction sentinel", [
+        'const REDACTED_SENTINEL = "__OPENCLAW_REDACTED__"',
+        "function redactConfigSnapshot(snapshot, uiHints)",
+        "const redactedConfig = redactObject(snapshot.config, uiHints)",
+        "const { pluginMetadataSnapshot: _pluginMetadataSnapshot, ...publicSnapshot } = snapshot",
+        "function restoreRedactedValues(incoming, original, hints)",
+        'assertNoRedactedSentinel(restored, "")',
+        "throw new RedactionError(params.path)",
+    ]);
+    const redactedSnapshot = boundedSourceRegion(
+        redaction,
+        "function redactConfigSnapshot(snapshot, uiHints) {",
+        "* Deep-walk `incoming`",
+        8 * 1024,
+        "config.get redacted snapshot"
+    );
+    assertRequiredMarkers(redactedSnapshot, "config.get redacted snapshot", [
+        "sourceConfig: redactedResolved",
+        "runtimeConfig: redactedConfig",
+        "config: redactedConfig",
+        "raw: redactedRaw",
+        "parsed: redactedParsed",
+        "resolved: redactedResolved",
+        "raw: null",
+        "parsed: null",
+    ]);
+
+    const configHandlers = artifactByRole(artifacts, "config-handlers").contents;
+    const configGetHandler = boundedSourceRegion(
+        configHandlers,
+        '"config.get": async',
+        '"config.schema":',
+        2 * 1024,
+        "config.get handler"
+    );
+    assertRequiredMarkers(configGetHandler, "config.get handler", [
+        'assertValidParams(params, validateConfigGetParams, "config.get", respond)',
+        "respond(true, await readConfigGetResponse({",
+        "loadUiHints: () => loadSchemaWithPlugins().uiHints",
+    ]);
+    const configPatchHandler = boundedSourceRegion(
+        configHandlers,
+        '"config.patch": async',
+        '"config.apply": async',
+        48 * 1024,
+        "config.patch handler"
+    );
+    assertRequiredMarkers(configPatchHandler, "config.patch handler", [
+        'assertValidParams(params, validateConfigPatchParams, "config.patch", respond)',
+        "const hashlessPatch = resolveBaseHashParam(params) === null",
+        "if (hashlessPatch && !hasHashlessPatchLwwStructure(normalizedPatch))",
+        "applyMergePatch(snapshot.config, normalizedPatch, {",
+        "mergeObjectArraysById: true",
+        "replaceArrayPaths: replacePaths",
+        "restoreRedactedValues(merged, snapshot.config, schemaPatch.uiHints)",
+        "if (hashlessPatch && !restoredChangedPaths.every(isHashlessPatchLwwPath))",
+        "respondConfigPatchNoop({",
+        "await respondWithConfigRestartWrite({",
+    ]);
+    assertRequiredMarkers(configHandlers, "config.patch base hash", [
+        'const HASHLESS_PATCH_LWW_PATH_PREFIXES = ["ui.prefs"]',
+        "if (baseHash !== snapshotHash)",
+        'errorShape(ErrorCodes.INVALID_REQUEST, "config changed since last load; re-run config.get and retry")',
+        "baseHash: resolveConfigSnapshotHash(params.snapshot) ?? void 0",
+    ]);
+    assertRequiredMarkers(configHandlers, "config.patch restart sentinel", [
+        "const sentinelPersisted = await tryWriteRestartSentinelPayload(payload)",
+        "const restart = restartRequirement.scheduleDirectRestart ? scheduleGatewaySigusr1Restart({",
+        "changedPaths: params.changedPaths",
+        "sentinel: {",
+        "persisted: sentinelPersisted",
+        "payload",
+    ]);
+
+    const skillsHandlers = artifactByRole(artifacts, "skills-handlers").contents;
+    const skillsWorkspace = boundedSourceRegion(
+        skillsHandlers,
+        "function resolveSkillsAgentWorkspace(params, context) {",
+        "const SKILL_PROPOSAL_RESPONSE_HANDLED",
+        4 * 1024,
+        "skills workspace resolution"
+    );
+    assertRequiredMarkers(skillsWorkspace, "skills workspace resolution", [
+        "const agentId = agentIdRaw ? normalizeAgentId(agentIdRaw) : resolveDefaultAgentId(cfg)",
+        "if (agentIdRaw && !listAgentIds(cfg).includes(agentId))",
+        "workspaceDir: resolveAgentWorkspaceDir(cfg, agentId)",
+    ]);
+    const skillsStatusHandler = boundedSourceRegion(
+        skillsHandlers,
+        '"skills.status":',
+        '"skills.securityVerdicts":',
+        2 * 1024,
+        "skills.status handler"
+    );
+    assertRequiredMarkers(skillsStatusHandler, "skills.status handler", [
+        'assertValidParams(params, validateSkillsStatusParams, "skills.status", respond)',
+        "const resolved = resolveSkillsAgentWorkspace(params, context)",
+        "respond(true, buildRemoteAwareWorkspaceSkillStatus(resolved), void 0)",
+    ]);
+    assertRequiredMarkers(skillsHandlers, "skills.status remote eligibility", [
+        "function buildRemoteAwareWorkspaceSkillStatus(resolved)",
+        "nodeSkills = resolveNodeExecEligibility({",
+        "remote: getRemoteSkillEligibility({ advertiseExecNode: nodeSkills.canExec })",
+    ]);
+
+    const skillMutation = boundedSourceRegion(
+        skillsHandlers,
+        "function patchSkillConfigEntry(cfg, skillKey, patch) {",
+        "async function updateSkillConfigEntry(params) {",
+        4 * 1024,
+        "skills.update mutation"
+    );
+    assertRequiredMarkers(skillMutation, "skills.update mutation", [
+        "const entries = { ...cfg.skills?.entries }",
+        "const current = entries[skillKey] ? { ...entries[skillKey] } : {}",
+        'if (typeof patch.enabled === "boolean") current.enabled = patch.enabled',
+        'if (typeof patch.apiKey === "string")',
+        'if (trimmed === "__OPENCLAW_REDACTED__")',
+        'if (patch.env && typeof patch.env === "object")',
+        "entries[skillKey] = current",
+    ]);
+    const updateSkillConfigEntry = boundedSourceRegion(
+        skillsHandlers,
+        "async function updateSkillConfigEntry(params) {",
+        "//#endregion",
+        2 * 1024,
+        "skills.update config write"
+    );
+    assertRequiredMarkers(updateSkillConfigEntry, "skills.update config write", [
+        "mutateConfigFileWithRetry({",
+        'afterWrite: { mode: "auto" }',
+        "const next = patchSkillConfigEntry(draft, params.skillKey, params)",
+        "return next.skills?.entries?.[params.skillKey] ?? {}",
+    ]);
+    const skillsUpdateHandler = boundedSourceRegion(
+        skillsHandlers,
+        '"skills.update": async',
+        "//#endregion",
+        8 * 1024,
+        "skills.update handler"
+    );
+    assertRequiredMarkers(skillsUpdateHandler, "skills.update handler", [
+        'assertValidParams(params, validateSkillsUpdateParams, "skills.update", respond)',
+        '"source" in params && params.source === "clawhub"',
+        "const updated = await updateSkillConfigEntry(p)",
+        "ok: true",
+        "skillKey: p.skillKey",
+        "config: redactConfigObject(updated)",
+    ]);
+
+    const skillsStatus = artifactByRole(artifacts, "skills-status").contents;
+    const skillStatusRow = boundedSourceRegion(
+        skillsStatus,
+        "function buildSkillStatus(indexed, context) {",
+        "function buildWorkspaceSkillStatus(workspaceDir, opts) {",
+        16 * 1024,
+        "skills.status row"
+    );
+    assertRequiredMarkers(skillStatusRow, "skills.status row", [
+        "const disabled = skillConfig?.enabled === false",
+        "const eligible = !disabled && !blockedByAllowlist && requirementsSatisfied",
+        "name: entry.skill.name",
+        "description: entry.skill.description",
+        "source: skillSource",
+        "bundled,",
+        "filePath: entry.skill.filePath",
+        "baseDir: entry.skill.baseDir",
+        "skillKey,",
+        "eligible,",
+    ]);
+    const skillStatusEnvelope = boundedSourceRegion(
+        skillsStatus,
+        "function buildWorkspaceSkillStatus(workspaceDir, opts) {",
+        "//#endregion",
+        16 * 1024,
+        "skills.status envelope"
+    );
+    assertRequiredMarkers(skillStatusEnvelope, "skills.status envelope", [
+        "workspaceDir,",
+        "managedSkillsDir,",
+        "agentId: opts?.agentId",
+        "agentSkillFilter,",
+        "skills: skillIndexEntries.map((entry) => buildSkillStatus(entry, {",
+    ]);
+
+    return {
+        agentAccess,
+        configGet: {
+            handlerValidatesParams: true,
+            method: "config.get",
+            requestParams: [],
+            response: {
+                invalidSnapshotClearsConfigPayloads: true,
+                pluginMetadataOmitted: true,
+                redactedSnapshotFields: [
+                    "config",
+                    "parsed",
+                    "raw",
+                    "resolved",
+                    "runtimeConfig",
+                    "sourceConfig",
+                ],
+                revisionHashFields: ["appliedConfigHash", "configRevisionHash"],
+                snapshotHashPreserved: true,
+                uiHintsDriveRedaction: true,
+            },
+        },
+        configPatch: {
+            baseHash: {
+                blankIsAbsent: true,
+                generalWritesRequireHash: true,
+                hashlessLastWriterWinsPaths: ["ui.prefs"],
+                mismatchRejected: true,
+                protocolOptional: true,
+                writeUsesSnapshotHash: true,
+            },
+            handlerValidatesParams: true,
+            method: "config.patch",
+            redaction: {
+                getAndWriteResponsesRedacted: true,
+                patchRestoresSensitiveValuesFromSnapshot: true,
+                reservedOrUnrestorableSentinelRejected: true,
+                sentinel: "__OPENCLAW_REDACTED__",
+            },
+            requestParams: [
+                "baseHash",
+                "deliveryContext",
+                "note",
+                "raw",
+                "replacePaths",
+                "restartDelayMs",
+                "sessionKey",
+            ],
+            restart: {
+                changedPathsDriveRequirement: true,
+                directRestartConditional: true,
+                sentinelPersistenceBestEffort: true,
+                sentinelResultFields: ["payload", "persisted"],
+            },
+            write: {
+                arraysMergeById: true,
+                noChangeReturnsNoop: true,
+                rawFormat: "json5-object",
+                replacePathsSupported: true,
+            },
+        },
+        domain: "settings",
+        methodAccess: [
+            { controlPlaneWrite: false, name: "config.get", scope: "operator.read" },
+            { controlPlaneWrite: true, name: "config.patch", scope: "operator.admin" },
+            { controlPlaneWrite: false, name: "skills.status", scope: "operator.read" },
+            { controlPlaneWrite: false, name: "skills.update", scope: "operator.admin" },
+        ],
+        schemaVersion: 1,
+        skillsStatus: {
+            row: {
+                disabledFrom: "skills.entries[skillKey].enabled-equals-false",
+                eligibleRequiresNotDisabled: true,
+                reviewedFields: [
+                    "baseDir",
+                    "bundled",
+                    "description",
+                    "disabled",
+                    "eligible",
+                    "filePath",
+                    "name",
+                    "skillKey",
+                    "source",
+                ],
+            },
+            handlerValidatesParams: true,
+            method: "skills.status",
+            requestParams: ["agentId"],
+            workspace: {
+                defaultAgentResolved: true,
+                remoteEligibilityIncluded: true,
+                unknownExplicitAgentRejected: true,
+                upstreamHostPathFields: [
+                    "managedSkillsDir",
+                    "skills[].baseDir",
+                    "skills[].filePath",
+                    "workspaceDir",
+                ],
+            },
+        },
+        skillsUpdate: {
+            handler: {
+                afterWriteMode: "auto",
+                configMutationUsesRetry: true,
+                localEntryPath: "skills.entries[skillKey]",
+                responseConfigRedacted: true,
+                resultFields: ["config", "ok", "skillKey"],
+            },
+            handlerValidatesParams: true,
+            method: "skills.update",
+            request: {
+                baseHashAccepted: false,
+                localParams: ["apiKey", "enabled", "env", "skillKey"],
+            },
+        },
+    };
+}
+
 function publicArtifacts(artifacts: readonly LoadedSourceArtifact[]): SourceArtifact[] {
     return artifacts
         .map(({ bytes, path: artifactPath, role, sha256: digest }) => ({
@@ -3633,6 +4338,7 @@ export async function auditInstalledOpenClaw(
     const tasksAdapter = assertPhase4TaskAdapterSemantics(artifacts);
     const sessionsAdapter = assertPhase4SessionsSemantics(artifacts);
     const cronAdapter = assertPhase4CronSemantics(artifacts);
+    const settings = assertSettingsSemantics(artifacts);
 
     return parseSourceAuditResult({
         agents: {
@@ -3868,6 +4574,7 @@ export async function auditInstalledOpenClaw(
             },
             schemaVersion: 1,
         },
+        settings,
         source: {
             builtAt: buildInfo.builtAt,
             commit: buildInfo.commit,
