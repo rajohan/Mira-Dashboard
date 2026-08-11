@@ -80,6 +80,11 @@ function array(value: unknown): readonly unknown[] {
     return value;
 }
 
+function requiredArray(value: unknown): readonly unknown[] {
+    if (!Array.isArray(value)) throw new MoltbookProviderFailure("invalid-response");
+    return value;
+}
+
 function optionalString(value: unknown): string | undefined {
     if (value === undefined || value === null) return undefined;
     if (typeof value !== "string") {
@@ -104,6 +109,13 @@ function nonnegativeCount(value: unknown): number {
         throw new MoltbookProviderFailure("invalid-response");
     }
     return numeric;
+}
+
+function requiredNonnegativeCount(value: unknown): number {
+    if (value === undefined || value === null) {
+        throw new MoltbookProviderFailure("invalid-response");
+    }
+    return nonnegativeCount(value);
 }
 
 function signedInteger(value: unknown): number {
@@ -137,6 +149,13 @@ function booleanValue(value: unknown, fallback = false): boolean {
         throw new MoltbookProviderFailure("invalid-response");
     }
     return value;
+}
+
+function requiredBoolean(value: unknown): boolean {
+    if (value === undefined || value === null) {
+        throw new MoltbookProviderFailure("invalid-response");
+    }
+    return booleanValue(value);
 }
 
 async function cancelResponse(
@@ -255,8 +274,8 @@ function normalizeFeed(value: unknown, sort: "hot" | "new") {
         ...(optionalString(feed.feed_filter) === undefined
             ? {}
             : { filter: optionalString(feed.feed_filter) }),
-        hasMore: booleanValue(feed.has_more),
-        posts: array(feed.posts)
+        hasMore: requiredBoolean(feed.has_more),
+        posts: requiredArray(feed.posts)
             .slice(0, moltbookFeedMaximumPosts)
             .map((post) => normalizeFeedPost(post)),
         sort,
@@ -312,8 +331,8 @@ function nextAction(value: unknown): string | undefined {
 
 function normalizeHome(value: unknown) {
     const home = record(value);
-    const messages = optionalRecord(home.your_direct_messages);
-    const account = optionalRecord(home.your_account);
+    const messages = record(home.your_direct_messages);
+    const account = record(home.your_account);
     const announcement = optionalRecord(home.latest_moltbook_announcement);
     const normalizedAnnouncement =
         announcement === undefined
@@ -340,21 +359,24 @@ function normalizeHome(value: unknown) {
                       : { title: optionalString(announcement.title) }),
               };
     return {
-        activityOnYourPostsCount: array(home.activity_on_your_posts).length,
-        exploreCount: array(home.explore).length,
+        activityOnYourPostsCount: requiredArray(home.activity_on_your_posts).length,
+        exploreCount: requiredArray(home.explore).length,
         ...(normalizedAnnouncement === undefined ||
         Object.keys(normalizedAnnouncement).length === 0
             ? {}
             : { latestAnnouncement: normalizedAnnouncement }),
-        nextActions: array(home.what_to_do_next)
+        nextActions: requiredArray(home.what_to_do_next)
             .map((action) => nextAction(action))
             .filter((action): action is string => action !== undefined)
             .slice(0, moltbookNextActionsMaximum),
-        pendingRequestCount: nonnegativeCount(messages?.pending_request_count),
-        postsFromAccountsYouFollowCount: array(home.posts_from_accounts_you_follow)
-            .length,
-        unreadMessageCount: nonnegativeCount(messages?.unread_message_count),
-        unreadNotificationCount: nonnegativeCount(account?.unread_notification_count),
+        pendingRequestCount: requiredNonnegativeCount(messages.pending_request_count),
+        postsFromAccountsYouFollowCount: requiredArray(
+            home.posts_from_accounts_you_follow
+        ).length,
+        unreadMessageCount: requiredNonnegativeCount(messages.unread_message_count),
+        unreadNotificationCount: requiredNonnegativeCount(
+            account.unread_notification_count
+        ),
     };
 }
 
@@ -378,10 +400,10 @@ function normalizeProfile(value: unknown) {
 function normalizeOwnContent(value: unknown) {
     const response = record(value);
     return {
-        comments: array(response.recentComments)
+        comments: requiredArray(response.recentComments)
             .slice(0, moltbookOwnCommentsMaximum)
             .map((comment) => normalizeOwnComment(comment)),
-        posts: array(response.recentPosts)
+        posts: requiredArray(response.recentPosts)
             .slice(0, moltbookOwnPostsMaximum)
             .map((post) => normalizeOwnPost(post)),
     };

@@ -184,6 +184,42 @@ describe("Moltbook dashboard provider", () => {
         expect(snapshot.myContent).toEqual({ comments: [], posts: [] });
     });
 
+    test("rejects empty endpoint envelopes instead of replacing last-known-good data", async () => {
+        const paths = [
+            "/api/v1/home",
+            "/api/v1/feed?sort=hot&limit=25",
+            "/api/v1/feed?sort=new&limit=25",
+            "/api/v1/agents/profile?name=mira_2026",
+        ] as const;
+
+        for (const emptyPath of paths) {
+            const byPath = new Map<string, unknown>([
+                ["/api/v1/home", providerPayloads.home],
+                ["/api/v1/feed?sort=hot&limit=25", providerPayloads.hot],
+                ["/api/v1/feed?sort=new&limit=25", providerPayloads.new],
+                ["/api/v1/agents/profile?name=mira_2026", providerPayloads.profile],
+            ]);
+            byPath.set(emptyPath, {});
+            const collector = createMoltbookDashboardCollector({
+                agentName: "mira_2026",
+                apiKey: Redacted.make("moltbook-secret-sentinel"),
+                fetch: (input) =>
+                    Promise.resolve(
+                        jsonResponse(byPath.get(input.pathname + input.search))
+                    ),
+            });
+
+            const failure = await collector
+                .collect(new AbortController().signal)
+                .catch((error: unknown) => error);
+
+            expect(failure).toBeInstanceOf(MoltbookProviderFailure);
+            expect((failure as MoltbookProviderFailure).reason).toBe(
+                "invalid-response"
+            );
+        }
+    });
+
     test("aborts outstanding sibling reads after an all-or-nothing failure", async () => {
         let abortedSiblings = 0;
         const collector = createMoltbookDashboardCollector({
