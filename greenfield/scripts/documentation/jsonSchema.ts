@@ -44,10 +44,13 @@ import {
     cacheEntryPayloadFitsBudget,
     cacheEntryStatusIsConsistent,
     cacheHeartbeatConnectionIsConsistent,
+    cacheHeartbeatCronHealthCountsAreConsistent,
     cacheHeartbeatCronLastKnownGoodIsConsistent,
+    cacheHeartbeatCronProjectionIsConsistent,
     cacheHeartbeatDashboardJobsAreConsistent,
     cacheHeartbeatResultIsConsistent,
     cacheHeartbeatSessionsLastKnownGoodIsConsistent,
+    cacheHeartbeatTaskCronIsConsistent,
     cacheHeartbeatTasksAreConsistent,
     cacheStatusEntriesAreCanonical,
     cacheStatusResultIsConsistent,
@@ -562,6 +565,18 @@ const runtimeCheckComments = new Map<unknown, string>([
         "Live Valibot validation additionally requires compact OpenClaw-cron staleness to begin at or after the last observation.",
     ],
     [
+        cacheHeartbeatCronHealthCountsAreConsistent,
+        "Live Valibot validation additionally requires OpenClaw-cron health categories to form consistent inspected, disabled, running, and synchronization subsets.",
+    ],
+    [
+        cacheHeartbeatCronProjectionIsConsistent,
+        "Live Valibot validation additionally requires OpenClaw-cron coverage, truncation, pending synchronization, and freshness to agree.",
+    ],
+    [
+        cacheHeartbeatTaskCronIsConsistent,
+        "Live Valibot validation additionally requires linked-cron actual, desired, and synchronization state to agree.",
+    ],
+    [
         cacheHeartbeatTasksAreConsistent,
         "Live Valibot validation additionally requires bounded heartbeat tasks to use strict canonical ID and relevance order with exact totals and truncation.",
     ],
@@ -571,7 +586,7 @@ const runtimeCheckComments = new Map<unknown, string>([
     ],
     [
         cacheHeartbeatResultIsConsistent,
-        "Live Valibot validation additionally requires nested heartbeat observations not to exceed the clamped response clock, disable-intent validity to match expiry, and cached projections not to remain fresh while Gateway is disconnected.",
+        "Live Valibot validation additionally requires nested heartbeat observations not to exceed the clamped response clock, disable-intent validity to match expiry, linked cron detail to follow global freshness and coverage, and cached projections not to remain fresh while Gateway is disconnected.",
     ],
     [
         cacheRealtimeIdentityMatches,

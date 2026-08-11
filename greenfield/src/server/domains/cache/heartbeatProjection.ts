@@ -14,20 +14,31 @@ import type {
     JobRepositoryReader,
     ScheduleRecordWithRelations,
 } from "../jobs/repository.ts";
-import type { TaskRepositoryReader } from "../tasks/repositoryTypes.ts";
+import type {
+    TaskHeartbeatCandidateSnapshot,
+    TaskRepositoryReader,
+} from "../tasks/repositoryTypes.ts";
 
 type HeartbeatTasks = CacheHeartbeatResult["tasks"];
 type HeartbeatDashboardJobs = CacheHeartbeatResult["dashboardJobs"];
+type HeartbeatTaskCron = NonNullable<
+    Extract<
+        HeartbeatTasks,
+        { readonly state: "available" }
+    >["items"][number]["automation"]
+>["cron"];
 type PresentDashboardJob = Extract<
     HeartbeatDashboardJobs,
     { readonly state: "available" }
 >["items"][number] & { readonly state: "present" };
 
 /** @returns The bounded content-free task projection for cache-read automation. */
-export function readCacheHeartbeatTasks(
-    repository: Pick<TaskRepositoryReader, "readHeartbeatCandidates">
+export function projectCacheHeartbeatTasks(
+    snapshot: TaskHeartbeatCandidateSnapshot,
+    readCron: (cronJobId: string) => HeartbeatTaskCron = () => ({
+        state: "unavailable",
+    })
 ): HeartbeatTasks {
-    const snapshot = repository.readHeartbeatCandidates();
     const items = snapshot.rows
         .map((row) => {
             const relevance = cacheHeartbeatTaskRelevanceValues.filter((value) => {
@@ -49,7 +60,12 @@ export function readCacheHeartbeatTasks(
             return {
                 ...(row.automation === undefined
                     ? {}
-                    : { automation: { recurring: row.automation.recurring } }),
+                    : {
+                          automation: {
+                              cron: readCron(row.automation.cronJobId),
+                              recurring: row.automation.recurring,
+                          },
+                      }),
                 id: row.id,
                 priority: row.priority,
                 relevance,
@@ -63,6 +79,40 @@ export function readCacheHeartbeatTasks(
         totalCount: snapshot.totalCount,
         truncated: snapshot.totalCount > items.length,
     };
+}
+
+/**
+ * Reads one short task snapshot, then refreshes cron outside its transaction boundary.
+ * A task-read failure cannot suppress the independent cron refresh.
+ * @param readSnapshot Synchronous task snapshot boundary that owns any short transaction.
+ * @param refreshCron Process-owned cron refresh performed after the task read closes.
+ * @param readCron Identity-private lookup against the resulting cron snapshot.
+ * @returns The projected tasks, or an unavailable task projection after a read failure.
+ */
+export async function readCacheHeartbeatTasksWithCronRefresh(
+    readSnapshot: () => TaskHeartbeatCandidateSnapshot,
+    refreshCron: () => Promise<void>,
+    readCron: (cronJobId: string) => HeartbeatTaskCron
+): Promise<HeartbeatTasks> {
+    const snapshotRead = (() => {
+        try {
+            return { snapshot: readSnapshot(), state: "available" as const };
+        } catch {
+            return { state: "unavailable" as const };
+        }
+    })();
+    await refreshCron();
+    return snapshotRead.state === "unavailable"
+        ? { state: "unavailable" }
+        : projectCacheHeartbeatTasks(snapshotRead.snapshot, readCron);
+}
+
+/** @returns A bounded task projection using an unavailable cron reader by default. */
+export function readCacheHeartbeatTasks(
+    repository: Pick<TaskRepositoryReader, "readHeartbeatCandidates">,
+    readCron?: (cronJobId: string) => HeartbeatTaskCron
+): HeartbeatTasks {
+    return projectCacheHeartbeatTasks(repository.readHeartbeatCandidates(), readCron);
 }
 
 function projectActiveRun(run: JobRunRecord): PresentDashboardJob["activeRun"] {

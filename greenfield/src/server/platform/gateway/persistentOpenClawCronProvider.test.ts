@@ -1,7 +1,12 @@
 import { describe, expect, test } from "bun:test";
 
 import { openClawCronPageMaximum } from "../../../contracts/openClawCron.ts";
+import { createInMemoryOpenClawCronIntentStore } from "../../domains/openClawCron/intentStore.ts";
 import { OpenClawCronProviderError } from "../../domains/openClawCron/provider.ts";
+import {
+    createOpenClawCronService,
+    openClawCronHeartbeatInventoryMaximumBytes,
+} from "../../domains/openClawCron/service.ts";
 import type {
     PersistentGatewayAdminMethod,
     PersistentGatewayReadWriteMethod,
@@ -80,9 +85,19 @@ class TestPersistentOpenClawCronTransport implements PersistentOpenClawCronTrans
             );
         }
         response.onRespond?.();
-        return response.value instanceof Error
-            ? Promise.reject(response.value)
-            : Promise.resolve(response.value);
+        if (response.value instanceof Error) return Promise.reject(response.value);
+        const encoded = JSON.stringify({
+            id: "fixture-response",
+            ok: true,
+            payload: response.value,
+            type: "res",
+        });
+        try {
+            request.options?.onResponseBytes?.(Buffer.byteLength(encoded, "utf8"));
+        } catch {
+            // Mirrors transport bookkeeping isolation.
+        }
+        return Promise.resolve(response.value);
     }
 }
 
@@ -234,6 +249,7 @@ describe("persistent OpenClaw cron provider", () => {
                 lane: "persistent",
                 method: "cron.list",
                 options: {
+                    onResponseBytes: expect.any(Function),
                     signal: abortController.signal,
                     timeoutMs: persistentOpenClawCronReadTimeoutMs,
                 },
@@ -258,6 +274,7 @@ describe("persistent OpenClaw cron provider", () => {
             offset: 0,
             total: 2,
         });
+        expect(page.responseBytes).toBeGreaterThan(0);
         expect(page.jobs[0]).toEqual({
             agentId: "main",
             configRevision: "definition-revision-1",
@@ -310,6 +327,65 @@ describe("persistent OpenClaw cron provider", () => {
         });
         expect(Object.isFrozen(page)).toBe(true);
         expect(Object.isFrozen(page.jobs)).toBe(true);
+    });
+
+    test("budgets raw response frames before unknown job fields are stripped", async () => {
+        const transport = new TestPersistentOpenClawCronTransport();
+        const padding = "x".repeat(
+            Math.floor(openClawCronHeartbeatInventoryMaximumBytes / 2) + 1024
+        );
+        const jobs = Array.from({ length: 201 }, (_, index) =>
+            upstreamJob(`cron-job-${String(index).padStart(3, "0")}`)
+        );
+        const firstJobs = jobs.slice(0, 100);
+        firstJobs[0] = upstreamJob("cron-job-000", { ignoredPadding: padding });
+        const secondJobs = jobs.slice(100, 200);
+        secondJobs[0] = upstreamJob("cron-job-100", { ignoredPadding: padding });
+        queue(
+            transport,
+            "cron.list",
+            listPage(firstJobs, {
+                hasMore: true,
+                limit: 100,
+                nextOffset: 100,
+                total: jobs.length,
+            })
+        );
+        queue(
+            transport,
+            "cron.list",
+            listPage(secondJobs, {
+                hasMore: true,
+                limit: 100,
+                nextOffset: 200,
+                offset: 100,
+                total: jobs.length,
+            })
+        );
+        queue(
+            transport,
+            "cron.list",
+            listPage(jobs.slice(200), {
+                limit: 100,
+                offset: 200,
+                total: jobs.length,
+            })
+        );
+        const service = createOpenClawCronService({
+            auditRequired: false,
+            intentStore: createInMemoryOpenClawCronIntentStore(),
+            provider: createPersistentOpenClawCronProvider(transport),
+        });
+
+        await service.refreshHeartbeatProjection();
+
+        expect(transport.calls.map(({ parameters }) => parameters.offset)).toEqual([
+            0, 100,
+        ]);
+        expect(service.readHeartbeatProjection()).toEqual({
+            pendingSync: "unknown",
+            state: "unavailable",
+        });
     });
 
     test("keeps broad read-only metadata complete and deep-freezes command arrays", async () => {

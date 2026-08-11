@@ -23,6 +23,7 @@ import {
     openClawCronJobSchema,
     openClawCronPayloadTextMaximumLength,
     openClawCronRunSchema,
+    openClawCronTimestampSchema,
 } from "../../../contracts/openClawCron.ts";
 import type { OpenClawCronActiveDisableIntent } from "./intentStore.ts";
 import {
@@ -330,6 +331,73 @@ function projectSynchronization(
                 ? "pending"
                 : "conflict",
     };
+}
+
+const openClawCronHeartbeatProviderJobSchema = v.object({
+    enabled: v.boolean("OpenClaw cron enabled state is invalid"),
+    id: openClawCronJobIdSchema,
+    state: v.object({
+        lastDurationMs: v.optional(openClawCronTimestampSchema),
+        lastRunAtMs: v.optional(openClawCronTimestampSchema),
+        lastRunStatus: v.optional(v.picklist(["error", "ok", "skipped"])),
+        nextRunAtMs: v.optional(openClawCronTimestampSchema),
+        runningAtMs: v.optional(openClawCronTimestampSchema),
+    }),
+});
+
+/** Minimal validated provider projection retained by the owned heartbeat inventory. */
+export type OpenClawCronHeartbeatJobSummary = Readonly<{
+    desiredEnabled?: boolean;
+    enabled: boolean;
+    id: string;
+    lastDurationMs?: number;
+    lastRunAtMs?: number;
+    lastRunStatus?: "error" | "ok" | "skipped";
+    nextRunAtMs?: number;
+    runningAtMs?: number;
+    synchronization: "confirmed" | "conflict" | "pending";
+}>;
+
+/**
+ * Projects only the fields needed by heartbeat without copying schedule or payload text.
+ * @returns A bounded identity-bearing summary for process-local correlation only.
+ */
+export function projectOpenClawCronHeartbeatJobSummary(
+    job: OpenClawCronProviderJob,
+    intent: OpenClawCronActiveDisableIntent | undefined,
+    freshness: OpenClawCronFreshness,
+    nowMs: number
+): OpenClawCronHeartbeatJobSummary {
+    const parsed = parseProviderProjection(openClawCronHeartbeatProviderJobSchema, job);
+    const synchronization = projectSynchronization(
+        parsed.enabled,
+        intent,
+        freshness,
+        nowMs
+    );
+    return Object.freeze({
+        ...(synchronization.desiredEnabled === undefined
+            ? {}
+            : { desiredEnabled: synchronization.desiredEnabled }),
+        enabled: parsed.enabled,
+        id: parsed.id,
+        ...(parsed.state.lastDurationMs === undefined
+            ? {}
+            : { lastDurationMs: parsed.state.lastDurationMs }),
+        ...(parsed.state.lastRunAtMs === undefined
+            ? {}
+            : { lastRunAtMs: parsed.state.lastRunAtMs }),
+        ...(parsed.state.lastRunStatus === undefined
+            ? {}
+            : { lastRunStatus: parsed.state.lastRunStatus }),
+        ...(parsed.state.nextRunAtMs === undefined
+            ? {}
+            : { nextRunAtMs: parsed.state.nextRunAtMs }),
+        ...(parsed.state.runningAtMs === undefined
+            ? {}
+            : { runningAtMs: parsed.state.runningAtMs }),
+        synchronization: synchronization.state,
+    });
 }
 
 export function projectOpenClawCronJob(

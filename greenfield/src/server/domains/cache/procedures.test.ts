@@ -104,7 +104,7 @@ describe("cache procedures", () => {
                         pendingSync: "unknown",
                         state: "unavailable",
                     },
-                    schemaVersion: 2,
+                    schemaVersion: 4,
                     tasks: {
                         items: [],
                         state: "available",
@@ -160,7 +160,7 @@ describe("cache procedures", () => {
             },
             generatedAtMs: 1000,
             openClawCron: { pendingSync: "unknown", state: "unavailable" },
-            schemaVersion: 2,
+            schemaVersion: 4,
             tasks: {
                 items: [],
                 state: "available",

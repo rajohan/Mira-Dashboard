@@ -9,6 +9,7 @@ import type { TaskRepositoryReader } from "../tasks/repositoryTypes.ts";
 import {
     readCacheHeartbeatDashboardJobs,
     readCacheHeartbeatTasks,
+    readCacheHeartbeatTasksWithCronRefresh,
 } from "./heartbeatProjection.ts";
 
 function uuid(index: number): string {
@@ -65,13 +66,19 @@ describe("cache heartbeat projection", () => {
                     },
                     {
                         assignee: "mira-2026" as const,
-                        automation: { recurring: false },
+                        automation: {
+                            cronJobId: "private-cron-1",
+                            recurring: false,
+                        },
                         id: uuid(1),
                         priority: "high" as const,
                         status: "in-progress" as const,
                     },
                     {
-                        automation: { recurring: true },
+                        automation: {
+                            cronJobId: "private-cron-2",
+                            recurring: true,
+                        },
                         id: uuid(2),
                         priority: "low" as const,
                         status: "todo" as const,
@@ -81,18 +88,38 @@ describe("cache heartbeat projection", () => {
             }),
         } satisfies Pick<TaskRepositoryReader, "readHeartbeatCandidates">;
 
-        const projection = readCacheHeartbeatTasks(repository);
+        const projection = readCacheHeartbeatTasks(repository, (cronJobId) =>
+            cronJobId === "private-cron-1"
+                ? {
+                      desiredEnabled: false,
+                      enabled: false,
+                      state: "present",
+                      synchronization: "confirmed",
+                  }
+                : { state: "missing" }
+        );
         expect(projection).toEqual({
             items: [
                 {
-                    automation: { recurring: false },
+                    automation: {
+                        cron: {
+                            desiredEnabled: false,
+                            enabled: false,
+                            state: "present",
+                            synchronization: "confirmed",
+                        },
+                        recurring: false,
+                    },
                     id: uuid(1),
                     priority: "high",
                     relevance: ["automation-linked", "agent-priority"],
                     status: "in-progress",
                 },
                 {
-                    automation: { recurring: true },
+                    automation: {
+                        cron: { state: "missing" },
+                        recurring: true,
+                    },
                     id: uuid(2),
                     priority: "low",
                     relevance: ["automation-linked"],
@@ -111,6 +138,54 @@ describe("cache heartbeat projection", () => {
         });
         expect(JSON.stringify(projection)).not.toContain("assignee");
         expect(JSON.stringify(projection)).not.toContain("cronJobId");
+    });
+
+    test("refreshes cron outside the task read and independently of task failures", async () => {
+        let taskReadOpen = false;
+        const events: string[] = [];
+        const snapshot = {
+            rows: [],
+            totalCount: 0,
+        };
+        const available = await readCacheHeartbeatTasksWithCronRefresh(
+            () => {
+                events.push("task-read");
+                taskReadOpen = true;
+                try {
+                    return snapshot;
+                } finally {
+                    taskReadOpen = false;
+                }
+            },
+            () => {
+                expect(taskReadOpen).toBeFalse();
+                events.push("cron-refresh");
+                return Promise.resolve();
+            },
+            () => ({ state: "unavailable" })
+        );
+        expect(events).toEqual(["task-read", "cron-refresh"]);
+        expect(available).toEqual({
+            items: [],
+            state: "available",
+            totalCount: 0,
+            truncated: false,
+        });
+
+        events.length = 0;
+        const unavailable = await readCacheHeartbeatTasksWithCronRefresh(
+            () => {
+                events.push("task-read-failed");
+                throw new Error("private database detail");
+            },
+            () => {
+                events.push("cron-refresh-after-failure");
+                return Promise.resolve();
+            },
+            () => ({ state: "missing" })
+        );
+        expect(events).toEqual(["task-read-failed", "cron-refresh-after-failure"]);
+        expect(unavailable).toEqual({ state: "unavailable" });
     });
 
     test("projects every code-owned schedule with compact run and expiry state", () => {

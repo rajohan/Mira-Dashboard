@@ -156,9 +156,30 @@ describe("cache service", () => {
             readHeartbeatTasks: () => {
                 calls.push("tasks");
                 return {
-                    items: [],
+                    items: [
+                        {
+                            automation: {
+                                cron: {
+                                    enabled: true,
+                                    lastRunAtMs: 5100,
+                                    nextRunAtMs: 9000,
+                                    runningAtMs: 5200,
+                                    state: "present" as const,
+                                    synchronization: "confirmed" as const,
+                                },
+                                recurring: true,
+                            },
+                            id: uuid(40),
+                            priority: "high" as const,
+                            relevance: [
+                                "automation-linked" as const,
+                                "agent-priority" as const,
+                            ],
+                            status: "in-progress" as const,
+                        },
+                    ],
                     state: "available",
-                    totalCount: 0,
+                    totalCount: 1,
                     truncated: false,
                 };
             },
@@ -166,6 +187,19 @@ describe("cache service", () => {
                 calls.push("cron");
                 return {
                     count: 7,
+                    health: {
+                        disabledCount: 0,
+                        enabledCount: 7,
+                        inspectedCount: 7,
+                        intendedDisabledCount: 0,
+                        lastRunErrorCount: 0,
+                        runningCount: 0,
+                        staleRunningCount: 0,
+                        synchronizationConflictCount: 1,
+                        synchronizationPendingCount: 0,
+                        truncated: false,
+                        unexpectedDisabledCount: 0,
+                    },
                     observedAtMs: 4600,
                     pendingSync: "present",
                     state: "fresh",
@@ -177,8 +211,8 @@ describe("cache service", () => {
         expect(calls).toEqual([
             "connection",
             "sessions",
-            "cron",
             "tasks",
+            "cron",
             "dashboard-jobs",
         ]);
         expect(heartbeat).toMatchObject({
@@ -202,18 +236,28 @@ describe("cache service", () => {
                     truncated: true,
                 },
             },
-            generatedAtMs: 5000,
+            generatedAtMs: 5200,
             openClawCron: {
                 count: 7,
                 observedAtMs: 4600,
                 pendingSync: "present",
                 state: "fresh",
             },
-            schemaVersion: 2,
+            schemaVersion: 4,
             tasks: {
-                items: [],
+                items: [
+                    {
+                        automation: {
+                            cron: {
+                                lastRunAtMs: 5100,
+                                nextRunAtMs: 9000,
+                                runningAtMs: 5200,
+                            },
+                        },
+                    },
+                ],
                 state: "available",
-                totalCount: 0,
+                totalCount: 1,
                 truncated: false,
             },
         });
@@ -236,8 +280,42 @@ describe("cache service", () => {
                 state: "fresh",
                 truncated: false,
             }),
+            readHeartbeatTasks: () => ({
+                items: [
+                    {
+                        automation: {
+                            cron: {
+                                enabled: true,
+                                state: "present",
+                                synchronization: "confirmed",
+                            },
+                            recurring: true,
+                        },
+                        id: "019fc968-1a9b-7765-8f1b-d5b863b0e7b4",
+                        priority: "high",
+                        relevance: ["automation-linked", "agent-priority"],
+                        status: "in-progress",
+                    },
+                ],
+                state: "available",
+                totalCount: 1,
+                truncated: false,
+            }),
             readOpenClawCronProjection: () => ({
                 count: 4,
+                health: {
+                    disabledCount: 0,
+                    enabledCount: 4,
+                    inspectedCount: 4,
+                    intendedDisabledCount: 0,
+                    lastRunErrorCount: 0,
+                    runningCount: 0,
+                    staleRunningCount: 0,
+                    synchronizationConflictCount: 0,
+                    synchronizationPendingCount: 0,
+                    truncated: false,
+                    unexpectedDisabledCount: 0,
+                },
                 observedAtMs: 4500,
                 pendingSync: "none",
                 state: "fresh",
@@ -253,6 +331,15 @@ describe("cache service", () => {
             openClawCron: {
                 staleSinceMs: 6000,
                 state: "last-known-good",
+            },
+            tasks: {
+                items: [
+                    {
+                        automation: {
+                            cron: { state: "unavailable" },
+                        },
+                    },
+                ],
             },
         });
 

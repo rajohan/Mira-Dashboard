@@ -1402,24 +1402,34 @@ full-browser parity, production rehearsal, cutover, and legacy deletion remain o
 - The existing stream enforces topic authorization, renewable and revocable authorization leases,
   bounded buffering, durable replay, and schema validation.
 
-### 2026-08-11 — Heartbeat automation parity closed with schema v2
+### 2026-08-11 — Heartbeat operational summary advanced to schema v4
 
-- `cache.getHeartbeat` schema v2 retains the bounded payload-free cache inventory, process-local
-  Gateway phase/current-session summary, and identity-free global OpenClaw-cron state without
-  issuing a Gateway RPC. Access remains exactly authenticated `cache:read`; no `tasks:read` or
-  `jobs:read` capability is required or granted.
-- A purpose-built task reader applies the exact legacy operational predicate to unfinished tasks,
-  returns a canonical UUID-keyed prefix of at most 100 rows plus exact total/truncation, and omits
-  titles, bodies, labels, assignee/cron identity, and automation configuration. A separate bounded
-  Dashboard-job projection enumerates every code-owned definition, including missing and
-  default-disabled schedules, while exposing only enabled/next-run, disable-expiry validity, and
-  compact run lifecycle/terminal code.
-- Both local projections validate inside independent safe-reader boundaries and become explicitly
-  `unavailable` on malformed data or read failure. Contract, repository, projection, service,
-  authorization, production-composition, JSON Schema, and parity regressions lock the secure
-  narrowing. No database migration, route, error-policy, or contract-registry change is required.
-- The reviewed legacy `GET /api/cache/heartbeat` row is implemented by this v2 replacement, not by
-  emulating payload-bearing schema v3. Greenfield cutover must migrate the repo-external OpenClaw
-  `HEARTBEAT.md` consumer to payload-free cache checks, UUID task checks, Dashboard-job summaries,
-  and global OpenClaw-cron availability/pending-sync state. The live production consumer remains
-  unchanged until activation.
+- `cache.getHeartbeat` schema v4 retains bounded payload-free cache, Gateway, task, and
+  Dashboard-job projections and adds an owned fresh-only OpenClaw-cron inventory refresh. The
+  refresh is process-single-flighted, has an eight-second aggregate deadline, 60-second success
+  TTL, ten-second failure retry gate, one bounded revision-race retry, and a 1000-row inspection
+  ceiling. Pages are read sequentially under a 32 MiB cumulative authenticated response-frame
+  admission budget and reduced immediately to heartbeat-only fields. Exact encoded bytes are
+  captured before provider projection can strip unknown fields; one bounded overflow page may
+  arrive, then the walk stops without retry. Public browser list reads no longer mutate heartbeat
+  state.
+- All cron pages must have one snapshot revision and total, exact offsets, complete page lengths,
+  and globally unique IDs before anything commits. A failed, raced, duplicate, incomplete, or
+  timed-out candidate preserves the whole previous projection as last-known-good. Mutations
+  invalidate the success TTL immediately; ordered server shutdown aborts and awaits any owned
+  refresh.
+- Identity-free aggregate health now distinguishes enabled/disabled, intentional/unexpected
+  disablement, running/potentially stuck, last-run failures, synchronization conflicts versus
+  pending reconciliation, and truncation. Automation-linked tasks receive `present`, `missing`, or
+  `unavailable` cron health;
+  `missing` requires fresh complete authority. The internal task-to-cron ID map never serializes,
+  and the task SQLite transaction closes before Gateway I/O.
+- Contract consistency accepts future `nextRunAtMs`, clamps only historical observations, and
+  forbids stale/truncated global state from asserting an unjustified missing linked cron. Focused
+  coverage locks cold refresh, TTL/backoff, single-flight/disposal, mutation invalidation,
+  0/100/101/1000/>1000 rows, sequential pagination, cumulative byte overflow, pagination defects,
+  whole-snapshot LKG, task correlation, and no-identity serialization.
+- This work does **not** claim that the legacy `GET /api/cache/heartbeat` schema-v3 contract is
+  replaced. Legacy still carries payload-bearing cache diagnostics and identifiable task,
+  Dashboard-job, and per-cron rows. Its parity entry is returned to `planned` until those
+  diagnostic capabilities and the repo-external consumer migration are preserved without loss.

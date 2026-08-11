@@ -64,6 +64,8 @@ export interface TaskOpenCronLinkRecord {
 export interface TaskHeartbeatCandidateRecord {
     readonly assignee?: TaskRecord["assignee"];
     readonly automation?: {
+        /** Internal correlation key; the heartbeat response never exposes it. */
+        readonly cronJobId: string;
         readonly recurring: boolean;
     };
     readonly id: TaskRecord["id"];

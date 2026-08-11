@@ -19,6 +19,7 @@ import {
     getOpenClawCronInputSchema,
     listOpenClawCronInputSchema,
     listOpenClawCronRunsInputSchema,
+    openClawCronPageMaximum,
     openClawCronTimestampSchema,
     runOpenClawCronInputSchema,
     runOpenClawCronResultSchema,
@@ -41,9 +42,11 @@ import {
     freshOpenClawCronSource,
     lastKnownGoodOpenClawCronSource,
     projectOpenClawCronGetResult,
+    projectOpenClawCronHeartbeatJobSummary,
     projectOpenClawCronJob,
     projectOpenClawCronListResult,
     projectOpenClawCronRunsResult,
+    type OpenClawCronHeartbeatJobSummary,
 } from "./projection.ts";
 import {
     type OpenClawCronProvider,
@@ -98,6 +101,8 @@ export interface OpenClawCronServiceOptions {
     readonly expirySystemActorId?: string;
     readonly intentStore: OpenClawCronIntentStore;
     readonly linkedTaskReader?: OpenClawCronLinkedTaskReader;
+    /** Monotonic process clock used only for refresh TTLs and retry admission. */
+    readonly monotonicClock?: () => number;
     readonly onAuditSettlementFailure?: (failure: {
         readonly operation: OpenClawCronAuditOperation;
         readonly settlement: OpenClawCronTerminalAuditSettlement;
@@ -166,21 +171,62 @@ export type OpenClawCronHeartbeatProjection =
       }>
     | Readonly<{
           count: number;
+          health: OpenClawCronHeartbeatHealth;
           observedAtMs: number;
           pendingSync: "none" | "present" | "unknown";
           state: "fresh";
       }>
     | Readonly<{
           count: number;
+          health: OpenClawCronHeartbeatHealth;
           observedAtMs: number;
           pendingSync: "none" | "present" | "unknown";
           staleSinceMs: number;
           state: "last-known-good";
       }>;
 
+export interface OpenClawCronHeartbeatHealth {
+    readonly disabledCount: number;
+    readonly enabledCount: number;
+    readonly inspectedCount: number;
+    readonly intendedDisabledCount: number;
+    readonly lastRunErrorCount: number;
+    readonly runningCount: number;
+    readonly staleRunningCount: number;
+    readonly synchronizationConflictCount: number;
+    readonly synchronizationPendingCount: number;
+    readonly truncated: boolean;
+    readonly unexpectedDisabledCount: number;
+}
+
+/** Identity-free state of one task-linked cron, never its provider id or name. */
+export type OpenClawCronHeartbeatJobProjection =
+    | Readonly<{ state: "missing" | "unavailable" }>
+    | Readonly<{
+          desiredEnabled?: boolean;
+          enabled: boolean;
+          lastDurationMs?: number;
+          lastRunAtMs?: number;
+          lastRunStatus?: "error" | "ok" | "skipped" | "unknown";
+          nextRunAtMs?: number;
+          runningAtMs?: number;
+          state: "present";
+          synchronization: "confirmed" | "conflict" | "pending";
+      }>;
+
+type OpenClawCronPresentHeartbeatJobProjection = Extract<
+    OpenClawCronHeartbeatJobProjection,
+    { readonly state: "present" }
+>;
+
 /** Non-fetching global summary seam with no job names, payloads, or identifiers. */
 export interface OpenClawCronHeartbeatReader {
+    readonly disposeHeartbeat: () => Promise<void>;
+    readonly readHeartbeatJobProjection: (
+        id: string
+    ) => OpenClawCronHeartbeatJobProjection;
     readonly readHeartbeatProjection: () => OpenClawCronHeartbeatProjection;
+    readonly refreshHeartbeatProjection: () => Promise<void>;
 }
 
 function parseInput<TSchema extends v.GenericSchema>(
@@ -313,25 +359,116 @@ function deferredVoid(): Readonly<{
     return { promise, resolve: resolvePromise };
 }
 
-function isGlobalInventory(input: ListOpenClawCronInput): boolean {
-    return (
-        input.enabled === "all" &&
-        input.lastRunStatus === "all" &&
-        input.offset === 0 &&
-        input.query === undefined &&
-        input.scheduleKind === "all"
-    );
+/** Minimum age before heartbeat performs another owned Gateway inventory read. */
+export const openClawCronHeartbeatRefreshIntervalMs = 60_000;
+/** Short retry gate after an unsuccessful refresh, without making stale data fresh. */
+export const openClawCronHeartbeatFailureBackoffMs = 10_000;
+/** Shared deadline below the HTTP listener ceiling for one owned refresh. */
+export const openClawCronHeartbeatRefreshTimeoutMs = 8000;
+/** Maximum complete cron rows inspected by one heartbeat refresh. */
+export const openClawCronHeartbeatInventoryMaximum = 1000;
+/** Maximum cumulative authenticated response-frame bytes admitted by one refresh. */
+export const openClawCronHeartbeatInventoryMaximumBytes = 32 * 1024 * 1024;
+/** A running cron older than this threshold is surfaced as potentially stuck. */
+export const openClawCronHeartbeatStaleRunningMs = 1_800_000;
+
+class OpenClawCronHeartbeatInventoryBudgetError extends OpenClawCronServiceError {
+    constructor() {
+        super("provider-data-invalid");
+        this.name = "OpenClawCronHeartbeatInventoryBudgetError";
+    }
 }
 
-function pendingSyncState(
-    result: ListOpenClawCronResult
-): "none" | "present" | "unknown" {
-    if (
-        result.jobs.some(({ synchronization }) => synchronization.state !== "confirmed")
-    ) {
-        return "present";
+function heartbeatSummary(
+    jobs: ReadonlyMap<string, OpenClawCronPresentHeartbeatJobProjection>,
+    total: number,
+    observedAtMs: number
+): Readonly<{
+    health: OpenClawCronHeartbeatHealth;
+    pendingSync: "none" | "present" | "unknown";
+}> {
+    let disabledCount = 0;
+    let enabledCount = 0;
+    let intendedDisabledCount = 0;
+    let lastRunErrorCount = 0;
+    let runningCount = 0;
+    let staleRunningCount = 0;
+    let synchronizationConflictCount = 0;
+    let synchronizationPendingCount = 0;
+    for (const job of jobs.values()) {
+        if (job.enabled) enabledCount += 1;
+        else disabledCount += 1;
+        if (!job.enabled && job.desiredEnabled === false) {
+            intendedDisabledCount += 1;
+        }
+        if (job.lastRunStatus === "error") lastRunErrorCount += 1;
+        if (job.runningAtMs !== undefined) {
+            runningCount += 1;
+            if (
+                job.runningAtMs <=
+                Math.max(0, observedAtMs - openClawCronHeartbeatStaleRunningMs)
+            ) {
+                staleRunningCount += 1;
+            }
+        }
+        if (job.synchronization === "conflict") {
+            synchronizationConflictCount += 1;
+        } else if (job.synchronization === "pending") {
+            synchronizationPendingCount += 1;
+        }
     }
-    return result.hasMore ? "unknown" : "none";
+    const health = Object.freeze({
+        disabledCount,
+        enabledCount,
+        inspectedCount: jobs.size,
+        intendedDisabledCount,
+        lastRunErrorCount,
+        runningCount,
+        staleRunningCount,
+        synchronizationConflictCount,
+        synchronizationPendingCount,
+        truncated: jobs.size < total,
+        unexpectedDisabledCount: disabledCount - intendedDisabledCount,
+    });
+    let pendingSync: "none" | "present" | "unknown" = "none";
+    if (synchronizationConflictCount + synchronizationPendingCount > 0) {
+        pendingSync = "present";
+    } else if (jobs.size < total) {
+        pendingSync = "unknown";
+    }
+    return Object.freeze({ health, pendingSync });
+}
+
+function heartbeatJobProjection(
+    job: OpenClawCronHeartbeatJobSummary
+): OpenClawCronPresentHeartbeatJobProjection {
+    return Object.freeze({
+        ...(job.desiredEnabled === undefined
+            ? {}
+            : { desiredEnabled: job.desiredEnabled }),
+        enabled: job.enabled,
+        ...(job.lastDurationMs === undefined
+            ? {}
+            : { lastDurationMs: job.lastDurationMs }),
+        ...(job.lastRunAtMs === undefined ? {} : { lastRunAtMs: job.lastRunAtMs }),
+        ...(job.lastRunStatus === undefined ? {} : { lastRunStatus: job.lastRunStatus }),
+        ...(job.nextRunAtMs === undefined ? {} : { nextRunAtMs: job.nextRunAtMs }),
+        ...(job.runningAtMs === undefined ? {} : { runningAtMs: job.runningAtMs }),
+        state: "present",
+        synchronization: job.synchronization,
+    });
+}
+
+function heartbeatInventoryInput(offset: number): ListOpenClawCronInput {
+    return {
+        enabled: "all",
+        lastRunStatus: "all",
+        limit: openClawCronPageMaximum,
+        offset,
+        scheduleKind: "all",
+        sortBy: "name",
+        sortDir: "asc",
+    };
 }
 
 function defaultAmbiguousPendingSync(
@@ -350,6 +487,7 @@ export function createOpenClawCronService(
     options: OpenClawCronServiceOptions
 ): OpenClawCronService & OpenClawCronHeartbeatReader {
     const now = options.clock ?? Date.now;
+    const monotonicNow = options.monotonicClock ?? (() => performance.now());
     const auditRequired = options.auditRequired ?? true;
     const expirySystemActor = {
         id: options.expirySystemActorId ?? "openclaw-cron-expiry",
@@ -366,33 +504,19 @@ export function createOpenClawCronService(
     const getCache = new Map<string, Observed<OpenClawCronProviderJob>>();
     const runsCache = new Map<string, Observed<OpenClawCronProviderRunPage>>();
     const jobLocks = new Map<string, Promise<void>>();
+    let heartbeatJobProjections: ReadonlyMap<
+        string,
+        OpenClawCronPresentHeartbeatJobProjection
+    > = new Map();
+    let heartbeatDisposed = false;
+    let heartbeatNextAttemptAtMonotonicMs: number | undefined;
+    let heartbeatRefreshController: AbortController | undefined;
+    let heartbeatRefreshPromise: Promise<void> | undefined;
+    let heartbeatSnapshotGeneration = 0;
     let heartbeatProjection: OpenClawCronHeartbeatProjection = Object.freeze({
         pendingSync: "unknown",
         state: "unavailable",
     });
-    let nextHeartbeatProjectionGeneration = 0;
-    let committedHeartbeatProjectionGeneration = 0;
-
-    function rememberHeartbeatProjection(
-        result: ListOpenClawCronResult,
-        generation: number
-    ): void {
-        if (generation < committedHeartbeatProjectionGeneration) return;
-        committedHeartbeatProjectionGeneration = generation;
-        const shared = {
-            count: result.total,
-            observedAtMs: result.freshness.observedAtMs,
-            pendingSync: pendingSyncState(result),
-        };
-        heartbeatProjection =
-            result.freshness.kind === "fresh"
-                ? Object.freeze({ ...shared, state: "fresh" })
-                : Object.freeze({
-                      ...shared,
-                      staleSinceMs: result.freshness.staleSinceMs,
-                      state: "last-known-good",
-                  });
-    }
 
     function markHeartbeatProjectionStale(
         candidateCheckedAtMs?: number,
@@ -419,6 +543,7 @@ export function createOpenClawCronService(
         }
         heartbeatProjection = Object.freeze({
             count: current.count,
+            health: current.health,
             observedAtMs: current.observedAtMs,
             pendingSync:
                 current.pendingSync === "present" || pendingSync === "present"
@@ -437,13 +562,286 @@ export function createOpenClawCronService(
         cause: unknown,
         pendingSync?: "present" | "unknown"
     ): OpenClawCronServiceError {
-        committedHeartbeatProjectionGeneration = nextHeartbeatProjectionGeneration += 1;
-        markHeartbeatProjectionStale(undefined, pendingSync);
+        invalidateHeartbeatProjection(undefined, pendingSync);
         return new OpenClawCronServiceError("unknown-outcome", { cause, id });
+    }
+
+    function invalidateHeartbeatProjection(
+        candidateCheckedAtMs?: number,
+        pendingSync?: "present" | "unknown"
+    ): void {
+        heartbeatSnapshotGeneration += 1;
+        heartbeatNextAttemptAtMonotonicMs = undefined;
+        markHeartbeatProjectionStale(candidateCheckedAtMs, pendingSync);
     }
 
     function readHeartbeatProjection(): OpenClawCronHeartbeatProjection {
         return heartbeatProjection;
+    }
+
+    function readHeartbeatJobProjection(id: string): OpenClawCronHeartbeatJobProjection {
+        if (heartbeatProjection.state !== "fresh") {
+            return Object.freeze({ state: "unavailable" });
+        }
+        const present = heartbeatJobProjections.get(id);
+        if (present !== undefined) return present;
+        return Object.freeze({
+            state: heartbeatProjection.health.truncated ? "unavailable" : "missing",
+        });
+    }
+
+    let lastHeartbeatMonotonicMs = 0;
+
+    function heartbeatMonotonicMs(): number {
+        const candidate = monotonicNow();
+        if (!Number.isFinite(candidate) || candidate < 0) {
+            throw new RangeError("OpenClaw cron heartbeat monotonic clock is invalid");
+        }
+        lastHeartbeatMonotonicMs = Math.max(lastHeartbeatMonotonicMs, candidate);
+        return lastHeartbeatMonotonicMs;
+    }
+
+    async function readFreshHeartbeatPage(
+        offset: number,
+        signal: AbortSignal
+    ): Promise<OpenClawCronProviderListPage> {
+        signal.throwIfAborted();
+        try {
+            const page = await options.provider.list({
+                ...heartbeatInventoryInput(offset),
+                compact: false,
+                includeDeliveryPreviews: false,
+                signal,
+            });
+            signal.throwIfAborted();
+            return page;
+        } catch (error) {
+            if (signal.aborted) throw error;
+            throw serviceError(error);
+        }
+    }
+
+    function validateHeartbeatPage(
+        page: OpenClawCronProviderListPage,
+        index: number,
+        inspectedTotal: number,
+        snapshotRevision: string,
+        total: number,
+        ids: Set<string>
+    ): void {
+        const expectedOffset = index * openClawCronPageMaximum;
+        const expectedLength = Math.min(
+            openClawCronPageMaximum,
+            Math.max(0, inspectedTotal - expectedOffset)
+        );
+        const expectedNextOffset = expectedOffset + expectedLength;
+        const expectedHasMore = expectedNextOffset < total;
+        if (
+            page.limit !== openClawCronPageMaximum ||
+            page.offset !== expectedOffset ||
+            !Number.isSafeInteger(page.responseBytes) ||
+            page.responseBytes < 1 ||
+            page.total !== total ||
+            page.snapshotRevision !== snapshotRevision ||
+            page.jobs.length !== expectedLength ||
+            page.hasMore !== expectedHasMore ||
+            page.nextOffset !== (expectedHasMore ? expectedNextOffset : null)
+        ) {
+            throw new OpenClawCronServiceError("provider-data-invalid");
+        }
+        for (const { id } of page.jobs) {
+            if (ids.has(id)) {
+                throw new OpenClawCronServiceError("provider-data-invalid", {
+                    id,
+                });
+            }
+            ids.add(id);
+        }
+    }
+
+    async function readFreshHeartbeatCandidate(signal: AbortSignal): Promise<{
+        readonly health: OpenClawCronHeartbeatHealth;
+        readonly jobs: ReadonlyMap<string, OpenClawCronPresentHeartbeatJobProjection>;
+        readonly observedAtMs: number;
+        readonly pendingSync: "none" | "present" | "unknown";
+        readonly total: number;
+    }> {
+        let lastFailure: unknown;
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+            const attemptController = new AbortController();
+            const abortAttempt = () => attemptController.abort();
+            if (signal.aborted) {
+                abortAttempt();
+            } else {
+                signal.addEventListener("abort", abortAttempt, { once: true });
+            }
+            try {
+                let currentPage: OpenClawCronProviderListPage | undefined =
+                    await readFreshHeartbeatPage(0, attemptController.signal);
+                if (
+                    !Number.isSafeInteger(currentPage.total) ||
+                    currentPage.total < 0 ||
+                    !/^sha256:[A-Za-z0-9_-]{43}$/u.test(currentPage.snapshotRevision)
+                ) {
+                    throw new OpenClawCronServiceError("provider-data-invalid");
+                }
+                const total = currentPage.total;
+                const snapshotRevision = currentPage.snapshotRevision;
+                const inspectedTotal = Math.min(
+                    total,
+                    openClawCronHeartbeatInventoryMaximum
+                );
+                const pageCount = Math.max(
+                    1,
+                    Math.ceil(inspectedTotal / openClawCronPageMaximum)
+                );
+                const observedAtMs = v.parse(openClawCronTimestampSchema, now());
+                const freshness = freshOpenClawCronSource(observedAtMs);
+                const ids = new Set<string>();
+                const jobs = new Map<string, OpenClawCronPresentHeartbeatJobProjection>();
+                let admittedResponseBytes = 0;
+                for (let index = 0; index < pageCount; index += 1) {
+                    attemptController.signal.throwIfAborted();
+                    if (index > 0) {
+                        currentPage = await readFreshHeartbeatPage(
+                            index * openClawCronPageMaximum,
+                            attemptController.signal
+                        );
+                    }
+                    const page = currentPage;
+                    if (page === undefined) {
+                        throw new OpenClawCronServiceError("provider-data-invalid");
+                    }
+                    validateHeartbeatPage(
+                        page,
+                        index,
+                        inspectedTotal,
+                        snapshotRevision,
+                        total,
+                        ids
+                    );
+                    if (
+                        page.responseBytes >
+                        openClawCronHeartbeatInventoryMaximumBytes - admittedResponseBytes
+                    ) {
+                        throw new OpenClawCronHeartbeatInventoryBudgetError();
+                    }
+                    admittedResponseBytes += page.responseBytes;
+                    for (const job of page.jobs) {
+                        const summary = projectOpenClawCronHeartbeatJobSummary(
+                            job,
+                            await getActiveIntent(job.id, attemptController.signal),
+                            freshness,
+                            observedAtMs
+                        );
+                        jobs.set(summary.id, heartbeatJobProjection(summary));
+                    }
+                    currentPage = undefined;
+                }
+                const summary = heartbeatSummary(jobs, total, observedAtMs);
+                return {
+                    health: summary.health,
+                    jobs,
+                    observedAtMs,
+                    pendingSync: summary.pendingSync,
+                    total,
+                };
+            } catch (error) {
+                if (signal.aborted) throw error;
+                const failure = serviceError(error);
+                lastFailure = failure;
+                if (
+                    attempt === 0 &&
+                    failure.reason === "provider-data-invalid" &&
+                    !(error instanceof OpenClawCronHeartbeatInventoryBudgetError)
+                ) {
+                    continue;
+                }
+                throw failure;
+            } finally {
+                signal.removeEventListener("abort", abortAttempt);
+                attemptController.abort();
+            }
+        }
+        throw serviceError(lastFailure);
+    }
+
+    async function refreshHeartbeatProjection(): Promise<void> {
+        if (heartbeatDisposed) return;
+        const active = heartbeatRefreshPromise;
+        if (active !== undefined) {
+            await active;
+            await refreshHeartbeatProjection();
+            return;
+        }
+        let startedAtMonotonicMs: number;
+        try {
+            startedAtMonotonicMs = heartbeatMonotonicMs();
+        } catch {
+            markHeartbeatProjectionStale();
+            return;
+        }
+        if (
+            heartbeatNextAttemptAtMonotonicMs !== undefined &&
+            startedAtMonotonicMs < heartbeatNextAttemptAtMonotonicMs
+        ) {
+            return;
+        }
+
+        const generation = heartbeatSnapshotGeneration;
+        const controller = new AbortController();
+        heartbeatRefreshController = controller;
+        const timeout = setTimeout(
+            () => controller.abort(),
+            openClawCronHeartbeatRefreshTimeoutMs
+        );
+        timeout.unref?.();
+        const flight = (async () => {
+            try {
+                const candidate = await readFreshHeartbeatCandidate(controller.signal);
+                if (heartbeatDisposed || generation !== heartbeatSnapshotGeneration) {
+                    return;
+                }
+                heartbeatJobProjections = candidate.jobs;
+                heartbeatProjection = Object.freeze({
+                    count: candidate.total,
+                    health: candidate.health,
+                    observedAtMs: candidate.observedAtMs,
+                    pendingSync: candidate.pendingSync,
+                    state: "fresh",
+                });
+                heartbeatNextAttemptAtMonotonicMs =
+                    heartbeatMonotonicMs() + openClawCronHeartbeatRefreshIntervalMs;
+            } catch {
+                if (!heartbeatDisposed && generation === heartbeatSnapshotGeneration) {
+                    markHeartbeatProjectionStale();
+                    let completedAtMonotonicMs = startedAtMonotonicMs;
+                    try {
+                        completedAtMonotonicMs = heartbeatMonotonicMs();
+                    } catch {
+                        // Retain a bounded gate from the last valid monotonic observation.
+                    }
+                    heartbeatNextAttemptAtMonotonicMs =
+                        completedAtMonotonicMs + openClawCronHeartbeatFailureBackoffMs;
+                }
+            } finally {
+                clearTimeout(timeout);
+                if (heartbeatRefreshController === controller) {
+                    heartbeatRefreshController = undefined;
+                    heartbeatRefreshPromise = undefined;
+                }
+            }
+        })();
+        heartbeatRefreshPromise = flight;
+        await flight;
+    }
+
+    async function disposeHeartbeat(): Promise<void> {
+        if (heartbeatDisposed) return;
+        heartbeatDisposed = true;
+        heartbeatSnapshotGeneration += 1;
+        heartbeatRefreshController?.abort();
+        await heartbeatRefreshPromise;
     }
 
     async function recordOperationAudit(
@@ -577,6 +975,7 @@ export function createOpenClawCronService(
             reason: "expired",
         });
         signal?.throwIfAborted();
+        if (closed) invalidateInventory(observedAtMs);
         return closed ? undefined : await getActiveIntent(job.id, signal);
     }
 
@@ -643,10 +1042,20 @@ export function createOpenClawCronService(
         return { observedAtMs, value: job };
     }
 
-    function invalidateInventory(): void {
+    function invalidateInventory(
+        candidateCheckedAtMs?: number,
+        pendingSync?: "present" | "unknown"
+    ): void {
         listCache.clear();
-        committedHeartbeatProjectionGeneration = nextHeartbeatProjectionGeneration += 1;
-        markHeartbeatProjectionStale();
+        invalidateHeartbeatProjection(candidateCheckedAtMs, pendingSync);
+    }
+
+    function clearTargetCaches(id: string): void {
+        getCache.delete(id);
+        for (const key of runsCache.keys()) {
+            const decoded = JSON.parse(key) as readonly unknown[];
+            if (decoded[0] === id) runsCache.delete(key);
+        }
     }
 
     async function list(
@@ -655,9 +1064,6 @@ export function createOpenClawCronService(
     ): Promise<ListOpenClawCronResult> {
         const parsed = parseInput(listOpenClawCronInputSchema, input);
         const key = listCacheKey(parsed);
-        const heartbeatGeneration = isGlobalInventory(parsed)
-            ? (nextHeartbeatProjectionGeneration += 1)
-            : undefined;
         signal?.throwIfAborted();
         try {
             const page = await options.provider.list({
@@ -679,17 +1085,11 @@ export function createOpenClawCronService(
             for (const job of page.jobs) {
                 getCache.set(job.id, { observedAtMs, value: job });
             }
-            if (heartbeatGeneration !== undefined) {
-                rememberHeartbeatProjection(result, heartbeatGeneration);
-            }
             return result;
         } catch (error) {
             if (signal?.aborted) throw error;
             const cached = listCache.get(key);
             if (cached === undefined) {
-                if (heartbeatGeneration !== undefined) {
-                    markHeartbeatProjectionStale();
-                }
                 throw serviceError(error);
             }
             const checkedAtMs = now();
@@ -700,9 +1100,6 @@ export function createOpenClawCronService(
                 checkedAtMs,
                 openLinkedTasks(cached.value.jobs)
             );
-            if (heartbeatGeneration !== undefined) {
-                rememberHeartbeatProjection(result, heartbeatGeneration);
-            }
             return result;
         }
     }
@@ -777,7 +1174,7 @@ export function createOpenClawCronService(
             throw ambiguousMutation(preflight.value.id, undefined, "present");
         }
         const checkedAtMs = now();
-        markHeartbeatProjectionStale(checkedAtMs, "present");
+        invalidateInventory(checkedAtMs, "present");
         return Promise.resolve(
             projectOpenClawCronGetResult(
                 preflight.value,
@@ -949,7 +1346,7 @@ export function createOpenClawCronService(
 
             if (readback.value.enabled !== parsed.enabled) {
                 if (parsed.enabled) {
-                    markHeartbeatProjectionStale(
+                    invalidateInventory(
                         undefined,
                         previousIntent === undefined ? undefined : "present"
                     );
@@ -1113,6 +1510,8 @@ export function createOpenClawCronService(
                     error.reason === "not-found"
                 ) {
                     await closeDeletedTarget(parsed.id, actor, signal);
+                    invalidateInventory();
+                    clearTargetCaches(parsed.id);
                     return v.parse(deleteOpenClawCronResultSchema, {
                         deleted: true,
                         id: parsed.id,
@@ -1160,11 +1559,7 @@ export function createOpenClawCronService(
                 throw ambiguousMutation(parsed.id, error, removalPendingSync);
             }
             invalidateInventory();
-            getCache.delete(parsed.id);
-            for (const key of runsCache.keys()) {
-                const decoded = JSON.parse(key) as readonly unknown[];
-                if (decoded[0] === parsed.id) runsCache.delete(key);
-            }
+            clearTargetCaches(parsed.id);
             return v.parse(deleteOpenClawCronResultSchema, {
                 deleted: true,
                 id: parsed.id,
@@ -1278,10 +1673,13 @@ export function createOpenClawCronService(
 
     return Object.freeze({
         delete: auditedDelete,
+        disposeHeartbeat,
         get,
         list,
         listRuns,
+        readHeartbeatJobProjection,
         readHeartbeatProjection,
+        refreshHeartbeatProjection,
         reconcileExpired,
         run: auditedRun,
         setEnabled: auditedSetEnabled,

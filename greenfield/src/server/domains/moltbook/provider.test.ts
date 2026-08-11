@@ -198,8 +198,8 @@ describe("Moltbook dashboard provider", () => {
                 ["/api/v1/feed?sort=hot&limit=25", providerPayloads.hot],
                 ["/api/v1/feed?sort=new&limit=25", providerPayloads.new],
                 ["/api/v1/agents/profile?name=mira_2026", providerPayloads.profile],
+                [emptyPath, {}],
             ]);
-            byPath.set(emptyPath, {});
             const collector = createMoltbookDashboardCollector({
                 agentName: "mira_2026",
                 apiKey: Redacted.make("moltbook-secret-sentinel"),
@@ -214,9 +214,7 @@ describe("Moltbook dashboard provider", () => {
                 .catch((error: unknown) => error);
 
             expect(failure).toBeInstanceOf(MoltbookProviderFailure);
-            expect((failure as MoltbookProviderFailure).reason).toBe(
-                "invalid-response"
-            );
+            expect((failure as MoltbookProviderFailure).reason).toBe("invalid-response");
         }
     });
 

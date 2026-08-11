@@ -187,16 +187,17 @@ describe("reviewed pre-cutover parity inventory", () => {
         ]);
     });
 
-    test("records heartbeat v2 as a secure narrowing with a cutover migration", async () => {
+    test("keeps full legacy heartbeat diagnostics planned beside schema v4", async () => {
         const reviewed = await loadReviewedParityInventory();
         const heartbeat = reviewed.legacyEndpoints.endpoints.find(
             ({ id }) => id === "GET /api/cache/heartbeat"
         );
 
-        expect(heartbeat?.purpose).toContain("schema v2 payload-free cache status");
-        expect(heartbeat?.purpose).toContain("external heartbeat consumer migrates");
+        expect(heartbeat?.purpose).toContain("legacy schema v3 payload-bearing");
+        expect(heartbeat?.purpose).toContain("schema v4");
+        expect(heartbeat?.purpose).toContain("without loss");
         expect(heartbeat?.target).toEqual({
-            delivery: "implemented",
+            delivery: "planned",
             kind: "procedure",
             names: ["cache.getHeartbeat"],
             phase: "phase-4",

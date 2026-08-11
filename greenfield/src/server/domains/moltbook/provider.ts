@@ -74,12 +74,6 @@ function optionalRecord(value: unknown): Readonly<Record<string, unknown>> | und
     return value === undefined || value === null ? undefined : record(value);
 }
 
-function array(value: unknown): readonly unknown[] {
-    if (value === undefined || value === null) return [];
-    if (!Array.isArray(value)) throw new MoltbookProviderFailure("invalid-response");
-    return value;
-}
-
 function requiredArray(value: unknown): readonly unknown[] {
     if (!Array.isArray(value)) throw new MoltbookProviderFailure("invalid-response");
     return value;

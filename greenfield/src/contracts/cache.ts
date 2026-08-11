@@ -23,6 +23,7 @@ import {
     jobTriggerTypeSchema,
     scheduleIdSchema,
 } from "./jobModel.ts";
+import { openClawCronRunStatusSchema } from "./openClawCron.ts";
 import type { ProcedureContract } from "./registry.ts";
 import { emptyInputSchema } from "./system.ts";
 import { taskIdSchema, taskPrioritySchema, taskStatusSchema } from "./taskModel.ts";
@@ -359,8 +360,8 @@ export const cacheStatusResultSchema = v.pipe(
     v.check(cacheStatusResultIsConsistent, "Cache status result is inconsistent")
 );
 
-/** Securely narrowed greenfield heartbeat schema; legacy schema-v3 rows are not mirrored. */
-export const cacheHeartbeatSchemaVersion = 2 as const;
+/** Purpose-built heartbeat schema retaining health signals without content identities. */
+export const cacheHeartbeatSchemaVersion = 4 as const;
 /** Hard row budget for the purpose-built heartbeat task projection. */
 export const cacheHeartbeatTaskMaximum = 100;
 /** Hard release-registry budget for Dashboard schedules exposed in one heartbeat. */
@@ -462,8 +463,77 @@ export const cacheHeartbeatPendingSyncSchema = v.picklist(
     "Heartbeat OpenClaw cron pending-sync state is invalid"
 );
 
+interface CacheHeartbeatCronHealthCounts {
+    readonly disabledCount: number;
+    readonly enabledCount: number;
+    readonly inspectedCount: number;
+    readonly intendedDisabledCount: number;
+    readonly lastRunErrorCount: number;
+    readonly runningCount: number;
+    readonly staleRunningCount: number;
+    readonly synchronizationConflictCount: number;
+    readonly synchronizationPendingCount: number;
+    readonly truncated: boolean;
+    readonly unexpectedDisabledCount: number;
+}
+
+/** @returns Whether all identity-free cron health categories form valid subsets. */
+export function cacheHeartbeatCronHealthCountsAreConsistent(
+    health: CacheHeartbeatCronHealthCounts
+): boolean {
+    return (
+        health.enabledCount + health.disabledCount === health.inspectedCount &&
+        health.intendedDisabledCount + health.unexpectedDisabledCount ===
+            health.disabledCount &&
+        health.lastRunErrorCount <= health.inspectedCount &&
+        health.runningCount <= health.inspectedCount &&
+        health.staleRunningCount <= health.runningCount &&
+        health.synchronizationConflictCount + health.synchronizationPendingCount <=
+            health.inspectedCount
+    );
+}
+
 const cacheHeartbeatCronProjectionEntries = {
     count: nonnegativeSafeIntegerSchema("Heartbeat OpenClaw cron count is invalid"),
+    health: v.pipe(
+        v.strictObject({
+            disabledCount: nonnegativeSafeIntegerSchema(
+                "Heartbeat disabled OpenClaw cron count is invalid"
+            ),
+            enabledCount: nonnegativeSafeIntegerSchema(
+                "Heartbeat enabled OpenClaw cron count is invalid"
+            ),
+            inspectedCount: nonnegativeSafeIntegerSchema(
+                "Heartbeat inspected OpenClaw cron count is invalid"
+            ),
+            intendedDisabledCount: nonnegativeSafeIntegerSchema(
+                "Heartbeat intended-disabled OpenClaw cron count is invalid"
+            ),
+            lastRunErrorCount: nonnegativeSafeIntegerSchema(
+                "Heartbeat failing OpenClaw cron count is invalid"
+            ),
+            runningCount: nonnegativeSafeIntegerSchema(
+                "Heartbeat running OpenClaw cron count is invalid"
+            ),
+            staleRunningCount: nonnegativeSafeIntegerSchema(
+                "Heartbeat stale-running OpenClaw cron count is invalid"
+            ),
+            synchronizationConflictCount: nonnegativeSafeIntegerSchema(
+                "Heartbeat conflicting OpenClaw cron count is invalid"
+            ),
+            synchronizationPendingCount: nonnegativeSafeIntegerSchema(
+                "Heartbeat pending OpenClaw cron count is invalid"
+            ),
+            truncated: v.boolean("Heartbeat OpenClaw cron truncation is invalid"),
+            unexpectedDisabledCount: nonnegativeSafeIntegerSchema(
+                "Heartbeat unexpected-disabled OpenClaw cron count is invalid"
+            ),
+        }),
+        v.check(
+            cacheHeartbeatCronHealthCountsAreConsistent,
+            "Heartbeat OpenClaw cron health counts are inconsistent"
+        )
+    ),
     observedAtMs: cacheTimestampSchema,
     pendingSync: cacheHeartbeatPendingSyncSchema,
 };
@@ -474,12 +544,31 @@ const cacheHeartbeatCronUnavailableSchema = v.strictObject({
     ),
     state: v.literal("unavailable"),
 });
+interface CacheHeartbeatCronHealthProjection {
+    readonly count: number;
+    readonly health: {
+        readonly inspectedCount: number;
+        readonly truncated: boolean;
+    };
+}
+
+function cacheHeartbeatCronHealthIsConsistent(
+    projection: CacheHeartbeatCronHealthProjection
+): boolean {
+    return (
+        projection.health.inspectedCount <= projection.count &&
+        projection.health.truncated ===
+            projection.health.inspectedCount < projection.count
+    );
+}
+
 const cacheHeartbeatCronFreshSchema = v.strictObject({
     ...cacheHeartbeatCronProjectionEntries,
     state: v.literal("fresh"),
 });
 interface CacheHeartbeatCronLastKnownGood {
     readonly count: number;
+    readonly health: CacheHeartbeatCronHealthProjection["health"];
     readonly observedAtMs: number;
     readonly pendingSync: "none" | "present" | "unknown";
     readonly staleSinceMs: number;
@@ -493,33 +582,122 @@ interface CacheHeartbeatCronLastKnownGood {
 export function cacheHeartbeatCronLastKnownGoodIsConsistent(
     projection: CacheHeartbeatCronLastKnownGood & Record<string, unknown>
 ): boolean {
-    return cacheHeartbeatLastKnownGoodTimesAreConsistent(projection);
+    return (
+        cacheHeartbeatLastKnownGoodTimesAreConsistent(projection) &&
+        cacheHeartbeatCronHealthIsConsistent(projection)
+    );
 }
 
-const cacheHeartbeatCronLastKnownGoodSchema = v.pipe(
-    v.strictObject({
-        ...cacheHeartbeatCronProjectionEntries,
-        staleSinceMs: cacheTimestampSchema,
-        state: v.literal("last-known-good"),
-    }),
-    v.check(
-        cacheHeartbeatCronLastKnownGoodIsConsistent,
-        "Heartbeat OpenClaw cron freshness is inconsistent"
-    )
-);
+const cacheHeartbeatCronLastKnownGoodSchema = v.strictObject({
+    ...cacheHeartbeatCronProjectionEntries,
+    staleSinceMs: cacheTimestampSchema,
+    state: v.literal("last-known-good"),
+});
 
-/** Identity- and payload-free state of the latest global OpenClaw cron projection. */
-export const cacheHeartbeatOpenClawCronSchema = v.variant("state", [
+const cacheHeartbeatOpenClawCronVariantSchema = v.variant("state", [
     cacheHeartbeatCronUnavailableSchema,
     cacheHeartbeatCronFreshSchema,
     cacheHeartbeatCronLastKnownGoodSchema,
 ]);
+type CacheHeartbeatOpenClawCronProjection = v.InferOutput<
+    typeof cacheHeartbeatOpenClawCronVariantSchema
+>;
+
+/** @returns Whether global cron freshness, coverage, and synchronization agree. */
+export function cacheHeartbeatCronProjectionIsConsistent(
+    projection: CacheHeartbeatOpenClawCronProjection
+): boolean {
+    if (projection.state === "unavailable") return true;
+    let expectedPendingSync: CacheHeartbeatOpenClawCronProjection["pendingSync"] = "none";
+    if (
+        projection.health.synchronizationConflictCount > 0 ||
+        projection.health.synchronizationPendingCount > 0
+    ) {
+        expectedPendingSync = "present";
+    } else if (projection.health.truncated) {
+        expectedPendingSync = "unknown";
+    }
+    let pendingSyncIsConsistent = projection.pendingSync === expectedPendingSync;
+    if (projection.state === "last-known-good") {
+        if (expectedPendingSync === "present") {
+            pendingSyncIsConsistent = projection.pendingSync === "present";
+        } else if (expectedPendingSync === "unknown") {
+            pendingSyncIsConsistent = projection.pendingSync !== "none";
+        } else {
+            pendingSyncIsConsistent = true;
+        }
+    }
+    return (
+        cacheHeartbeatCronHealthIsConsistent(projection) &&
+        pendingSyncIsConsistent &&
+        (projection.state === "fresh" ||
+            cacheHeartbeatCronLastKnownGoodIsConsistent(projection))
+    );
+}
+
+/** Identity- and payload-free state of the latest global OpenClaw cron projection. */
+export const cacheHeartbeatOpenClawCronSchema = v.pipe(
+    cacheHeartbeatOpenClawCronVariantSchema,
+    v.check(
+        cacheHeartbeatCronProjectionIsConsistent,
+        "Heartbeat OpenClaw cron projection is inconsistent"
+    )
+);
 
 export const cacheHeartbeatTaskRelevanceValues = [
     "automation-linked",
     "agent-priority",
     "owner-blocked",
 ] as const;
+const cacheHeartbeatTaskCronUnavailableSchema = v.strictObject({
+    state: v.literal("unavailable"),
+});
+const cacheHeartbeatTaskCronMissingSchema = v.strictObject({
+    state: v.literal("missing"),
+});
+const cacheHeartbeatTaskCronPresentSchema = v.strictObject({
+    desiredEnabled: v.optional(
+        v.boolean("Heartbeat linked-cron desired state is invalid")
+    ),
+    enabled: v.boolean("Heartbeat linked-cron enabled state is invalid"),
+    lastDurationMs: v.optional(cacheTimestampSchema),
+    lastRunAtMs: v.optional(cacheTimestampSchema),
+    lastRunStatus: v.optional(openClawCronRunStatusSchema),
+    nextRunAtMs: v.optional(cacheTimestampSchema),
+    runningAtMs: v.optional(cacheTimestampSchema),
+    state: v.literal("present"),
+    synchronization: v.picklist(
+        ["confirmed", "conflict", "pending"],
+        "Heartbeat linked-cron synchronization state is invalid"
+    ),
+});
+const cacheHeartbeatTaskCronVariantSchema = v.variant("state", [
+    cacheHeartbeatTaskCronUnavailableSchema,
+    cacheHeartbeatTaskCronMissingSchema,
+    cacheHeartbeatTaskCronPresentSchema,
+]);
+type CacheHeartbeatTaskCronProjection = v.InferOutput<
+    typeof cacheHeartbeatTaskCronVariantSchema
+>;
+
+/** @returns Whether one linked cron's actual and desired enabled state agree. */
+export function cacheHeartbeatTaskCronIsConsistent(
+    cron: CacheHeartbeatTaskCronProjection
+): boolean {
+    if (cron.state !== "present") return true;
+    return cron.synchronization === "confirmed"
+        ? cron.desiredEnabled === undefined || cron.desiredEnabled === cron.enabled
+        : cron.desiredEnabled !== undefined && cron.desiredEnabled !== cron.enabled;
+}
+
+/** Identity-free health of the OpenClaw cron linked to one task. */
+export const cacheHeartbeatTaskCronSchema = v.pipe(
+    cacheHeartbeatTaskCronVariantSchema,
+    v.check(
+        cacheHeartbeatTaskCronIsConsistent,
+        "Heartbeat linked-cron synchronization state is inconsistent"
+    )
+);
 const cacheHeartbeatTaskRelevanceSchema = v.pipe(
     v.array(
         v.picklist(
@@ -537,6 +715,7 @@ const cacheHeartbeatTaskRelevanceSchema = v.pipe(
 const cacheHeartbeatTaskSchema = v.strictObject({
     automation: v.optional(
         v.strictObject({
+            cron: cacheHeartbeatTaskCronSchema,
             recurring: v.boolean("Heartbeat task recurring state is invalid"),
         })
     ),
@@ -853,9 +1032,33 @@ export function cacheHeartbeatResultIsConsistent(result: CacheHeartbeatResult): 
                             ]),
                   ]
         ),
+        ...(result.tasks.state === "unavailable"
+            ? []
+            : result.tasks.items.flatMap((task) => {
+                  const cron = task.automation?.cron;
+                  return cron?.state === "present"
+                      ? [
+                            ...(cron.lastRunAtMs === undefined ? [] : [cron.lastRunAtMs]),
+                            ...(cron.runningAtMs === undefined ? [] : [cron.runningAtMs]),
+                        ]
+                      : [];
+              })),
     ];
+    const linkedCronStatesAreTruthful =
+        result.tasks.state === "unavailable" ||
+        result.tasks.items.every((task) => {
+            const cron = task.automation?.cron;
+            if (cron === undefined) return true;
+            if (result.openClawCron.state !== "fresh") {
+                return cron.state === "unavailable";
+            }
+            return result.openClawCron.health.truncated
+                ? cron.state !== "missing"
+                : cron.state !== "unavailable";
+        });
     return (
         timestamps.every((timestamp) => timestamp <= result.generatedAtMs) &&
+        linkedCronStatesAreTruthful &&
         (result.gateway.connection.freshness === "fresh" ||
             (result.gateway.sessions.state !== "fresh" &&
                 result.openClawCron.state !== "fresh"))

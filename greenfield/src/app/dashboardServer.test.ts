@@ -342,6 +342,7 @@ describe("Dashboard OpenClaw cron composition", () => {
         const transport: PersistentOpenClawCronTransport = {
             request: (method, parameters, options) => {
                 calls.push({ method, options, parameters });
+                options?.onResponseBytes?.(1024);
                 return Promise.resolve({
                     hasMore: false,
                     jobs: [],
@@ -379,7 +380,10 @@ describe("Dashboard OpenClaw cron composition", () => {
         expect(calls).toEqual([
             {
                 method: "cron.list",
-                options: { timeoutMs: 15_000 },
+                options: {
+                    onResponseBytes: expect.any(Function),
+                    timeoutMs: 15_000,
+                },
                 parameters: {
                     compact: false,
                     enabled: "all",
@@ -948,7 +952,7 @@ describe("Dashboard security composition", () => {
                     sessions: { state: "unavailable" },
                 },
                 openClawCron: { pendingSync: "unknown", state: "unavailable" },
-                schemaVersion: 2,
+                schemaVersion: 4,
                 tasks: {
                     items: [],
                     state: "available",

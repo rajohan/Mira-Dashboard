@@ -4,6 +4,7 @@ import * as v from "valibot";
 
 import {
     cacheEntrySchema,
+    cacheHeartbeatCronProjectionIsConsistent,
     cacheHeartbeatResultSchema,
     cacheStatusMaximumEntries,
     cacheStatusResultSchema,
@@ -184,16 +185,32 @@ describe("cache contracts", () => {
             generatedAtMs: 2000,
             openClawCron: {
                 count: 5,
+                health: {
+                    disabledCount: 0,
+                    enabledCount: 3,
+                    inspectedCount: 3,
+                    intendedDisabledCount: 0,
+                    lastRunErrorCount: 0,
+                    runningCount: 0,
+                    staleRunningCount: 0,
+                    synchronizationConflictCount: 0,
+                    synchronizationPendingCount: 0,
+                    truncated: true,
+                    unexpectedDisabledCount: 0,
+                },
                 observedAtMs: 900,
                 pendingSync: "unknown",
                 staleSinceMs: 1500,
                 state: "last-known-good",
             },
-            schemaVersion: 2,
+            schemaVersion: 4,
             tasks: {
                 items: [
                     {
-                        automation: { recurring: true },
+                        automation: {
+                            cron: { state: "unavailable" },
+                            recurring: true,
+                        },
                         id: "019fc968-1a9b-7765-8f1b-d5b863b0e7b4",
                         priority: "high",
                         relevance: ["automation-linked", "agent-priority"],
@@ -206,6 +223,84 @@ describe("cache contracts", () => {
             },
         } as const;
         expect(v.parse(cacheHeartbeatResultSchema, heartbeat)).toEqual(heartbeat);
+
+        const futureLinkedRun = {
+            ...heartbeat,
+            gateway: {
+                ...heartbeat.gateway,
+                connection: {
+                    checkedAtMs: 2000,
+                    freshness: "fresh" as const,
+                    phase: "connected" as const,
+                },
+            },
+            openClawCron: {
+                count: 1,
+                health: {
+                    disabledCount: 0,
+                    enabledCount: 1,
+                    inspectedCount: 1,
+                    intendedDisabledCount: 0,
+                    lastRunErrorCount: 0,
+                    runningCount: 0,
+                    staleRunningCount: 0,
+                    synchronizationConflictCount: 0,
+                    synchronizationPendingCount: 0,
+                    truncated: false,
+                    unexpectedDisabledCount: 0,
+                },
+                observedAtMs: 1900,
+                pendingSync: "none" as const,
+                state: "fresh" as const,
+            },
+            tasks: {
+                ...heartbeat.tasks,
+                items: [
+                    {
+                        ...heartbeat.tasks.items[0],
+                        automation: {
+                            cron: {
+                                enabled: true,
+                                lastRunAtMs: 1800,
+                                nextRunAtMs: 5000,
+                                state: "present" as const,
+                                synchronization: "confirmed" as const,
+                            },
+                            recurring: true,
+                        },
+                    },
+                ],
+            },
+        };
+        expect(
+            v.safeParse(cacheHeartbeatResultSchema, futureLinkedRun).success
+        ).toBeTrue();
+        expect(
+            v.safeParse(cacheHeartbeatResultSchema, {
+                ...futureLinkedRun,
+                openClawCron: {
+                    ...futureLinkedRun.openClawCron,
+                    count: 2,
+                    health: {
+                        ...futureLinkedRun.openClawCron.health,
+                        truncated: true,
+                    },
+                    pendingSync: "unknown",
+                },
+                tasks: {
+                    ...futureLinkedRun.tasks,
+                    items: [
+                        {
+                            ...futureLinkedRun.tasks.items[0],
+                            automation: {
+                                cron: { state: "missing" },
+                                recurring: true,
+                            },
+                        },
+                    ],
+                },
+            }).success
+        ).toBeFalse();
 
         for (const invalid of [
             {
@@ -441,6 +536,51 @@ describe("cache contracts", () => {
         ]) {
             expect(v.safeParse(cacheHeartbeatResultSchema, invalid).success).toBeFalse();
         }
+    });
+
+    test("allows last-known-good synchronization warnings to strengthen stale counts", () => {
+        const health = {
+            disabledCount: 0,
+            enabledCount: 1,
+            inspectedCount: 1,
+            intendedDisabledCount: 0,
+            lastRunErrorCount: 0,
+            runningCount: 0,
+            staleRunningCount: 0,
+            synchronizationConflictCount: 0,
+            synchronizationPendingCount: 0,
+            truncated: false,
+            unexpectedDisabledCount: 0,
+        } as const;
+        expect(
+            cacheHeartbeatCronProjectionIsConsistent({
+                count: 1,
+                health,
+                observedAtMs: 1000,
+                pendingSync: "present",
+                staleSinceMs: 1100,
+                state: "last-known-good",
+            })
+        ).toBeTrue();
+        expect(
+            cacheHeartbeatCronProjectionIsConsistent({
+                count: 1,
+                health,
+                observedAtMs: 1000,
+                pendingSync: "unknown",
+                staleSinceMs: 1100,
+                state: "last-known-good",
+            })
+        ).toBeTrue();
+        expect(
+            cacheHeartbeatCronProjectionIsConsistent({
+                count: 1,
+                health,
+                observedAtMs: 1000,
+                pendingSync: "present",
+                state: "fresh",
+            })
+        ).toBeFalse();
     });
 
     test("accepts only canonical lost-response-safe refresh requests", () => {

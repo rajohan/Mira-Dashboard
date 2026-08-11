@@ -227,35 +227,45 @@ contract for automation merely because the caller is non-browser TypeScript.
 
 ### Compact automation heartbeat
 
-`cache.getHeartbeat` schema v2 is a dedicated declassification query under the existing
+`cache.getHeartbeat` schema v4 is a dedicated declassification query under the existing
 `cache:read` automation scope. It embeds the same at-most-128-row, payload-free cache status used
-by `cache.getStatus`, then adds only the process-owned Gateway phase/freshness and identity-free
-summaries of the latest validated current-session and global OpenClaw-cron projections. Session
-keys, display names, cron names, payloads, credentials, endpoints, and raw errors never cross this
-boundary.
+by `cache.getStatus`, then adds process-owned Gateway freshness, bounded task and Dashboard-job
+state, and identity-free OpenClaw-cron health. Session keys, display names, cron identifiers and
+names, payloads, credentials, endpoints, and raw errors never cross this boundary.
 
-The heartbeat does not issue a Gateway RPC. Before a bounded projection has been observed it says
-`unavailable`; after a failed refresh or Gateway disconnect it retains the count as explicitly
-`last-known-good`. Session truncation remains visible. Cron pending synchronization is `unknown`
-when the cached global page cannot prove absence and `present` when any unsettled desired state is
-known.
+Each heartbeat owns a fixed, fresh-only OpenClaw-cron inventory refresh instead of depending on
+unrelated browser list traffic. The process single-flights refreshes, enforces an eight-second
+aggregate deadline, admits one successful snapshot for 60 seconds, and applies a ten-second retry
+gate after failure. Up to 1000 rows and 32 MiB of cumulative authenticated response-frame bytes are
+admitted as one atomic candidate. The transport records exact encoded frame bytes before the
+provider strips unknown fields; one already-received protocol-bounded page may cross the cumulative
+limit, after which the walk stops without retry. Pages are fetched sequentially; each page must
+share snapshot revision and total, advance exact offsets, and contain globally unique identifiers.
+Each full row is immediately reduced to the small heartbeat-only projection, so payload and
+schedule text do not accumulate across pages. Revision races receive one bounded retry. Only a
+complete coherent candidate replaces state; failure retains the previous aggregate as
+`last-known-good`, and truncation remains explicit.
 
-Two purpose-built local projections preserve the remaining operational checks without widening
-authorization to `tasks:read` or `jobs:read`. Tasks include at most 100 UUID-keyed open rows that
-are automation-linked, Mira-owned medium/high priority, or Raymond-owned blocked. They disclose
-only status, priority, canonical relevance categories, and the optional recurring bit; content,
-labels, assignee identity, cron identity, and automation configuration are omitted. Dashboard jobs
-enumerate the bounded code-owned action registry so a missing schedule remains visible, including
-the definition's `defaultEnabled` state. Present rows disclose only enabled/next-run state,
-expiry validity without disable identity or reason, and compact run lifecycle state without run
-identity, payload, result, event, actor, worker, lease, fencing, or terminal message data.
+The global cron summary includes inspected/enabled/disabled/running/failing counts plus
+intentional versus unexpected disablement, separate synchronization conflict/pending counts, and
+potentially stuck runs.
+For each automation-linked task, the internal cron identifier is used only for process-local
+correlation. The response reports `present` runtime/synchronization health, `missing` only when a
+complete fresh inventory proves absence, or `unavailable` when freshness/truncation cannot support
+that conclusion. Task candidates are read in a short SQLite transaction that closes before any
+Gateway I/O, then the same immutable snapshot is allowlist-projected.
 
-Task and Dashboard-job reads fail independently to explicit `unavailable`; malformed rows are
-contained before whole-response validation. The task count and prefix share one deferred SQLite
-snapshot, while Gateway summaries remain process-local and trigger no RPC. The reviewed legacy
-endpoint is implemented by this secure v2 narrowing. At greenfield cutover, the repo-external
-OpenClaw `HEARTBEAT.md` consumer must move from legacy schema v3 to these bounded UUID and aggregate
-checks; production's live consumer must not change before activation.
+The task projection still returns at most 100 UUID-keyed open rows selected by the exact legacy
+operational predicate, without task content, assignee identity, or cron identity. Dashboard jobs
+enumerate every bounded code-owned definition and compact lifecycle state. Each local reader fails
+independently to explicit `unavailable`, and cross-object validation prevents stale or truncated
+cron state from asserting an unjustified missing task automation.
+
+This schema v4 summary is not declared a replacement for legacy REST heartbeat schema v3. The
+legacy endpoint also exposes payload-bearing cache diagnostics and identifiable task, Dashboard-job,
+and per-cron rows. Its parity entry remains `planned` until those diagnostic capabilities and the
+repo-external OpenClaw consumer migration are preserved without loss; production's live consumer
+must not change before that cutover gate is satisfied.
 
 ### Browser-managed automation security
 

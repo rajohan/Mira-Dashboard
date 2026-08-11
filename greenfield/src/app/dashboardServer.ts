@@ -12,7 +12,7 @@ import { createAgentRepository } from "../server/domains/agents/repository.ts";
 import { createAgentService } from "../server/domains/agents/service.ts";
 import {
     readCacheHeartbeatDashboardJobs,
-    readCacheHeartbeatTasks,
+    readCacheHeartbeatTasksWithCronRefresh,
 } from "../server/domains/cache/heartbeatProjection.ts";
 import { createCacheRepository } from "../server/domains/cache/repository.ts";
 import { createCacheService } from "../server/domains/cache/service.ts";
@@ -61,7 +61,10 @@ import {
     OpenClawCronProviderError,
     type OpenClawCronProvider,
 } from "../server/domains/openClawCron/provider.ts";
-import { createOpenClawCronService } from "../server/domains/openClawCron/service.ts";
+import {
+    createOpenClawCronService,
+    type OpenClawCronHeartbeatReader,
+} from "../server/domains/openClawCron/service.ts";
 import { createSqliteOpenClawCronIntentStore } from "../server/domains/openClawCron/sqliteIntentStore.ts";
 import { createOpenClawTasksRealtimePublisher } from "../server/domains/openClawTasks/realtime.ts";
 import {
@@ -431,6 +434,7 @@ export async function createDashboardServer(
     let chatMaintenance: DashboardChatRuntimeMaintenance | undefined;
     let chatTranscriptLifecycleSupervisor: ChatTranscriptLifecycleSupervisor | undefined;
     let openClawTasksService: OpenClawTasksService | undefined;
+    let openClawCronHeartbeatReader: OpenClawCronHeartbeatReader | undefined;
     let workspaceFilesService: WorkspaceFilesService | undefined;
     let openClawTasksSupervisor:
         | ReturnType<typeof createOpenClawTasksSubscriptionSupervisor>
@@ -456,6 +460,11 @@ export async function createDashboardServer(
         }
         try {
             await workspaceFilesService?.dispose();
+        } catch (error) {
+            failure ??= error;
+        }
+        try {
+            await openClawCronHeartbeatReader?.disposeHeartbeat();
         } catch (error) {
             failure ??= error;
         }
@@ -987,6 +996,7 @@ export async function createDashboardServer(
                 options.applicationRuntime.persistentGatewayTransport
             ),
         });
+        openClawCronHeartbeatReader = openClawCronService;
         const cacheService = createCacheService({
             cacheRepository: createCacheRepository(database, databaseRuntime),
             jobRepository,
@@ -996,8 +1006,13 @@ export async function createDashboardServer(
             readHeartbeatDashboardJobs: (generatedAtMs) =>
                 readCacheHeartbeatDashboardJobs(jobRepository, generatedAtMs),
             readHeartbeatTasks: () =>
-                taskRepository.withReadTransaction((reader) =>
-                    readCacheHeartbeatTasks(reader)
+                readCacheHeartbeatTasksWithCronRefresh(
+                    () =>
+                        taskRepository.withReadTransaction((reader) =>
+                            reader.readHeartbeatCandidates()
+                        ),
+                    openClawCronService.refreshHeartbeatProjection,
+                    openClawCronService.readHeartbeatJobProjection
                 ),
             readOpenClawCronProjection: openClawCronService.readHeartbeatProjection,
             wakeEventPump,

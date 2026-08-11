@@ -283,6 +283,7 @@ export class DrizzleTaskRepositoryReader implements TaskRepositoryReader {
         const rows = this.database
             .select({
                 assignee: tasks.assignee,
+                automationCronJobId: taskAutomationProfiles.cronJobId,
                 automationRecurring: taskAutomationProfiles.recurring,
                 id: tasks.id,
                 priority: tasks.priority,
@@ -295,13 +296,20 @@ export class DrizzleTaskRepositoryReader implements TaskRepositoryReader {
             .limit(taskHeartbeatCandidateMaximum)
             .all();
         return {
-            rows: rows.map(({ assignee, automationRecurring, ...task }) => ({
-                ...task,
-                ...(assignee === null ? {} : { assignee }),
-                ...(automationRecurring === null
-                    ? {}
-                    : { automation: { recurring: automationRecurring } }),
-            })),
+            rows: rows.map(
+                ({ assignee, automationCronJobId, automationRecurring, ...task }) => ({
+                    ...task,
+                    ...(assignee === null ? {} : { assignee }),
+                    ...(automationCronJobId === null || automationRecurring === null
+                        ? {}
+                        : {
+                              automation: {
+                                  cronJobId: automationCronJobId,
+                                  recurring: automationRecurring,
+                              },
+                          }),
+                })
+            ),
             totalCount,
         };
     }

@@ -284,11 +284,13 @@ the worker.
 The `cache:read` automation heartbeat is a separate sanitized projection, not a shortcut around
 session, task, job, or cron detail authorization. It reads process-local validated Gateway
 summaries plus bounded payload-free cache status and purpose-built SQLite task/Dashboard-job
-projections, performs no upstream refresh, and requires neither `tasks:read` nor `jobs:read`.
+projections, and requires neither `tasks:read` nor `jobs:read`. Its only upstream work is a
+fixed read-only OpenClaw-cron inventory refresh with an aggregate deadline, atomic snapshot checks,
+single-flight ownership, success TTL, and failure backoff.
 Task content, assignee and cron identity, schedule metadata, payloads, results, events, actors,
 workers, leases, credentials, endpoints, disable reasons, terminal messages, and raw failures do
-not cross the boundary. Exact task count/truncation and the canonical row prefix share one deferred
-read transaction. Each local projection is structurally and semantically validated inside its own
+not cross the boundary. Exact task count/truncation and the canonical row prefix share one short
+read transaction that closes before Gateway I/O. Each local projection is structurally and semantically validated inside its own
 safe reader boundary, so failure degrades only that projection to `unavailable`. Missing and
 last-known-good Gateway states remain explicit so an empty count is never inferred from
 unavailable upstream state.

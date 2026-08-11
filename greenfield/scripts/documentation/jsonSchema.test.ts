@@ -173,7 +173,7 @@ describe("contract JSON Schema conversion", () => {
         );
     });
 
-    test("documents heartbeat v2 bounds and secure runtime-only invariants", () => {
+    test("documents heartbeat v4 bounds and secure runtime-only invariants", () => {
         const document = convertContractSchema(
             cacheHeartbeatResultSchema,
             "cache.getHeartbeat",
@@ -182,12 +182,14 @@ describe("contract JSON Schema conversion", () => {
         const serialized = JSON.stringify(document);
 
         expect(document).toMatchObject({
-            properties: { schemaVersion: { const: 2 } },
+            properties: { schemaVersion: { const: 4 } },
         });
         expect(serialized).toContain('"maxItems":100');
         expect(serialized).toContain('"maxItems":32');
         expect(serialized).toContain("strict canonical ID and relevance order");
         expect(serialized).toContain("disable-intent validity to match expiry");
+        expect(serialized).toContain("cron health categories");
+        expect(serialized).toContain("linked-cron actual, desired");
     });
 
     test("documents the runtime-only terminal replay window invariant", () => {

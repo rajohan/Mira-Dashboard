@@ -142,7 +142,10 @@ describe("task repository cron projection", () => {
                     status: "blocked",
                 },
                 {
-                    automation: { recurring: true },
+                    automation: {
+                        cronJobId: "private-cron-0",
+                        recurring: true,
+                    },
                     id: uuid(6),
                     priority: "low",
                     status: "todo",
@@ -150,7 +153,6 @@ describe("task repository cron projection", () => {
             ]);
             expect(snapshot.rows.at(-1)?.id).toBe(uuid(103));
             expect(JSON.stringify(snapshot)).not.toContain("Private");
-            expect(JSON.stringify(snapshot)).not.toContain("private-cron");
         } finally {
             database.sqlite.close(true);
         }
