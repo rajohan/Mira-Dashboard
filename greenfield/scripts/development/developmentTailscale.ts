@@ -50,26 +50,57 @@ export type DevelopmentTailscaleRouteLockAcquirer = (
     httpsPort: number
 ) => Promise<DevelopmentTailscaleRouteLock>;
 
+interface ResolvedDevelopmentTailscaleCommand {
+    readonly command: readonly string[];
+    readonly privileged: boolean;
+}
+
 const commandTimeoutMs = 15_000;
 const commandForceKillGraceMs = 2000;
 
-async function commandOutput(command: readonly string[]): Promise<string> {
-    let guardedCommand: readonly string[];
+/**
+ * Resolves the executable before the command crosses a direct or privileged guard.
+ * @param command Tailscale command, optionally prefixed by the reviewed sudo boundary.
+ * @param resolveExecutable PATH resolver, injectable for deterministic unit tests.
+ * @returns Absolute inner command and whether it requires the privileged guard.
+ */
+export function resolveDevelopmentTailscaleCommand(
+    command: readonly string[],
+    resolveExecutable: (executable: string) => string | null = (executable) =>
+        Bun.which(executable)
+): ResolvedDevelopmentTailscaleCommand {
     if (command[0] === "sudo") {
         if (command[1] !== "-n" || command[2] === undefined) {
             throw new TypeError("Development sudo command is invalid");
         }
-        const executable = Bun.which(command[2]);
+        const executable = resolveExecutable(command[2]);
         if (executable === null) {
             throw new Error("Development privileged command is unavailable");
         }
-        guardedCommand = guardedDevelopmentPrivilegedCommand([
-            executable,
-            ...command.slice(3),
-        ]);
-    } else {
-        guardedCommand = guardedDevelopmentChildCommand(command);
+        return Object.freeze({
+            command: Object.freeze([executable, ...command.slice(3)]),
+            privileged: true,
+        });
     }
+    const executableName = command[0];
+    if (executableName === undefined) {
+        throw new TypeError("Development child command is invalid");
+    }
+    const executable = resolveExecutable(executableName);
+    if (executable === null) {
+        throw new Error("Development child command is unavailable");
+    }
+    return Object.freeze({
+        command: Object.freeze([executable, ...command.slice(1)]),
+        privileged: false,
+    });
+}
+
+async function commandOutput(command: readonly string[]): Promise<string> {
+    const resolved = resolveDevelopmentTailscaleCommand(command);
+    const guardedCommand = resolved.privileged
+        ? guardedDevelopmentPrivilegedCommand(resolved.command)
+        : guardedDevelopmentChildCommand(resolved.command);
     const child = Bun.spawn([...guardedCommand], {
         env: {
             LANG: "C",

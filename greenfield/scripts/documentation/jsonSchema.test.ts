@@ -559,7 +559,7 @@ describe("contract JSON Schema conversion", () => {
             expectParity(value);
         }
 
-        const controlOrFormatRanges = [
+        const controlFormatOrSeparatorRanges = [
             ["0000", "001F"],
             ["007F", "009F"],
             ["00AD", "00AD"],
@@ -571,7 +571,7 @@ describe("contract JSON Schema conversion", () => {
             ["08E2", "08E2"],
             ["180E", "180E"],
             ["200B", "200F"],
-            ["202A", "202E"],
+            ["2028", "202E"],
             ["2060", "2064"],
             ["2066", "206F"],
             ["FEFF", "FEFF"],
@@ -584,7 +584,7 @@ describe("contract JSON Schema conversion", () => {
             ["E0001", "E0001"],
             ["E0020", "E007F"],
         ] as const;
-        for (const [start, end] of controlOrFormatRanges) {
+        for (const [start, end] of controlFormatOrSeparatorRanges) {
             for (
                 let codePoint = parseHexadecimalCodePoint(start);
                 codePoint <= parseHexadecimalCodePoint(end);

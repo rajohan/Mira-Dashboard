@@ -5,6 +5,7 @@ import {
     type DevelopmentTailscaleCommandAdapter,
     type DevelopmentTailscaleRouteLockAcquirer,
     enableDevelopmentServe,
+    resolveDevelopmentTailscaleCommand,
     tailscaleDnsName,
 } from "./developmentTailscale.ts";
 
@@ -27,6 +28,44 @@ function serveStatus(enabled: boolean) {
 }
 
 describe("development Tailscale route", () => {
+    test("resolves the default non-sudo command before the child guard", () => {
+        const executableNames: string[] = [];
+        const resolved = resolveDevelopmentTailscaleCommand(
+            ["tailscale", "status", "--json"],
+            (executable) => {
+                executableNames.push(executable);
+                return "/usr/bin/tailscale";
+            }
+        );
+
+        expect(executableNames).toEqual(["tailscale"]);
+        expect(resolved).toEqual({
+            command: ["/usr/bin/tailscale", "status", "--json"],
+            privileged: false,
+        });
+    });
+
+    test("fails clearly when the default command binary is unavailable", () => {
+        expect(() =>
+            resolveDevelopmentTailscaleCommand(
+                ["tailscale", "serve", "status", "--json"],
+                () => null
+            )
+        ).toThrow("Development child command is unavailable");
+    });
+
+    test("keeps sudo outside the resolved privileged command", () => {
+        const resolved = resolveDevelopmentTailscaleCommand(
+            ["sudo", "-n", "tailscale", "serve", "--https=3445", "off"],
+            () => "/usr/bin/tailscale"
+        );
+
+        expect(resolved).toEqual({
+            command: ["/usr/bin/tailscale", "serve", "--https=3445", "off"],
+            privileged: true,
+        });
+    });
+
     test("normalizes MagicDNS and recognizes only the exact dedicated route", () => {
         const dnsName = tailscaleDnsName({
             Self: { DNSName: "Dashboard.Example.TS.NET." },

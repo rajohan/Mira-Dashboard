@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { readDevelopmentPrivateFile } from "./developmentPrivateFile.ts";
 import type { DevelopmentStackConfig } from "./developmentStackConfig.ts";
+import { acquireDevelopmentStateAcquisitionLock } from "./developmentStateAcquisitionLock.ts";
 
 const leaseFilePattern =
     /^\.mira-dashboard-development-lease-(\d+)-([0-9a-f]{32})\.json$/u;
@@ -252,15 +253,29 @@ export async function acquireDevelopmentStateLease(
         throw new Error("Development state root is missing");
     }
     await validateStateOwnerMarker(config);
-    const initialActiveLeaseFiles = await activeLeaseFiles(config);
-    if (initialActiveLeaseFiles.length > 0) {
-        throw new Error("Development state is already in use");
-    }
     const token = randomBytes(16).toString("hex");
     const processIdentity = await linuxProcessIdentity(process.pid);
     const marker = expectedLeaseMarker(config, token, processIdentity);
-    const leasePath = await publishLeaseFile(config, marker);
+    const acquisitionLock = await acquireDevelopmentStateAcquisitionLock(
+        config.stateRoot
+    );
+    let leasePath: string | undefined;
     try {
+        const lockedStateRootIdentity = await stateRootIdentity(config.stateRoot);
+        if (
+            lockedStateRootIdentity === null ||
+            !stateRootIdentityMatches(acquiredStateRootIdentity, lockedStateRootIdentity)
+        ) {
+            throw new Error(
+                "Development state root identity changed during lease acquisition"
+            );
+        }
+        await validateStateOwnerMarker(config);
+        const initialActiveLeaseFiles = await activeLeaseFiles(config);
+        if (initialActiveLeaseFiles.length > 0) {
+            throw new Error("Development state is already in use");
+        }
+        leasePath = await publishLeaseFile(config, marker);
         const concurrentActiveLeaseFiles = await activeLeaseFiles(config, leasePath);
         if (concurrentActiveLeaseFiles.length > 0) {
             throw new Error("Development state is already in use");
@@ -279,8 +294,13 @@ export async function acquireDevelopmentStateLease(
         }
         await validateStateOwnerMarker(config);
     } catch (error) {
-        await rm(leasePath, { force: true });
+        if (leasePath !== undefined) await rm(leasePath, { force: true });
         throw error;
+    } finally {
+        await acquisitionLock.release();
+    }
+    if (leasePath === undefined) {
+        throw new Error("Development state lease publication did not complete");
     }
 
     let released = false;

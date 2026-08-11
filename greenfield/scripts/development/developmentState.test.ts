@@ -209,6 +209,62 @@ describe("development state", () => {
         }
     });
 
+    test("elects exactly one lease owner during simultaneous startup", async () => {
+        const temporaryRoot = await mkdtemp(
+            path.join(tmpdir(), "mira-dashboard-development-lease-race-")
+        );
+        const config = resolveDevelopmentStackConfig(
+            {
+                MIRA_DASHBOARD_PROJECT_ROOT: path.join(temporaryRoot, "project"),
+            },
+            repositoryRoot
+        );
+        let sessions: Awaited<ReturnType<typeof prepareDevelopmentRuntimeState>>[] = [];
+
+        try {
+            await prepareDevelopmentState(config);
+            const attempts = await Promise.allSettled(
+                Array.from({ length: 8 }, () => prepareDevelopmentRuntimeState(config))
+            );
+            sessions = attempts.flatMap((attempt) =>
+                attempt.status === "fulfilled" ? [attempt.value] : []
+            );
+            const failures = attempts.flatMap((attempt) =>
+                attempt.status === "rejected" ? [attempt.reason as unknown] : []
+            );
+
+            expect(sessions).toHaveLength(1);
+            expect(failures).toHaveLength(7);
+            for (const failure of failures) {
+                expect(failure).toBeInstanceOf(Error);
+                if (!(failure instanceof Error)) {
+                    throw new Error("Expected concurrent state lease failure");
+                }
+                expect(failure.message).toContain("Development state is already in use");
+            }
+            const activeStateEntries = await readdir(config.stateRoot);
+            expect(
+                activeStateEntries.filter((entry) =>
+                    entry.startsWith(".mira-dashboard-development-lease-")
+                )
+            ).toHaveLength(1);
+
+            const winner = sessions[0];
+            if (winner === undefined) throw new Error("Expected one lease owner");
+            await Promise.all([winner.release(), winner.release()]);
+            sessions = [];
+            const releasedStateEntries = await readdir(config.stateRoot);
+            expect(
+                releasedStateEntries.filter((entry) =>
+                    entry.startsWith(".mira-dashboard-development-lease-")
+                )
+            ).toEqual([]);
+        } finally {
+            await Promise.all(sessions.map((session) => session.release()));
+            await rm(temporaryRoot, { force: true, recursive: true });
+        }
+    });
+
     test("names the invalid lease file in parse and marker diagnostics", async () => {
         const temporaryRoot = await mkdtemp(
             path.join(tmpdir(), "mira-dashboard-development-invalid-lease-")
