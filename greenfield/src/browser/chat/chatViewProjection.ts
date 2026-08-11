@@ -15,6 +15,7 @@ import {
     mergeChatToolPart,
     projectChatContractMessage,
 } from "./chatContractAdapter.ts";
+import { sortChatDisplayMessages } from "./chatMessageOrdering.ts";
 import type {
     ChatDisplayMessage,
     ChatMessageAttachment,
@@ -306,8 +307,8 @@ export function mergeChatMessages(
                 : []
         )
     );
-    const ephemeral = runtime
-        .filter(
+    const ephemeral = sortChatDisplayMessages(
+        runtime.filter(
             (message) =>
                 !canonicalIds.has(message.id) &&
                 !hiddenMessageIds.has(message.id) &&
@@ -322,20 +323,7 @@ export function mergeChatMessages(
                     canonicalAssistantProviderRunIds.has(message.providerRunId)
                 )
         )
-        .toSorted((left, right) => {
-            if (
-                left.providerRunId !== undefined &&
-                left.providerRunId === right.providerRunId
-            ) {
-                return left.sequence - right.sequence || left.id.localeCompare(right.id);
-            }
-            return (
-                (left.timestampMs ?? Number.MAX_SAFE_INTEGER) -
-                    (right.timestampMs ?? Number.MAX_SAFE_INTEGER) ||
-                left.sequence - right.sequence ||
-                left.id.localeCompare(right.id)
-            );
-        });
+    );
     const externalGroups = Map.groupBy(
         ephemeral.filter(
             (message) =>
@@ -344,11 +332,6 @@ export function mergeChatMessages(
                 message.id.startsWith("external:")
         ),
         (message) => message.providerRunId as string
-    );
-    const groupedExternalIds = new Set(
-        [...externalGroups.values()].flatMap((messages) =>
-            messages.map((message) => message.id)
-        )
     );
     const beforeCanonical = new Map<string, ChatDisplayMessage[]>();
     const afterCanonical = new Map<string, ChatDisplayMessage[]>();
@@ -404,10 +387,7 @@ export function mergeChatMessages(
         ...(afterCanonical.get(message.id) ?? []),
     ]);
     const unanchored = ephemeral.filter(
-        (message) =>
-            !anchoredExternalIds.has(message.id) &&
-            (!groupedExternalIds.has(message.id) ||
-                !canonicalAssistantProviderRunIds.has(message.providerRunId ?? ""))
+        (message) => !anchoredExternalIds.has(message.id)
     );
     return [...mergedCanonical, ...unanchored];
 }

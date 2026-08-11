@@ -1,6 +1,7 @@
 import { Store } from "@tanstack/react-store";
 
 import { mergeChatStreamText } from "../../shared/chatStreamText.ts";
+import { sortChatDisplayMessages } from "./chatMessageOrdering.ts";
 import type {
     ChatActivePlanView,
     ChatDisplayMessage,
@@ -1351,7 +1352,7 @@ export class ChatRuntimeStore extends Store<ChatRuntimeState> {
             const installed = Object.fromEntries(
                 projections.map((projection) => {
                     const existing = session.externalRuns[projection.providerRunId];
-                    if (existing === undefined) {
+                    if (existing === undefined || !projection.projectionTruncated) {
                         return [projection.providerRunId, projection] as const;
                     }
                     const existingResetByStream = new Map(
@@ -1379,16 +1380,13 @@ export class ChatRuntimeStore extends Store<ChatRuntimeState> {
                         projection.message.parts,
                         newlyReplacedStreams
                     );
-                    const reconciledSegments = projection.projectionTruncated
-                        ? reconcileExternalSegmentsWithAuthoritativeParts(
-                              segments,
-                              authoritativeParts
-                          )
-                        : externalSegments(projection);
+                    const reconciledSegments =
+                        reconcileExternalSegmentsWithAuthoritativeParts(
+                            segments,
+                            authoritativeParts
+                        );
                     const streamResets = projection.streamResets ?? existing.streamResets;
-                    const plan =
-                        projection.plan ??
-                        (projection.projectionTruncated ? existing.plan : undefined);
+                    const plan = projection.plan ?? existing.plan;
                     const preserved = withExternalSegments(
                         {
                             ...projection,
@@ -1549,26 +1547,12 @@ export function chatRuntimeMessages(
                   },
               ]
             : [];
-    return [...optimistic, ...runs, ...externalRows, ...externalTruncation].toSorted(
-        (left, right) => {
-            const sameExternalRun =
-                left.providerRunId !== undefined &&
-                left.providerRunId === right.providerRunId;
-            if (sameExternalRun) {
-                return left.sequence - right.sequence || left.id.localeCompare(right.id);
-            }
-            const leftUsesFallback = left.timestampMs === undefined;
-            const rightUsesFallback = right.timestampMs === undefined;
-            if (leftUsesFallback !== rightUsesFallback) {
-                return leftUsesFallback ? 1 : -1;
-            }
-            return (
-                (left.timestampMs ?? 0) - (right.timestampMs ?? 0) ||
-                left.sequence - right.sequence ||
-                left.id.localeCompare(right.id)
-            );
-        }
-    );
+    return sortChatDisplayMessages([
+        ...optimistic,
+        ...runs,
+        ...externalRows,
+        ...externalTruncation,
+    ]);
 }
 
 /**

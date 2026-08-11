@@ -505,7 +505,7 @@ export function ChatMessageBubble({
                                             key={`control:${index}`}
                                         >
                                             {part.activity === "running" ? (
-                                                <LoadingDots label={`${part.text}…`} />
+                                                <LoadingDots label={part.text} />
                                             ) : (
                                                 part.text
                                             )}

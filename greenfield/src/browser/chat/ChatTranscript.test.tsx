@@ -4,6 +4,7 @@ import { visibleChatTranscriptMessages } from "./chatMessageVisibility.ts";
 import { ChatTranscript } from "./ChatTranscript.tsx";
 import {
     activeCompactionMaximumAgeMs,
+    completedCompactionMaximumAgeMs,
     projectChatTranscriptMessages,
 } from "./chatTranscriptProjection.ts";
 import type { ChatDisplayMessage } from "./chatTypes.ts";
@@ -243,6 +244,19 @@ describe("chat transcript", () => {
             });
             expect(screen.queryByText("No messages yet")).toBeNull();
 
+            const dateReadsBeforeUnrelatedMessage = nowSpy.mock.calls.length;
+            act(() => {
+                rendered.rerender(
+                    <ChatTranscript
+                        {...properties([
+                            compaction(currentTimeMs),
+                            message("unrelated-message", 2),
+                        ])}
+                    />
+                );
+            });
+            expect(nowSpy).toHaveBeenCalledTimes(dateReadsBeforeUnrelatedMessage);
+
             currentTimeMs += activeCompactionMaximumAgeMs - 1000;
             act(() => {
                 jest.advanceTimersByTime(activeCompactionMaximumAgeMs - 1000);
@@ -265,6 +279,65 @@ describe("chat transcript", () => {
                 jest.advanceTimersByTime(activeCompactionMaximumAgeMs - 2000);
             });
             expect(screen.getByText("No messages yet")).toBeVisible();
+        } finally {
+            act(() => rendered.unmount());
+            nowSpy.mockRestore();
+            jest.useRealTimers();
+        }
+    });
+
+    test("filters an expired compaction synchronously when it arrives after idle", () => {
+        jest.useFakeTimers();
+        let currentTimeMs = 1000;
+        const nowSpy = spyOn(Date, "now").mockImplementation(() => currentTimeMs);
+        const rendered = render(<ChatTranscript {...properties([])} />);
+        const expiredCompaction: ChatDisplayMessage = {
+            attachments: [],
+            id: "expired-after-idle",
+            parts: [
+                {
+                    activity: "complete",
+                    kind: "control",
+                    text: "Context compacted",
+                    tone: "muted",
+                },
+            ],
+            providerRunId: "expired-provider-run",
+            role: "assistant",
+            sequence: 1,
+            sessionKey,
+            timestampMs: 1_000_000 - completedCompactionMaximumAgeMs - 1,
+        };
+
+        try {
+            const readsBeforeArrival = nowSpy.mock.calls.length;
+            currentTimeMs = 1_000_000;
+            act(() => {
+                rendered.rerender(
+                    <ChatTranscript {...properties([expiredCompaction])} />
+                );
+            });
+            expect(nowSpy).toHaveBeenCalledTimes(readsBeforeArrival + 1);
+            expect(screen.queryByText("Context compacted")).toBeNull();
+            expect(screen.getByText("No messages yet")).toBeVisible();
+
+            const readsBeforePendingTimers = nowSpy.mock.calls.length;
+            act(() => {
+                jest.advanceTimersByTime(0);
+            });
+            expect(nowSpy).toHaveBeenCalledTimes(readsBeforePendingTimers);
+
+            act(() => {
+                rendered.rerender(
+                    <ChatTranscript
+                        {...properties([
+                            expiredCompaction,
+                            message("unrelated-after-expiry", 2),
+                        ])}
+                    />
+                );
+            });
+            expect(nowSpy).toHaveBeenCalledTimes(readsBeforePendingTimers);
         } finally {
             act(() => rendered.unmount());
             nowSpy.mockRestore();

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, jest, test } from "bun:test";
 
-import { type ComponentProps, useState } from "react";
+import { type ComponentProps, Profiler, useState } from "react";
 
 import { Virtualizer } from "./Virtualizer.tsx";
 
@@ -167,6 +167,51 @@ function DefaultFixture() {
                 >
                     {state}
                 </button>
+            )}
+        </Virtualizer>
+    );
+}
+
+function SvgFollowFixture() {
+    return (
+        <Virtualizer<SVGSVGElement>
+            count={1}
+            estimateSize={() => 100}
+            followToEnd={{ layoutRevision: 1, scopeKey: "svg" }}
+            getItemKey={() => "svg-row"}
+            initialRect={{ height: 200, width: 320 }}
+        >
+            {(virtualization) => (
+                <section
+                    data-total-size={virtualization.totalSize}
+                    data-testid="svg-follow-fixture"
+                >
+                    <button
+                        onClick={virtualization.followToEnd?.notifyDynamicContentChange}
+                        type="button"
+                    >
+                        Remeasure SVG content
+                    </button>
+                    <div
+                        aria-label="Virtual SVG messages"
+                        ref={virtualization.scrollContainerRef}
+                        role="log"
+                        style={{ height: 200, overflow: "auto" }}
+                    >
+                        {virtualization.virtualItems.map((item) => (
+                            <svg
+                                data-index={item.index}
+                                data-testid="svg-row"
+                                key={item.key}
+                                ref={virtualization.measureElement}
+                                style={{
+                                    height: 100,
+                                    transform: `translateY(${item.start}px)`,
+                                }}
+                            />
+                        ))}
+                    </div>
+                </section>
             )}
         </Virtualizer>
     );
@@ -915,6 +960,60 @@ describe("shared virtualizer follow-to-end controller", () => {
         );
         expect(log.scrollTop).toBe(900);
         act(() => rendered.unmount());
+    });
+
+    test("skips non-HTML rows during bounded manual remeasurement", async () => {
+        const originalSvgOffsetHeight = Object.getOwnPropertyDescriptor(
+            SVGElement.prototype,
+            "offsetHeight"
+        );
+        Object.defineProperty(SVGElement.prototype, "offsetHeight", {
+            configurable: true,
+            get: () => 100,
+        });
+        const onRender = jest.fn();
+        const rendered = render(
+            <Profiler id="svg-follow-fixture" onRender={onRender}>
+                <SvgFollowFixture />
+            </Profiler>
+        );
+        try {
+            const log = screen.getByRole("log", { name: "Virtual SVG messages" });
+            setScrollGeometry(log, { clientHeight: 200, scrollHeight: () => 200 });
+            await flushAnimationFrames();
+
+            const row = screen.getByTestId("svg-row");
+            expect(row).toBeInstanceOf(SVGElement);
+            expect(row).not.toBeInstanceOf(HTMLElement);
+            expect(screen.getByTestId("svg-follow-fixture")).toHaveAttribute(
+                "data-total-size",
+                "100"
+            );
+
+            const renderCount = onRender.mock.calls.length;
+            Reflect.deleteProperty(SVGElement.prototype, "offsetHeight");
+            fireEvent.click(
+                screen.getByRole("button", { name: "Remeasure SVG content" })
+            );
+            await flushAnimationFrames();
+
+            expect(onRender).toHaveBeenCalledTimes(renderCount);
+            expect(screen.getByTestId("svg-follow-fixture")).toHaveAttribute(
+                "data-total-size",
+                "100"
+            );
+        } finally {
+            act(() => rendered.unmount());
+            if (originalSvgOffsetHeight === undefined) {
+                Reflect.deleteProperty(SVGElement.prototype, "offsetHeight");
+            } else {
+                Object.defineProperty(
+                    SVGElement.prototype,
+                    "offsetHeight",
+                    originalSvgOffsetHeight
+                );
+            }
+        }
     });
 
     test("completes a scrollbar gesture released outside the scroll container", async () => {

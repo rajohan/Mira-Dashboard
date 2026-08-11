@@ -26,8 +26,12 @@ export function toolDisplayName(name: string): string {
     const normalized = ["bash", "exec", "exec_command"].includes(unqualified)
         ? "bash"
         : unqualified;
-    const words = normalized.replaceAll(/[_-]/gu, " ").replaceAll(/\s+/gu, " ").trim();
-    return words === "" ? "Tool" : `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
+    const words = boundedToolSummaryText(normalized.replaceAll(/[_-]/gu, " "));
+    if (words === undefined) return "Tool";
+    return (
+        boundedToolSummaryText(`${words.charAt(0).toUpperCase()}${words.slice(1)}`) ??
+        "Tool"
+    );
 }
 
 /**

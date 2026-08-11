@@ -1,5 +1,5 @@
 import { ArrowDown, MessagesSquare } from "lucide-react";
-import { useEffect, useEffectEvent, useState } from "react";
+import { useEffect, useEffectEvent, useLayoutEffect, useState } from "react";
 /* eslint-disable jsx-a11y/no-noninteractive-tabindex -- The scrollable transcript log must be keyboard-focusable. */
 
 import { Button } from "../ui/Button.tsx";
@@ -130,6 +130,29 @@ function emptyTranscriptNotice(sessionKey: string): ChatTranscriptNotice {
     return { announcement: "", newMessageCount: 0, sessionKey };
 }
 
+function compactionTimings(messages: readonly ChatDisplayMessage[]): readonly Readonly<{
+    expiresAtMs: number;
+    revision: readonly [string, number, number, "complete" | "running"];
+}>[] {
+    return messages.flatMap((message) => {
+        const timestampMs = message.timestampMs;
+        if (timestampMs === undefined) return [];
+        return message.parts.flatMap((part, index) => {
+            if (part.kind !== "control" || part.activity === undefined) return [];
+            return [
+                {
+                    expiresAtMs:
+                        timestampMs +
+                        (part.activity === "running"
+                            ? activeCompactionMaximumAgeMs
+                            : completedCompactionMaximumAgeMs),
+                    revision: [message.id, timestampMs, index, part.activity] as const,
+                },
+            ];
+        });
+    });
+}
+
 /**
  * Virtualizes hydrated chat history while preserving prepend and follow anchors.
  * @returns One accessible virtual transcript.
@@ -155,7 +178,13 @@ export function ChatTranscript({
     const [notice, setNotice] = useState<ChatTranscriptNotice>(() =>
         emptyTranscriptNotice(sessionKey)
     );
+    const timings = compactionTimings(messages);
+    const compactionRevision = JSON.stringify(timings.map(({ revision }) => revision));
     const [nowMs, setNowMs] = useState(() => Date.now());
+    const nextCompactionExpiry = timings
+        .map(({ expiresAtMs }) => expiresAtMs)
+        .filter((expiry) => expiry > nowMs)
+        .toSorted((left, right) => left - right)[0];
     const currentNotice =
         notice.sessionKey === sessionKey ? notice : emptyTranscriptNotice(sessionKey);
     const transcriptMessages = projectChatTranscriptMessages(
@@ -215,37 +244,19 @@ export function ChatTranscript({
     }
 
     useEffect(() => () => stopActiveReadAloud(), [sessionKey]);
-    useEffect(() => {
-        const timeout = globalThis.setTimeout(() => setNowMs(Date.now()), 0);
-        return () => globalThis.clearTimeout(timeout);
-    }, [messages]);
-    useEffect(() => {
+    useLayoutEffect(() => {
         const currentTimeMs = Date.now();
-        const nextExpiry = messages
-            .flatMap((message) =>
-                message.timestampMs === undefined
-                    ? []
-                    : message.parts.flatMap((part) => {
-                          if (part.kind !== "control" || part.activity === undefined) {
-                              return [];
-                          }
-                          return [
-                              message.timestampMs! +
-                                  (part.activity === "running"
-                                      ? activeCompactionMaximumAgeMs
-                                      : completedCompactionMaximumAgeMs),
-                          ];
-                      })
-            )
-            .filter((expiry) => expiry > currentTimeMs)
-            .toSorted((left, right) => left - right)[0];
-        if (nextExpiry === undefined) return;
+        // oxlint-disable-next-line react/react-compiler -- A changed provider lifecycle must refresh the external wall clock before paint so an already-expired status never flashes.
+        setNowMs((previous) => Math.max(previous, currentTimeMs));
+    }, [compactionRevision]);
+    useEffect(() => {
+        if (nextCompactionExpiry === undefined) return;
         const timeout = globalThis.setTimeout(
             () => setNowMs(Date.now()),
-            Math.max(0, nextExpiry - currentTimeMs)
+            Math.max(0, nextCompactionExpiry - nowMs)
         );
         return () => globalThis.clearTimeout(timeout);
-    }, [messages, nowMs]);
+    }, [nextCompactionExpiry, nowMs]);
 
     if (visibleMessages.length === 0 && initialLoading) {
         return (

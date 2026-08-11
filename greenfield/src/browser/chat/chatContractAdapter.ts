@@ -734,18 +734,26 @@ export function projectChatExternalRun(run: ChatExternalRun): ChatExternalRunPro
             run.text.startsWith(renderedAssistantText)
         ) {
             const previous = segments[lastAssistantIndex];
-            const previousPart = previous?.message.parts.findLast(
-                (part) => part.kind === "text"
-            );
-            if (previous !== undefined && previousPart?.kind === "text") {
-                replaceSegmentParts(lastAssistantIndex, [
-                    {
-                        ...previousPart,
-                        text:
-                            previousPart.text +
-                            run.text.slice(renderedAssistantText.length),
-                    },
-                ]);
+            if (previous !== undefined) {
+                const previousPartIndex = previous.message.parts.findLastIndex(
+                    (part) => part.kind === "text"
+                );
+                const previousPart = previous.message.parts[previousPartIndex];
+                if (previousPart?.kind === "text") {
+                    replaceSegmentParts(
+                        lastAssistantIndex,
+                        previous.message.parts.map((part, index) =>
+                            index === previousPartIndex
+                                ? {
+                                      ...previousPart,
+                                      text:
+                                          previousPart.text +
+                                          run.text.slice(renderedAssistantText.length),
+                                  }
+                                : part
+                        )
+                    );
+                }
             }
         } else if (lastAssistantIndex === undefined) {
             segments.push(
@@ -760,13 +768,15 @@ export function projectChatExternalRun(run: ChatExternalRun): ChatExternalRunPro
             );
         } else {
             const insertionIndex = assistantSegmentIndexes[0] ?? segments.length;
+            const aggregateProviderSequence =
+                segments[insertionIndex]?.providerSequence ?? Number.MAX_SAFE_INTEGER - 4;
             const retained = segments.filter(
                 (segment) => !segment.message.parts.some((part) => part.kind === "text")
             );
             retained.splice(
                 Math.min(insertionIndex, retained.length),
                 0,
-                createSegment("aggregate:assistant", Number.MAX_SAFE_INTEGER - 4, [
+                createSegment("aggregate:assistant", aggregateProviderSequence, [
                     {
                         kind: "text",
                         sourceKey: `${run.providerRunId}:aggregate:assistant`,

@@ -293,4 +293,78 @@ describe("live OpenClaw chat projection", () => {
         );
         expect(screen.queryByRole("article")).toBeNull();
     });
+
+    test("renders an aggregate assistant replacement at the replaced provider position", () => {
+        const projection = projectChatExternalRun({
+            continuity: "complete",
+            hasUnprojectedActivity: false,
+            observationEpoch: 1,
+            observedAtMs: 1000,
+            parts: [
+                {
+                    kind: "thinking",
+                    segmentId: "reasoning-before",
+                    sequence: 1,
+                    text: "Reasoning before.",
+                },
+                {
+                    kind: "assistant",
+                    segmentId: "assistant-replaced",
+                    sequence: 2,
+                    text: "Stale answer.",
+                },
+                {
+                    callId: "command-after",
+                    isError: false,
+                    kind: "tool",
+                    name: "lookup",
+                    phase: "succeeded",
+                    sequence: 3,
+                },
+                {
+                    kind: "thinking",
+                    segmentId: "reasoning-after",
+                    sequence: 4,
+                    text: "Reasoning after.",
+                },
+            ],
+            projectionTruncated: false,
+            providerRunId: "aggregate-order-run",
+            sessionKey,
+            source: "provider-runtime",
+            text: "Authoritative answer.",
+            updatedAtMs: 1000,
+        });
+        expect(
+            projection.segments?.find(
+                ({ segmentId }) => segmentId === "aggregate:assistant"
+            )?.providerSequence
+        ).toBe(2);
+        const store = createChatRuntimeStore();
+        store.installExternalRuns(sessionKey, [projection]);
+        const messages = chatRuntimeMessages(store.state, sessionKey);
+        render(
+            <div>
+                {messages.map((message) => (
+                    <ChatMessageBubble
+                        display={display}
+                        key={message.id}
+                        message={message}
+                    />
+                ))}
+            </div>
+        );
+
+        const visibleText = document.body.textContent ?? "";
+        const visibleOrder = [
+            "Reasoning before.",
+            "Authoritative answer.",
+            "Lookup",
+            "Reasoning after.",
+        ].map((text) => visibleText.indexOf(text));
+        expect(visibleOrder.every((index) => index >= 0)).toBeTrue();
+        expect(visibleOrder).toEqual(
+            [...visibleOrder].toSorted((left, right) => left - right)
+        );
+    });
 });

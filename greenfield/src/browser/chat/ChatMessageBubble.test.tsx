@@ -2,6 +2,7 @@ import { describe, expect, jest, test } from "bun:test";
 
 import { safeChatMarkdownLink } from "./chatMarkdownPolicy.ts";
 import { ChatMessageBubble } from "./ChatMessageBubble.tsx";
+import { toolDisplayName } from "./chatToolPresentation.ts";
 
 const { render, screen, waitFor, within } = await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
@@ -57,7 +58,9 @@ describe("chat message bubble", () => {
             </>
         );
 
-        expect(screen.getByRole("status", { name: "Thinking…" })).toBeVisible();
+        const running = screen.getByRole("status", { name: "Thinking…" });
+        expect(running).toBeVisible();
+        expect(running.textContent).toBe("Thinking...");
         expect(screen.getByRole("status", { name: "Context compacted" })).toBeVisible();
     });
 
@@ -316,6 +319,43 @@ describe("chat message bubble", () => {
         }).textContent;
         expect(fullInput).toContain("\u202E");
         expect(fullInput).toContain(String.raw`\u0007`);
+    });
+
+    test("bounds and strips Unicode controls from tool names and accessible labels", () => {
+        const name = `functions.unsafe\u202E_tool\u0007_${"x".repeat(160)}`;
+        const label = toolDisplayName(name);
+        expect(label).toHaveLength(120);
+        expect(label).not.toContain("\u202E");
+        expect(label).not.toContain("\u0007");
+        const expandingLabel = toolDisplayName(`ß${"x".repeat(119)}`);
+        expect(expandingLabel).toHaveLength(120);
+        expect(expandingLabel.startsWith("SS")).toBeTrue();
+        expect(expandingLabel.endsWith("…")).toBeTrue();
+        render(
+            <ChatMessageBubble
+                display={display}
+                message={{
+                    attachments: [],
+                    id: "message-controlled-tool-name",
+                    parts: [
+                        {
+                            callId: "call-controlled-name",
+                            kind: "tool",
+                            name,
+                            status: "completed",
+                        },
+                    ],
+                    role: "assistant",
+                    sequence: 1,
+                    sessionKey: "agent:main:main",
+                }}
+            />
+        );
+
+        const tool = screen.getByRole("region", { name: `${label}, completed` });
+        expect(within(tool).getByRole("button")).toHaveAccessibleName(
+            `${label} completed`
+        );
     });
 
     test("derives tool descriptions only from valid structured string input", () => {

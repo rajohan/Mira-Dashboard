@@ -6,6 +6,7 @@ import {
     type GatewaySession,
     type ListGatewaySessionsResult,
 } from "../../contracts/gatewaySessions.ts";
+import { sortChatDisplayMessages } from "./chatMessageOrdering.ts";
 import {
     mergeChatMessages,
     projectChatHistory,
@@ -936,6 +937,87 @@ describe("chat view projection", () => {
         expect(
             mergeChatMessages(canonical, runtime, new Set()).map(({ id }) => id)
         ).toEqual(["message-1", "message-2", "runtime-1", "runtime-2"]);
+    });
+
+    test("sorts provider groups transitively and independently of input order", () => {
+        const providerLaterSequence = {
+            attachments: [],
+            id: "provider-later-sequence",
+            parts: [],
+            providerRunId: "provider-group",
+            role: "assistant" as const,
+            sequence: 2,
+            sessionKey,
+            timestampMs: 100,
+        };
+        const providerEarlierSequence = {
+            ...providerLaterSequence,
+            id: "provider-earlier-sequence",
+            sequence: 1,
+            timestampMs: 300,
+        };
+        const ordinary = {
+            ...providerLaterSequence,
+            id: "ordinary",
+            providerRunId: undefined,
+            sequence: 3,
+            timestampMs: 200,
+        };
+        const permutations = [
+            [providerLaterSequence, providerEarlierSequence, ordinary],
+            [providerLaterSequence, ordinary, providerEarlierSequence],
+            [providerEarlierSequence, providerLaterSequence, ordinary],
+            [providerEarlierSequence, ordinary, providerLaterSequence],
+            [ordinary, providerLaterSequence, providerEarlierSequence],
+            [ordinary, providerEarlierSequence, providerLaterSequence],
+        ];
+
+        expect(
+            permutations.map((messages) =>
+                sortChatDisplayMessages(messages).map(({ id }) => id)
+            )
+        ).toEqual(
+            Array.from({ length: permutations.length }, () => [
+                "provider-earlier-sequence",
+                "provider-later-sequence",
+                "ordinary",
+            ])
+        );
+    });
+
+    test("orders canonically equivalent distinct ids and run groups deterministically", () => {
+        const nfc = "é";
+        const nfd = "e\u0301";
+        const messageWith = (id: string, providerRunId: string) => ({
+            attachments: [],
+            id,
+            parts: [],
+            providerRunId,
+            role: "assistant" as const,
+            sequence: 1,
+            sessionKey,
+            timestampMs: 100,
+        });
+        const equivalentIds = [
+            messageWith(`message-${nfc}`, "same-run"),
+            messageWith(`message-${nfd}`, "same-run"),
+        ];
+        const equivalentGroups = [
+            messageWith("shared-message", `run-${nfc}`),
+            messageWith("shared-message", `run-${nfd}`),
+        ];
+
+        for (const input of [equivalentIds, equivalentIds.toReversed()]) {
+            expect(sortChatDisplayMessages(input).map(({ id }) => id)).toEqual([
+                `message-${nfd}`,
+                `message-${nfc}`,
+            ]);
+        }
+        for (const input of [equivalentGroups, equivalentGroups.toReversed()]) {
+            expect(
+                sortChatDisplayMessages(input).map(({ providerRunId }) => providerRunId)
+            ).toEqual([`run-${nfd}`, `run-${nfc}`]);
+        }
     });
 
     test("anchors repeated same-text steers to the exact provider run", () => {

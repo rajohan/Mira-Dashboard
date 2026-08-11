@@ -188,11 +188,8 @@ function remeasureMountedItems<TItemElement extends Element>(
     const sizeProperty = virtualizer.options.horizontal ? "offsetWidth" : "offsetHeight";
     for (const item of virtualizer.getVirtualItems()) {
         const element = virtualizer.elementsCache.get(item.key);
-        if (element === undefined || !element.isConnected) continue;
-        virtualizer.resizeItem(
-            item.index,
-            (element as unknown as HTMLElement)[sizeProperty]
-        );
+        if (!(element instanceof HTMLElement) || !element.isConnected) continue;
+        virtualizer.resizeItem(item.index, element[sizeProperty]);
     }
 }
 
