@@ -46,6 +46,8 @@ export function createTaskRepository(
             withReadTransaction((reader) => reader.listTaskProgress(input)),
         listOpenTasksByCronJobIds: (cronJobIds: readonly string[]) =>
             withReadTransaction((reader) => reader.listOpenTasksByCronJobIds(cronJobIds)),
+        readHeartbeatCandidates: () =>
+            withReadTransaction((reader) => reader.readHeartbeatCandidates()),
         listTasks: (input: ListTasksInput) =>
             withReadTransaction((reader) => reader.listTasks(input)),
         withImmediateTransaction<T>(

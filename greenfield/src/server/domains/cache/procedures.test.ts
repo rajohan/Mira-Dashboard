@@ -77,6 +77,7 @@ describe("cache procedures", () => {
             () => writeOnly.getEntry({ key: systemHostKey }),
             "FORBIDDEN"
         );
+        await expectTrpcCode(() => writeOnly.getHeartbeat({}), "FORBIDDEN");
     });
 
     test("serves bounded status and durable refresh results", async () => {
@@ -89,6 +90,7 @@ describe("cache procedures", () => {
                         totalCount: 0,
                         truncated: false,
                     },
+                    dashboardJobs: { items: [], state: "available" },
                     gateway: {
                         connection: {
                             checkedAtMs: 1000,
@@ -102,7 +104,13 @@ describe("cache procedures", () => {
                         pendingSync: "unknown",
                         state: "unavailable",
                     },
-                    schemaVersion: 1,
+                    schemaVersion: 2,
+                    tasks: {
+                        items: [],
+                        state: "available",
+                        totalCount: 0,
+                        truncated: false,
+                    },
                 }),
             getStatus: () =>
                 Effect.succeed({
@@ -120,6 +128,13 @@ describe("cache procedures", () => {
                 { cacheService }
             )
         ).cache;
+        const cacheOnlyAutomation = appRouter.createCaller(
+            await createTestRequestContext(
+                createTestAutomationAuthentication(["cache:read"]),
+                createTestApplicationRuntime(),
+                { cacheService }
+            )
+        ).cache;
 
         expect(await caller.getStatus({})).toEqual({
             entries: [],
@@ -127,13 +142,14 @@ describe("cache procedures", () => {
             totalCount: 0,
             truncated: false,
         });
-        expect(await caller.getHeartbeat({})).toEqual({
+        const heartbeat = {
             cache: {
                 entries: [],
                 generatedAtMs: 1000,
                 totalCount: 0,
                 truncated: false,
             },
+            dashboardJobs: { items: [], state: "available" },
             gateway: {
                 connection: {
                     checkedAtMs: 1000,
@@ -144,8 +160,16 @@ describe("cache procedures", () => {
             },
             generatedAtMs: 1000,
             openClawCron: { pendingSync: "unknown", state: "unavailable" },
-            schemaVersion: 1,
-        });
+            schemaVersion: 2,
+            tasks: {
+                items: [],
+                state: "available",
+                totalCount: 0,
+                truncated: false,
+            },
+        } as const;
+        expect(await cacheOnlyAutomation.getHeartbeat({})).toEqual(heartbeat);
+        expect(await caller.getHeartbeat({})).toEqual(heartbeat);
         expect(
             await caller.refreshEntry({
                 idempotencyKey: "A".repeat(32),

@@ -886,21 +886,27 @@ describe("Dashboard security composition", () => {
                 scheduleBody.result?.data?.json
             );
             expect(schedules.schedules.map(({ id }) => id)).toEqual([
+                "cache.moltbook-dashboard",
                 "cache.system-host",
                 "maintenance.rotate-managed-logs",
                 "system.worker-smoke",
             ]);
             expect(schedules.schedules[0]).toMatchObject({
+                actionKey: "cache.refresh.moltbook-dashboard",
+                enabled: true,
+                id: "cache.moltbook-dashboard",
+            });
+            expect(schedules.schedules[1]).toMatchObject({
                 actionKey: "cache.refresh.system-host",
                 enabled: true,
                 id: "cache.system-host",
             });
-            expect(schedules.schedules[1]).toMatchObject({
+            expect(schedules.schedules[2]).toMatchObject({
                 actionKey: "maintenance.rotate-logs",
                 enabled: true,
                 id: "maintenance.rotate-managed-logs",
             });
-            expect(schedules.schedules[2]).toMatchObject({
+            expect(schedules.schedules[3]).toMatchObject({
                 actionKey: "system.worker-smoke",
                 enabled: false,
                 id: "system.worker-smoke",
@@ -930,17 +936,58 @@ describe("Dashboard security composition", () => {
             };
             expect(heartbeatResponse.status).toBe(200);
             expect(heartbeatBody.error).toBeUndefined();
-            expect(
-                v.parse(cacheHeartbeatResultSchema, heartbeatBody.result?.data?.json)
-            ).toMatchObject({
+            const heartbeat = v.parse(
+                cacheHeartbeatResultSchema,
+                heartbeatBody.result?.data?.json
+            );
+            expect(heartbeat).toMatchObject({
                 cache: { entries: [], totalCount: 0, truncated: false },
+                dashboardJobs: { state: "available" },
                 gateway: {
                     connection: { freshness: "unavailable", phase: "stopped" },
                     sessions: { state: "unavailable" },
                 },
                 openClawCron: { pendingSync: "unknown", state: "unavailable" },
-                schemaVersion: 1,
+                schemaVersion: 2,
+                tasks: {
+                    items: [],
+                    state: "available",
+                    totalCount: 0,
+                    truncated: false,
+                },
             });
+            expect(
+                heartbeat.dashboardJobs.state === "available"
+                    ? heartbeat.dashboardJobs.items.map(
+                          ({ defaultEnabled, id, state }) => ({
+                              defaultEnabled,
+                              id,
+                              state,
+                          })
+                      )
+                    : []
+            ).toEqual([
+                {
+                    defaultEnabled: true,
+                    id: "cache.moltbook-dashboard",
+                    state: "present",
+                },
+                {
+                    defaultEnabled: true,
+                    id: "cache.system-host",
+                    state: "present",
+                },
+                {
+                    defaultEnabled: true,
+                    id: "maintenance.rotate-managed-logs",
+                    state: "present",
+                },
+                {
+                    defaultEnabled: false,
+                    id: "system.worker-smoke",
+                    state: "present",
+                },
+            ]);
 
             const idempotencyKey = "cHJvZHVjdGlvbi1odHRwLWNvbXBvc2l0aW9uLWtleS0x";
             const enqueue = () =>

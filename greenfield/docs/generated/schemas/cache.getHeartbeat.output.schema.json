@@ -162,6 +162,215 @@
       "additionalProperties": false,
       "$comment": "Live Valibot validation additionally requires cache totals, truncation, snapshot timestamps, and freshness relative to the snapshot clock to agree."
     },
+    "dashboardJobs": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "state": {
+              "const": "unavailable"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "defaultEnabled": {
+                        "type": "boolean"
+                      },
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 80,
+                        "pattern": "^[a-z0-9][a-z0-9._-]*$"
+                      },
+                      "state": {
+                        "const": "missing"
+                      }
+                    },
+                    "required": [
+                      "defaultEnabled",
+                      "id",
+                      "state"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "activeRun": {
+                        "type": "object",
+                        "properties": {
+                          "firstStartedAtMs": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 8640000000000000
+                          },
+                          "queuedAtMs": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 8640000000000000
+                          },
+                          "state": {
+                            "enum": [
+                              "queued",
+                              "running"
+                            ],
+                            "type": "string"
+                          },
+                          "updatedAtMs": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 8640000000000000
+                          }
+                        },
+                        "required": [
+                          "queuedAtMs",
+                          "state",
+                          "updatedAtMs"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "defaultEnabled": {
+                        "type": "boolean"
+                      },
+                      "disableIntent": {
+                        "type": "object",
+                        "properties": {
+                          "expiresAtMs": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 8640000000000000
+                          },
+                          "valid": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "valid"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 80,
+                        "pattern": "^[a-z0-9][a-z0-9._-]*$"
+                      },
+                      "latestRun": {
+                        "type": "object",
+                        "properties": {
+                          "finishedAtMs": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 8640000000000000
+                          },
+                          "firstStartedAtMs": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 8640000000000000
+                          },
+                          "queuedAtMs": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 8640000000000000
+                          },
+                          "state": {
+                            "enum": [
+                              "cancelled",
+                              "failed",
+                              "queued",
+                              "running",
+                              "succeeded",
+                              "timed-out"
+                            ],
+                            "type": "string"
+                          },
+                          "terminalCode": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "pattern": "^[a-z0-9][a-z0-9._/-]*$"
+                          },
+                          "triggerType": {
+                            "enum": [
+                              "manual",
+                              "schedule",
+                              "startup",
+                              "system"
+                            ],
+                            "type": "string"
+                          },
+                          "updatedAtMs": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 8640000000000000
+                          }
+                        },
+                        "required": [
+                          "queuedAtMs",
+                          "state",
+                          "triggerType",
+                          "updatedAtMs"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "nextRunAtMs": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 8640000000000000
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "state": {
+                        "const": "present"
+                      }
+                    },
+                    "required": [
+                      "defaultEnabled",
+                      "enabled",
+                      "id",
+                      "nextRunAtMs",
+                      "state"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "maxItems": 32
+            },
+            "state": {
+              "const": "available"
+            }
+          },
+          "required": [
+            "items",
+            "state"
+          ],
+          "additionalProperties": false
+        }
+      ],
+      "$comment": "Live Valibot validation additionally requires the bounded code-owned Dashboard-job inventory and compact run lifecycle to remain canonical."
+    },
     "gateway": {
       "type": "object",
       "properties": {
@@ -389,17 +598,124 @@
       ]
     },
     "schemaVersion": {
-      "const": 1
+      "const": 2
+    },
+    "tasks": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "state": {
+              "const": "unavailable"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "automation": {
+                    "type": "object",
+                    "properties": {
+                      "recurring": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "recurring"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "id": {
+                    "type": "string",
+                    "minLength": 36,
+                    "maxLength": 36,
+                    "format": "uuid",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  "priority": {
+                    "enum": [
+                      "low",
+                      "medium",
+                      "high"
+                    ],
+                    "type": "string"
+                  },
+                  "relevance": {
+                    "type": "array",
+                    "items": {
+                      "enum": [
+                        "automation-linked",
+                        "agent-priority",
+                        "owner-blocked"
+                      ],
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "maxItems": 3
+                  },
+                  "status": {
+                    "enum": [
+                      "todo",
+                      "in-progress",
+                      "blocked",
+                      "done"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "priority",
+                  "relevance",
+                  "status"
+                ],
+                "additionalProperties": false
+              },
+              "maxItems": 100
+            },
+            "state": {
+              "const": "available"
+            },
+            "totalCount": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "truncated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "items",
+            "state",
+            "totalCount",
+            "truncated"
+          ],
+          "additionalProperties": false
+        }
+      ],
+      "$comment": "Live Valibot validation additionally requires bounded heartbeat tasks to use strict canonical ID and relevance order with exact totals and truncation."
     }
   },
   "required": [
     "cache",
+    "dashboardJobs",
     "gateway",
     "generatedAtMs",
     "openClawCron",
-    "schemaVersion"
+    "schemaVersion",
+    "tasks"
   ],
   "additionalProperties": false,
-  "$comment": "Live Valibot validation additionally requires nested heartbeat observations not to exceed the clamped response clock and cached projections not to remain fresh while Gateway is disconnected.",
+  "$comment": "Live Valibot validation additionally requires nested heartbeat observations not to exceed the clamped response clock, disable-intent validity to match expiry, and cached projections not to remain fresh while Gateway is disconnected.",
   "$schema": "https://json-schema.org/draft/2020-12/schema"
 }

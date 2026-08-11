@@ -45,8 +45,10 @@ import {
     cacheEntryStatusIsConsistent,
     cacheHeartbeatConnectionIsConsistent,
     cacheHeartbeatCronLastKnownGoodIsConsistent,
+    cacheHeartbeatDashboardJobsAreConsistent,
     cacheHeartbeatResultIsConsistent,
     cacheHeartbeatSessionsLastKnownGoodIsConsistent,
+    cacheHeartbeatTasksAreConsistent,
     cacheStatusEntriesAreCanonical,
     cacheStatusResultIsConsistent,
     systemHostCapacityIsConsistent,
@@ -560,8 +562,16 @@ const runtimeCheckComments = new Map<unknown, string>([
         "Live Valibot validation additionally requires compact OpenClaw-cron staleness to begin at or after the last observation.",
     ],
     [
+        cacheHeartbeatTasksAreConsistent,
+        "Live Valibot validation additionally requires bounded heartbeat tasks to use strict canonical ID and relevance order with exact totals and truncation.",
+    ],
+    [
+        cacheHeartbeatDashboardJobsAreConsistent,
+        "Live Valibot validation additionally requires the bounded code-owned Dashboard-job inventory and compact run lifecycle to remain canonical.",
+    ],
+    [
         cacheHeartbeatResultIsConsistent,
-        "Live Valibot validation additionally requires nested heartbeat observations not to exceed the clamped response clock and cached projections not to remain fresh while Gateway is disconnected.",
+        "Live Valibot validation additionally requires nested heartbeat observations not to exceed the clamped response clock, disable-intent validity to match expiry, and cached projections not to remain fresh while Gateway is disconnected.",
     ],
     [
         cacheRealtimeIdentityMatches,

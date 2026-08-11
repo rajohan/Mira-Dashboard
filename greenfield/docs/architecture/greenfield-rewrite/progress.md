@@ -1401,3 +1401,25 @@ full-browser parity, production rehearsal, cutover, and legacy deletion remain o
   forwarding is not restored.
 - The existing stream enforces topic authorization, renewable and revocable authorization leases,
   bounded buffering, durable replay, and schema validation.
+
+### 2026-08-11 — Heartbeat automation parity closed with schema v2
+
+- `cache.getHeartbeat` schema v2 retains the bounded payload-free cache inventory, process-local
+  Gateway phase/current-session summary, and identity-free global OpenClaw-cron state without
+  issuing a Gateway RPC. Access remains exactly authenticated `cache:read`; no `tasks:read` or
+  `jobs:read` capability is required or granted.
+- A purpose-built task reader applies the exact legacy operational predicate to unfinished tasks,
+  returns a canonical UUID-keyed prefix of at most 100 rows plus exact total/truncation, and omits
+  titles, bodies, labels, assignee/cron identity, and automation configuration. A separate bounded
+  Dashboard-job projection enumerates every code-owned definition, including missing and
+  default-disabled schedules, while exposing only enabled/next-run, disable-expiry validity, and
+  compact run lifecycle/terminal code.
+- Both local projections validate inside independent safe-reader boundaries and become explicitly
+  `unavailable` on malformed data or read failure. Contract, repository, projection, service,
+  authorization, production-composition, JSON Schema, and parity regressions lock the secure
+  narrowing. No database migration, route, error-policy, or contract-registry change is required.
+- The reviewed legacy `GET /api/cache/heartbeat` row is implemented by this v2 replacement, not by
+  emulating payload-bearing schema v3. Greenfield cutover must migrate the repo-external OpenClaw
+  `HEARTBEAT.md` consumer to payload-free cache checks, UUID task checks, Dashboard-job summaries,
+  and global OpenClaw-cron availability/pending-sync state. The live production consumer remains
+  unchanged until activation.

@@ -140,6 +140,33 @@ describe("cache contracts", () => {
                 totalCount: 0,
                 truncated: false,
             },
+            dashboardJobs: {
+                items: [
+                    {
+                        defaultEnabled: true,
+                        disableIntent: { expiresAtMs: 1800, valid: false },
+                        enabled: false,
+                        id: "cache.system-host",
+                        latestRun: {
+                            finishedAtMs: 1800,
+                            firstStartedAtMs: 1600,
+                            queuedAtMs: 1500,
+                            state: "failed",
+                            terminalCode: "provider-unavailable",
+                            triggerType: "schedule",
+                            updatedAtMs: 1800,
+                        },
+                        nextRunAtMs: null,
+                        state: "present",
+                    },
+                    {
+                        defaultEnabled: false,
+                        id: "system.worker-smoke",
+                        state: "missing",
+                    },
+                ],
+                state: "available",
+            },
             gateway: {
                 connection: {
                     checkedAtMs: 2000,
@@ -162,7 +189,21 @@ describe("cache contracts", () => {
                 staleSinceMs: 1500,
                 state: "last-known-good",
             },
-            schemaVersion: 1,
+            schemaVersion: 2,
+            tasks: {
+                items: [
+                    {
+                        automation: { recurring: true },
+                        id: "019fc968-1a9b-7765-8f1b-d5b863b0e7b4",
+                        priority: "high",
+                        relevance: ["automation-linked", "agent-priority"],
+                        status: "blocked",
+                    },
+                ],
+                state: "available",
+                totalCount: 1,
+                truncated: false,
+            },
         } as const;
         expect(v.parse(cacheHeartbeatResultSchema, heartbeat)).toEqual(heartbeat);
 
@@ -190,6 +231,212 @@ describe("cache contracts", () => {
             {
                 ...heartbeat,
                 openClawCron: { pendingSync: "none", state: "unavailable" },
+            },
+            {
+                ...heartbeat,
+                dashboardJobs: {
+                    ...heartbeat.dashboardJobs,
+                    items: [
+                        {
+                            ...heartbeat.dashboardJobs.items[0],
+                            disableIntent: { expiresAtMs: 1800, valid: true },
+                        },
+                        heartbeat.dashboardJobs.items[1],
+                    ],
+                },
+            },
+            {
+                ...heartbeat,
+                tasks: { ...heartbeat.tasks, totalCount: 2, truncated: true },
+            },
+            {
+                ...heartbeat,
+                tasks: {
+                    ...heartbeat.tasks,
+                    items: [
+                        {
+                            ...heartbeat.tasks.items[0],
+                            relevance: ["agent-priority", "automation-linked"],
+                        },
+                    ],
+                },
+            },
+            {
+                ...heartbeat,
+                tasks: {
+                    ...heartbeat.tasks,
+                    items: [
+                        {
+                            ...heartbeat.tasks.items[0],
+                            priority: "low",
+                            relevance: ["automation-linked", "agent-priority"],
+                        },
+                    ],
+                },
+            },
+            {
+                ...heartbeat,
+                tasks: {
+                    ...heartbeat.tasks,
+                    items: [
+                        {
+                            ...heartbeat.tasks.items[0],
+                            relevance: ["automation-linked", "owner-blocked"],
+                            status: "todo",
+                        },
+                    ],
+                },
+            },
+            {
+                ...heartbeat,
+                dashboardJobs: {
+                    items: [
+                        {
+                            defaultEnabled: true,
+                            enabled: true,
+                            id: "cache.system-host",
+                            latestRun: heartbeat.dashboardJobs.items[0].latestRun,
+                            nextRunAtMs: null,
+                            state: "present",
+                        },
+                        heartbeat.dashboardJobs.items[1],
+                    ],
+                    state: "available",
+                },
+            },
+            {
+                ...heartbeat,
+                dashboardJobs: {
+                    items: [
+                        {
+                            activeRun: {
+                                queuedAtMs: 1500,
+                                state: "queued",
+                                updatedAtMs: 1700,
+                            },
+                            defaultEnabled: true,
+                            enabled: false,
+                            id: "cache.system-host",
+                            latestRun: heartbeat.dashboardJobs.items[0].latestRun,
+                            nextRunAtMs: null,
+                            state: "present",
+                        },
+                        heartbeat.dashboardJobs.items[1],
+                    ],
+                    state: "available",
+                },
+            },
+            {
+                ...heartbeat,
+                dashboardJobs: {
+                    items: [
+                        {
+                            defaultEnabled: true,
+                            enabled: false,
+                            id: "cache.system-host",
+                            latestRun: {
+                                queuedAtMs: 1500,
+                                state: "queued",
+                                triggerType: "schedule",
+                                updatedAtMs: 1700,
+                            },
+                            nextRunAtMs: null,
+                            state: "present",
+                        },
+                        heartbeat.dashboardJobs.items[1],
+                    ],
+                    state: "available",
+                },
+            },
+            {
+                ...heartbeat,
+                dashboardJobs: {
+                    items: [
+                        {
+                            defaultEnabled: true,
+                            enabled: false,
+                            id: "cache.system-host",
+                            latestRun: heartbeat.dashboardJobs.items[0].latestRun,
+                            nextRunAtMs: 2500,
+                            state: "present",
+                        },
+                        heartbeat.dashboardJobs.items[1],
+                    ],
+                    state: "available",
+                },
+            },
+            {
+                ...heartbeat,
+                dashboardJobs: {
+                    items: [
+                        {
+                            defaultEnabled: true,
+                            disableIntent: { expiresAtMs: 1800, valid: false },
+                            enabled: true,
+                            id: "cache.system-host",
+                            latestRun: heartbeat.dashboardJobs.items[0].latestRun,
+                            nextRunAtMs: 2500,
+                            state: "present",
+                        },
+                        heartbeat.dashboardJobs.items[1],
+                    ],
+                    state: "available",
+                },
+            },
+            {
+                ...heartbeat,
+                dashboardJobs: {
+                    items: [
+                        {
+                            activeRun: {
+                                queuedAtMs: 1500,
+                                state: "running",
+                                updatedAtMs: 1800,
+                            },
+                            defaultEnabled: true,
+                            enabled: false,
+                            id: "cache.system-host",
+                            latestRun: {
+                                queuedAtMs: 1500,
+                                state: "running",
+                                triggerType: "schedule",
+                                updatedAtMs: 1800,
+                            },
+                            nextRunAtMs: null,
+                            state: "present",
+                        },
+                        heartbeat.dashboardJobs.items[1],
+                    ],
+                    state: "available",
+                },
+            },
+            {
+                ...heartbeat,
+                dashboardJobs: {
+                    items: [
+                        {
+                            activeRun: {
+                                queuedAtMs: 1500,
+                                state: "queued",
+                                updatedAtMs: 1700,
+                            },
+                            defaultEnabled: true,
+                            enabled: false,
+                            id: "cache.system-host",
+                            latestRun: {
+                                firstStartedAtMs: 1600,
+                                queuedAtMs: 1500,
+                                state: "running",
+                                triggerType: "schedule",
+                                updatedAtMs: 1800,
+                            },
+                            nextRunAtMs: null,
+                            state: "present",
+                        },
+                        heartbeat.dashboardJobs.items[1],
+                    ],
+                    state: "available",
+                },
             },
         ]) {
             expect(v.safeParse(cacheHeartbeatResultSchema, invalid).success).toBeFalse();

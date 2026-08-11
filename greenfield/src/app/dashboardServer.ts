@@ -10,6 +10,10 @@ import {
 } from "../contracts/chatModel.ts";
 import { createAgentRepository } from "../server/domains/agents/repository.ts";
 import { createAgentService } from "../server/domains/agents/service.ts";
+import {
+    readCacheHeartbeatDashboardJobs,
+    readCacheHeartbeatTasks,
+} from "../server/domains/cache/heartbeatProjection.ts";
 import { createCacheRepository } from "../server/domains/cache/repository.ts";
 import { createCacheService } from "../server/domains/cache/service.ts";
 import { createChatRepository } from "../server/domains/chat/repository.ts";
@@ -989,6 +993,12 @@ export async function createDashboardServer(
             ...(domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }),
             readGatewayConnection: gatewayConnectionService.get,
             readGatewaySessionsProjection: gatewaySessionsService.readHeartbeatProjection,
+            readHeartbeatDashboardJobs: (generatedAtMs) =>
+                readCacheHeartbeatDashboardJobs(jobRepository, generatedAtMs),
+            readHeartbeatTasks: () =>
+                taskRepository.withReadTransaction((reader) =>
+                    readCacheHeartbeatTasks(reader)
+                ),
             readOpenClawCronProjection: openClawCronService.readHeartbeatProjection,
             wakeEventPump,
         });

@@ -227,19 +227,35 @@ contract for automation merely because the caller is non-browser TypeScript.
 
 ### Compact automation heartbeat
 
-`cache.getHeartbeat` is a versioned greenfield query under the existing `cache:read` automation
-scope. It embeds the same at-most-128-row, payload-free cache status used by `cache.getStatus`, then
-adds only the process-owned Gateway phase/freshness and identity-free summaries of the latest
-validated current-session and global OpenClaw-cron projections. Session keys, display names, cron
-names, payloads, credentials, endpoints, and raw errors never cross this boundary.
+`cache.getHeartbeat` schema v2 is a dedicated declassification query under the existing
+`cache:read` automation scope. It embeds the same at-most-128-row, payload-free cache status used
+by `cache.getStatus`, then adds only the process-owned Gateway phase/freshness and identity-free
+summaries of the latest validated current-session and global OpenClaw-cron projections. Session
+keys, display names, cron names, payloads, credentials, endpoints, and raw errors never cross this
+boundary.
 
 The heartbeat does not issue a Gateway RPC. Before a bounded projection has been observed it says
 `unavailable`; after a failed refresh or Gateway disconnect it retains the count as explicitly
 `last-known-good`. Session truncation remains visible. Cron pending synchronization is `unknown`
 when the cached global page cannot prove absence and `present` when any unsettled desired state is
-known. This modern schema does not reproduce legacy schema-v3 task rows, Dashboard-job rows, or
-payload-bearing cache envelopes, so the reviewed legacy endpoint remains planned until those
-remaining consumers are deliberately migrated or removed.
+known.
+
+Two purpose-built local projections preserve the remaining operational checks without widening
+authorization to `tasks:read` or `jobs:read`. Tasks include at most 100 UUID-keyed open rows that
+are automation-linked, Mira-owned medium/high priority, or Raymond-owned blocked. They disclose
+only status, priority, canonical relevance categories, and the optional recurring bit; content,
+labels, assignee identity, cron identity, and automation configuration are omitted. Dashboard jobs
+enumerate the bounded code-owned action registry so a missing schedule remains visible, including
+the definition's `defaultEnabled` state. Present rows disclose only enabled/next-run state,
+expiry validity without disable identity or reason, and compact run lifecycle state without run
+identity, payload, result, event, actor, worker, lease, fencing, or terminal message data.
+
+Task and Dashboard-job reads fail independently to explicit `unavailable`; malformed rows are
+contained before whole-response validation. The task count and prefix share one deferred SQLite
+snapshot, while Gateway summaries remain process-local and trigger no RPC. The reviewed legacy
+endpoint is implemented by this secure v2 narrowing. At greenfield cutover, the repo-external
+OpenClaw `HEARTBEAT.md` consumer must move from legacy schema v3 to these bounded UUID and aggregate
+checks; production's live consumer must not change before activation.
 
 ### Browser-managed automation security
 

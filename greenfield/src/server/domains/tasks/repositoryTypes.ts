@@ -60,6 +60,23 @@ export interface TaskOpenCronLinkRecord {
     readonly task: TaskRecord;
 }
 
+/** Minimal task row used only by the cache-read heartbeat declassification. */
+export interface TaskHeartbeatCandidateRecord {
+    readonly assignee?: TaskRecord["assignee"];
+    readonly automation?: {
+        readonly recurring: boolean;
+    };
+    readonly id: TaskRecord["id"];
+    readonly priority: TaskRecord["priority"];
+    readonly status: TaskRecord["status"];
+}
+
+/** Exact heartbeat-relevant task count plus its bounded canonical prefix. */
+export interface TaskHeartbeatCandidateSnapshot {
+    readonly rows: readonly TaskHeartbeatCandidateRecord[];
+    readonly totalCount: number;
+}
+
 export interface VersionedTaskMutationInput {
     readonly changes: TaskMutableUpdate;
     readonly expectedVersion: number;
@@ -82,6 +99,7 @@ export interface TaskRepositoryReader {
     listTaskProgress(input: ListTaskProgressInput): TaskProgressRecord[];
     listTasks(input: ListTasksInput): TaskAggregateRecord[];
     listOpenTasksByCronJobIds(cronJobIds: readonly string[]): TaskOpenCronLinkRecord[];
+    readHeartbeatCandidates(): TaskHeartbeatCandidateSnapshot;
 }
 
 /** Synchronous writes owned by one admitted SQLite IMMEDIATE transaction. */

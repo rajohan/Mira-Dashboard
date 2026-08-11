@@ -6,6 +6,10 @@ import { testImmediateDatabaseWriteAdmission } from "../../test/support/database
 import { openFreshMigratedDatabase } from "../../test/support/freshDatabase.ts";
 import { createTaskRepository } from "./repository.ts";
 
+function uuid(index: number): string {
+    return `019fd984-63e8-7404-a7da-${String(index).padStart(12, "0")}`;
+}
+
 describe("task repository cron projection", () => {
     test("returns only exact unfinished task relationships in one bounded read", async () => {
         const database = await openFreshMigratedDatabase();
@@ -67,6 +71,86 @@ describe("task repository cron projection", () => {
                     task: { id: openId, status: "blocked", title: "Open linked task" },
                 },
             ]);
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("reads the exact bounded heartbeat policy in canonical order", async () => {
+        const database = await openFreshMigratedDatabase();
+        try {
+            const policyRows = [
+                { assignee: "mira-2026", priority: "medium", status: "todo" },
+                { assignee: "rajohan", priority: "low", status: "blocked" },
+                { assignee: "mira-2026", priority: "low", status: "todo" },
+                { assignee: "rajohan", priority: "high", status: "in-progress" },
+                { assignee: "mira-2026", priority: "high", status: "done" },
+                { assignee: undefined, priority: "high", status: "done" },
+            ] as const;
+            database.orm
+                .insert(tasks)
+                .values([
+                    ...policyRows.map((row, index) => ({
+                        ...(row.assignee === undefined ? {} : { assignee: row.assignee }),
+                        createdAt: new Date(1000),
+                        id: uuid(index),
+                        priority: row.priority,
+                        status: row.status,
+                        title: `Private policy task ${index}`,
+                        updatedAt: new Date(1000),
+                    })),
+                    ...Array.from({ length: 101 }, (_, offset) => ({
+                        createdAt: new Date(1000),
+                        id: uuid(offset + 6),
+                        priority: "low" as const,
+                        status: "todo" as const,
+                        title: `Private automation task ${offset}`,
+                        updatedAt: new Date(1000),
+                    })),
+                ])
+                .run();
+            database.orm
+                .insert(taskAutomationProfiles)
+                .values(
+                    Array.from({ length: 101 }, (_, offset) => ({
+                        cronJobId: `private-cron-${offset}`,
+                        kind: "openclaw-cron" as const,
+                        recurring: offset % 2 === 0,
+                        taskId: uuid(offset + 6),
+                    }))
+                )
+                .run();
+            const repository = createTaskRepository(
+                database.orm,
+                testImmediateDatabaseWriteAdmission
+            );
+
+            const snapshot = repository.readHeartbeatCandidates();
+            expect(snapshot.totalCount).toBe(103);
+            expect(snapshot.rows).toHaveLength(100);
+            expect(snapshot.rows.slice(0, 3)).toEqual([
+                {
+                    assignee: "mira-2026",
+                    id: uuid(0),
+                    priority: "medium",
+                    status: "todo",
+                },
+                {
+                    assignee: "rajohan",
+                    id: uuid(1),
+                    priority: "low",
+                    status: "blocked",
+                },
+                {
+                    automation: { recurring: true },
+                    id: uuid(6),
+                    priority: "low",
+                    status: "todo",
+                },
+            ]);
+            expect(snapshot.rows.at(-1)?.id).toBe(uuid(103));
+            expect(JSON.stringify(snapshot)).not.toContain("Private");
+            expect(JSON.stringify(snapshot)).not.toContain("private-cron");
         } finally {
             database.sqlite.close(true);
         }

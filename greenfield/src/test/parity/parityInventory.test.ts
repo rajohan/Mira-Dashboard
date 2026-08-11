@@ -187,6 +187,22 @@ describe("reviewed pre-cutover parity inventory", () => {
         ]);
     });
 
+    test("records heartbeat v2 as a secure narrowing with a cutover migration", async () => {
+        const reviewed = await loadReviewedParityInventory();
+        const heartbeat = reviewed.legacyEndpoints.endpoints.find(
+            ({ id }) => id === "GET /api/cache/heartbeat"
+        );
+
+        expect(heartbeat?.purpose).toContain("schema v2 payload-free cache status");
+        expect(heartbeat?.purpose).toContain("external heartbeat consumer migrates");
+        expect(heartbeat?.target).toEqual({
+            delivery: "implemented",
+            kind: "procedure",
+            names: ["cache.getHeartbeat"],
+            phase: "phase-4",
+        });
+    });
+
     test("keeps the reviewed Phase 5 Logs slice closed", async () => {
         const reviewed = await loadReviewedParityInventory();
         const logsRoute = reviewed.frontend.routes.find(({ path }) => path === "/logs");

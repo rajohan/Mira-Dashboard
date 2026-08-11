@@ -17,10 +17,15 @@ import { gatewaySessionProjectionMaximum } from "./gatewaySessions.ts";
 import {
     jobIdempotencyKeySchema,
     jobRunIdSchema,
+    jobRunStateSchema,
     jobRunSummarySchema,
+    jobRunTerminalCodeSchema,
+    jobTriggerTypeSchema,
+    scheduleIdSchema,
 } from "./jobModel.ts";
 import type { ProcedureContract } from "./registry.ts";
 import { emptyInputSchema } from "./system.ts";
+import { taskIdSchema, taskPrioritySchema, taskStatusSchema } from "./taskModel.ts";
 
 /** Hard cache-status row budget for one complete status response. */
 export const cacheStatusMaximumEntries = 128;
@@ -354,8 +359,12 @@ export const cacheStatusResultSchema = v.pipe(
     v.check(cacheStatusResultIsConsistent, "Cache status result is inconsistent")
 );
 
-/** First compact greenfield heartbeat schema; legacy schema-v3 rows are not mirrored. */
-export const cacheHeartbeatSchemaVersion = 1 as const;
+/** Securely narrowed greenfield heartbeat schema; legacy schema-v3 rows are not mirrored. */
+export const cacheHeartbeatSchemaVersion = 2 as const;
+/** Hard row budget for the purpose-built heartbeat task projection. */
+export const cacheHeartbeatTaskMaximum = 100;
+/** Hard release-registry budget for Dashboard schedules exposed in one heartbeat. */
+export const cacheHeartbeatDashboardJobMaximum = 32;
 
 interface CacheHeartbeatConnectionState {
     readonly checkedAtMs: number;
@@ -506,8 +515,256 @@ export const cacheHeartbeatOpenClawCronSchema = v.variant("state", [
     cacheHeartbeatCronLastKnownGoodSchema,
 ]);
 
+export const cacheHeartbeatTaskRelevanceValues = [
+    "automation-linked",
+    "agent-priority",
+    "owner-blocked",
+] as const;
+const cacheHeartbeatTaskRelevanceSchema = v.pipe(
+    v.array(
+        v.picklist(
+            cacheHeartbeatTaskRelevanceValues,
+            "Heartbeat task relevance is invalid"
+        ),
+        "Heartbeat task relevance is invalid"
+    ),
+    v.minLength(1, "Heartbeat task relevance is invalid"),
+    v.maxLength(
+        cacheHeartbeatTaskRelevanceValues.length,
+        "Heartbeat task relevance is invalid"
+    )
+);
+const cacheHeartbeatTaskSchema = v.strictObject({
+    automation: v.optional(
+        v.strictObject({
+            recurring: v.boolean("Heartbeat task recurring state is invalid"),
+        })
+    ),
+    id: taskIdSchema,
+    priority: taskPrioritySchema,
+    relevance: cacheHeartbeatTaskRelevanceSchema,
+    status: taskStatusSchema,
+});
+const cacheHeartbeatTasksUnavailableSchema = v.strictObject({
+    state: v.literal("unavailable"),
+});
+const cacheHeartbeatTasksAvailableSchema = v.strictObject({
+    items: v.pipe(
+        v.array(cacheHeartbeatTaskSchema, "Heartbeat task rows are invalid"),
+        v.maxLength(cacheHeartbeatTaskMaximum, "Heartbeat task rows exceed their budget")
+    ),
+    state: v.literal("available"),
+    totalCount: nonnegativeSafeIntegerSchema("Heartbeat task total count is invalid"),
+    truncated: v.boolean("Heartbeat task truncation state is invalid"),
+});
+const cacheHeartbeatTasksVariantSchema = v.variant("state", [
+    cacheHeartbeatTasksUnavailableSchema,
+    cacheHeartbeatTasksAvailableSchema,
+]);
+export type CacheHeartbeatTasks = v.InferOutput<typeof cacheHeartbeatTasksVariantSchema>;
+
+/** @returns Whether task rows, relevance, exact total, and truncation are canonical. */
+export function cacheHeartbeatTasksAreConsistent(
+    projection: CacheHeartbeatTasks
+): boolean {
+    if (projection.state === "unavailable") return true;
+    const items = projection.items;
+    return (
+        items.length === Math.min(projection.totalCount, cacheHeartbeatTaskMaximum) &&
+        projection.truncated === projection.totalCount > cacheHeartbeatTaskMaximum &&
+        items.every((item, index) =>
+            index === 0 ? true : compareStrings(items[index - 1]!.id, item.id) < 0
+        ) &&
+        items.every((item) => {
+            const canonicalRelevance = cacheHeartbeatTaskRelevanceValues.filter((value) =>
+                item.relevance.includes(value)
+            );
+            return (
+                item.status !== "done" &&
+                canonicalRelevance.length === item.relevance.length &&
+                canonicalRelevance.every(
+                    (value, index) => value === item.relevance[index]
+                ) &&
+                item.relevance.includes("automation-linked") ===
+                    (item.automation !== undefined) &&
+                (!item.relevance.includes("agent-priority") ||
+                    item.priority === "medium" ||
+                    item.priority === "high") &&
+                (!item.relevance.includes("owner-blocked") || item.status === "blocked")
+            );
+        })
+    );
+}
+
+/** Bounded content-free task state used only by cache-read automation. */
+export const cacheHeartbeatTasksSchema = v.pipe(
+    cacheHeartbeatTasksVariantSchema,
+    v.check(cacheHeartbeatTasksAreConsistent, "Heartbeat task projection is inconsistent")
+);
+
+const cacheHeartbeatJobDisableIntentSchema = v.strictObject({
+    expiresAtMs: v.optional(cacheTimestampSchema),
+    valid: v.boolean("Heartbeat Dashboard-job disable validity is invalid"),
+});
+const cacheHeartbeatActiveRunSchema = v.strictObject({
+    firstStartedAtMs: v.optional(cacheTimestampSchema),
+    queuedAtMs: cacheTimestampSchema,
+    state: v.picklist(
+        ["queued", "running"],
+        "Heartbeat Dashboard-job active-run state is invalid"
+    ),
+    updatedAtMs: cacheTimestampSchema,
+});
+const cacheHeartbeatLatestRunSchema = v.strictObject({
+    finishedAtMs: v.optional(cacheTimestampSchema),
+    firstStartedAtMs: v.optional(cacheTimestampSchema),
+    queuedAtMs: cacheTimestampSchema,
+    state: jobRunStateSchema,
+    terminalCode: v.optional(jobRunTerminalCodeSchema),
+    triggerType: jobTriggerTypeSchema,
+    updatedAtMs: cacheTimestampSchema,
+});
+const cacheHeartbeatDashboardJobMissingSchema = v.strictObject({
+    defaultEnabled: v.boolean("Heartbeat Dashboard-job default state is invalid"),
+    id: scheduleIdSchema,
+    state: v.literal("missing"),
+});
+const cacheHeartbeatDashboardJobPresentSchema = v.strictObject({
+    activeRun: v.optional(cacheHeartbeatActiveRunSchema),
+    defaultEnabled: v.boolean("Heartbeat Dashboard-job default state is invalid"),
+    disableIntent: v.optional(cacheHeartbeatJobDisableIntentSchema),
+    enabled: v.boolean("Heartbeat Dashboard-job enabled state is invalid"),
+    id: scheduleIdSchema,
+    latestRun: v.optional(cacheHeartbeatLatestRunSchema),
+    nextRunAtMs: v.nullable(cacheTimestampSchema),
+    state: v.literal("present"),
+});
+/** One code-owned schedule without action metadata, payloads, identities, or messages. */
+export const cacheHeartbeatDashboardJobSchema = v.variant("state", [
+    cacheHeartbeatDashboardJobMissingSchema,
+    cacheHeartbeatDashboardJobPresentSchema,
+]);
+const cacheHeartbeatDashboardJobsUnavailableSchema = v.strictObject({
+    state: v.literal("unavailable"),
+});
+const cacheHeartbeatDashboardJobsAvailableSchema = v.strictObject({
+    items: v.pipe(
+        v.array(
+            cacheHeartbeatDashboardJobSchema,
+            "Heartbeat Dashboard-job rows are invalid"
+        ),
+        v.maxLength(
+            cacheHeartbeatDashboardJobMaximum,
+            "Heartbeat Dashboard-job rows exceed their budget"
+        )
+    ),
+    state: v.literal("available"),
+});
+const cacheHeartbeatDashboardJobsVariantSchema = v.variant("state", [
+    cacheHeartbeatDashboardJobsUnavailableSchema,
+    cacheHeartbeatDashboardJobsAvailableSchema,
+]);
+export type CacheHeartbeatDashboardJobs = v.InferOutput<
+    typeof cacheHeartbeatDashboardJobsVariantSchema
+>;
+
+/** @returns Whether schedule rows, run lifecycle, and optional expiry state are canonical. */
+export function cacheHeartbeatDashboardJobsAreConsistent(
+    projection: CacheHeartbeatDashboardJobs,
+    generatedAtMs?: number
+): boolean {
+    if (projection.state === "unavailable") return true;
+    return (
+        projection.items.every((item, index) =>
+            index === 0
+                ? true
+                : compareStrings(projection.items[index - 1]!.id, item.id) < 0
+        ) &&
+        projection.items.every((job) => {
+            if (job.state === "missing") return true;
+            const latestRunIsActive =
+                job.latestRun !== undefined &&
+                ["queued", "running"].includes(job.latestRun.state);
+            if (
+                job.enabled !== (job.nextRunAtMs !== null) ||
+                (job.enabled && job.disableIntent !== undefined) ||
+                (job.activeRun?.state === "running" &&
+                    job.activeRun.firstStartedAtMs === undefined) ||
+                (job.activeRun !== undefined) !== latestRunIsActive
+            ) {
+                return false;
+            }
+            if (
+                job.activeRun !== undefined &&
+                job.latestRun !== undefined &&
+                (job.activeRun.state !== job.latestRun.state ||
+                    job.activeRun.queuedAtMs !== job.latestRun.queuedAtMs ||
+                    job.activeRun.firstStartedAtMs !== job.latestRun.firstStartedAtMs ||
+                    job.activeRun.updatedAtMs !== job.latestRun.updatedAtMs)
+            ) {
+                return false;
+            }
+            const historicalTimestamps = [
+                ...(job.activeRun === undefined
+                    ? []
+                    : [
+                          job.activeRun.queuedAtMs,
+                          job.activeRun.updatedAtMs,
+                          ...(job.activeRun.firstStartedAtMs === undefined
+                              ? []
+                              : [job.activeRun.firstStartedAtMs]),
+                      ]),
+                ...(job.latestRun === undefined
+                    ? []
+                    : [
+                          job.latestRun.queuedAtMs,
+                          job.latestRun.updatedAtMs,
+                          ...(job.latestRun.firstStartedAtMs === undefined
+                              ? []
+                              : [job.latestRun.firstStartedAtMs]),
+                          ...(job.latestRun.finishedAtMs === undefined
+                              ? []
+                              : [job.latestRun.finishedAtMs]),
+                      ]),
+            ];
+            if (
+                generatedAtMs !== undefined &&
+                (!historicalTimestamps.every((timestamp) => timestamp <= generatedAtMs) ||
+                    (job.disableIntent !== undefined &&
+                        job.disableIntent.valid !==
+                            (job.disableIntent.expiresAtMs === undefined ||
+                                job.disableIntent.expiresAtMs > generatedAtMs)))
+            ) {
+                return false;
+            }
+            return !(
+                (job.activeRun !== undefined &&
+                    !heartbeatRunTimesAreConsistent(job.activeRun)) ||
+                (job.latestRun !== undefined &&
+                    (!heartbeatRunTimesAreConsistent(job.latestRun) ||
+                        ["queued", "running"].includes(job.latestRun.state) !==
+                            (job.latestRun.finishedAtMs === undefined) ||
+                        ["cancelled", "failed", "timed-out"].includes(
+                            job.latestRun.state
+                        ) !==
+                            (job.latestRun.terminalCode !== undefined)))
+            );
+        })
+    );
+}
+
+/** Complete code-owned Dashboard schedule inventory or an explicit safe read failure. */
+export const cacheHeartbeatDashboardJobsSchema = v.pipe(
+    cacheHeartbeatDashboardJobsVariantSchema,
+    v.check(
+        cacheHeartbeatDashboardJobsAreConsistent,
+        "Heartbeat Dashboard-job projection is inconsistent"
+    )
+);
+
 const cacheHeartbeatResultObjectSchema = v.strictObject({
     cache: cacheStatusResultSchema,
+    dashboardJobs: cacheHeartbeatDashboardJobsSchema,
     gateway: v.strictObject({
         connection: cacheHeartbeatConnectionSchema,
         sessions: cacheHeartbeatSessionsSchema,
@@ -515,12 +772,41 @@ const cacheHeartbeatResultObjectSchema = v.strictObject({
     generatedAtMs: cacheTimestampSchema,
     openClawCron: cacheHeartbeatOpenClawCronSchema,
     schemaVersion: v.literal(cacheHeartbeatSchemaVersion),
+    tasks: cacheHeartbeatTasksSchema,
 });
 
 export type CacheHeartbeatResult = v.InferOutput<typeof cacheHeartbeatResultObjectSchema>;
 
-/** @returns Whether all nested observations precede the clamped response clock. */
+function heartbeatRunTimesAreConsistent(run: {
+    readonly finishedAtMs?: number;
+    readonly firstStartedAtMs?: number;
+    readonly queuedAtMs: number;
+    readonly updatedAtMs: number;
+}): boolean {
+    return (
+        run.queuedAtMs <= run.updatedAtMs &&
+        (run.firstStartedAtMs === undefined ||
+            (run.firstStartedAtMs >= run.queuedAtMs &&
+                run.firstStartedAtMs <= run.updatedAtMs)) &&
+        (run.finishedAtMs === undefined ||
+            (run.finishedAtMs >= (run.firstStartedAtMs ?? run.queuedAtMs) &&
+                run.finishedAtMs <= run.updatedAtMs))
+    );
+}
+
+/** @returns Whether all bounded rows, totals, and timestamps agree with the response clock. */
 export function cacheHeartbeatResultIsConsistent(result: CacheHeartbeatResult): boolean {
+    if (
+        !cacheHeartbeatTasksAreConsistent(result.tasks) ||
+        !cacheHeartbeatDashboardJobsAreConsistent(
+            result.dashboardJobs,
+            result.generatedAtMs
+        )
+    ) {
+        return false;
+    }
+    const dashboardJobs =
+        result.dashboardJobs.state === "available" ? result.dashboardJobs.items : [];
     const timestamps = [
         result.cache.generatedAtMs,
         result.gateway.connection.checkedAtMs,
@@ -540,6 +826,33 @@ export function cacheHeartbeatResultIsConsistent(result: CacheHeartbeatResult): 
                       ? [result.openClawCron.staleSinceMs]
                       : []),
               ]),
+        ...dashboardJobs.flatMap((job) =>
+            job.state === "missing"
+                ? []
+                : [
+                      ...(job.activeRun === undefined
+                          ? []
+                          : [
+                                job.activeRun.queuedAtMs,
+                                job.activeRun.updatedAtMs,
+                                ...(job.activeRun.firstStartedAtMs === undefined
+                                    ? []
+                                    : [job.activeRun.firstStartedAtMs]),
+                            ]),
+                      ...(job.latestRun === undefined
+                          ? []
+                          : [
+                                job.latestRun.queuedAtMs,
+                                job.latestRun.updatedAtMs,
+                                ...(job.latestRun.firstStartedAtMs === undefined
+                                    ? []
+                                    : [job.latestRun.firstStartedAtMs]),
+                                ...(job.latestRun.finishedAtMs === undefined
+                                    ? []
+                                    : [job.latestRun.finishedAtMs]),
+                            ]),
+                  ]
+        ),
     ];
     return (
         timestamps.every((timestamp) => timestamp <= result.generatedAtMs) &&
@@ -549,7 +862,7 @@ export function cacheHeartbeatResultIsConsistent(result: CacheHeartbeatResult): 
     );
 }
 
-/** Compact cache, Gateway, current-session, and OpenClaw-cron heartbeat projection. */
+/** Compact cache, Gateway, task, schedule, and OpenClaw-cron heartbeat projection. */
 export const cacheHeartbeatResultSchema = v.pipe(
     cacheHeartbeatResultObjectSchema,
     v.check(cacheHeartbeatResultIsConsistent, "Cache heartbeat result is inconsistent")
@@ -601,8 +914,7 @@ export const cacheProcedureContracts = [
         name: "cache.getHeartbeat",
         output: cacheHeartbeatResultSchema,
         outputSchemaId: "cache.getHeartbeat.output",
-        summary:
-            "Returns compact cache status plus sanitized process-owned Gateway projections.",
+        summary: "Returns compact cache status plus sanitized operational projections.",
         transport: cacheQueryTransport,
     },
     {

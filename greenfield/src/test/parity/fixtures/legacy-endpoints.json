@@ -283,10 +283,10 @@
             "id": "GET /api/cache/heartbeat",
             "method": "GET",
             "path": "/api/cache/heartbeat",
-            "purpose": "Reads schema v3 cache envelopes plus compact task, OpenClaw cron, and Dashboard-job projections.",
+            "purpose": "Reads schema v2 payload-free cache status plus securely narrowed task, Dashboard-job, Gateway-session, and global OpenClaw-cron projections; the external heartbeat consumer migrates at greenfield cutover.",
             "section": "Backups, Cache, Metrics, Ops",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["cache.getHeartbeat"],
                 "phase": "phase-4"
