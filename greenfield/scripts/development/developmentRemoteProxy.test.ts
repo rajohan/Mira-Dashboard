@@ -1,4 +1,5 @@
 import { describe, expect, jest, test } from "bun:test";
+import { createConnection, createServer, type Socket } from "node:net";
 
 import type { ServerWebSocket } from "bun";
 
@@ -21,6 +22,11 @@ interface ObservedWebSocketUpgrade {
     readonly origin: string | null;
     readonly pathname: string;
     readonly search: string;
+}
+
+interface SingleHostWebSocketForwarder {
+    readonly origin: string;
+    stop(): Promise<void>;
 }
 
 function socketData(): DevelopmentRemoteProxySocketData {
@@ -51,12 +57,22 @@ function nextMessage(socket: WebSocket): Promise<MessageEvent> {
 
 function opened(socket: WebSocket): Promise<void> {
     return new Promise((resolve, reject) => {
-        socket.addEventListener("open", () => resolve(), { once: true });
-        socket.addEventListener(
-            "error",
-            () => reject(new Error("WebSocket connection failed")),
-            { once: true }
-        );
+        const cleanup = (): void => {
+            socket.removeEventListener("close", rejectConnection);
+            socket.removeEventListener("error", rejectConnection);
+            socket.removeEventListener("open", resolveConnection);
+        };
+        const rejectConnection = (): void => {
+            cleanup();
+            reject(new Error("WebSocket connection failed"));
+        };
+        const resolveConnection = (): void => {
+            cleanup();
+            resolve();
+        };
+        socket.addEventListener("close", rejectConnection, { once: true });
+        socket.addEventListener("error", rejectConnection, { once: true });
+        socket.addEventListener("open", resolveConnection, { once: true });
     });
 }
 
@@ -77,6 +93,95 @@ async function closeSocket(socket: WebSocket): Promise<void> {
     });
     socket.close(1000, "Test complete");
     await Promise.race([closed, Bun.sleep(1000)]);
+}
+
+async function startSingleHostWebSocketForwarder(
+    targetPort: number,
+    host: string
+): Promise<SingleHostWebSocketForwarder> {
+    const sockets = new Set<Socket>();
+    const server = createServer((downstream) => {
+        const upstream = createConnection({ host: "127.0.0.1", port: targetPort });
+        sockets.add(downstream);
+        sockets.add(upstream);
+
+        const closePair = (): void => {
+            downstream.destroy();
+            upstream.destroy();
+        };
+        const forgetDownstream = (): void => {
+            sockets.delete(downstream);
+        };
+        const forgetUpstream = (): void => {
+            sockets.delete(upstream);
+        };
+        downstream.once("close", forgetDownstream);
+        downstream.once("error", closePair);
+        upstream.once("close", forgetUpstream);
+        upstream.once("error", closePair);
+        upstream.pipe(downstream);
+
+        let request = Buffer.alloc(0);
+        const forwardHandshake = (chunk: Buffer): void => {
+            request = Buffer.concat([request, chunk]);
+            if (request.byteLength > 16 * 1024) {
+                closePair();
+                return;
+            }
+            const headerEnd = request.indexOf("\r\n\r\n");
+            if (headerEnd === -1) return;
+
+            downstream.off("data", forwardHandshake);
+            const headerLines = request
+                .subarray(0, headerEnd)
+                .toString("latin1")
+                .split("\r\n");
+            const requestLine = headerLines.shift();
+            if (requestLine === undefined || requestLine === "") {
+                closePair();
+                return;
+            }
+            const forwardedHeader = [
+                requestLine,
+                `Host: ${host}`,
+                ...headerLines.filter((line) => !/^host\s*:/iu.test(line)),
+                "",
+                "",
+            ].join("\r\n");
+            upstream.write(forwardedHeader);
+            const remainder = request.subarray(headerEnd + 4);
+            if (remainder.byteLength > 0) upstream.write(remainder);
+            downstream.pipe(upstream);
+        };
+        downstream.on("data", forwardHandshake);
+    });
+
+    await new Promise<void>((resolve, reject) => {
+        const rejectListen = (error: Error): void => reject(error);
+        server.once("error", rejectListen);
+        server.listen(0, "127.0.0.1", () => {
+            server.off("error", rejectListen);
+            resolve();
+        });
+    });
+    const address = server.address();
+    if (address === null || typeof address === "string") {
+        server.close();
+        throw new Error("WebSocket test forwarder did not bind a TCP port");
+    }
+
+    return {
+        origin: `ws://127.0.0.1:${address.port}`,
+        async stop() {
+            for (const socket of sockets) socket.destroy();
+            await new Promise<void>((resolve, reject) => {
+                server.close((error) => {
+                    if (error === undefined) resolve();
+                    else reject(error);
+                });
+            });
+        },
+    };
 }
 
 function startObservedWebSocketServer(): Bun.Server<ObservedWebSocketUpgrade> {
@@ -120,6 +225,16 @@ function startObservedWebSocketServer(): Bun.Server<ObservedWebSocketUpgrade> {
 }
 
 describe("development remote proxy", () => {
+    test("treats a close-only rejected handshake as an open failure", async () => {
+        const socket = new EventTarget() as unknown as WebSocket;
+        const opening = opened(socket);
+
+        socket.dispatchEvent(new CloseEvent("close", { code: 1006 }));
+
+        const openError = await opening.catch((error: unknown) => error);
+        expect(openError).toEqual(new Error("WebSocket connection failed"));
+    });
+
     test("binds only to loopback and validates the fixed frontend target", async () => {
         expect(() =>
             startDevelopmentRemoteProxy({
@@ -249,14 +364,20 @@ describe("development remote proxy", () => {
             port: 0,
             publicOrigin,
         });
-        const hmr = new WebSocket(websocketUrl(proxy.url.origin, "/_bun/hmr?key=1"), {
-            headers: { host: publicHost, origin: publicOrigin },
-            perMessageDeflate: false,
-        });
-        hmr.binaryType = "arraybuffer";
-        const hmrObserved = nextMessage(hmr);
+        let forwarder: SingleHostWebSocketForwarder | undefined;
+        let hmr: WebSocket | undefined;
 
         try {
+            forwarder = await startSingleHostWebSocketForwarder(
+                Number(proxy.url.port),
+                publicHost
+            );
+            hmr = new WebSocket(websocketUrl(forwarder.origin, "/_bun/hmr?key=1"), {
+                headers: { origin: publicOrigin },
+                perMessageDeflate: false,
+            });
+            hmr.binaryType = "arraybuffer";
+            const hmrObserved = nextMessage(hmr);
             await opened(hmr);
             const hmrObservedMessage = await hmrObserved;
             expect(JSON.parse(String(hmrObservedMessage.data))).toEqual({
@@ -273,9 +394,9 @@ describe("development remote proxy", () => {
 
             const token = `${"0".repeat(32)}.${"1".repeat(64)}`;
             const application = new WebSocket(
-                websocketUrl(proxy.url.origin, "/api/terminal/session/socket"),
+                websocketUrl(forwarder.origin, "/api/terminal/session/socket"),
                 {
-                    headers: { host: publicHost, origin: publicOrigin },
+                    headers: { origin: publicOrigin },
                     perMessageDeflate: false,
                     protocols: ["mira-terminal-v1", token],
                 }
@@ -303,7 +424,8 @@ describe("development remote proxy", () => {
                 await closeSocket(application);
             }
         } finally {
-            await closeSocket(hmr);
+            if (hmr !== undefined) await closeSocket(hmr);
+            if (forwarder !== undefined) await forwarder.stop();
             await proxy.stop(true);
             await upstream.stop(true);
         }
