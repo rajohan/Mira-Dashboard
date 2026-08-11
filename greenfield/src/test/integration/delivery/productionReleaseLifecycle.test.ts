@@ -35,6 +35,8 @@ const temporaryDirectories: string[] = [];
 const excludedBuildEntries = new Set([".git", "coverage", "dist", "node_modules"]);
 const gatewayTestEnvironment = Object.freeze({
     MIRA_DASHBOARD_WORKSPACE_ROOT: sourceProjectRoot,
+    MOLTBOOK_AGENT_NAME: "mira_2026",
+    MOLTBOOK_API_KEY: "worker-moltbook-key-test-value",
     OPENCLAW_GATEWAY_TOKEN: "gateway-token-test-value",
     OPENCLAW_GATEWAY_URL: "ws://127.0.0.1:65530",
 });
