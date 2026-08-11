@@ -521,11 +521,8 @@ export function developmentWebSocketHandler(
             socket.data.backend = backend;
             backend.binaryType = "arraybuffer";
             backend.addEventListener("open", () => {
-                if (backend.protocol !== terminalWebSocketProtocol) {
-                    backend.close(1002, "Protocol mismatch");
-                    closeProxySocket(socket, 1002, "Protocol mismatch");
-                    return;
-                }
+                // Bun may leave `protocol` empty for a valid multi-protocol handshake;
+                // the fixed backend has already validated the exact offered tuple.
                 flushBackendMessages(socket);
             });
             backend.addEventListener("message", (event) => {

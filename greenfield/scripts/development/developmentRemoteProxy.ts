@@ -41,7 +41,6 @@ export interface DevelopmentRemoteProxySocketData {
     downstreamPendingMessages: DevelopmentRemoteProxyMessage[];
     isClosing: boolean;
     readonly protocols: readonly string[];
-    readonly selectedProtocol?: string;
     upstream?: WebSocket;
     readonly upstreamHeaders: Readonly<Record<string, string>>;
     upstreamPendingBytes: number;
@@ -236,7 +235,6 @@ function upgradeWebSocket(
             downstreamPendingMessages: [],
             isClosing: false,
             protocols,
-            ...(selectedProtocol === undefined ? {} : { selectedProtocol }),
             upstreamHeaders: forwardedWebSocketHeaders(request, target, rewriteOrigin),
             upstreamPendingBytes: 0,
             upstreamPendingMessages: [],
@@ -506,10 +504,10 @@ export function developmentRemoteWebSocketHandler(): Bun.WebSocketHandler<Develo
                     closeUpstream(upstream, 1001, "Client closed");
                     return;
                 }
-                if (upstream.protocol !== (socket.data.selectedProtocol ?? "")) {
-                    closeRelay(socket, 1002, "Protocol mismatch");
-                    return;
-                }
+                // Bun does not reliably expose the selected value when multiple
+                // protocols were offered. A successful fixed-target handshake is
+                // the upstream readiness signal; the downstream selection is fixed
+                // during its validated upgrade.
                 flushUpstreamMessages(socket);
             });
             upstream.addEventListener("message", (event) => {

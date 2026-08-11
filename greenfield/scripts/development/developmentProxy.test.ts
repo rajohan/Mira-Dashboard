@@ -302,6 +302,66 @@ describe("development proxy", () => {
         expect(data.backendPendingMessages).toEqual([]);
     });
 
+    test("flushes and relays when Bun leaves the selected backend protocol empty", () => {
+        const NativeWebSocket = globalThis.WebSocket;
+        let offeredProtocols: string | string[] | undefined;
+        class ProtocolOpaqueWebSocket extends EventTarget {
+            static readonly CLOSED = 3;
+            static readonly CLOSING = 2;
+            static readonly CONNECTING = 0;
+            static readonly OPEN = 1;
+            readonly bufferedAmount = 0;
+            binaryType = "arraybuffer";
+            readonly protocol = "";
+            readyState = ProtocolOpaqueWebSocket.CONNECTING;
+            readonly send = jest.fn();
+
+            constructor(_url: string | URL, value?: Bun.WebSocketOptions) {
+                super();
+                if (value !== undefined && "protocols" in value) {
+                    offeredProtocols = value.protocols;
+                }
+            }
+
+            open(): void {
+                this.readyState = ProtocolOpaqueWebSocket.OPEN;
+                this.dispatchEvent(new Event("open"));
+            }
+        }
+
+        globalThis.WebSocket =
+            ProtocolOpaqueWebSocket as unknown as typeof globalThis.WebSocket;
+        try {
+            const handler = developmentWebSocketHandler(configuration);
+            const data = socketData();
+            data.backendPendingBytes = 6;
+            data.backendPendingMessages = ["queued"];
+            const send = jest.fn(() => 6);
+            const close = jest.fn();
+            const socket = {
+                close,
+                data,
+                readyState: WebSocket.OPEN,
+                send,
+            } as unknown as ServerWebSocket<DevelopmentProxySocketData>;
+
+            void handler.open?.(socket);
+            expect(offeredProtocols).toEqual(data.protocols);
+            expect(data.backend).toBeInstanceOf(ProtocolOpaqueWebSocket);
+            const backend = data.backend as unknown as ProtocolOpaqueWebSocket;
+            backend.open();
+
+            expect(backend.send).toHaveBeenCalledWith("queued");
+            expect(data.backendPendingBytes).toBe(0);
+            expect(data.backendPendingMessages).toEqual([]);
+            backend.dispatchEvent(new MessageEvent("message", { data: "output" }));
+            expect(send).toHaveBeenCalledWith("output");
+            expect(close).not.toHaveBeenCalled();
+        } finally {
+            globalThis.WebSocket = NativeWebSocket;
+        }
+    });
+
     test("closes the browser socket when the backend socket cannot be constructed", () => {
         const handler = developmentWebSocketHandler(configuration);
         const data = { ...socketData(), backendUrl: "not-a-websocket-url" };

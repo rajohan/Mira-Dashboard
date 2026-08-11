@@ -206,14 +206,16 @@ async function startWebSocketForwarder(
     };
 }
 
-function startObservedWebSocketServer(): Bun.Server<ObservedWebSocketUpgrade> {
+function startObservedWebSocketServer(
+    exposeSelectedProtocol = true
+): Bun.Server<ObservedWebSocketUpgrade> {
     return Bun.serve<ObservedWebSocketUpgrade>({
         fetch(request, server) {
             const url = new URL(request.url);
             const offeredProtocols = request.headers.get("sec-websocket-protocol");
             const selectedProtocol = offeredProtocols?.split(",")[0]?.trim();
             const headers = new Headers();
-            if (selectedProtocol !== undefined) {
+            if (exposeSelectedProtocol && selectedProtocol !== undefined) {
                 headers.set("sec-websocket-protocol", selectedProtocol);
             }
             if (
@@ -379,8 +381,8 @@ describe("development remote proxy", () => {
         }
     });
 
-    test("bridges HMR and application WebSockets with path-specific Origin handling", async () => {
-        const upstream = startObservedWebSocketServer();
+    test("bridges HMR and multi-protocol application sockets without upstream protocol introspection", async () => {
+        const upstream = startObservedWebSocketServer(false);
         let upstreamForwarder: WebSocketForwarder | undefined;
         let proxy: Bun.Server<DevelopmentRemoteProxySocketData> | undefined;
         let publicForwarder: WebSocketForwarder | undefined;
