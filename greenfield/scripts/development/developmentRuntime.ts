@@ -21,6 +21,7 @@ export interface DevelopmentChildProcess {
 }
 
 export interface DevelopmentRuntimeDependencies {
+    readonly environment?: Readonly<Record<string, string | undefined>>;
     readonly resolveSourceCommit: (repositoryRoot: string) => Promise<string>;
     readonly spawn: (
         command: readonly string[],
@@ -133,7 +134,11 @@ async function startDevelopmentChildren(
     | readonly [DevelopmentChildProcess, DevelopmentChildProcess, DevelopmentChildProcess]
     | undefined
 > {
-    const environments = await developmentProcessEnvironments(config, state.keyring);
+    const environments = await developmentProcessEnvironments(
+        config,
+        state.keyring,
+        dependencies.environment ?? process.env
+    );
     if (stopController.stopRequested) return;
     const bun = process.execPath;
     const watch = config.hotReload ? ["--watch"] : [];
