@@ -146,6 +146,20 @@ describe("system health diagnostics contract", () => {
                 queue: {
                     ...healthDiagnostics.queue,
                     workers: {
+                        capacity: 33,
+                        drainingCount: 0,
+                        freshCount: 33,
+                        onlineCount: 33,
+                    },
+                },
+            })
+        ).toThrow("worker count is outside its budget");
+        expect(() =>
+            v.parse(systemHealthDiagnosticsSchema, {
+                ...healthDiagnostics,
+                queue: {
+                    ...healthDiagnostics.queue,
+                    workers: {
                         ...healthDiagnostics.queue.workers,
                         capacity: 0,
                     },
@@ -237,6 +251,39 @@ describe("system health diagnostics contract", () => {
                 queue: {
                     ...healthDiagnostics.queue,
                     oldestQueuedAtMs: healthDiagnostics.checkedAtMs + 1,
+                },
+            })
+        ).toThrow("aggregate is inconsistent");
+    });
+
+    test("rejects inconsistent last-known-good session timestamps", () => {
+        expect(() =>
+            v.parse(systemHealthDiagnosticsSchema, {
+                ...healthDiagnostics,
+                dependencies: {
+                    ...healthDiagnostics.dependencies,
+                    sessions: {
+                        count: 2,
+                        observedAtMs: healthDiagnostics.checkedAtMs,
+                        staleSinceMs: healthDiagnostics.checkedAtMs - 1,
+                        state: "last-known-good",
+                        truncated: false,
+                    },
+                },
+            })
+        ).toThrow("session projection is inconsistent");
+        expect(() =>
+            v.parse(systemHealthDiagnosticsSchema, {
+                ...healthDiagnostics,
+                dependencies: {
+                    ...healthDiagnostics.dependencies,
+                    sessions: {
+                        count: 2,
+                        observedAtMs: healthDiagnostics.checkedAtMs,
+                        staleSinceMs: healthDiagnostics.checkedAtMs + 1,
+                        state: "last-known-good",
+                        truncated: false,
+                    },
                 },
             })
         ).toThrow("aggregate is inconsistent");

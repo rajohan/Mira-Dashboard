@@ -343,6 +343,10 @@
             "name": "moltbook.profile"
         },
         {
+            "kind": "query",
+            "name": "moltbook.snapshot"
+        },
+        {
             "kind": "mutation",
             "name": "monitoring.submitCompleteSnapshot"
         },

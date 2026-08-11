@@ -7,7 +7,7 @@ import {
     gatewayConnectionPhaseSchema,
 } from "./gatewayConnection.ts";
 import { gatewaySessionProjectionMaximum } from "./gatewaySessions.ts";
-import { jobWorkerCapacityMaximum } from "./jobLimits.ts";
+import { jobWorkerCapacityMaximum, jobWorkerSummaryMaximum } from "./jobLimits.ts";
 import type { ProcedureContract, RawHttpContract } from "./registry.ts";
 
 /** Stable raw HTTP liveness endpoint shared by contracts and runtime dispatch. */
@@ -171,11 +171,26 @@ export const systemHealthDiagnosticsSessionsSchema = v.pipe(
     )
 );
 
+const systemHealthDiagnosticsWorkerCountSchema = v.pipe(
+    systemHealthDiagnosticsCountSchema,
+    v.maxValue(
+        jobWorkerSummaryMaximum,
+        "System health worker count is outside its budget"
+    )
+);
+const systemHealthDiagnosticsWorkerCapacitySchema = v.pipe(
+    systemHealthDiagnosticsCountSchema,
+    v.maxValue(
+        jobWorkerSummaryMaximum * jobWorkerCapacityMaximum,
+        "System health worker capacity is outside its budget"
+    )
+);
+
 const systemHealthDiagnosticsWorkersObjectSchema = v.strictObject({
-    capacity: systemHealthDiagnosticsCountSchema,
-    drainingCount: systemHealthDiagnosticsCountSchema,
-    freshCount: systemHealthDiagnosticsCountSchema,
-    onlineCount: systemHealthDiagnosticsCountSchema,
+    capacity: systemHealthDiagnosticsWorkerCapacitySchema,
+    drainingCount: systemHealthDiagnosticsWorkerCountSchema,
+    freshCount: systemHealthDiagnosticsWorkerCountSchema,
+    onlineCount: systemHealthDiagnosticsWorkerCountSchema,
 });
 
 /** @returns Whether the fresh worker count matches its lifecycle partitions. */
@@ -184,7 +199,6 @@ export function systemHealthDiagnosticsWorkersAreConsistent(
 ): boolean {
     const maximumCapacity = workers.freshCount * jobWorkerCapacityMaximum;
     return (
-        Number.isSafeInteger(maximumCapacity) &&
         workers.freshCount === workers.drainingCount + workers.onlineCount &&
         workers.capacity >= workers.freshCount &&
         workers.capacity <= maximumCapacity

@@ -100,10 +100,7 @@ function workerState(
     ) {
         return "unavailable";
     }
-    return diagnostics.checks.worker.status === "ready" &&
-        !diagnostics.queue.claimingPaused
-        ? "online"
-        : "offline";
+    return diagnostics.checks.worker.status === "ready" ? "online" : "offline";
 }
 
 function backendState(

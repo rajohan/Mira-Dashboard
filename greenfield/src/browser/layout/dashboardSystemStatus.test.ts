@@ -85,6 +85,14 @@ describe("Dashboard system status projection", () => {
                 isStale: false,
             })
         ).toBe(true);
+        expect(
+            dashboardHealthSnapshotIsStale({
+                fetchStatus: "idle",
+                hasData: true,
+                isError: false,
+                isStale: false,
+            })
+        ).toBe(false);
     });
 
     test("reports online only when every bounded observation is online", () => {
@@ -114,7 +122,16 @@ describe("Dashboard system status projection", () => {
         });
     });
 
-    test("surfaces paused claiming or a degraded Gateway as attention", () => {
+    test("does not treat intentionally paused claiming as a worker outage", () => {
+        expect(
+            projectDashboardSystemStatus({
+                ...diagnostics,
+                queue: { ...diagnostics.queue, claimingPaused: true },
+            })
+        ).toMatchObject({ overall: "online", worker: "online" });
+    });
+
+    test("surfaces a degraded Gateway as attention", () => {
         expect(
             projectDashboardSystemStatus({
                 ...diagnostics,
@@ -126,9 +143,8 @@ describe("Dashboard system status projection", () => {
                         status: "observed",
                     },
                 },
-                queue: { ...diagnostics.queue, claimingPaused: true },
             })
-        ).toMatchObject({ gateway: "offline", overall: "offline", worker: "offline" });
+        ).toMatchObject({ gateway: "offline", overall: "offline", worker: "online" });
     });
 
     test("keeps unavailable backend checks distinct from an observed offline process", () => {

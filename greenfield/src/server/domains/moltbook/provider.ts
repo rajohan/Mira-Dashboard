@@ -207,6 +207,11 @@ async function boundedJsonResponse(
             }
             chunks.push(chunk);
         }
+    } catch (error) {
+        if (signal.aborted) {
+            await reader.cancel("Moltbook provider response was aborted").catch(() => {});
+        }
+        throw error;
     } finally {
         reader.releaseLock();
     }
@@ -326,7 +331,7 @@ function nextAction(value: unknown): string | undefined {
 function normalizeHome(value: unknown) {
     const home = record(value);
     const messages = record(home.your_direct_messages);
-    const account = record(home.your_account);
+    const account = optionalRecord(home.your_account);
     const announcement = optionalRecord(home.latest_moltbook_announcement);
     const normalizedAnnouncement =
         announcement === undefined
@@ -368,9 +373,10 @@ function normalizeHome(value: unknown) {
             home.posts_from_accounts_you_follow
         ).length,
         unreadMessageCount: requiredNonnegativeCount(messages.unread_message_count),
-        unreadNotificationCount: requiredNonnegativeCount(
-            account.unread_notification_count
-        ),
+        unreadNotificationCount:
+            account === undefined
+                ? 0
+                : requiredNonnegativeCount(account.unread_notification_count),
     };
 }
 
@@ -472,7 +478,7 @@ export function createMoltbookDashboardCollector(
                 ]);
                 signal.throwIfAborted();
                 const normalizedProfile = normalizeProfile(profile);
-                const snapshot = v.parse(moltbookDashboardCachePayloadSchema, {
+                const candidate = {
                     feeds: {
                         hot: normalizeFeed(hot, "hot"),
                         new: normalizeFeed(newest, "new"),
@@ -483,7 +489,13 @@ export function createMoltbookDashboardCollector(
                     ...(normalizedProfile === undefined
                         ? {}
                         : { profile: normalizedProfile }),
-                });
+                };
+                let snapshot: MoltbookDashboardCachePayload;
+                try {
+                    snapshot = v.parse(moltbookDashboardCachePayloadSchema, candidate);
+                } catch {
+                    throw new MoltbookProviderFailure("invalid-response");
+                }
                 v.parse(cacheEntryPayloadSchema, snapshot);
                 return snapshot;
             } catch (error) {

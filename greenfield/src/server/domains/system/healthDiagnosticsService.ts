@@ -161,6 +161,14 @@ function readWorkerCheck(
     return { status: "not-ready" };
 }
 
+function readApplicationStatus(readiness: ReadinessState): "not-ready" | "ready" {
+    try {
+        return readiness.isReady() ? "ready" : "not-ready";
+    } catch {
+        return "not-ready";
+    }
+}
+
 /**
  * Projects live process, dependency, and queue state onto one bounded identity-free snapshot.
  * Expected dependency failures are represented per component so diagnostics remain readable.
@@ -198,9 +206,7 @@ export function createSystemHealthDiagnosticsService(
             const queue = projectQueue(queueState, checkedAtMs);
             const checks = {
                 application: {
-                    status: dependencies.readiness.isReady()
-                        ? ("ready" as const)
-                        : ("not-ready" as const),
+                    status: readApplicationStatus(dependencies.readiness),
                 },
                 database: {
                     status:

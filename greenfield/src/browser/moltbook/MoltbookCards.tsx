@@ -22,6 +22,25 @@ import {
     truncateMoltbookText,
 } from "./moltbookPresentation.ts";
 
+function MoltbookVoteCounts({
+    downvotes,
+    upvotes,
+}: Readonly<{ downvotes: number; upvotes: number }>) {
+    return (
+        <>
+            <span aria-label={`${upvotes} upvotes`}>
+                <span aria-hidden="true">↑ </span>
+                {upvotes}
+            </span>{" "}
+            ·{" "}
+            <span aria-label={`${downvotes} downvotes`}>
+                <span aria-hidden="true">↓ </span>
+                {downvotes}
+            </span>
+        </>
+    );
+}
+
 export function MoltbookProfileCard({
     home,
     profile,
@@ -157,7 +176,8 @@ export function MoltbookOwnPostCard({ post }: Readonly<{ post: MoltbookOwnPost }
                 )}
             </ExternalLink>
             <Text className="mt-3" size="sm" tone="muted">
-                ↑ {post.upvotes} · ↓ {post.downvotes} · {post.commentCount} comments
+                <MoltbookVoteCounts downvotes={post.downvotes} upvotes={post.upvotes} /> ·{" "}
+                {post.commentCount} comments
             </Text>
         </Card>
     );
@@ -185,7 +205,10 @@ export function MoltbookOwnCommentCard({
                 </Text>
             </ExternalLink>
             <Text className="mt-3" size="sm" tone="muted">
-                ↑ {comment.upvotes} · ↓ {comment.downvotes}
+                <MoltbookVoteCounts
+                    downvotes={comment.downvotes}
+                    upvotes={comment.upvotes}
+                />
             </Text>
         </Card>
     );

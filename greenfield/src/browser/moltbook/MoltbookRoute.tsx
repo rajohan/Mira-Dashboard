@@ -1,4 +1,4 @@
-import { useQueries, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Flame, MessageCircle, MessageSquare, Newspaper, RotateCw } from "lucide-react";
 import { useState } from "react";
 
@@ -6,6 +6,7 @@ import type {
     MoltbookFeedPost,
     MoltbookOwnComment,
     MoltbookOwnPost,
+    MoltbookSnapshotResult,
     MoltbookSnapshotStatus,
 } from "../../contracts/moltbook.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
@@ -25,10 +26,8 @@ import {
     MoltbookProfileCard,
 } from "./MoltbookCards.tsx";
 import {
-    moltbookFeedQueryOptions,
-    moltbookHomeQueryOptions,
-    moltbookOwnContentQueryOptions,
-    moltbookProfileQueryOptions,
+    moltbookSnapshotQueryKey,
+    moltbookSnapshotQueryOptions,
     refreshMoltbookQueries,
 } from "./moltbookQueries.ts";
 
@@ -100,29 +99,16 @@ export function MoltbookRoute() {
     const queryClient = useQueryClient();
     const [content, setContent] = useState<"comments" | "feed" | "posts">("feed");
     const [sort, setSort] = useState<"hot" | "new">("hot");
-    const [homeQuery, feedQuery, profileQuery, ownContentQuery] = useQueries({
-        queries: [
-            moltbookHomeQueryOptions(client),
-            moltbookFeedQueryOptions(client, sort),
-            moltbookProfileQueryOptions(client),
-            moltbookOwnContentQueryOptions(client),
-        ],
-    });
-    const data = {
-        feed: feedQuery.data,
-        home: homeQuery.data,
-        ownContent: ownContentQuery.data,
-        profile: profileQuery.data,
-    };
-    const firstError =
-        homeQuery.error ?? feedQuery.error ?? profileQuery.error ?? ownContentQuery.error;
-    const complete = Object.values(data).every((value) => value !== undefined);
-    const loading = [homeQuery, feedQuery, profileQuery, ownContentQuery].some(
-        (query) => query.isPending
+    const snapshotQuery = useQuery(moltbookSnapshotQueryOptions(client, sort));
+    const firstError = snapshotQuery.error;
+    const retainedSort = sort === "hot" ? "new" : "hot";
+    const retainedSnapshot = queryClient.getQueryData<MoltbookSnapshotResult>(
+        moltbookSnapshotQueryKey(retainedSort)
     );
-    const fetching = [homeQuery, feedQuery, profileQuery, ownContentQuery].some(
-        (query) => query.isFetching
-    );
+    const ready = snapshotQuery.data ?? retainedSnapshot;
+    const complete = ready !== undefined;
+    const loading = snapshotQuery.isPending;
+    const fetching = snapshotQuery.isFetching;
     const refresh = () => void refreshMoltbookQueries(queryClient);
 
     return (
@@ -160,12 +146,23 @@ export function MoltbookRoute() {
                 {complete ? (
                     <PageState status="ready">
                         <div className="space-y-6">
-                            <MoltbookSnapshotNotice status={data.home!.status} />
-                            <MoltbookSnapshotBadge status={data.home!.status} />
-                            {data.profile!.profile === undefined ? null : (
+                            {firstError === null ? null : (
+                                <Alert
+                                    focusOnError={false}
+                                    message={
+                                        ready.feed.sort === sort
+                                            ? dashboardBrowserFailureMessage(firstError)
+                                            : `The ${sort} feed could not be loaded; showing ${ready.feed.sort} feed data.`
+                                    }
+                                    variant="info"
+                                />
+                            )}
+                            <MoltbookSnapshotNotice status={ready.status} />
+                            <MoltbookSnapshotBadge status={ready.status} />
+                            {ready.profile === undefined ? null : (
                                 <MoltbookProfileCard
-                                    home={data.home!.home}
-                                    profile={data.profile!.profile}
+                                    home={ready.home}
+                                    profile={ready.profile}
                                 />
                             )}
                             <Tabs
@@ -196,9 +193,7 @@ export function MoltbookRoute() {
                                                         ),
                                                         panel: (
                                                             <MoltbookFeedList
-                                                                posts={
-                                                                    data.feed!.feed.posts
-                                                                }
+                                                                posts={ready.feed.posts}
                                                             />
                                                         ),
                                                         value: "hot",
@@ -207,9 +202,7 @@ export function MoltbookRoute() {
                                                         label: "New",
                                                         panel: (
                                                             <MoltbookFeedList
-                                                                posts={
-                                                                    data.feed!.feed.posts
-                                                                }
+                                                                posts={ready.feed.posts}
                                                             />
                                                         ),
                                                         value: "new",
@@ -229,7 +222,7 @@ export function MoltbookRoute() {
                                         ),
                                         panel: (
                                             <MoltbookOwnPostList
-                                                posts={data.ownContent!.content.posts}
+                                                posts={ready.content.posts}
                                             />
                                         ),
                                         value: "posts",
@@ -243,9 +236,7 @@ export function MoltbookRoute() {
                                         ),
                                         panel: (
                                             <MoltbookOwnCommentList
-                                                comments={
-                                                    data.ownContent!.content.comments
-                                                }
+                                                comments={ready.content.comments}
                                             />
                                         ),
                                         value: "comments",

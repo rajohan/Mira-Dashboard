@@ -108,6 +108,9 @@ describe("generated contract documentation", () => {
             "| `moltbook.feed` | query | moltbook | Authenticated browser session: cache:read |"
         );
         expect(procedureDocumentation).toContain(
+            "| `moltbook.snapshot` | query | moltbook | Authenticated browser session: cache:read |"
+        );
+        expect(procedureDocumentation).toContain(
             "| `terminal.prepareSession` | mutation | terminal | Authenticated browser session: terminal:write; MFA enrollment required; recent MFA when enabled |"
         );
         expect(procedureDocumentation).toContain(
@@ -175,6 +178,7 @@ describe("generated contract documentation", () => {
         expect(first.has("schemas/files.upload.accepted.schema.json")).toBe(true);
         expect(first.has("schemas/logs.tail.output.schema.json")).toBe(true);
         expect(first.has("schemas/moltbook.feed.result.v1.schema.json")).toBe(true);
+        expect(first.has("schemas/moltbook.snapshot.result.v1.schema.json")).toBe(true);
         expect(first.has("schemas/terminal.prepareSession.output.schema.json")).toBe(
             true
         );

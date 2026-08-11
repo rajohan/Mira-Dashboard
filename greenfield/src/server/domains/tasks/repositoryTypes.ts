@@ -62,7 +62,7 @@ export interface TaskOpenCronLinkRecord {
 
 /** Minimal task row used only by the cache-read heartbeat declassification. */
 export interface TaskHeartbeatCandidateRecord {
-    readonly assignee?: TaskRecord["assignee"];
+    readonly assignee?: NonNullable<TaskRecord["assignee"]>;
     readonly automation?: {
         /** Internal correlation key; the heartbeat response never exposes it. */
         readonly cronJobId: string;

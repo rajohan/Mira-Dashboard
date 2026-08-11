@@ -18,7 +18,7 @@ import { jobWorkerCapacityMaximum } from "./jobLimits.ts";
 import { canonicalScheduleTimeZones } from "./scheduleTimeZones.ts";
 import { isCanonicalWebAuthnBase64Url } from "./webauthn.ts";
 
-export { jobWorkerCapacityMaximum } from "./jobLimits.ts";
+export { jobWorkerCapacityMaximum, jobWorkerSummaryMaximum } from "./jobLimits.ts";
 
 /** Canonical durable job-run states. */
 export const jobRunStates = [
@@ -90,7 +90,6 @@ export const jobRunPayloadEventMaximumBytes =
     jobRunOutputMaximumBytes - jobRunAttemptMaximum * jobRunEventMessageMaximumBytes;
 export const jobRunEventProgressMaximumBytes = 16 * 1024;
 export const jobWorkerFreshnessMs = 30_000;
-export const jobWorkerSummaryMaximum = 32;
 export const jobIdempotencyKeyMinimumLength = 32;
 export const jobIdempotencyKeyMaximumLength = 128;
 export const scheduleIdMaximumLength = 80;

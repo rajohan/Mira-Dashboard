@@ -5,6 +5,8 @@ import * as v from "valibot";
 import {
     moltbookFeedMaximumPosts,
     moltbookFeedSchema,
+    moltbookProcedureContracts,
+    moltbookSnapshotResultSchema,
     moltbookSnapshotStatusSchema,
 } from "./moltbook.ts";
 
@@ -72,5 +74,41 @@ describe("Moltbook contracts", () => {
                 lastSuccessAtMs: 2000,
             }).success
         ).toBe(false);
+    });
+
+    test("exposes one strict combined browser snapshot without removing legacy reads", () => {
+        const snapshot = {
+            content: { comments: [], posts: [] },
+            feed: { hasMore: false, posts: [post], sort: "hot" },
+            home: {
+                activityOnYourPostsCount: 0,
+                exploreCount: 0,
+                nextActions: [],
+                pendingRequestCount: 0,
+                postsFromAccountsYouFollowCount: 0,
+                unreadMessageCount: 0,
+                unreadNotificationCount: 0,
+            },
+            status: {
+                freshness: "fresh",
+                lastAttemptAtMs: 2000,
+                lastAttemptStatus: "succeeded",
+                lastSuccessAtMs: 2000,
+            },
+        } as const;
+        expect(v.safeParse(moltbookSnapshotResultSchema, snapshot).success).toBe(true);
+        expect(
+            v.safeParse(moltbookSnapshotResultSchema, {
+                ...snapshot,
+                providerPath: "/private/moltbook",
+            }).success
+        ).toBe(false);
+        expect(moltbookProcedureContracts.map(({ name }) => name)).toEqual([
+            "moltbook.feed",
+            "moltbook.home",
+            "moltbook.listMyPosts",
+            "moltbook.profile",
+            "moltbook.snapshot",
+        ]);
     });
 });

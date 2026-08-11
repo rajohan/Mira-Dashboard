@@ -431,6 +431,7 @@ export const procedureExpectedErrorPolicy = freezeProcedureExpectedErrorPolicy({
     "moltbook.home": ["FORBIDDEN", "SERVICE_UNAVAILABLE", "UNAUTHORIZED"],
     "moltbook.listMyPosts": ["FORBIDDEN", "SERVICE_UNAVAILABLE", "UNAUTHORIZED"],
     "moltbook.profile": ["FORBIDDEN", "SERVICE_UNAVAILABLE", "UNAUTHORIZED"],
+    "moltbook.snapshot": ["FORBIDDEN", "SERVICE_UNAVAILABLE", "UNAUTHORIZED"],
     "monitoring.submitCompleteSnapshot": [
         "BAD_REQUEST",
         "CONFLICT",

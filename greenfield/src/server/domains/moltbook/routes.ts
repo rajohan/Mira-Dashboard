@@ -10,6 +10,7 @@ import {
     moltbookHomeResultSchema,
     moltbookOwnContentResultSchema,
     moltbookProfileResultSchema,
+    moltbookSnapshotResultSchema,
     moltbookSnapshotStatusSchema,
 } from "../../../contracts/moltbook.ts";
 import { emptyInputSchema } from "../../../contracts/system.ts";
@@ -92,6 +93,19 @@ export const moltbookRoutes = {
         .query(async ({ ctx }) => {
             const { snapshot, status } = await readSnapshot(ctx.cacheService);
             return {
+                ...(snapshot.profile === undefined ? {} : { profile: snapshot.profile }),
+                status,
+            };
+        }),
+    snapshot: moltbookReadProcedure
+        .input(moltbookFeedInputSchema)
+        .output(moltbookSnapshotResultSchema)
+        .query(async ({ ctx, input }) => {
+            const { snapshot, status } = await readSnapshot(ctx.cacheService);
+            return {
+                content: snapshot.myContent,
+                feed: snapshot.feeds[input.sort],
+                home: snapshot.home,
                 ...(snapshot.profile === undefined ? {} : { profile: snapshot.profile }),
                 status,
             };

@@ -51,8 +51,12 @@ async function expectCode(
 
 describe("Moltbook procedures", () => {
     test("serves every projection with explicit stale last-known-good status", async () => {
+        let cacheReads = 0;
         const cacheService = createTestCacheService({
-            getEntry: () => Effect.succeed(staleEntry()),
+            getEntry: () => {
+                cacheReads += 1;
+                return Effect.succeed(staleEntry());
+            },
         });
         const caller = appRouter.createCaller(
             await createTestRequestContext(
@@ -81,6 +85,14 @@ describe("Moltbook procedures", () => {
         expect(await caller.listMyPosts({})).toMatchObject({
             content: { comments: [], posts: [] },
         });
+        expect(await caller.snapshot({ sort: "hot" })).toMatchObject({
+            content: { comments: [], posts: [] },
+            feed: { sort: "hot" },
+            home: testMoltbookDashboardSnapshot.home,
+            profile: { name: "mira_2026" },
+            status: { freshness: "stale" },
+        });
+        expect(cacheReads).toBe(5);
     });
 
     test("requires a cache-capable browser session and sanitizes missing state", async () => {
@@ -108,5 +120,22 @@ describe("Moltbook procedures", () => {
             )
         ).moltbook;
         await expectCode(() => missing.profile({}), "SERVICE_UNAVAILABLE");
+
+        const outdated = appRouter.createCaller(
+            await createTestRequestContext(
+                createTestSessionAuthentication(["cache:read"]),
+                createTestApplicationRuntime(),
+                {
+                    cacheService: createTestCacheService({
+                        getEntry: () =>
+                            Effect.succeed({
+                                ...staleEntry(),
+                                schemaId: "moltbook.dashboard.v0",
+                            }),
+                    }),
+                }
+            )
+        ).moltbook;
+        await expectCode(() => outdated.home({}), "SERVICE_UNAVAILABLE");
     });
 });

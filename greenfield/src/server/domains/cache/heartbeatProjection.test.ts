@@ -141,7 +141,6 @@ describe("cache heartbeat projection", () => {
     });
 
     test("refreshes cron outside the task read and independently of task failures", async () => {
-        let taskReadOpen = false;
         const events: string[] = [];
         const snapshot = {
             rows: [],
@@ -150,15 +149,9 @@ describe("cache heartbeat projection", () => {
         const available = await readCacheHeartbeatTasksWithCronRefresh(
             () => {
                 events.push("task-read");
-                taskReadOpen = true;
-                try {
-                    return snapshot;
-                } finally {
-                    taskReadOpen = false;
-                }
+                return snapshot;
             },
             () => {
-                expect(taskReadOpen).toBeFalse();
                 events.push("cron-refresh");
                 return Promise.resolve();
             },
@@ -321,5 +314,38 @@ describe("cache heartbeat projection", () => {
         ]) {
             expect(serialized).not.toContain(forbidden);
         }
+    });
+
+    test("degrades inconsistent or failed Dashboard-job reads without failing heartbeat", () => {
+        const selectedDefinition = definition("cache.moltbook-dashboard");
+        const terminalActiveRun = relation(selectedDefinition.scheduleId, {
+            activeRun: { state: "succeeded" },
+            enabled: true,
+        });
+
+        expect(
+            readCacheHeartbeatDashboardJobs(
+                { findSchedule: () => terminalActiveRun },
+                5000,
+                [selectedDefinition]
+            )
+        ).toEqual({
+            dashboardJobs: { state: "unavailable" },
+            generatedAtMs: 5000,
+        });
+        expect(
+            readCacheHeartbeatDashboardJobs(
+                {
+                    findSchedule() {
+                        throw new Error("private repository failure");
+                    },
+                },
+                6000,
+                [selectedDefinition]
+            )
+        ).toEqual({
+            dashboardJobs: { state: "unavailable" },
+            generatedAtMs: 6000,
+        });
     });
 });

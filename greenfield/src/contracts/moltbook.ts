@@ -226,6 +226,13 @@ export const moltbookOwnContentResultSchema = v.strictObject({
     content: moltbookOwnContentSchema,
     status: moltbookSnapshotStatusSchema,
 });
+export const moltbookSnapshotResultSchema = v.strictObject({
+    content: moltbookOwnContentSchema,
+    feed: moltbookFeedSchema,
+    home: moltbookHomeSchema,
+    profile: v.optional(moltbookProfileSchema),
+    status: moltbookSnapshotStatusSchema,
+});
 
 export type MoltbookFeedInput = v.InferOutput<typeof moltbookFeedInputSchema>;
 export type MoltbookFeedResult = v.InferOutput<typeof moltbookFeedResultSchema>;
@@ -234,6 +241,7 @@ export type MoltbookOwnContentResult = v.InferOutput<
     typeof moltbookOwnContentResultSchema
 >;
 export type MoltbookProfileResult = v.InferOutput<typeof moltbookProfileResultSchema>;
+export type MoltbookSnapshotResult = v.InferOutput<typeof moltbookSnapshotResultSchema>;
 export type MoltbookSnapshotStatus = v.InferOutput<typeof moltbookSnapshotStatusSchema>;
 
 const moltbookReadAccess = Object.freeze({
@@ -301,6 +309,19 @@ export const moltbookProcedureContracts = [
         output: moltbookProfileResultSchema,
         outputSchemaId: "moltbook.profile.result.v1",
         summary: "Reads the configured agent's bounded Moltbook profile.",
+        transport: moltbookReadTransport,
+    },
+    {
+        access: moltbookReadAccess,
+        domain: "moltbook",
+        errors: moltbookReadErrors,
+        input: moltbookFeedInputSchema,
+        inputSchemaId: "moltbook.feed.input.v1",
+        kind: "query",
+        name: "moltbook.snapshot",
+        output: moltbookSnapshotResultSchema,
+        outputSchemaId: "moltbook.snapshot.result.v1",
+        summary: "Reads the complete bounded Moltbook page projection in one request.",
         transport: moltbookReadTransport,
     },
 ] as const satisfies readonly ProcedureContract[];

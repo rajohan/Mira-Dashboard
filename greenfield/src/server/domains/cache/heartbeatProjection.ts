@@ -14,6 +14,12 @@ import type {
     JobRepositoryReader,
     ScheduleRecordWithRelations,
 } from "../jobs/repository.ts";
+import {
+    taskHeartbeatAgentAssignee,
+    taskHeartbeatAgentPriorities,
+    taskHeartbeatOwnerAssignee,
+    taskHeartbeatOwnerStatus,
+} from "../tasks/heartbeatPolicy.ts";
 import type {
     TaskHeartbeatCandidateSnapshot,
     TaskRepositoryReader,
@@ -48,12 +54,17 @@ export function projectCacheHeartbeatTasks(
                     }
                     case "agent-priority": {
                         return (
-                            row.assignee === "mira-2026" &&
-                            (row.priority === "medium" || row.priority === "high")
+                            row.assignee === taskHeartbeatAgentAssignee &&
+                            taskHeartbeatAgentPriorities.some(
+                                (priority) => priority === row.priority
+                            )
                         );
                     }
                     case "owner-blocked": {
-                        return row.assignee === "rajohan" && row.status === "blocked";
+                        return (
+                            row.assignee === taskHeartbeatOwnerAssignee &&
+                            row.status === taskHeartbeatOwnerStatus
+                        );
                     }
                 }
             });
@@ -173,69 +184,79 @@ export function readCacheHeartbeatDashboardJobs(
     candidateGeneratedAtMs: number,
     definitions: readonly JobActionDefinition[] = jobActionDefinitions
 ): CacheHeartbeatDashboardJobsRead {
-    const rows = definitions
-        .map((definition) => ({
-            definition,
-            relation: repository.findSchedule(definition.scheduleId),
-        }))
-        .toSorted((left, right) =>
-            compareStrings(left.definition.scheduleId, right.definition.scheduleId)
+    try {
+        const rows = definitions
+            .map((definition) => ({
+                definition,
+                relation: repository.findSchedule(definition.scheduleId),
+            }))
+            .toSorted((left, right) =>
+                compareStrings(left.definition.scheduleId, right.definition.scheduleId)
+            );
+        const generatedAtMs = Math.max(
+            candidateGeneratedAtMs,
+            ...rows.flatMap(({ relation }) =>
+                relation === undefined ? [] : historicalRunTimestamps(relation)
+            )
         );
-    const generatedAtMs = Math.max(
-        candidateGeneratedAtMs,
-        ...rows.flatMap(({ relation }) =>
-            relation === undefined ? [] : historicalRunTimestamps(relation)
-        )
-    );
-    return {
-        dashboardJobs: {
-            items: rows.map(({ definition, relation }) => {
-                if (
-                    relation === undefined ||
-                    relation.schedule.actionKey !== definition.actionKey
-                ) {
+        return {
+            dashboardJobs: {
+                items: rows.map(({ definition, relation }) => {
+                    if (
+                        relation === undefined ||
+                        relation.schedule.actionKey !== definition.actionKey
+                    ) {
+                        return {
+                            defaultEnabled: definition.defaultEnabled,
+                            id: definition.scheduleId,
+                            state: "missing" as const,
+                        };
+                    }
                     return {
+                        ...(relation.activeRun === undefined
+                            ? {}
+                            : { activeRun: projectActiveRun(relation.activeRun) }),
                         defaultEnabled: definition.defaultEnabled,
+                        ...(relation.activeDisableIntent === undefined
+                            ? {}
+                            : {
+                                  disableIntent: {
+                                      ...(relation.activeDisableIntent.expiresAt === null
+                                          ? {}
+                                          : {
+                                                expiresAtMs: getTime(
+                                                    relation.activeDisableIntent.expiresAt
+                                                ),
+                                            }),
+                                      valid:
+                                          relation.activeDisableIntent.expiresAt ===
+                                              null ||
+                                          getTime(
+                                              relation.activeDisableIntent.expiresAt
+                                          ) > generatedAtMs,
+                                  },
+                              }),
+                        enabled: relation.schedule.enabled,
                         id: definition.scheduleId,
-                        state: "missing" as const,
+                        ...(relation.latestRun === undefined
+                            ? {}
+                            : { latestRun: projectLatestRun(relation.latestRun) }),
+                        nextRunAtMs:
+                            relation.schedule.enabled &&
+                            relation.schedule.nextRunAt !== null
+                                ? getTime(relation.schedule.nextRunAt)
+                                : null,
+                        state: "present" as const,
                     };
-                }
-                return {
-                    ...(relation.activeRun === undefined
-                        ? {}
-                        : { activeRun: projectActiveRun(relation.activeRun) }),
-                    defaultEnabled: definition.defaultEnabled,
-                    ...(relation.activeDisableIntent === undefined
-                        ? {}
-                        : {
-                              disableIntent: {
-                                  ...(relation.activeDisableIntent.expiresAt === null
-                                      ? {}
-                                      : {
-                                            expiresAtMs: getTime(
-                                                relation.activeDisableIntent.expiresAt
-                                            ),
-                                        }),
-                                  valid:
-                                      relation.activeDisableIntent.expiresAt === null ||
-                                      getTime(relation.activeDisableIntent.expiresAt) >
-                                          generatedAtMs,
-                              },
-                          }),
-                    enabled: relation.schedule.enabled,
-                    id: definition.scheduleId,
-                    ...(relation.latestRun === undefined
-                        ? {}
-                        : { latestRun: projectLatestRun(relation.latestRun) }),
-                    nextRunAtMs:
-                        relation.schedule.enabled && relation.schedule.nextRunAt !== null
-                            ? getTime(relation.schedule.nextRunAt)
-                            : null,
-                    state: "present" as const,
-                };
-            }),
-            state: "available",
-        },
-        generatedAtMs,
-    };
+                }),
+                state: "available",
+            },
+            generatedAtMs,
+        };
+    } catch {
+        return {
+            dashboardJobs: { state: "unavailable" },
+            generatedAtMs: candidateGeneratedAtMs,
+        };
+    }
 }

@@ -297,7 +297,11 @@ describe("system health diagnostics service", () => {
 
     test("degrades component reader failures without exposing their diagnostics", () => {
         const secret = "private dependency diagnostic";
-        const throwingReadiness: ReadinessState = { isReady: () => true };
+        const throwingReadiness: ReadinessState = {
+            isReady: () => {
+                throw new Error(secret);
+            },
+        };
         const diagnostics = createSystemHealthDiagnosticsService({
             expectedWorkerReleaseId: releaseId,
             frontendReady: true,
@@ -322,6 +326,7 @@ describe("system health diagnostics service", () => {
 
         expect(diagnostics).toMatchObject({
             checks: {
+                application: { status: "not-ready" },
                 database: { status: "unavailable" },
                 worker: { status: "unavailable" },
             },

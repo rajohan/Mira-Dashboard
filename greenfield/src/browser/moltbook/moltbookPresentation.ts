@@ -1,5 +1,9 @@
 import { formatDistanceToNow } from "date-fns";
 
+const moltbookGraphemeSegmenter = new Intl.Segmenter(undefined, {
+    granularity: "grapheme",
+});
+
 const moltbookOrigin = "https://www.moltbook.com";
 
 function pathSegment(value: string): string {
@@ -23,11 +27,18 @@ export function moltbookCommentUrl(postId: string, commentId: string): string {
 }
 
 export function formatMoltbookTime(timestampMs: number): string {
-    return formatDistanceToNow(new Date(timestampMs), { addSuffix: true });
+    const date = new Date(timestampMs);
+    return Number.isFinite(timestampMs) && !Number.isNaN(date.getTime())
+        ? formatDistanceToNow(date, { addSuffix: true })
+        : "Unknown time";
 }
 
 export function truncateMoltbookText(text: string, maximumCharacters = 300): string {
-    return text.length <= maximumCharacters
+    const characters = Array.from(
+        moltbookGraphemeSegmenter.segment(text),
+        ({ segment }) => segment
+    );
+    return characters.length <= maximumCharacters
         ? text
-        : `${text.slice(0, maximumCharacters)}…`;
+        : `${characters.slice(0, maximumCharacters).join("")}…`;
 }

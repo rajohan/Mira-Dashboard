@@ -28,6 +28,12 @@ import { taskLabels } from "../../database/schema/taskLabels.ts";
 import { tasks } from "../../database/schema/tasks.ts";
 import { taskUpdates } from "../../database/schema/taskUpdates.ts";
 import {
+    taskHeartbeatAgentAssignee,
+    taskHeartbeatAgentPriorities,
+    taskHeartbeatOwnerAssignee,
+    taskHeartbeatOwnerStatus,
+} from "./heartbeatPolicy.ts";
+import {
     parseTaskAutomationProfileRecord,
     parseTaskLabelRecord,
     parseTaskProgressRecord,
@@ -266,10 +272,13 @@ export class DrizzleTaskRepositoryReader implements TaskRepositoryReader {
             or(
                 linkedAutomation,
                 and(
-                    eq(tasks.assignee, "mira-2026"),
-                    inArray(tasks.priority, ["medium", "high"])
+                    eq(tasks.assignee, taskHeartbeatAgentAssignee),
+                    inArray(tasks.priority, [...taskHeartbeatAgentPriorities])
                 ),
-                and(eq(tasks.assignee, "rajohan"), eq(tasks.status, "blocked"))
+                and(
+                    eq(tasks.assignee, taskHeartbeatOwnerAssignee),
+                    eq(tasks.status, taskHeartbeatOwnerStatus)
+                )
             )
         );
         const totalCount = this.database

@@ -555,10 +555,10 @@ interface CacheHeartbeatCronHealthProjection {
 function cacheHeartbeatCronHealthIsConsistent(
     projection: CacheHeartbeatCronHealthProjection
 ): boolean {
+    const expectedTruncated = projection.health.inspectedCount < projection.count;
     return (
         projection.health.inspectedCount <= projection.count &&
-        projection.health.truncated ===
-            projection.health.inspectedCount < projection.count
+        projection.health.truncated === expectedTruncated
     );
 }
 
@@ -748,9 +748,10 @@ export function cacheHeartbeatTasksAreConsistent(
 ): boolean {
     if (projection.state === "unavailable") return true;
     const items = projection.items;
+    const expectedTruncated = projection.totalCount > cacheHeartbeatTaskMaximum;
     return (
         items.length === Math.min(projection.totalCount, cacheHeartbeatTaskMaximum) &&
-        projection.truncated === projection.totalCount > cacheHeartbeatTaskMaximum &&
+        projection.truncated === expectedTruncated &&
         items.every((item, index) =>
             index === 0 ? true : compareStrings(items[index - 1]!.id, item.id) < 0
         ) &&

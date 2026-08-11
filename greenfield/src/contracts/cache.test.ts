@@ -565,6 +565,26 @@ describe("cache contracts", () => {
         expect(
             cacheHeartbeatCronProjectionIsConsistent({
                 count: 1,
+                health: { ...health, synchronizationPendingCount: 1 },
+                observedAtMs: 1000,
+                pendingSync: "unknown",
+                staleSinceMs: 1100,
+                state: "last-known-good",
+            })
+        ).toBeFalse();
+        expect(
+            cacheHeartbeatCronProjectionIsConsistent({
+                count: 2,
+                health: { ...health, truncated: true },
+                observedAtMs: 1000,
+                pendingSync: "none",
+                staleSinceMs: 1100,
+                state: "last-known-good",
+            })
+        ).toBeFalse();
+        expect(
+            cacheHeartbeatCronProjectionIsConsistent({
+                count: 1,
                 health,
                 observedAtMs: 1000,
                 pendingSync: "unknown",

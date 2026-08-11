@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { asc, count, eq } from "drizzle-orm";
 
-import { jobWorkerSummaryMaximum } from "../../../contracts/jobModel.ts";
+import { jobWorkerSummaryMaximum } from "../../../contracts/jobLimits.ts";
 import { jobRunEvents } from "../../database/schema/jobRunEvents.ts";
 import { jobRuns } from "../../database/schema/jobRuns.ts";
 import { realtimeEvents } from "../../database/schema/realtime.ts";
@@ -2226,14 +2226,12 @@ describe("durable jobs repository", () => {
                 schedules: [schedule()],
                 sideEffectsForSchedule: () => noSideEffects,
             });
-            for (const index of [20, 21]) {
-                const run = queuedRun(index);
-                await repository.enqueueManualRun({
-                    ...noSideEffects,
-                    queuedEvent: queuedEvent(run),
-                    run,
-                });
-            }
+            const run = queuedRun(20);
+            await repository.enqueueManualRun({
+                ...noSideEffects,
+                queuedEvent: queuedEvent(run),
+                run,
+            });
             for (let index = 0; index <= jobWorkerSummaryMaximum; index += 1) {
                 await repository.registerWorker({
                     ...noSideEffects,

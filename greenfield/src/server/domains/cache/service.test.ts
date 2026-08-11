@@ -434,7 +434,7 @@ describe("cache service", () => {
                 truncated: false,
             },
         ] as const;
-        for (const tasks of malformedTaskProjections) {
+        for (const [index, tasks] of malformedTaskProjections.entries()) {
             const service = createCacheService({
                 cacheRepository: readOnlyCacheRepository(record),
                 jobRepository: Object.freeze({}) as never,
@@ -445,7 +445,10 @@ describe("cache service", () => {
                 }),
                 readHeartbeatTasks: () => tasks as never,
             });
-            expect(await Effect.runPromise(service.getHeartbeat())).toMatchObject({
+            expect(
+                await Effect.runPromise(service.getHeartbeat()),
+                `malformed task projection ${index}`
+            ).toMatchObject({
                 dashboardJobs: { items: [], state: "available" },
                 tasks: { state: "unavailable" },
             });
@@ -596,7 +599,7 @@ describe("cache service", () => {
                 state: "available",
             },
         ] as const;
-        for (const dashboardJobs of malformedDashboardJobProjections) {
+        for (const [index, dashboardJobs] of malformedDashboardJobProjections.entries()) {
             const service = createCacheService({
                 cacheRepository: readOnlyCacheRepository(record),
                 jobRepository: Object.freeze({}) as never,
@@ -608,7 +611,10 @@ describe("cache service", () => {
                     }) as never,
                 readHeartbeatTasks: () => validTasks,
             });
-            expect(await Effect.runPromise(service.getHeartbeat())).toMatchObject({
+            expect(
+                await Effect.runPromise(service.getHeartbeat()),
+                `malformed dashboard-job projection ${index}`
+            ).toMatchObject({
                 dashboardJobs: { state: "unavailable" },
                 tasks: { items: [], state: "available" },
             });

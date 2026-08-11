@@ -184,6 +184,52 @@ describe("Moltbook dashboard provider", () => {
         expect(snapshot.myContent).toEqual({ comments: [], posts: [] });
     });
 
+    test("defaults a missing optional account notification block without losing home data", async () => {
+        const byPath = new Map<string, unknown>([
+            ["/api/v1/home", { ...providerPayloads.home, your_account: undefined }],
+            ["/api/v1/feed?sort=hot&limit=25", providerPayloads.hot],
+            ["/api/v1/feed?sort=new&limit=25", providerPayloads.new],
+            ["/api/v1/agents/profile?name=mira_2026", providerPayloads.profile],
+        ]);
+        const collector = createMoltbookDashboardCollector({
+            agentName: "mira_2026",
+            apiKey: Redacted.make("moltbook-secret-sentinel"),
+            fetch: (input) =>
+                Promise.resolve(jsonResponse(byPath.get(input.pathname + input.search))),
+            nowMs: () => 1_723_365_000_000,
+        });
+
+        const snapshot = await collector.collect(new AbortController().signal);
+
+        expect(snapshot.home).toMatchObject({
+            exploreCount: 2,
+            unreadMessageCount: 2,
+            unreadNotificationCount: 0,
+        });
+    });
+
+    test("rejects a present account block without its notification count", async () => {
+        const byPath = new Map<string, unknown>([
+            ["/api/v1/home", { ...providerPayloads.home, your_account: {} }],
+            ["/api/v1/feed?sort=hot&limit=25", providerPayloads.hot],
+            ["/api/v1/feed?sort=new&limit=25", providerPayloads.new],
+            ["/api/v1/agents/profile?name=mira_2026", providerPayloads.profile],
+        ]);
+        const collector = createMoltbookDashboardCollector({
+            agentName: "mira_2026",
+            apiKey: Redacted.make("moltbook-secret-sentinel"),
+            fetch: (input) =>
+                Promise.resolve(jsonResponse(byPath.get(input.pathname + input.search))),
+        });
+
+        const failure = await collector
+            .collect(new AbortController().signal)
+            .catch((error: unknown) => error);
+
+        expect(failure).toBeInstanceOf(MoltbookProviderFailure);
+        expect((failure as MoltbookProviderFailure).reason).toBe("invalid-response");
+    });
+
     test("rejects empty endpoint envelopes instead of replacing last-known-good data", async () => {
         const paths = [
             "/api/v1/home",
@@ -250,6 +296,76 @@ describe("Moltbook dashboard provider", () => {
 
         expect(failure).toBeInstanceOf(MoltbookProviderFailure);
         expect(abortedSiblings).toBe(3);
+    });
+
+    test("cancels response readers before releasing their locks after caller abort", async () => {
+        const requestController = new AbortController();
+        let cancelledBodies = 0;
+        let abortTriggered = false;
+        const collector = createMoltbookDashboardCollector({
+            agentName: "mira_2026",
+            apiKey: Redacted.make("moltbook-secret-sentinel"),
+            fetch: () =>
+                Promise.resolve(
+                    new Response(
+                        new ReadableStream<Uint8Array>({
+                            cancel() {
+                                cancelledBodies += 1;
+                            },
+                            pull(controller) {
+                                if (!abortTriggered) {
+                                    abortTriggered = true;
+                                    requestController.abort(
+                                        new Error("Caller cancelled Moltbook collection")
+                                    );
+                                }
+                                controller.enqueue(new TextEncoder().encode("{}"));
+                            },
+                        }),
+                        { headers: { "content-type": "application/json" } }
+                    )
+                ),
+        });
+
+        const failure = await collector
+            .collect(requestController.signal)
+            .catch((error: unknown) => error);
+
+        expect(failure).toBeInstanceOf(Error);
+        expect(cancelledBodies).toBeGreaterThan(0);
+    });
+
+    test("classifies normalized payload schema violations as invalid responses", async () => {
+        const byPath = new Map<string, unknown>([
+            ["/api/v1/home", providerPayloads.home],
+            [
+                "/api/v1/feed?sort=hot&limit=25",
+                {
+                    ...providerPayloads.hot,
+                    posts: [
+                        {
+                            ...providerPayloads.hot.posts[0],
+                            title: "x".repeat(501),
+                        },
+                    ],
+                },
+            ],
+            ["/api/v1/feed?sort=new&limit=25", providerPayloads.new],
+            ["/api/v1/agents/profile?name=mira_2026", providerPayloads.profile],
+        ]);
+        const collector = createMoltbookDashboardCollector({
+            agentName: "mira_2026",
+            apiKey: Redacted.make("moltbook-secret-sentinel"),
+            fetch: (input) =>
+                Promise.resolve(jsonResponse(byPath.get(input.pathname + input.search))),
+        });
+
+        const failure = await collector
+            .collect(new AbortController().signal)
+            .catch((error: unknown) => error);
+
+        expect(failure).toBeInstanceOf(MoltbookProviderFailure);
+        expect((failure as MoltbookProviderFailure).reason).toBe("invalid-response");
     });
 
     test("rejects a valid projection that exceeds the cache row budget", async () => {

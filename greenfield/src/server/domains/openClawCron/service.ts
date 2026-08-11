@@ -767,12 +767,11 @@ export function createOpenClawCronService(
     }
 
     async function refreshHeartbeatProjection(): Promise<void> {
-        if (heartbeatDisposed) return;
-        const active = heartbeatRefreshPromise;
-        if (active !== undefined) {
+        for (;;) {
+            if (heartbeatDisposed) return;
+            const active = heartbeatRefreshPromise;
+            if (active === undefined) break;
             await active;
-            await refreshHeartbeatProjection();
-            return;
         }
         let startedAtMonotonicMs: number;
         try {
