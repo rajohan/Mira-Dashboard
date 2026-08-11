@@ -18,6 +18,48 @@ import { environmentSource } from "./environmentSource.ts";
 
 const noFrontendAssets: FrontendAssetHandler = () => Promise.resolve(undefined);
 
+type DevelopmentWebRuntimeConfiguration = Pick<
+    Parameters<DashboardWebProcessDependencies["createRuntime"]>[0],
+    "gatewayToken" | "gatewayUrl"
+>;
+
+interface DevelopmentWebRuntimeFactories {
+    readonly createApplicationRuntime: typeof createDashboardApplicationRuntime;
+    readonly createGatewayTransport: typeof createPersistentGatewayTransport;
+}
+
+const developmentWebRuntimeFactories = Object.freeze({
+    createApplicationRuntime: createDashboardApplicationRuntime,
+    createGatewayTransport: createPersistentGatewayTransport,
+} satisfies DevelopmentWebRuntimeFactories);
+
+/**
+ * Composes the development-only runtime overrides behind injectable factory boundaries.
+ * @returns One application runtime using the source tree and isolated development state.
+ */
+export function createDevelopmentWebRuntime(
+    configuration: DevelopmentWebRuntimeConfiguration,
+    layout: Parameters<DashboardWebProcessDependencies["createRuntime"]>[1],
+    source: Parameters<DashboardWebProcessDependencies["createRuntime"]>[2],
+    logger: Parameters<DashboardWebProcessDependencies["createRuntime"]>[3],
+    factories: DevelopmentWebRuntimeFactories = developmentWebRuntimeFactories
+): ReturnType<DashboardWebProcessDependencies["createRuntime"]> {
+    return factories.createApplicationRuntime({
+        database: {
+            migrationsDirectory: path.join(source.releaseRoot, "migrations"),
+            releaseId: source.manifest.source.commitSha,
+            startupMode: "initialize-empty",
+            stateDirectory: layout.production.state.root,
+        },
+        logger,
+        persistentGatewayTransport: factories.createGatewayTransport({
+            clientVersion: source.manifest.source.commitSha,
+            token: configuration.gatewayToken,
+            url: configuration.gatewayUrl,
+        }),
+    });
+}
+
 /**
  * Runs the source-watched web composition against isolated development state.
  * @param arguments_ Command-line arguments containing the exact source commit.
@@ -35,21 +77,7 @@ export async function runDevelopmentWebProcess(
     const dependencies = Object.freeze({
         ...defaults,
         createFrontendAssets: () => Promise.resolve(noFrontendAssets),
-        createRuntime: (configuration, layout, source, logger) =>
-            createDashboardApplicationRuntime({
-                database: {
-                    migrationsDirectory: path.join(source.releaseRoot, "migrations"),
-                    releaseId: source.manifest.source.commitSha,
-                    startupMode: "initialize-empty",
-                    stateDirectory: layout.production.state.root,
-                },
-                logger,
-                persistentGatewayTransport: createPersistentGatewayTransport({
-                    clientVersion: source.manifest.source.commitSha,
-                    token: configuration.gatewayToken,
-                    url: configuration.gatewayUrl,
-                }),
-            }),
+        createRuntime: createDevelopmentWebRuntime,
         loadRelease: () => Promise.resolve(release),
     } satisfies DashboardWebProcessDependencies);
     await runDashboardWebProcess(
