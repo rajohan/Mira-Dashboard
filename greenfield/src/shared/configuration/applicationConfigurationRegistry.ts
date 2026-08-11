@@ -9,6 +9,8 @@ export const applicationConfigurationLimits = Object.freeze({
     elevenLabsApiKeyMaximumLength: 4096,
     gatewayTokenMaximumLength: 4096,
     gatewayUrlMaximumLength: 2048,
+    moltbookAgentNameMaximumLength: 128,
+    moltbookApiKeyMaximumLength: 4096,
     openClawRootMaximumLength: 4096,
     port: Object.freeze({ maximum: 65_535, minimum: 1 }),
     projectRootMaximumLength: 4096,
@@ -33,6 +35,8 @@ export type ApplicationConfigurationField =
     | "gatewayToken"
     | "gatewayUrl"
     | "logLevel"
+    | "moltbookAgentName"
+    | "moltbookApiKey"
     | "nodeEnvironment"
     | "openClawRoot"
     | "port"
@@ -57,6 +61,8 @@ export const applicationConfigurationEnvironmentNames = [
     "MIRA_DASHBOARD_PUBLIC_ORIGIN",
     "MIRA_DASHBOARD_TRUSTED_PROXY_IPS",
     "ELEVENLABS_API_KEY",
+    "MOLTBOOK_API_KEY",
+    "MOLTBOOK_AGENT_NAME",
     "OPENCLAW_GATEWAY_TOKEN",
     "OPENCLAW_GATEWAY_URL",
     "MIRA_DASHBOARD_WEBAUTHN_RP_ID",
@@ -96,6 +102,7 @@ export interface ApplicationConfigurationMetadata {
         | "environment-mode"
         | "http-origin"
         | "http-origin-list"
+        | "identifier"
         | "ip-address-list"
         | "json-secret"
         | "log-level"
@@ -252,6 +259,37 @@ export const applicationConfigurationRegistry: readonly ApplicationConfiguration
             secret: true,
             validationConstraints: `When present, a trimmed nonblank control-safe secret at most ${applicationConfigurationLimits.elevenLabsApiKeyMaximumLength} code units; never persisted, logged, or browser-exposed.`,
             valueType: "opaque-secret",
+        }),
+        metadata({
+            allowedValues: null,
+            browserExposure: "none",
+            defaultValue: null,
+            description:
+                "Worker-only Moltbook API credential used by the fixed read-only cache provider.",
+            environmentName: "MOLTBOOK_API_KEY",
+            field: "moltbookApiKey",
+            operationalEffect:
+                "Authenticates four fixed-host Moltbook snapshot requests from the worker.",
+            restartRequired: true,
+            roles: Object.freeze(["worker"]),
+            secret: true,
+            validationConstraints: `Trimmed nonblank control-safe secret at most ${applicationConfigurationLimits.moltbookApiKeyMaximumLength} code units; never persisted, logged, or browser-exposed.`,
+            valueType: "opaque-secret",
+        }),
+        metadata({
+            allowedValues: null,
+            browserExposure: "none",
+            defaultValue: "mira_2026",
+            description: "Moltbook agent identity projected into the Dashboard cache.",
+            environmentName: "MOLTBOOK_AGENT_NAME",
+            field: "moltbookAgentName",
+            operationalEffect:
+                "Selects the fixed, URL-encoded profile read used for profile, posts, and comments.",
+            restartRequired: true,
+            roles: Object.freeze(["worker"]),
+            secret: false,
+            validationConstraints: `Trimmed nonblank control-safe identity at most ${applicationConfigurationLimits.moltbookAgentNameMaximumLength} code units.`,
+            valueType: "identifier",
         }),
         metadata({
             allowedValues: null,

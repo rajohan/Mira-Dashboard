@@ -6,6 +6,7 @@ import type { TaskNotificationQueue } from "../../../shared/taskNotifications.ts
 import type { ImmediateDatabaseWriteAdmission } from "../../database/immediateWriteAdmission.ts";
 import type { RuntimeOwnedDatabase } from "../../database/runtime/databaseService.ts";
 import type { PersistentGatewayTaskNotificationTransport } from "../../platform/gateway/persistentGatewayTransport.ts";
+import { testMoltbookCollector } from "../../test/support/moltbook.ts";
 import type { CacheRepository } from "../cache/repository.ts";
 import type { JobWorkerCoordinator } from "./coordinator.ts";
 import type { JobRepository } from "./repository.ts";
@@ -31,6 +32,7 @@ const baseRuntimeOptions = {
     logMaintenance: Object.freeze({
         run: () => Promise.resolve(undefined),
     }),
+    moltbook: testMoltbookCollector,
     pid: 123,
     releaseId: "a".repeat(40),
     sideEffects: {

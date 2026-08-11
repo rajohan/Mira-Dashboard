@@ -327,6 +327,22 @@
             "name": "logs.tail"
         },
         {
+            "kind": "query",
+            "name": "moltbook.feed"
+        },
+        {
+            "kind": "query",
+            "name": "moltbook.home"
+        },
+        {
+            "kind": "query",
+            "name": "moltbook.listMyPosts"
+        },
+        {
+            "kind": "query",
+            "name": "moltbook.profile"
+        },
+        {
             "kind": "mutation",
             "name": "monitoring.submitCompleteSnapshot"
         },

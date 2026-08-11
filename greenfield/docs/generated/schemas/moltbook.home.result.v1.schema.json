@@ -1,0 +1,201 @@
+{
+  "$id": "urn:mira-dashboard:moltbook.home.result.v1",
+  "type": "object",
+  "properties": {
+    "home": {
+      "type": "object",
+      "properties": {
+        "activityOnYourPostsCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "exploreCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "latestAnnouncement": {
+          "type": "object",
+          "properties": {
+            "authorName": {
+              "type": "string",
+              "maxLength": 200,
+              "pattern": "^[^\\u0000]*$",
+              "allOf": [
+                {
+                  "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                }
+              ]
+            },
+            "createdAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            },
+            "postId": {
+              "type": "string",
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "\\S",
+              "allOf": [
+                {
+                  "pattern": "^[^\\u0000]*$"
+                },
+                {
+                  "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                }
+              ]
+            },
+            "previewText": {
+              "type": "string",
+              "maxLength": 2000,
+              "pattern": "^[^\\u0000]*$"
+            },
+            "title": {
+              "type": "string",
+              "maxLength": 500,
+              "pattern": "^[^\\u0000]*$",
+              "allOf": [
+                {
+                  "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                }
+              ]
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "nextActions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 300,
+            "pattern": "^[^\\u0000]*$",
+            "allOf": [
+              {
+                "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+              }
+            ]
+          },
+          "maxItems": 8
+        },
+        "pendingRequestCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "postsFromAccountsYouFollowCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "unreadMessageCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "unreadNotificationCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "activityOnYourPostsCount",
+        "exploreCount",
+        "nextActions",
+        "pendingRequestCount",
+        "postsFromAccountsYouFollowCount",
+        "unreadMessageCount",
+        "unreadNotificationCount"
+      ],
+      "additionalProperties": false
+    },
+    "status": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "freshness": {
+              "enum": [
+                "fresh",
+                "stale"
+              ],
+              "type": "string"
+            },
+            "lastAttemptAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            },
+            "lastSuccessAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            },
+            "lastAttemptStatus": {
+              "const": "failed"
+            },
+            "refreshFailureMessage": {
+              "type": "string",
+              "maxLength": 2000,
+              "pattern": "^[^\\u0000]*$",
+              "allOf": [
+                {
+                  "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                }
+              ]
+            }
+          },
+          "required": [
+            "freshness",
+            "lastAttemptAtMs",
+            "lastSuccessAtMs",
+            "lastAttemptStatus",
+            "refreshFailureMessage"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "freshness": {
+              "enum": [
+                "fresh",
+                "stale"
+              ],
+              "type": "string"
+            },
+            "lastAttemptAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            },
+            "lastSuccessAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            },
+            "lastAttemptStatus": {
+              "const": "succeeded"
+            }
+          },
+          "required": [
+            "freshness",
+            "lastAttemptAtMs",
+            "lastSuccessAtMs",
+            "lastAttemptStatus"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+  "required": [
+    "home",
+    "status"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

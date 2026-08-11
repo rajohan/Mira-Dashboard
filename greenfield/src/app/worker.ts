@@ -6,6 +6,10 @@ import {
     createSystemJobWorkerSideEffects,
 } from "../server/domains/jobs/workerRuntime.ts";
 import {
+    createMoltbookDashboardCollector,
+    type MoltbookDashboardCollector,
+} from "../server/domains/moltbook/provider.ts";
+import {
     parseWorkerConfiguration,
     type WorkerConfiguration,
 } from "../server/platform/configuration/workerConfiguration.ts";
@@ -94,7 +98,8 @@ export interface DashboardWorkerProcessDependencies {
         persistentGatewayTransport: PersistentGatewayTaskNotificationTransport,
         workspaceRoot: WorkerWorkspaceFileRootConfiguration,
         openClawRoot: WorkerWorkspaceFileRootConfiguration,
-        logMaintenance: LogMaintenanceExecutor
+        logMaintenance: LogMaintenanceExecutor,
+        moltbook: MoltbookDashboardCollector
     ) => DashboardWorkerRuntime;
     readonly createTerminationController: () => ProcessTerminationController;
     readonly loadRelease: (
@@ -174,7 +179,8 @@ const defaultDependencies = Object.freeze({
         gatewayTransport,
         workspaceRoot,
         openClawRoot,
-        logMaintenance
+        logMaintenance,
+        moltbook
     ) => {
         const writer = createDescriptorWorkspaceFileStructuralWriter({
             roots: [workspaceRoot, openClawRoot],
@@ -188,6 +194,7 @@ const defaultDependencies = Object.freeze({
                 stateDirectory: layout.production.state.root,
             },
             logMaintenance,
+            moltbook,
             persistentGatewayTransport: gatewayTransport,
             pid: process.pid,
             releaseId: release.manifest.source.commitSha,
@@ -293,6 +300,10 @@ export async function runDashboardWorkerProcess(
             url: configuration.gatewayUrl,
         });
         const logMaintenance = dependencies.createLogMaintenanceExecutor(layout);
+        const moltbook = createMoltbookDashboardCollector({
+            agentName: configuration.moltbookAgentName,
+            apiKey: configuration.moltbookApiKey,
+        });
         runtime = dependencies.createRuntime(
             layout,
             release,
@@ -300,7 +311,8 @@ export async function runDashboardWorkerProcess(
             gatewayTransport,
             workspaceRoot,
             openClawRoot,
-            logMaintenance
+            logMaintenance,
+            moltbook
         );
         const runtimeCompletion = runtime.completion.then(
             () => ({ kind: "stopped" as const }),

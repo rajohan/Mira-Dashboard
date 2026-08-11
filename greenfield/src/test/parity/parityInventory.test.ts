@@ -59,6 +59,7 @@ describe("reviewed pre-cutover parity inventory", () => {
             "/files",
             "/login",
             "/logs",
+            "/moltbook",
             "/reports",
             "/sessions",
             "/tasks",
@@ -260,5 +261,34 @@ describe("reviewed pre-cutover parity inventory", () => {
             path: "/api/media/*",
             phase: "phase-5",
         });
+    });
+
+    test("keeps the reviewed Phase 5 Moltbook slice closed", async () => {
+        const reviewed = await loadReviewedParityInventory();
+        const moltbookRoute = reviewed.frontend.routes.find(
+            ({ path }) => path === "/moltbook"
+        );
+        const endpoints = reviewed.legacyEndpoints.endpoints.filter(({ id }) =>
+            [
+                "GET /api/moltbook/feed",
+                "GET /api/moltbook/home",
+                "GET /api/moltbook/my-posts",
+                "GET /api/moltbook/profile",
+            ].includes(id)
+        );
+
+        expect(moltbookRoute?.target.delivery).toBe("implemented");
+        expect(
+            endpoints.map(({ id, target }) => [
+                id,
+                target.kind === "reviewed-removal" ? target.kind : target.delivery,
+                target.kind === "procedure" ? target.names : undefined,
+            ])
+        ).toEqual([
+            ["GET /api/moltbook/feed", "implemented", ["moltbook.feed"]],
+            ["GET /api/moltbook/home", "implemented", ["moltbook.home"]],
+            ["GET /api/moltbook/my-posts", "implemented", ["moltbook.listMyPosts"]],
+            ["GET /api/moltbook/profile", "implemented", ["moltbook.profile"]],
+        ]);
     });
 });

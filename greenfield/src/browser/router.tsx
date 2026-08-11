@@ -49,6 +49,10 @@ const logsRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/logs",
 }).lazy(() => import("./routes/logs.lazy.tsx").then((module) => module.Route));
+const moltbookRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/moltbook",
+}).lazy(() => import("./routes/moltbook.lazy.tsx").then((module) => module.Route));
 const terminalRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/terminal",
@@ -82,6 +86,7 @@ const routeTree = rootRoute.addChildren([
     incidentsRoute,
     jobsRoute,
     logsRoute,
+    moltbookRoute,
     reportsRoute,
     sessionsRoute,
     tasksRoute,

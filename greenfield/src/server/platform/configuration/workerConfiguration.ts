@@ -7,6 +7,10 @@ import {
     configurationGatewayUrl,
 } from "./gatewayConfiguration.ts";
 import {
+    configurationMoltbookAgentName,
+    configurationMoltbookApiKey,
+} from "./moltbookConfiguration.ts";
+import {
     configurationChoice,
     configurationOpenClawRoot,
     configurationProjectRoot,
@@ -21,6 +25,8 @@ export interface WorkerConfiguration {
     readonly gatewayToken: Redacted.Redacted<string>;
     readonly gatewayUrl: string;
     readonly logLevel: ApplicationLogLevel;
+    readonly moltbookAgentName: string;
+    readonly moltbookApiKey: Redacted.Redacted<string>;
     readonly nodeEnvironment: ApplicationNodeEnvironment;
     readonly openClawRoot: string;
     readonly projectRoot: string;
@@ -35,6 +41,8 @@ export const workerConfigurationEnvironmentSchema = v.object({
     MIRA_DASHBOARD_OPENCLAW_ROOT: optionalEnvironmentValueSchema,
     MIRA_DASHBOARD_PROJECT_ROOT: optionalEnvironmentValueSchema,
     MIRA_DASHBOARD_WORKSPACE_ROOT: optionalEnvironmentValueSchema,
+    MOLTBOOK_AGENT_NAME: optionalEnvironmentValueSchema,
+    MOLTBOOK_API_KEY: optionalEnvironmentValueSchema,
     NODE_ENV: optionalEnvironmentValueSchema,
     OPENCLAW_GATEWAY_TOKEN: optionalEnvironmentValueSchema,
     OPENCLAW_GATEWAY_URL: optionalEnvironmentValueSchema,
@@ -67,6 +75,8 @@ export function parseWorkerConfiguration(
             "info",
             "warn",
         ] as const),
+        moltbookAgentName: configurationMoltbookAgentName(input),
+        moltbookApiKey: configurationMoltbookApiKey(input),
         nodeEnvironment: configurationChoice(input, "NODE_ENV", [
             "development",
             "production",

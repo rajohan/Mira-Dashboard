@@ -3,8 +3,13 @@ import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 
 import {
+    testMoltbookCollector,
+    testMoltbookDashboardSnapshot,
+} from "../../test/support/moltbook.ts";
+import {
     createJobWorkerActionResolver,
     createLogMaintenanceJobExecutor,
+    createMoltbookDashboardExecutor,
     createSystemHostExecutor,
     createWorkspaceFileWriteJobExecutor,
     createJobWorkerActionRegistry,
@@ -36,7 +41,8 @@ const successfulExecutor = () => Effect.succeed({});
 describe("worker-only job executor registry", () => {
     test("matches every pure definition with one exact executor", () => {
         const findAction = createJobWorkerActionResolver({
-            run: () => Promise.resolve(undefined),
+            logMaintenance: { run: () => Promise.resolve(undefined) },
+            moltbook: testMoltbookCollector,
         });
         expect(findAction("system.worker-smoke")).toBeDefined();
         expect(findAction("cache.refresh.system-host")).toBeDefined();
@@ -223,10 +229,11 @@ describe("worker-only job executor registry", () => {
             },
         ]);
 
-        const findAction = createJobWorkerActionResolver(
-            { run: () => Promise.resolve(undefined) },
-            writer
-        );
+        const findAction = createJobWorkerActionResolver({
+            logMaintenance: { run: () => Promise.resolve(undefined) },
+            moltbook: testMoltbookCollector,
+            workspaceFiles: writer,
+        });
         expect(findAction("workspace-files.apply-write")).toBeDefined();
         expect(findAction("workspace-files.apply-write")).not.toHaveProperty(
             "scheduleId"
@@ -326,5 +333,62 @@ describe("worker-only job executor registry", () => {
         })(executionContext([]), { key: "different" });
         expect(Effect.runPromise(invalidPayloadExecution)).rejects.toBeInstanceOf(Error);
         expect(invalidPayloadCollections).toBe(0);
+    });
+
+    test("commits one aggregate Moltbook attempt and redacts collector failures", async () => {
+        const attempts: JobCacheAttemptCommit[] = [];
+        const times = [10, 19];
+        const executor = createMoltbookDashboardExecutor({
+            collector: testMoltbookCollector,
+            monotonicNowMs: () => times.shift() ?? 19,
+        });
+        expect(
+            await Effect.runPromise(
+                executor(executionContext(attempts), {
+                    key: "moltbook.dashboard",
+                })
+            )
+        ).toEqual({ cacheKeys: ["moltbook.dashboard"], completedAtMs: 5000 });
+        expect(attempts).toEqual([
+            {
+                durationMs: 9,
+                entries: [
+                    {
+                        key: "moltbook.dashboard",
+                        metadata: { kind: "dashboard" },
+                        payload: testMoltbookDashboardSnapshot,
+                        schemaId: "moltbook.dashboard.v1",
+                        source: "moltbook.api",
+                        ttlMs: 1_800_000,
+                    },
+                ],
+                kind: "succeeded",
+            },
+        ]);
+
+        const failedAttempts: JobCacheAttemptCommit[] = [];
+        const secret = "private-provider-detail";
+        const failure = await Effect.runPromise(
+            createMoltbookDashboardExecutor({
+                collector: {
+                    collect: () => Promise.reject(new Error(secret)),
+                },
+                monotonicNowMs: (() => {
+                    const values = [20, 24];
+                    return () => values.shift() ?? 24;
+                })(),
+            })(executionContext(failedAttempts), { key: "moltbook.dashboard" })
+        ).catch((error: unknown) => error);
+        expect(failure).toBeInstanceOf(JobActionRetryableError);
+        expect(failedAttempts).toEqual([
+            {
+                durationMs: 4,
+                failureCode: "provider/moltbook-unavailable",
+                failureMessage: "Moltbook dashboard projection could not be collected.",
+                key: "moltbook.dashboard",
+                kind: "failed",
+            },
+        ]);
+        expect(JSON.stringify(failedAttempts)).not.toContain(secret);
     });
 });

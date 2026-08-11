@@ -103,6 +103,10 @@ export async function developmentProcessEnvironments(
         PORT: String(config.backendPort),
     };
     const worker: Record<string, string> = { ...shared };
+    for (const name of ["MOLTBOOK_AGENT_NAME", "MOLTBOOK_API_KEY"] as const) {
+        const value = environment[name];
+        if (value !== undefined) worker[name] = value;
+    }
     for (const name of [
         "MIRA_DASHBOARD_LOG_LEVEL",
         "MIRA_DASHBOARD_RECENT_AUTH_MINUTES",

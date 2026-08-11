@@ -4,6 +4,7 @@ import { Effect } from "effect";
 
 import { testImmediateDatabaseWriteAdmission } from "../../test/support/databaseWriteAdmission.ts";
 import { openFreshMigratedDatabase } from "../../test/support/freshDatabase.ts";
+import { testMoltbookCollector } from "../../test/support/moltbook.ts";
 import { createJobWorkerActionResolver } from "./actionExecutors.ts";
 import {
     type JobActionRegistration,
@@ -40,7 +41,8 @@ import {
 import { createJobRealtimeSideEffects } from "./sideEffects.ts";
 
 const findJobWorkerAction = createJobWorkerActionResolver({
-    run: () => Promise.resolve(undefined),
+    logMaintenance: { run: () => Promise.resolve(undefined) },
+    moltbook: testMoltbookCollector,
 });
 
 const releaseId = "a".repeat(40);

@@ -721,7 +721,7 @@
             "purpose": "Reads feed with query params.",
             "section": "Moltbook And Voice",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["moltbook.feed"],
                 "phase": "phase-5"
@@ -734,7 +734,7 @@
             "purpose": "Reads Moltbook home cache/API.",
             "section": "Moltbook And Voice",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["moltbook.home"],
                 "phase": "phase-5"
@@ -747,7 +747,7 @@
             "purpose": "Reads own content.",
             "section": "Moltbook And Voice",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["moltbook.listMyPosts"],
                 "phase": "phase-5"
@@ -760,7 +760,7 @@
             "purpose": "Reads profile.",
             "section": "Moltbook And Voice",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["moltbook.profile"],
                 "phase": "phase-5"

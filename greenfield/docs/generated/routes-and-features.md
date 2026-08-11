@@ -13,6 +13,7 @@
 | `/jobs` | Browser session | Jobs | `jobs` | Shows Dashboard jobs, schedules, worker state, and OpenClaw cron. |
 | `/login` | Public | Hidden | `security` | Authenticates a browser session and completes pending MFA login. |
 | `/logs` | Browser session | Logs | `logs` | Reads redacted named log sources and queues fixed maintenance policies. |
+| `/moltbook` | Browser session | Moltbook | `moltbook` | Reads the bounded worker-owned Moltbook profile, feeds, posts, and comments snapshot. |
 | `/reports` | Browser session | Reports | `monitoring` | Lists and renders durable bounded monitoring reports. |
 | `/sessions` | Browser session | Sessions | `gateway-sessions` | Shows and controls the bounded current Gateway session projection. |
 | `/tasks` | Browser session | Tasks | `tasks` | Manages the durable task board, updates, labels, and assignments. |

@@ -342,6 +342,7 @@ const processOptions = Object.freeze({
         MIRA_DASHBOARD_PROJECT_ROOT: projectRoot,
         MIRA_DASHBOARD_OPENCLAW_ROOT: openClawRoot,
         MIRA_DASHBOARD_WORKSPACE_ROOT: workspaceRoot,
+        MOLTBOOK_API_KEY: "worker-moltbook-key-test-value",
         NODE_ENV: "production",
         OPENCLAW_GATEWAY_TOKEN: "worker-gateway-token-test-value",
         OPENCLAW_GATEWAY_URL: "ws://127.0.0.1:18789",

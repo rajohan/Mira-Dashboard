@@ -10,6 +10,7 @@ import {
 import type { JsonObject } from "../../../shared/json.ts";
 import { collectSystemHostPayload } from "../cache/systemHostProvider.ts";
 import { parseWorkspaceFileJobPayload } from "../files/jobPayload.ts";
+import type { MoltbookDashboardCollector } from "../moltbook/provider.ts";
 import {
     type JobActionExecutor,
     type JobExecutableActionDefinition,
@@ -27,6 +28,9 @@ import {
 
 const emptyPayloadSchema = v.strictObject({});
 const systemHostActionPayloadSchema = v.strictObject({ key: v.literal("system.host") });
+const moltbookDashboardActionPayloadSchema = v.strictObject({
+    key: v.literal("moltbook.dashboard"),
+});
 const logMaintenanceActionPayloadSchema = v.pipe(
     v.strictObject({
         dryRun: v.optional(v.boolean("Log maintenance mode is invalid"), false),
@@ -179,6 +183,77 @@ export function createSystemHostExecutor(
         });
 }
 
+export interface MoltbookDashboardExecutorDependencies {
+    readonly collector: MoltbookDashboardCollector;
+    readonly monotonicNowMs?: () => number;
+}
+
+/**
+ * Creates the worker-only all-or-nothing Moltbook cache refresh executor.
+ * @param dependencies Fixed collector and optional monotonic test clock.
+ * @returns Claim-fenced cache job executor.
+ */
+export function createMoltbookDashboardExecutor(
+    dependencies: MoltbookDashboardExecutorDependencies
+): JobActionExecutor {
+    const monotonicNowMs = dependencies.monotonicNowMs ?? (() => performance.now());
+    return (context, payload) =>
+        Effect.suspend(() => {
+            v.parse(moltbookDashboardActionPayloadSchema, payload);
+            const startedAt = monotonicNowMs();
+            const collected = Effect.tryPromise({
+                catch: (error) => new JobActionRetryableError(error),
+                try: (signal) => dependencies.collector.collect(signal),
+            }).pipe(
+                Effect.catch((error) => {
+                    const durationMs = Math.max(
+                        0,
+                        Math.floor(monotonicNowMs() - startedAt)
+                    );
+                    return Effect.tryPromise(() =>
+                        context.commitCacheAttempt({
+                            durationMs,
+                            failureCode: "provider/moltbook-unavailable",
+                            failureMessage:
+                                "Moltbook dashboard projection could not be collected.",
+                            key: "moltbook.dashboard",
+                            kind: "failed",
+                        })
+                    ).pipe(Effect.andThen(Effect.fail(error)));
+                })
+            );
+            return collected.pipe(
+                Effect.flatMap((snapshot) => {
+                    const durationMs = Math.max(
+                        0,
+                        Math.floor(monotonicNowMs() - startedAt)
+                    );
+                    return Effect.tryPromise(() =>
+                        context.commitCacheAttempt({
+                            durationMs,
+                            entries: [
+                                {
+                                    key: "moltbook.dashboard",
+                                    metadata: { kind: "dashboard" },
+                                    payload: snapshot,
+                                    schemaId: "moltbook.dashboard.v1",
+                                    source: "moltbook.api",
+                                    ttlMs: 30 * 60_000,
+                                },
+                            ],
+                            kind: "succeeded",
+                        })
+                    ).pipe(
+                        Effect.as({
+                            cacheKeys: ["moltbook.dashboard"],
+                            completedAtMs: context.nowMs(),
+                        })
+                    );
+                })
+            );
+        });
+}
+
 /**
  * Adapts the fixed worker log-maintenance port to one schema-validated durable action.
  * The payload can select only a reviewed policy identity and never carries host paths.
@@ -303,10 +378,16 @@ export function createJobWorkerActionRegistry(
  * Web code can import pure definitions without gaining log-maintenance authority.
  * @returns A fail-closed resolver containing every reviewed worker action.
  */
+export interface JobWorkerActionResolverDependencies {
+    readonly logMaintenance: LogMaintenanceExecutionPort;
+    readonly moltbook: MoltbookDashboardCollector;
+    readonly workspaceFiles?: WorkspaceFileWriteExecutionPort;
+}
+
 export function createJobWorkerActionResolver(
-    logMaintenance: LogMaintenanceExecutionPort,
-    workspaceFiles?: WorkspaceFileWriteExecutionPort
+    dependencies: JobWorkerActionResolverDependencies
 ): JobWorkerActionResolver {
+    const workspaceFiles = dependencies.workspaceFiles;
     const definitions =
         workspaceFiles === undefined
             ? jobActionDefinitions
@@ -321,8 +402,14 @@ export function createJobWorkerActionResolver(
             execute: systemHostExecutor,
         }),
         Object.freeze({
+            actionKey: "cache.refresh.moltbook-dashboard",
+            execute: createMoltbookDashboardExecutor({
+                collector: dependencies.moltbook,
+            }),
+        }),
+        Object.freeze({
             actionKey: logMaintenanceJobActionKey,
-            execute: createLogMaintenanceJobExecutor(logMaintenance),
+            execute: createLogMaintenanceJobExecutor(dependencies.logMaintenance),
         }),
         Object.freeze({
             actionKey: "system.worker-smoke",

@@ -16,6 +16,7 @@ function validEnvironment(): Record<string, unknown> {
         MIRA_DASHBOARD_OPENCLAW_ROOT: "/srv/openclaw",
         MIRA_DASHBOARD_PROJECT_ROOT: "/srv/mira-dashboard",
         MIRA_DASHBOARD_WORKSPACE_ROOT: "/srv/mira-workspace",
+        MOLTBOOK_API_KEY: "worker-moltbook-key-test-value",
         NODE_ENV: "production",
         OPENCLAW_GATEWAY_TOKEN: "worker-gateway-token-test-value",
         OPENCLAW_GATEWAY_URL: "ws://127.0.0.1:18789",
@@ -43,6 +44,7 @@ describe("worker application configuration", () => {
         expect(configuration).toMatchObject({
             gatewayUrl: "ws://127.0.0.1:18789/",
             logLevel: "info",
+            moltbookAgentName: "mira_2026",
             nodeEnvironment: "production",
             openClawRoot: "/srv/openclaw",
             projectRoot: "/srv/mira-dashboard",
@@ -54,12 +56,23 @@ describe("worker application configuration", () => {
         expect(JSON.stringify(configuration.gatewayToken)).toBe(
             '"<redacted:gateway-token>"'
         );
+        expect(Redacted.value(configuration.moltbookApiKey)).toBe(
+            "worker-moltbook-key-test-value"
+        );
+        expect(JSON.stringify(configuration.moltbookApiKey)).toBe(
+            '"<redacted:moltbook-api-key>"'
+        );
         expect(JSON.stringify(configuration)).not.toContain(
             "worker-gateway-token-test-value"
         );
+        expect(JSON.stringify(configuration)).not.toContain(
+            "worker-moltbook-key-test-value"
+        );
         expect(inspect(configuration)).not.toContain("worker-gateway-token-test-value");
+        expect(inspect(configuration)).not.toContain("worker-moltbook-key-test-value");
         expect(Object.isFrozen(configuration)).toBe(true);
         expect(Object.isFrozen(configuration.gatewayToken)).toBe(true);
+        expect(Object.isFrozen(configuration.moltbookApiKey)).toBe(true);
     });
 
     test("observes only the worker registry projection", () => {
@@ -105,6 +118,7 @@ describe("worker application configuration", () => {
         const secret = "worker-secret-sentinel";
         for (const [field, value, reason] of [
             ["OPENCLAW_GATEWAY_TOKEN", ` ${secret}`, "invalid"],
+            ["MOLTBOOK_API_KEY", ` ${secret}`, "invalid"],
             ["OPENCLAW_GATEWAY_URL", `ws://${secret}.example`, "invalid"],
         ] as const) {
             const environment = validEnvironment();
@@ -131,6 +145,8 @@ describe("worker application configuration", () => {
             ["MIRA_DASHBOARD_OPENCLAW_ROOT", undefined, "missing"],
             ["MIRA_DASHBOARD_WORKSPACE_ROOT", "relative", "invalid"],
             ["MIRA_DASHBOARD_WORKSPACE_ROOT", undefined, "missing"],
+            ["MOLTBOOK_AGENT_NAME", " mira_2026", "invalid"],
+            ["MOLTBOOK_API_KEY", undefined, "missing"],
             ["OPENCLAW_GATEWAY_TOKEN", undefined, "missing"],
             ["OPENCLAW_GATEWAY_URL", "wss://gateway.example.com", "invalid"],
         ] as const) {

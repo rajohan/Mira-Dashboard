@@ -177,7 +177,7 @@
             "searchNormalizer": null,
             "sourceRouteName": "moltbook",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "path": "/moltbook",
                 "phase": "phase-5"
             }

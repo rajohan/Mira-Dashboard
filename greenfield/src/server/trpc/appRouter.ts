@@ -21,6 +21,10 @@ import {
 } from "../domains/jobs/procedures.ts";
 import { logProcedureNames, logsRouter } from "../domains/logs/procedures.ts";
 import {
+    moltbookProcedureNames,
+    moltbookRouter,
+} from "../domains/moltbook/procedures.ts";
+import {
     incidentProcedureNames,
     incidentRouter,
     monitoringProcedureNames,
@@ -83,6 +87,7 @@ export const appRouter = router({
     jobs: jobRouter,
     logs: logsRouter,
     monitoring: monitoringRouter,
+    moltbook: moltbookRouter,
     notifications: notificationRouter,
     openClawCron: openClawCronRouter,
     openClawTasks: openClawTasksRouter,
@@ -110,6 +115,7 @@ export const appRouterProcedureNames = Object.freeze([
     ...namespacedProcedureNames("jobs", jobProcedureNames),
     ...namespacedProcedureNames("logs", logProcedureNames),
     ...namespacedProcedureNames("monitoring", monitoringProcedureNames),
+    ...namespacedProcedureNames("moltbook", moltbookProcedureNames),
     ...namespacedProcedureNames("notifications", notificationProcedureNames),
     ...namespacedProcedureNames("openClawCron", openClawCronProcedureNames),
     ...namespacedProcedureNames("openClawTasks", openClawTaskProcedureNames),

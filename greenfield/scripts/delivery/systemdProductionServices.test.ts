@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test
 import { mkdir, readFile, readlink, unlink } from "node:fs/promises";
 import path from "node:path";
 
+import { configurationEnvironmentNamesForRole } from "../../src/shared/configuration/applicationConfigurationRegistry.ts";
 import {
     createLocalReleaseFixture,
     createProductionTargetFixture,
@@ -261,6 +262,12 @@ describe("production user-systemd service control", () => {
             readFile(path.join(systemdRoot, "mira-dashboard-web.service"), "utf8"),
             readFile(path.join(systemdRoot, "mira-dashboard-worker.service"), "utf8"),
         ]);
+        const webExecStart = web
+            .split("\n")
+            .find((line) => line.startsWith("ExecStart="));
+        const workerExecStart = worker
+            .split("\n")
+            .find((line) => line.startsWith("ExecStart="));
         for (const unit of [web, worker]) {
             expect(unit).not.toContain("StateDirectory=");
             expect(unit).not.toContain("LogsDirectory=");
@@ -275,6 +282,7 @@ describe("production user-systemd service control", () => {
             expect(unit).toContain(
                 "WorkingDirectory=%h/projects/mira-dashboard/production/releases/current"
             );
+            expect(unit).toContain("--no-exit-on-missing-only-secrets");
             expect(unit).toMatch(
                 /StandardOutput=append:%h\/projects\/mira-dashboard\/production\/state\/logs\//u
             );
@@ -287,9 +295,22 @@ describe("production user-systemd service control", () => {
         expect(web).toContain(
             "--preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT,MIRA_DASHBOARD_OPENCLAW_ROOT,MIRA_DASHBOARD_WORKSPACE_ROOT"
         );
+        expect(web).toContain(
+            `--only-secrets ${configurationEnvironmentNamesForRole("web").join(",")}`
+        );
+        expect(webExecStart).not.toContain("MOLTBOOK_API_KEY");
+        expect(web).toContain("UnsetEnvironment=MOLTBOOK_API_KEY MOLTBOOK_AGENT_NAME");
         expect(worker).toContain("Environment=MIRA_DASHBOARD_OPENCLAW_ROOT=%h/.openclaw");
         expect(worker).toContain(
             "--preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT,MIRA_DASHBOARD_OPENCLAW_ROOT,MIRA_DASHBOARD_WORKSPACE_ROOT"
+        );
+        expect(worker).toContain(
+            `--only-secrets ${configurationEnvironmentNamesForRole("worker").join(",")}`
+        );
+        expect(workerExecStart).not.toContain("ELEVENLABS_API_KEY");
+        expect(workerExecStart).not.toContain("MIRA_DASHBOARD_TOTP_KEYRING");
+        expect(worker).toContain(
+            "UnsetEnvironment=ELEVENLABS_API_KEY MIRA_DASHBOARD_TOTP_KEYRING"
         );
         expect(web).toContain("MemoryMax=1G");
         expect(web).toContain("TasksMax=96");

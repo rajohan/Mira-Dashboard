@@ -44,7 +44,8 @@ export async function runDevelopmentWorkerProcess(
             gatewayTransport,
             workspaceRoot,
             openClawRoot,
-            logMaintenance
+            logMaintenance,
+            moltbook
         ) => {
             const writer = createDescriptorWorkspaceFileStructuralWriter({
                 roots: [workspaceRoot, openClawRoot],
@@ -58,6 +59,7 @@ export async function runDevelopmentWorkerProcess(
                     stateDirectory: layout.production.state.root,
                 },
                 logMaintenance,
+                moltbook,
                 persistentGatewayTransport: gatewayTransport,
                 pid: process.pid,
                 releaseId: source.manifest.source.commitSha,
