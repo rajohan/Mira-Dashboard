@@ -152,6 +152,7 @@ describe("development runtime lifecycle", () => {
         const worker = fakeChild();
         const frontend = fakeChild();
         const children = [web, worker, frontend];
+        const commands: Array<readonly string[]> = [];
         let resolveStarted!: () => void;
         const started = new Promise<void>((resolve) => {
             resolveStarted = resolve;
@@ -161,7 +162,8 @@ describe("development runtime lifecycle", () => {
         try {
             const running = runDevelopmentStack(config, {
                 resolveSourceCommit: () => Promise.resolve(sourceCommit),
-                spawn() {
+                spawn(command) {
+                    commands.push(command);
                     const next = children[spawnCalls];
                     spawnCalls += 1;
                     if (spawnCalls === children.length) resolveStarted();
@@ -181,6 +183,16 @@ describe("development runtime lifecycle", () => {
             expect(web.signals).toEqual([]);
             expect(worker.signals).toEqual(["SIGTERM"]);
             expect(frontend.signals).toEqual(["SIGTERM"]);
+            expect(commands).toEqual([
+                [process.execPath, "--watch", "src/app/developmentWeb.ts", sourceCommit],
+                [
+                    process.execPath,
+                    "--watch",
+                    "src/app/developmentWorker.ts",
+                    sourceCommit,
+                ],
+                [process.execPath, "scripts/developmentFrontend.ts"],
+            ]);
             await expectLeaseReleased(config);
         } finally {
             await rm(temporaryRoot, { force: true, recursive: true });

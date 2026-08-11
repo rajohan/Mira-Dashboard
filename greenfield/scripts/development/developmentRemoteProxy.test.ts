@@ -24,7 +24,13 @@ interface ObservedWebSocketUpgrade {
     readonly search: string;
 }
 
-interface SingleHostWebSocketForwarder {
+interface ObservedForwardedWebSocketUpgrade {
+    readonly hostHeaders: readonly string[];
+    readonly requestTarget: string;
+}
+
+interface WebSocketForwarder {
+    readonly observedUpgrades: readonly ObservedForwardedWebSocketUpgrade[];
     readonly origin: string;
     stop(): Promise<void>;
 }
@@ -95,10 +101,11 @@ async function closeSocket(socket: WebSocket): Promise<void> {
     await Promise.race([closed, Bun.sleep(1000)]);
 }
 
-async function startSingleHostWebSocketForwarder(
+async function startWebSocketForwarder(
     targetPort: number,
-    host: string
-): Promise<SingleHostWebSocketForwarder> {
+    host?: string
+): Promise<WebSocketForwarder> {
+    const observedUpgrades: ObservedForwardedWebSocketUpgrade[] = [];
     const sockets = new Set<Socket>();
     const server = createServer((downstream) => {
         const upstream = createConnection({ host: "127.0.0.1", port: targetPort });
@@ -141,16 +148,30 @@ async function startSingleHostWebSocketForwarder(
                 closePair();
                 return;
             }
-            const forwardedHeader = [
-                requestLine,
-                `Host: ${host}`,
-                ...headerLines.filter((line) => !/^host\s*:/iu.test(line)),
-                "",
-                "",
-            ].join("\r\n");
-            upstream.write(forwardedHeader);
-            const remainder = request.subarray(headerEnd + 4);
-            if (remainder.byteLength > 0) upstream.write(remainder);
+            observedUpgrades.push(
+                Object.freeze({
+                    hostHeaders: Object.freeze(
+                        headerLines
+                            .filter((line) => /^host\s*:/iu.test(line))
+                            .map((line) => line.slice(line.indexOf(":") + 1).trim())
+                    ),
+                    requestTarget: requestLine.split(" ", 3)[1] ?? "",
+                })
+            );
+            if (host === undefined) {
+                upstream.write(request);
+            } else {
+                const forwardedHeader = [
+                    requestLine,
+                    `Host: ${host}`,
+                    ...headerLines.filter((line) => !/^host\s*:/iu.test(line)),
+                    "",
+                    "",
+                ].join("\r\n");
+                upstream.write(forwardedHeader);
+                const remainder = request.subarray(headerEnd + 4);
+                if (remainder.byteLength > 0) upstream.write(remainder);
+            }
             downstream.pipe(upstream);
         };
         downstream.on("data", forwardHandshake);
@@ -171,7 +192,8 @@ async function startSingleHostWebSocketForwarder(
     }
 
     return {
-        origin: `ws://127.0.0.1:${address.port}`,
+        observedUpgrades,
+        origin: `http://127.0.0.1:${address.port}`,
         async stop() {
             for (const socket of sockets) socket.destroy();
             await new Promise<void>((resolve, reject) => {
@@ -359,20 +381,24 @@ describe("development remote proxy", () => {
 
     test("bridges HMR and application WebSockets with path-specific Origin handling", async () => {
         const upstream = startObservedWebSocketServer();
-        const proxy = startDevelopmentRemoteProxy({
-            frontendTarget: upstream.url.origin,
-            port: 0,
-            publicOrigin,
-        });
-        let forwarder: SingleHostWebSocketForwarder | undefined;
+        let upstreamForwarder: WebSocketForwarder | undefined;
+        let proxy: Bun.Server<DevelopmentRemoteProxySocketData> | undefined;
+        let publicForwarder: WebSocketForwarder | undefined;
         let hmr: WebSocket | undefined;
 
         try {
-            forwarder = await startSingleHostWebSocketForwarder(
+            upstreamForwarder = await startWebSocketForwarder(Number(upstream.url.port));
+            const targetHost = new URL(upstreamForwarder.origin).host;
+            proxy = startDevelopmentRemoteProxy({
+                frontendTarget: upstreamForwarder.origin,
+                port: 0,
+                publicOrigin,
+            });
+            publicForwarder = await startWebSocketForwarder(
                 Number(proxy.url.port),
                 publicHost
             );
-            hmr = new WebSocket(websocketUrl(forwarder.origin, "/_bun/hmr?key=1"), {
+            hmr = new WebSocket(websocketUrl(publicForwarder.origin, "/_bun/hmr?key=1"), {
                 headers: { origin: publicOrigin },
                 perMessageDeflate: false,
             });
@@ -381,9 +407,9 @@ describe("development remote proxy", () => {
             await opened(hmr);
             const hmrObservedMessage = await hmrObserved;
             expect(JSON.parse(String(hmrObservedMessage.data))).toEqual({
-                host: upstream.url.host,
+                host: targetHost,
                 offeredProtocols: null,
-                origin: upstream.url.origin,
+                origin: upstreamForwarder.origin,
                 pathname: "/_bun/hmr",
                 search: "?key=1",
             });
@@ -394,7 +420,7 @@ describe("development remote proxy", () => {
 
             const token = `${"0".repeat(32)}.${"1".repeat(64)}`;
             const application = new WebSocket(
-                websocketUrl(forwarder.origin, "/api/terminal/session/socket"),
+                websocketUrl(publicForwarder.origin, "/api/terminal/session/socket"),
                 {
                     headers: { origin: publicOrigin },
                     perMessageDeflate: false,
@@ -408,7 +434,7 @@ describe("development remote proxy", () => {
                 expect(application.protocol).toBe("mira-terminal-v1");
                 const applicationObservedMessage = await applicationObserved;
                 expect(JSON.parse(String(applicationObservedMessage.data))).toEqual({
-                    host: upstream.url.host,
+                    host: targetHost,
                     offeredProtocols: `mira-terminal-v1, ${token}`,
                     origin: publicOrigin,
                     pathname: "/api/terminal/session/socket",
@@ -420,13 +446,24 @@ describe("development remote proxy", () => {
                 expect(new Uint8Array(binaryEchoMessage.data as ArrayBuffer)).toEqual(
                     Uint8Array.of(1, 3, 5, 7)
                 );
+                expect(upstreamForwarder.observedUpgrades).toEqual([
+                    {
+                        hostHeaders: [targetHost],
+                        requestTarget: "/_bun/hmr?key=1",
+                    },
+                    {
+                        hostHeaders: [targetHost],
+                        requestTarget: "/api/terminal/session/socket",
+                    },
+                ]);
             } finally {
                 await closeSocket(application);
             }
         } finally {
             if (hmr !== undefined) await closeSocket(hmr);
-            if (forwarder !== undefined) await forwarder.stop();
-            await proxy.stop(true);
+            if (publicForwarder !== undefined) await publicForwarder.stop();
+            if (proxy !== undefined) await proxy.stop(true);
+            if (upstreamForwarder !== undefined) await upstreamForwarder.stop();
             await upstream.stop(true);
         }
     }, 10_000);

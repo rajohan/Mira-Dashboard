@@ -194,7 +194,8 @@ function forwardedWebSocketHeaders(
 ): Readonly<Record<string, string>> {
     const headers = headersWithoutHopByHop(request.headers);
     for (const name of webSocketHandshakeHeaders) headers.delete(name);
-    headers.set("host", target.host);
+    // Bun derives the single upstream Host from the fixed WebSocket URL.
+    headers.delete("host");
     if (rewriteOrigin) {
         const httpOrigin = new URL(target.href);
         httpOrigin.protocol = "http:";

@@ -135,7 +135,7 @@ async function startDevelopmentChildren(
 > {
     const environments = await developmentProcessEnvironments(config, state.keyring);
     if (stopController.stopRequested) return;
-    const bun = Bun.which("bun") ?? process.execPath;
+    const bun = process.execPath;
     const watch = config.hotReload ? ["--watch"] : [];
     const web = dependencies.spawn(
         [bun, ...watch, "src/app/developmentWeb.ts", sourceCommit],
