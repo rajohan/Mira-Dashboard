@@ -2,24 +2,43 @@ import { guardedDevelopmentChildCommand } from "./developmentProcessGuard.ts";
 
 const lockAcquireTimeoutMs = 5000;
 const lockReleaseTimeoutMs = 5000;
-
-interface OutputChunk {
-    readonly done: boolean;
-    readonly value?: Uint8Array;
-}
+const lockReadySignal = "LOCKED\n";
 
 export interface DevelopmentStateAcquisitionLock {
     release(): Promise<void>;
 }
 
-async function firstOutputChunk(
+/**
+ * Waits for the complete lock-holder readiness signal across arbitrary stream chunks.
+ * @param stream Lock-holder standard output.
+ * @returns Completion after the exact readiness signal has been observed.
+ */
+export async function waitForDevelopmentStateLockReadiness(
     stream: ReadableStream<Uint8Array>
-): Promise<OutputChunk> {
+): Promise<void> {
     const reader = stream.getReader();
     let timeout: ReturnType<typeof setTimeout> | undefined;
+    const readSignal = async (): Promise<void> => {
+        const decoder = new TextDecoder();
+        let output = "";
+        while (output.length < lockReadySignal.length) {
+            const chunk = await reader.read();
+            if (chunk.done === true || chunk.value === undefined) {
+                throw new Error("Development state lease acquisition lock failed");
+            }
+            output += decoder.decode(chunk.value, { stream: true });
+            if (!lockReadySignal.startsWith(output)) {
+                throw new Error("Development state lease acquisition lock failed");
+            }
+        }
+        output += decoder.decode();
+        if (output !== lockReadySignal) {
+            throw new Error("Development state lease acquisition lock failed");
+        }
+    };
     try {
-        return await Promise.race([
-            reader.read(),
+        await Promise.race([
+            readSignal(),
             new Promise<never>((_resolve, reject) => {
                 timeout = setTimeout(
                     () =>
@@ -97,21 +116,11 @@ export async function acquireDevelopmentStateAcquisitionLock(
             stdout: "pipe",
         }
     );
-    let ready: OutputChunk;
     try {
-        ready = await firstOutputChunk(child.stdout);
+        await waitForDevelopmentStateLockReadiness(child.stdout);
     } catch (error) {
         await stopLockHolder(child);
         throw error;
-    }
-    if (
-        ready.done === true ||
-        ready.value === undefined ||
-        new TextDecoder().decode(ready.value) !== "LOCKED\n"
-    ) {
-        await stopLockHolder(child);
-        await Promise.all([child.exited, new Response(child.stderr).text()]);
-        throw new Error("Development state lease acquisition lock failed");
     }
 
     let releasePromise: Promise<void> | undefined;

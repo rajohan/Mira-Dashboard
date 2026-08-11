@@ -75,8 +75,8 @@
         "src/server/domains/security/mfa/accountLifecycle.factors.test.ts": 622,
         "src/server/domains/agents/procedures.test.ts": 610,
         "src/server/domains/monitoring/procedures.test.ts": 601,
+        "scripts/development/developmentState.test.ts": 599,
         "src/server/domains/jobs/workerSystem.test.ts": 598,
-        "scripts/development/developmentState.test.ts": 580,
         "src/server/database/migrations/securityIdentitySchema.browser.test.ts": 577,
         "src/server/platform/realtime/eventStore.test.ts": 569,
         "src/server/domains/jobs/coordinator.test.ts": 535,
@@ -379,7 +379,8 @@
         "src/server/rawHttp/authenticationCredentials.test.ts": 24,
         "src/server/domains/security/mfa/recoveryCodes.test.ts": 20,
         "scripts/testOutputPolicy.test.ts": 17,
-        "src/server/domains/security/authenticationWorkBudget.test.ts": 16
+        "src/server/domains/security/authenticationWorkBudget.test.ts": 16,
+        "scripts/development/developmentStateAcquisitionLock.test.ts": 13
     },
     "version": 1
 }
