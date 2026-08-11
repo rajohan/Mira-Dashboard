@@ -181,6 +181,73 @@ describe("cache heartbeat projection", () => {
         expect(unavailable).toEqual({ state: "unavailable" });
     });
 
+    test("preserves readable tasks when cron refresh or lookup is unavailable", async () => {
+        const snapshot = {
+            rows: [
+                {
+                    automation: {
+                        cronJobId: "private-cron",
+                        recurring: true,
+                    },
+                    id: uuid(4),
+                    priority: "low" as const,
+                    status: "todo" as const,
+                },
+                {
+                    assignee: "rajohan" as const,
+                    id: uuid(5),
+                    priority: "low" as const,
+                    status: "blocked" as const,
+                },
+            ],
+            totalCount: 2,
+        };
+        let cronLookups = 0;
+        const refreshDegraded = await readCacheHeartbeatTasksWithCronRefresh(
+            () => snapshot,
+            () => Promise.reject(new Error("private cron refresh failure")),
+            () => {
+                cronLookups += 1;
+                return { state: "missing" };
+            }
+        );
+        const expected = {
+            items: [
+                {
+                    automation: {
+                        cron: { state: "unavailable" as const },
+                        recurring: true,
+                    },
+                    id: uuid(4),
+                    priority: "low" as const,
+                    relevance: ["automation-linked" as const],
+                    status: "todo" as const,
+                },
+                {
+                    id: uuid(5),
+                    priority: "low" as const,
+                    relevance: ["owner-blocked" as const],
+                    status: "blocked" as const,
+                },
+            ],
+            state: "available" as const,
+            totalCount: 2,
+            truncated: false,
+        };
+
+        expect(refreshDegraded).toEqual(expected);
+        expect(cronLookups).toBe(0);
+
+        const lookupDegraded = await readCacheHeartbeatTasksWithCronRefresh(
+            () => snapshot,
+            () => Promise.resolve(),
+            () => {
+                throw new Error("private cron lookup failure");
+            }
+        );
+        expect(lookupDegraded).toEqual(expected);
+    });
+
     test("projects every code-owned schedule with compact run and expiry state", () => {
         const queuedRun = {
             firstStartedAt: null,

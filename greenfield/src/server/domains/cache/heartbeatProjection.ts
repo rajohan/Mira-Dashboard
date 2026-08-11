@@ -38,12 +38,25 @@ type PresentDashboardJob = Extract<
     { readonly state: "available" }
 >["items"][number] & { readonly state: "present" };
 
+function unavailableHeartbeatTaskCron(): HeartbeatTaskCron {
+    return { state: "unavailable" };
+}
+
+function readHeartbeatTaskCron(
+    readCron: (cronJobId: string) => HeartbeatTaskCron,
+    cronJobId: string
+): HeartbeatTaskCron {
+    try {
+        return readCron(cronJobId);
+    } catch {
+        return unavailableHeartbeatTaskCron();
+    }
+}
+
 /** @returns The bounded content-free task projection for cache-read automation. */
 export function projectCacheHeartbeatTasks(
     snapshot: TaskHeartbeatCandidateSnapshot,
-    readCron: (cronJobId: string) => HeartbeatTaskCron = () => ({
-        state: "unavailable",
-    })
+    readCron: (cronJobId: string) => HeartbeatTaskCron = unavailableHeartbeatTaskCron
 ): HeartbeatTasks {
     const items = snapshot.rows
         .map((row) => {
@@ -73,7 +86,10 @@ export function projectCacheHeartbeatTasks(
                     ? {}
                     : {
                           automation: {
-                              cron: readCron(row.automation.cronJobId),
+                              cron: readHeartbeatTaskCron(
+                                  readCron,
+                                  row.automation.cronJobId
+                              ),
                               recurring: row.automation.recurring,
                           },
                       }),
@@ -95,6 +111,7 @@ export function projectCacheHeartbeatTasks(
 /**
  * Reads one short task snapshot, then refreshes cron outside its transaction boundary.
  * A task-read failure cannot suppress the independent cron refresh.
+ * A cron refresh failure cannot suppress an otherwise readable task snapshot.
  * @param readSnapshot Synchronous task snapshot boundary that owns any short transaction.
  * @param refreshCron Process-owned cron refresh performed after the task read closes.
  * @param readCron Identity-private lookup against the resulting cron snapshot.
@@ -112,10 +129,18 @@ export async function readCacheHeartbeatTasksWithCronRefresh(
             return { state: "unavailable" as const };
         }
     })();
-    await refreshCron();
+    let cronAvailable = true;
+    try {
+        await refreshCron();
+    } catch {
+        cronAvailable = false;
+    }
     return snapshotRead.state === "unavailable"
         ? { state: "unavailable" }
-        : projectCacheHeartbeatTasks(snapshotRead.snapshot, readCron);
+        : projectCacheHeartbeatTasks(
+              snapshotRead.snapshot,
+              cronAvailable ? readCron : unavailableHeartbeatTaskCron
+          );
 }
 
 /** @returns A bounded task projection using an unavailable cron reader by default. */
