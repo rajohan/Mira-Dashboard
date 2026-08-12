@@ -2,6 +2,14 @@ import { Effect } from "effect";
 import * as v from "valibot";
 
 import {
+    databaseObservabilityCacheKey,
+    databaseObservabilityCacheSchemaId,
+    databaseObservabilityCacheSource,
+    type SqliteMaintenanceExecutionPort,
+    sqliteMaintenanceJobResultSchema,
+} from "../../../contracts/database.ts";
+import type { DatabaseObservabilityCollector } from "../../../contracts/databaseObservabilityCollector.ts";
+import {
     logMaintenanceJobResultSchema,
     type LogMaintenancePolicyId,
     type LogMaintenanceExecutionSummary,
@@ -24,6 +32,7 @@ import {
     type JobActionSuccessfulSettlementHandler,
     JobActionOutcomeUnknownError,
     JobActionRetryableError,
+    databaseObservabilityCacheJobActionKey,
     hostSystemCleanupJobActionDefinition,
     hostSystemCleanupJobActionKey,
     hostSystemCleanupJobResultSchema,
@@ -44,6 +53,7 @@ import {
     openClawSessionsCleanupJobActionDefinition,
     openClawSessionsCleanupJobActionKey,
     openClawSessionsCleanupJobResultSchema,
+    sqliteMaintenanceJobActionKey,
     validateJobActionRegistration,
     workspaceFileReplaceJobActionDefinition,
     workspaceFileReplaceJobActionKey,
@@ -73,6 +83,9 @@ const emptyPayloadSchema = v.strictObject({});
 const systemHostActionPayloadSchema = v.strictObject({ key: v.literal("system.host") });
 const moltbookDashboardActionPayloadSchema = v.strictObject({
     key: v.literal("moltbook.dashboard"),
+});
+const databaseObservabilityActionPayloadSchema = v.strictObject({
+    key: v.literal(databaseObservabilityCacheKey),
 });
 const logMaintenanceActionPayloadSchema = v.pipe(
     v.strictObject({
@@ -254,6 +267,56 @@ export function createSystemHostExecutor(
 export interface MoltbookDashboardExecutorDependencies {
     readonly collector: MoltbookDashboardCollector;
     readonly monotonicNowMs?: () => number;
+}
+
+export interface DatabaseObservabilityExecutorDependencies {
+    readonly collector: DatabaseObservabilityCollector;
+    readonly monotonicNowMs?: () => number;
+}
+
+/**
+ * Adapts the fixed worker-only SQLite maintenance process to one durable action.
+ * @returns A path-free durable SQLite maintenance executor.
+ */
+export function createSqliteMaintenanceJobExecutor(
+    maintenance: SqliteMaintenanceExecutionPort
+): JobActionExecutor {
+    return (_context, payload) =>
+        Effect.tryPromise({
+            catch: () => new Error("SQLite maintenance action failed"),
+            try: async (signal) => {
+                v.parse(emptyPayloadSchema, payload);
+                return v.parse(
+                    sqliteMaintenanceJobResultSchema,
+                    await maintenance.run(signal)
+                );
+            },
+        });
+}
+
+/**
+ * Creates the worker-only domain cache refresh backed by direct database protocol I/O.
+ * @param dependencies Bounded collector and optional monotonic test clock.
+ * @returns Claim-fenced cache job executor with no generic manual exposure.
+ */
+export function createDatabaseObservabilityExecutor(
+    dependencies: DatabaseObservabilityExecutorDependencies
+): JobActionExecutor {
+    const monotonicNowMs = dependencies.monotonicNowMs ?? (() => performance.now());
+    return createCacheRefreshExecutor({
+        collect: (signal) => dependencies.collector.collect(signal),
+        failureCode: "provider/database-observability-unavailable",
+        failureMessage: "Database observability projection could not be collected.",
+        key: databaseObservabilityCacheKey,
+        metadata: { kind: "database-observability" },
+        monotonicNowMs,
+        schemaId: databaseObservabilityCacheSchemaId,
+        source: databaseObservabilityCacheSource,
+        ttlMs: 90 * 60_000,
+        validatePayload: (payload) => {
+            v.parse(databaseObservabilityActionPayloadSchema, payload);
+        },
+    });
 }
 
 /**
@@ -503,18 +566,33 @@ export function createJobWorkerActionRegistry(
  */
 export interface JobWorkerActionResolverDependencies {
     readonly actionDefinitions?: readonly JobExecutableActionDefinition[];
+    readonly databaseObservability?: DatabaseObservabilityCollector;
     readonly logMaintenance: LogMaintenanceExecutionPort;
     readonly hostOperations?: FixedHostOperationsExecutionPort;
     readonly moltbook: MoltbookDashboardCollector;
     readonly openClawGateway?: OpenClawGatewayLifecycleExecutionPort;
     readonly openClawServiceActions?: OpenClawServiceActionsExecutionPort;
+    readonly sqliteMaintenance?: SqliteMaintenanceExecutionPort;
     readonly workspaceFiles?: WorkspaceFileWriteExecutionPort;
 }
 
 export function createJobWorkerActionResolver(
     dependencies: JobWorkerActionResolverDependencies
 ): JobWorkerActionResolver {
+    const databaseObservability =
+        dependencies.databaseObservability ??
+        Object.freeze({
+            collect: () =>
+                Promise.reject(
+                    new Error("Database observability collector is unavailable")
+                ),
+        });
     const workspaceFiles = dependencies.workspaceFiles;
+    const sqliteMaintenance =
+        dependencies.sqliteMaintenance ??
+        Object.freeze({
+            run: () => Promise.reject(new Error("SQLite maintenance is unavailable")),
+        });
     const definitions =
         dependencies.actionDefinitions ??
         Object.freeze([
@@ -560,6 +638,16 @@ export function createJobWorkerActionResolver(
             execute: createMoltbookDashboardExecutor({
                 collector: dependencies.moltbook,
             }),
+        }),
+        Object.freeze({
+            actionKey: databaseObservabilityCacheJobActionKey,
+            execute: createDatabaseObservabilityExecutor({
+                collector: databaseObservability,
+            }),
+        }),
+        Object.freeze({
+            actionKey: sqliteMaintenanceJobActionKey,
+            execute: createSqliteMaintenanceJobExecutor(sqliteMaintenance),
         }),
         Object.freeze({
             actionKey: logMaintenanceJobActionKey,

@@ -1,0 +1,84 @@
+{
+    "formatVersion": 2,
+    "observerRole": "mira_dashboard_observer",
+    "viewOwnerRole": "mira_dashboard_observability_owner",
+    "postgresql": {
+        "builtinRoles": ["pg_monitor", "pg_read_all_stats"],
+        "reviewedDatabases": [
+            "aiomanager",
+            "aiometadata",
+            "aiostreams",
+            "authelia",
+            "bitmagnet",
+            "comet",
+            "crowdsec",
+            "metabase",
+            "postgres",
+            "speedtest_tracker"
+        ],
+        "sessionDefaults": {
+            "default_transaction_read_only": "on",
+            "statement_timeout": "5s"
+        },
+        "statementStatistics": {
+            "database": "postgres",
+            "extension": "pg_stat_statements",
+            "relations": ["public.pg_stat_statements", "public.pg_stat_statements_info"],
+            "schema": "public",
+            "version": "1.12"
+        }
+    },
+    "pgBouncer": {
+        "adminUserForbidden": "mira_dashboard_observer",
+        "statsUserRequired": "mira_dashboard_observer",
+        "virtualDatabase": "pgbouncer"
+    },
+    "torrentViews": [
+        {
+            "database": "bitmagnet",
+            "source": "public.torrents",
+            "target": "mira_dashboard_observability.torrent_count"
+        },
+        {
+            "database": "comet",
+            "source": "public.torrents",
+            "target": "mira_dashboard_observability.torrent_count"
+        }
+    ],
+    "applyOrder": [
+        "apply-cluster.sql",
+        "interactive-observer-password",
+        "apply-torrent-view.sql@bitmagnet",
+        "apply-torrent-view.sql@comet",
+        "manual-pgbouncer-stats-user"
+    ],
+    "verifyOrder": [
+        "verify-cluster.sql",
+        "verify-database.sql@aiomanager",
+        "verify-database.sql@aiometadata",
+        "verify-database.sql@aiostreams",
+        "verify-database.sql@authelia",
+        "verify-database.sql@bitmagnet",
+        "verify-database.sql@comet",
+        "verify-database.sql@crowdsec",
+        "verify-database.sql@metabase",
+        "verify-database.sql@postgres",
+        "verify-database.sql@speedtest_tracker",
+        "verify-torrent-view.sql@bitmagnet",
+        "verify-torrent-view.sql@comet",
+        "manual-pgbouncer-config-check"
+    ],
+    "activationOrder": [
+        "activate-observer.sql",
+        "manual-observer-pgbouncer-command-check",
+        "enable-worker-credential"
+    ],
+    "rollbackOrder": [
+        "disable-worker-credential",
+        "disable-observer.sql",
+        "rollback-torrent-view.sql@comet",
+        "rollback-torrent-view.sql@bitmagnet",
+        "manual-pgbouncer-stats-user-removal",
+        "rollback-cluster.sql"
+    ]
+}

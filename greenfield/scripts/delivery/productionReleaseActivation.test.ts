@@ -8,7 +8,7 @@ import {
     setDefaultTimeout,
     test,
 } from "bun:test";
-import { lstat, readdir } from "node:fs/promises";
+import { lstat, mkdir, readdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { Effect } from "effect";
@@ -471,6 +471,7 @@ describe("production release activation", () => {
                     baseDependencies
                 )
             );
+            const crashStages: string[] = [];
             for (const scenario of [
                 {
                     boundary: "afterActivationCommit" as const,
@@ -491,8 +492,19 @@ describe("production release activation", () => {
                         scenario.candidate,
                         fixtures.runtime,
                         activationDependencies(services, fixtures.probeRuntime, {
-                            [scenario.boundary]: () => {
+                            [scenario.boundary]: async () => {
                                 hookCalls += 1;
+                                const crashId = Bun.randomUUIDv7();
+                                const crashStage = `.stage-${crashId}`;
+                                crashStages.push(crashStage);
+                                await mkdir(
+                                    path.join(
+                                        paths.stateDirectory,
+                                        "backups",
+                                        crashStage
+                                    ),
+                                    { mode: 0o700 }
+                                );
                                 throw new Error("simulated cleanup interruption");
                             },
                         })
@@ -513,9 +525,75 @@ describe("production release activation", () => {
                 expect(services.events.at(-1)).toBe(
                     `ready:${scenario.expectedReleaseId}`
                 );
+                expect(
+                    await readdir(path.join(paths.stateDirectory, "backups"))
+                ).not.toContain(crashStages.at(-1));
             }
         });
     }, 15_000);
+
+    test("reports committed retention failure and retries it on the same candidate", async () => {
+        const sourceReleases = sourceReleaseFixtures();
+        const { projectRoot, runtimeSource } = await createProjectFixture();
+        const state = await prepareProtectedProductionStatePath(projectRoot);
+        await withDeploymentLease(state.stateDirectory, async (lease) => {
+            const paths = await prepareProductionDeliveryDirectories(state);
+            const fixtures = await publishFixtures(
+                lease,
+                paths,
+                sourceReleases,
+                runtimeSource
+            );
+            const services = new TestServiceController();
+            await Effect.runPromise(
+                activatePublishedProductionRelease(
+                    lease,
+                    paths,
+                    fixtures.first,
+                    fixtures.runtime,
+                    activationDependencies(services, fixtures.probeRuntime)
+                )
+            );
+            const unknownEntry = path.join(
+                paths.stateDirectory,
+                "backups",
+                "unexpected-retention-entry"
+            );
+            const failure = await rejectionError(
+                Effect.runPromise(
+                    activatePublishedProductionRelease(
+                        lease,
+                        paths,
+                        fixtures.second,
+                        fixtures.runtime,
+                        activationDependencies(services, fixtures.probeRuntime, {
+                            afterActivationJournalClear: async () => {
+                                await writeFile(unknownEntry, "fixture", { mode: 0o600 });
+                                throw new Error(
+                                    "simulated interruption after journal clear"
+                                );
+                            },
+                        })
+                    )
+                )
+            );
+            expect(failure.message).toBe("Production release activation failed");
+            const committedState = await loadProductionActivationState(lease, paths);
+            expect(committedState.record?.current.releaseId).toBe(secondReleaseId);
+
+            await unlink(unknownEntry);
+            const retried = await Effect.runPromise(
+                activatePublishedProductionRelease(
+                    lease,
+                    paths,
+                    fixtures.second,
+                    fixtures.runtime,
+                    activationDependencies(services, fixtures.probeRuntime)
+                )
+            );
+            expect(retried.current.releaseId).toBe(secondReleaseId);
+        });
+    });
 
     test("recovers a durable rollback request after candidate activation commit", async () => {
         const sourceReleases = sourceReleaseFixtures();

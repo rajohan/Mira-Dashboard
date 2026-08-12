@@ -31,6 +31,9 @@ const baseRuntimeOptions = {
         startupMode: "validate-only",
         stateDirectory: "/srv/mira-dashboard/state",
     },
+    databaseObservability: Object.freeze({
+        collect: () => Promise.reject(new Error("Unused database collector")),
+    }),
     logMaintenance: Object.freeze({
         run: () => Promise.resolve(undefined),
     }),

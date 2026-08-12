@@ -6,6 +6,7 @@ import type {
     RequestAuthentication,
 } from "../../../contracts/security.ts";
 import type { SystemHealthDiagnostics } from "../../../contracts/system.ts";
+import type { DatabaseRuntimeObservation } from "../../database/runtime/databaseService.ts";
 import type { AgentService } from "../../domains/agents/service.ts";
 import { createTestAgentService } from "../../domains/agents/testSupport/service.ts";
 import type { CacheService } from "../../domains/cache/service.ts";
@@ -73,6 +74,37 @@ const anonymousAuthentication: RequestAuthentication = { kind: "anonymous" };
 export const testSecurityUserId = "019fc968-1a9b-7770-8f1b-d5b863b0e7b4";
 export const testSessionSelector = "a".repeat(32);
 export const testAutomationCredentialId = "019fc968-1a9b-7771-9f1b-d5b863b0e7b4";
+export const testDatabaseRuntimeDiagnostics = Object.freeze({
+    appliedMigrations: 1,
+    connection: Object.freeze({
+        busyTimeoutMs: 0,
+        checksEnforced: true,
+        foreignKeysEnabled: true,
+        journalMode: "wal",
+        synchronousLevel: 2,
+        trustedSchemaEnabled: false,
+        walAutoCheckpointPages: 1000,
+    }),
+    databaseFileName: "mira-dashboard.db",
+    migrationCount: 1,
+    sqlite: Object.freeze({
+        databaseBytes: 8192,
+        freeBytes: 0,
+        freePages: 0,
+        freePercent: 0,
+        pageCount: 2,
+        pageSizeBytes: 4096,
+        permissions: Object.freeze({
+            dataDirectory: "0700",
+            database: "0600",
+            secure: true,
+        }),
+        shmBytes: 0,
+        storageBytes: 8192,
+        walBytes: 0,
+    }),
+    startupMode: "initialize-empty",
+} satisfies DatabaseRuntimeObservation);
 
 const inertStructuredLogSink = Object.freeze({
     write(): undefined {},
@@ -639,6 +671,7 @@ export function withTestDashboardDatabase(
     return Object.freeze({
         ...applicationRuntime,
         database: Object.freeze({
+            diagnostics: () => Promise.resolve(testDatabaseRuntimeDiagnostics),
             orm: () => Promise.resolve(database),
             run: runTestImmediateDatabaseWrite,
         }),

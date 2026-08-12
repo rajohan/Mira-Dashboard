@@ -11,6 +11,7 @@ import { applyVerifiedMigrations } from "../migrations/applyVerifiedMigrations.t
 import { loadVerifiedMigrations } from "../migrations/loadVerifiedMigrations.ts";
 import {
     DatabaseRuntimeLockTimeoutError,
+    DatabaseRuntimePathError,
     DatabaseRuntimeStartupError,
     DatabaseRuntimeWriteAdmissionTimeoutError,
     DatabaseRuntimeWriteContentionError,
@@ -154,7 +155,7 @@ describe("database runtime service", () => {
 
     test("initializes a fresh strict WAL database through one native Drizzle handle", async () => {
         const stateDirectory = await privateTemporaryDirectory();
-        const { service } = await buildRuntime(options(stateDirectory));
+        const { runtime, service } = await buildRuntime(options(stateDirectory));
 
         expect(service.diagnostics).toEqual({
             appliedMigrations: 1,
@@ -192,6 +193,27 @@ describe("database runtime service", () => {
         expect(service.orm.$client.query("PRAGMA trusted_schema").get()).toEqual({
             trusted_schema: 0,
         });
+
+        const observation = await runtime.runPromise(service.observeDiagnostics);
+        expect(observation).toMatchObject({
+            databaseFileName: "mira-dashboard.db",
+            sqlite: {
+                permissions: {
+                    dataDirectory: "0700",
+                    database: "0600",
+                    secure: true,
+                },
+            },
+        });
+        expect(observation.sqlite.databaseBytes).toBeGreaterThan(0);
+        expect(observation.sqlite.freeBytes).toBe(
+            observation.sqlite.freePages * observation.sqlite.pageSizeBytes
+        );
+        expect(observation.sqlite.storageBytes).toBe(
+            observation.sqlite.databaseBytes +
+                observation.sqlite.walBytes +
+                observation.sqlite.shmBytes
+        );
     });
 
     test("validates an already-current database without applying migrations", async () => {
@@ -209,6 +231,21 @@ describe("database runtime service", () => {
                 )
                 .get()
         ).toEqual({ count: 1 });
+    });
+
+    test("fails live storage observation closed after permission drift", async () => {
+        const stateDirectory = await privateTemporaryDirectory();
+        const { runtime, service } = await buildRuntime(options(stateDirectory));
+        const databasePath = service.orm.$client.filename;
+        await chmod(databasePath, 0o644);
+
+        try {
+            expect(
+                await rejectionOf(runtime.runPromise(service.observeDiagnostics))
+            ).toBeInstanceOf(DatabaseRuntimePathError);
+        } finally {
+            await chmod(databasePath, 0o600);
+        }
     });
 
     test("validates an already-current database while another process owns the writer slot", async () => {

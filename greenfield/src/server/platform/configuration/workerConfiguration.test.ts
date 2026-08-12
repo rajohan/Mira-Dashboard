@@ -73,6 +73,48 @@ describe("worker application configuration", () => {
         expect(Object.isFrozen(configuration)).toBe(true);
         expect(Object.isFrozen(configuration.gatewayToken)).toBe(true);
         expect(Object.isFrozen(configuration.moltbookApiKey)).toBe(true);
+        expect(configuration.databaseObservabilityUrl).toBeUndefined();
+    });
+
+    test("accepts only the optional exact loopback monitoring URL and redacts it", () => {
+        const environment = validEnvironment();
+        environment.MIRA_DASHBOARD_DATABASE_OBSERVABILITY_URL =
+            "postgresql://mira_dashboard_observer:private-password@127.0.0.1:6432/postgres";
+        const configuredUrl =
+            environment.MIRA_DASHBOARD_DATABASE_OBSERVABILITY_URL as string;
+        const configuration = parseWorkerConfiguration(environment);
+
+        expect(Redacted.value(configuration.databaseObservabilityUrl!)).toBe(
+            configuredUrl
+        );
+        expect(JSON.stringify(configuration)).not.toContain("private-password");
+        expect(inspect(configuration)).not.toContain("private-password");
+        expect(Object.isFrozen(configuration.databaseObservabilityUrl)).toBe(true);
+        expect(JSON.stringify(configuration.databaseObservabilityUrl)).toBe(
+            '"<redacted:database-observability-url>"'
+        );
+
+        for (const invalid of [
+            "postgresql://monitor:password@localhost:6432/postgres",
+            "postgresql://monitor:password@127.0.0.1:5432/postgres",
+            "postgresql://monitor:password@127.0.0.1:6432/other",
+            "postgresql://monitor:password@127.0.0.1:6432/postgres?sslmode=disable",
+            "postgresql://monitor@127.0.0.1:6432/postgres",
+            "postgres://monitor:password@127.0.0.1:6432/postgres",
+            "POSTGRESQL://monitor:password@127.0.0.1:6432/postgres",
+            "postgresql://monitor%40role:password@127.0.0.1:6432/postgres",
+            "postgresql://monitor:pass%2Fword@127.0.0.1:6432/postgres",
+            "postgresql://monitor:%20password@127.0.0.1:6432/postgres",
+            "postgresql://monitor:password@127.0.0.1:6432/postgres/",
+            `postgresql://monitor:${"x".repeat(4096)}@127.0.0.1:6432/postgres`,
+        ]) {
+            const candidate = validEnvironment();
+            candidate.MIRA_DASHBOARD_DATABASE_OBSERVABILITY_URL = invalid;
+            expect(configurationFailure(candidate)).toMatchObject({
+                field: "MIRA_DASHBOARD_DATABASE_OBSERVABILITY_URL",
+                reason: "invalid",
+            });
+        }
     });
 
     test("observes only the worker registry projection", () => {
@@ -119,6 +161,11 @@ describe("worker application configuration", () => {
         for (const [field, value, reason] of [
             ["OPENCLAW_GATEWAY_TOKEN", ` ${secret}`, "invalid"],
             ["MOLTBOOK_API_KEY", ` ${secret}`, "invalid"],
+            [
+                "MIRA_DASHBOARD_DATABASE_OBSERVABILITY_URL",
+                `postgresql://monitor:${secret}@127.0.0.1:6432/other`,
+                "invalid",
+            ],
             ["OPENCLAW_GATEWAY_URL", `ws://${secret}.example`, "invalid"],
         ] as const) {
             const environment = validEnvironment();

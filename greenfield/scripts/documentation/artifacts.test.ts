@@ -54,6 +54,9 @@ describe("generated contract documentation", () => {
             "| `ELEVENLABS_API_KEY` | `elevenLabsApiKey` | `opaque-secret`; values withheld | When present, a trimmed nonblank control-safe secret at most 4096 code units; never persisted, logged, or browser-exposed. | Optional; no default | `web` | Yes | None |"
         );
         expect(configurationDocumentation).toContain(
+            "| `MIRA_DASHBOARD_DATABASE_OBSERVABILITY_URL` | `databaseObservabilityUrl` | `postgresql-url`; values withheld | Canonical postgresql URL for exact 127.0.0.1:6432/postgres with explicit user and password, no query or fragment, at most 4096 code units; never persisted, logged, or browser-exposed. | Optional; no default | `worker` | Yes | None |"
+        );
+        expect(configurationDocumentation).toContain(
             "| `MOLTBOOK_API_KEY` | `moltbookApiKey` | `opaque-secret`; values withheld | Trimmed nonblank control-safe secret at most 4096 code units; never persisted, logged, or browser-exposed. | Required; value withheld | `worker` | Yes | None |"
         );
         const procedureDocumentation = first.get("procedures.md");

@@ -1,9 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import { chmod, mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 
 import { addMilliseconds, secondsToMilliseconds } from "date-fns";
 import { maxTime } from "date-fns/constants";
 import { Effect, Layer, Logger, Stream } from "effect";
 
+import { migrationsDirectory } from "../../test/support/freshDatabase.ts";
 import {
     captureFailure,
     rejectOnAbort,
@@ -22,6 +26,7 @@ import {
     ApplicationListenerStopError,
     ApplicationListenerStopTimeoutError,
     createApplicationRuntime,
+    createDashboardApplicationRuntime,
 } from "./applicationRuntime.ts";
 
 const delivery: RealtimeEventDelivery = {
@@ -57,6 +62,69 @@ function createInertApplicationRuntime() {
 }
 
 describe("application Effect runtime", () => {
+    test("retains sanitized database diagnostics behind the composition accessor", async () => {
+        const stateDirectory = await mkdtemp(
+            path.join(os.tmpdir(), "dashboard-diagnostics-runtime-")
+        );
+        await chmod(stateDirectory, 0o700);
+        const runtime = createDashboardApplicationRuntime({
+            database: {
+                migrationsDirectory,
+                releaseId: "0".repeat(40),
+                startupMode: "initialize-empty",
+                stateDirectory,
+            },
+            logger: testStructuredLogger,
+        });
+
+        try {
+            await runtime.initialize();
+            const first = await runtime.database.diagnostics();
+            const second = await runtime.database.diagnostics();
+
+            expect(first).toMatchObject({
+                appliedMigrations: first.migrationCount,
+                connection: {
+                    busyTimeoutMs: 0,
+                    checksEnforced: true,
+                    foreignKeysEnabled: true,
+                    journalMode: "wal",
+                    synchronousLevel: 2,
+                    trustedSchemaEnabled: false,
+                    walAutoCheckpointPages: 1000,
+                },
+                databaseFileName: "mira-dashboard.db",
+                migrationCount: first.migrationCount,
+                sqlite: {
+                    permissions: {
+                        dataDirectory: "0700",
+                        database: "0600",
+                        secure: true,
+                    },
+                },
+                startupMode: "initialize-empty",
+            });
+            expect(first.sqlite.databaseBytes).toBeGreaterThan(0);
+            expect(first.sqlite.pageCount).toBeGreaterThan(0);
+            expect(first.sqlite.pageSizeBytes).toBeGreaterThanOrEqual(512);
+            expect(first.sqlite.freePages).toBeLessThanOrEqual(first.sqlite.pageCount);
+            expect(first.sqlite.freeBytes).toBe(
+                first.sqlite.freePages * first.sqlite.pageSizeBytes
+            );
+            expect(first.sqlite.storageBytes).toBe(
+                first.sqlite.databaseBytes + first.sqlite.walBytes + first.sqlite.shmBytes
+            );
+            expect(second.sqlite.permissions).toEqual(first.sqlite.permissions);
+            expect(JSON.stringify(first)).not.toContain(stateDirectory);
+        } finally {
+            try {
+                await runtime.dispose();
+            } finally {
+                await rm(stateDirectory, { force: true, recursive: true });
+            }
+        }
+    });
+
     test("installs the supplied structured logger without the default Effect logger", async () => {
         const lines: string[] = [];
         const logger = createStructuredLogger({

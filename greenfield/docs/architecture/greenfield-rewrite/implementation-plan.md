@@ -116,6 +116,22 @@ including restart during streaming.
   principal. Separately approved provisioning must bind only that principal, exclude the web
   principal, validate immutable artifacts, and preserve explicit rollback; a shared-user/group
   grant is forbidden.
+- implement `database.overview` and `/database` as one read-only vertical: compose live
+  Dashboard-SQLite lifecycle facts with a worker-owned, bounded last-known-good
+  PostgreSQL/PgBouncer projection; preserve the source picker, maintenance assessment, responsive
+  tables, freshness, and failure states without exposing SQL, paths, credentials, or mutations.
+  Provision a dedicated statistics-only PostgreSQL/PgBouncer principal plus exact count-only
+  `mira_dashboard_observability.torrent_count` views in Comet and Bitmagnet; no broad application
+  table read is permitted. Treat legacy raw query text/copy as a reviewed security narrowing while
+  retaining ranked aggregate performance metrics.
+  Compose only canonical scheduled and activation/cutover SQLite snapshots. Treat one immutable
+  activation snapshot as the reviewed secure consolidation of the legacy pre-deploy and
+  pre-migration recovery purposes; never synthesize unsupported provenance. Retain at most
+  fourteen scheduled snapshots and at most five cutover snapshots/two days of unreferenced
+   cutover age, protecting current, previous, and active-journal identities through descriptor-
+   pinned atomic-retire cleanup.
+   Keep the six Kopia/WAL-G status/control rows and database backup/restore in their separate
+   privileged slices.
 
 **Exit gate:** capability, step-up, audit, cancellation, resource-limit, and failure-recovery
 tests pass for every privileged operation.

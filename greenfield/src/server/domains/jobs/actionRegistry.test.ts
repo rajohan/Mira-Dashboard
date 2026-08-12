@@ -36,6 +36,33 @@ describe("durable job action registry", () => {
             manualExposure: "cache-write",
             scheduleId: "cache.system-host",
         });
+        expect(
+            findJobActionDefinition("cache.refresh.database-observability")
+        ).toMatchObject({
+            actionPayload: { key: "database.observability" },
+            defaultEnabled: true,
+            defaultSchedule: { intervalMs: 3_600_000, kind: "interval" },
+            manualExposure: "none",
+            scheduleId: "cache.database-observability",
+            timeoutMs: 65_000,
+        });
+        expect(findJobActionDefinition("database.sqlite-maintenance")).toMatchObject({
+            actionPayload: {},
+            attemptLimit: 1,
+            cancellationPolicy: "never",
+            defaultEnabled: true,
+            defaultSchedule: {
+                kind: "daily",
+                timeOfDay: "02:40",
+                timeZone: "Europe/Oslo",
+            },
+            initialDue: "next-occurrence",
+            manualExposure: "none",
+            resourceClass: "host-heavy",
+            resourceKeys: ["database"],
+            retrySafe: false,
+            scheduleId: "database.sqlite-maintenance",
+        });
         expect(findJobActionDefinition("maintenance.rotate-logs")).toMatchObject({
             actionPayload: { policyId: "docker-managed" },
             attemptLimit: 1,

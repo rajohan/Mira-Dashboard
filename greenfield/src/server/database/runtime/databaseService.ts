@@ -14,6 +14,7 @@ import {
     assertDatabasePathStillValid,
     dashboardDatabaseFileName,
     prepareDatabasePath,
+    readDatabasePathDiagnostics,
     type PreparedDatabasePath,
 } from "./databasePath.ts";
 import {
@@ -54,12 +55,41 @@ export interface DatabaseRuntimeDiagnostics extends DatabaseStartupDiagnostics {
     readonly databaseFileName: typeof dashboardDatabaseFileName;
 }
 
+/** Live, path-free SQLite storage diagnostics read from the retained runtime. */
+export interface DatabaseRuntimeSqliteDiagnostics {
+    readonly databaseBytes: number;
+    readonly freeBytes: number;
+    readonly freePages: number;
+    readonly freePercent: number;
+    readonly pageCount: number;
+    readonly pageSizeBytes: number;
+    readonly permissions: {
+        readonly dataDirectory: string;
+        readonly database: string;
+        readonly secure: true;
+        readonly shm?: string;
+        readonly wal?: string;
+    };
+    readonly shmBytes: number;
+    readonly storageBytes: number;
+    readonly walBytes: number;
+}
+
+/** Startup policy plus one live, sanitized SQLite storage observation. */
+export interface DatabaseRuntimeObservation extends DatabaseRuntimeDiagnostics {
+    readonly sqlite: DatabaseRuntimeSqliteDiagnostics;
+}
+
 interface DatabaseRuntimeServiceShape {
     readonly checkpointPassive: Effect.Effect<
         DatabaseCheckpointDiagnostics,
         DatabaseRuntimeCheckpointError
     >;
     readonly diagnostics: DatabaseRuntimeDiagnostics;
+    readonly observeDiagnostics: Effect.Effect<
+        DatabaseRuntimeObservation,
+        DatabaseRuntimePathError | DatabaseRuntimeStartupError
+    >;
     readonly orm: RuntimeOwnedDatabase;
     readonly runImmediateWrite: <A>(
         operation: (markTransactionStarted: () => void) => A
@@ -199,6 +229,110 @@ function releaseCandidateDatabase(
     });
 }
 
+const sqliteObservationPragmas = Object.freeze([
+    "freelist_count",
+    "page_count",
+    "page_size",
+] as const);
+
+type SqliteObservationPragma = (typeof sqliteObservationPragmas)[number];
+
+function readSqlitePragmaInteger(
+    database: Database,
+    pragma: SqliteObservationPragma
+): number {
+    const row: unknown = database.query(`PRAGMA ${pragma}`).get();
+    if (typeof row !== "object" || row === null || Array.isArray(row)) {
+        throw new TypeError("SQLite observation row is invalid");
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(row, pragma);
+    const value: unknown =
+        descriptor !== undefined && "value" in descriptor
+            ? (descriptor.value as unknown)
+            : undefined;
+    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+        throw new TypeError("SQLite observation value is invalid");
+    }
+    return value;
+}
+
+function safeIntegerProduct(left: number, right: number): number {
+    const value = left * right;
+    if (!Number.isSafeInteger(value) || value < 0) {
+        throw new RangeError("SQLite observation size is outside its budget");
+    }
+    return value;
+}
+
+function safeIntegerSum(values: readonly number[]): number {
+    const value = values.reduce((total, current) => total + current, 0);
+    if (!Number.isSafeInteger(value) || value < 0) {
+        throw new RangeError("SQLite observation size is outside its budget");
+    }
+    return value;
+}
+
+function observeDatabaseRuntime(
+    database: Database,
+    prepared: PreparedDatabasePath,
+    diagnostics: DatabaseRuntimeDiagnostics
+): Effect.Effect<
+    DatabaseRuntimeObservation,
+    DatabaseRuntimePathError | DatabaseRuntimeStartupError
+> {
+    return Effect.tryPromise({
+        catch: (error) =>
+            error instanceof DatabaseRuntimePathError
+                ? error
+                : new DatabaseRuntimeStartupError({
+                      message: "Database observability validation failed",
+                      reason: "database-startup-failed",
+                  }),
+        try: async () => {
+            const files = await readDatabasePathDiagnostics(prepared);
+            const freePages = readSqlitePragmaInteger(database, "freelist_count");
+            const pageCount = readSqlitePragmaInteger(database, "page_count");
+            const pageSizeBytes = readSqlitePragmaInteger(database, "page_size");
+            if (
+                freePages > pageCount ||
+                pageSizeBytes < 512 ||
+                pageSizeBytes > 65_536 ||
+                !Number.isInteger(Math.log2(pageSizeBytes))
+            ) {
+                throw new RangeError("SQLite page observation is invalid");
+            }
+            const freeBytes = safeIntegerProduct(freePages, pageSizeBytes);
+            const storageBytes = safeIntegerSum([
+                files.databaseBytes,
+                files.walBytes,
+                files.shmBytes,
+            ]);
+            const freePercent = pageCount === 0 ? 0 : (freePages / pageCount) * 100;
+            if (!Number.isFinite(freePercent) || freePercent < 0 || freePercent > 100) {
+                throw new RangeError("SQLite free-space observation is invalid");
+            }
+            // Revalidate fixed identities after both the filesystem and PRAGMA reads.
+            await assertDatabasePathStillValid(prepared);
+
+            return Object.freeze({
+                ...diagnostics,
+                sqlite: Object.freeze({
+                    databaseBytes: files.databaseBytes,
+                    freeBytes,
+                    freePages,
+                    freePercent,
+                    pageCount,
+                    pageSizeBytes,
+                    permissions: files.permissions,
+                    shmBytes: files.shmBytes,
+                    storageBytes,
+                    walBytes: files.walBytes,
+                }),
+            });
+        },
+    });
+}
+
 function acquireDatabaseRuntime(unverifiedOptions: DatabaseRuntimeLayerOptions) {
     return Effect.gen(function* () {
         const options = yield* Effect.try({
@@ -233,6 +367,7 @@ function acquireDatabaseRuntime(unverifiedOptions: DatabaseRuntimeLayerOptions) 
         const service = Object.freeze({
             checkpointPassive: checkpointDatabasePassive(database),
             diagnostics,
+            observeDiagnostics: observeDatabaseRuntime(database, prepared, diagnostics),
             orm,
             runImmediateWrite: retryDatabaseWriteOperation,
         });

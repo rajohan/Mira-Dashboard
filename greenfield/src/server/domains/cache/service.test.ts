@@ -55,6 +55,41 @@ function readOnlyCacheRepository(entry: CacheEntryRecord): CacheRepository {
 }
 
 describe("cache service", () => {
+    test("does not expose a domain-only database payload through generic cache reads", async () => {
+        const databaseRecord: CacheEntryRecord = {
+            ...record,
+            key: "database.observability",
+            schemaId: "database.observability.v1",
+            source: "postgresql.pgbouncer",
+        };
+        const cacheRepository = readOnlyCacheRepository(databaseRecord);
+        const service = createCacheService({
+            cacheRepository: {
+                ...cacheRepository,
+                findEntry: () => {
+                    throw new Error("Domain-only payload repository was read");
+                },
+            },
+            jobRepository: Object.freeze({}) as never,
+            nowMs: () => 4500,
+        });
+
+        expect(
+            Effect.runPromise(service.getEntry({ key: "database.observability" }))
+        ).rejects.toBeInstanceOf(CacheNotFoundError);
+        expect(
+            Effect.runPromise(service.getEntry({ key: "retired.provider" }))
+        ).rejects.toBeInstanceOf(CacheNotFoundError);
+        expect(await Effect.runPromise(service.getStatus())).toMatchObject({
+            entries: [
+                {
+                    key: "database.observability",
+                    manualRunAvailable: false,
+                },
+            ],
+        });
+    });
+
     test("derives freshness independently from a failed latest attempt", async () => {
         let currentTime = 4500;
         const service = createCacheService({

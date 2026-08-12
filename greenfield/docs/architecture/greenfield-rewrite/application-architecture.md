@@ -958,7 +958,7 @@ the following behavior is covered by automated tests and a manual parity checkli
 | `/delivery`   | PR review queues, trusted PR development, previews, release records, deploy/rollback actions, progress, blocking reasons, and retention.                                                                                                                      |
 | `/files`      | Safe workspace browsing, edit/save, upload/download/preview, Markdown/code rendering, path policy, and conflict/error handling.                                                                                                                               |
 | `/docker`     | Inventory, independently refreshed live stats, managed update policy, checks/actions, history, console commands, and duplicate-submit prevention.                                                                                                             |
-| `/database`   | PostgreSQL/PgBouncer and Dashboard SQLite views, source picker, metrics, maintenance assessment/actions, cached fallback, and balanced layout.                                                                                                                |
+| `/database`   | PostgreSQL/PgBouncer and Dashboard SQLite views, source picker, bounded metrics, maintenance assessment, cached fallback, and balanced layout. Privileged backup, restore, and maintenance actions remain owned by their purpose-built domains.                |
 | `/moltbook`   | Cached/API data, refresh behavior, status and error presentation, and existing actions.                                                                                                                                                                       |
 | `/settings`   | Persistent OpenClaw/Dashboard tab, OpenClaw configuration, password, WebAuthn/passkeys, TOTP, recovery codes, browser sessions, secret handling, and restart actions.                                                                                         |
 | `/terminal`   | Real PTY input/output, ANSI/UTF-8, resize, signals, bounded reconnect replay, cancellation, backpressure, and narrow-screen interaction. The selected workspace root is a starting location, not a filesystem sandbox.                                        |
@@ -968,3 +968,29 @@ the following behavior is covered by automated tests and a manual parity checkli
 The existing API endpoint list is an input to the parity inventory, not a contract to preserve.
 Each old endpoint must map to a new procedure, a raw protocol route, or an explicit removal
 reason showing that no current frontend or automation behavior depends on it.
+
+The Database vertical is one read-only slice rather than an implicit backup or Docker
+control plane. `database.overview` will expose a session-only, bounded projection: live
+Dashboard-owned SQLite lifecycle facts from the retained database runtime plus a worker-owned
+last-known-good PostgreSQL/PgBouncer snapshot. `/database` will preserve the reviewed source
+picker, responsive summary/table layout, explicit unavailable/stale states, and non-blocking
+refresh warnings. It must not expose credentials, host paths, raw provider failures, arbitrary
+SQL, or mutation authority. The six Kopia/WAL-G status/control rows and all database
+backup/restore operations remain separately planned. Neither the procedure nor `/database` is
+recorded as implemented until the contract, provider, production composition, browser route, and
+acceptance tests exist together. Its SQLite inventory recognizes only two canonical greenfield
+provenances: scheduled maintenance snapshots below `backups/sqlite-maintenance/` and activation
+snapshots below `backups/<transitionId>` classified as `cutover`. The activation snapshot securely
+consolidates the recovery purpose of legacy pre-deploy and pre-migration copies; those legacy
+artifact kinds are not imported or fabricated. Each row reports whether it is only immutable-
+manifest verified or was also opened and migration-checked through an isolated restore copy.
+The scheduled namespace retains at most fourteen published snapshots. Activation owns cutover
+retention under the deployment lease: at most five snapshots and two days of unreferenced age,
+while current, previous, and in-flight journal transition identities are always preserved.
+Deletion first atomically renames the selected immutable directory to an owned `.retire-*` name,
+fsyncs the parent, and then uses descriptor-pinned, resumable exact-file reaping.
+
+The external provider uses a dedicated statistics-only PostgreSQL/PgBouncer principal and two
+fixed count-only views for the Comet and Bitmagnet cards. The page preserves query-performance
+triage as snapshot-local ranked aggregates; legacy raw query text and copy are deliberately not
+carried forward because identifiers, comments, or utility text can disclose database contents.

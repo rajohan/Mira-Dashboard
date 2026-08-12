@@ -17,6 +17,7 @@ import type {
 import {
     databaseRuntimeLayer,
     DatabaseRuntimeService,
+    type DatabaseRuntimeObservation,
     type DatabaseRuntimeLayerOptions,
     type RuntimeOwnedDatabase,
 } from "../../database/runtime/databaseService.ts";
@@ -114,6 +115,7 @@ export interface ApplicationRuntime {
 
 /** Runtime-owned database access exposed only to the Dashboard composition root. */
 export interface DashboardDatabaseRuntimeService extends ImmediateDatabaseWriteAdmission {
+    readonly diagnostics: () => Promise<DatabaseRuntimeObservation>;
     readonly orm: () => Promise<SQLiteBunDatabase>;
 }
 
@@ -505,6 +507,12 @@ export function createDashboardApplicationRuntime(
         options.logger
     );
     const database: DashboardDatabaseRuntimeService = Object.freeze({
+        diagnostics: () =>
+            databaseRuntime.runPromise(
+                DatabaseRuntimeService.pipe(
+                    Effect.flatMap((service) => service.observeDiagnostics)
+                )
+            ),
         orm: () =>
             databaseRuntime.runPromise(
                 DatabaseRuntimeService.pipe(Effect.map((service) => service.orm))

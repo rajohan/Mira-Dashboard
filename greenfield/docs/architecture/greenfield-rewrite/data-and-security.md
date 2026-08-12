@@ -122,6 +122,43 @@ Moltbook remain external systems. Dashboard persists only configuration, bounded
 audit/history, job state, or recovery state that it owns. It does not mirror entire external
 databases.
 
+Database observability follows that rule. The web process may read Dashboard SQLite only through
+the retained runtime's narrow read port; it does not open another native handle or accept SQL from
+the browser. External PostgreSQL/PgBouncer collection is worker-owned and uses fixed reviewed
+queries under a deadline, row budget, payload budget, and exact resource key. Only a validated
+last-known-good projection crosses into Dashboard SQLite. Public rows omit connection strings,
+credentials, host/container paths, raw errors, provider output, and query literals; transient
+collection failure is represented as stale or unavailable instead of an empty healthy snapshot.
+Dashboard SQLite backup inventory is descriptor-anchored and bounded across exactly the scheduled
+maintenance and activation/cutover namespaces. It never infers legacy provenance from a filename:
+the single immutable activation/cutover snapshot subsumes the former pre-deploy and pre-migration
+recovery purposes. Scheduled snapshots receive a separate temporary-copy `quick_check` and
+migration verification before publication; cutover snapshots honestly remain manifest-verified
+until an equivalent restore-copy verification exists.
+Scheduled retention is capped at fourteen. Cutover retention is enforced on every committed,
+recovered, and same-candidate activation success: no more than five snapshots and no unreferenced
+snapshot older than two days, while current/previous activation and active journal references are
+protected. Both namespaces use an atomic parent-descriptor `.retire-*` handoff followed by a
+bounded resumable reaper; published immutable directories are never chmoded or unlinked in place.
+Production collection requires a dedicated login monitoring principal rather than an application
+or superuser credential. PostgreSQL grants are limited to `pg_monitor`/`pg_read_all_stats`,
+`CONNECT` on the reviewed databases, read-only transactions, and a fixed statement timeout;
+PgBouncer grants only `stats_users`, never `admin_users`. The `comet` and `bitmagnet` count cards
+read one exact row from `mira_dashboard_observability.torrent_count`. Each database uses a
+non-login view owner; `PUBLIC` receives no schema, view, or base-table authority, while the
+monitoring principal receives only `USAGE` on that schema and `SELECT` on that view. It receives
+no direct `SELECT` on the torrent base tables. Until these grants and views are provisioned and
+verified, the affected source or count card remains explicitly unavailable.
+
+Legacy query text and its browser copy action are a reviewed security narrowing. Even
+`pg_stat_statements` text can retain identifiers, comments, or utility-statement data that should
+not cross the browser, audit, logging, or durable-cache boundaries. The replacement preserves
+ranked calls, rows, execution time, and block metrics for performance triage, but exposes no query
+literal or stable reversible query identity.
+The session-only `database.overview` query grants no backup, restore, compaction, vacuum, or
+maintenance authority. The six Kopia/WAL-G status/control inventory rows and later database
+backup/restore workflows remain separate capability, worker, audit, and recovery boundaries.
+
 ### Task and agent ownership
 
 The reviewed agent directory is application configuration rather than database or Gateway
@@ -266,11 +303,11 @@ match the reviewed schema, immutable checksum ledger, strictly increasing non-fu
 times, connection policy, and integrity checks. Unknown history fails closed. A reviewed pending
 prefix raises `DatabaseRuntimeSnapshotRequiredError`; it is not migrated in place.
 
-Post-cutover delivery must add the missing snapshot/promotion protocol before enabling forward
-migrations: quiesce writers, acquire the deployment lease, create and verify a WAL-safe snapshot,
-apply to a copy, and atomically promote the matching release/database pair. The future web and
-worker executable roots may start concurrently, but only one may own that protocol while the other
-waits with a bounded deadline and validates the final schema. Neither process may contain
+Post-cutover delivery uses the implemented snapshot/promotion protocol for forward migrations:
+quiesce writers, acquire the deployment lease, create and verify a WAL-safe snapshot, apply to a
+copy, and atomically promote the matching release/database pair. Web and worker executable roots
+may start concurrently, but only activation owns that protocol while the other process waits with
+a bounded deadline and validates the final schema. Neither process may contain
 table/column existence fallbacks.
 
 Retention remains explicit per append-only table. The later maintenance job removes bounded

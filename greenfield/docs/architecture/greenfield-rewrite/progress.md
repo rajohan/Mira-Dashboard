@@ -1601,3 +1601,35 @@ full-browser parity, production rehearsal, cutover, and legacy deletion remain o
   157 legacy endpoints. Browser routes remain **12 implemented and four planned**. This advances
   Phase 5 without claiming complete exec, host-operation, Docker/database/delivery parity, or the
   aggregate Phase 5 exit gate.
+
+### 2026-08-12 — Database observability parity boundary reviewed
+
+- Legacy evidence identifies one read-only `GET /api/database/overview` consumer and the stable
+  session route `/database`. The reviewed replacement is `database.overview`: live bounded
+  Dashboard-SQLite lifecycle facts composed with a worker-owned last-known-good
+  PostgreSQL/PgBouncer projection. The page retains the source picker, responsive summaries and
+  tables, maintenance assessment, freshness, stale-data warning, and explicit unavailable state.
+- This review does not grant arbitrary SQL, Docker/exec, backup, restore, vacuum, or maintenance
+  authority. Credentials, connection strings, host/container paths, provider output, raw errors,
+  and query literals do not cross the contract. The six Kopia/WAL-G status/control rows and later
+  database backup/restore remain separate planned privileged work.
+- Delivery must provision a dedicated statistics-only PostgreSQL/PgBouncer principal and exact
+  one-row `mira_dashboard_observability.torrent_count` views in Comet and Bitmagnet. The principal
+  receives no direct torrent-table access. Legacy raw query text/copy is a reviewed security
+  narrowing; ranked aggregate statement metrics remain available without literals or reversible
+  query identity.
+- Bookkeeping deliberately remains **112 implemented, 42 planned, and three reviewed removals**;
+  browser routes remain **12 implemented and four planned**. `database.overview` and `/database`
+  stay planned until the contract, worker provider, database-runtime read port, production
+  composition, browser route, and acceptance evidence land together.
+- SQLite lifecycle evidence now composes the bounded scheduled-maintenance namespace with the
+  immutable activation/cutover namespace. Only `scheduled` and `cutover` are canonical kinds.
+  The activation snapshot securely consolidates the recovery purpose of legacy pre-deploy and
+  pre-migration copies; no old artifact kind is claimed or imported. Scheduled publication now
+  requires a separate temporary restore copy to pass `quick_check` and verified migrations, and
+  the exclusive job reconciles bounded crash-left stage/verification/retire directories before
+  work. Scheduled retention is capped at fourteen. Every committed/recovered/same-candidate
+  activation enforces cutover retention at five snapshots and two days of unreferenced age while
+  preserving current, previous, and active-journal transition IDs. Both namespaces atomically
+  rename selected artifacts to `.retire-*`, fsync the parent, and resume descriptor-pinned exact-
+  file reaping after interruption; published immutable snapshots are never mutated in place.

@@ -303,6 +303,39 @@ Minimum operational signals include:
 The Dashboard displays the last known good operational data with a freshness marker when a
 refresh fails. It never converts a dependency outage into an empty healthy-looking screen.
 
+The planned Database page applies this operational model without adding a privileged request
+path. One worker refresh produces the bounded PostgreSQL/PgBouncer snapshot and persists it through
+the existing claim-fenced cache protocol; refresh work is not repeated per browser request.
+Dashboard SQLite lifecycle facts come from the already-retained process database runtime and are
+joined with that cached external projection by `database.overview`. Collection is sequential or
+low-concurrency, abortable, deadline-bound, and constrained by a database-specific 128 KiB payload
+limit beneath the generic 256 KiB cache ceiling, plus contract row limits. Missing or failed external data remains explicitly unavailable
+or last-known-good. The `/database` route is lazy and session-gated, retains validated data during
+background failure, and offers no mutation controls. Backup/restore and Kopia/WAL-G operations are
+not enabled by this observability composition. The read-only SQLite inventory composes scheduled
+and activation/cutover snapshots only. The activation snapshot is the reviewed greenfield
+consolidation of legacy pre-deploy and pre-migration recovery purposes, not an import of those old
+artifact kinds. A scheduled snapshot is not published until a separate temporary copy passes
+SQLite integrity and migration checks; crash-left staging/verification directories are reconciled
+under the exclusive maintenance job. Fourteen scheduled snapshots are retained. The deployment
+lease enforces cutover retention on every committed/recovered/same-candidate success: at most five
+snapshots, at most two days for unreferenced snapshots, and unconditional preservation of current,
+previous, and active-journal identities. Both namespaces use parent-descriptor atomic `.retire-*`
+rename plus fsync before bounded resumable exact-file reaping, so a crash never requires mutating
+or recursively deleting a published immutable snapshot in place.
+
+Database-observability provisioning is a separate fail-closed delivery step. It creates one
+dedicated monitoring login, assigns only the reviewed PostgreSQL statistics roles and database
+`CONNECT`, and grants PgBouncer `stats_users` without admin authority. In both `comet` and
+`bitmagnet`, an operator-owned migration creates the one-column, one-row
+`mira_dashboard_observability.torrent_count` view under a non-login owner. The installer revokes
+all `PUBLIC` access to the schema/view and grants the monitoring login only schema `USAGE` and
+view `SELECT`; it never grants direct base-table access. A release must verify these exact grants,
+the read-only/session-timeout preflight, and the view shape before advertising availability.
+Credential absence, grant drift, an unexpected row shape, or more than the reviewed database
+count causes an unavailable/last-known-good state and never widens authority or falls back to an
+application credential.
+
 ## Resource Safety
 
 At this audit, the production web service used about 247 MiB with a recorded peak of 379 MiB;

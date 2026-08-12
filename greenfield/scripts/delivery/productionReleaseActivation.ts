@@ -11,6 +11,7 @@ import {
     runDatabaseCandidateMaintenance,
     runDatabaseSnapshotMaintenance,
 } from "./databaseMaintenanceProcess.ts";
+import { retainProductionDatabaseSnapshots } from "./databaseSnapshotRetention.ts";
 import {
     discardDatabaseTransitionWorkspace,
     discardOrphanDatabaseTransitionWorkspace,
@@ -130,6 +131,30 @@ function sameRecord(
 
 function activationError(): ProductionReleaseActivationError {
     return new ProductionReleaseActivationError({ message: activationFailureMessage });
+}
+
+function activationSnapshotReferences(
+    record: ProductionActivationRecord
+): readonly string[] {
+    return Object.freeze([
+        record.transitionId,
+        ...(record.previous === null
+            ? []
+            : [record.previous.databaseSnapshotTransitionId]),
+    ]);
+}
+
+async function retainCommittedDatabaseSnapshots(
+    lease: DashboardDeploymentLease,
+    paths: PreparedProductionDeliveryPaths,
+    activation: ProductionActivationState
+): Promise<void> {
+    await retainProductionDatabaseSnapshots(lease, paths, {
+        activationTransitionIds:
+            activation.record === undefined
+                ? []
+                : activationSnapshotReferences(activation.record),
+    });
 }
 
 async function loadActiveArtifacts(
@@ -448,6 +473,7 @@ async function activateRelease(
     dependencies: ProductionReleaseActivationDependencies
 ): Promise<ProductionActivationRecord> {
     const activation = await recoverExistingTransition(lease, paths, dependencies);
+    await retainCommittedDatabaseSnapshots(lease, paths, activation);
     const candidate = await verifyCandidateArtifacts(
         paths,
         candidateRelease,
@@ -541,6 +567,7 @@ async function activateRelease(
         await clearProductionActivationJournal(lease, paths, journal);
         journal = undefined;
         await dependencies.testHooks?.afterActivationJournalClear?.();
+        await retainCommittedDatabaseSnapshots(lease, paths, committedState);
         return committed;
     } catch {
         const observedJournal = await loadProductionActivationJournal(lease, paths).catch(
@@ -553,12 +580,14 @@ async function activateRelease(
         if (observedJournal) {
             const recovered = await recoverExistingTransition(lease, paths, dependencies);
             if (sameRecord(recovered.record, expectedCommitted)) {
+                await retainCommittedDatabaseSnapshots(lease, paths, recovered);
                 return expectedCommitted;
             }
             throw activationError();
         }
         if (sameRecord(observedActivation.record, expectedCommitted)) {
             await discardTransitionWorkspace(lease, paths, transitionId, workspace);
+            await retainCommittedDatabaseSnapshots(lease, paths, observedActivation);
             return expectedCommitted;
         }
 

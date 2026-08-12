@@ -213,6 +213,7 @@ function processFixture(
             observedOpenClawRoot,
             observedLogMaintenance,
             _observedMoltbook,
+            observedDatabaseObservability,
             observedHostOperations,
             observedBootIdentity
         ) {
@@ -245,6 +246,7 @@ function processFixture(
                 writable: true,
             });
             expect(observedLogMaintenance).toBe(logMaintenance);
+            expect(observedDatabaseObservability.collect).toBeFunction();
             expect(observedHostOperations).toBeUndefined();
             expect(observedBootIdentity).toBe(bootIdentity);
             expect(Object.keys(observedGatewayTransport).toSorted()).toEqual([

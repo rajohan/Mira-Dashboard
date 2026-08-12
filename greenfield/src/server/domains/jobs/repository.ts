@@ -543,6 +543,7 @@ export interface JobRepositoryReader {
     findActiveDisableIntent(scheduleId: string): JobDisableIntentRecord | undefined;
     findActiveRunForSchedule(scheduleId: string): JobRunRecord | undefined;
     findLatestRunForSchedule(scheduleId: string): JobRunRecord | undefined;
+    findLatestSuccessfulRunForSchedule(scheduleId: string): JobRunRecord | undefined;
     findRun(id: string): JobRunRecord | undefined;
     findRunByIdempotency(
         requestedByKind: JobRunRecord["requestedByKind"],
@@ -861,6 +862,23 @@ class DrizzleJobReader implements JobRepositoryReader {
             .from(jobRuns)
             .where(eq(jobRuns.scheduledJobId, scheduleId))
             .orderBy(desc(jobRuns.queuedAt), desc(jobRuns.id))
+            .get();
+        return row === undefined ? undefined : parseRun(row);
+    }
+
+    public findLatestSuccessfulRunForSchedule(
+        scheduleId: string
+    ): JobRunRecord | undefined {
+        const row = this.database
+            .select()
+            .from(jobRuns)
+            .where(
+                and(
+                    eq(jobRuns.scheduledJobId, scheduleId),
+                    eq(jobRuns.state, "succeeded")
+                )
+            )
+            .orderBy(desc(jobRuns.finishedAt), desc(jobRuns.id))
             .get();
         return row === undefined ? undefined : parseRun(row);
     }
@@ -3079,6 +3097,8 @@ export function createJobRepository(
             read((reader) => reader.findActiveRunForSchedule(scheduleId)),
         findLatestRunForSchedule: (scheduleId: string) =>
             read((reader) => reader.findLatestRunForSchedule(scheduleId)),
+        findLatestSuccessfulRunForSchedule: (scheduleId: string) =>
+            read((reader) => reader.findLatestSuccessfulRunForSchedule(scheduleId)),
         findRun: (id: string) => read((reader) => reader.findRun(id)),
         findRunByIdempotency: (
             requestedByKind: JobRunRecord["requestedByKind"],

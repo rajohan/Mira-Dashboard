@@ -19,6 +19,7 @@ import {
 import { readBoundedUtf8RegularFile } from "../files/boundedFile.ts";
 import { resolveDirectPackageVersions } from "../packageIdentity.ts";
 import { hostOperationsProvisioningReleaseArtifactPaths } from "./hostOperationsProvisioningPolicy.ts";
+import { databaseObservabilityProvisioningReleaseArtifactPaths } from "./databaseObservabilityProvisioningPolicy.ts";
 import { logMaintenanceProvisioningReleaseArtifactPaths } from "./logMaintenanceProvisioningPolicy.ts";
 import { productionSystemdUnits } from "./productionSystemdUnitPolicy.ts";
 import {
@@ -57,6 +58,7 @@ const exactSystemdPaths = Object.freeze(
 );
 const exactScriptPaths = Object.freeze(
     [
+        ...databaseObservabilityProvisioningReleaseArtifactPaths,
         ...hostOperationsProvisioningReleaseArtifactPaths,
         ...logMaintenanceProvisioningReleaseArtifactPaths,
     ].toSorted()

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { Effect } from "effect";
 
+import { databaseObservabilityMetricDatabases } from "../../../shared/databaseObservabilityPolicy.ts";
 import { OpenClawServiceActionsExecutionError } from "../../../shared/openClawServiceActions.ts";
 import {
     testMoltbookCollector,
@@ -9,11 +10,13 @@ import {
 } from "../../test/support/moltbook.ts";
 import {
     createJobWorkerActionResolver,
+    createDatabaseObservabilityExecutor,
     createHostOperationJobExecutor,
     createLogMaintenanceJobExecutor,
     createMoltbookDashboardExecutor,
     createOpenClawGatewayRestartJobExecutor,
     createOpenClawServiceActionJobExecutor,
+    createSqliteMaintenanceJobExecutor,
     createSystemHostExecutor,
     createWorkspaceFileWriteJobExecutor,
     createJobWorkerActionRegistry,
@@ -47,6 +50,35 @@ function executionContext(attempts: JobCacheAttemptCommit[]): JobActionExecution
 const successfulExecutor = () => Effect.succeed({});
 
 describe("worker-only job executor registry", () => {
+    test("persists only the validated path-free SQLite maintenance result", () => {
+        const signalSeen: AbortSignal[] = [];
+        const executor = createSqliteMaintenanceJobExecutor({
+            run(signal) {
+                if (signal !== undefined) signalSeen.push(signal);
+                return Promise.resolve({
+                    backupBytes: 4096,
+                    backupCreatedAtMs: 4000,
+                    checkpoint: {
+                        busyFrames: 0,
+                        checkpointedFrames: 2,
+                        logFrames: 2,
+                    },
+                    completedAtMs: 5000,
+                    retainedBackupBytes: 4096,
+                    retainedBackupCount: 1,
+                    status: "completed",
+                });
+            },
+        });
+        expect(
+            Effect.runPromise(executor(executionContext([]), {}))
+        ).resolves.toMatchObject({ backupBytes: 4096, status: "completed" });
+        expect(signalSeen).toEqual([expect.any(AbortSignal)]);
+        expect(
+            Effect.runPromise(executor(executionContext([]), { path: "/private" }))
+        ).rejects.toThrow("SQLite maintenance action failed");
+    });
+
     test("matches every pure definition with one exact executor", () => {
         const findAction = createJobWorkerActionResolver({
             logMaintenance: { run: () => Promise.resolve(undefined) },
@@ -654,6 +686,104 @@ describe("worker-only job executor registry", () => {
                 failureCode: "provider/moltbook-unavailable",
                 failureMessage: "Moltbook dashboard projection could not be collected.",
                 key: "moltbook.dashboard",
+                kind: "failed",
+            },
+        ]);
+        expect(JSON.stringify(failedAttempts)).not.toContain(secret);
+    });
+
+    test("commits one exact domain-only database snapshot and redacts failures", async () => {
+        const payload = {
+            databases: databaseObservabilityMetricDatabases.map((name) => ({
+                cacheHitRatio: 100,
+                committedTransactions: 0,
+                connections: 0,
+                name,
+                rolledBackTransactions: 0,
+                sizeBytes: 0,
+            })),
+            pgbouncer: {
+                averageQueryMs: 0,
+                averageTransactionMs: 0,
+                clientConnections: 0,
+                maxWaitSeconds: 0,
+                serverConnections: 0,
+                waitingClients: 0,
+            },
+            statements: [],
+            summary: {
+                activeConnections: 0,
+                averageCacheHitRatio: 100,
+                idleConnections: 0,
+                maintenance: {
+                    assessmentComplete: true,
+                    assessedPhysicalBytes: 0,
+                    estimatedReclaimableBytes: 0,
+                    estimatedReclaimablePercent: 0,
+                    highDeadTupleTableCount: 0,
+                    requiresBloatReview: false,
+                    slowStatementCount: 0,
+                    status: "healthy" as const,
+                    unassessedPhysicalBytes: 0,
+                    unassessedTableCount: 0,
+                },
+                pgStatStatementsEnabled: false,
+                totalConnections: 0,
+                totalDatabaseSizeBytes: 0,
+            },
+            tableHealth: [],
+            torrentCounts: {
+                bitmagnet: { state: "unavailable" as const },
+                comet: { state: "unavailable" as const },
+            },
+        };
+        const attempts: JobCacheAttemptCommit[] = [];
+        const executor = createDatabaseObservabilityExecutor({
+            collector: { collect: () => Promise.resolve(payload) },
+            monotonicNowMs: (() => {
+                const values = [10, 15];
+                return () => values.shift() ?? 15;
+            })(),
+        });
+        expect(
+            await Effect.runPromise(
+                executor(executionContext(attempts), {
+                    key: "database.observability",
+                })
+            )
+        ).toEqual({ cacheKeys: ["database.observability"], completedAtMs: 5000 });
+        expect(attempts).toEqual([
+            {
+                durationMs: 5,
+                entries: [
+                    {
+                        key: "database.observability",
+                        metadata: { kind: "database-observability" },
+                        payload,
+                        schemaId: "database.observability.v1",
+                        source: "postgresql.pgbouncer",
+                        ttlMs: 5_400_000,
+                    },
+                ],
+                kind: "succeeded",
+            },
+        ]);
+
+        const failedAttempts: JobCacheAttemptCommit[] = [];
+        const secret = "postgresql://monitor:secret@127.0.0.1:6432/postgres";
+        const failure = await Effect.runPromise(
+            createDatabaseObservabilityExecutor({
+                collector: { collect: () => Promise.reject(new Error(secret)) },
+            })(executionContext(failedAttempts), { key: "database.observability" })
+        ).catch((error: unknown) => error);
+        expect(failure).toBeInstanceOf(JobActionRetryableError);
+        expect(failedAttempts).toEqual([
+            {
+                durationMs: expect.any(Number),
+                failureCode: "provider/database-observability-unavailable",
+                failureMessage:
+                    "Database observability projection could not be collected.",
+                key: "database.observability",
                 kind: "failed",
             },
         ]);

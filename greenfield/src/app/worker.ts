@@ -1,6 +1,7 @@
 import { realpath } from "node:fs/promises";
 import path from "node:path";
 
+import type { DatabaseObservabilityCollector } from "../contracts/databaseObservabilityCollector.ts";
 import type { FixedHostOperationsExecutionPort } from "../server/domains/jobs/actionExecutors.ts";
 import {
     createDashboardWorkerRuntime,
@@ -43,6 +44,8 @@ import {
 import type { LinuxBootIdentity } from "../shared/linuxBootIdentity.ts";
 import type { OpenClawGatewayLifecycleExecutionPort } from "../shared/openClawGatewayLifecycle.ts";
 import type { OpenClawServiceActionsExecutionPort } from "../shared/openClawServiceActions.ts";
+import { createBunSqlDatabaseObservabilityCollector } from "../worker/database/bunSqlDatabaseObservabilityCollector.ts";
+import { createFixedSqliteLifecycleMaintenance } from "../worker/database/fixedSqliteLifecycleMaintenance.ts";
 import {
     createDescriptorWorkspaceFileStructuralWriter,
     type WorkerWorkspaceFileRootConfiguration,
@@ -117,6 +120,7 @@ export interface DashboardWorkerProcessDependencies {
         openClawRoot: WorkerWorkspaceFileRootConfiguration,
         logMaintenance: LogMaintenanceExecutor,
         moltbook: MoltbookDashboardCollector,
+        databaseObservability: DatabaseObservabilityCollector,
         hostOperations: FixedHostOperationsExecutionPort | undefined,
         bootIdentity: LinuxBootIdentity
     ) => DashboardWorkerRuntime;
@@ -205,6 +209,7 @@ const defaultDependencies = Object.freeze({
         openClawRoot,
         logMaintenance,
         moltbook,
+        databaseObservability,
         hostOperations,
         bootIdentity
     ) => {
@@ -220,6 +225,7 @@ const defaultDependencies = Object.freeze({
                 startupMode: "validate-only",
                 stateDirectory: layout.production.state.root,
             },
+            databaseObservability,
             logMaintenance,
             moltbook,
             ...(openClawGateway === undefined ? {} : { openClawGateway }),
@@ -229,6 +235,12 @@ const defaultDependencies = Object.freeze({
             pid: process.pid,
             releaseId: release.manifest.source.commitSha,
             sideEffects: createSystemJobWorkerSideEffects(),
+            sqliteMaintenance: createFixedSqliteLifecycleMaintenance({
+                migrationsDirectory: path.join(release.releaseRoot, "migrations"),
+                releaseId: release.manifest.source.commitSha,
+                releaseRoot: release.releaseRoot,
+                stateDirectory: layout.production.state.root,
+            }),
             taskNotificationLoop: taskNotificationWorkerLoop,
             workerInstanceId: Bun.randomUUIDv7(),
             workspaceFiles: writer,
@@ -342,6 +354,9 @@ export async function runDashboardWorkerProcess(
             agentName: configuration.moltbookAgentName,
             apiKey: configuration.moltbookApiKey,
         });
+        const databaseObservability = createBunSqlDatabaseObservabilityCollector({
+            connectionUrl: configuration.databaseObservabilityUrl,
+        });
         runtime = dependencies.createRuntime(
             layout,
             release,
@@ -353,6 +368,7 @@ export async function runDashboardWorkerProcess(
             openClawRoot,
             logMaintenance,
             moltbook,
+            databaseObservability,
             hostOperations,
             bootIdentity
         );

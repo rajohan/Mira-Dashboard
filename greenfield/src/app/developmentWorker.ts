@@ -10,6 +10,8 @@ import {
     developmentStartupFailureMessage,
     parseDevelopmentSourceCommit,
 } from "../shared/developmentProcessSupport.ts";
+import { createUnavailableDatabaseObservabilityCollector } from "../worker/database/bunSqlDatabaseObservabilityCollector.ts";
+import { createFixedSqliteLifecycleMaintenance } from "../worker/database/fixedSqliteLifecycleMaintenance.ts";
 import { developmentTaskNotificationLoop } from "../worker/developmentTaskNotifications.ts";
 import { createDescriptorWorkspaceFileStructuralWriter } from "../worker/files/descriptorWorkspaceFileStructuralWriter.ts";
 import { createDevelopmentLogMaintenanceExecutor } from "../worker/logs/developmentLogMaintenance.ts";
@@ -51,6 +53,7 @@ export async function runDevelopmentWorkerProcess(
             openClawRoot,
             logMaintenance,
             moltbook,
+            _databaseObservability,
             hostOperations,
             bootIdentity
         ) => {
@@ -66,6 +69,7 @@ export async function runDevelopmentWorkerProcess(
                     startupMode: "initialize-empty",
                     stateDirectory: layout.production.state.root,
                 },
+                databaseObservability: createUnavailableDatabaseObservabilityCollector(),
                 logMaintenance,
                 moltbook,
                 ...(openClawGateway === undefined ? {} : { openClawGateway }),
@@ -77,6 +81,16 @@ export async function runDevelopmentWorkerProcess(
                 pid: process.pid,
                 releaseId: source.manifest.source.commitSha,
                 sideEffects: createSystemJobWorkerSideEffects(),
+                sqliteMaintenance: createFixedSqliteLifecycleMaintenance({
+                    migrationsDirectory: path.join(source.releaseRoot, "migrations"),
+                    releaseId: source.manifest.source.commitSha,
+                    releaseRoot: source.releaseRoot,
+                    scriptPath: path.join(
+                        source.releaseRoot,
+                        "src/app/databaseMaintenance.ts"
+                    ),
+                    stateDirectory: layout.production.state.root,
+                }),
                 taskNotificationLoop: developmentTaskNotificationLoop,
                 workerInstanceId: Bun.randomUUIDv7(),
                 workspaceFiles: writer,

@@ -299,7 +299,9 @@ describe("production user-systemd service control", () => {
             `--only-secrets ${configurationEnvironmentNamesForRole("web").join(",")}`
         );
         expect(webExecStart).not.toContain("MOLTBOOK_API_KEY");
-        expect(web).toContain("UnsetEnvironment=MOLTBOOK_API_KEY MOLTBOOK_AGENT_NAME");
+        expect(web).toContain(
+            "UnsetEnvironment=MIRA_DASHBOARD_DATABASE_OBSERVABILITY_URL MOLTBOOK_API_KEY MOLTBOOK_AGENT_NAME"
+        );
         expect(worker).toContain("Environment=MIRA_DASHBOARD_OPENCLAW_ROOT=%h/.openclaw");
         expect(worker).toContain(
             "--preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT,MIRA_DASHBOARD_OPENCLAW_ROOT,MIRA_DASHBOARD_WORKSPACE_ROOT"

@@ -12,7 +12,7 @@ Environment=MIRA_DASHBOARD_PROJECT_ROOT=%h/projects/mira-dashboard
 Environment=MIRA_DASHBOARD_OPENCLAW_ROOT=%h/.openclaw
 Environment=MIRA_DASHBOARD_WORKSPACE_ROOT=%h/.openclaw/workspace
 UnsetEnvironment=ELEVENLABS_API_KEY MIRA_DASHBOARD_TOTP_KEYRING
-ExecStart=/usr/local/bin/doppler run --config prd --project rajohan --only-secrets NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT,MIRA_DASHBOARD_OPENCLAW_ROOT,MIRA_DASHBOARD_WORKSPACE_ROOT,MOLTBOOK_API_KEY,MOLTBOOK_AGENT_NAME,OPENCLAW_GATEWAY_URL,OPENCLAW_GATEWAY_TOKEN,MIRA_DASHBOARD_LOG_LEVEL --no-exit-on-missing-only-secrets --preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT,MIRA_DASHBOARD_OPENCLAW_ROOT,MIRA_DASHBOARD_WORKSPACE_ROOT -- %h/projects/mira-dashboard/production/runtimes/bun/current/bun %h/projects/mira-dashboard/production/releases/current/server/worker.js
+ExecStart=/usr/local/bin/doppler run --config prd --project rajohan --only-secrets NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT,MIRA_DASHBOARD_OPENCLAW_ROOT,MIRA_DASHBOARD_WORKSPACE_ROOT,MIRA_DASHBOARD_DATABASE_OBSERVABILITY_URL,MOLTBOOK_API_KEY,MOLTBOOK_AGENT_NAME,OPENCLAW_GATEWAY_URL,OPENCLAW_GATEWAY_TOKEN,MIRA_DASHBOARD_LOG_LEVEL --no-exit-on-missing-only-secrets --preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT,MIRA_DASHBOARD_OPENCLAW_ROOT,MIRA_DASHBOARD_WORKSPACE_ROOT -- %h/projects/mira-dashboard/production/runtimes/bun/current/bun %h/projects/mira-dashboard/production/releases/current/server/worker.js
 StandardOutput=append:%h/projects/mira-dashboard/production/state/logs/worker-stdout.log
 StandardError=append:%h/projects/mira-dashboard/production/state/logs/worker-stderr.log
 Restart=on-failure

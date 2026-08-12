@@ -1428,6 +1428,8 @@ describe("Dashboard security composition", () => {
                 },
             }),
             database: Object.freeze({
+                diagnostics: () =>
+                    Promise.reject(new Error("Database must not be reached")),
                 orm: () => Promise.reject(new Error("Database must not be reached")),
                 run: runTestImmediateDatabaseWrite,
             }),
@@ -1465,6 +1467,8 @@ describe("Dashboard security composition", () => {
                 },
             }),
             database: Object.freeze({
+                diagnostics: () =>
+                    Promise.reject(new Error("Database must not be reached")),
                 orm: () => {
                     ormCalls += 1;
                     return Promise.reject(new Error("Database must not be reached"));

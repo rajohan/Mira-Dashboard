@@ -230,11 +230,8 @@ export async function stageReleaseArtifacts(
             path.join(stagingRoot, "systemd")
         ),
         copyArtifactTree(
-            path.join(
-                sources.repositoryRoot,
-                "scripts/delivery/provisioning/log-maintenance"
-            ),
-            path.join(stagingRoot, "scripts/delivery/provisioning/log-maintenance")
+            path.join(sources.repositoryRoot, "scripts/delivery/provisioning"),
+            path.join(stagingRoot, "scripts/delivery/provisioning")
         ),
         copyArtifactTree(
             path.join(

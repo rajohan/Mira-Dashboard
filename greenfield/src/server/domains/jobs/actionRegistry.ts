@@ -1,6 +1,7 @@
 import type { Effect } from "effect";
 import * as v from "valibot";
 
+import { databaseObservabilityCacheKey } from "../../../contracts/database.ts";
 import {
     type JobCancellationPolicy,
     type JobResourceClass,
@@ -38,6 +39,15 @@ export const logMaintenanceJobScheduleId = "maintenance.rotate-managed-logs";
 export const moltbookDashboardCacheJobActionKey = "cache.refresh.moltbook-dashboard";
 /** Durable schedule identity for the all-or-nothing Moltbook projection. */
 export const moltbookDashboardCacheJobScheduleId = "cache.moltbook-dashboard";
+/** Worker-only direct-protocol PostgreSQL and PgBouncer snapshot refresh identity. */
+export const databaseObservabilityCacheJobActionKey =
+    "cache.refresh.database-observability";
+/** Durable hourly schedule identity for the external database projection. */
+export const databaseObservabilityCacheJobScheduleId = "cache.database-observability";
+/** Fixed worker-only online SQLite backup and upkeep identity. */
+export const sqliteMaintenanceJobActionKey = "database.sqlite-maintenance";
+/** Durable daily SQLite backup and upkeep schedule identity. */
+export const sqliteMaintenanceJobScheduleId = "database.sqlite-maintenance";
 /** Worker-only dynamic action used for one already-spooled structural file write. */
 export const workspaceFileWriteJobActionKey = "workspace-files.apply-write";
 /** Retry-safe worker action backed by a durable replace intent and atomic exchange. */
@@ -405,6 +415,56 @@ const moltbookDashboardCacheDefinition = validateJobActionDefinition({
     timeoutMs: 30_000,
 });
 
+const databaseObservabilityCacheDefinition = validateJobActionDefinition({
+    actionKey: databaseObservabilityCacheJobActionKey,
+    actionPayload: Object.freeze({ key: databaseObservabilityCacheKey }),
+    attemptLimit: 3,
+    cancellationPolicy: "cooperative",
+    defaultEnabled: true,
+    defaultSchedule: Object.freeze({
+        intervalMs: 60 * 60_000,
+        kind: "interval",
+    }),
+    description:
+        "Projects a bounded read-only PostgreSQL and PgBouncer observability snapshot.",
+    displayName: "Database observability cache",
+    initialDue: "immediate",
+    manualExposure: "none",
+    priority: 0,
+    resourceClass: "light",
+    resourceKeys: Object.freeze(["network.database-observability"]),
+    retrySafe: true,
+    scheduleId: databaseObservabilityCacheJobScheduleId,
+    // The collector owns the 60-second protocol deadline. This outer margin
+    // preserves enough time for its claim-fenced failure commit to settle.
+    timeoutMs: 65_000,
+});
+
+/** Daily online SQLite snapshot, restore verification, retention, and fixed upkeep. */
+export const sqliteMaintenanceJobActionDefinition = validateJobActionDefinition({
+    actionKey: sqliteMaintenanceJobActionKey,
+    actionPayload: Object.freeze({}),
+    attemptLimit: 1,
+    cancellationPolicy: "never",
+    defaultEnabled: true,
+    defaultSchedule: Object.freeze({
+        kind: "daily",
+        timeOfDay: "02:40",
+        timeZone: "Europe/Oslo",
+    }),
+    description:
+        "Creates and verifies one immutable SQLite snapshot, applies bounded retention, and runs fixed SQLite upkeep.",
+    displayName: "SQLite maintenance",
+    initialDue: "next-occurrence",
+    manualExposure: "none",
+    priority: 0,
+    resourceClass: "host-heavy",
+    resourceKeys: Object.freeze(["database"]),
+    retrySafe: false,
+    scheduleId: sqliteMaintenanceJobScheduleId,
+    timeoutMs: 16 * 60_000,
+});
+
 const logMaintenanceDefinition = validateJobActionDefinition({
     actionKey: logMaintenanceJobActionKey,
     actionPayload: Object.freeze({ policyId: "docker-managed" }),
@@ -547,6 +607,8 @@ export const hostSystemUpdateJobActionDefinition = serviceActionDefinition({
 export const jobActionDefinitions = Object.freeze([
     systemHostCacheDefinition,
     moltbookDashboardCacheDefinition,
+    databaseObservabilityCacheDefinition,
+    sqliteMaintenanceJobActionDefinition,
     logMaintenanceDefinition,
     workerSmokeDefinition,
 ]);

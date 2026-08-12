@@ -23,6 +23,20 @@ export interface DatabasePathIdentity {
     readonly inode: bigint;
 }
 
+/** Path-free size and permission metadata for the retained SQLite files. */
+export interface DatabasePathDiagnostics {
+    readonly databaseBytes: number;
+    readonly permissions: {
+        readonly dataDirectory: string;
+        readonly database: string;
+        readonly secure: true;
+        readonly shm?: string;
+        readonly wal?: string;
+    };
+    readonly shmBytes: number;
+    readonly walBytes: number;
+}
+
 function invalidStateDirectory(): DatabaseRuntimePathError {
     return new DatabaseRuntimePathError({
         message: "Database state directory violates the private runtime policy",
@@ -92,6 +106,17 @@ function matchesProtectedAncestorPolicy(
 
 function identityOf(stat: BigIntStats): DatabasePathIdentity {
     return Object.freeze({ device: stat.dev, inode: stat.ino });
+}
+
+function boundedFileSize(stat: BigIntStats): number {
+    if (stat.size < 0n || stat.size > BigInt(Number.MAX_SAFE_INTEGER)) {
+        throw invalidDatabaseFile();
+    }
+    return Number(stat.size);
+}
+
+function fileMode(stat: BigIntStats): string {
+    return (stat.mode & 0o777n).toString(8).padStart(4, "0");
 }
 
 function sameIdentity(
@@ -282,6 +307,64 @@ export async function assertDatabasePathStillValid(
             throw invalidDatabaseFile();
         }
         await assertPrivateDatabaseSidecars(prepared.filePath, userId);
+    } catch (error) {
+        if (error instanceof DatabaseRuntimePathError) throw error;
+        throw invalidDatabaseFile();
+    }
+}
+
+/**
+ * Revalidates the fixed runtime files and returns only path-free diagnostics.
+ * Missing WAL/SHM sidecars are represented as zero bytes and an absent mode.
+ * @param prepared Acquisition-time path identities owned by the runtime scope.
+ * @returns Bounded file sizes and exact permission modes without path disclosure.
+ */
+export async function readDatabasePathDiagnostics(
+    prepared: PreparedDatabasePath
+): Promise<DatabasePathDiagnostics> {
+    try {
+        const stateDirectory = await assertCanonicalPrivateStateDirectory(
+            path.dirname(prepared.filePath)
+        );
+        if (
+            path.join(stateDirectory.directory, dashboardDatabaseFileName) !==
+                prepared.filePath ||
+            !sameIdentity(stateDirectory.identity, prepared.directoryIdentity)
+        ) {
+            throw invalidStateDirectory();
+        }
+        const database = await privateDatabaseFileStat(
+            prepared.filePath,
+            stateDirectory.userId
+        );
+        if (!database || !sameIdentity(identityOf(database), prepared.identity)) {
+            throw invalidDatabaseFile();
+        }
+        const [shm, wal] = await Promise.all([
+            privateDatabaseFileStat(`${prepared.filePath}-shm`, stateDirectory.userId),
+            privateDatabaseFileStat(`${prepared.filePath}-wal`, stateDirectory.userId),
+        ]);
+        // The rollback journal is not presented, but it remains part of the
+        // path-safety revalidation for the retained SQLite connection.
+        await privateDatabaseFileStat(
+            `${prepared.filePath}-journal`,
+            stateDirectory.userId
+        );
+
+        return Object.freeze({
+            databaseBytes: boundedFileSize(database),
+            permissions: Object.freeze({
+                dataDirectory: fileMode(
+                    await lstat(stateDirectory.directory, { bigint: true })
+                ),
+                database: fileMode(database),
+                secure: true as const,
+                ...(shm === undefined ? {} : { shm: fileMode(shm) }),
+                ...(wal === undefined ? {} : { wal: fileMode(wal) }),
+            }),
+            shmBytes: shm === undefined ? 0 : boundedFileSize(shm),
+            walBytes: wal === undefined ? 0 : boundedFileSize(wal),
+        });
     } catch (error) {
         if (error instanceof DatabaseRuntimePathError) throw error;
         throw invalidDatabaseFile();

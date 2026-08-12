@@ -1,15 +1,15 @@
 import { Database } from "bun:sqlite";
 import { constants, type BigIntStats } from "node:fs";
 import {
-    chmod,
     lstat,
     mkdir,
     open,
     readdir,
     realpath,
     rename,
-    rm,
+    rmdir,
     statfs,
+    unlink,
     type FileHandle,
 } from "node:fs/promises";
 import path from "node:path";
@@ -17,6 +17,11 @@ import path from "node:path";
 import { Effect, Schema } from "effect";
 import * as v from "valibot";
 
+import {
+    sqliteBackupInventoryMaximum,
+    sqliteMaintenanceBackupMaximum,
+    type SqliteMaintenanceJobResult,
+} from "../../../contracts/database.ts";
 import {
     currentDatabaseSnapshotMigrations,
     parseDatabaseSnapshotManifest,
@@ -55,6 +60,9 @@ const privateDirectoryMode = 0o700;
 const privateFileMode = 0o600;
 const immutableDirectoryMode = 0o500;
 const immutableFileMode = 0o400;
+const sqliteMaintenanceDirectoryName = "sqlite-maintenance";
+const sqliteMaintenanceEntryMaximum = sqliteMaintenanceBackupMaximum + 4;
+const sqliteBackupRootEntryMaximum = 128;
 const directoryFlags =
     constants.O_RDONLY |
     constants.O_DIRECTORY |
@@ -86,10 +94,42 @@ const snapshotOptionsSchema = v.variant("expectedState", [
         transitionId: lowercaseUuidV7Schema(snapshotFailureMessage),
     }),
 ]);
+const sqliteMaintenanceOptionsSchema = v.strictObject({
+    migrationsDirectory: absolutePathSchema,
+    releaseId: fullCommitShaSchema(snapshotFailureMessage),
+    stateDirectory: absolutePathSchema,
+    transitionId: lowercaseUuidV7Schema(snapshotFailureMessage),
+});
+
+const quickCheckRowsSchema = v.array(v.strictObject({ quick_check: v.string() }));
+const passiveCheckpointRowSchema = v.strictObject({
+    busy: v.pipe(v.number(), v.safeInteger(), v.minValue(0)),
+    checkpointed: v.pipe(v.number(), v.safeInteger(), v.minValue(0)),
+    log: v.pipe(v.number(), v.safeInteger(), v.minValue(0)),
+});
 
 export type DatabaseSnapshotOptions = Readonly<
     v.InferOutput<typeof snapshotOptionsSchema>
 >;
+
+/** Exact fixed inputs for one isolated online SQLite maintenance process. */
+export type SqliteMaintenanceSnapshotOptions = Readonly<
+    v.InferOutput<typeof sqliteMaintenanceOptionsSchema>
+>;
+/** Sanitized path-free completion returned by the isolated maintenance process. */
+export type SqliteMaintenanceSnapshotResult = SqliteMaintenanceJobResult;
+
+/** Path-free immutable snapshot metadata admitted to the read model. */
+export interface SqliteMaintenanceSnapshotInventory {
+    readonly backups: readonly {
+        readonly bytes: number;
+        readonly createdAtMs: number;
+        readonly kind: "cutover" | "scheduled";
+        readonly restoreVerifiedAtMs?: number;
+        readonly verificationLevel: "manifest-verified" | "restore-copy-verified";
+    }[];
+    readonly totalBytes: number;
+}
 
 export type DatabaseSnapshotResult =
     | Readonly<{ state: "absent"; transitionId: string }>
@@ -115,6 +155,17 @@ export interface DatabaseSnapshotTestHooks {
     readonly afterSnapshotCreated?: (snapshotFile: string) => Promise<void> | void;
     readonly afterSnapshotFileOpen?: (snapshotFile: string) => Promise<void> | void;
     readonly afterSnapshotFrozen?: (snapshotDirectory: string) => Promise<void> | void;
+}
+
+/** Deterministic mutation boundary for adversarial maintenance-restore tests. */
+export interface SqliteMaintenanceSnapshotTestHooks {
+    readonly afterRetiredDirectorySynced?: (ownedName: string) => Promise<void> | void;
+    readonly afterRetiredFileRemoved?: (
+        ownedName: string,
+        fileName: string
+    ) => Promise<void> | void;
+    readonly afterRestoreCopyCreated?: (restoreCopyFile: string) => Promise<void> | void;
+    readonly beforeOwnedSnapshotRetired?: (ownedName: string) => Promise<void> | void;
 }
 
 /** Sanitized failure from the delivery-owned snapshot boundary. */
@@ -629,43 +680,258 @@ async function hashImmutableSnapshot(
     return result;
 }
 
-async function removeOwnedSnapshot(
-    backupsDirectory: string,
-    ownedName: string
-): Promise<void> {
+type OwnedSnapshotKind = "final" | "retired" | "stage" | "verify";
+
+interface OwnedSnapshotIdentity {
+    readonly device: bigint;
+    readonly id: string;
+    readonly inode: bigint;
+    readonly kind: OwnedSnapshotKind;
+    readonly name: string;
+}
+
+function isUuidV7(value: string): boolean {
+    return v.safeParse(lowercaseUuidV7Schema(), value, { abortEarly: true }).success;
+}
+
+function parseOwnedSnapshotName(name: string):
+    | {
+          readonly id: string;
+          readonly kind: OwnedSnapshotKind;
+      }
+    | undefined {
+    if (isUuidV7(name)) return { id: name, kind: "final" };
+    for (const [prefix, kind] of [
+        [".stage-", "stage"],
+        [".verify-", "verify"],
+        [".retire-final-", "retired"],
+        [".retire-stage-", "retired"],
+        [".retire-verify-", "retired"],
+        [".retire-", "retired"],
+    ] as const) {
+        if (!name.startsWith(prefix)) continue;
+        const id = name.slice(prefix.length);
+        if (isUuidV7(id)) return { id, kind };
+    }
+    return undefined;
+}
+
+function retiredSnapshotName(snapshot: OwnedSnapshotIdentity): string {
+    if (snapshot.kind === "retired") return snapshot.name;
+    return `.retire-${snapshot.kind}-${snapshot.id}`;
+}
+
+async function inspectOwnedSnapshot(
+    parent: OpenedDirectory,
+    name: string
+): Promise<OwnedSnapshotIdentity> {
+    const parsed = parseOwnedSnapshotName(name);
+    if (parsed === undefined) throw snapshotFailure();
+    const anchored = path.join(`/proc/self/fd/${parent.handle.fd}`, name);
+    const status = await lstat(anchored, { bigint: true });
+    const allowedModes = parsed.kind === "final" ? [0o500n] : [0o500n, 0o700n];
     if (
-        ownedName !== path.basename(ownedName) ||
-        (!ownedName.startsWith(".stage-") && !v.is(lowercaseUuidV7Schema(), ownedName))
+        typeof process.getuid !== "function" ||
+        !status.isDirectory() ||
+        status.isSymbolicLink() ||
+        status.nlink !== 2n ||
+        status.uid !== BigInt(process.getuid()) ||
+        status.dev !== parent.identity.dev ||
+        !allowedModes.includes(status.mode & 0o7777n)
     ) {
         throw snapshotFailure();
     }
-    const ownedPath = path.join(backupsDirectory, ownedName);
+    return Object.freeze({
+        device: status.dev,
+        id: parsed.id,
+        inode: status.ino,
+        kind: parsed.kind,
+        name,
+    });
+}
+
+async function openOwnedSnapshot(
+    parent: OpenedDirectory,
+    snapshot: OwnedSnapshotIdentity
+): Promise<FileHandle> {
+    const anchored = path.join(`/proc/self/fd/${parent.handle.fd}`, snapshot.name);
+    let handle: FileHandle | undefined;
     try {
-        const status = await lstat(ownedPath, { bigint: true });
+        handle = await open(anchored, directoryFlags);
+        const [held, named] = await Promise.all([
+            handle.stat({ bigint: true }),
+            lstat(anchored, { bigint: true }),
+        ]);
+        const allowedModes = snapshot.kind === "final" ? [0o500n] : [0o500n, 0o700n];
         if (
             typeof process.getuid !== "function" ||
-            !status.isDirectory() ||
-            status.isSymbolicLink() ||
-            status.uid !== BigInt(process.getuid())
+            !held.isDirectory() ||
+            held.isSymbolicLink() ||
+            held.nlink !== 2n ||
+            held.uid !== BigInt(process.getuid()) ||
+            held.dev !== snapshot.device ||
+            held.ino !== snapshot.inode ||
+            !allowedModes.includes(held.mode & 0o7777n) ||
+            !named.isDirectory() ||
+            named.isSymbolicLink() ||
+            named.dev !== held.dev ||
+            named.ino !== held.ino ||
+            named.uid !== held.uid ||
+            named.nlink !== 2n ||
+            !allowedModes.includes(named.mode & 0o7777n)
         ) {
             throw snapshotFailure();
         }
-        await chmod(ownedPath, privateDirectoryMode);
-        const entries = await readdir(ownedPath, { withFileTypes: true });
-        for (const entry of entries) {
-            if (
-                !entry.isFile() ||
-                (entry.name !== snapshotDatabaseFileName &&
-                    entry.name !== snapshotManifestFileName)
-            ) {
-                throw snapshotFailure();
-            }
-            await chmod(path.join(ownedPath, entry.name), privateFileMode);
-        }
-        await rm(ownedPath, { recursive: true });
-    } catch (error) {
-        if (errorCode(error) !== "ENOENT") throw snapshotFailure();
+        return handle;
+    } catch {
+        await closeHandle(handle);
+        throw snapshotFailure();
     }
+}
+
+async function retireOwnedSnapshot(
+    parent: OpenedDirectory,
+    snapshot: OwnedSnapshotIdentity,
+    hooks: SqliteMaintenanceSnapshotTestHooks
+): Promise<OwnedSnapshotIdentity> {
+    if (snapshot.kind === "retired") return snapshot;
+    const retiredName = retiredSnapshotName(snapshot);
+    const descriptor = `/proc/self/fd/${parent.handle.fd}`;
+    const source = path.join(descriptor, snapshot.name);
+    const target = path.join(descriptor, retiredName);
+    const child = await openOwnedSnapshot(parent, snapshot);
+    let failed = false;
+    try {
+        await hooks.beforeOwnedSnapshotRetired?.(snapshot.name);
+        const named = await lstat(source, { bigint: true });
+        if (named.dev !== snapshot.device || named.ino !== snapshot.inode) {
+            throw snapshotFailure();
+        }
+        await rename(source, target);
+        const retired = await lstat(target, { bigint: true });
+        if (retired.dev !== snapshot.device || retired.ino !== snapshot.inode) {
+            throw snapshotFailure();
+        }
+        await parent.handle.sync();
+        await hooks.afterRetiredDirectorySynced?.(snapshot.name);
+    } catch {
+        failed = true;
+    }
+    if (!(await closeHandle(child)) || failed) throw snapshotFailure();
+    return Object.freeze({
+        ...snapshot,
+        kind: "retired" as const,
+        name: retiredName,
+    });
+}
+
+async function reapRetiredSnapshot(
+    parent: OpenedDirectory,
+    snapshot: OwnedSnapshotIdentity,
+    hooks: SqliteMaintenanceSnapshotTestHooks
+): Promise<void> {
+    if (snapshot.kind !== "retired") throw snapshotFailure();
+    if (typeof process.getuid !== "function") throw snapshotFailure();
+    const expectedUid = BigInt(process.getuid());
+    const child = await openOwnedSnapshot(parent, snapshot);
+    const descriptor = `/proc/self/fd/${child.fd}`;
+    let failed = false;
+    try {
+        const entries = await readdir(descriptor, { withFileTypes: true });
+        if (
+            entries.length > 2 ||
+            entries.some(
+                (entry) =>
+                    !entry.isFile() ||
+                    ![snapshotDatabaseFileName, snapshotManifestFileName].includes(
+                        entry.name
+                    )
+            )
+        ) {
+            throw snapshotFailure();
+        }
+        await child.chmod(privateDirectoryMode);
+        for (const fileName of [
+            snapshotDatabaseFileName,
+            snapshotManifestFileName,
+        ] as const) {
+            if (!entries.some((entry) => entry.name === fileName)) continue;
+            const anchored = path.join(descriptor, fileName);
+            let file: FileHandle | undefined;
+            let fileFailed = false;
+            try {
+                file = await open(
+                    anchored,
+                    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
+                );
+                const [held, named] = await Promise.all([
+                    file.stat({ bigint: true }),
+                    lstat(anchored, { bigint: true }),
+                ]);
+                if (
+                    typeof process.getuid !== "function" ||
+                    !held.isFile() ||
+                    held.isSymbolicLink() ||
+                    held.nlink !== 1n ||
+                    held.uid !== BigInt(process.getuid()) ||
+                    held.dev !== parent.identity.dev ||
+                    ![0o400n, 0o600n].includes(held.mode & 0o7777n) ||
+                    !named.isFile() ||
+                    named.isSymbolicLink() ||
+                    named.dev !== held.dev ||
+                    named.ino !== held.ino ||
+                    named.nlink !== 1n ||
+                    named.uid !== held.uid ||
+                    ![0o400n, 0o600n].includes(named.mode & 0o7777n)
+                ) {
+                    throw snapshotFailure();
+                }
+                await file.chmod(privateFileMode);
+                await unlink(anchored);
+                await hooks.afterRetiredFileRemoved?.(snapshot.name, fileName);
+            } catch {
+                fileFailed = true;
+            }
+            if (!(await closeHandle(file)) || fileFailed) throw snapshotFailure();
+        }
+        const remainingEntries = await readdir(descriptor);
+        if (remainingEntries.length > 0) throw snapshotFailure();
+        const named = await lstat(
+            path.join(`/proc/self/fd/${parent.handle.fd}`, snapshot.name),
+            { bigint: true }
+        );
+        if (named.dev !== snapshot.device || named.ino !== snapshot.inode) {
+            throw snapshotFailure();
+        }
+    } catch {
+        failed = true;
+    }
+    if (!(await closeHandle(child)) || failed) throw snapshotFailure();
+    const parentEntry = path.join(`/proc/self/fd/${parent.handle.fd}`, snapshot.name);
+    const finalNamed = await lstat(parentEntry, { bigint: true });
+    if (
+        !finalNamed.isDirectory() ||
+        finalNamed.isSymbolicLink() ||
+        finalNamed.dev !== snapshot.device ||
+        finalNamed.ino !== snapshot.inode ||
+        finalNamed.nlink !== 2n ||
+        finalNamed.uid !== expectedUid ||
+        (finalNamed.mode & 0o7777n) !== 0o700n
+    ) {
+        throw snapshotFailure();
+    }
+    await rmdir(parentEntry);
+    await parent.handle.sync();
+}
+
+async function removeOwnedSnapshot(
+    parent: OpenedDirectory,
+    ownedName: string,
+    hooks: SqliteMaintenanceSnapshotTestHooks = {}
+): Promise<void> {
+    const snapshot = await inspectOwnedSnapshot(parent, ownedName);
+    const retired = await retireOwnedSnapshot(parent, snapshot, hooks);
+    await reapRetiredSnapshot(parent, retired, hooks);
 }
 
 async function snapshotPresentDatabase(
@@ -792,18 +1058,18 @@ async function snapshotPresentDatabase(
             closeFailed = true;
         }
     }
-    const [stageClosed, backupsClosed, stateClosed] = await Promise.all([
-        closeHandle(stage?.handle),
-        closeHandle(backups?.handle),
-        closeHandle(state.handle),
-    ]);
-    if (ownedName) {
+    const stageClosed = await closeHandle(stage?.handle);
+    if (ownedName && backups && stageClosed) {
         try {
-            await removeOwnedSnapshot(backupsPath, ownedName);
+            await removeOwnedSnapshot(backups, ownedName);
         } catch {
             closeFailed = true;
         }
     }
+    const [backupsClosed, stateClosed] = await Promise.all([
+        closeHandle(backups?.handle),
+        closeHandle(state.handle),
+    ]);
     if (
         failure ||
         closeFailed ||
@@ -815,6 +1081,681 @@ async function snapshotPresentDatabase(
         throw snapshotFailure();
     }
     return result;
+}
+
+function uuidV7Timestamp(id: string): number {
+    const value = Number.parseInt(id.replaceAll("-", "").slice(0, 12), 16);
+    if (!Number.isSafeInteger(value) || value < 0) throw snapshotFailure();
+    return value;
+}
+
+async function openOrCreateMaintenanceDirectory(
+    backups: OpenedDirectory
+): Promise<OpenedDirectory> {
+    const descriptorPath = `/proc/self/fd/${backups.handle.fd}`;
+    const candidate = path.join(descriptorPath, sqliteMaintenanceDirectoryName);
+    try {
+        await mkdir(candidate, { mode: privateDirectoryMode });
+        await backups.handle.sync();
+    } catch (error) {
+        if (errorCode(error) !== "EEXIST") throw snapshotFailure();
+    }
+    return openStableDirectory(
+        path.join(backups.path, sqliteMaintenanceDirectoryName),
+        0o700n,
+        backups.identity.dev
+    );
+}
+
+interface InternalMaintenanceSnapshotRecord {
+    readonly bytes: number;
+    readonly createdAtMs: number;
+    readonly kind: "cutover" | "scheduled";
+    readonly name: string;
+    readonly restoreVerifiedAtMs?: number;
+    readonly verificationLevel: "manifest-verified" | "restore-copy-verified";
+}
+
+async function readMaintenanceSnapshotRecord(
+    parent: OpenedDirectory,
+    name: string,
+    kind: InternalMaintenanceSnapshotRecord["kind"]
+): Promise<InternalMaintenanceSnapshotRecord> {
+    if (typeof process.getuid !== "function" || !v.is(lowercaseUuidV7Schema(), name)) {
+        throw snapshotFailure();
+    }
+    const directoryPath = path.join(parent.path, name);
+    const databaseFile = path.join(directoryPath, snapshotDatabaseFileName);
+    const manifestFile = path.join(directoryPath, snapshotManifestFileName);
+    const [directory, entries, databaseFileStatus] = await Promise.all([
+        lstat(directoryPath, { bigint: true }),
+        readdir(directoryPath),
+        lstat(databaseFile, { bigint: true }),
+    ]);
+    if (
+        !validDirectory(directory, 0o500n, process.getuid()) ||
+        directory.dev !== parent.identity.dev ||
+        entries.length !== 2 ||
+        entries.toSorted().join("\0") !==
+            [snapshotDatabaseFileName, snapshotManifestFileName].toSorted().join("\0") ||
+        !databaseFileStatus.isFile() ||
+        databaseFileStatus.isSymbolicLink() ||
+        databaseFileStatus.nlink !== 1n ||
+        databaseFileStatus.uid !== BigInt(process.getuid()) ||
+        databaseFileStatus.dev !== parent.identity.dev ||
+        databaseFileStatus.size <= 0n ||
+        databaseFileStatus.size > BigInt(maximumSnapshotBytes) ||
+        (databaseFileStatus.mode & 0o7777n) !== 0o400n
+    ) {
+        throw snapshotFailure();
+    }
+    const rawManifest = await readImmutableSnapshotManifest(
+        manifestFile,
+        parent.identity.dev
+    );
+    let manifest: DatabaseSnapshotManifest;
+    try {
+        manifest = parseDatabaseSnapshotManifest(JSON.parse(rawManifest) as unknown);
+    } catch {
+        throw snapshotFailure();
+    }
+    const createdAtMs = uuidV7Timestamp(name);
+    if (
+        createdAtMs > Date.now() ||
+        manifest.transitionId !== name ||
+        manifest.database.bytes !== Number(databaseFileStatus.size) ||
+        (kind === "scheduled" && manifest.restoreVerifiedAtMs === undefined) ||
+        (kind === "cutover" && manifest.restoreVerifiedAtMs !== undefined) ||
+        (manifest.restoreVerifiedAtMs !== undefined &&
+            (manifest.restoreVerifiedAtMs < createdAtMs ||
+                manifest.restoreVerifiedAtMs > Date.now()))
+    ) {
+        throw snapshotFailure();
+    }
+    return Object.freeze({
+        bytes: manifest.database.bytes,
+        createdAtMs,
+        kind,
+        name,
+        ...(manifest.restoreVerifiedAtMs === undefined
+            ? {}
+            : { restoreVerifiedAtMs: manifest.restoreVerifiedAtMs }),
+        verificationLevel:
+            manifest.restoreVerifiedAtMs === undefined
+                ? ("manifest-verified" as const)
+                : ("restore-copy-verified" as const),
+    });
+}
+
+async function listMaintenanceSnapshotRecords(
+    maintenance: OpenedDirectory
+): Promise<readonly InternalMaintenanceSnapshotRecord[]> {
+    const entries = await readdir(maintenance.path, { withFileTypes: true });
+    if (entries.length > sqliteMaintenanceEntryMaximum) throw snapshotFailure();
+    const records: InternalMaintenanceSnapshotRecord[] = [];
+    for (const entry of entries) {
+        const parsed = parseOwnedSnapshotName(entry.name);
+        if (
+            entry.isDirectory() &&
+            parsed !== undefined &&
+            parsed.kind !== "final" &&
+            uuidV7Timestamp(parsed.id) <= Date.now()
+        ) {
+            continue;
+        }
+        if (!entry.isDirectory() || parsed === undefined || parsed.kind !== "final") {
+            throw snapshotFailure();
+        }
+        records.push(
+            await readMaintenanceSnapshotRecord(maintenance, entry.name, "scheduled")
+        );
+    }
+    records.sort((left, right) => right.name.localeCompare(left.name));
+    return Object.freeze(records);
+}
+
+async function reconcileStaleMaintenanceTransients(
+    maintenance: OpenedDirectory,
+    hooks: SqliteMaintenanceSnapshotTestHooks
+): Promise<void> {
+    const entries = await readdir(maintenance.path, { withFileTypes: true });
+    if (entries.length > sqliteMaintenanceEntryMaximum) throw snapshotFailure();
+    const stale: string[] = [];
+    for (const entry of entries) {
+        const parsed = parseOwnedSnapshotName(entry.name);
+        if (parsed === undefined || uuidV7Timestamp(parsed.id) > Date.now()) {
+            throw snapshotFailure();
+        }
+        if (entry.isDirectory() && parsed.kind !== "final") {
+            stale.push(entry.name);
+            continue;
+        }
+        if (!entry.isDirectory() || parsed.kind !== "final") {
+            throw snapshotFailure();
+        }
+    }
+    if (stale.length > 4) throw snapshotFailure();
+    for (const ownedName of stale) {
+        await removeOwnedSnapshot(maintenance, ownedName, hooks);
+    }
+    if (stale.length > 0) await maintenance.handle.sync();
+    await revalidateDirectory(maintenance, 0o700n);
+}
+
+async function listCutoverSnapshotRecords(
+    backups: OpenedDirectory
+): Promise<readonly InternalMaintenanceSnapshotRecord[]> {
+    const entries = await readdir(backups.path, { withFileTypes: true });
+    if (entries.length > sqliteBackupRootEntryMaximum) throw snapshotFailure();
+    const records: InternalMaintenanceSnapshotRecord[] = [];
+    for (const entry of entries) {
+        if (entry.name === sqliteMaintenanceDirectoryName && entry.isDirectory()) {
+            continue;
+        }
+        const parsed = parseOwnedSnapshotName(entry.name);
+        if (
+            entry.isDirectory() &&
+            parsed !== undefined &&
+            parsed.kind !== "final" &&
+            uuidV7Timestamp(parsed.id) <= Date.now()
+        ) {
+            continue;
+        }
+        if (!entry.isDirectory() || !v.is(lowercaseUuidV7Schema(), entry.name)) {
+            throw snapshotFailure();
+        }
+        records.push(await readMaintenanceSnapshotRecord(backups, entry.name, "cutover"));
+    }
+    return Object.freeze(records);
+}
+
+function projectMaintenanceInventory(
+    records: readonly InternalMaintenanceSnapshotRecord[]
+): SqliteMaintenanceSnapshotInventory {
+    let totalBytes = 0;
+    const backups = records
+        .toSorted((left, right) => right.name.localeCompare(left.name))
+        .map((record) => {
+            const { bytes, createdAtMs, kind, restoreVerifiedAtMs, verificationLevel } =
+                record;
+            totalBytes += bytes;
+            if (!Number.isSafeInteger(totalBytes)) throw snapshotFailure();
+            return Object.freeze({
+                bytes,
+                createdAtMs,
+                kind,
+                ...(restoreVerifiedAtMs === undefined ? {} : { restoreVerifiedAtMs }),
+                verificationLevel,
+            });
+        });
+    if (backups.length > sqliteBackupInventoryMaximum) throw snapshotFailure();
+    return Object.freeze({ backups: Object.freeze(backups), totalBytes });
+}
+
+/**
+ * Reads fixed immutable scheduled and activation/cutover namespaces into path-free metadata.
+ * At most 32 manifests (64 KiB each) are admitted; database bytes are never read.
+ * @param untrustedStateDirectory Candidate canonical Dashboard state directory.
+ * @returns Bounded verified inventory without paths.
+ */
+export async function readVerifiedSqliteMaintenanceInventory(
+    untrustedStateDirectory: string
+): Promise<SqliteMaintenanceSnapshotInventory> {
+    const parsed = v.safeParse(absolutePathSchema, untrustedStateDirectory, {
+        abortEarly: true,
+    });
+    if (!parsed.success) throw snapshotFailure();
+    const state = await openStableDirectory(parsed.output, 0o700n);
+    let backups: OpenedDirectory | undefined;
+    let maintenance: OpenedDirectory | undefined;
+    let result: SqliteMaintenanceSnapshotInventory | undefined;
+    let failure = false;
+    try {
+        backups = await openStableDirectory(
+            path.join(parsed.output, "backups"),
+            0o700n,
+            state.identity.dev
+        );
+        const maintenancePath = path.join(backups.path, sqliteMaintenanceDirectoryName);
+        const maintenanceExists = await lstat(maintenancePath)
+            .then(() => true)
+            .catch((error: unknown) => {
+                if (errorCode(error) === "ENOENT") return false;
+                throw snapshotFailure();
+            });
+        if (maintenanceExists) {
+            maintenance = await openStableDirectory(
+                maintenancePath,
+                0o700n,
+                backups.identity.dev
+            );
+            result = projectMaintenanceInventory([
+                ...(await listMaintenanceSnapshotRecords(maintenance)),
+                ...(await listCutoverSnapshotRecords(backups)),
+            ]);
+        } else {
+            result = projectMaintenanceInventory(
+                await listCutoverSnapshotRecords(backups)
+            );
+        }
+    } catch {
+        failure = true;
+    } finally {
+        const [maintenanceClosed, backupsClosed, stateClosed] = await Promise.all([
+            closeHandle(maintenance?.handle),
+            closeHandle(backups?.handle),
+            closeHandle(state.handle),
+        ]);
+        if (!maintenanceClosed || !backupsClosed || !stateClosed) failure = true;
+    }
+    if (failure || result === undefined) throw snapshotFailure();
+    return result;
+}
+
+function verifyQuickCheck(database: Database): void {
+    const parsed = v.safeParse(
+        quickCheckRowsSchema,
+        database.query("PRAGMA quick_check").all(),
+        { abortEarly: true }
+    );
+    if (
+        !parsed.success ||
+        parsed.output.length !== 1 ||
+        parsed.output[0]?.quick_check !== "ok"
+    ) {
+        throw snapshotFailure();
+    }
+}
+
+async function copySnapshotIntoRestoreVerification(
+    sourceDirectory: OpenedDirectory,
+    verificationDirectory: OpenedDirectory,
+    expectedSource: SnapshotFileIdentity
+): Promise<BigIntStats> {
+    if (typeof process.getuid !== "function") throw snapshotFailure();
+    const sourceFile = `/proc/self/fd/${sourceDirectory.handle.fd}/${snapshotDatabaseFileName}`;
+    const destinationFile = `/proc/self/fd/${verificationDirectory.handle.fd}/${snapshotDatabaseFileName}`;
+    let source: FileHandle | undefined;
+    let destination: FileHandle | undefined;
+    let copied: BigIntStats | undefined;
+    let failure = false;
+    try {
+        source = await open(
+            sourceFile,
+            constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
+        );
+        destination = await open(
+            destinationFile,
+            constants.O_CREAT |
+                constants.O_EXCL |
+                constants.O_NOFOLLOW |
+                constants.O_WRONLY,
+            privateFileMode
+        );
+        const held = await source.stat({ bigint: true });
+        if (
+            !held.isFile() ||
+            held.isSymbolicLink() ||
+            held.dev !== expectedSource.dev ||
+            held.ino !== expectedSource.ino ||
+            held.nlink !== 1n ||
+            held.uid !== BigInt(process.getuid()) ||
+            held.size !== BigInt(expectedSource.bytes) ||
+            (held.mode & 0o7777n) !== 0o400n
+        ) {
+            throw snapshotFailure();
+        }
+        const buffer = Buffer.alloc(
+            Math.min(snapshotCopyBufferBytes, expectedSource.bytes)
+        );
+        let offset = 0;
+        while (offset < expectedSource.bytes) {
+            const length = Math.min(buffer.byteLength, expectedSource.bytes - offset);
+            const read = await source.read(buffer, 0, length, offset);
+            if (read.bytesRead <= 0) throw snapshotFailure();
+            let written = 0;
+            while (written < read.bytesRead) {
+                const write = await destination.write(
+                    buffer,
+                    written,
+                    read.bytesRead - written,
+                    offset + written
+                );
+                if (write.bytesWritten <= 0) throw snapshotFailure();
+                written += write.bytesWritten;
+            }
+            offset += read.bytesRead;
+        }
+        await destination.sync();
+        const [sourceAfter, destinationAfter] = await Promise.all([
+            source.stat({ bigint: true }),
+            destination.stat({ bigint: true }),
+        ]);
+        if (
+            sourceAfter.dev !== held.dev ||
+            sourceAfter.ino !== held.ino ||
+            sourceAfter.size !== held.size ||
+            sourceAfter.ctimeNs !== held.ctimeNs ||
+            sourceAfter.mtimeNs !== held.mtimeNs ||
+            !destinationAfter.isFile() ||
+            destinationAfter.isSymbolicLink() ||
+            destinationAfter.dev !== verificationDirectory.identity.dev ||
+            destinationAfter.nlink !== 1n ||
+            destinationAfter.uid !== BigInt(process.getuid()) ||
+            destinationAfter.size !== held.size ||
+            (destinationAfter.mode & 0o7777n) !== 0o600n
+        ) {
+            throw snapshotFailure();
+        }
+        copied = destinationAfter;
+    } catch {
+        failure = true;
+    }
+    const [sourceClosed, destinationClosed] = await Promise.all([
+        closeHandle(source),
+        closeHandle(destination),
+    ]);
+    if (failure || !sourceClosed || !destinationClosed || copied === undefined) {
+        throw snapshotFailure();
+    }
+    return copied;
+}
+
+async function verifySnapshotRestoreCopy(
+    maintenance: OpenedDirectory,
+    sourceDirectory: OpenedDirectory,
+    transitionId: string,
+    expectedSource: SnapshotFileIdentity,
+    migrations: readonly VerifiedMigration[],
+    hooks: SqliteMaintenanceSnapshotTestHooks
+): Promise<number> {
+    const verificationName = `.verify-${transitionId}`;
+    const maintenanceDescriptor = `/proc/self/fd/${maintenance.handle.fd}`;
+    await requireMissing(path.join(maintenanceDescriptor, verificationName));
+    await mkdir(path.join(maintenanceDescriptor, verificationName), {
+        mode: privateDirectoryMode,
+    });
+    await maintenance.handle.sync();
+
+    let verification: OpenedDirectory | undefined;
+    let verifiedAtMs: number | undefined;
+    let failure = false;
+    try {
+        const verificationPath = path.join(maintenance.path, verificationName);
+        verification = await openStableDirectory(
+            verificationPath,
+            0o700n,
+            maintenance.identity.dev
+        );
+        const copied = await copySnapshotIntoRestoreVerification(
+            sourceDirectory,
+            verification,
+            expectedSource
+        );
+        const restoreCopyFile = path.join(verificationPath, snapshotDatabaseFileName);
+        await hooks.afterRestoreCopyCreated?.(restoreCopyFile);
+        const before = await lstat(restoreCopyFile, { bigint: true });
+        if (
+            typeof process.getuid !== "function" ||
+            !before.isFile() ||
+            before.isSymbolicLink() ||
+            before.dev !== copied.dev ||
+            before.ino !== copied.ino ||
+            before.nlink !== 1n ||
+            before.uid !== BigInt(process.getuid()) ||
+            before.size !== copied.size ||
+            before.ctimeNs !== copied.ctimeNs ||
+            before.mtimeNs !== copied.mtimeNs ||
+            (before.mode & 0o7777n) !== 0o600n
+        ) {
+            throw snapshotFailure();
+        }
+        const restored = new Database(restoreCopyFile, {
+            readonly: true,
+            strict: true,
+        });
+        try {
+            if (restored.filename !== restoreCopyFile) throw snapshotFailure();
+            configureSnapshotValidationConnection(restored);
+            verifyQuickCheck(restored);
+            validateVerifiedMigrations(restored, migrations);
+        } finally {
+            restored.close(true);
+        }
+        await requireSidecarsAbsent(restoreCopyFile);
+        const after = await lstat(restoreCopyFile, { bigint: true });
+        if (
+            after.dev !== before.dev ||
+            after.ino !== before.ino ||
+            after.size !== before.size ||
+            after.ctimeNs !== before.ctimeNs ||
+            after.mtimeNs !== before.mtimeNs ||
+            after.nlink !== 1n ||
+            (after.mode & 0o7777n) !== 0o600n
+        ) {
+            throw snapshotFailure();
+        }
+        verifiedAtMs = Date.now();
+    } catch {
+        failure = true;
+    }
+    const verificationClosed = await closeHandle(verification?.handle);
+    let removed = true;
+    try {
+        await removeOwnedSnapshot(maintenance, verificationName, hooks);
+        await maintenance.handle.sync();
+    } catch {
+        removed = false;
+    }
+    if (failure || !verificationClosed || !removed || verifiedAtMs === undefined) {
+        throw snapshotFailure();
+    }
+    return verifiedAtMs;
+}
+
+function runPassiveCheckpoint(database: Database): {
+    readonly busyFrames: number;
+    readonly checkpointedFrames: number;
+    readonly logFrames: number;
+} {
+    database.run("PRAGMA optimize");
+    const parsed = v.safeParse(
+        v.nullable(passiveCheckpointRowSchema),
+        database.query("PRAGMA wal_checkpoint(PASSIVE)").get(),
+        { abortEarly: true }
+    );
+    if (!parsed.success || parsed.output === null) throw snapshotFailure();
+    return Object.freeze({
+        busyFrames: parsed.output.busy,
+        checkpointedFrames: parsed.output.checkpointed,
+        logFrames: parsed.output.log,
+    });
+}
+
+async function createOnlineMaintenanceSnapshot(
+    untrustedOptions: SqliteMaintenanceSnapshotOptions,
+    hooks: SqliteMaintenanceSnapshotTestHooks
+): Promise<SqliteMaintenanceJobResult> {
+    const parsed = v.safeParse(sqliteMaintenanceOptionsSchema, untrustedOptions, {
+        abortEarly: true,
+    });
+    if (!parsed.success) throw snapshotFailure();
+    const options = Object.freeze(parsed.output);
+    const prepared = await prepareDatabasePath(options.stateDirectory, false);
+    if (!prepared) throw snapshotFailure();
+    const state = await openStableDirectory(options.stateDirectory, 0o700n);
+    let backups: OpenedDirectory | undefined;
+    let maintenance: OpenedDirectory | undefined;
+    let stage: OpenedDirectory | undefined;
+    let database: Database | undefined;
+    let ownedName: string | undefined;
+    let result: SqliteMaintenanceJobResult | undefined;
+    let failure = false;
+    try {
+        backups = await openStableDirectory(
+            path.join(options.stateDirectory, "backups"),
+            0o700n,
+            state.identity.dev
+        );
+        maintenance = await openOrCreateMaintenanceDirectory(backups);
+        await reconcileStaleMaintenanceTransients(maintenance, hooks);
+        await requireSnapshotCapacity(prepared.filePath, maintenance.path);
+        const migrations = await loadVerifiedMigrations({
+            directory: options.migrationsDirectory,
+        });
+        const finalName = options.transitionId;
+        const stageName = `.stage-${options.transitionId}`;
+        const maintenanceDescriptor = `/proc/self/fd/${maintenance.handle.fd}`;
+        await requireMissing(path.join(maintenanceDescriptor, finalName));
+        await requireMissing(path.join(maintenanceDescriptor, stageName));
+        await mkdir(path.join(maintenanceDescriptor, stageName), {
+            mode: privateDirectoryMode,
+        });
+        ownedName = stageName;
+        const stagePath = path.join(maintenance.path, stageName);
+        stage = await openStableDirectory(stagePath, 0o700n, maintenance.identity.dev);
+        const snapshotFile = path.join(stagePath, snapshotDatabaseFileName);
+
+        database = new Database(prepared.filePath, {
+            create: false,
+            readwrite: true,
+            strict: true,
+        });
+        if (database.filename !== prepared.filePath) throw snapshotFailure();
+        configureDatabaseConnection(database);
+        validateVerifiedMigrations(database, migrations);
+        await assertDatabasePathStillValid(prepared);
+        vacuumInto(database, snapshotFile);
+        await assertDatabasePathStillValid(prepared);
+
+        const snapshot = new Database(snapshotFile, { readonly: true, strict: true });
+        try {
+            if (snapshot.filename !== snapshotFile) throw snapshotFailure();
+            configureSnapshotValidationConnection(snapshot);
+            verifyQuickCheck(snapshot);
+            validateVerifiedMigrations(snapshot, migrations);
+        } finally {
+            snapshot.close(true);
+        }
+        const fileIdentity = await hashAndFreezeSnapshotFile(
+            snapshotFile,
+            maintenance.identity.dev
+        );
+        const restoreVerifiedAtMs = await verifySnapshotRestoreCopy(
+            maintenance,
+            stage,
+            options.transitionId,
+            fileIdentity,
+            migrations,
+            hooks
+        );
+        const manifest = parseDatabaseSnapshotManifest({
+            database: {
+                bytes: fileIdentity.bytes,
+                sha256: fileIdentity.sha256,
+            },
+            formatVersion: 1,
+            migrations: currentDatabaseSnapshotMigrations(),
+            releaseId: options.releaseId,
+            restoreVerifiedAtMs,
+            transitionId: options.transitionId,
+        });
+        await writeSnapshotManifest(
+            path.join(stagePath, snapshotManifestFileName),
+            manifest
+        );
+        await stage.handle.sync();
+        await stage.handle.chmod(immutableDirectoryMode);
+        await stage.handle.sync();
+        await revalidateDirectory(stage, 0o500n);
+        await revalidateDirectory(maintenance, 0o700n);
+        await rename(
+            path.join(maintenanceDescriptor, stageName),
+            path.join(maintenanceDescriptor, finalName)
+        );
+        ownedName = finalName;
+        await maintenance.handle.sync();
+        await verifyFrozenSnapshot(
+            path.join(maintenance.path, finalName),
+            manifest,
+            fileIdentity
+        );
+        // Publication and frozen-file verification are the commit point. Later
+        // retention or result-projection failure must never roll back this new
+        // recovery artifact after an older snapshot may already be retired.
+        ownedName = undefined;
+
+        const checkpoint = runPassiveCheckpoint(database);
+        const records = await listMaintenanceSnapshotRecords(maintenance);
+        for (const record of records.slice(sqliteMaintenanceBackupMaximum)) {
+            await removeOwnedSnapshot(maintenance, record.name, hooks);
+        }
+        await maintenance.handle.sync();
+        const retained = await listMaintenanceSnapshotRecords(maintenance);
+        const inventory = projectMaintenanceInventory(retained);
+        result = Object.freeze({
+            backupBytes: fileIdentity.bytes,
+            backupCreatedAtMs: uuidV7Timestamp(options.transitionId),
+            checkpoint,
+            completedAtMs: Date.now(),
+            retainedBackupCount: inventory.backups.length,
+            retainedBackupBytes: inventory.totalBytes,
+            status: "completed" as const,
+        });
+    } catch {
+        failure = true;
+    }
+
+    let closeFailed = false;
+    if (database) {
+        try {
+            database.close(true);
+        } catch {
+            closeFailed = true;
+        }
+    }
+    const stageClosed = await closeHandle(stage?.handle);
+    if (ownedName && maintenance && stageClosed) {
+        try {
+            await removeOwnedSnapshot(maintenance, ownedName, hooks);
+        } catch {
+            closeFailed = true;
+        }
+    }
+    const [maintenanceClosed, backupsClosed, stateClosed] = await Promise.all([
+        closeHandle(maintenance?.handle),
+        closeHandle(backups?.handle),
+        closeHandle(state.handle),
+    ]);
+    if (
+        failure ||
+        closeFailed ||
+        !stageClosed ||
+        !maintenanceClosed ||
+        !backupsClosed ||
+        !stateClosed ||
+        result === undefined
+    ) {
+        throw snapshotFailure();
+    }
+    return result;
+}
+
+/**
+ * Creates one WAL-consistent online snapshot under the fixed maintenance namespace,
+ * verifies it before atomic publication, retains fourteen, then runs fixed SQLite upkeep.
+ * @param options Fixed release, migrations, state, and transition identity.
+ * @param hooks Optional deterministic adversarial test boundaries.
+ * @returns Effect yielding one sanitized maintenance result.
+ */
+export function createVerifiedSqliteMaintenanceSnapshot(
+    options: SqliteMaintenanceSnapshotOptions,
+    hooks: SqliteMaintenanceSnapshotTestHooks = {}
+): Effect.Effect<SqliteMaintenanceJobResult, DatabaseSnapshotError> {
+    return Effect.tryPromise({
+        catch: () => new DatabaseSnapshotError({ message: snapshotFailureMessage }),
+        try: () => createOnlineMaintenanceSnapshot(options, hooks),
+    });
 }
 
 async function createSnapshot(
