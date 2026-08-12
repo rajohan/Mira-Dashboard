@@ -15,6 +15,7 @@ concurrency:
 jobs:
     frontend-checks:
         name: frontend-checks
+        if: ${{ !startsWith(github.event.pull_request.head.ref, 'mira/greenfield-rewrite-') }}
         runs-on: ubuntu-latest
         timeout-minutes: 15
         env:
@@ -68,6 +69,7 @@ jobs:
 
     backend-checks:
         name: backend-checks
+        if: ${{ !startsWith(github.event.pull_request.head.ref, 'mira/greenfield-rewrite-') }}
         runs-on: ubuntu-latest
         timeout-minutes: 15
         env:

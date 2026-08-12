@@ -547,6 +547,7 @@ export function startDevelopmentRemoteProxy(
     const resolved = resolvedConfiguration(configuration);
     return Bun.serve<DevelopmentRemoteProxySocketData>({
         fetch(request, server) {
+            server.timeout(request, 0);
             if (!hasExpectedPublicHost(request, resolved.publicOrigin)) {
                 return new Response("Invalid development host", { status: 421 });
             }

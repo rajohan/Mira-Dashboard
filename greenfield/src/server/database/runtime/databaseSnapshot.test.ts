@@ -69,6 +69,18 @@ async function fixture() {
     return { projectRoot, state };
 }
 
+async function withProcessUmask<T>(
+    mask: number,
+    operation: () => Promise<T>
+): Promise<T> {
+    const previous = process.umask(mask);
+    try {
+        return await operation();
+    } finally {
+        process.umask(previous);
+    }
+}
+
 async function initializeDatabase(stateDirectory: string): Promise<void> {
     const runtime = ManagedRuntime.make(
         databaseRuntimeLayer({
@@ -132,13 +144,15 @@ describe("verified database snapshots", () => {
         runtimes.push(runtime);
         await runtime.runPromise(DatabaseRuntimeService);
         const transitionId = uuidV7At(Date.now() - 1000, 100);
-        const result = await Effect.runPromise(
-            createVerifiedSqliteMaintenanceSnapshot({
-                migrationsDirectory,
-                releaseId,
-                stateDirectory: state.stateDirectory,
-                transitionId,
-            })
+        const result = await withProcessUmask(0o022, () =>
+            Effect.runPromise(
+                createVerifiedSqliteMaintenanceSnapshot({
+                    migrationsDirectory,
+                    releaseId,
+                    stateDirectory: state.stateDirectory,
+                    transitionId,
+                })
+            )
         );
         expect(result.backupCreatedAtMs).toBe(
             Number.parseInt(transitionId.replaceAll("-", "").slice(0, 12), 16)
@@ -703,7 +717,7 @@ describe("verified database snapshots", () => {
         }
     });
 
-    test("fails closed on expectation mismatch and removes only its owned stage", async () => {
+    test("fails closed under a permissive umask and removes only its owned stage", async () => {
         const { state } = await fixture();
         await initializeDatabase(state.stateDirectory);
         const absentTransitionId = Bun.randomUUIDv7();
@@ -719,20 +733,25 @@ describe("verified database snapshots", () => {
         expect(absentFailure._tag).toBe("Failure");
 
         const transitionId = Bun.randomUUIDv7();
-        const tamperFailure = await rejectionError(
-            Effect.runPromise(
-                createVerifiedDatabaseSnapshot(
-                    {
-                        expectedState: "present",
-                        migrationsDirectory,
-                        releaseId,
-                        stateDirectory: state.stateDirectory,
-                        transitionId,
-                    },
-                    {
-                        afterSnapshotCreated: (snapshotFile) =>
-                            writeFile(snapshotFile, "tampered"),
-                    }
+        const tamperFailure = await withProcessUmask(0o022, () =>
+            rejectionError(
+                Effect.runPromise(
+                    createVerifiedDatabaseSnapshot(
+                        {
+                            expectedState: "present",
+                            migrationsDirectory,
+                            releaseId,
+                            stateDirectory: state.stateDirectory,
+                            transitionId,
+                        },
+                        {
+                            afterSnapshotCreated: async (snapshotFile) => {
+                                const snapshotStatus = await stat(snapshotFile);
+                                expect(snapshotStatus.mode & 0o777).toBe(0o600);
+                                await writeFile(snapshotFile, "tampered");
+                            },
+                        }
+                    )
                 )
             )
         );
@@ -740,17 +759,19 @@ describe("verified database snapshots", () => {
         expect(tamperFailure).toBeInstanceOf(DatabaseSnapshotError);
         expect(await readdir(state.backupsDirectory)).toEqual([]);
 
-        const replacementFailure = await rejectionError(
-            Effect.runPromise(
-                createVerifiedDatabaseSnapshot(
-                    {
-                        expectedState: "present",
-                        migrationsDirectory,
-                        releaseId,
-                        stateDirectory: state.stateDirectory,
-                        transitionId: Bun.randomUUIDv7(),
-                    },
-                    { afterSnapshotFileOpen: unlink }
+        const replacementFailure = await withProcessUmask(0o022, () =>
+            rejectionError(
+                Effect.runPromise(
+                    createVerifiedDatabaseSnapshot(
+                        {
+                            expectedState: "present",
+                            migrationsDirectory,
+                            releaseId,
+                            stateDirectory: state.stateDirectory,
+                            transitionId: Bun.randomUUIDv7(),
+                        },
+                        { afterSnapshotFileOpen: unlink }
+                    )
                 )
             )
         );

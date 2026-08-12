@@ -372,6 +372,82 @@ function vacuumInto(database: Database, destination: string): void {
     }
 }
 
+async function makeSnapshotFilePrivate(
+    snapshotDirectory: OpenedDirectory,
+    snapshotFile: string
+): Promise<void> {
+    if (
+        typeof process.getuid !== "function" ||
+        snapshotFile !== path.join(snapshotDirectory.path, snapshotDatabaseFileName)
+    ) {
+        throw snapshotFailure();
+    }
+    const anchored = path.join(
+        `/proc/self/fd/${snapshotDirectory.handle.fd}`,
+        snapshotDatabaseFileName
+    );
+    let handle: FileHandle | undefined;
+    let failed = false;
+    try {
+        handle = await open(anchored, snapshotFileFlags);
+        const [held, named, canonical] = await Promise.all([
+            handle.stat({ bigint: true }),
+            lstat(anchored, { bigint: true }),
+            realpath(`/proc/self/fd/${handle.fd}`),
+        ]);
+        const heldMode = held.mode & 0o7777n;
+        if (
+            canonical !== snapshotFile ||
+            !held.isFile() ||
+            held.isSymbolicLink() ||
+            held.nlink !== 1n ||
+            held.uid !== BigInt(process.getuid()) ||
+            held.dev !== snapshotDirectory.identity.dev ||
+            held.size <= 0n ||
+            held.size > BigInt(maximumSnapshotBytes) ||
+            (heldMode & 0o600n) !== 0o600n ||
+            (heldMode & 0o7111n) !== 0n ||
+            !named.isFile() ||
+            named.isSymbolicLink() ||
+            named.dev !== held.dev ||
+            named.ino !== held.ino ||
+            named.size !== held.size ||
+            named.nlink !== held.nlink ||
+            named.uid !== held.uid ||
+            (named.mode & 0o7777n) !== heldMode
+        ) {
+            throw snapshotFailure();
+        }
+        await handle.chmod(privateFileMode);
+        await handle.sync();
+        const [heldAfter, namedAfter] = await Promise.all([
+            handle.stat({ bigint: true }),
+            lstat(anchored, { bigint: true }),
+        ]);
+        if (
+            heldAfter.dev !== held.dev ||
+            heldAfter.ino !== held.ino ||
+            heldAfter.size !== held.size ||
+            heldAfter.nlink !== held.nlink ||
+            heldAfter.uid !== held.uid ||
+            (heldAfter.mode & 0o7777n) !== 0o600n ||
+            !namedAfter.isFile() ||
+            namedAfter.isSymbolicLink() ||
+            namedAfter.dev !== heldAfter.dev ||
+            namedAfter.ino !== heldAfter.ino ||
+            namedAfter.size !== heldAfter.size ||
+            namedAfter.nlink !== heldAfter.nlink ||
+            namedAfter.uid !== heldAfter.uid ||
+            (namedAfter.mode & 0o7777n) !== 0o600n
+        ) {
+            throw snapshotFailure();
+        }
+    } catch {
+        failed = true;
+    }
+    if (!(await closeHandle(handle)) || failed) throw snapshotFailure();
+}
+
 function verifySnapshotDatabase(
     snapshotFile: string,
     migrations: readonly VerifiedMigration[]
@@ -978,6 +1054,7 @@ async function snapshotPresentDatabase(
         checkpointSourceDatabase(database);
         await assertDatabasePathStillValid(prepared);
         vacuumInto(database, snapshotFile);
+        await makeSnapshotFilePrivate(stage, snapshotFile);
         await hooks.afterSnapshotCreated?.(snapshotFile);
         await assertDatabasePathStillValid(prepared);
         expectedSourceIdentity = sourceDatabaseIdentity(
@@ -1626,6 +1703,7 @@ async function createOnlineMaintenanceSnapshot(
         validateVerifiedMigrations(database, migrations);
         await assertDatabasePathStillValid(prepared);
         vacuumInto(database, snapshotFile);
+        await makeSnapshotFilePrivate(stage, snapshotFile);
         await assertDatabasePathStillValid(prepared);
 
         const snapshot = new Database(snapshotFile, { readonly: true, strict: true });
