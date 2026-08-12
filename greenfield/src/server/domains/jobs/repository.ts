@@ -91,9 +91,9 @@ import {
     scheduledJobInsertSchema,
     scheduledJobSelectSchema,
 } from "../../database/validation/scheduledJobs.ts";
-import { parseWorkerActionKeysJson } from "../../database/validation/workerActionKeys.ts";
 import {
     canonicalWorkerActionKeys,
+    parseWorkerActionKeysJson,
     workerActionKeysSchema,
 } from "../../database/validation/workerActionKeys.ts";
 import {

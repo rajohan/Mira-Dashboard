@@ -116,11 +116,11 @@ export function createServiceActionsService(
                 ...(jobRunId === undefined ? {} : { jobRunId }),
                 settlement,
             });
-        } catch (cause) {
+        } catch (error) {
             try {
                 options.onAuditSettlementFailure?.({
                     actionId: input.actionId,
-                    cause,
+                    cause: error,
                     settlement,
                 });
             } catch {
@@ -197,18 +197,18 @@ export function createServiceActionsService(
                 await settleAudit(parsed, context, "failed");
                 throw error;
             }
-            const mapped =
-                error instanceof ServiceActionQueueError
-                    ? queueFailure(error)
-                    : error instanceof v.ValiError
-                      ? new ServiceActionsServiceError("unknown-outcome", {
-                            cause: error,
-                        })
-                      : signal?.aborted
-                        ? error
-                        : new ServiceActionsServiceError("unavailable", {
-                              cause: error,
-                          });
+            let mapped: unknown;
+            if (error instanceof ServiceActionQueueError) {
+                mapped = queueFailure(error);
+            } else if (error instanceof v.ValiError) {
+                mapped = new ServiceActionsServiceError("unknown-outcome", {
+                    cause: error,
+                });
+            } else {
+                mapped = signal?.aborted
+                    ? error
+                    : new ServiceActionsServiceError("unavailable", { cause: error });
+            }
             await settleAudit(
                 parsed,
                 context,

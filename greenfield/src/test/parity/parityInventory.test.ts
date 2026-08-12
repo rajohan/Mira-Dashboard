@@ -273,17 +273,17 @@ describe("reviewed pre-cutover parity inventory", () => {
 
         expect(
             endpoints.map(({ id, target }) => {
-                const identity =
-                    target.kind === "procedure"
-                        ? target.names
-                        : target.kind === "raw-http"
-                          ? `${target.method} ${target.path}`
-                          : target.consumerEvidence;
+                let identity: readonly string[] | string;
+                if (target.kind === "procedure") {
+                    identity = target.names;
+                } else if (target.kind === "raw-http") {
+                    identity = `${target.method} ${target.path}`;
+                } else {
+                    identity = target.consumerEvidence;
+                }
                 return [
                     id,
-                    target.kind === "reviewed-removal"
-                        ? target.kind
-                        : target.delivery,
+                    target.kind === "reviewed-removal" ? target.kind : target.delivery,
                     identity,
                 ];
             })
@@ -291,18 +291,10 @@ describe("reviewed pre-cutover parity inventory", () => {
             [
                 "GET /api/exec/:jobId",
                 "implemented",
-                [
-                    "jobs.getRun",
-                    "serviceActions.getStatus",
-                    "terminal.getActiveSession",
-                ],
+                ["jobs.getRun", "serviceActions.getStatus", "terminal.getActiveSession"],
             ],
             ["POST /api/exec", "reviewed-removal", "no-current-consumers"],
-            [
-                "POST /api/exec/:jobId/stop",
-                "implemented",
-                ["terminal.terminateSession"],
-            ],
+            ["POST /api/exec/:jobId/stop", "implemented", ["terminal.terminateSession"]],
             [
                 "POST /api/exec/start",
                 "implemented",
