@@ -396,11 +396,11 @@ export function createDashboardChatMediaReferenceRefresh(
         if (
             attachmentId !== undefined &&
             routedSessions.length === 0 &&
+            sessionsRead > 0 &&
             fallbackSessionCount > 0
         ) {
             legacyFallbackSessionOffset =
-                (legacyFallbackSessionOffset + Math.max(1, sessionsRead)) %
-                fallbackSessionCount;
+                (legacyFallbackSessionOffset + sessionsRead) % fallbackSessionCount;
         }
     };
 }

@@ -17,6 +17,8 @@ export const chatMediaReferenceTtlMs = 10 * 60 * 1000;
 
 export interface ChatMediaReference {
     readonly attachmentId: string;
+    /** Canonical transcript identifier used when this row is a compatibility alias. */
+    readonly authorizationAttachmentId?: string;
     readonly messageId: string;
     readonly sessionKey: string;
     readonly source: PersistentGatewayChatMediaSource;
@@ -323,6 +325,7 @@ class InMemoryChatMediaReferencesImplementation implements InMemoryChatMediaRefe
         const attachmentId = uuidV4FromHash(identifierHash);
         this.#register({
             attachmentId: upstreamAttachmentId,
+            authorizationAttachmentId: attachmentId,
             messageId,
             sessionKey,
             source: {
@@ -386,6 +389,10 @@ class InMemoryChatMediaReferencesImplementation implements InMemoryChatMediaRefe
     #register(reference: ChatMediaReference): void {
         if (this.#disposed) throw new TypeError("Chat media references are disposed");
         const attachmentId = v.parse(chatAttachmentIdSchema, reference.attachmentId);
+        const authorizationAttachmentId =
+            reference.authorizationAttachmentId === undefined
+                ? undefined
+                : v.parse(chatAttachmentIdSchema, reference.authorizationAttachmentId);
         const sessionKey = boundedIdentity(reference.sessionKey, 512);
         const messageId = boundedIdentity(reference.messageId, 256);
         const source = frozenSource(reference.source);
@@ -395,6 +402,8 @@ class InMemoryChatMediaReferencesImplementation implements InMemoryChatMediaRefe
             current !== undefined &&
             (current.sessionKey !== sessionKey ||
                 current.messageId !== messageId ||
+                (current.authorizationAttachmentId ?? current.attachmentId) !==
+                    (authorizationAttachmentId ?? attachmentId) ||
                 !sameSource(current.source, source))
         ) {
             this.#references.delete(attachmentId);
@@ -409,6 +418,9 @@ class InMemoryChatMediaReferencesImplementation implements InMemoryChatMediaRefe
             attachmentId,
             Object.freeze({
                 attachmentId,
+                ...(authorizationAttachmentId === undefined
+                    ? {}
+                    : { authorizationAttachmentId }),
                 expiresAtMs: now + this.#ttlMs,
                 messageId,
                 sessionKey,
@@ -433,6 +445,11 @@ class InMemoryChatMediaReferencesImplementation implements InMemoryChatMediaRefe
         }
         return Object.freeze({
             attachmentId: reference.attachmentId,
+            ...(reference.authorizationAttachmentId === undefined
+                ? {}
+                : {
+                      authorizationAttachmentId: reference.authorizationAttachmentId,
+                  }),
             messageId: reference.messageId,
             sessionKey: reference.sessionKey,
             source: reference.source,

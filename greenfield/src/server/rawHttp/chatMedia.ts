@@ -257,14 +257,22 @@ function requestAbortReason(signal: AbortSignal): Error {
         : new DOMException("The operation was aborted", "AbortError");
 }
 
-function waitForRefresh<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
-    if (signal.aborted) return Promise.reject(requestAbortReason(signal));
+function waitForRefresh<T>(
+    work: Promise<T>,
+    signal: AbortSignal,
+    onSettled?: () => void
+): Promise<T> {
+    if (signal.aborted) {
+        onSettled?.();
+        return Promise.reject(requestAbortReason(signal));
+    }
     return new Promise<T>((resolve, reject) => {
         let settled = false;
         const finish = (settle: () => void): void => {
             if (settled) return;
             settled = true;
             signal.removeEventListener("abort", onAbort);
+            onSettled?.();
             settle();
         };
         const onAbort = (): void => {
@@ -273,43 +281,6 @@ function waitForRefresh<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
         signal.addEventListener("abort", onAbort, { once: true });
         work.then(
             (value) => finish(() => resolve(value)),
-            (error: unknown) =>
-                finish(() =>
-                    reject(
-                        error instanceof Error
-                            ? error
-                            : new Error("Chat media reference refresh failed")
-                    )
-                )
-        ).catch(() => {});
-        if (signal.aborted) onAbort();
-    });
-}
-
-function waitForSharedRefresh(
-    work: Promise<void>,
-    signal: AbortSignal,
-    onSettled: () => void
-): Promise<void> {
-    if (signal.aborted) {
-        onSettled();
-        return Promise.reject(requestAbortReason(signal));
-    }
-    return new Promise<void>((resolve, reject) => {
-        let settled = false;
-        const finish = (settle: () => void): void => {
-            if (settled) return;
-            settled = true;
-            signal.removeEventListener("abort", onAbort);
-            onSettled();
-            settle();
-        };
-        const onAbort = (): void => {
-            finish(() => reject(requestAbortReason(signal)));
-        };
-        signal.addEventListener("abort", onAbort, { once: true });
-        work.then(
-            () => finish(resolve),
             (error: unknown) =>
                 finish(() =>
                     reject(
@@ -946,7 +917,7 @@ export function createChatRawHttpHandler(
                 return;
             }
             mediaReferenceRefreshFollowerCount += 1;
-            await waitForSharedRefresh(activeRefresh.response, requestSignal, () => {
+            await waitForRefresh(activeRefresh.response, requestSignal, () => {
                 mediaReferenceRefreshFollowerCount -= 1;
             });
             return;
@@ -1171,7 +1142,8 @@ export function createChatRawHttpHandler(
         try {
             authorized = await options.authorizeMedia(
                 {
-                    attachmentId: reference.attachmentId,
+                    attachmentId:
+                        reference.authorizationAttachmentId ?? reference.attachmentId,
                     messageId: reference.messageId,
                     principal: authentication.principal,
                     sessionKey: reference.sessionKey,

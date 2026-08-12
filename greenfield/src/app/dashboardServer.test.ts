@@ -525,6 +525,42 @@ describe("Dashboard chat media-reference refresh", () => {
         expect(calls).toEqual([]);
     });
 
+    test("does not rotate the legacy fallback when a targeted refresh reads no session", async () => {
+        const targetSessionKey = "agent:stable-fallback:main";
+        const references = createInMemoryChatMediaReferences();
+        const attachmentId = references.registerManaged({
+            attachmentId: "00000000-0000-4000-8000-000000000002",
+            messageId: "message-stable-fallback",
+            sessionKey: targetSessionKey,
+        }).attachmentId;
+        references.dispose();
+        const calls: string[] = [];
+        const sessions = [
+            targetSessionKey,
+            "agent:unrelated:main",
+            targetSessionKey,
+            ...Array.from({ length: 30 }, (_, index) => `agent:fallback-${index}:main`),
+        ];
+        const refresh = createDashboardChatMediaReferenceRefresh({
+            chatService: {
+                history: (input) => {
+                    calls.push(input.sessionKey);
+                    return Promise.resolve(emptyMediaRefreshHistory(input.sessionKey));
+                },
+            },
+            gatewaySessionsService: {
+                list: () => Promise.resolve(mediaRefreshSessionSnapshot(sessions)),
+            },
+        });
+
+        await refresh(new AbortController().signal, attachmentId, "targeted");
+        expect(calls).toEqual([]);
+        await refresh(new AbortController().signal, attachmentId, "legacy");
+
+        expect(calls[0]).toBe(targetSessionKey);
+        expect(calls[1]).toBe("agent:unrelated:main");
+    });
+
     test("uses a bounded rotating fallback for legacy managed ids", async () => {
         const calls: string[] = [];
         const refresh = createDashboardChatMediaReferenceRefresh({

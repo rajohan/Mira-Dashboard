@@ -541,6 +541,64 @@ describe("chat raw HTTP media boundary", () => {
         references.dispose();
     });
 
+    test("reauthorizes a managed compatibility alias against its routed transcript id", async () => {
+        const store = createInMemoryChatAttachmentStore();
+        const references = createInMemoryChatMediaReferences();
+        const registered = references.registerManaged({
+            attachmentId,
+            messageId: "message-managed-alias",
+            sessionKey: "agent:main:main",
+        });
+        const authorizationIds: string[] = [];
+        const handler = createChatRawHttpHandler({
+            attachmentStore: store,
+            authenticateCredential: authentication(principal()),
+            authorizeMedia: (input) => {
+                authorizationIds.push(input.attachmentId);
+                return chatMessageAuthorizesMediaReference(
+                    {
+                        message: {
+                            content: {
+                                kind: "complete",
+                                parts: [
+                                    {
+                                        fileName: "managed.png",
+                                        id: "attachment-part-managed",
+                                        kind: "attachment",
+                                        mediaType: "image/png",
+                                        renderPolicy: "inline-image",
+                                        url: `/api/chat/media/${registered.attachmentId}?disposition=preview`,
+                                    },
+                                ],
+                            },
+                            id: "message-managed-alias",
+                            role: "assistant",
+                            source: "gateway-history",
+                        },
+                        status: "available",
+                    },
+                    input
+                );
+            },
+            browserOrigin: origin,
+            mediaFetcher: {
+                fetch: () =>
+                    Promise.resolve(
+                        new Response(png, { headers: { "content-type": "image/png" } })
+                    ),
+            },
+            mediaReferences: references,
+        });
+        const request = authenticatedRequest(
+            `/api/chat/media/${attachmentId}?disposition=preview`
+        );
+
+        expect(await handlerStatus(handler, request)).toBe(200);
+        expect(authorizationIds).toEqual([registered.attachmentId]);
+        store.dispose();
+        references.dispose();
+    });
+
     test("reauthorizes an expired media association before rejecting it", async () => {
         const now = { value: 1000 };
         const store = createInMemoryChatAttachmentStore();

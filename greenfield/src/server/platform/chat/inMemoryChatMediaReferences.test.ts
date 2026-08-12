@@ -115,6 +115,7 @@ describe("in-memory chat media references", () => {
         });
         expect(first.resolve(attachmentId)).toEqual({
             attachmentId,
+            authorizationAttachmentId: registered.attachmentId,
             messageId: input.messageId,
             sessionKey: input.sessionKey,
             source: {

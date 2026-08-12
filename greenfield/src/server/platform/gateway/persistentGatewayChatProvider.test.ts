@@ -1106,6 +1106,49 @@ describe("persistent Gateway chat provider", () => {
         ).toBeFalse();
     });
 
+    test("preserves literal MEDIA lines in non-assistant messages", async () => {
+        const literal = "Keep this literal\nMEDIA: /tmp/user-example.png";
+        const harness = createHarness({
+            "chat.history": {
+                messages: [
+                    {
+                        content: [{ text: literal, type: "text" }],
+                        id: "message-user-media-literal",
+                        role: "user",
+                    },
+                    {
+                        content: Array.from({ length: 129 }, () => ({
+                            text: "overflow",
+                            type: "text",
+                        })),
+                        id: "message-user-media-preview",
+                        role: "user",
+                        text: literal,
+                    },
+                ],
+                offset: 0,
+                sessionKey,
+            },
+        });
+
+        const history = await harness.provider.history({
+            limit: 2,
+            maxChars: 64 * 1024,
+            offset: 0,
+            sessionKey,
+        });
+        expect(history.messages[0]?.content).toEqual({
+            kind: "complete",
+            parts: [{ id: "1", kind: "text", text: literal }],
+        });
+        expect(history.messages[1]?.content).toEqual({
+            kind: "hydration-required",
+            preview: literal,
+            reason: "response-budget",
+        });
+        expect(harness.references).toEqual([]);
+    });
+
     test("previews only local text with a known bounded size", async () => {
         const harness = createHarness({
             "chat.history": {
@@ -1218,7 +1261,7 @@ describe("persistent Gateway chat provider", () => {
         ]);
     });
 
-    test("strips but never registers MEDIA directives from non-assistant roles", async () => {
+    test("preserves but never registers MEDIA directives from non-assistant roles", async () => {
         const discardedCandidates = Array.from(
             { length: 33 },
             (_, index) => `private/secret-${index}.txt`
@@ -1244,12 +1287,13 @@ describe("persistent Gateway chat provider", () => {
             sessionKey,
         });
 
+        const literalText = `Visible user text\nMeDiA: ${discardedCandidates.join(" ")}`;
         expect(history.messages[0]?.content).toEqual({
             kind: "complete",
-            parts: [{ id: "1", kind: "text", text: "Visible user text" }],
+            parts: [{ id: "1", kind: "text", text: literalText }],
         });
         expect(harness.references).toEqual([]);
-        expect(JSON.stringify(history.messages[0])).not.toContain("private/secret-");
+        expect(JSON.stringify(history.messages[0])).toContain("private/secret-32.txt");
     });
 
     test("resolves structured paths and URLs independently while preferring a valid path", async () => {

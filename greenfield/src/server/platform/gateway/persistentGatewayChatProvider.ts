@@ -881,9 +881,12 @@ function projectMessageParts(
     ): Readonly<{ text?: string }> | undefined => {
         const raw = boundedString(value, maximum);
         if (raw === undefined) return undefined;
+        if (!acceptsDirectiveMedia) {
+            return raw.length === 0 ? {} : { text: raw };
+        }
         const parsed = parseMediaDirectiveText(raw);
-        if (acceptsDirectiveMedia) directiveOverflow ||= parsed.overflow;
-        for (const candidate of acceptsDirectiveMedia ? parsed.candidates : []) {
+        directiveOverflow ||= parsed.overflow;
+        for (const candidate of parsed.candidates) {
             if (directiveMedia.length >= localHistoryMediaMaximum) {
                 directiveOverflow = true;
                 break;
@@ -1184,8 +1187,10 @@ function projectHistoryMessage(
     }
     if (role === undefined) throw new ChatProviderUnavailableError();
     const rawPreview = boundedString(message.text, 4096);
-    const preview =
-        rawPreview === undefined ? undefined : parseMediaDirectiveText(rawPreview).text;
+    let preview = rawPreview;
+    if (rawPreview !== undefined && rawRole === "assistant") {
+        preview = parseMediaDirectiveText(rawPreview).text;
+    }
     const parts = projectMessageParts(message, sessionKey, id, registrar);
     const hydrationRequired = metadata.truncated === true || parts === undefined;
     const projected = {
