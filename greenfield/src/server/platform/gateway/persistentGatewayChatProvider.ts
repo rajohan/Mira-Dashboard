@@ -1092,10 +1092,13 @@ function projectMessageParts(
                 providerVisibleToolResult(block.content) ??
                 block.text ??
                 block.error;
-            const output =
-                typeof outputValue === "string"
-                    ? visibleText(outputValue, 32 * 1024)?.text
-                    : safeJsonText(outputValue, 32 * 1024);
+            let output: string | undefined;
+            if (typeof outputValue === "string") {
+                const boundedToolOutput = boundedString(outputValue, 32 * 1024);
+                output = boundedToolOutput === "" ? undefined : boundedToolOutput;
+            } else {
+                output = safeJsonText(outputValue, 32 * 1024);
+            }
             parts.push({
                 callId: providerCallId ?? partId,
                 ...(providerCallId === undefined ? { callIdSource: "synthetic" } : {}),

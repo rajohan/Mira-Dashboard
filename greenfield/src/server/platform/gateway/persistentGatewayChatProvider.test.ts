@@ -588,6 +588,41 @@ describe("persistent Gateway chat provider", () => {
         });
     });
 
+    test("preserves literal MEDIA lines inside assistant tool results", async () => {
+        const literal =
+            "Tool output before\nMEDIA: images/tool-output.png\nTool output after";
+        const harness = createHarness({
+            "chat.history": {
+                messages: [
+                    {
+                        content: [
+                            {
+                                content: literal,
+                                type: "tool_result",
+                            },
+                        ],
+                        id: "assistant-tool-result",
+                        role: "assistant",
+                    },
+                ],
+                offset: 0,
+                sessionKey,
+            },
+        });
+
+        const history = await harness.provider.history({
+            limit: 1,
+            maxChars: 32 * 1024,
+            offset: 0,
+            sessionKey,
+        });
+
+        expect(history.messages[0]?.content).toMatchObject({
+            parts: [{ kind: "tool", output: literal, phase: "succeeded" }],
+        });
+        expect(harness.references).toEqual([]);
+    });
+
     test("redacts unknown tool-role array blocks instead of serializing provider metadata", async () => {
         const harness = createHarness({
             "chat.history": {
