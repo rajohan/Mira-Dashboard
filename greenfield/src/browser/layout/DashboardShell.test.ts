@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { dashboardNavigationItems } from "./DashboardShell.tsx";
+import { dashboardNavigationItems } from "./dashboardNavigation.ts";
 import {
     dashboardContentContainerClassName,
     dashboardMainClassName,
