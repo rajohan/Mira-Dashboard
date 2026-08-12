@@ -12,7 +12,7 @@ import {
     cacheHeartbeatResultSchema,
     cacheStatusResultSchema,
 } from "../contracts/cache.ts";
-import type { ChatHistoryOutput } from "../contracts/chat.ts";
+import { chatHistoryOutputSchema, type ChatHistoryOutput } from "../contracts/chat.ts";
 import { chatHistoryRetainedPageMaximum } from "../contracts/chatModel.ts";
 import {
     type GatewaySession,
@@ -51,6 +51,7 @@ import {
     testTotpSecretCipher,
 } from "../server/domains/security/testSupport/authentication.ts";
 import { resolveReviewedOpenClawFileRoot } from "../server/platform/files/openClawFileRootConfiguration.ts";
+import type { PersistentGatewayTransport } from "../server/platform/gateway/persistentGatewayTransport.ts";
 import type { PersistentOpenClawCronTransport } from "../server/platform/gateway/persistentOpenClawCronProvider.ts";
 import { createReadinessController } from "../server/platform/readiness/readinessState.ts";
 import { createDashboardApplicationRuntime } from "../server/platform/runtime/applicationRuntime.ts";
@@ -69,6 +70,7 @@ import {
     createDashboardChatMediaReferenceRefresh,
     createDashboardOpenClawCronProvider,
     createDashboardServer,
+    dashboardChatMediaReferenceRefreshPageMaximum,
     resolveDashboardGatewayScope,
     startDashboardOpenClawCronExpiryReconciliation,
     validateDashboardWebAuthnBrowserOrigin,
@@ -76,6 +78,75 @@ import {
 import { createDashboardTerminalComposition } from "./dashboardTerminal.ts";
 
 const mediaRefreshObservedAtMs = 1_800_000_000_000;
+
+function unavailableDashboardGatewayRequest(): Promise<never> {
+    return Promise.reject(new Error("unused Gateway operation"));
+}
+
+function localHistoryMediaGatewayTransport(
+    sessionKey: string,
+    message: Readonly<Record<string, unknown>>
+): PersistentGatewayTransport {
+    const listeners = new Set<Parameters<PersistentGatewayTransport["subscribe"]>[0]>();
+    return {
+        request(method) {
+            if (method !== "sessions.list") {
+                return unavailableDashboardGatewayRequest();
+            }
+            return Promise.resolve({
+                count: 1,
+                creators: [],
+                defaults: {},
+                hasMore: false,
+                limitApplied: 1,
+                nextOffset: null,
+                path: "(multiple)",
+                sessions: [
+                    {
+                        key: sessionKey,
+                        kind: "direct",
+                        updatedAt: authenticationTestNow.getTime(),
+                    },
+                ],
+                totalCount: 1,
+                ts: authenticationTestNow.getTime(),
+            });
+        },
+        requestAdmin: unavailableDashboardGatewayRequest,
+        requestChatRead(method) {
+            if (method === "chat.history") {
+                return Promise.resolve({ messages: [message], offset: 0, sessionKey });
+            }
+            if (method === "chat.message.get") {
+                return Promise.resolve({ message, ok: true });
+            }
+            return unavailableDashboardGatewayRequest();
+        },
+        requestChatReadMutation: unavailableDashboardGatewayRequest,
+        requestChatWrite: unavailableDashboardGatewayRequest,
+        requestOpenClawSettingsRead: unavailableDashboardGatewayRequest,
+        requestOpenClawSettingsWrite: unavailableDashboardGatewayRequest,
+        requestTaskRead: unavailableDashboardGatewayRequest,
+        requestTaskWrite: unavailableDashboardGatewayRequest,
+        snapshot: {
+            connectionGeneration: 1,
+            phase: "connected",
+            reconnectAttempt: 0,
+        },
+        start() {
+            for (const listener of listeners) listener.onState?.(this.snapshot);
+        },
+        stop() {
+            return Promise.resolve();
+        },
+        subscribe(listener) {
+            listeners.add(listener);
+            listener.onState?.(this.snapshot);
+            return () => listeners.delete(listener);
+        },
+        subscribeChat: () => () => {},
+    };
+}
 
 function mediaRefreshSessionSnapshot(keys: readonly string[]): ListGatewaySessionsResult {
     const sessions: GatewaySession[] = keys.map((key, index) => ({
@@ -249,6 +320,184 @@ describe("Dashboard chat media-reference refresh", () => {
                 sessionKey: "agent:long:main",
             })),
         ]);
+    });
+
+    test("caps aggregate restart rehydration work across all sessions", async () => {
+        const calls: { cursor: string; sessionKey: string }[] = [];
+        const refresh = createDashboardChatMediaReferenceRefresh({
+            chatService: {
+                history: (input) => {
+                    calls.push({ cursor: input.cursor, sessionKey: input.sessionKey });
+                    return Promise.reject(new Error("unavailable history"));
+                },
+            },
+            gatewaySessionsService: {
+                list: () =>
+                    Promise.resolve(
+                        mediaRefreshSessionSnapshot(
+                            Array.from(
+                                { length: 40 },
+                                (_, index) => `agent:bounded-${index}:main`
+                            )
+                        )
+                    ),
+            },
+        });
+
+        await refresh(new AbortController().signal);
+
+        expect(calls).toHaveLength(dashboardChatMediaReferenceRefreshPageMaximum);
+    });
+});
+
+describe("Dashboard local-history media composition", () => {
+    test("projects and serves one transcript-bound file without a Gateway media token", async () => {
+        const rootDirectory = await mkdtemp(
+            path.join(os.tmpdir(), "dashboard-local-history-media-composition-")
+        );
+        const stateDirectory = path.join(rootDirectory, "state");
+        const workspaceRoot = path.join(rootDirectory, "workspace");
+        const openClawRoot = path.join(rootDirectory, "openclaw");
+        const mediaRoot = path.join(openClawRoot, "media");
+        const productionRoot = path.join(rootDirectory, "production");
+        const uploadSpoolRoot = path.join(rootDirectory, "uploads");
+        await Promise.all(
+            [
+                stateDirectory,
+                workspaceRoot,
+                mediaRoot,
+                productionRoot,
+                uploadSpoolRoot,
+            ].map((directory) => mkdir(directory, { mode: 0o700, recursive: true }))
+        );
+        await chmod(openClawRoot, 0o700);
+        await writeFile(path.join(openClawRoot, "openclaw.json"), "{}\n", {
+            mode: 0o600,
+        });
+        const mediaBytes = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3, 4]);
+        const mediaPath = path.join(mediaRoot, "history-diagram.png");
+        await writeFile(mediaPath, mediaBytes, { mode: 0o600 });
+        const sessionKey = "agent:main:main";
+        const message = {
+            __openclaw: {
+                id: "message-local-history-media",
+                media: [
+                    {
+                        contentType: "image/png",
+                        fileName: "history-diagram.png",
+                        path: mediaPath,
+                        sizeBytes: mediaBytes.byteLength,
+                    },
+                ],
+            },
+            content: [{ text: "Rendered attachment.", type: "text" }],
+            role: "assistant",
+            timestamp: authenticationTestNow.getTime(),
+        };
+        const applicationRuntime = createDashboardApplicationRuntime({
+            database: {
+                migrationsDirectory,
+                releaseId: "0".repeat(40),
+                startupMode: "initialize-empty",
+                stateDirectory,
+            },
+            logger: createTestStructuredLogger(),
+            persistentGatewayTransport: localHistoryMediaGatewayTransport(
+                sessionKey,
+                message
+            ),
+        });
+        let server: Awaited<ReturnType<typeof createDashboardServer>> | undefined;
+
+        try {
+            await applicationRuntime.initialize();
+            const database = await applicationRuntime.database.orm();
+            const fixture = seedAuthenticationTestDatabase(
+                database,
+                authenticationTestNow
+            );
+            const openClawFileRoot = await resolveReviewedOpenClawFileRoot(
+                openClawRoot,
+                productionRoot
+            );
+            server = await createDashboardServer({
+                applicationRuntime,
+                browserOrigin: "https://dashboard.example",
+                gatewayUrl: "ws://127.0.0.1:1",
+                now: () => authenticationTestNow,
+                openClawFileRoot,
+                port: 0,
+                readiness: createReadinessController(),
+                totpSecretCipher: testTotpSecretCipher,
+                workspaceFileRoot: {
+                    id: "workspace",
+                    label: "Workspace",
+                    path: workspaceRoot,
+                    writable: true,
+                },
+                workspaceFileUploadSpoolRoot: uploadSpoolRoot,
+            });
+            const sessionHeaders = {
+                cookie: `${dashboardSessionCookieName}=${fixture.session.token}`,
+                origin: "https://dashboard.example",
+                "sec-fetch-site": "same-origin",
+            };
+            const input = encodeURIComponent(
+                JSON.stringify({
+                    json: { cursor: "0", limit: 100, sessionKey },
+                })
+            );
+            const historyResponse = await fetch(
+                new URL(`/trpc/chat.history?input=${input}`, server.url),
+                { headers: sessionHeaders }
+            );
+            expect(historyResponse.status).toBe(200);
+            const history = v.parse(
+                chatHistoryOutputSchema,
+                await readTrpcResult(historyResponse)
+            );
+            const projectedMessage = history.messages[0];
+            const attachment =
+                projectedMessage?.content.kind === "complete"
+                    ? projectedMessage.content.parts.find(
+                          (part) => part.kind === "attachment"
+                      )
+                    : undefined;
+            expect(attachment?.kind).toBe("attachment");
+            if (attachment?.kind !== "attachment") {
+                throw new Error("Expected one projected local-history attachment");
+            }
+            expect(attachment.url).toMatch(
+                /^\/api\/chat\/media\/[0-9a-f-]{36}\?disposition=preview$/u
+            );
+            expect(JSON.stringify(history)).not.toContain(openClawRoot);
+
+            const headResponse = await fetch(new URL(attachment.url, server.url), {
+                headers: sessionHeaders,
+                method: "HEAD",
+            });
+            expect(headResponse.status).toBe(200);
+            expect(headResponse.headers.get("content-type")).toBe("image/png");
+            expect(headResponse.headers.get("content-length")).toBe(
+                String(mediaBytes.byteLength)
+            );
+            const mediaResponse = await fetch(new URL(attachment.url, server.url), {
+                headers: sessionHeaders,
+            });
+            expect(mediaResponse.status).toBe(200);
+            expect(new Uint8Array(await mediaResponse.arrayBuffer())).toEqual(mediaBytes);
+            expect(JSON.stringify([...mediaResponse.headers])).not.toContain(
+                openClawRoot
+            );
+        } finally {
+            try {
+                await (server === undefined
+                    ? applicationRuntime.dispose()
+                    : server.stop(true));
+            } finally {
+                await rm(rootDirectory, { force: true, recursive: true });
+            }
+        }
     });
 });
 

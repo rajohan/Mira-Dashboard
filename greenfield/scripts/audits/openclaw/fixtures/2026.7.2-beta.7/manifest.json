@@ -6,7 +6,7 @@
         },
         {
             "file": "chat.json",
-            "sha256": "f8ff4bea603dec7ad74f6d875a8a24f5e345008d9ec2bf57c3283cb2e8e528d9"
+            "sha256": "9d5b8de41e511ea75ed028d95817680a2afb470fdd2022de01f09e93618c0410"
         },
         {
             "file": "cron.json",
@@ -86,6 +86,12 @@
             "path": "dist/channel-selection-DlHJ2GPc.js",
             "role": "channel-enabled-default",
             "sha256": "2a1876a154bf425d7afc957be08ef6bb003bb08df96614a94765b91a2ec82f4d"
+        },
+        {
+            "bytes": 61120,
+            "path": "dist/chat-display-projection-D-iaDWFn.js",
+            "role": "chat-display-projection",
+            "sha256": "4c1fe8c4b5ddcd1ebc42ea316186e2a78f890bcbd964fad5f918c26911236fc5"
         },
         {
             "bytes": 14070,
@@ -284,6 +290,24 @@
             "path": "dist/managed-image-attachments-DY0M_0qi.js",
             "role": "managed-outgoing-media",
             "sha256": "8e533074d301a5d4884158e1d4f12094310ca26075c8bf3237a67612804aced9"
+        },
+        {
+            "bytes": 14918,
+            "path": "dist/media-facts-B3O7my_e.js",
+            "role": "media-facts",
+            "sha256": "e4d4b50d59a39fb66b9a6ffbdb2ba0708b66eff2184d9839c5c10020195b6d26"
+        },
+        {
+            "bytes": 30733,
+            "path": "dist/payloads-DMgg2zzp.js",
+            "role": "media-output-directives",
+            "sha256": "d27eafea2b8da8f3cc2df756374236caa1b04012686e7a78c66289119fd289da"
+        },
+        {
+            "bytes": 28462,
+            "path": "dist/store-DQlZULRw.js",
+            "role": "media-store-root",
+            "sha256": "081a1888925702e4889164e2a48f331fd0aebab2ccc64348006de906328ade5b"
         },
         {
             "bytes": 33960,
@@ -500,6 +524,12 @@
             "path": "dist/tool-policy-D0BPUirT.js",
             "role": "tool-policy-normalization",
             "sha256": "27ad84b74bbeb660d9119bb45bb87ea619bf7b5fffe4ac4da5b9f42014bc64b0"
+        },
+        {
+            "bytes": 46765,
+            "path": "dist/session-accessor.sqlite-transcript-store-D9IEgzu1.js",
+            "role": "transcript-media-persistence",
+            "sha256": "73fef1dff84be8783531dae1528e25dbfd2cfe2d3d7abdaa1eefea0320529f0e"
         },
         {
             "bytes": 6633,

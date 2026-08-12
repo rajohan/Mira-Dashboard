@@ -71,6 +71,15 @@ const distributionArtifactSpecs: readonly DistributionArtifactSpec[] = [
         role: "chat-run-projection",
     },
     {
+        fileNamePattern: /^chat-display-projection-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "function hasTranscriptMediaFacts(message)",
+            "function toProjectedMessages(messages)",
+            "function projectChatDisplayMessagesWithState(messages, options)",
+        ],
+        role: "chat-display-projection",
+    },
+    {
         fileNamePattern: /^zod-schema\.channels-config-[A-Za-z0-9_-]+\.js$/u,
         markers: [
             "const ChannelModelByChannelSchema",
@@ -107,6 +116,33 @@ const distributionArtifactSpecs: readonly DistributionArtifactSpec[] = [
             "resolveByteResponse({",
         ],
         role: "managed-outgoing-media",
+    },
+    {
+        fileNamePattern: /^media-facts-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "function readPersistedMediaFacts(message)",
+            "function canonicalizePersistedUserMessageMedia(message)",
+            "function resolveMediaFactsWithPrecedence(source, legacyProjectionWins)",
+        ],
+        role: "media-facts",
+    },
+    {
+        fileNamePattern: /^payloads-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "const MEDIA_TOKEN_RE =",
+            "function isValidMedia(candidate, opts)",
+            "function splitMediaFromOutput(raw, options = {})",
+        ],
+        role: "media-output-directives",
+    },
+    {
+        fileNamePattern: /^store-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            'const resolveMediaDir = () => path.join(resolveConfigDir(), "media")',
+            "function resolveMediaScopedDir(subdir, caller)",
+            "function openMediaStore(maxBytes = MAX_BYTES, rootDir = resolveMediaDir())",
+        ],
+        role: "media-store-root",
     },
     {
         fileNamePattern: /^models-[A-Za-z0-9_-]+\.js$/u,
@@ -478,6 +514,16 @@ const distributionArtifactSpecs: readonly DistributionArtifactSpec[] = [
             "dropIfSlow: true",
         ],
         role: "session-change-event",
+    },
+    {
+        fileNamePattern:
+            /^session-accessor\.sqlite-transcript-store-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "function appendTranscriptEventInTransaction(database, scope, event, options = {})",
+            "function canonicalizeTranscriptEventMedia(event)",
+            "const persistedEvent = canonicalizeTranscriptEventMedia(event)",
+        ],
+        role: "transcript-media-persistence",
     },
     {
         fileNamePattern: /^reset-policy-[A-Za-z0-9_-]+\.js$/u,
@@ -1204,6 +1250,212 @@ function assertTaskNotificationChatSendSemantics(
     };
 }
 
+function assertLocalHistoryMediaSemantics(
+    artifacts: readonly LoadedSourceArtifact[]
+): SourceAuditResult["chat"]["adapter"]["media"]["localHistory"] {
+    const mediaFacts = artifactByRole(artifacts, "media-facts").contents;
+    const persistedReader = boundedSourceRegion(
+        mediaFacts,
+        "function readPersistedMediaFacts(message)",
+        "const LEGACY_MEDIA_CONTEXT_KEYS =",
+        2 * 1024,
+        "persisted media reader"
+    );
+    assertRequiredMarkers(persistedReader, "persisted canonical media envelope", [
+        'const metadata = message["__openclaw"]',
+        "metadata.media",
+        "return Array.isArray(media) ? media : void 0",
+    ]);
+
+    const normalizedFact = boundedSourceRegion(
+        mediaFacts,
+        "function normalizeMediaFact(media, index, defaults = {})",
+        "/** True when every path-bearing canonical fact has explicit staging proof. */",
+        4 * 1024,
+        "canonical media fact"
+    );
+    assertRequiredMarkers(normalizedFact, "canonical media fact fields", [
+        "path: normalizeOptionalString(media.path)",
+        "url: normalizeOptionalString(media.url)",
+        "contentType,",
+        "kind: media.kind ?? defaults.kind ?? kindFromMime(contentType)",
+        "fileName: normalizeOptionalString(media.fileName)",
+        "sizeBytes: normalizeNonNegativeNumber(media.sizeBytes)",
+        "durationMs",
+        "width",
+        "height",
+        "transcribed:",
+        "messageId:",
+        "workspaceDir",
+        "staged:",
+        "hydrationSuppressed:",
+    ]);
+
+    const canonicalization = boundedSourceRegion(
+        mediaFacts,
+        "function canonicalizePersistedUserMessageMedia(message)",
+        "function stripLegacyMediaContextFields(ctx)",
+        16 * 1024,
+        "persisted media canonicalization"
+    );
+    assertRequiredMarkers(canonicalization, "persisted legacy media canonicalization", [
+        'const hadTopLevelMedia = Object.hasOwn(record, "media")',
+        "media: canonical ?? topLevelMedia",
+        'throw new Error("legacy media arrays have ambiguous sparse positional alignment")',
+        "MediaType: void 0",
+        "MediaTypes: []",
+        "delete next.media",
+        "for (const key of PERSISTED_LEGACY_MEDIA_KEYS) delete next[key]",
+        "openclaw.media = media",
+        'next["__openclaw"] = openclaw',
+    ]);
+
+    const precedence = boundedSourceRegion(
+        mediaFacts,
+        "function resolveMediaFactsWithPrecedence(source, legacyProjectionWins)",
+        "/** Normalizes canonical facts or, for compatibility callers, legacy parallel fields. */",
+        8 * 1024,
+        "media carrier precedence"
+    );
+    assertRequiredMarkers(precedence, "media carrier precedence", [
+        "const canonical = normalizeMediaFacts(source.media)",
+        "const paths = Array.isArray(source.MediaPaths) ? source.MediaPaths : []",
+        "const urls = Array.isArray(source.MediaUrls) ? source.MediaUrls : []",
+        "const types = Array.isArray(source.MediaTypes) ? source.MediaTypes : []",
+        "const count = Math.max(canonical.length, paths.length, urls.length, types.length, source.MediaPath || source.MediaUrl || source.MediaType ? 1 : 0)",
+        "const legacyPath = paths[index] ?? (index === 0 ? source.MediaPath : void 0)",
+        "const legacyUrl = urls[index] ?? (paths.length > 0 || index === 0 ? source.MediaUrl : void 0)",
+        "const legacyContentType = normalizeOptionalString(types[index]) ?? (index === 0 ? source.MediaType : void 0)",
+        "fact?.path ?? legacyPath",
+        "fact?.url ?? legacyUrl",
+        "fact?.contentType ?? legacyContentType",
+    ]);
+
+    const directives = artifactByRole(artifacts, "media-output-directives").contents;
+    const directiveParser = boundedSourceRegion(
+        directives,
+        "function splitMediaFromOutput(raw, options = {})",
+        "//#endregion",
+        24 * 1024,
+        "MEDIA directive parser"
+    );
+    assertRequiredMarkers(directives, "MEDIA directive validation", [
+        "const MEDIA_TOKEN_RE =",
+        "if (candidate.length > 4096) return false",
+        "if (hasTraversalOrUnsupportedHomeDirPrefix(candidate)) return false",
+        String.raw`const FILE_URL_PREFIX_RE = /^file:\/\//i`,
+    ]);
+    assertRequiredMarkers(directiveParser, "MEDIA directive projection", [
+        "const trimmedStart = line.trimStart()",
+        '!trimmedStart.toUpperCase().startsWith("MEDIA:")',
+        "isInsideFence(fenceSpans, lineOffset)",
+        "const candidate = normalizeMediaSource(cleanCandidate(part))",
+        "else if (looksLikeLocalPath) foundMediaToken = true",
+        "const parsedText = foundMediaToken || hasAudioAsVoice ? cleanedText : trimmedRaw",
+    ]);
+
+    const displayProjection = artifactByRole(
+        artifacts,
+        "chat-display-projection"
+    ).contents;
+    assertRequiredMarkers(displayProjection, "canonical media history projection", [
+        "function hasTranscriptMediaFacts(message)",
+        "(readPersistedMediaFacts(message) ?? []).some(isMeaningfulMediaFact)",
+        "isEmptyTextOnlyContent(message.content ?? message.text) && !hasTranscriptMediaFacts(message)",
+        "function toProjectedMessages(messages)",
+    ]);
+    assertRequiredMarkers(
+        artifactByRole(artifacts, "chat-send-handler").contents,
+        "chat history display projection",
+        ["projectChatDisplayMessages(recencyFilteredMessages"]
+    );
+
+    const persistence = artifactByRole(
+        artifacts,
+        "transcript-media-persistence"
+    ).contents;
+    assertRequiredMarkers(persistence, "SQLite media canonicalization", [
+        "const persistedEvent = canonicalizeTranscriptEventMedia(event)",
+        "event_json: JSON.stringify(persistedEvent)",
+        "function canonicalizeTranscriptEventMedia(event)",
+        'if (record.type !== "message"',
+        "const canonical = canonicalizePersistedUserMessageMedia(message)",
+        "message: canonical.message",
+    ]);
+
+    assertRequiredMarkers(
+        artifactByRole(artifacts, "media-store-root").contents,
+        "OpenClaw media store root",
+        [
+            'const resolveMediaDir = () => path.join(resolveConfigDir(), "media")',
+            "const mediaDir = resolveMediaDir()",
+            "if (!isPathInside(mediaDir, dir))",
+        ]
+    );
+
+    return {
+        canonical: {
+            fields: [
+                "contentType",
+                "durationMs",
+                "fileName",
+                "height",
+                "hydrationSuppressed",
+                "kind",
+                "messageId",
+                "path",
+                "sizeBytes",
+                "staged",
+                "transcribed",
+                "url",
+                "width",
+                "workspaceDir",
+            ],
+            persistedPath: "__openclaw.media",
+            retiredTopLevelMediaMigrated: true,
+        },
+        directives: {
+            fencedBlocksPreserved: true,
+            fileUrlPrefixStripped: true,
+            invalidLocalPathDirectiveRemovedFromVisibleText: true,
+            lineLeadingAfterWhitespace: true,
+            maximumCandidateCharacters: 4096,
+            scope: "outbound-reply-output",
+            token: "MEDIA:",
+            traversalSegmentsRejected: true,
+        },
+        legacy: {
+            pluralFields: ["MediaPaths", "MediaTypes", "MediaUrls"],
+            singularFields: ["MediaPath", "MediaType", "MediaUrl"],
+        },
+        persistence: {
+            ambiguousSparseLegacyAlignmentRejected: true,
+            canonicalizedBeforeSqliteWrite: true,
+            retiredFieldsDeleted: true,
+            underCardinalLegacyTypesDroppedWhenUnambiguous: true,
+        },
+        precedence: {
+            contentType: [
+                "canonical.contentType",
+                "MediaTypes[index]",
+                "MediaType[index=0]",
+            ],
+            path: ["canonical.path", "MediaPaths[index]", "MediaPath[index=0]"],
+            slotCount: "maximum-canonical-paths-urls-types-or-singular",
+            url: [
+                "canonical.url",
+                "MediaUrls[index]",
+                "MediaUrl[index=0-or-MediaPaths-present]",
+            ],
+        },
+        projection: {
+            canonicalEnvelopeOnly: true,
+            mediaOnlyUserMessagesRetained: true,
+        },
+        root: { mediaStore: "config-directory/media" },
+    };
+}
+
 function assertPhase4ChatAdapterSemantics(
     artifacts: readonly LoadedSourceArtifact[]
 ): Pick<SourceAuditResult["chat"], "adapter" | "methodAccess"> {
@@ -1654,6 +1906,7 @@ function assertPhase4ChatAdapterSemantics(
         "resolveByteResponse({",
         "rangeHeader: req.headers.range",
     ]);
+    const localHistory = assertLocalHistoryMediaSemantics(artifacts);
 
     return {
         adapter: {
@@ -1672,6 +1925,7 @@ function assertPhase4ChatAdapterSemantics(
             media: {
                 attachmentId: "uuidv4",
                 bearerServerSide: true,
+                localHistory,
                 ownerRequired: true,
                 rangeRequests: true,
                 routePrefix: "/api/chat/media/outgoing",

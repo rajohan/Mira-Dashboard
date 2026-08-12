@@ -691,13 +691,13 @@
             "id": "GET /api/media",
             "method": "GET",
             "path": "/api/media",
-            "purpose": "Serves or safely previews media bytes from OpenClaw media roots.",
+            "purpose": "Securely narrows local-history media to transcript-visible files beneath the reviewed OpenClaw media root; the browser receives only opaque message/session-bound references and never supplies a host path or lists media.",
             "section": "Files, Config Files, Logs, Media",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "raw-http",
                 "method": "GET",
-                "path": "/api/media/*",
+                "path": "/api/chat/media/:attachmentId",
                 "phase": "phase-5"
             }
         },

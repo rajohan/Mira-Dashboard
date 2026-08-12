@@ -729,6 +729,22 @@ per-session/process concurrency, per-actor rolling rate admission, reset superse
 errors. OpenClaw background tasks remain a separate bounded provider projection invalidated through
 `openclaw.tasks`; neither companion exchanges nor task payloads become durable chat events.
 
+The same `GET`/`HEAD /api/chat/media/:attachmentId` proxy also securely narrows legacy local-history
+media without restoring a path-query API or adding a browser route. The hash-pinned OpenClaw adapter
+recognizes bounded canonical `__openclaw.media` entries plus the reviewed legacy path, URL, type, and
+`MEDIA:` carriers. Recognized directives are removed from projected text even when their candidates
+are rejected, so a local locator never becomes browser content. Valid local candidates register a
+stable opaque reference bound to the exact session, message, source slot, and normalized server-only
+locator; the reference exposes neither a host path nor directory-listing authority.
+
+Media delivery resolves that reference only after principal authentication, `chat:read`, and
+an exact `chat.message.get` reauthorization prove that the same projected message still contains the
+same attachment URL. Local bytes are opened only afterward through a descriptor-rooted reader fixed
+to `<MIRA_DASHBOARD_OPENCLAW_ROOT>/media`. Managed outgoing media keeps its existing Gateway source;
+both sources share the raw handler's range, preview, timeout, response-header, and work-admission
+policies. Local files are limited to 16 MiB, bounded text preview is limited to 1 MiB, and the server
+determines final MIME and disposition rather than trusting transcript hints.
+
 Chat voice is another raw protocol edge, not a second REST domain. An optional
 `ELEVENLABS_API_KEY` remains redacted in the web process and is never sent to the browser, SQLite,
 or logs. The authenticated capability probe reports each control only when the provider is

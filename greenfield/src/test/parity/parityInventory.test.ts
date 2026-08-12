@@ -404,10 +404,10 @@ describe("reviewed pre-cutover parity inventory", () => {
             ],
         ]);
         expect(mediaEndpoint?.target).toEqual({
-            delivery: "planned",
+            delivery: "implemented",
             kind: "raw-http",
             method: "GET",
-            path: "/api/media/*",
+            path: "/api/chat/media/:attachmentId",
             phase: "phase-5",
         });
     });

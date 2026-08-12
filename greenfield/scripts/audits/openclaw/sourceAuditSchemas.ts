@@ -203,6 +203,82 @@ export const gatewayFixtureSchema = v.strictObject({
     }),
 });
 
+const localHistoryMediaFixtureSchema = v.strictObject({
+    canonical: v.strictObject({
+        fields: v.tuple([
+            v.literal("contentType"),
+            v.literal("durationMs"),
+            v.literal("fileName"),
+            v.literal("height"),
+            v.literal("hydrationSuppressed"),
+            v.literal("kind"),
+            v.literal("messageId"),
+            v.literal("path"),
+            v.literal("sizeBytes"),
+            v.literal("staged"),
+            v.literal("transcribed"),
+            v.literal("url"),
+            v.literal("width"),
+            v.literal("workspaceDir"),
+        ]),
+        persistedPath: v.literal("__openclaw.media"),
+        retiredTopLevelMediaMigrated: v.literal(true),
+    }),
+    directives: v.strictObject({
+        fencedBlocksPreserved: v.literal(true),
+        fileUrlPrefixStripped: v.literal(true),
+        invalidLocalPathDirectiveRemovedFromVisibleText: v.literal(true),
+        lineLeadingAfterWhitespace: v.literal(true),
+        maximumCandidateCharacters: v.literal(4096),
+        scope: v.literal("outbound-reply-output"),
+        token: v.literal("MEDIA:"),
+        traversalSegmentsRejected: v.literal(true),
+    }),
+    legacy: v.strictObject({
+        pluralFields: v.tuple([
+            v.literal("MediaPaths"),
+            v.literal("MediaTypes"),
+            v.literal("MediaUrls"),
+        ]),
+        singularFields: v.tuple([
+            v.literal("MediaPath"),
+            v.literal("MediaType"),
+            v.literal("MediaUrl"),
+        ]),
+    }),
+    persistence: v.strictObject({
+        ambiguousSparseLegacyAlignmentRejected: v.literal(true),
+        canonicalizedBeforeSqliteWrite: v.literal(true),
+        retiredFieldsDeleted: v.literal(true),
+        underCardinalLegacyTypesDroppedWhenUnambiguous: v.literal(true),
+    }),
+    precedence: v.strictObject({
+        contentType: v.tuple([
+            v.literal("canonical.contentType"),
+            v.literal("MediaTypes[index]"),
+            v.literal("MediaType[index=0]"),
+        ]),
+        path: v.tuple([
+            v.literal("canonical.path"),
+            v.literal("MediaPaths[index]"),
+            v.literal("MediaPath[index=0]"),
+        ]),
+        slotCount: v.literal("maximum-canonical-paths-urls-types-or-singular"),
+        url: v.tuple([
+            v.literal("canonical.url"),
+            v.literal("MediaUrls[index]"),
+            v.literal("MediaUrl[index=0-or-MediaPaths-present]"),
+        ]),
+    }),
+    projection: v.strictObject({
+        canonicalEnvelopeOnly: v.literal(true),
+        mediaOnlyUserMessagesRetained: v.literal(true),
+    }),
+    root: v.strictObject({
+        mediaStore: v.literal("config-directory/media"),
+    }),
+});
+
 export const chatFixtureSchema = v.strictObject({
     ...domainFixtureEntries,
     adapter: v.strictObject({
@@ -221,6 +297,7 @@ export const chatFixtureSchema = v.strictObject({
         media: v.strictObject({
             attachmentId: v.literal("uuidv4"),
             bearerServerSide: v.literal(true),
+            localHistory: localHistoryMediaFixtureSchema,
             ownerRequired: v.literal(true),
             rangeRequests: v.literal(true),
             routePrefix: v.literal("/api/chat/media/outgoing"),
@@ -1878,6 +1955,7 @@ export const sourceArtifactSchema = v.strictObject({
         "agent-tools-schema",
         "automations-tool-name",
         "build-info",
+        "chat-display-projection",
         "chat-run-projection",
         "chat-send-handler",
         "chat-streaming",
@@ -1913,6 +1991,9 @@ export const sourceArtifactSchema = v.strictObject({
         "gateway-restart-scheduler",
         "gateway-websocket",
         "managed-outgoing-media",
+        "media-facts",
+        "media-output-directives",
+        "media-store-root",
         "method-descriptors",
         "method-scopes",
         "models-handlers",
@@ -1949,6 +2030,7 @@ export const sourceArtifactSchema = v.strictObject({
         "task-summary",
         "tasks-handlers",
         "tool-policy-normalization",
+        "transcript-media-persistence",
         "web-fetch-runtime",
         "web-search-runtime",
     ]),
@@ -1957,7 +2039,7 @@ export const sourceArtifactSchema = v.strictObject({
 
 const sourceArtifactsSchema = v.pipe(
     v.array(sourceArtifactSchema),
-    v.length(78),
+    v.length(83),
     v.check(
         (artifacts) => isSortedAndUnique(artifacts.map((artifact) => artifact.role)),
         "Source artifact roles must be sorted and unique"

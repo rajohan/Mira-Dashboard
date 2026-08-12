@@ -1,12 +1,19 @@
 import { describe, expect, test } from "bun:test";
 
-import { chatHistoryResponseMaximumBytes } from "../../../contracts/chatModel.ts";
+import {
+    chatHistoryResponseMaximumBytes,
+    type ChatMessage,
+} from "../../../contracts/chatModel.ts";
 import {
     ChatProviderCapacityError,
     ChatProviderUnknownOutcomeError,
     ChatProviderUnavailableError,
 } from "../../domains/chat/provider.ts";
 import { captureFailure } from "../../test/support/promise.ts";
+import {
+    createInMemoryChatMediaReferences,
+    type ChatMediaReference,
+} from "../chat/inMemoryChatMediaReferences.ts";
 import {
     createPersistentGatewayChatProvider,
     type PersistentGatewayChatMediaReferenceRegistrar,
@@ -40,15 +47,11 @@ function createHarness(responses: Readonly<Record<string, unknown>>): Readonly<{
     mediaReferences: PersistentGatewayChatMediaReferenceRegistrar;
     deliverChat: (event: PersistentGatewayDeliveredChatEvent) => Promise<void>;
     provider: ReturnType<typeof createPersistentGatewayChatProvider>;
-    references: Array<
-        Readonly<{ attachmentId: string; messageId: string; sessionKey: string }>
-    >;
+    references: ChatMediaReference[];
     requests: RecordedRequest[];
 }> {
     const requests: RecordedRequest[] = [];
-    const references: Array<
-        Readonly<{ attachmentId: string; messageId: string; sessionKey: string }>
-    > = [];
+    const references: ChatMediaReference[] = [];
     const queues = new Map<string, unknown[]>(
         Object.entries(responses).map(([method, response]) => {
             const queue = isResponseQueue(response) ? [...response] : [response];
@@ -85,15 +88,20 @@ function createHarness(responses: Readonly<Record<string, unknown>>): Readonly<{
             };
         },
     } as PersistentGatewayChatProviderTransport;
-    const mediaReferences = {
-        register: (
-            reference: Readonly<{
-                attachmentId: string;
-                messageId: string;
-                sessionKey: string;
-            }>
-        ) => {
-            references.push(reference);
+    const referenceStore = createInMemoryChatMediaReferences({
+        localMediaRoot: "/srv/openclaw/media",
+    });
+    const mediaReferences: PersistentGatewayChatMediaReferenceRegistrar = {
+        registerLocal: (reference) => {
+            const registered = referenceStore.registerLocal(reference);
+            if (registered !== undefined) {
+                references.push(referenceStore.resolve(registered.attachmentId)!);
+            }
+            return registered;
+        },
+        registerManaged: (reference) => {
+            referenceStore.registerManaged(reference);
+            references.push(referenceStore.resolve(reference.attachmentId)!);
         },
     };
     return {
@@ -105,6 +113,17 @@ function createHarness(responses: Readonly<Record<string, unknown>>): Readonly<{
         references,
         requests,
     };
+}
+
+function projectedAttachmentUrl(projected: ChatMessage): string {
+    if (projected.content.kind !== "complete") {
+        throw new Error("Expected complete history");
+    }
+    const attachment = projected.content.parts.find((part) => part.kind === "attachment");
+    if (attachment?.kind !== "attachment") {
+        throw new Error("Expected attachment");
+    }
+    return attachment.url;
 }
 
 describe("persistent Gateway chat provider", () => {
@@ -315,7 +334,15 @@ describe("persistent Gateway chat provider", () => {
             ],
         });
         expect(harness.references).toEqual([
-            { attachmentId, messageId: "message-media", sessionKey },
+            {
+                attachmentId,
+                messageId: "message-media",
+                sessionKey,
+                source: {
+                    kind: "gateway-managed",
+                    upstreamAttachmentId: attachmentId,
+                },
+            },
         ]);
         expect(history.inFlightRun).toEqual({
             plan: {
@@ -941,8 +968,270 @@ describe("persistent Gateway chat provider", () => {
                 attachmentId: svgAttachmentId,
                 messageId: "message-svg",
                 sessionKey,
+                source: {
+                    kind: "gateway-managed",
+                    upstreamAttachmentId: svgAttachmentId,
+                },
             },
         ]);
+    });
+
+    test("projects canonical local history media before legacy carriers and strips MEDIA directives", async () => {
+        const harness = createHarness({
+            "chat.history": {
+                messages: [
+                    {
+                        __openclaw: {
+                            media: [
+                                {
+                                    contentType: "image/png",
+                                    fileName: "provider-friendly-name.png",
+                                    path: "images/canonical.png",
+                                    sizeBytes: 4096,
+                                    url: "https://ignored.example.test/canonical.png",
+                                },
+                                {
+                                    contentType: "text/markdown; charset=utf-8",
+                                    url: "file:///srv/openclaw/media/docs/readme.md",
+                                },
+                            ],
+                        },
+                        MediaPaths: [
+                            "legacy/ignored.png",
+                            "legacy/ignored.md",
+                            "exports/data.csv",
+                        ],
+                        MediaTypes: ["image/gif", "text/plain", "text/csv"],
+                        content: [
+                            {
+                                text: [
+                                    "Visible before",
+                                    'MEDIA: images/canonical.png "notes/quoted file.txt" https://example.test/remote.png /srv/openclaw/openclaw.json',
+                                    "```txt",
+                                    "MEDIA: literal/example.png",
+                                    "```",
+                                    "mEdIa: /srv/openclaw/private/secret.png",
+                                    "Visible after",
+                                ].join("\n"),
+                                type: "text",
+                            },
+                        ],
+                        id: "message-local-media",
+                        media: [{ path: "retired/ignored.png" }],
+                        role: "assistant",
+                    },
+                ],
+                offset: 0,
+                sessionKey,
+            },
+        });
+
+        const history = await harness.provider.history({
+            limit: 1,
+            maxChars: 512 * 1024,
+            offset: 0,
+            sessionKey,
+        });
+        const content = history.messages[0]!.content;
+        expect(content.kind).toBe("complete");
+        if (content.kind !== "complete") throw new Error("Expected complete history");
+        expect(content.parts[0]).toEqual({
+            id: "1",
+            kind: "text",
+            text: [
+                "Visible before",
+                "```txt",
+                "MEDIA: literal/example.png",
+                "```",
+                "Visible after",
+            ].join("\n"),
+        });
+        expect(
+            content.parts.slice(1).map((part) =>
+                part.kind === "attachment"
+                    ? {
+                          fileName: part.fileName,
+                          id: part.id,
+                          mediaType: part.mediaType,
+                          renderPolicy: part.renderPolicy,
+                          sizeBytes: part.sizeBytes,
+                      }
+                    : part
+            )
+        ).toEqual([
+            {
+                fileName: "canonical.png",
+                id: "history-media:1",
+                mediaType: "image/png",
+                renderPolicy: "inline-image",
+                sizeBytes: 4096,
+            },
+            {
+                fileName: "readme.md",
+                id: "history-media:2",
+                mediaType: "text/markdown",
+                renderPolicy: "bounded-text",
+                sizeBytes: undefined,
+            },
+            {
+                fileName: "data.csv",
+                id: "history-media:3",
+                mediaType: "text/csv",
+                renderPolicy: "bounded-text",
+                sizeBytes: undefined,
+            },
+            {
+                fileName: "quoted file.txt",
+                id: "history-media:4",
+                mediaType: "text/plain",
+                renderPolicy: "bounded-text",
+                sizeBytes: undefined,
+            },
+        ]);
+        const serialized = JSON.stringify(history.messages[0]);
+        expect(serialized).not.toContain("/srv/openclaw");
+        expect(serialized).not.toContain("images/canonical.png");
+        expect(serialized).not.toContain("provider-friendly-name.png");
+        expect(
+            harness.references.some(
+                (reference) =>
+                    reference.source.kind === "openclaw-local-history" &&
+                    reference.source.segments.join("/") === "retired/ignored.png"
+            )
+        ).toBeFalse();
+    });
+
+    test("strips but never registers MEDIA directives from non-assistant roles", async () => {
+        const harness = createHarness({
+            "chat.history": {
+                messages: [
+                    {
+                        content: "Visible user text\nMeDiA: private/secret.txt",
+                        id: "message-user-media-directive",
+                        role: "user",
+                    },
+                ],
+                offset: 0,
+                sessionKey,
+            },
+        });
+
+        const history = await harness.provider.history({
+            limit: 1,
+            maxChars: 64 * 1024,
+            offset: 0,
+            sessionKey,
+        });
+
+        expect(history.messages[0]?.content).toEqual({
+            kind: "complete",
+            parts: [{ id: "1", kind: "text", text: "Visible user text" }],
+        });
+        expect(harness.references).toEqual([]);
+        expect(JSON.stringify(history.messages[0])).not.toContain("private/secret.txt");
+    });
+
+    test("supports retired media and exact legacy plural and singular fallback slots", async () => {
+        const harness = createHarness({
+            "chat.history": {
+                messages: [
+                    {
+                        MediaPaths: ["legacy/ignored.txt", null],
+                        MediaType: "text/plain",
+                        MediaTypes: ["text/plain", "image/svg+xml"],
+                        MediaUrl:
+                            "file:///srv/openclaw/media/legacy/singular-fallback.svg",
+                        content: "Retired carrier",
+                        id: "retired-carrier",
+                        media: [{ contentType: "image/png", path: "retired/top.png" }],
+                        role: "assistant",
+                    },
+                    {
+                        MediaPath: "singular/data.csv",
+                        MediaType: "text/csv",
+                        MediaUrl:
+                            "file:///srv/openclaw/media/singular/ignored-by-path.txt",
+                        content: "Singular carrier",
+                        id: "singular-carrier",
+                        role: "assistant",
+                    },
+                    {
+                        MediaTypes: ["image/png", "text/markdown"],
+                        MediaUrls: [
+                            "file:///srv/openclaw/media/plural/first.png",
+                            "file:///srv/openclaw/media/plural/second.md",
+                        ],
+                        content: "Plural URL carrier",
+                        id: "plural-url-carrier",
+                        role: "assistant",
+                    },
+                ],
+                offset: 0,
+                sessionKey,
+            },
+        });
+
+        const history = await harness.provider.history({
+            limit: 3,
+            maxChars: 512 * 1024,
+            offset: 0,
+            sessionKey,
+        });
+        const attachmentNames = history.messages.map((message) =>
+            message.content.kind === "complete"
+                ? message.content.parts.flatMap((part) =>
+                      part.kind === "attachment" ? [part.fileName] : []
+                  )
+                : []
+        );
+
+        expect(attachmentNames).toEqual([
+            ["top.png", "singular-fallback.svg"],
+            ["data.csv"],
+            ["first.png", "second.md"],
+        ]);
+    });
+
+    test("derives the same local media id across history, hydration, and provider restart", async () => {
+        const message = {
+            __openclaw: { media: [{ path: "images/stable.png" }] },
+            content: "Stable media",
+            id: "message-stable-media",
+            role: "assistant",
+        };
+        const responses = {
+            "chat.history": { messages: [message], offset: 0, sessionKey },
+            "chat.message.get": { message, ok: true },
+        };
+        const harness = createHarness(responses);
+        const history = await harness.provider.history({
+            limit: 1,
+            maxChars: 64 * 1024,
+            offset: 0,
+            sessionKey,
+        });
+        const hydrated = await harness.provider.getMessage({
+            maxChars: 64 * 1024,
+            messageId: "message-stable-media",
+            sessionKey,
+        });
+        const restarted = createHarness({
+            "chat.history": { messages: [message], offset: 0, sessionKey },
+        });
+        const restartedHistory = await restarted.provider.history({
+            limit: 1,
+            maxChars: 64 * 1024,
+            offset: 0,
+            sessionKey,
+        });
+        expect(hydrated.status).toBe("available");
+        if (hydrated.status !== "available") throw new Error("Expected hydration");
+        expect(projectedAttachmentUrl(history.messages[0]!)).toBe(
+            projectedAttachmentUrl(hydrated.message)
+        );
+        expect(projectedAttachmentUrl(history.messages[0]!)).toBe(
+            projectedAttachmentUrl(restartedHistory.messages[0]!)
+        );
     });
 
     test("surfaces companion ask post-dispatch uncertainty without a blind retry", async () => {

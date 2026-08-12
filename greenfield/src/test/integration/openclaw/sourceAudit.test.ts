@@ -479,6 +479,7 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
                 return typeof metadata?.id === "string" ? metadata.id : void 0;
             }
             const nextOffset = hasMore ? candidateNextOffset : void 0;
+            projectChatDisplayMessages(recencyFilteredMessages, { maxChars: effectiveMaxChars });
             sessionInfo.activeRunIds = activeRunState.runIds;
             const boundedInFlightRun = boundInFlightRunSnapshotForChatHistory({
                 snapshot: resolveInFlightRunSnapshot({}),
@@ -519,6 +520,150 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
                 });
             }
             //#endregion
+        `,
+        "chat-display-projection-fixture.js": `
+            function hasTranscriptMediaFacts(message) {
+                return (readPersistedMediaFacts(message) ?? []).some(isMeaningfulMediaFact);
+            }
+            function toProjectedMessages(messages) {
+                return messages.filter((message) => Boolean(message));
+            }
+            function shouldHideProjectedHistoryMessage(message) {
+                if (roleContent.role === "user" && isEmptyTextOnlyContent(message.content ?? message.text) && !hasTranscriptMediaFacts(message)) return true;
+                return false;
+            }
+            function projectChatDisplayMessagesWithState(messages, options) {
+                return { messages: toProjectedMessages(messages) };
+            }
+        `,
+        "media-facts-fixture.js": `
+            function readPersistedMediaFacts(message) {
+                const media = readPersistedMediaFactInputs(message);
+                return media ? normalizeMediaFacts(media) : void 0;
+            }
+            function readPersistedMediaFactInputs(message) {
+                const metadata = message["__openclaw"];
+                const media = metadata && typeof metadata === "object" ? metadata.media : void 0;
+                return Array.isArray(media) ? media : void 0;
+            }
+            const LEGACY_MEDIA_CONTEXT_KEYS = ["MediaPath", "MediaPaths", "MediaUrl", "MediaUrls", "MediaType", "MediaTypes"];
+            const PERSISTED_LEGACY_MEDIA_KEYS = ["MediaPath", "MediaPaths", "MediaUrl", "MediaUrls", "MediaType", "MediaTypes"];
+            function hasAmbiguousSparseLegacyMediaAlignment(source) { return false; }
+            function hasUnderCardinalLegacyTypes(source) { return false; }
+            function canonicalizePersistedUserMessageMedia(message) {
+                const record = message;
+                const hadTopLevelMedia = Object.hasOwn(record, "media");
+                const canonical = readPersistedMediaFactInputs(message);
+                const topLevelMedia = Array.isArray(record.media) ? record.media : void 0;
+                const source = { ...record, media: canonical ?? topLevelMedia };
+                if (hasAmbiguousSparseLegacyMediaAlignment(source)) throw new Error("legacy media arrays have ambiguous sparse positional alignment");
+                const resolvedSource = hasUnderCardinalLegacyTypes(source) ? { ...source, MediaType: void 0, MediaTypes: [] } : source;
+                const media = resolveMediaFacts(resolvedSource);
+                const next = { ...record };
+                delete next.media;
+                for (const key of PERSISTED_LEGACY_MEDIA_KEYS) delete next[key];
+                const openclaw = { ...(record["__openclaw"] ?? {}) };
+                openclaw.media = media;
+                next["__openclaw"] = openclaw;
+                return { changed: true, message: next };
+            }
+            function stripLegacyMediaContextFields(ctx) {}
+            function normalizeMediaFact(media, index, defaults = {}) {
+                const contentType = normalizeOptionalString(media.contentType);
+                const durationMs = normalizePositiveInteger(media.durationMs);
+                const width = normalizePositiveInteger(media.width);
+                const height = normalizePositiveInteger(media.height);
+                const workspaceDir = normalizeOptionalString(media.workspaceDir);
+                return {
+                    path: normalizeOptionalString(media.path),
+                    url: normalizeOptionalString(media.url),
+                    contentType,
+                    kind: media.kind ?? defaults.kind ?? kindFromMime(contentType),
+                    fileName: normalizeOptionalString(media.fileName),
+                    sizeBytes: normalizeNonNegativeNumber(media.sizeBytes),
+                    durationMs,
+                    width,
+                    height,
+                    transcribed: media.transcribed === true,
+                    messageId: normalizeOptionalString(media.messageId),
+                    workspaceDir,
+                    staged: media.staged === true,
+                    hydrationSuppressed: media.hydrationSuppressed === true
+                };
+            }
+            /** True when every path-bearing canonical fact has explicit staging proof. */
+            function normalizeMediaFacts(media) { return Array.isArray(media) ? media.map(normalizeMediaFact) : []; }
+            function resolveMediaFactsWithPrecedence(source, legacyProjectionWins) {
+                const canonical = normalizeMediaFacts(source.media);
+                const paths = Array.isArray(source.MediaPaths) ? source.MediaPaths : [];
+                const urls = Array.isArray(source.MediaUrls) ? source.MediaUrls : [];
+                const types = Array.isArray(source.MediaTypes) ? source.MediaTypes : [];
+                const count = Math.max(canonical.length, paths.length, urls.length, types.length, source.MediaPath || source.MediaUrl || source.MediaType ? 1 : 0);
+                return Array.from({ length: count }, (_, index) => {
+                    const fact = canonical[index];
+                    const legacyPath = paths[index] ?? (index === 0 ? source.MediaPath : void 0);
+                    const legacyUrl = urls[index] ?? (paths.length > 0 || index === 0 ? source.MediaUrl : void 0);
+                    const legacyContentType = normalizeOptionalString(types[index]) ?? (index === 0 ? source.MediaType : void 0);
+                    return normalizeMediaFact({
+                        path: legacyProjectionWins ? legacyPath : fact?.path ?? legacyPath,
+                        url: legacyProjectionWins ? legacyUrl : fact?.url ?? legacyUrl,
+                        contentType: legacyProjectionWins ? legacyContentType : fact?.contentType ?? legacyContentType
+                    }, index);
+                });
+            }
+            /** Normalizes canonical facts or, for compatibility callers, legacy parallel fields. */
+            function resolveMediaFacts(source) { return resolveMediaFactsWithPrecedence(source, false); }
+        `,
+        "payloads-media-fixture.js": `
+            const MEDIA_TOKEN_RE = /\\bMEDIA:\\s*([^\\n]+)/gi;
+            const FILE_URL_PREFIX_RE = /^file:\\/\\//i;
+            function normalizeMediaSource(src) { return src.replace(FILE_URL_PREFIX_RE, ""); }
+            function hasTraversalOrUnsupportedHomeDirPrefix(candidate) { return candidate.includes(".."); }
+            function isValidMedia(candidate, opts) {
+                if (candidate.length > 4096) return false;
+                if (hasTraversalOrUnsupportedHomeDirPrefix(candidate)) return false;
+                return true;
+            }
+            function splitMediaFromOutput(raw, options = {}) {
+                const trimmedRaw = raw.trimEnd();
+                const lines = trimmedRaw.split("\\n");
+                let foundMediaToken = false;
+                let cleanedText = "";
+                for (const line of lines) {
+                    if (isInsideFence(fenceSpans, lineOffset)) continue;
+                    const trimmedStart = line.trimStart();
+                    if (!trimmedStart.toUpperCase().startsWith("MEDIA:")) continue;
+                    const candidate = normalizeMediaSource(cleanCandidate(part));
+                    if (isValidMedia(candidate)) foundMediaToken = true;
+                    else if (looksLikeLocalPath) foundMediaToken = true;
+                }
+                const parsedText = foundMediaToken || hasAudioAsVoice ? cleanedText : trimmedRaw;
+                return { text: parsedText };
+            }
+            //#endregion
+        `,
+        "store-media-fixture.js": `
+            const resolveMediaDir = () => path.join(resolveConfigDir(), "media");
+            function resolveMediaScopedDir(subdir, caller) {
+                const mediaDir = resolveMediaDir();
+                const dir = path.join(mediaDir, subdir);
+                if (!isPathInside(mediaDir, dir)) throw new Error("escaped media root");
+                return dir;
+            }
+            function openMediaStore(maxBytes = MAX_BYTES, rootDir = resolveMediaDir()) { return fileStore({ rootDir, maxBytes }); }
+        `,
+        "session-accessor.sqlite-transcript-store-fixture.js": `
+            function appendTranscriptEventInTransaction(database, scope, event, options = {}) {
+                const persistedEvent = canonicalizeTranscriptEventMedia(event);
+                database.insert({ event_json: JSON.stringify(persistedEvent) });
+            }
+            function canonicalizeTranscriptEventMedia(event) {
+                const record = event;
+                const message = record.message;
+                if (record.type !== "message" || !message) return event;
+                const canonical = canonicalizePersistedUserMessageMedia(message);
+                return canonical.changed ? { ...record, message: canonical.message } : event;
+            }
         `,
         "models-fixture.js": `
             function buildModelsListResult() {}
@@ -2466,7 +2611,68 @@ describe("reviewed OpenClaw protocol fixtures", () => {
             "chat-delta",
             "chat-terminal",
         ]);
-        expect(reviewed.audit.sourceArtifacts).toHaveLength(78);
+        expect(reviewed.audit.sourceArtifacts).toHaveLength(83);
+        expect(reviewed.audit.chat.adapter.media.localHistory).toEqual({
+            canonical: {
+                fields: [
+                    "contentType",
+                    "durationMs",
+                    "fileName",
+                    "height",
+                    "hydrationSuppressed",
+                    "kind",
+                    "messageId",
+                    "path",
+                    "sizeBytes",
+                    "staged",
+                    "transcribed",
+                    "url",
+                    "width",
+                    "workspaceDir",
+                ],
+                persistedPath: "__openclaw.media",
+                retiredTopLevelMediaMigrated: true,
+            },
+            directives: {
+                fencedBlocksPreserved: true,
+                fileUrlPrefixStripped: true,
+                invalidLocalPathDirectiveRemovedFromVisibleText: true,
+                lineLeadingAfterWhitespace: true,
+                maximumCandidateCharacters: 4096,
+                scope: "outbound-reply-output",
+                token: "MEDIA:",
+                traversalSegmentsRejected: true,
+            },
+            legacy: {
+                pluralFields: ["MediaPaths", "MediaTypes", "MediaUrls"],
+                singularFields: ["MediaPath", "MediaType", "MediaUrl"],
+            },
+            persistence: {
+                ambiguousSparseLegacyAlignmentRejected: true,
+                canonicalizedBeforeSqliteWrite: true,
+                retiredFieldsDeleted: true,
+                underCardinalLegacyTypesDroppedWhenUnambiguous: true,
+            },
+            precedence: {
+                contentType: [
+                    "canonical.contentType",
+                    "MediaTypes[index]",
+                    "MediaType[index=0]",
+                ],
+                path: ["canonical.path", "MediaPaths[index]", "MediaPath[index=0]"],
+                slotCount: "maximum-canonical-paths-urls-types-or-singular",
+                url: [
+                    "canonical.url",
+                    "MediaUrls[index]",
+                    "MediaUrl[index=0-or-MediaPaths-present]",
+                ],
+            },
+            projection: {
+                canonicalEnvelopeOnly: true,
+                mediaOnlyUserMessagesRetained: true,
+            },
+            root: { mediaStore: "config-directory/media" },
+        });
         expect(reviewed.audit.settings.methodAccess).toEqual([
             { controlPlaneWrite: false, name: "config.get", scope: "operator.read" },
             { controlPlaneWrite: true, name: "config.patch", scope: "operator.admin" },
@@ -3212,7 +3418,12 @@ describe("explicit OpenClaw source audit", () => {
                 schedulerSuccess: { ok: true },
                 sentinelRequiresRestartPath: "sentinel.payload.stats.requiresRestart",
             });
-            expect(audit.sourceArtifacts).toHaveLength(78);
+            expect(audit.sourceArtifacts).toHaveLength(83);
+            expect(audit.chat.adapter.media.localHistory.precedence.url).toEqual([
+                "canonical.url",
+                "MediaUrls[index]",
+                "MediaUrl[index=0-or-MediaPaths-present]",
+            ]);
         });
     });
 
@@ -3239,6 +3450,72 @@ describe("explicit OpenClaw source audit", () => {
                 "permission descriptor changed for chat.send"
             );
         });
+    });
+
+    test("rejects drift in source-backed local-history media facts", async () => {
+        await withTemporaryDirectory(
+            "mira-openclaw-local-media-",
+            async (temporaryRoot) => {
+                const cases = [
+                    {
+                        expected: "media carrier precedence changed",
+                        fileName: "media-facts-fixture.js",
+                        from: "paths.length > 0 || index === 0",
+                        name: "legacy-url-precedence",
+                        to: "index === 0",
+                    },
+                    {
+                        expected: "MEDIA directive projection changed",
+                        fileName: "payloads-media-fixture.js",
+                        from: "const trimmedStart = line.trimStart()",
+                        name: "directive-line-boundary",
+                        to: "const trimmedStart = line",
+                    },
+                    {
+                        expected: "canonical media history projection changed",
+                        fileName: "chat-display-projection-fixture.js",
+                        from: "&& !hasTranscriptMediaFacts(message)",
+                        name: "media-only-message",
+                        to: "&& hasTranscriptMediaFacts(message)",
+                    },
+                    {
+                        expected: "SQLite media canonicalization changed",
+                        fileName: "session-accessor.sqlite-transcript-store-fixture.js",
+                        from: "event_json: JSON.stringify(persistedEvent)",
+                        name: "sqlite-canonicalization",
+                        to: "event_json: JSON.stringify(event)",
+                    },
+                    {
+                        expected:
+                            "Expected one OpenClaw media-store-root artifact, found 0",
+                        fileName: "store-media-fixture.js",
+                        from: 'path.join(resolveConfigDir(), "media")',
+                        name: "media-store-root",
+                        to: 'path.join(resolveStateDir(), "media")',
+                    },
+                ] as const;
+
+                for (const driftCase of cases) {
+                    const sourceRoot = path.join(temporaryRoot, driftCase.name);
+                    await writeSyntheticOpenClawPackage(sourceRoot);
+                    const artifactPath = path.join(
+                        sourceRoot,
+                        "dist",
+                        driftCase.fileName
+                    );
+                    const source = await readFile(artifactPath, "utf8");
+                    expect(source).toContain(driftCase.from);
+                    await writeFile(
+                        artifactPath,
+                        source.replace(driftCase.from, driftCase.to),
+                        "utf8"
+                    );
+
+                    const error = await rejectedError(auditInstalledOpenClaw(sourceRoot));
+                    expect(error.message).toContain(driftCase.expected);
+                }
+            }
+        );
     });
 
     test("rejects drift in the system.info read permission", async () => {

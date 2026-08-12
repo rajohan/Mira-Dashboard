@@ -17,6 +17,8 @@ export const chatOutgoingMediaMaximumBytes = 16 * 1024 * 1024;
 export const chatOutgoingTextPreviewMaximumBytes = 1024 * 1024;
 export const chatOutgoingMediaTimeoutMs = 30_000;
 export const chatAttachmentUploadTimeoutMs = 60_000;
+export const chatMediaReferenceRefreshTimeoutMs = 15_000;
+export const chatMediaReferenceRefreshCooldownMs = 30_000;
 
 type ChatRawHttpTimerHandle = object;
 
@@ -129,10 +131,47 @@ export interface OpenClawOutgoingMediaRequest {
     readonly range?: string;
     readonly sessionKey: string;
     readonly signal: AbortSignal;
+    readonly source: ChatMediaReference["source"];
 }
 
 export interface OpenClawOutgoingMediaFetcher {
     readonly fetch: (request: OpenClawOutgoingMediaRequest) => Promise<Response>;
+}
+
+export interface ChatMediaSourceFetcherOptions {
+    readonly gatewayManaged?: OpenClawOutgoingMediaFetcher;
+    readonly localHistory?: Pick<OpenClawOutgoingMediaFetcher, "fetch">;
+}
+
+/**
+ * Dispatches one already-authorized opaque reference to its exact server-only source.
+ * Missing source adapters are indistinguishable from absent media.
+ * @returns A source-aware fetcher that preserves the existing raw media response contract.
+ */
+export function createChatMediaSourceFetcher(
+    options: ChatMediaSourceFetcherOptions
+): OpenClawOutgoingMediaFetcher {
+    if (options.gatewayManaged === undefined && options.localHistory === undefined) {
+        throw new TypeError("Chat media source composition is unavailable");
+    }
+    return Object.freeze({
+        fetch(request: OpenClawOutgoingMediaRequest): Promise<Response> {
+            switch (request.source.kind) {
+                case "gateway-managed": {
+                    return (
+                        options.gatewayManaged?.fetch(request) ??
+                        Promise.resolve(new Response(null, { status: 404 }))
+                    );
+                }
+                case "openclaw-local-history": {
+                    return (
+                        options.localHistory?.fetch(request) ??
+                        Promise.resolve(new Response(null, { status: 404 }))
+                    );
+                }
+            }
+        },
+    });
 }
 
 export interface ChatRawHttpHandlerOptions {
@@ -487,14 +526,8 @@ async function proxyMedia(
     reference: ChatMediaReference,
     disposition: ChatMediaDisposition,
     options: ChatRawHttpHandlerOptions,
-    downloadAdmission: RawHttpWorkAdmission
+    downloadLease: RawHttpWorkLease
 ): Promise<Response> {
-    const downloadLease = downloadAdmission.tryAcquire(
-        request.method === "GET" ? chatOutgoingMediaMaximumBytes : 1
-    );
-    if (downloadLease === undefined) {
-        return noStoreResponse("Media capacity exceeded", 429);
-    }
     try {
         const range = request.headers.get("range")?.trim();
         if (range !== undefined && !singleRangePattern.test(range)) {
@@ -524,6 +557,7 @@ async function proxyMedia(
                 ...(range === undefined ? {} : { range }),
                 sessionKey: reference.sessionKey,
                 signal: request.signal,
+                source: reference.source,
             });
         } catch {
             return noStoreResponse("Bad Gateway", 502);
@@ -632,7 +666,7 @@ async function proxyMedia(
             status: upstream.status,
         });
     } finally {
-        downloadLease?.release();
+        downloadLease.release();
     }
 }
 
@@ -662,21 +696,47 @@ export function createChatRawHttpHandler(
         workLimits.maximumConcurrentDownloads,
         workLimits.maximumDownloadBytes
     );
-    let mediaReferenceRefresh: Promise<void> | undefined;
-    const refreshMediaReferences = async (signal: AbortSignal): Promise<void> => {
+    let mediaReferenceRefresh:
+        | Readonly<{
+              wait: Promise<void>;
+              work: Promise<void>;
+          }>
+        | undefined;
+    let mediaReferenceRefreshNotBeforeMs = 0;
+    const refreshMediaReferences = async (): Promise<void> => {
         if (options.refreshMediaReferences === undefined) return;
         const activeRefresh = mediaReferenceRefresh;
         if (activeRefresh !== undefined) {
-            await activeRefresh;
+            await activeRefresh.wait;
             return;
         }
-        const refresh = options.refreshMediaReferences(signal);
+        const startedAtMs = Date.now();
+        if (startedAtMs < mediaReferenceRefreshNotBeforeMs) return;
+        mediaReferenceRefreshNotBeforeMs =
+            startedAtMs + chatMediaReferenceRefreshCooldownMs;
+        const deadlineController = new AbortController();
+        let rejectDeadline!: (reason: unknown) => void;
+        const deadline = new Promise<never>((_resolve, reject) => {
+            rejectDeadline = reject;
+        });
+        const deadlineHandle = scheduler.setTimeout(() => {
+            deadlineController.abort();
+            rejectDeadline(new DOMException("The operation timed out", "TimeoutError"));
+        }, chatMediaReferenceRefreshTimeoutMs);
+        const work = Promise.resolve().then(() =>
+            options.refreshMediaReferences!(deadlineController.signal)
+        );
+        const wait = Promise.race([work, deadline]);
+        const refresh = Object.freeze({ wait, work });
         mediaReferenceRefresh = refresh;
-        try {
-            await refresh;
-        } finally {
-            if (mediaReferenceRefresh === refresh) mediaReferenceRefresh = undefined;
-        }
+        void work
+            .finally(() => {
+                scheduler.clearTimeout(deadlineHandle);
+                if (mediaReferenceRefresh?.work === work)
+                    mediaReferenceRefresh = undefined;
+            })
+            .catch(() => {});
+        await wait;
     };
     return async (request, requestUrl) => {
         const attachment = attachmentPathPattern.exec(requestUrl.pathname);
@@ -777,38 +837,50 @@ export function createChatRawHttpHandler(
         if (!hasCapability(authentication.principal, "chat:read")) {
             return noStoreResponse("Forbidden", 403);
         }
-        let reference = options.mediaReferences.resolve(media![1]!);
-        if (reference === undefined) {
-            try {
-                await refreshMediaReferences(request.signal);
-            } catch {
-                // A refresh failure is intentionally indistinguishable from absence.
-            }
-            reference = options.mediaReferences.resolve(media![1]!);
-        }
-        if (reference === undefined) return noStoreResponse("Not found", 404);
-        let authorized: boolean;
-        try {
-            authorized = await options.authorizeMedia(
-                {
-                    attachmentId: reference.attachmentId,
-                    messageId: reference.messageId,
-                    principal: authentication.principal,
-                    sessionKey: reference.sessionKey,
-                },
-                request.signal
-            );
-        } catch {
-            authorized = false;
-        }
-        if (!authorized) return noStoreResponse("Not found", 404);
-        return proxyMedia(
-            request,
-            reference,
-            disposition as ChatMediaDisposition,
-            options,
-            downloadAdmission
+        const downloadLease = downloadAdmission.tryAcquire(
+            request.method === "GET" ? chatOutgoingMediaMaximumBytes : 1
         );
+        if (downloadLease === undefined) {
+            return noStoreResponse("Media capacity exceeded", 429);
+        }
+        let proxyOwnsDownloadLease = false;
+        try {
+            let reference = options.mediaReferences.resolve(media![1]!);
+            if (reference === undefined) {
+                try {
+                    await refreshMediaReferences();
+                } catch {
+                    // A refresh failure is intentionally indistinguishable from absence.
+                }
+                reference = options.mediaReferences.resolve(media![1]!);
+            }
+            if (reference === undefined) return noStoreResponse("Not found", 404);
+            let authorized: boolean;
+            try {
+                authorized = await options.authorizeMedia(
+                    {
+                        attachmentId: reference.attachmentId,
+                        messageId: reference.messageId,
+                        principal: authentication.principal,
+                        sessionKey: reference.sessionKey,
+                    },
+                    request.signal
+                );
+            } catch {
+                authorized = false;
+            }
+            if (!authorized) return noStoreResponse("Not found", 404);
+            proxyOwnsDownloadLease = true;
+            return proxyMedia(
+                request,
+                reference,
+                disposition as ChatMediaDisposition,
+                options,
+                downloadLease
+            );
+        } finally {
+            if (!proxyOwnsDownloadLease) downloadLease.release();
+        }
     };
 }
 
@@ -850,10 +922,13 @@ export function createOpenClawOutgoingMediaFetcher(
     const fetchImplementation = options.fetch ?? globalThis.fetch;
     return Object.freeze({
         async fetch(request: OpenClawOutgoingMediaRequest): Promise<Response> {
+            if (request.source.kind !== "gateway-managed") {
+                return new Response(null, { status: 404 });
+            }
             const url = new URL(
                 `/api/chat/media/outgoing/${encodeURIComponent(
                     request.sessionKey
-                )}/${request.attachmentId}/full`,
+                )}/${request.source.upstreamAttachmentId}/full`,
                 base
             );
             const timeoutSignal = AbortSignal.timeout(timeoutMs);

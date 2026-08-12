@@ -9,8 +9,10 @@ import { createInMemoryChatMediaReferences } from "../platform/chat/inMemoryChat
 import { dashboardSessionCookieName } from "./authenticationCredentials.ts";
 import {
     chatMessageAuthorizesMediaReference,
+    chatMediaReferenceRefreshTimeoutMs,
     chatOutgoingMediaMaximumBytes,
     chatOutgoingTextPreviewMaximumBytes,
+    createChatMediaSourceFetcher,
     createChatRawHttpHandler,
     createOpenClawOutgoingMediaFetcher,
     type ChatRawHttpHandler,
@@ -572,6 +574,44 @@ describe("chat raw HTTP media boundary", () => {
         references.dispose();
     });
 
+    test("reauthorizes a local-history reference before dispatching any file read", async () => {
+        const store = createInMemoryChatAttachmentStore();
+        const references = createInMemoryChatMediaReferences();
+        references.register({
+            attachmentId,
+            messageId: "message-local",
+            sessionKey: "agent:main:main",
+            source: {
+                kind: "openclaw-local-history",
+                segments: ["history", "private.png"],
+            },
+        });
+        let fetchCount = 0;
+        const handler = createChatRawHttpHandler({
+            attachmentStore: store,
+            authenticateCredential: authentication(principal()),
+            authorizeMedia: () => false,
+            browserOrigin: origin,
+            mediaFetcher: {
+                fetch: () => {
+                    fetchCount += 1;
+                    return Promise.resolve(
+                        new Response(png, { headers: { "content-type": "image/png" } })
+                    );
+                },
+            },
+            mediaReferences: references,
+        });
+        const request = authenticatedRequest(
+            `/api/chat/media/${attachmentId}?disposition=preview`
+        );
+
+        expect(await handlerStatus(handler, request)).toBe(404);
+        expect(fetchCount).toBe(0);
+        store.dispose();
+        references.dispose();
+    });
+
     test("refreshes an empty post-restart reference cache before returning 404", async () => {
         const store = createInMemoryChatAttachmentStore();
         const references = createInMemoryChatMediaReferences();
@@ -632,6 +672,11 @@ describe("chat raw HTTP media boundary", () => {
                     ),
             },
             mediaReferences: references,
+            workLimits: {
+                ...singleChatMediaWorkLimits,
+                maximumConcurrentDownloads: 2,
+                maximumDownloadBytes: 2 * chatOutgoingMediaMaximumBytes,
+            },
             refreshMediaReferences: async () => {
                 refreshCount += 1;
                 markRefreshStarted();
@@ -662,6 +707,102 @@ describe("chat raw HTTP media boundary", () => {
 
         releaseRefresh();
         expect(await Promise.all([first, second])).toEqual([200, 200]);
+        store.dispose();
+        references.dispose();
+    });
+
+    test("admits cache-miss refreshes before work and cools down repeated misses", async () => {
+        const store = createInMemoryChatAttachmentStore();
+        const references = createInMemoryChatMediaReferences();
+        let refreshCount = 0;
+        let releaseRefresh!: () => void;
+        const refreshReleased = new Promise<void>((resolve) => {
+            releaseRefresh = resolve;
+        });
+        const handler = createChatRawHttpHandler({
+            attachmentStore: store,
+            authenticateCredential: authentication(principal()),
+            authorizeMedia: () => true,
+            browserOrigin: origin,
+            mediaFetcher: {
+                fetch: () => Promise.resolve(new Response(png)),
+            },
+            mediaReferences: references,
+            refreshMediaReferences: async () => {
+                refreshCount += 1;
+                await refreshReleased;
+            },
+            workLimits: singleChatMediaWorkLimits,
+        });
+
+        const first = handlerStatus(
+            handler,
+            authenticatedRequest(`/api/chat/media/${attachmentId}?disposition=download`)
+        );
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(
+            await handlerStatus(
+                handler,
+                authenticatedRequest(
+                    `/api/chat/media/${crossSessionAttachmentId}?disposition=download`
+                )
+            )
+        ).toBe(429);
+        releaseRefresh();
+        expect(await first).toBe(404);
+        expect(
+            await handlerStatus(
+                handler,
+                authenticatedRequest(
+                    `/api/chat/media/${unknownMessageAttachmentId}?disposition=download`
+                )
+            )
+        ).toBe(404);
+        expect(refreshCount).toBe(1);
+        store.dispose();
+        references.dispose();
+    });
+
+    test("aborts a cache-miss refresh at its absolute deadline", async () => {
+        const store = createInMemoryChatAttachmentStore();
+        const references = createInMemoryChatMediaReferences();
+        const scheduler = new ManualChatRawHttpScheduler();
+        let refreshSignal: AbortSignal | undefined;
+        const handler = createChatRawHttpHandler({
+            attachmentStore: store,
+            authenticateCredential: authentication(principal()),
+            authorizeMedia: () => true,
+            browserOrigin: origin,
+            mediaFetcher: {
+                fetch: () => Promise.resolve(new Response(png)),
+            },
+            mediaReferences: references,
+            refreshMediaReferences: (signal) => {
+                refreshSignal = signal;
+                return new Promise<void>((_resolve, reject) => {
+                    signal.addEventListener(
+                        "abort",
+                        () => reject(new DOMException("Aborted", "AbortError")),
+                        { once: true }
+                    );
+                });
+            },
+            scheduler,
+            workLimits: singleChatMediaWorkLimits,
+        });
+
+        const request = handlerStatus(
+            handler,
+            authenticatedRequest(`/api/chat/media/${attachmentId}?disposition=download`)
+        );
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(scheduler.pendingCount).toBe(1);
+        scheduler.advance(chatMediaReferenceRefreshTimeoutMs);
+        expect(await request).toBe(404);
+        expect(refreshSignal?.aborted).toBeTrue();
+        expect(scheduler.pendingCount).toBe(0);
         store.dispose();
         references.dispose();
     });
@@ -1099,6 +1240,10 @@ describe("chat raw HTTP media boundary", () => {
             range: "bytes=0-3",
             sessionKey: "agent:main:main",
             signal: new AbortController().signal,
+            source: {
+                kind: "gateway-managed",
+                upstreamAttachmentId: attachmentId,
+            },
         });
 
         expect(response.status).toBe(302);
@@ -1114,5 +1259,62 @@ describe("chat raw HTTP media boundary", () => {
             redirect: "manual",
         });
         expect(JSON.stringify(observed[0]?.input)).not.toContain("gateway-secret");
+    });
+
+    test("dispatches only the exact authorized media source without path projection", async () => {
+        const managedRequests: OpenClawOutgoingMediaRequest[] = [];
+        const localRequests: OpenClawOutgoingMediaRequest[] = [];
+        const fetcher = createChatMediaSourceFetcher({
+            gatewayManaged: {
+                fetch: (request) => {
+                    managedRequests.push(request);
+                    return Promise.resolve(new Response("managed"));
+                },
+            },
+            localHistory: {
+                fetch: (request) => {
+                    localRequests.push(request);
+                    return Promise.resolve(new Response("local"));
+                },
+            },
+        });
+        const sharedRequest = {
+            attachmentId,
+            method: "GET" as const,
+            sessionKey: "agent:main:main",
+            signal: new AbortController().signal,
+        };
+
+        const managedResponse = await fetcher.fetch({
+            ...sharedRequest,
+            source: {
+                kind: "gateway-managed",
+                upstreamAttachmentId: attachmentId,
+            },
+        });
+        expect(await managedResponse.text()).toBe("managed");
+        const localResponse = await fetcher.fetch({
+            ...sharedRequest,
+            source: {
+                kind: "openclaw-local-history",
+                segments: ["history", "diagram.png"],
+            },
+        });
+        expect(await localResponse.text()).toBe("local");
+        expect(managedRequests).toHaveLength(1);
+        expect(localRequests).toHaveLength(1);
+        expect(JSON.stringify(localRequests)).not.toContain("/home/");
+
+        const managedOnly = createChatMediaSourceFetcher({
+            gatewayManaged: { fetch: () => Promise.resolve(new Response("managed")) },
+        });
+        const unavailableResponse = await managedOnly.fetch({
+            ...sharedRequest,
+            source: {
+                kind: "openclaw-local-history",
+                segments: ["missing.png"],
+            },
+        });
+        expect(unavailableResponse.status).toBe(404);
     });
 });

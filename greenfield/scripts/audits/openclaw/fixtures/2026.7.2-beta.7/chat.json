@@ -27,6 +27,69 @@
         "media": {
             "attachmentId": "uuidv4",
             "bearerServerSide": true,
+            "localHistory": {
+                "canonical": {
+                    "fields": [
+                        "contentType",
+                        "durationMs",
+                        "fileName",
+                        "height",
+                        "hydrationSuppressed",
+                        "kind",
+                        "messageId",
+                        "path",
+                        "sizeBytes",
+                        "staged",
+                        "transcribed",
+                        "url",
+                        "width",
+                        "workspaceDir"
+                    ],
+                    "persistedPath": "__openclaw.media",
+                    "retiredTopLevelMediaMigrated": true
+                },
+                "directives": {
+                    "fencedBlocksPreserved": true,
+                    "fileUrlPrefixStripped": true,
+                    "invalidLocalPathDirectiveRemovedFromVisibleText": true,
+                    "lineLeadingAfterWhitespace": true,
+                    "maximumCandidateCharacters": 4096,
+                    "scope": "outbound-reply-output",
+                    "token": "MEDIA:",
+                    "traversalSegmentsRejected": true
+                },
+                "legacy": {
+                    "pluralFields": ["MediaPaths", "MediaTypes", "MediaUrls"],
+                    "singularFields": ["MediaPath", "MediaType", "MediaUrl"]
+                },
+                "persistence": {
+                    "ambiguousSparseLegacyAlignmentRejected": true,
+                    "canonicalizedBeforeSqliteWrite": true,
+                    "retiredFieldsDeleted": true,
+                    "underCardinalLegacyTypesDroppedWhenUnambiguous": true
+                },
+                "precedence": {
+                    "contentType": [
+                        "canonical.contentType",
+                        "MediaTypes[index]",
+                        "MediaType[index=0]"
+                    ],
+                    "path": ["canonical.path", "MediaPaths[index]", "MediaPath[index=0]"],
+                    "slotCount": "maximum-canonical-paths-urls-types-or-singular",
+                    "url": [
+                        "canonical.url",
+                        "MediaUrls[index]",
+                        "MediaUrl[index=0-or-MediaPaths-present]"
+                    ]
+                },
+                "projection": {
+                    "canonicalEnvelopeOnly": true,
+                    "mediaOnlyUserMessagesRetained": true
+                },
+                "root": {
+                    "mediaStore": "config-directory/media"
+                }
+            },
             "ownerRequired": true,
             "rangeRequests": true,
             "routePrefix": "/api/chat/media/outgoing",

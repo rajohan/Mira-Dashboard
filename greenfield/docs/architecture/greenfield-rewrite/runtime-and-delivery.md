@@ -423,6 +423,16 @@ target-directory write access for its private stage file, `renameat2` exchange, 
 at runtime. Descriptor validation, per-file bounds, CAS, and the fixed worker manifest are the write
 boundary.
 
+The web process also derives the fixed `<MIRA_DASHBOARD_OPENCLAW_ROOT>/media` descriptor boundary
+from that same reviewed root. It exposes no configurable media directory, recursive listing, or
+browser-supplied path route. Local-history transcript carriers become opaque session/message-bound
+references and reuse `GET`/`HEAD /api/chat/media/:attachmentId`; each access reauthorizes the exact
+projected transcript association before descriptor traversal begins. The local adapter enforces
+same-owner/same-device no-follow traversal, one-link regular files, stable identity, a 16 MiB body
+ceiling, and a 1 MiB text-preview ceiling. Its retained root descriptor and process-local reference
+state are disposed with the web runtime, while bounded history refresh reconstructs only an already
+authorized association after restart.
+
 Persistent state remains inside the existing Dashboard project layout at
 `<project-root>/production/state`, but outside every immutable release directory. Production
 composition derives that path from `MIRA_DASHBOARD_PROJECT_ROOT`; neither configuration nor a

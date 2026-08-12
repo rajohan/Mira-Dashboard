@@ -510,6 +510,23 @@ proxy mode names exact proxies and requires them to overwrite forwarded identity
 - File and media operations resolve against named allowlisted roots, reject traversal, verify
   containment after symlink resolution, avoid following unsafe links, and enforce size/MIME
   limits before parsing or preview.
+- Local-history media does not restore the legacy browser-supplied path boundary. Hash-pinned
+  projection recognizes the bounded canonical and reviewed legacy transcript carriers, strips each
+  recognized `MEDIA:` directive before browser delivery, and registers only an opaque non-path
+  reference bound to the exact session, message, source slot, and normalized server-only locator.
+  The identifier is not a capability: every `GET` or `HEAD /api/chat/media/:attachmentId` request
+  requires an authenticated principal with `chat:read`, reprojects the exact message through
+  `chat.message.get`, verifies the same attachment URL, and opens no file until that authorization
+  succeeds. A bounded history refresh can reconstruct the same association after process-local
+  reference loss, but cannot widen it to another session or message.
+- The local reader is descriptor-rooted beneath the exact
+  `<MIRA_DASHBOARD_OPENCLAW_ROOT>/media` directory. It rejects traversal, network locations,
+  symlinks, hardlinks, special files, cross-device nodes, unsafe ownership or modes, and file
+  identity changes; it never returns a locator in browser data, response headers, errors, audit, or
+  logs. Local bodies are capped at 16 MiB, text preview at 1 MiB, and SVG, HTML, unknown, or other
+  active content remains download-only. The existing Chat media concurrency and in-flight-byte
+  admission applies to both managed and local sources, with private/no-store responses and no
+  listing or path-query operation.
 - The Files and Terminal surfaces may share the explicit `MIRA_DASHBOARD_WORKSPACE_ROOT`. Files
   keeps descriptor-anchored containment for each operation. Terminal uses the same named root only
   to select the interactive shell's initial working directory: it is not a filesystem sandbox, and

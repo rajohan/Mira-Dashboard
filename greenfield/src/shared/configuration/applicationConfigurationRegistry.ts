@@ -170,11 +170,11 @@ export const applicationConfigurationRegistry: readonly ApplicationConfiguration
             browserExposure: "none",
             defaultValue: null,
             description:
-                "Explicit reviewed OpenClaw home used only by the fixed Files manifest and worker replacement allowlist.",
+                "Explicit reviewed OpenClaw home used by the fixed Files manifest, worker replacement allowlist, exact configuration export, and transcript-authorized local media reader.",
             environmentName: "MIRA_DASHBOARD_OPENCLAW_ROOT",
             field: "openClawRoot",
             operationalEffect:
-                "Selects the descriptor-rooted OpenClaw Config tree; only reviewed config can be explicitly revealed, only two files can be replaced, and arbitrary OpenClaw state remains opaque.",
+                "Selects the descriptor-rooted OpenClaw tree; only reviewed config can be explicitly revealed, only two files can be replaced, and local media is readable only beneath its fixed media directory through opaque transcript-bound references.",
             restartRequired: true,
             roles: Object.freeze(["web", "worker"]),
             secret: false,
