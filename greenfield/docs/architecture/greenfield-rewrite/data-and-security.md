@@ -299,6 +299,11 @@ enablement requires a distinct worker OS identity, root-owned immutable worker e
 subject and operation policy, and reviewed install/rollback evidence before either action key can
 be advertised.
 
+This boundary is a partial secure replacement for `POST /api/exec/start`, not a feature-removal
+claim. The legacy `system_cleanup` intent remains planned as three separately authorized effects:
+Docker prune in the Docker slice, apt cleanup in host/package maintenance, and journald vacuum in
+log maintenance. None may be smuggled back through a generic shell or shared-user privilege grant.
+
 The `cache:read` automation heartbeat is a separate sanitized projection, not a shortcut around
 session, task, job, or cron detail authorization. It reads process-local validated Gateway
 summaries plus bounded payload-free cache status and purpose-built SQLite task/Dashboard-job

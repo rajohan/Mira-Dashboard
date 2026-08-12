@@ -485,6 +485,10 @@ describe("Dashboard operational overview foundation", () => {
         const { user } = renderOverview(transport);
 
         expect(
+            await screen.findByRole("heading", { level: 2, name: "Service actions" })
+        ).toBeTruthy();
+
+        expect(
             await screen.findByRole("heading", { level: 1, name: "Mira Dashboard" })
         ).toBeTruthy();
         expect(
@@ -565,9 +569,6 @@ describe("Dashboard operational overview foundation", () => {
         for (const call of jobSummaryCalls) {
             expect(call).toEqual({ input: { limit: 1 }, path: "jobs.listRuns" });
         }
-        expect(
-            await screen.findByRole("heading", { level: 2, name: "Service actions" })
-        ).toBeTruthy();
         expect(
             transport.queryCalls.filter(({ path }) => path === "serviceActions.getStatus")
         ).toEqual([{ input: {}, path: "serviceActions.getStatus" }]);

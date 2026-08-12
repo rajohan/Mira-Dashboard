@@ -63,7 +63,7 @@ import {
 import {
     serviceActionsProcedureNames,
     serviceActionsRouter,
-} from "../domains/serviceActions/procedures.ts";
+} from "../domains/serviceActions/routes.ts";
 import { systemProcedureNames, systemRouter } from "../domains/system/procedures.ts";
 import { taskProcedureNames, taskRouter } from "../domains/tasks/procedures.ts";
 import {

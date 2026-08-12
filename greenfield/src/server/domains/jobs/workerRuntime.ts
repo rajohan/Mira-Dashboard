@@ -1,9 +1,5 @@
 import { Cause, Effect, Exit, Fiber, ManagedRuntime } from "effect";
 
-import {
-    hostOperationIds,
-    type FixedHostOperationsExecutionPort,
-} from "../../../shared/hostOperations.ts";
 import type { OpenClawGatewayLifecycleExecutionPort } from "../../../shared/openClawGatewayLifecycle.ts";
 import type { OpenClawServiceActionsExecutionPort } from "../../../shared/openClawServiceActions.ts";
 import type {
@@ -24,6 +20,8 @@ import type { MoltbookDashboardCollector } from "../moltbook/provider.ts";
 import { createTaskNotificationQueue } from "../tasks/taskNotificationQueue.ts";
 import {
     createJobWorkerActionResolver,
+    hostOperationIds,
+    type FixedHostOperationsExecutionPort,
     type LogMaintenanceExecutionPort,
     type WorkspaceFileWriteExecutionPort,
 } from "./actionExecutors.ts";

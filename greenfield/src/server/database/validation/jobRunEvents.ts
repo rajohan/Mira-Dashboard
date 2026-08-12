@@ -9,6 +9,7 @@ import {
     jobRunEventProgressMaximumBytes,
     jobRunEventProgressSchema,
     jobRunEventSequenceSchema,
+    retiredScheduledActionTerminalMessage,
 } from "../../../contracts/jobModel.ts";
 import { utf8ByteLength } from "../../../shared/encoding.ts";
 import { parseJsonText } from "../../../shared/json.ts";
@@ -69,10 +70,15 @@ function eventAttemptIsConsistent(event: StoredJobRunEvent): boolean {
     if (event.kind === "queued") {
         return event.attempt === 0 && event.workerInstanceId == null;
     }
+    if (event.kind === "failed" && event.attempt === 0) {
+        return (
+            event.workerInstanceId == null &&
+            event.message === retiredScheduledActionTerminalMessage
+        );
+    }
     if (
         [
             "claimed",
-            "failed",
             "lease-expired",
             "output-truncated",
             "progress",

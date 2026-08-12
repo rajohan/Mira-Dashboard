@@ -5,7 +5,6 @@ import {
     count,
     desc,
     eq,
-    exists,
     gte,
     gt,
     inArray,
@@ -96,8 +95,6 @@ import {
     canonicalWorkerActionKeys,
     parseWorkerActionKeysJson,
     workerActionKeysSchema,
-} from "../../database/validation/workerActionKeys.ts";
-import {
     workerInstanceInsertSchema,
     workerInstanceSelectSchema,
 } from "../../database/validation/workerInstances.ts";
@@ -241,6 +238,11 @@ export interface ReconcileSchedulesInput {
     readonly at: Date;
     readonly retiredRunCancellation?: {
         readonly actor: JobActor;
+        readonly sideEffectsForRun: (run: JobRunRecord) => JobMutationSideEffects;
+        readonly terminalCode: string;
+        readonly terminalMessage: string;
+    };
+    readonly retiredRunFailure?: {
         readonly sideEffectsForRun: (run: JobRunRecord) => JobMutationSideEffects;
         readonly terminalCode: string;
         readonly terminalMessage: string;
@@ -536,7 +538,10 @@ export interface JobRepository extends JobRepositoryReader {
     beginWorkerDrain(input: WorkerLifecycleMutationInput): Promise<WorkerLifecycleResult>;
     cancelRun(input: CancelRunRepositoryInput): Promise<CancelRunRepositoryResult>;
     claimNextRun(input: ClaimNextRunInput): Promise<JobClaimResult>;
-    enqueueManualRun(input: EnqueueManualRunInput): Promise<EnqueueManualRunResult>;
+    enqueueManualRun(
+        input: EnqueueManualRunInput,
+        beforeInsert?: () => void
+    ): Promise<EnqueueManualRunResult>;
     enqueueNextDueSchedule(
         input: DueScheduleEnqueueInput
     ): Promise<DueScheduleEnqueueResult>;
@@ -1405,20 +1410,28 @@ class DrizzleJobWriter extends DrizzleJobReader {
             .filter((schedule) => !registeredScheduleIds.has(schedule.id));
         for (const schedule of retiredSchedules) {
             const queuedScheduleRun = this.#findQueuedScheduleRun(schedule.id);
-            // Registry retirement disables future scheduling. A queued `never` run keeps
-            // its immutable execution snapshot and completes through the normal worker
-            // action-availability path; retirement must not reinterpret it as cancellable.
-            const cancellableQueuedScheduleRun =
+            const neverCancellableQueuedRun =
                 queuedScheduleRun?.cancellationPolicy === "never"
-                    ? undefined
-                    : queuedScheduleRun;
+                    ? queuedScheduleRun
+                    : undefined;
+            const cancellableQueuedScheduleRun =
+                neverCancellableQueuedRun === undefined ? queuedScheduleRun : undefined;
             const retiredRunCancellation = input.retiredRunCancellation;
+            const retiredRunFailure = input.retiredRunFailure;
             if (
                 cancellableQueuedScheduleRun !== undefined &&
                 retiredRunCancellation === undefined
             ) {
                 throw new Error(
                     "Removed schedule retirement requires queued-run cancellation metadata"
+                );
+            }
+            if (
+                neverCancellableQueuedRun !== undefined &&
+                retiredRunFailure === undefined
+            ) {
+                throw new Error(
+                    "Removed schedule retirement requires immutable-run failure metadata"
                 );
             }
             const retired = this.#transaction
@@ -1457,12 +1470,26 @@ class DrizzleJobWriter extends DrizzleJobReader {
                     retiredRunCancellation.sideEffectsForRun(cancelled)
                 );
             }
+            if (
+                neverCancellableQueuedRun !== undefined &&
+                retiredRunFailure !== undefined
+            ) {
+                const failed = this.#failQueuedRun(neverCancellableQueuedRun, {
+                    at: retiredSchedule.updatedAt,
+                    terminalCode: retiredRunFailure.terminalCode,
+                    terminalMessage: retiredRunFailure.terminalMessage,
+                });
+                this.#insertSideEffects(retiredRunFailure.sideEffectsForRun(failed));
+            }
             this.#insertSideEffects(input.sideEffectsForSchedule(retiredSchedule));
         }
         return records;
     }
 
-    public enqueueManualRun(input: EnqueueManualRunInput): EnqueueManualRunResult {
+    public enqueueManualRun(
+        input: EnqueueManualRunInput,
+        beforeInsert?: () => void
+    ): EnqueueManualRunResult {
         const run = v.parse(jobRunInsertSchema, input.run);
         if (input.queuedEvent.jobRunId !== run.id) {
             throw new Error("Queued event does not belong to the inserted manual run");
@@ -1496,6 +1523,7 @@ class DrizzleJobWriter extends DrizzleJobReader {
                 .get();
             if (active !== undefined) return { kind: "active", run: parseRun(active) };
         }
+        beforeInsert?.();
         const inserted = this.#transaction.insert(jobRuns).values(run).returning().get();
         const record = parseRun(requiredRow(inserted, "manual run insert"));
         this.#insertSuppliedEvent(input.queuedEvent);
@@ -2148,21 +2176,6 @@ class DrizzleJobWriter extends DrizzleJobReader {
         if (activeCount >= worker.capacity) return { kind: "worker-unavailable" };
         const workerActionKeys = parseWorkerActionKeysJson(worker.actionKeysJson);
         if (workerActionKeys.length === 0) return { kind: "empty" };
-        const retiredNeverRun = and(
-            eq(jobRuns.cancellationPolicy, "never"),
-            isNotNull(jobRuns.scheduledJobId),
-            exists(
-                this.#transaction
-                    .select({ id: scheduledJobs.id })
-                    .from(scheduledJobs)
-                    .where(
-                        and(
-                            eq(scheduledJobs.id, jobRuns.scheduledJobId),
-                            eq(scheduledJobs.enabled, false)
-                        )
-                    )
-            )
-        );
 
         const availableThrough = input.cursor?.availableThrough ?? input.at;
         const candidates: JobRunRecord[] = [];
@@ -2177,10 +2190,7 @@ class DrizzleJobWriter extends DrizzleJobReader {
                         and(
                             eq(jobRuns.state, "queued"),
                             lte(jobRuns.availableAt, availableThrough),
-                            or(
-                                inArray(jobRuns.actionKey, workerActionKeys),
-                                retiredNeverRun
-                            ),
+                            inArray(jobRuns.actionKey, workerActionKeys),
                             range
                         )
                     )
@@ -2577,6 +2587,38 @@ class DrizzleJobWriter extends DrizzleJobReader {
         return requiredRow(this.findRun(run.id), "cancelled run refresh");
     }
 
+    #failQueuedRun(run: JobRunRecord, input: ScheduleQueuedCancellation): JobRunRecord {
+        const at = maximumDate(run.updatedAt, input.at);
+        const row = this.#transaction
+            .update(jobRuns)
+            .set({
+                finishedAt: at,
+                state: "failed",
+                stateVersion: run.stateVersion + 1,
+                terminalCode: input.terminalCode,
+                terminalMessage: input.terminalMessage,
+                updatedAt: at,
+            })
+            .where(
+                and(
+                    eq(jobRuns.id, run.id),
+                    eq(jobRuns.state, "queued"),
+                    eq(jobRuns.stateVersion, run.stateVersion)
+                )
+            )
+            .returning()
+            .get();
+        parseRun(requiredRow(row, "queued run failure"));
+        this.#appendEvent(run.id, {
+            attempt: run.attemptCount,
+            kind: "failed",
+            message: boundedStructuralMessage(input.terminalMessage),
+            occurredAt: at,
+            workerInstanceId: null,
+        });
+        return requiredRow(this.findRun(run.id), "failed queued run refresh");
+    }
+
     #claimFence(input: ClaimFenceInput): SQL {
         return and(
             eq(jobRuns.id, input.runId),
@@ -2814,8 +2856,8 @@ export function createJobRepository(
             write((writer) => writer.cancelRun(input)),
         claimNextRun: (input: ClaimNextRunInput) =>
             write((writer) => writer.claimNextRun(input)),
-        enqueueManualRun: (input: EnqueueManualRunInput) =>
-            write((writer) => writer.enqueueManualRun(input)),
+        enqueueManualRun: (input: EnqueueManualRunInput, beforeInsert?: () => void) =>
+            write((writer) => writer.enqueueManualRun(input, beforeInsert)),
         enqueueNextDueSchedule: (input: DueScheduleEnqueueInput) =>
             write((writer) => writer.enqueueNextDueSchedule(input)),
         expireDisableIntents: (input: ExpireDisableIntentsInput) =>

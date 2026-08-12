@@ -998,7 +998,7 @@ CREATE TABLE `job_runs` (
 	CONSTRAINT "job_runs_result_json_check" CHECK("result_json" IS NULL OR (length(CAST("result_json" AS BLOB)) <= 65536 AND CASE WHEN json_valid("result_json") THEN json_type("result_json") = 'object' ELSE 0 END)),
 	CONSTRAINT "job_runs_retry_safe_check" CHECK("retry_safe" IN (0, 1)),
 	CONSTRAINT "job_runs_schedule_check" CHECK(("trigger_type" = 'schedule' AND "scheduled_job_id" IS NOT NULL AND "scheduled_job_version" BETWEEN 1 AND 9007199254740991 AND "scheduled_for_at" IS NOT NULL AND "scheduled_for_at" BETWEEN 0 AND 8640000000000000 AND "scheduled_for_at" <= "queued_at") OR ("trigger_type" = 'manual' AND ((("scheduled_job_id" IS NOT NULL AND "scheduled_job_version" BETWEEN 1 AND 9007199254740991) OR ("scheduled_job_id" IS NULL AND "scheduled_job_version" IS NULL)) AND "scheduled_for_at" IS NULL)) OR ("trigger_type" IN ('startup', 'system') AND "scheduled_job_id" IS NULL AND "scheduled_job_version" IS NULL AND "scheduled_for_at" IS NULL)),
-	CONSTRAINT "job_runs_state_check" CHECK("state" IN ('cancelled', 'failed', 'queued', 'running', 'succeeded', 'timed-out') AND (("state" = 'queued' AND "finished_at" IS NULL AND "result_json" IS NULL AND "terminal_code" IS NULL AND "terminal_message" IS NULL) OR ("state" = 'running' AND "attempt_count" > 0 AND "finished_at" IS NULL AND "result_json" IS NULL AND "terminal_code" IS NULL AND "terminal_message" IS NULL) OR ("state" = 'succeeded' AND "attempt_count" > 0 AND "finished_at" IS NOT NULL AND "result_json" IS NOT NULL AND "terminal_code" IS NULL AND "terminal_message" IS NULL) OR ("state" IN ('failed', 'timed-out') AND "attempt_count" > 0 AND "finished_at" IS NOT NULL AND "result_json" IS NULL AND "terminal_code" IS NOT NULL AND "terminal_message" IS NOT NULL) OR ("state" = 'cancelled' AND "finished_at" IS NOT NULL AND "result_json" IS NULL AND "terminal_code" IS NOT NULL AND "terminal_message" IS NOT NULL))),
+	CONSTRAINT "job_runs_state_check" CHECK("state" IN ('cancelled', 'failed', 'queued', 'running', 'succeeded', 'timed-out') AND (("state" = 'queued' AND "finished_at" IS NULL AND "result_json" IS NULL AND "terminal_code" IS NULL AND "terminal_message" IS NULL) OR ("state" = 'running' AND "attempt_count" > 0 AND "finished_at" IS NULL AND "result_json" IS NULL AND "terminal_code" IS NULL AND "terminal_message" IS NULL) OR ("state" = 'succeeded' AND "attempt_count" > 0 AND "finished_at" IS NOT NULL AND "result_json" IS NOT NULL AND "terminal_code" IS NULL AND "terminal_message" IS NULL) OR ("state" IN ('failed', 'timed-out') AND ("attempt_count" > 0 OR ("state" = 'failed' AND "attempt_count" = 0 AND "cancellation_policy" = 'never' AND "trigger_type" = 'schedule' AND "terminal_code" = 'action-unavailable' AND "terminal_message" = 'The scheduled action is no longer available')) AND "finished_at" IS NOT NULL AND "result_json" IS NULL AND "terminal_code" IS NOT NULL AND "terminal_message" IS NOT NULL) OR ("state" = 'cancelled' AND "finished_at" IS NOT NULL AND "result_json" IS NULL AND "terminal_code" IS NOT NULL AND "terminal_message" IS NOT NULL))),
 	CONSTRAINT "job_runs_state_version_check" CHECK("state_version" BETWEEN 1 AND 9007199254740991),
 	CONSTRAINT "job_runs_terminal_code_check" CHECK(("terminal_code" IS NULL OR (length("terminal_code") BETWEEN 1 AND 128 AND instr("terminal_code", char(0)) = 0 AND "terminal_code" = lower("terminal_code") AND substr("terminal_code", 1, 1) GLOB '[a-z0-9]' AND "terminal_code" NOT GLOB '*[^a-z0-9._/-]*'))),
 	CONSTRAINT "job_runs_terminal_message_check" CHECK(("terminal_message" IS NULL OR (length("terminal_message") BETWEEN 1 AND 2000 AND instr("terminal_message", char(0)) = 0 AND length(trim("terminal_message", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND "terminal_message" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8232) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*') AND length(CAST("terminal_message" AS BLOB)) <= 8000))),
@@ -1977,12 +1977,28 @@ WHEN (
         AND NEW.attempt_count <> OLD.attempt_count + 1
     )
     OR (
-        NOT (OLD.state = 'queued' AND NEW.state = 'running')
+        NOT (
+            OLD.state = 'queued'
+            AND NEW.state = 'running'
+        )
         AND NEW.attempt_count <> OLD.attempt_count
     )
     OR (
         OLD.state = 'queued'
         AND NEW.state NOT IN ('queued', 'running', 'cancelled')
+        AND NOT (
+            NEW.state = 'failed'
+            AND OLD.cancellation_policy = 'never'
+            AND OLD.trigger_type = 'schedule'
+            AND NEW.terminal_code = 'action-unavailable'
+            AND NEW.terminal_message = 'The scheduled action is no longer available'
+            AND EXISTS (
+                SELECT 1
+                FROM scheduled_jobs AS schedule
+                WHERE schedule.id = OLD.scheduled_job_id
+                  AND schedule.enabled = 0
+            )
+        )
     )
     OR (
         OLD.state = 'running'
@@ -2127,6 +2143,17 @@ WHEN NOT EXISTS (
       AND (
           NEW.kind IN ('cancel-requested', 'cancelled', 'queued')
           OR NEW.attempt > 0
+          OR (
+              NEW.kind = 'failed'
+              AND NEW.attempt = 0
+              AND NEW.worker_instance_id IS NULL
+              AND run.state = 'failed'
+              AND run.attempt_count = 0
+              AND run.cancellation_policy = 'never'
+              AND run.trigger_type = 'schedule'
+              AND run.terminal_code = 'action-unavailable'
+              AND NEW.message = 'The scheduled action is no longer available'
+          )
       )
       AND (
           NEW.kind <> 'queued'

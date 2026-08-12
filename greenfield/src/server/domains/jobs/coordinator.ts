@@ -7,10 +7,12 @@ import {
     jobPayloadSchema,
     jobRunResultSchema,
     jobWorkerFreshnessMs,
+    retiredScheduledActionTerminalCode,
+    retiredScheduledActionTerminalMessage,
 } from "../../../contracts/jobModel.ts";
 import type { JsonObject } from "../../../shared/json.ts";
 import { parseJsonText } from "../../../shared/json.ts";
-import { serializeWorkerActionKeys } from "../../database/validation/workerActionKeys.ts";
+import { serializeWorkerActionKeys } from "../../database/validation/workerInstances.ts";
 import { sha256Hex } from "../../shared/crypto.ts";
 import {
     type JobActionDefinition,
@@ -1098,6 +1100,16 @@ export function createJobWorkerCoordinator(
                 terminalCode: "cancelled/schedule-retired",
                 terminalMessage:
                     "Cancelled because the schedule was retired from the action registry",
+            },
+            retiredRunFailure: {
+                sideEffectsForRun: (run) =>
+                    durableRunTransitionSideEffects(
+                        options.sideEffects,
+                        "jobs.run.action-unavailable",
+                        run
+                    ),
+                terminalCode: retiredScheduledActionTerminalCode,
+                terminalMessage: retiredScheduledActionTerminalMessage,
             },
             schedules,
             sideEffectsForSchedule: (schedule) =>

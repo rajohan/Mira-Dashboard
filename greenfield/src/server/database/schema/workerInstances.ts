@@ -1,13 +1,12 @@
 import { sql } from "drizzle-orm";
 import { check, index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
-import { workerActionKeysMaximumBytes } from "../workerActionKeyPolicy.ts";
 import {
     lowercaseHexTextCheck,
     timestampMillisecondsCheck,
     uuidV7TextCheck,
 } from "./checks.ts";
-import { boundedJsonArrayCheck } from "./jobChecks.ts";
+import { boundedJsonArrayCheck, workerActionKeysMaximumBytes } from "./jobChecks.ts";
 
 /** Durable worker registration and heartbeat state shared across rolling releases. */
 export const workerInstances = sqliteTable(

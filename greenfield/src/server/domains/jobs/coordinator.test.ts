@@ -734,7 +734,7 @@ describe("durable job worker coordinator", () => {
         ]);
     });
 
-    test("starts after retiring a queued never-cancellable schedule run", async () => {
+    test("fails a queued never-cancellable run before starting after schedule retirement", async () => {
         const database = await openFreshMigratedDatabase();
         const repository = createJobRepository(
             database.orm,
@@ -808,7 +808,7 @@ describe("durable job worker coordinator", () => {
             });
             expect(repository.findRun(run.id)).toMatchObject({
                 cancelRequestedAt: null,
-                eventCount: 3,
+                eventCount: 2,
                 state: "failed",
                 terminalCode: "action-unavailable",
             });

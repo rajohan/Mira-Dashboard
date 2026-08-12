@@ -1593,10 +1593,10 @@
             "id": "POST /api/exec/start",
             "method": "POST",
             "path": "/api/exec/start",
-            "purpose": "Queues a worker-owned long-running exec job.",
+            "purpose": "Partially replaced by the bounded PTY and fixed Service Actions. This row stays planned until legacy system_cleanup is decomposed without feature loss: Docker prune in Docker control, apt cleanup in host/package maintenance, and journald vacuum in log maintenance.",
             "section": "Exec And Terminal",
             "target": {
-                "delivery": "implemented",
+                "delivery": "planned",
                 "kind": "procedure",
                 "names": ["serviceActions.request", "terminal.prepareSession"],
                 "phase": "phase-5"

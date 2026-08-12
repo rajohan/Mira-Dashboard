@@ -49,7 +49,8 @@ function repositoryFixture() {
     const idempotencyReads: [JobRunRecord["requestedByKind"], string, string][] = [];
     let stored: JobRunRecord | undefined;
     const repository: ServiceActionQueueDependencies["repository"] = {
-        enqueueManualRun(input): Promise<EnqueueManualRunResult> {
+        enqueueManualRun(input, beforeInsert): Promise<EnqueueManualRunResult> {
+            beforeInsert?.();
             enqueues.push(input);
             stored = {
                 ...input.run,
@@ -88,7 +89,7 @@ function request(
     return {
         actionId,
         actor,
-        authorizeDispatch: () => Promise.resolve(),
+        authorizeDispatch: () => Promise.resolve(() => {}),
         idempotencyKey,
         requestId: "request-1",
         ...overrides,
@@ -130,11 +131,11 @@ describe("Service Action durable queue", () => {
 
             const result = await queue.enqueue(
                 request(actionId, {
-                    authorizeDispatch: () => {
-                        authorizationChecks += 1;
-                        expect(fixture.enqueues).toHaveLength(0);
-                        return Promise.resolve();
-                    },
+                    authorizeDispatch: () =>
+                        Promise.resolve(() => {
+                            authorizationChecks += 1;
+                            expect(fixture.enqueues).toHaveLength(0);
+                        }),
                 })
             );
 
@@ -178,10 +179,10 @@ describe("Service Action durable queue", () => {
 
         const replay = await queue.enqueue(
             request("system-update", {
-                authorizeDispatch: () => {
-                    authorizationChecks += 1;
-                    return Promise.resolve();
-                },
+                authorizeDispatch: () =>
+                    Promise.resolve(() => {
+                        authorizationChecks += 1;
+                    }),
             })
         );
 
@@ -289,6 +290,26 @@ describe("Service Action durable queue", () => {
             .enqueue(
                 request("system-restart", {
                     authorizeDispatch: () => Promise.reject(authorizationFailure),
+                })
+            )
+            .catch((error: unknown) => error);
+
+        expect(failure).toBe(authorizationFailure);
+        expect(fixture.enqueues).toEqual([]);
+        expect(fixture.run()).toBeUndefined();
+    });
+
+    test("does not insert when the final admitted authorization fence rejects", async () => {
+        const { fixture, queue } = queueFixture();
+        const authorizationFailure = new Error("authorization changed during admission");
+
+        const failure = await queue
+            .enqueue(
+                request("system-restart", {
+                    authorizeDispatch: () =>
+                        Promise.resolve(() => {
+                            throw authorizationFailure;
+                        }),
                 })
             )
             .catch((error: unknown) => error);

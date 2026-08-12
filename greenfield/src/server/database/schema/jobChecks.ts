@@ -1,11 +1,42 @@
 import { sql, type SQLWrapper } from "drizzle-orm";
 
 import {
+    retiredScheduledActionTerminalCode,
+    retiredScheduledActionTerminalMessage,
+} from "../../../contracts/jobModel.ts";
+import {
     boundedControlSafeTextCheck,
     boundedNonBlankTextCheck,
     nulFreeTextCheck,
     uuidV7TextCheck,
 } from "./checks.ts";
+
+/** Maximum executable action identities advertised by one worker process. */
+export const workerActionKeyMaximum = 32;
+/** Maximum canonical UTF-8 JSON representation retained in one worker row. */
+export const workerActionKeysMaximumBytes = 4 * 1024;
+
+const retiredScheduledActionTerminalCodeSql = sql.raw(
+    `'${retiredScheduledActionTerminalCode}'`
+);
+const retiredScheduledActionTerminalMessageSql = sql.raw(
+    `'${retiredScheduledActionTerminalMessage}'`
+);
+
+/**
+ * Exact SQL form of the only failed lifecycle admitted before attempt one.
+ * @returns Canonical predicate shared by durable job-row constraints.
+ */
+export function unstartedRetiredScheduleFailureCheck(columns: {
+    readonly attemptCount: SQLWrapper;
+    readonly cancellationPolicy: SQLWrapper;
+    readonly state: SQLWrapper;
+    readonly terminalCode: SQLWrapper;
+    readonly terminalMessage: SQLWrapper;
+    readonly triggerType: SQLWrapper;
+}) {
+    return sql`${columns.state} = 'failed' AND ${columns.attemptCount} = 0 AND ${columns.cancellationPolicy} = 'never' AND ${columns.triggerType} = 'schedule' AND ${columns.terminalCode} = ${retiredScheduledActionTerminalCodeSql} AND ${columns.terminalMessage} = ${retiredScheduledActionTerminalMessageSql}`;
+}
 
 /**
  * Canonical lowercase identifier used by schedules, actions, and resource leases.

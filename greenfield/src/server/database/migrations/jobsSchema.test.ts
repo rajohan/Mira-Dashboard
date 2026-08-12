@@ -1034,6 +1034,94 @@ describe("jobs baseline schema", () => {
                 )
             ).toThrow("job_runs lifecycle transition is invalid");
 
+            const retiredScheduleId = "system.worker-smoke-retired-never";
+            const retiredRunId = uuid(29);
+            insertSchedule(database, {
+                cancellationPolicy: "never",
+                id: retiredScheduleId,
+            });
+            insertQueuedRun(database, {
+                cancellationPolicy: "never",
+                id: retiredRunId,
+                idempotencyKey: idempotencyKey(29),
+                scheduledForAt: 1000,
+                scheduledJobId: retiredScheduleId,
+                scheduledJobVersion: 1,
+                triggerType: "schedule",
+            });
+            insertEvent(database, {
+                jobRunId: retiredRunId,
+                kind: "queued",
+                sequence: 1,
+            });
+            expect(() =>
+                database.sqlite.run(
+                    `UPDATE job_runs
+                     SET finished_at = 1500, state = 'failed', state_version = 2,
+                         terminal_code = 'action-unavailable',
+                         terminal_message = 'The scheduled action is no longer available',
+                         updated_at = 1500
+                     WHERE id = ?`,
+                    [retiredRunId]
+                )
+            ).toThrow("job_runs lifecycle transition is invalid");
+            database.sqlite.run(
+                `UPDATE scheduled_jobs
+                 SET enabled = 0, next_run_at = NULL, updated_at = 1500, version = 2
+                 WHERE id = ?`,
+                [retiredScheduleId]
+            );
+            expect(() =>
+                database.sqlite.run(
+                    `UPDATE job_runs
+                     SET finished_at = 1500, state = 'failed', state_version = 2,
+                         terminal_code = 'action-unavailable',
+                         terminal_message = 'A different bounded failure message',
+                         updated_at = 1500
+                     WHERE id = ?`,
+                    [retiredRunId]
+                )
+            ).toThrow();
+            database.sqlite.run(
+                `UPDATE job_runs
+                 SET finished_at = 1500, state = 'failed', state_version = 2,
+                     terminal_code = 'action-unavailable',
+                     terminal_message = 'The scheduled action is no longer available',
+                     updated_at = 1500
+                 WHERE id = ?`,
+                [retiredRunId]
+            );
+            insertEvent(database, {
+                attempt: 0,
+                jobRunId: retiredRunId,
+                kind: "failed",
+                message: "The scheduled action is no longer available",
+                occurredAt: 1500,
+                sequence: 2,
+            });
+            expect(
+                database.sqlite
+                    .query<
+                        {
+                            attempt_count: number;
+                            first_started_at: number | null;
+                            last_attempt_started_at: number | null;
+                            state: string;
+                        },
+                        [string]
+                    >(
+                        `SELECT attempt_count, first_started_at,
+                                last_attempt_started_at, state
+                         FROM job_runs WHERE id = ?`
+                    )
+                    .get(retiredRunId)
+            ).toEqual({
+                attempt_count: 0,
+                first_started_at: null,
+                last_attempt_started_at: null,
+                state: "failed",
+            });
+
             const queuedOnlyRunId = uuid(27);
             insertQueuedRun(database, {
                 cancellationPolicy: "queued-only",

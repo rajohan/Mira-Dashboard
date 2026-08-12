@@ -440,6 +440,11 @@ OpenClaw cleanup and update do not use this deferred host authority: their exact
 Gateway operations are already implemented and remain available only when a fresh exact-release
 worker advertises them.
 
+Those fixed operations do not close the legacy `POST /api/exec/start` row. Its `system_cleanup`
+consumer remains planned as Docker prune in the Docker slice, apt cleanup in host/package
+maintenance, and journald vacuum in log maintenance. Delivery must preserve each capability behind
+its own reviewed authority rather than recreate the old shared shell boundary.
+
 The web process also derives the fixed `<MIRA_DASHBOARD_OPENCLAW_ROOT>/media` descriptor boundary
 from that same reviewed root. It exposes no configurable media directory, recursive listing, or
 browser-supplied path route. Local-history transcript carriers become opaque session/message-bound

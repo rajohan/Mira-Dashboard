@@ -1,6 +1,7 @@
 import { realpath } from "node:fs/promises";
 import path from "node:path";
 
+import type { FixedHostOperationsExecutionPort } from "../server/domains/jobs/actionExecutors.ts";
 import {
     createDashboardWorkerRuntime,
     createSystemJobWorkerSideEffects,
@@ -39,7 +40,6 @@ import {
     createProcessTerminationController,
     type ProcessTerminationController,
 } from "../server/platform/runtime/processSignals.ts";
-import type { FixedHostOperationsExecutionPort } from "../shared/hostOperations.ts";
 import type { OpenClawGatewayLifecycleExecutionPort } from "../shared/openClawGatewayLifecycle.ts";
 import type { OpenClawServiceActionsExecutionPort } from "../shared/openClawServiceActions.ts";
 import {

@@ -11,6 +11,7 @@ import type { RequestContext } from "../../trpc/context.ts";
 import {
     authenticationPolicyError,
     operationOutcomeUnknownError,
+    router,
     sessionCapabilityProcedure,
 } from "../../trpc/trpc.ts";
 import type { AuthenticatedBrowserIdentity } from "../security/authenticationSession.ts";
@@ -123,3 +124,11 @@ export const serviceActionsRoutes = {
             }
         }),
 };
+
+/** Leaf procedure names owned by the fixed Service Actions router. */
+export const serviceActionsProcedureNames = Object.freeze(
+    Object.keys(serviceActionsRoutes)
+);
+
+/** Session-only status and recent-MFA fixed-operation queue controls. */
+export const serviceActionsRouter = router(serviceActionsRoutes);

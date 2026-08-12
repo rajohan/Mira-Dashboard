@@ -297,7 +297,7 @@ describe("reviewed pre-cutover parity inventory", () => {
             ["POST /api/exec/:jobId/stop", "implemented", ["terminal.terminateSession"]],
             [
                 "POST /api/exec/start",
-                "implemented",
+                "planned",
                 ["serviceActions.request", "terminal.prepareSession"],
             ],
             [
@@ -316,6 +316,11 @@ describe("reviewed pre-cutover parity inventory", () => {
             kind: "reviewed-removal",
             reason: expect.stringContaining("synchronous generic command endpoint"),
         });
+        expect(endpoints[3]?.purpose).toContain("Docker prune in Docker control");
+        expect(endpoints[3]?.purpose).toContain(
+            "apt cleanup in host/package maintenance"
+        );
+        expect(endpoints[3]?.purpose).toContain("journald vacuum in log maintenance");
     });
 
     test("records the bounded OpenClaw settings and operations slice", async () => {

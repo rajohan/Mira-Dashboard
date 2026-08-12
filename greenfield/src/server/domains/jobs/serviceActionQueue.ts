@@ -57,7 +57,8 @@ export interface ServiceActionQueueActor {
 export interface ServiceActionQueueRequest {
     readonly actionId: ServiceActionId;
     readonly actor: ServiceActionQueueActor;
-    readonly authorizeDispatch: () => Promise<void>;
+    /** Preflights asynchronous availability and returns the final synchronous auth fence. */
+    readonly authorizeDispatch: () => Promise<() => void>;
     readonly idempotencyKey: string;
     readonly requestId: string;
     readonly signal?: AbortSignal;
@@ -272,13 +273,29 @@ export function createServiceActionQueue(
             });
 
             request.signal?.throwIfAborted();
-            await request.authorizeDispatch();
+            const authorizeEnqueue = await request.authorizeDispatch();
             request.signal?.throwIfAborted();
 
             let enqueued: Awaited<ReturnType<JobRepository["enqueueManualRun"]>>;
+            let authorizationFailed = false;
+            let authorizationFailure: unknown;
             try {
-                enqueued = await dependencies.repository.enqueueManualRun(enqueueInput);
+                enqueued = await dependencies.repository.enqueueManualRun(
+                    enqueueInput,
+                    () => {
+                        request.signal?.throwIfAborted();
+                        try {
+                            authorizeEnqueue();
+                            request.signal?.throwIfAborted();
+                        } catch (error) {
+                            authorizationFailed = true;
+                            authorizationFailure = error;
+                            throw error;
+                        }
+                    }
+                );
             } catch {
+                if (authorizationFailed) throw authorizationFailure;
                 let recovered: JobRunRecord | undefined;
                 try {
                     recovered = dependencies.repository.findRunByIdempotency(

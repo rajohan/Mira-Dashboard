@@ -1,8 +1,17 @@
 import { describe, expect, test } from "bun:test";
 
+import { asc } from "drizzle-orm";
+
+import { auditEvents as storedAuditEvents } from "../../database/schema/auditEvents.ts";
+import { testImmediateDatabaseWriteAdmission } from "../../test/support/databaseWriteAdmission.ts";
+import { openFreshMigratedDatabase } from "../../test/support/freshDatabase.ts";
 import { ServiceActionQueueError } from "../jobs/serviceActionQueue.ts";
-import type { ServiceActionAuditEvent } from "./operationAudit.ts";
-import { createServiceActionsService, ServiceActionsServiceError } from "./service.ts";
+import {
+    createServiceActionsService,
+    createSqliteServiceActionAuditWriter,
+    type ServiceActionAuditEvent,
+    ServiceActionsServiceError,
+} from "./service.ts";
 
 const actor = Object.freeze({
     authenticatorId: "a".repeat(32),
@@ -72,7 +81,8 @@ function fixture(
         },
         queue: options.queue ?? {
             enqueue: async (request) => {
-                await request.authorizeDispatch();
+                const authorizeEnqueue = await request.authorizeDispatch();
+                authorizeEnqueue();
                 return queuedResult;
             },
         },
@@ -115,6 +125,58 @@ async function captureFailure(work: () => Promise<unknown>): Promise<unknown> {
 }
 
 describe("service actions service", () => {
+    test("persists only fixed action, run identity, and classified settlement", async () => {
+        const database = await openFreshMigratedDatabase();
+        const ids = [
+            "019ff1c6-1a9b-7775-8f1b-d5b863b0e7a1",
+            "019ff1c6-1a9b-7775-8f1b-d5b863b0e7a2",
+        ];
+        const writer = createSqliteServiceActionAuditWriter({
+            clock: () => new Date(1000),
+            database: database.orm,
+            generateId: () => {
+                const id = ids.shift();
+                if (id === undefined) throw new Error("Audit id budget exhausted");
+                return id;
+            },
+            writeAdmission: testImmediateDatabaseWriteAdmission,
+        });
+        const context = {
+            actionId: "system-update",
+            actor,
+            requestId: "request-1",
+        } as const;
+
+        try {
+            await writer.record({ ...context, settlement: "attempted" });
+            await writer.record({ ...context, jobRunId, settlement: "succeeded" });
+            const rows = database.orm
+                .select()
+                .from(storedAuditEvents)
+                .orderBy(asc(storedAuditEvents.id))
+                .all();
+            expect(rows).toMatchObject([
+                {
+                    action: "service-actions.system-update.request",
+                    metadataJson: '{"settlement":"attempted"}',
+                    outcome: "attempted",
+                    requestId: "request-1",
+                    targetId: "system-update",
+                    targetType: "service-action",
+                },
+                {
+                    action: "service-actions.system-update.request",
+                    metadataJson: '{"settlement":"succeeded"}',
+                    outcome: "succeeded",
+                    targetId: jobRunId,
+                    targetType: "job-run",
+                },
+            ]);
+            expect(JSON.stringify(rows)).not.toContain("apt-get");
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
     test("projects the exact bounded status inventory", async () => {
         const result = await fixture().service.getStatus();
         expect(result).toMatchObject({
@@ -146,7 +208,9 @@ describe("service actions service", () => {
             queue: {
                 enqueue: async (request) => {
                     order.push("queue:preflight");
-                    await request.authorizeDispatch();
+                    const authorizeEnqueue = await request.authorizeDispatch();
+                    order.push("queue:admitted");
+                    authorizeEnqueue();
                     order.push("queue:enqueue");
                     return queuedResult;
                 },
@@ -175,6 +239,7 @@ describe("service actions service", () => {
         expect(order).toEqual([
             "audit:attempted",
             "queue:preflight",
+            "queue:admitted",
             "authorize",
             "queue:enqueue",
             "audit:succeeded",
@@ -204,7 +269,8 @@ describe("service actions service", () => {
         const state = fixture({
             queue: {
                 enqueue: async (request) => {
-                    await request.authorizeDispatch();
+                    const authorizeEnqueue = await request.authorizeDispatch();
+                    authorizeEnqueue();
                     durableEnqueue = true;
                     return queuedResult;
                 },
@@ -236,7 +302,12 @@ describe("service actions service", () => {
         const state = fixture({
             queue: {
                 enqueue: async (request) => {
-                    await request.authorizeDispatch().catch(() => {});
+                    const authorizeEnqueue = await request.authorizeDispatch();
+                    try {
+                        authorizeEnqueue();
+                    } catch {
+                        // Deliberately emulate a queue bug swallowing the rejection.
+                    }
                     return queuedResult;
                 },
             },

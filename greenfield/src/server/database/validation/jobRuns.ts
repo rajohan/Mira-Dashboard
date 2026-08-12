@@ -8,6 +8,7 @@ import {
     jobCancellationPolicySchema,
     jobDisplayNameSchema,
     jobIdempotencyKeySchema,
+    isUnstartedRetiredScheduleFailure,
     jobPayloadMaximumBytes,
     jobPayloadSchema,
     jobPrioritySchema,
@@ -151,7 +152,8 @@ function attemptsAreConsistent(run: StoredJobRun): boolean {
     }
     return (
         !["failed", "running", "succeeded", "timed-out"].includes(run.state) ||
-        run.attemptCount > 0
+        run.attemptCount > 0 ||
+        isUnstartedRetiredScheduleFailure(run)
     );
 }
 

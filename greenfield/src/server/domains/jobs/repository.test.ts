@@ -142,6 +142,57 @@ function worker(
 }
 
 describe("durable jobs repository", () => {
+    test("rechecks authority after write admission and rolls back a rejected enqueue", async () => {
+        const database = await openFreshMigratedDatabase();
+        let releaseAdmission: (() => void) | undefined;
+        let enteredAdmission: (() => void) | undefined;
+        const admissionEntered = new Promise<void>((resolve) => {
+            enteredAdmission = resolve;
+        });
+        const admissionRelease = new Promise<void>((resolve) => {
+            releaseAdmission = resolve;
+        });
+        const repository = createJobRepository(database.orm, {
+            async run(operation) {
+                enteredAdmission?.();
+                await admissionRelease;
+                return operation(() => {});
+            },
+        });
+        const run = queuedRun(8, {
+            actionKey: "host.system.update",
+            displayName: "Update host system",
+            scheduledJobId: null,
+            scheduledJobVersion: null,
+        });
+        const authorizationFailure = new Error("authorization expired");
+        let authorized = true;
+
+        try {
+            const pending = repository.enqueueManualRun(
+                {
+                    ...noSideEffects,
+                    queuedEvent: queuedEvent(run),
+                    run,
+                },
+                () => {
+                    if (!authorized) throw authorizationFailure;
+                }
+            );
+            await admissionEntered;
+            authorized = false;
+            releaseAdmission?.();
+
+            expect(await pending.catch((error: unknown) => error)).toBe(
+                authorizationFailure
+            );
+            expect(repository.findRun(run.id)).toBeUndefined();
+        } finally {
+            releaseAdmission?.();
+            database.sqlite.close(true);
+        }
+    });
+
     test("reconciles code metadata and enforces caller-scoped manual idempotency", async () => {
         const database = await openFreshMigratedDatabase();
         const repository = createJobRepository(
@@ -1309,6 +1360,11 @@ describe("durable jobs repository", () => {
                     terminalCode: "cancelled/schedule-retired",
                     terminalMessage: "Cancelled because the schedule was retired",
                 },
+                retiredRunFailure: {
+                    sideEffectsForRun: () => noSideEffects,
+                    terminalCode: "action-unavailable",
+                    terminalMessage: "The scheduled action is no longer available",
+                },
                 schedules: [],
                 sideEffectsForSchedule: () => {
                     throw new Error("reject retirement schedule side effects");
@@ -1335,6 +1391,7 @@ describe("durable jobs repository", () => {
                 readonly updatedAt: Date;
                 readonly version: number;
             }> = [];
+            let failureSideEffectAt: Date | undefined;
             await repository.reconcileSchedules({
                 at: new Date(900),
                 retiredRunCancellation: {
@@ -1344,6 +1401,14 @@ describe("durable jobs repository", () => {
                     },
                     terminalCode: "cancelled/schedule-retired",
                     terminalMessage: "Cancelled because the schedule was retired",
+                },
+                retiredRunFailure: {
+                    sideEffectsForRun: (failed) => {
+                        failureSideEffectAt = failed.updatedAt;
+                        return noSideEffects;
+                    },
+                    terminalCode: "action-unavailable",
+                    terminalMessage: "The scheduled action is no longer available",
                 },
                 schedules: [],
                 sideEffectsForSchedule: (retired) => {
@@ -1371,11 +1436,16 @@ describe("durable jobs repository", () => {
                 version: 2,
             });
             expect(repository.findRun(run.id)).toMatchObject({
+                attemptCount: 0,
                 cancelRequestedAt: null,
-                eventCount: 1,
-                state: "queued",
+                eventCount: 2,
+                firstStartedAt: null,
+                lastAttemptStartedAt: null,
+                state: "failed",
+                terminalCode: "action-unavailable",
                 updatedAt: new Date(100_000),
             });
+            expect(failureSideEffectAt).toEqual(new Date(100_000));
 
             await repository.reconcileSchedules({
                 at: new Date(130_000),

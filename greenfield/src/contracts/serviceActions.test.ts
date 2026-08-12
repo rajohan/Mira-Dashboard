@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import * as v from "valibot";
 
 import { procedureContracts } from "./contractRegistry.ts";
+import { jobRunSummarySchema } from "./jobModel.ts";
 import {
     getServiceActionsStatusResultSchema,
     requestServiceActionInputSchema,
@@ -38,6 +39,39 @@ function queuedRun(actionKey: string) {
 }
 
 describe("service action contracts", () => {
+    test("accepts only the exact zero-attempt scheduled-action retirement", () => {
+        const retired = {
+            ...queuedRun("cache.refresh.retired"),
+            eventCount: 2,
+            finishedAtMs: 2000,
+            scheduledForAtMs: 1000,
+            scheduledJobId: "cache.refresh.retired",
+            scheduledJobVersion: 1,
+            state: "failed" as const,
+            stateVersion: 2,
+            terminalCode: "action-unavailable",
+            terminalMessage: "The scheduled action is no longer available",
+            triggerType: "schedule" as const,
+            updatedAtMs: 2000,
+        };
+
+        expect(v.parse(jobRunSummarySchema, retired)).toEqual(retired);
+        for (const invalid of [
+            { ...retired, cancellationPolicy: "queued-only" },
+            { ...retired, terminalCode: "failed/provider" },
+            { ...retired, terminalMessage: "Scheduled action unavailable" },
+            {
+                ...retired,
+                scheduledForAtMs: undefined,
+                scheduledJobId: undefined,
+                scheduledJobVersion: undefined,
+                triggerType: "manual",
+            },
+        ]) {
+            expect(v.safeParse(jobRunSummarySchema, invalid).success).toBeFalse();
+        }
+    });
+
     test("registers one session-only status query and one recent-MFA mutation", () => {
         expect(
             serviceActionProcedureContracts.map(

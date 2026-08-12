@@ -680,6 +680,35 @@ describe("Drizzle-generated Valibot row schemas", () => {
                 workerInstanceId: null,
             })
         ).toThrow();
+        const retiredUnstartedRun = {
+            ...validJobRunRow,
+            cancellationPolicy: "never" as const,
+            finishedAt: jobUpdatedAt,
+            scheduledForAt: jobCreatedAt,
+            state: "failed" as const,
+            terminalCode: "action-unavailable",
+            terminalMessage: "The scheduled action is no longer available",
+            triggerType: "schedule" as const,
+        };
+        expect(v.parse(jobRunSelectSchema, retiredUnstartedRun)).toBeDefined();
+        expect(() =>
+            v.parse(jobRunSelectSchema, {
+                ...retiredUnstartedRun,
+                terminalCode: "action-failed",
+            })
+        ).toThrow();
+        expect(() =>
+            v.parse(jobRunSelectSchema, {
+                ...retiredUnstartedRun,
+                terminalMessage: "A different bounded failure message",
+            })
+        ).toThrow();
+        expect(() =>
+            v.parse(jobRunSelectSchema, {
+                ...retiredUnstartedRun,
+                triggerType: "manual",
+            })
+        ).toThrow();
         expect(() =>
             v.parse(workerInstanceSelectSchema, {
                 actionKeysJson: "[]",

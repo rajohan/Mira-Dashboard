@@ -78,6 +78,10 @@ export const jobResourceKeysMaximumBytes = 4 * 1024;
 export const jobRunResultMaximumBytes = 64 * 1024;
 export const jobRunTerminalCodeMaximumLength = 128;
 export const jobRunTerminalMessageMaximumLength = 2000;
+/** Exact terminal identity for a never-started run whose code-owned schedule retired. */
+export const retiredScheduledActionTerminalCode = "action-unavailable";
+export const retiredScheduledActionTerminalMessage =
+    "The scheduled action is no longer available";
 export const jobRunAttemptMaximum = 10;
 export const jobRunEventMaximum = 1000;
 /** Payload slots left after reserving every worst-case structural lifecycle event. */
@@ -489,6 +493,32 @@ const jobRunSummaryObjectSchema = v.strictObject({
 
 export type JobRunSummary = v.InferOutput<typeof jobRunSummaryObjectSchema>;
 
+interface UnstartedRetiredScheduleFailure {
+    readonly attemptCount: number;
+    readonly cancellationPolicy: JobCancellationPolicy;
+    readonly state: JobRunState;
+    readonly terminalCode?: string | null;
+    readonly terminalMessage?: string | null;
+    readonly triggerType: JobTriggerType;
+}
+
+/**
+ * @param run Stored or public run projection to inspect.
+ * @returns Whether it is the one canonical terminal state allowed before attempt one.
+ */
+export function isUnstartedRetiredScheduleFailure(
+    run: UnstartedRetiredScheduleFailure
+): boolean {
+    return (
+        run.state === "failed" &&
+        run.attemptCount === 0 &&
+        run.cancellationPolicy === "never" &&
+        run.triggerType === "schedule" &&
+        run.terminalCode === retiredScheduledActionTerminalCode &&
+        run.terminalMessage === retiredScheduledActionTerminalMessage
+    );
+}
+
 /**
  * @param run Public run projection to inspect.
  * @returns Whether it preserves lifecycle and timestamp invariants.
@@ -532,7 +562,8 @@ export function jobRunSummaryIsConsistent(run: JobRunSummary): boolean {
     }
     if (
         ["failed", "running", "succeeded", "timed-out"].includes(run.state) &&
-        run.attemptCount === 0
+        run.attemptCount === 0 &&
+        !isUnstartedRetiredScheduleFailure(run)
     ) {
         return false;
     }

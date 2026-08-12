@@ -119,8 +119,10 @@ import { createRequestAuthenticator } from "../server/domains/security/requestAu
 import { createRequestAuthenticationRepository } from "../server/domains/security/requestAuthenticationRepository.ts";
 import { createSecurityAuditLifecycleService } from "../server/domains/security/securityAuditLifecycle.ts";
 import { createSecurityAuditLifecycleRepository } from "../server/domains/security/securityAuditLifecycleRepository.ts";
-import { createSqliteServiceActionAuditWriter } from "../server/domains/serviceActions/operationAudit.ts";
-import { createServiceActionsService } from "../server/domains/serviceActions/service.ts";
+import {
+    createServiceActionsService,
+    createSqliteServiceActionAuditWriter,
+} from "../server/domains/serviceActions/service.ts";
 import { createSqliteServiceActionStatusReader } from "../server/domains/serviceActions/statusReader.ts";
 import { createSystemHealthDiagnosticsService } from "../server/domains/system/healthDiagnosticsService.ts";
 import { createTaskRepository } from "../server/domains/tasks/repository.ts";

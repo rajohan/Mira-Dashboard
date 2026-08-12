@@ -31,6 +31,7 @@ import {
     jobActorCheck,
     optionalJobMessageCheck,
     optionalJobTerminalCodeCheck,
+    unstartedRetiredScheduleFailureCheck,
 } from "./jobChecks.ts";
 import { scheduledJobs } from "./scheduledJobs.ts";
 import { workerInstances } from "./workerInstances.ts";
@@ -170,7 +171,7 @@ export const jobRuns = sqliteTable(
         ),
         check(
             "job_runs_state_check",
-            sql`${table.state} IN ('cancelled', 'failed', 'queued', 'running', 'succeeded', 'timed-out') AND ((${table.state} = 'queued' AND ${table.finishedAt} IS NULL AND ${table.resultJson} IS NULL AND ${table.terminalCode} IS NULL AND ${table.terminalMessage} IS NULL) OR (${table.state} = 'running' AND ${table.attemptCount} > 0 AND ${table.finishedAt} IS NULL AND ${table.resultJson} IS NULL AND ${table.terminalCode} IS NULL AND ${table.terminalMessage} IS NULL) OR (${table.state} = 'succeeded' AND ${table.attemptCount} > 0 AND ${table.finishedAt} IS NOT NULL AND ${table.resultJson} IS NOT NULL AND ${table.terminalCode} IS NULL AND ${table.terminalMessage} IS NULL) OR (${table.state} IN ('failed', 'timed-out') AND ${table.attemptCount} > 0 AND ${table.finishedAt} IS NOT NULL AND ${table.resultJson} IS NULL AND ${table.terminalCode} IS NOT NULL AND ${table.terminalMessage} IS NOT NULL) OR (${table.state} = 'cancelled' AND ${table.finishedAt} IS NOT NULL AND ${table.resultJson} IS NULL AND ${table.terminalCode} IS NOT NULL AND ${table.terminalMessage} IS NOT NULL))`
+            sql`${table.state} IN ('cancelled', 'failed', 'queued', 'running', 'succeeded', 'timed-out') AND ((${table.state} = 'queued' AND ${table.finishedAt} IS NULL AND ${table.resultJson} IS NULL AND ${table.terminalCode} IS NULL AND ${table.terminalMessage} IS NULL) OR (${table.state} = 'running' AND ${table.attemptCount} > 0 AND ${table.finishedAt} IS NULL AND ${table.resultJson} IS NULL AND ${table.terminalCode} IS NULL AND ${table.terminalMessage} IS NULL) OR (${table.state} = 'succeeded' AND ${table.attemptCount} > 0 AND ${table.finishedAt} IS NOT NULL AND ${table.resultJson} IS NOT NULL AND ${table.terminalCode} IS NULL AND ${table.terminalMessage} IS NULL) OR (${table.state} IN ('failed', 'timed-out') AND (${table.attemptCount} > 0 OR (${unstartedRetiredScheduleFailureCheck(table)})) AND ${table.finishedAt} IS NOT NULL AND ${table.resultJson} IS NULL AND ${table.terminalCode} IS NOT NULL AND ${table.terminalMessage} IS NOT NULL) OR (${table.state} = 'cancelled' AND ${table.finishedAt} IS NOT NULL AND ${table.resultJson} IS NULL AND ${table.terminalCode} IS NOT NULL AND ${table.terminalMessage} IS NOT NULL))`
         ),
         check(
             "job_runs_state_version_check",

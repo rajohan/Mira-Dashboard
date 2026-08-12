@@ -464,7 +464,7 @@ is exclusive, caller-idempotent, single-attempt, non-retry-safe, and non-cancell
 worker owns its fixed no-shell lifecycle command. Ambiguous enqueue or terminal settlement is
 reconciled by durable run identity and never blindly dispatches a second restart.
 
-### Purpose-built Service Actions replace generic exec
+### Purpose-built Service Actions partially replace generic exec consumers
 
 The Overview exposes exactly four fixed Service Actions through
 `serviceActions.getStatus` and `serviceActions.request`: OpenClaw session cleanup, OpenClaw
@@ -478,9 +478,12 @@ OpenClaw cleanup and update are implemented worker-only through the hash-pinned
 `sessions.cleanup` and `update.run` Gateway methods. Their providers accept no browser parameters,
 persist only bounded schema-validated summaries, never return raw Gateway results, and never
 blindly replay a post-dispatch unknown outcome. Cleanup deliberately uses OpenClaw's source-owned
-session/artifact maintenance instead of reproducing legacy recursive deletion. The legacy broad
-`system_cleanup` behavior is not restored: package, journal, and Docker deletion cross separate
-ownership domains, and Docker cleanup remains part of the Docker domain.
+session/artifact maintenance instead of reproducing legacy recursive deletion. These safe
+replacements do not yet close `POST /api/exec/start`: the legacy broad `system_cleanup` behavior
+crosses separate ownership domains and remains planned as three explicit capabilities. Docker
+prune belongs to the Docker slice, apt cleanup belongs to host/package maintenance, and journald
+vacuum belongs to log maintenance. The row stays open until all three are delivered or separately
+reviewed without removing their operator-visible behavior.
 
 The contract and Overview retain fixed rows for host restart and host update, but production marks
 both unavailable. The current web and worker processes share one Unix identity, so a group- or
@@ -493,8 +496,9 @@ The interactive PTY remains the sole terminal boundary. Shell `cd` and completio
 connected shell/readline protocol, termination uses the bounded terminal session control, and no
 new generic command, cwd, or completion API is introduced. The unused synchronous `POST /api/exec`
 endpoint is a reviewed removal because no current browser or scoped automation consumer depends on
-it; legacy long-running exec consumers map to either the PTY or the fixed durable Service Actions
-queue.
+it. Implemented long-running exec consumers map to either the PTY or the fixed durable Service
+Actions queue, while the inventory keeps `POST /api/exec/start` planned for the outstanding
+cleanup decomposition.
 
 ### Current-protocol Control UI projections
 

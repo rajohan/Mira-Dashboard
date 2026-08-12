@@ -103,7 +103,9 @@ including restart during streaming.
   filesystem isolation requires a separate mount, namespace, or container sandbox.
 - keep shell `cd`, completion, and termination inside the implemented bounded PTY. Replace consumed
   legacy exec behavior only with purpose-built durable Service Actions; do not restore a generic
-  command, shell, or cwd API for the unused synchronous exec route.
+  command, shell, or cwd API for the unused synchronous exec route. Keep `POST /api/exec/start`
+  planned until `system_cleanup` is decomposed without feature loss: Docker prune in the Docker
+  slice, apt cleanup in host/package maintenance, and journald vacuum in log maintenance.
 - expose the four fixed Service Action intents in contract/UI, but advertise only exact executors
   owned by a fresh worker on the current release. OpenClaw cleanup/update use reviewed worker-only
   Gateway methods. Host restart/update remain unavailable until web and worker have distinct OS

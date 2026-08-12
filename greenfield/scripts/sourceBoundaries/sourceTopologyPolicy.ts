@@ -52,6 +52,7 @@ const reviewedApplicationServerTargets: ReadonlyMap<
     [
         "src/app/worker.ts",
         new Set([
+            "src/server/domains/jobs/actionExecutors.ts",
             "src/server/domains/jobs/workerRuntime.ts",
             "src/server/domains/moltbook/provider.ts",
             "src/server/platform/configuration/workerConfiguration.ts",
