@@ -8,11 +8,13 @@ import {
     setDefaultTimeout,
     test,
 } from "bun:test";
-import { lstat, mkdir, readdir, unlink, writeFile } from "node:fs/promises";
+import { cp, lstat, mkdir, mkdtemp, readdir, unlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { Effect } from "effect";
 
+import type { ProductionActivationRecord } from "../../src/shared/productionActivationRecord.ts";
 import { parseProductionActivationTransition } from "../../src/shared/productionActivationTransition.ts";
 import {
     createLocalReleaseFixture,
@@ -63,6 +65,15 @@ const runtimeIdentity: ReleaseRuntimeIdentity = Object.freeze({
 const releaseFixtureDirectories: string[] = [];
 const temporaryDirectories: string[] = [];
 let sharedSourceReleases: readonly [string, string] | undefined;
+let sharedPublishedFixture:
+    | Readonly<{
+          activatedProjectRoot: string;
+          initialActivation: ProductionActivationRecord;
+          firstManifest: PublishedProductionRelease["manifest"];
+          projectRoot: string;
+          secondManifest: PublishedProductionRelease["manifest"];
+      }>
+    | undefined;
 
 setDefaultTimeout(15_000);
 
@@ -81,6 +92,52 @@ beforeAll(async () => {
             releaseFixtureDirectories
         ),
     ]);
+    const { projectRoot, runtimeSource } = await createProductionTargetFixture(
+        releaseFixtureDirectories
+    );
+    const state = await prepareProtectedProductionStatePath(projectRoot);
+    sharedPublishedFixture = await withDeploymentLease(
+        state.stateDirectory,
+        async (lease) => {
+            const paths = await prepareProductionDeliveryDirectories(state);
+            const published = await publishProductionDeliveryFixtures(
+                lease,
+                paths,
+                sourceReleaseFixtures(),
+                runtimeSource,
+                runtimeIdentity
+            );
+            const pristineProjectRoot = await mkdtemp(
+                path.join(tmpdir(), "mira-release-activation-published-")
+            );
+            releaseFixtureDirectories.push(pristineProjectRoot);
+            await cp(
+                path.join(projectRoot, "production"),
+                path.join(pristineProjectRoot, "production"),
+                { recursive: true }
+            );
+            await unlink(
+                path.join(pristineProjectRoot, "production/state/.deployment.lock")
+            );
+            const services = new TestServiceController();
+            const initialActivation = await Effect.runPromise(
+                activatePublishedProductionRelease(
+                    lease,
+                    paths,
+                    published.first,
+                    published.runtime,
+                    activationDependencies(services, published.probeRuntime)
+                )
+            );
+            return Object.freeze({
+                activatedProjectRoot: projectRoot,
+                firstManifest: published.first.manifest,
+                initialActivation,
+                projectRoot: pristineProjectRoot,
+                secondManifest: published.second.manifest,
+            });
+        }
+    );
 });
 
 afterEach(async () => {
@@ -98,8 +155,32 @@ function sourceReleaseFixtures(): readonly [string, string] {
     return sharedSourceReleases;
 }
 
-function createProjectFixture() {
-    return createProductionTargetFixture(temporaryDirectories);
+function publishedFixtureSource() {
+    if (sharedPublishedFixture === undefined) {
+        throw new Error("Published production fixture is not initialized");
+    }
+    return sharedPublishedFixture;
+}
+
+async function createProjectFixture(initiallyActivated = true): Promise<string> {
+    const fixture = publishedFixtureSource();
+    const projectRoot = await mkdtemp(
+        path.join(tmpdir(), "mira-release-activation-target-")
+    );
+    temporaryDirectories.push(projectRoot);
+    await cp(
+        path.join(
+            initiallyActivated ? fixture.activatedProjectRoot : fixture.projectRoot,
+            "production"
+        ),
+        path.join(projectRoot, "production"),
+        { recursive: true }
+    );
+    return projectRoot;
+}
+
+function initialActivationFixture() {
+    return publishedFixtureSource().initialActivation;
 }
 
 class TestServiceController implements ProductionServiceController {
@@ -152,19 +233,31 @@ function activationDependencies(
     });
 }
 
-function publishFixtures(
-    lease: Parameters<typeof publishProductionDeliveryFixtures>[0],
-    paths: Parameters<typeof publishProductionDeliveryFixtures>[1],
-    sourceReleases: readonly [string, string],
-    runtimeSource: string
+function clonedPublishedFixtures(
+    paths: Parameters<typeof publishProductionDeliveryFixtures>[1]
 ) {
-    return publishProductionDeliveryFixtures(
-        lease,
-        paths,
-        sourceReleases,
-        runtimeSource,
-        runtimeIdentity
-    );
+    const fixture = publishedFixtureSource();
+    const probeRuntime = () => Promise.resolve(runtimeIdentity);
+    return Object.freeze({
+        first: Object.freeze({
+            manifest: fixture.firstManifest,
+            releaseRoot: path.join(paths.releasesDirectory, firstReleaseId),
+        }),
+        probeRuntime,
+        runtime: Object.freeze({
+            executable: path.join(
+                paths.runtimesDirectory,
+                "bun",
+                runtimeIdentity.revision,
+                "bun"
+            ),
+            identity: runtimeIdentity,
+        }),
+        second: Object.freeze({
+            manifest: fixture.secondManifest,
+            releaseRoot: path.join(paths.releasesDirectory, secondReleaseId),
+        }),
+    });
 }
 
 function readMigrationReleaseId(databaseFile: string): string {
@@ -184,17 +277,11 @@ function readMigrationReleaseId(databaseFile: string): string {
 
 describe("production release activation", () => {
     test("commits initial and upgraded release/database pairs under one lease", async () => {
-        const sourceReleases = sourceReleaseFixtures();
-        const { projectRoot, runtimeSource } = await createProjectFixture();
+        const projectRoot = await createProjectFixture(false);
         const state = await prepareProtectedProductionStatePath(projectRoot);
         await withDeploymentLease(state.stateDirectory, async (lease) => {
             const paths = await prepareProductionDeliveryDirectories(state);
-            const fixtures = await publishFixtures(
-                lease,
-                paths,
-                sourceReleases,
-                runtimeSource
-            );
+            const fixtures = clonedPublishedFixtures(paths);
             const services = new TestServiceController();
             const authoritativeAtStart: string[] = [];
             services.onStart = async (release) => {
@@ -260,28 +347,14 @@ describe("production release activation", () => {
     });
 
     test("restores the previous release and database when candidate readiness fails", async () => {
-        const sourceReleases = sourceReleaseFixtures();
-        const { projectRoot, runtimeSource } = await createProjectFixture();
+        const projectRoot = await createProjectFixture();
         const state = await prepareProtectedProductionStatePath(projectRoot);
         await withDeploymentLease(state.stateDirectory, async (lease) => {
             const paths = await prepareProductionDeliveryDirectories(state);
-            const fixtures = await publishFixtures(
-                lease,
-                paths,
-                sourceReleases,
-                runtimeSource
-            );
+            const fixtures = clonedPublishedFixtures(paths);
             const services = new TestServiceController();
             const dependencies = activationDependencies(services, fixtures.probeRuntime);
-            const initial = await Effect.runPromise(
-                activatePublishedProductionRelease(
-                    lease,
-                    paths,
-                    fixtures.first,
-                    fixtures.runtime,
-                    dependencies
-                )
-            );
+            const initial = initialActivationFixture();
             services.rejectReadyReleaseId = secondReleaseId;
             const failure = await rejectionError(
                 Effect.runPromise(
@@ -322,28 +395,14 @@ describe("production release activation", () => {
     });
 
     test("restores the previous release and database after a partial candidate start", async () => {
-        const sourceReleases = sourceReleaseFixtures();
-        const { projectRoot, runtimeSource } = await createProjectFixture();
+        const projectRoot = await createProjectFixture();
         const state = await prepareProtectedProductionStatePath(projectRoot);
         await withDeploymentLease(state.stateDirectory, async (lease) => {
             const paths = await prepareProductionDeliveryDirectories(state);
-            const fixtures = await publishFixtures(
-                lease,
-                paths,
-                sourceReleases,
-                runtimeSource
-            );
+            const fixtures = clonedPublishedFixtures(paths);
             const services = new TestServiceController();
             const dependencies = activationDependencies(services, fixtures.probeRuntime);
-            const initial = await Effect.runPromise(
-                activatePublishedProductionRelease(
-                    lease,
-                    paths,
-                    fixtures.first,
-                    fixtures.runtime,
-                    dependencies
-                )
-            );
+            const initial = initialActivationFixture();
             services.rejectStartReleaseId = secondReleaseId;
             const partialStartFailure = await rejectionError(
                 Effect.runPromise(
@@ -387,27 +446,13 @@ describe("production release activation", () => {
     });
 
     test("recovers the active service after interruption immediately after stop", async () => {
-        const sourceReleases = sourceReleaseFixtures();
-        const { projectRoot, runtimeSource } = await createProjectFixture();
+        const projectRoot = await createProjectFixture();
         const state = await prepareProtectedProductionStatePath(projectRoot);
         await withDeploymentLease(state.stateDirectory, async (lease) => {
             const paths = await prepareProductionDeliveryDirectories(state);
-            const fixtures = await publishFixtures(
-                lease,
-                paths,
-                sourceReleases,
-                runtimeSource
-            );
+            const fixtures = clonedPublishedFixtures(paths);
             const services = new TestServiceController();
-            const initial = await Effect.runPromise(
-                activatePublishedProductionRelease(
-                    lease,
-                    paths,
-                    fixtures.first,
-                    fixtures.runtime,
-                    activationDependencies(services, fixtures.probeRuntime)
-                )
-            );
+            const initial = initialActivationFixture();
             let observedPhase: string | undefined;
             const failure = await rejectionError(
                 Effect.runPromise(
@@ -446,31 +491,12 @@ describe("production release activation", () => {
     });
 
     test("keeps a committed candidate when post-commit cleanup is interrupted", async () => {
-        const sourceReleases = sourceReleaseFixtures();
-        const { projectRoot, runtimeSource } = await createProjectFixture();
+        const projectRoot = await createProjectFixture();
         const state = await prepareProtectedProductionStatePath(projectRoot);
         await withDeploymentLease(state.stateDirectory, async (lease) => {
             const paths = await prepareProductionDeliveryDirectories(state);
-            const fixtures = await publishFixtures(
-                lease,
-                paths,
-                sourceReleases,
-                runtimeSource
-            );
+            const fixtures = clonedPublishedFixtures(paths);
             const services = new TestServiceController();
-            const baseDependencies = activationDependencies(
-                services,
-                fixtures.probeRuntime
-            );
-            await Effect.runPromise(
-                activatePublishedProductionRelease(
-                    lease,
-                    paths,
-                    fixtures.first,
-                    fixtures.runtime,
-                    baseDependencies
-                )
-            );
             const crashStages: string[] = [];
             for (const scenario of [
                 {
@@ -533,27 +559,12 @@ describe("production release activation", () => {
     }, 15_000);
 
     test("reports committed retention failure and retries it on the same candidate", async () => {
-        const sourceReleases = sourceReleaseFixtures();
-        const { projectRoot, runtimeSource } = await createProjectFixture();
+        const projectRoot = await createProjectFixture();
         const state = await prepareProtectedProductionStatePath(projectRoot);
         await withDeploymentLease(state.stateDirectory, async (lease) => {
             const paths = await prepareProductionDeliveryDirectories(state);
-            const fixtures = await publishFixtures(
-                lease,
-                paths,
-                sourceReleases,
-                runtimeSource
-            );
+            const fixtures = clonedPublishedFixtures(paths);
             const services = new TestServiceController();
-            await Effect.runPromise(
-                activatePublishedProductionRelease(
-                    lease,
-                    paths,
-                    fixtures.first,
-                    fixtures.runtime,
-                    activationDependencies(services, fixtures.probeRuntime)
-                )
-            );
             const unknownEntry = path.join(
                 paths.stateDirectory,
                 "backups",
@@ -596,28 +607,14 @@ describe("production release activation", () => {
     });
 
     test("recovers a durable rollback request after candidate activation commit", async () => {
-        const sourceReleases = sourceReleaseFixtures();
-        const { projectRoot, runtimeSource } = await createProjectFixture();
+        const projectRoot = await createProjectFixture();
         const state = await prepareProtectedProductionStatePath(projectRoot);
         await withDeploymentLease(state.stateDirectory, async (lease) => {
             const paths = await prepareProductionDeliveryDirectories(state);
-            const fixtures = await publishFixtures(
-                lease,
-                paths,
-                sourceReleases,
-                runtimeSource
-            );
+            const fixtures = clonedPublishedFixtures(paths);
             const services = new TestServiceController();
             const dependencies = activationDependencies(services, fixtures.probeRuntime);
-            const initial = await Effect.runPromise(
-                activatePublishedProductionRelease(
-                    lease,
-                    paths,
-                    fixtures.first,
-                    fixtures.runtime,
-                    dependencies
-                )
-            );
+            const initial = initialActivationFixture();
             const previousState = await loadProductionActivationState(lease, paths);
             const transitionId = Bun.randomUUIDv7();
             const snapshot = await runDatabaseSnapshotMaintenance(
@@ -718,28 +715,14 @@ describe("production release activation", () => {
     });
 
     test("recovers a crash after database promotion but before journal advancement", async () => {
-        const sourceReleases = sourceReleaseFixtures();
-        const { projectRoot, runtimeSource } = await createProjectFixture();
+        const projectRoot = await createProjectFixture();
         const state = await prepareProtectedProductionStatePath(projectRoot);
         await withDeploymentLease(state.stateDirectory, async (lease) => {
             const paths = await prepareProductionDeliveryDirectories(state);
-            const fixtures = await publishFixtures(
-                lease,
-                paths,
-                sourceReleases,
-                runtimeSource
-            );
+            const fixtures = clonedPublishedFixtures(paths);
             const services = new TestServiceController();
             const dependencies = activationDependencies(services, fixtures.probeRuntime);
-            const initial = await Effect.runPromise(
-                activatePublishedProductionRelease(
-                    lease,
-                    paths,
-                    fixtures.first,
-                    fixtures.runtime,
-                    dependencies
-                )
-            );
+            const initial = initialActivationFixture();
             const transitionId = Bun.randomUUIDv7();
             const snapshot = await runDatabaseSnapshotMaintenance(
                 lease,

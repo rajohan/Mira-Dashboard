@@ -166,11 +166,12 @@ jobs:
             - name: Prefix isolated LCOV paths for the coexistence checkout
               run: |
                   lcov_path="${RUNNER_TEMP}/mira-dashboard-greenfield/coverage/lcov.info"
-                  perl -0pi -e 's{^SF:(?:\./)?src/}{SF:greenfield/src/}mg' "${lcov_path}"
-                  if grep '^SF:' "${lcov_path}" | grep --quiet --invert-match '^SF:greenfield/src/'; then
-                      echo "LCOV contains a source path outside greenfield/src" >&2
+                  perl -0pi -e 's{^SF:(?:\./)?(scripts|src)/}{SF:greenfield/$1/}mg' "${lcov_path}"
+                  if grep '^SF:' "${lcov_path}" | grep --quiet --invert-match --extended-regexp '^SF:greenfield/(scripts|src)/'; then
+                      echo "LCOV contains a source path outside greenfield/scripts or greenfield/src" >&2
                       exit 1
                   fi
+                  grep --quiet '^SF:greenfield/scripts/' "${lcov_path}"
                   grep --quiet '^SF:greenfield/src/' "${lcov_path}"
 
             - name: Upload isolated coverage artifact

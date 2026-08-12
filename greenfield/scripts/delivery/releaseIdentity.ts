@@ -320,7 +320,8 @@ export async function createReleaseIdentity(
 ): Promise<ReleaseManifest> {
     validateRoots(options.repositoryRoot, options.releaseRoot);
     const source =
-        options.sourceIdentity ?? resolveBuildSourceIdentity(options.repositoryRoot);
+        options.sourceIdentity ??
+        (await resolveBuildSourceIdentity(options.repositoryRoot));
     if (source.state !== "clean") throw invalidReleaseIdentity();
     const runtime = options.runtimeIdentity ?? currentRuntimeIdentity();
     assertRuntimeIdentity(runtime);

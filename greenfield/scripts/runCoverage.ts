@@ -12,7 +12,10 @@ import { runTestSuite } from "./runTestSuite.ts";
 
 const projectRoot = path.resolve(import.meta.dir, "..");
 const coverageDirectory = path.join(projectRoot, "coverage");
-const coveredSourceRoots = Object.freeze(["src"]);
+const coveredSourceRoots = Object.freeze(["scripts", "src"]);
+const bunTestParallelProcesses = 3;
+const browserTestTimingsFile = ".bun-browser-test-timings.json";
+const bunTestTimingsFile = ".bun-test-timings.json";
 const browserTestPreload = "./src/browser/test/setup.ts";
 
 /** Independently executed test process contributing to the merged LCOV artifact. */
@@ -79,7 +82,9 @@ export function createCoverageTestArguments(
     partition: CoveragePartition
 ): readonly string[] {
     const coverageArguments = [
+        "--bail=1",
         "--only-failures",
+        `--parallel=${bunTestParallelProcesses}`,
         "--coverage",
         "--coverage-reporter",
         "lcov",
@@ -88,15 +93,15 @@ export function createCoverageTestArguments(
     ];
     if (partition === "browser") {
         return Object.freeze([
+            `--timings=${browserTestTimingsFile}`,
             ...coverageArguments,
             "--preload",
             browserTestPreload,
-            "--bail=1",
             "src/browser",
         ]);
     }
     return Object.freeze([
-        "--bail=1",
+        `--timings=${bunTestTimingsFile}`,
         ...coverageArguments,
         "scripts",
         "src/app",

@@ -13,6 +13,7 @@ coverage:
                 flags:
                     - dashboard
                 paths:
+                    - greenfield/scripts/
                     - greenfield/src/
             backend:
                 target: 85%
@@ -42,6 +43,7 @@ coverage:
                 flags:
                     - dashboard
                 paths:
+                    - greenfield/scripts/
                     - greenfield/src/
             backend:
                 target: 85%
@@ -70,6 +72,7 @@ comment:
 flags:
     dashboard:
         paths:
+            - greenfield/scripts/
             - greenfield/src/
     frontend:
         paths:

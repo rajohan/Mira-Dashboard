@@ -13,6 +13,7 @@ coverage:
                 flags:
                     - dashboard
                 paths:
+                    - scripts/
                     - src/
         patch:
             dashboard:
@@ -24,6 +25,7 @@ coverage:
                 flags:
                     - dashboard
                 paths:
+                    - scripts/
                     - src/
 
 comment:
@@ -34,4 +36,5 @@ comment:
 flags:
     dashboard:
         paths:
+            - scripts/
             - src/

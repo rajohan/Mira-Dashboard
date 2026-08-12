@@ -181,6 +181,7 @@ export function relativeImportTarget(importer: string, specifier: string): strin
 export function isTestPath(filePath: string): boolean {
     return (
         /(?:^|\/)(?:__tests__|test(?:Support)?)\//u.test(filePath) ||
+        /(?:^|\/)testSupport\.[cm]?[jt]sx?$/u.test(filePath) ||
         /\.(?:spec|test)\.[cm]?[jt]sx?$/u.test(filePath)
     );
 }

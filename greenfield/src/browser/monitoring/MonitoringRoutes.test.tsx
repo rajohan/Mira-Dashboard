@@ -323,7 +323,7 @@ describe("monitoring browser routes", () => {
         await screen.findByRole("heading", { level: 1, name: "Incidents" });
         const incidentsTab = screen.getByRole("tab", { name: "Incidents" });
         expect(incidentsTab).toHaveAttribute("aria-selected", "true");
-        expect(document.activeElement).toBe(incidentsTab);
+        await waitFor(() => expect(document.activeElement === incidentsTab).toBeTrue());
         navigation = screen.getByRole("navigation", { name: "Main navigation" });
         const reportsNavigation = within(navigation).getByRole("link", {
             name: "Reports",
@@ -340,7 +340,7 @@ describe("monitoring browser routes", () => {
         await screen.findByRole("heading", { level: 1, name: "Reports" });
         const reportsTab = screen.getByRole("tab", { name: "Reports" });
         expect(reportsTab).toHaveAttribute("aria-selected", "true");
-        expect(document.activeElement).toBe(reportsTab);
+        await waitFor(() => expect(document.activeElement === reportsTab).toBeTrue());
 
         await act(async () => {
             router.history.back();

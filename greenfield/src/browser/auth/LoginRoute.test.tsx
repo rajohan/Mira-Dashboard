@@ -399,7 +399,7 @@ describe("Dashboard login route", () => {
         const alert = await screen.findByRole("alert");
         expect(alert.textContent).toContain("Too many attempts");
         expect(alert.textContent).not.toContain(privateSentinel);
-        await waitFor(() => expect(document.activeElement).toBe(alert));
+        await waitFor(() => expect(document.activeElement === alert).toBeTrue());
     });
 
     test("preserves the operation failure when fallback cache reset also fails", async () => {

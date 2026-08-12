@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
 
+import { startDevelopmentFrontend } from "../developmentFrontend.ts";
+
 const repositoryRoot = new URL("../../", import.meta.url).pathname;
 
 async function reserveLoopbackPorts(count: number): Promise<readonly number[]> {
@@ -147,3 +149,21 @@ test("serves remote Bun HMR, React Fast Refresh, and React Compiler output toget
         await stopChild(child);
     }
 }, 30_000);
+
+test("starts and stops the exported frontend runtime in process", async () => {
+    const runtime = await startDevelopmentFrontend({
+        apiTarget: "http://127.0.0.1:65534",
+        cookieNamespace: "__Host-mira_dashboard_dev_in_process",
+        host: "127.0.0.1",
+        hotReload: false,
+        port: 0,
+        publicOrigin: "http://localhost",
+    });
+
+    try {
+        expect(runtime.frontend.port).toBeGreaterThan(0);
+        expect(runtime.remoteProxy).toBeUndefined();
+    } finally {
+        await runtime.stop(true);
+    }
+});

@@ -34,6 +34,7 @@ import {
 import type { ReleaseRuntimeIdentity } from "../delivery/releaseIdentity.ts";
 
 const encoder = new TextEncoder();
+const documentationFixture = "# Production delivery fixture\n";
 
 async function restoreOwnerWrite(directory: string): Promise<void> {
     const status = await stat(directory).catch(() => null);
@@ -110,11 +111,11 @@ export async function createLocalReleaseFixture(
         path.join(tmpdir(), "mira-release-activation-source-")
     );
     temporaryDirectories.push(repositoryRoot);
+    await mkdir(path.join(repositoryRoot, "docs/generated"), { recursive: true });
     await Promise.all([
-        cp(
-            path.join(sourceProjectRoot, "docs/generated"),
-            path.join(repositoryRoot, "docs/generated"),
-            { recursive: true }
+        writeFile(
+            path.join(repositoryRoot, "docs/generated/README.md"),
+            documentationFixture
         ),
         cp(
             path.join(sourceProjectRoot, "migrations"),
@@ -149,7 +150,7 @@ export async function createLocalReleaseFixture(
         state: "clean",
     });
     const release = await buildDashboardRelease(repositoryRoot, {
-        resolveSourceIdentity: () => cleanSource,
+        resolveSourceIdentity: () => Promise.resolve(cleanSource),
         runCommand: materializeCommandOutput,
         runtimeIdentity,
     });

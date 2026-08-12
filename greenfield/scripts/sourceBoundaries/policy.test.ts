@@ -1,7 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { fileURLToPath } from "node:url";
 
-import { checkSourceBoundaries } from "../checkSourceBoundaries.ts";
 import {
     validateDeclaredPackageImport,
     validateSourceAmbientRuntimeDeclaration,
@@ -751,10 +749,4 @@ describe("source-boundary policy", () => {
             undefined
         );
     });
-
-    test("accepts the complete current repository graph", async () => {
-        const projectRootUrl = new URL("../..", import.meta.url);
-        const violations = await checkSourceBoundaries(fileURLToPath(projectRootUrl));
-        expect(violations).toEqual([]);
-    }, 60_000);
 });

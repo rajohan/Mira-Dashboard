@@ -330,6 +330,11 @@ describe("cache heartbeat projection", () => {
         expect(result.dashboardJobs).toMatchObject({
             items: [
                 {
+                    defaultEnabled: true,
+                    id: "cache.database-observability",
+                    state: "missing",
+                },
+                {
                     activeRun: { state: "running" },
                     defaultEnabled: true,
                     enabled: true,
@@ -347,6 +352,11 @@ describe("cache heartbeat projection", () => {
                     latestRun: { state: "queued", triggerType: "schedule" },
                     nextRunAtMs: null,
                     state: "present",
+                },
+                {
+                    defaultEnabled: true,
+                    id: "database.sqlite-maintenance",
+                    state: "missing",
                 },
                 {
                     defaultEnabled: true,

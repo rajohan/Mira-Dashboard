@@ -107,6 +107,17 @@ describe("database migration graph", () => {
         expect(foundationMigration.id).toEndWith("_dashboard-foundation");
         expect(foundationMigration.migrationSha256).toMatch(/^[a-f\d]{64}$/u);
         expect(foundationMigration.snapshotSha256).toMatch(/^[a-f\d]{64}$/u);
+        const emptyDatabase = new Database(":memory:", { strict: true });
+        try {
+            emptyDatabase.run("PRAGMA foreign_keys = ON");
+            expect(
+                applyVerifiedMigrations(emptyDatabase, migrations, {
+                    releaseId: "0".repeat(40),
+                })
+            ).toBe(1);
+        } finally {
+            emptyDatabase.close(true);
+        }
         const foundationSql = foundationMigration.statements.join("\n");
         expect(foundationSql).toContain(") STRICT, WITHOUT ROWID;");
         for (const trigger of [

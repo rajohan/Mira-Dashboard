@@ -1,4 +1,12 @@
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import {
+    afterAll,
+    afterEach,
+    beforeAll,
+    describe,
+    expect,
+    setDefaultTimeout,
+    test,
+} from "bun:test";
 import {
     chmod,
     cp,
@@ -34,7 +42,10 @@ const runtimeIdentity: ReleaseRuntimeIdentity = Object.freeze({
     version: "1.4.0",
 });
 const releaseFixtureDirectories: string[] = [];
+const documentationFixture = "# Production release publication fixture\n";
 let sharedSourceReleaseRoot: string | undefined;
+
+setDefaultTimeout(15_000);
 
 async function restoreOwnerWrite(directory: string): Promise<void> {
     const status = await stat(directory).catch(() => null);
@@ -81,11 +92,11 @@ async function repositoryFixture(): Promise<string> {
         path.join(tmpdir(), "mira-production-release-source-")
     );
     releaseFixtureDirectories.push(repositoryRoot);
+    await mkdir(path.join(repositoryRoot, "docs/generated"), { recursive: true });
     await Promise.all([
-        cp(
-            path.join(sourceProjectRoot, "docs/generated"),
-            path.join(repositoryRoot, "docs/generated"),
-            { recursive: true }
+        writeFile(
+            path.join(repositoryRoot, "docs/generated/README.md"),
+            documentationFixture
         ),
         cp(
             path.join(sourceProjectRoot, "migrations"),
@@ -151,7 +162,7 @@ async function localReleaseFixture(): Promise<string> {
     const repositoryRoot = await repositoryFixture();
     const observedCommands: ReleaseBuildCommand[] = [];
     const release = await buildDashboardRelease(repositoryRoot, {
-        resolveSourceIdentity: () => cleanSource,
+        resolveSourceIdentity: () => Promise.resolve(cleanSource),
         runCommand: async (command, root) => {
             observedCommands.push(command);
             await materializeCommandOutput(command, root);

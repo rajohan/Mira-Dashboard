@@ -6,9 +6,11 @@ import { eq } from "drizzle-orm";
 import type { ChatSendInput } from "../../../contracts/chat.ts";
 import {
     chatDeltaCoalescingMilliseconds,
+    chatRunEventMaximum,
     chatRuntimeProjectionPartsMaximum,
     chatRuntimeResponseMaximumBytes,
     chatRuntimeSnapshotMaximumBytes,
+    type ChatRuntimeProjectionPart,
 } from "../../../contracts/chatModel.ts";
 import { utf8ByteLength } from "../../../shared/encoding.ts";
 import { chatRunEvents } from "../../database/schema/chatRunEvents.ts";
@@ -35,6 +37,7 @@ import {
     chatExternalRunStaleMilliseconds,
     type ChatRecoveryScheduler,
     ChatServiceError,
+    normalizeExternalProjectionParts,
 } from "./service.ts";
 import { createChatTranscriptLifecycleCoordinator } from "./transcriptLifecycle.ts";
 
@@ -145,6 +148,71 @@ async function flushAsync(): Promise<void> {
 }
 
 describe("ChatService", () => {
+    test("normalizes projection count and lifetime sequence boundaries", () => {
+        const exactLifetimePart: ChatRuntimeProjectionPart = {
+            id: "exact-lifetime-limit",
+            kind: "item",
+            sequence: chatRunEventMaximum,
+            type: "progress",
+        };
+        const exactLifetime = normalizeExternalProjectionParts([exactLifetimePart]);
+        expect(exactLifetime).toEqual({
+            parts: [exactLifetimePart],
+            partsExceeded: false,
+        });
+
+        const lifetimeParts: readonly ChatRuntimeProjectionPart[] = [
+            {
+                id: "at-limit",
+                kind: "item",
+                sequence: chatRunEventMaximum,
+                type: "progress",
+            },
+            {
+                id: "past-limit",
+                kind: "item",
+                sequence: chatRunEventMaximum + 1,
+                type: "progress",
+            },
+        ];
+        const lifetime = normalizeExternalProjectionParts(lifetimeParts);
+        expect(lifetime.partsExceeded).toBeFalse();
+        expect(lifetime.parts.map(({ sequence }) => sequence)).toEqual([1, 2]);
+
+        const exactCount = Array.from(
+            { length: chatRuntimeProjectionPartsMaximum },
+            (_, index): ChatRuntimeProjectionPart => ({
+                id: `exact-${index + 1}`,
+                kind: "item",
+                sequence: index + 1,
+                type: "progress",
+            })
+        );
+        expect(normalizeExternalProjectionParts(exactCount)).toEqual({
+            parts: exactCount,
+            partsExceeded: false,
+        });
+
+        const overflow = normalizeExternalProjectionParts(
+            Array.from(
+                { length: chatRuntimeProjectionPartsMaximum + 1 },
+                (_, index): ChatRuntimeProjectionPart => ({
+                    id: `item-${index + 1}`,
+                    kind: "item",
+                    sequence: index + 1,
+                    type: "progress",
+                })
+            )
+        );
+        expect(overflow.partsExceeded).toBeTrue();
+        expect(overflow.parts).toHaveLength(chatRuntimeProjectionPartsMaximum);
+        expect(overflow.parts.at(0)).toMatchObject({ id: "item-2", sequence: 1 });
+        expect(overflow.parts.at(-1)).toMatchObject({
+            id: `item-${chatRuntimeProjectionPartsMaximum + 1}`,
+            sequence: chatRuntimeProjectionPartsMaximum,
+        });
+    });
+
     test("reserves after admission, dispatches once, and commits only after ACK", async () => {
         const database = await openFreshMigratedDatabase();
         const repository = createChatRepository(
@@ -492,7 +560,9 @@ describe("ChatService", () => {
             await service.runtime(runtimeInput());
             const subscription = provider.requests[0]!;
             for (let runIndex = 0; runIndex < 9; runIndex += 1) {
-                for (let sequence = 1; sequence <= 5; sequence += 1) {
+                const usesLargeProjection = runIndex >= 7;
+                const eventCount = usesLargeProjection ? 5 : 1;
+                for (let sequence = 1; sequence <= eventCount; sequence += 1) {
                     await subscription.onEvent({
                         kind: "delta",
                         mode: sequence === 1 ? "replace" : "append",
@@ -502,7 +572,9 @@ describe("ChatService", () => {
                         sessionKey: "agent:main:main",
                         stream: "assistant",
                         streamId: "assistant",
-                        text: "😀".repeat(32 * 1024),
+                        text: usesLargeProjection
+                            ? "😀".repeat(32 * 1024)
+                            : `External run ${runIndex}`,
                     });
                 }
             }
@@ -528,10 +600,17 @@ describe("ChatService", () => {
             expect(utf8ByteLength(JSON.stringify(runtime))).toBeLessThanOrEqual(
                 chatRuntimeResponseMaximumBytes
             );
-            for (const external of runtime.externalRuns) {
-                if (external.text.length === 0) continue;
-                expect(external.text.endsWith("😀")).toBeTrue();
-            }
+            const olderBoundedExternal = runtime.externalRuns.find(
+                ({ providerRunId }) => providerRunId === "external-7"
+            );
+            const newerBoundedExternal = runtime.externalRuns.find(
+                ({ providerRunId }) => providerRunId === "external-8"
+            );
+            expect(olderBoundedExternal?.text.endsWith("😀")).toBeTrue();
+            expect(newerBoundedExternal?.text.endsWith("😀")).toBeTrue();
+            expect(newerBoundedExternal!.text.length).toBeGreaterThan(
+                olderBoundedExternal!.text.length
+            );
             expect(
                 database.orm
                     .select()
@@ -577,11 +656,17 @@ describe("ChatService", () => {
 
             const projectedRuntime = await service.runtime(runtimeInput());
             for (const external of projectedRuntime.externalRuns) {
+                const terminalSequence =
+                    external.providerRunId === "external-7" ||
+                    external.providerRunId === "external-8" ||
+                    external.providerRunId === "external-late-baseline"
+                        ? 6
+                        : 2;
                 await subscription.onEvent({
                     kind: "terminal",
                     outcome: "completed",
                     providerRunId: external.providerRunId,
-                    providerSequence: 6,
+                    providerSequence: terminalSequence,
                     receivedAtMs: 2100,
                     sessionKey: "agent:main:main",
                 });
@@ -649,66 +734,27 @@ describe("ChatService", () => {
                 utf8ByteLength(JSON.stringify(boundedAbortRuntime))
             ).toBeLessThanOrEqual(chatRuntimeResponseMaximumBytes);
 
-            const lifetimeProjectionSegments = 4097;
-            for (
-                let sequence = 1;
-                sequence <= lifetimeProjectionSegments;
-                sequence += 1
-            ) {
-                await subscription.onEvent(
-                    sequence <= 514
-                        ? {
-                              kind: "delta",
-                              mode: sequence === 1 ? "replace" : "merge",
-                              providerRunId: "external-many-parts",
-                              providerSequence: sequence,
-                              receivedAtMs: 2300 + sequence,
-                              segmentId: `agent:preamble:preamble-${sequence}`,
-                              sessionKey: "agent:main:main",
-                              stream: "thinking",
-                              streamId: "agent:preamble",
-                              text: `Preamble ${sequence}`,
-                          }
-                        : {
-                              itemId: `item-${sequence}`,
-                              itemType: "progress",
-                              kind: "item",
-                              providerRunId: "external-many-parts",
-                              providerSequence: sequence,
-                              receivedAtMs: 2300 + sequence,
-                              sessionKey: "agent:main:main",
-                          }
-                );
-                if (sequence === 513 || sequence === 514) {
-                    const rolloverRuntime = await service.runtime(runtimeInput());
-                    const rollover = rolloverRuntime.externalRuns.find(
-                        ({ providerRunId }) => providerRunId === "external-many-parts"
-                    );
-                    expect(rollover?.parts).toHaveLength(
-                        chatRuntimeProjectionPartsMaximum
-                    );
-                    expect(rollover?.parts?.at(0)).toMatchObject({
-                        segmentId: `agent:preamble:preamble-${sequence - 511}`,
-                        sequence: 1,
-                    });
-                    expect(rollover?.parts?.at(-1)).toMatchObject({
-                        segmentId: `agent:preamble:preamble-${sequence}`,
-                        sequence: chatRuntimeProjectionPartsMaximum,
-                    });
-                    expect(rollover?.streamResets).toEqual([
-                        {
-                            resetId: "external-many-parts:1",
-                            streamId: "agent:preamble",
-                        },
-                    ]);
-                }
+            const projectedSegments = 3;
+            for (let sequence = 1; sequence <= projectedSegments; sequence += 1) {
+                await subscription.onEvent({
+                    kind: "delta",
+                    mode: sequence === 1 ? "replace" : "merge",
+                    providerRunId: "external-many-parts",
+                    providerSequence: sequence,
+                    receivedAtMs: 2300 + sequence,
+                    segmentId: `agent:preamble:preamble-${sequence}`,
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                    streamId: "agent:preamble",
+                    text: `Preamble ${sequence}`,
+                });
             }
             await subscription.onEvent({
                 kind: "delta",
                 mode: "append",
                 providerRunId: "external-many-parts",
-                providerSequence: lifetimeProjectionSegments + 1,
-                receivedAtMs: 2300 + lifetimeProjectionSegments + 1,
+                providerSequence: projectedSegments + 1,
+                receivedAtMs: 2300 + projectedSegments + 1,
                 sessionKey: "agent:main:main",
                 stream: "assistant",
                 streamId: "assistant",
@@ -718,16 +764,18 @@ describe("ChatService", () => {
             const manyParts = manyPartsRuntime.externalRuns.find(
                 ({ providerRunId }) => providerRunId === "external-many-parts"
             );
-            expect(manyParts?.parts).toHaveLength(chatRuntimeProjectionPartsMaximum);
-            expect(manyParts?.parts?.map(({ sequence }) => sequence)).toEqual(
-                Array.from(
-                    { length: chatRuntimeProjectionPartsMaximum },
-                    (_, index) => index + 1
-                )
-            );
+            expect(manyParts?.parts?.map(({ sequence }) => sequence)).toEqual([
+                1, 2, 3, 4,
+            ]);
+            expect(manyParts?.streamResets).toEqual([
+                {
+                    resetId: "external-many-parts:1",
+                    streamId: "agent:preamble",
+                },
+            ]);
             expect(manyParts?.parts?.at(-1)).toMatchObject({
                 kind: "assistant",
-                segmentId: `external-many-parts:${lifetimeProjectionSegments + 1}`,
+                segmentId: `external-many-parts:${projectedSegments + 1}`,
                 text: "Final response",
             });
         } finally {
