@@ -94,7 +94,11 @@ const frontendRouteSchema = v.strictObject({
     pageModule: v.pipe(v.string(), v.regex(/^\.\.\/pages\/[A-Z][A-Za-z0-9]*$/u)),
     path: routePathSchema,
     searchNormalizer: v.nullable(
-        v.picklist(["normalizeChatSearch", "normalizeSettingsSearch"])
+        v.picklist([
+            "normalizeChatSearch",
+            "normalizeDatabaseSearch",
+            "normalizeSettingsSearch",
+        ])
     ),
     sourceRouteName: v.pipe(v.string(), v.regex(/^[a-z][A-Za-z0-9]*$/u)),
     target: v.strictObject({

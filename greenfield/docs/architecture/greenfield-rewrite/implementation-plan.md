@@ -116,7 +116,7 @@ including restart during streaming.
   principal. Separately approved provisioning must bind only that principal, exclude the web
   principal, validate immutable artifacts, and preserve explicit rollback; a shared-user/group
   grant is forbidden.
-- implement `database.overview` and `/database` as one read-only vertical: compose live
+- keep the implemented `database.overview` and `/database` read-only vertical bounded: compose live
   Dashboard-SQLite lifecycle facts with a worker-owned, bounded last-known-good
   PostgreSQL/PgBouncer projection; preserve the source picker, maintenance assessment, responsive
   tables, freshness, and failure states without exposing SQL, paths, credentials, or mutations.

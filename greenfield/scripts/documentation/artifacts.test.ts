@@ -181,12 +181,15 @@ describe("generated contract documentation", () => {
             "| `/moltbook` | Browser session | Moltbook | `moltbook` |"
         );
         expect(routeDocumentation).toContain(
+            "| `/database` | Browser session | Database | `database` |"
+        );
+        expect(routeDocumentation).toContain(
             "| `/settings` | Browser session | Settings | `settings` |"
         );
         expect(routeDocumentation).toContain(
             "| `/terminal` | Browser session | Terminal | `terminal` |"
         );
-        expect(routeDocumentation?.match(/^\| `\//gmu)).toHaveLength(15);
+        expect(routeDocumentation?.match(/^\| `\//gmu)).toHaveLength(16);
         expect(first.has("schemas/files.upload.accepted.schema.json")).toBe(true);
         expect(first.has("schemas/logs.tail.output.schema.json")).toBe(true);
         expect(first.has("schemas/moltbook.feed.result.v1.schema.json")).toBe(true);

@@ -303,7 +303,7 @@ Minimum operational signals include:
 The Dashboard displays the last known good operational data with a freshness marker when a
 refresh fails. It never converts a dependency outage into an empty healthy-looking screen.
 
-The planned Database page applies this operational model without adding a privileged request
+The implemented Database page applies this operational model without adding a privileged request
 path. One worker refresh produces the bounded PostgreSQL/PgBouncer snapshot and persists it through
 the existing claim-fenced cache protocol; refresh work is not repeated per browser request.
 Dashboard SQLite lifecycle facts come from the already-retained process database runtime and are

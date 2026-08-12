@@ -47,6 +47,14 @@ export const dashboardRouteDocumentation = Object.freeze([
     },
     {
         access: "session",
+        featureOwner: "database",
+        navigationLabel: "Database",
+        path: "/database",
+        summary:
+            "Shows bounded read-only health and lifecycle observations for Dashboard databases.",
+    },
+    {
+        access: "session",
         featureOwner: "files",
         navigationLabel: "Files",
         path: "/files",

@@ -4,6 +4,7 @@ import {
     BookOpen,
     Bot,
     CalendarClock,
+    Database,
     FolderOpen,
     Home,
     ListTodo,
@@ -40,7 +41,7 @@ interface NavigationItem {
     readonly to: DashboardNavigationPath;
 }
 
-const navigationItems: readonly NavigationItem[] = Object.freeze([
+export const dashboardNavigationItems: readonly NavigationItem[] = Object.freeze([
     { icon: Home, label: "Dashboard", to: "/" },
     { icon: Bot, label: "Agents", to: "/agents" },
     { icon: MessagesSquare, label: "Sessions", to: "/sessions" },
@@ -49,13 +50,14 @@ const navigationItems: readonly NavigationItem[] = Object.freeze([
     { icon: ListTodo, label: "Tasks", to: "/tasks" },
     { icon: CalendarClock, label: "Jobs", to: "/jobs" },
     { icon: Logs, label: "Logs", to: "/logs" },
+    { icon: Database, label: "Database", to: "/database" },
     { icon: BookOpen, label: "Moltbook", to: "/moltbook" },
     { icon: SquareTerminal, label: "Terminal", to: "/terminal" },
     { icon: Newspaper, label: "Reports", to: "/reports" },
     { icon: SettingsIcon, label: "Settings", to: "/settings" },
 ]);
 const routeTitles: readonly Pick<NavigationItem, "label" | "to">[] = Object.freeze([
-    ...navigationItems,
+    ...dashboardNavigationItems,
 ]);
 const authenticatedRouteTitles: readonly {
     readonly label: string;
@@ -75,7 +77,7 @@ interface NavigationProps {
 function Navigation({ currentPath, onNavigate }: NavigationProps) {
     return (
         <nav aria-label="Main navigation" className="flex-1 p-2">
-            {navigationItems.map((item) => {
+            {dashboardNavigationItems.map((item) => {
                 const active =
                     currentPath === item.to ||
                     (item.to === "/reports" && currentPath === "/incidents");

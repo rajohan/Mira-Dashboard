@@ -1,0 +1,2471 @@
+{
+  "$id": "urn:mira-dashboard:database.overview.output",
+  "type": "object",
+  "properties": {
+    "checkedAtMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 8640000000000000
+    },
+    "postgresql": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "state": {
+              "const": "unavailable"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "databases": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "cacheHitRatio": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  "committedTransactions": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "connections": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "name": {
+                    "type": "string",
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "allOf": [
+                      {
+                        "pattern": "^[^\\u0000]*$"
+                      },
+                      {
+                        "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                      }
+                    ]
+                  },
+                  "pool": {
+                    "type": "object",
+                    "properties": {
+                      "activeClients": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "activeServers": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "averageQueryMs": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "averageTransactionMs": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "idleServers": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "totalQueries": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "usedServers": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "waitingClients": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "activeClients",
+                      "activeServers",
+                      "averageQueryMs",
+                      "averageTransactionMs",
+                      "idleServers",
+                      "totalQueries",
+                      "usedServers",
+                      "waitingClients"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "rolledBackTransactions": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "sizeBytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "cacheHitRatio",
+                  "committedTransactions",
+                  "connections",
+                  "name",
+                  "rolledBackTransactions",
+                  "sizeBytes"
+                ],
+                "additionalProperties": false
+              },
+              "maxItems": 16
+            },
+            "pgbouncer": {
+              "type": "object",
+              "properties": {
+                "averageQueryMs": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "averageTransactionMs": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "clientConnections": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "maxWaitSeconds": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "serverConnections": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "waitingClients": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "averageQueryMs",
+                "averageTransactionMs",
+                "clientConnections",
+                "maxWaitSeconds",
+                "serverConnections",
+                "waitingClients"
+              ],
+              "additionalProperties": false
+            },
+            "statements": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "calls": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "meanExecutionMs": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "rank": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 20
+                  },
+                  "rows": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "sharedBlocksHit": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "sharedBlocksRead": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "totalExecutionMs": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "calls",
+                  "meanExecutionMs",
+                  "rank",
+                  "rows",
+                  "sharedBlocksHit",
+                  "sharedBlocksRead",
+                  "totalExecutionMs"
+                ],
+                "additionalProperties": false
+              },
+              "maxItems": 20
+            },
+            "summary": {
+              "type": "object",
+              "properties": {
+                "activeConnections": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "averageCacheHitRatio": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                "idleConnections": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "maintenance": {
+                  "type": "object",
+                  "properties": {
+                    "assessedPhysicalBytes": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "assessmentComplete": {
+                      "type": "boolean"
+                    },
+                    "estimatedReclaimableBytes": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "estimatedReclaimablePercent": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 100
+                    },
+                    "highDeadTupleTableCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "requiresBloatReview": {
+                      "type": "boolean"
+                    },
+                    "slowStatementCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "status": {
+                      "enum": [
+                        "healthy",
+                        "not-assessed",
+                        "review"
+                      ],
+                      "type": "string"
+                    },
+                    "unassessedPhysicalBytes": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "unassessedTableCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "assessedPhysicalBytes",
+                    "assessmentComplete",
+                    "estimatedReclaimableBytes",
+                    "estimatedReclaimablePercent",
+                    "highDeadTupleTableCount",
+                    "requiresBloatReview",
+                    "slowStatementCount",
+                    "status",
+                    "unassessedPhysicalBytes",
+                    "unassessedTableCount"
+                  ],
+                  "additionalProperties": false
+                },
+                "pgStatStatementsEnabled": {
+                  "type": "boolean"
+                },
+                "totalConnections": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "totalDatabaseSizeBytes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "activeConnections",
+                "averageCacheHitRatio",
+                "idleConnections",
+                "maintenance",
+                "pgStatStatementsEnabled",
+                "totalConnections",
+                "totalDatabaseSizeBytes"
+              ],
+              "additionalProperties": false
+            },
+            "tableHealth": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "assessment": {
+                    "enum": [
+                      "assessed",
+                      "unavailable"
+                    ],
+                    "type": "string"
+                  },
+                  "database": {
+                    "type": "string",
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "allOf": [
+                      {
+                        "pattern": "^[^\\u0000]*$"
+                      },
+                      {
+                        "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                      }
+                    ]
+                  },
+                  "deadTuplePercent": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  "deadTuples": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "estimatedReclaimableBytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "lastAutoanalyzeAtMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 8640000000000000
+                  },
+                  "lastAutovacuumAtMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 8640000000000000
+                  },
+                  "liveTuples": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "physicalBytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "schema": {
+                    "type": "string",
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "allOf": [
+                      {
+                        "pattern": "^[^\\u0000]*$"
+                      },
+                      {
+                        "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                      }
+                    ]
+                  },
+                  "table": {
+                    "type": "string",
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "allOf": [
+                      {
+                        "pattern": "^[^\\u0000]*$"
+                      },
+                      {
+                        "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "assessment",
+                  "database",
+                  "deadTuplePercent",
+                  "deadTuples",
+                  "liveTuples",
+                  "physicalBytes",
+                  "schema",
+                  "table"
+                ],
+                "additionalProperties": false
+              },
+              "maxItems": 25
+            },
+            "torrentCounts": {
+              "type": "object",
+              "properties": {
+                "bitmagnet": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "count": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "state": {
+                          "const": "available"
+                        }
+                      },
+                      "required": [
+                        "count",
+                        "state"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "state": {
+                          "const": "unavailable"
+                        }
+                      },
+                      "required": [
+                        "state"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "comet": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "count": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "state": {
+                          "const": "available"
+                        }
+                      },
+                      "required": [
+                        "count",
+                        "state"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "state": {
+                          "const": "unavailable"
+                        }
+                      },
+                      "required": [
+                        "state"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "bitmagnet",
+                "comet"
+              ],
+              "additionalProperties": false
+            },
+            "observedAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            },
+            "state": {
+              "const": "fresh"
+            }
+          },
+          "required": [
+            "databases",
+            "pgbouncer",
+            "statements",
+            "summary",
+            "tableHealth",
+            "torrentCounts",
+            "observedAtMs",
+            "state"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "databases": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "cacheHitRatio": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  "committedTransactions": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "connections": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "name": {
+                    "type": "string",
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "allOf": [
+                      {
+                        "pattern": "^[^\\u0000]*$"
+                      },
+                      {
+                        "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                      }
+                    ]
+                  },
+                  "pool": {
+                    "type": "object",
+                    "properties": {
+                      "activeClients": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "activeServers": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "averageQueryMs": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "averageTransactionMs": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "idleServers": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "totalQueries": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "usedServers": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "waitingClients": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "activeClients",
+                      "activeServers",
+                      "averageQueryMs",
+                      "averageTransactionMs",
+                      "idleServers",
+                      "totalQueries",
+                      "usedServers",
+                      "waitingClients"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "rolledBackTransactions": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "sizeBytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "cacheHitRatio",
+                  "committedTransactions",
+                  "connections",
+                  "name",
+                  "rolledBackTransactions",
+                  "sizeBytes"
+                ],
+                "additionalProperties": false
+              },
+              "maxItems": 16
+            },
+            "pgbouncer": {
+              "type": "object",
+              "properties": {
+                "averageQueryMs": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "averageTransactionMs": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "clientConnections": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "maxWaitSeconds": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "serverConnections": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "waitingClients": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "averageQueryMs",
+                "averageTransactionMs",
+                "clientConnections",
+                "maxWaitSeconds",
+                "serverConnections",
+                "waitingClients"
+              ],
+              "additionalProperties": false
+            },
+            "statements": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "calls": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "meanExecutionMs": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "rank": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 20
+                  },
+                  "rows": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "sharedBlocksHit": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "sharedBlocksRead": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "totalExecutionMs": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "calls",
+                  "meanExecutionMs",
+                  "rank",
+                  "rows",
+                  "sharedBlocksHit",
+                  "sharedBlocksRead",
+                  "totalExecutionMs"
+                ],
+                "additionalProperties": false
+              },
+              "maxItems": 20
+            },
+            "summary": {
+              "type": "object",
+              "properties": {
+                "activeConnections": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "averageCacheHitRatio": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                "idleConnections": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "maintenance": {
+                  "type": "object",
+                  "properties": {
+                    "assessedPhysicalBytes": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "assessmentComplete": {
+                      "type": "boolean"
+                    },
+                    "estimatedReclaimableBytes": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "estimatedReclaimablePercent": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 100
+                    },
+                    "highDeadTupleTableCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "requiresBloatReview": {
+                      "type": "boolean"
+                    },
+                    "slowStatementCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "status": {
+                      "enum": [
+                        "healthy",
+                        "not-assessed",
+                        "review"
+                      ],
+                      "type": "string"
+                    },
+                    "unassessedPhysicalBytes": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "unassessedTableCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "assessedPhysicalBytes",
+                    "assessmentComplete",
+                    "estimatedReclaimableBytes",
+                    "estimatedReclaimablePercent",
+                    "highDeadTupleTableCount",
+                    "requiresBloatReview",
+                    "slowStatementCount",
+                    "status",
+                    "unassessedPhysicalBytes",
+                    "unassessedTableCount"
+                  ],
+                  "additionalProperties": false
+                },
+                "pgStatStatementsEnabled": {
+                  "type": "boolean"
+                },
+                "totalConnections": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "totalDatabaseSizeBytes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "activeConnections",
+                "averageCacheHitRatio",
+                "idleConnections",
+                "maintenance",
+                "pgStatStatementsEnabled",
+                "totalConnections",
+                "totalDatabaseSizeBytes"
+              ],
+              "additionalProperties": false
+            },
+            "tableHealth": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "assessment": {
+                    "enum": [
+                      "assessed",
+                      "unavailable"
+                    ],
+                    "type": "string"
+                  },
+                  "database": {
+                    "type": "string",
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "allOf": [
+                      {
+                        "pattern": "^[^\\u0000]*$"
+                      },
+                      {
+                        "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                      }
+                    ]
+                  },
+                  "deadTuplePercent": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  "deadTuples": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "estimatedReclaimableBytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "lastAutoanalyzeAtMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 8640000000000000
+                  },
+                  "lastAutovacuumAtMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 8640000000000000
+                  },
+                  "liveTuples": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "physicalBytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "schema": {
+                    "type": "string",
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "allOf": [
+                      {
+                        "pattern": "^[^\\u0000]*$"
+                      },
+                      {
+                        "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                      }
+                    ]
+                  },
+                  "table": {
+                    "type": "string",
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "allOf": [
+                      {
+                        "pattern": "^[^\\u0000]*$"
+                      },
+                      {
+                        "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "assessment",
+                  "database",
+                  "deadTuplePercent",
+                  "deadTuples",
+                  "liveTuples",
+                  "physicalBytes",
+                  "schema",
+                  "table"
+                ],
+                "additionalProperties": false
+              },
+              "maxItems": 25
+            },
+            "torrentCounts": {
+              "type": "object",
+              "properties": {
+                "bitmagnet": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "count": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "state": {
+                          "const": "available"
+                        }
+                      },
+                      "required": [
+                        "count",
+                        "state"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "state": {
+                          "const": "unavailable"
+                        }
+                      },
+                      "required": [
+                        "state"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "comet": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "count": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "state": {
+                          "const": "available"
+                        }
+                      },
+                      "required": [
+                        "count",
+                        "state"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "state": {
+                          "const": "unavailable"
+                        }
+                      },
+                      "required": [
+                        "state"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "bitmagnet",
+                "comet"
+              ],
+              "additionalProperties": false
+            },
+            "observedAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            },
+            "staleSinceMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            },
+            "state": {
+              "const": "last-known-good"
+            }
+          },
+          "required": [
+            "databases",
+            "pgbouncer",
+            "statements",
+            "summary",
+            "tableHealth",
+            "torrentCounts",
+            "observedAtMs",
+            "staleSinceMs",
+            "state"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "sqlite": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "state": {
+              "const": "unavailable"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "type": "object",
+              "properties": {
+                "busyPolicy": {
+                  "const": "non-blocking"
+                },
+                "checksEnforced": {
+                  "const": true
+                },
+                "foreignKeysEnabled": {
+                  "const": true
+                },
+                "journalMode": {
+                  "const": "wal"
+                },
+                "synchronousMode": {
+                  "const": "full"
+                },
+                "trustedSchemaEnabled": {
+                  "const": false
+                },
+                "walAutoCheckpointPages": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1000000
+                }
+              },
+              "required": [
+                "busyPolicy",
+                "checksEnforced",
+                "foreignKeysEnabled",
+                "journalMode",
+                "synchronousMode",
+                "trustedSchemaEnabled",
+                "walAutoCheckpointPages"
+              ],
+              "additionalProperties": false
+            },
+            "fileName": {
+              "const": "mira-dashboard.db"
+            },
+            "lifecycle": {
+              "type": "object",
+              "properties": {
+                "backupInventory": {
+                  "anyOf": [
+                    {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "backups": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "bytes": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "createdAtMs": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 8640000000000000
+                                  },
+                                  "kind": {
+                                    "enum": [
+                                      "cutover",
+                                      "scheduled"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "restoreVerifiedAtMs": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 8640000000000000
+                                  },
+                                  "verificationLevel": {
+                                    "enum": [
+                                      "manifest-verified",
+                                      "restore-copy-verified"
+                                    ],
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "bytes",
+                                  "createdAtMs",
+                                  "kind",
+                                  "verificationLevel"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "maxItems": 32
+                            },
+                            "observedAtMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 8640000000000000
+                            },
+                            "totalBytes": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "state": {
+                              "const": "available"
+                            }
+                          },
+                          "required": [
+                            "backups",
+                            "observedAtMs",
+                            "totalBytes",
+                            "state"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "backups": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "bytes": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "createdAtMs": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 8640000000000000
+                                  },
+                                  "kind": {
+                                    "enum": [
+                                      "cutover",
+                                      "scheduled"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "restoreVerifiedAtMs": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 8640000000000000
+                                  },
+                                  "verificationLevel": {
+                                    "enum": [
+                                      "manifest-verified",
+                                      "restore-copy-verified"
+                                    ],
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "bytes",
+                                  "createdAtMs",
+                                  "kind",
+                                  "verificationLevel"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "maxItems": 32
+                            },
+                            "observedAtMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 8640000000000000
+                            },
+                            "totalBytes": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "staleSinceMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 8640000000000000
+                            },
+                            "state": {
+                              "const": "last-known-good"
+                            }
+                          },
+                          "required": [
+                            "backups",
+                            "observedAtMs",
+                            "totalBytes",
+                            "staleSinceMs",
+                            "state"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "reason": {
+                          "const": "inventory-unavailable"
+                        },
+                        "state": {
+                          "const": "unavailable"
+                        }
+                      },
+                      "required": [
+                        "reason",
+                        "state"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "maintenance": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "latestSuccessfulAtMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 8640000000000000
+                        },
+                        "nextRunAtMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 8640000000000000
+                        },
+                        "observedAtMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 8640000000000000
+                        },
+                        "runs": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "finishedAtMs": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 8640000000000000
+                              },
+                              "queuedAtMs": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 8640000000000000
+                              },
+                              "startedAtMs": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 8640000000000000
+                              },
+                              "state": {
+                                "enum": [
+                                  "cancelled",
+                                  "failed",
+                                  "queued",
+                                  "running",
+                                  "succeeded",
+                                  "timed-out"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "queuedAtMs",
+                              "state"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "maxItems": 10
+                        },
+                        "schedule": {
+                          "type": "object",
+                          "properties": {
+                            "timeOfDay": {
+                              "const": "02:40"
+                            },
+                            "timeZone": {
+                              "const": "Europe/Oslo"
+                            }
+                          },
+                          "required": [
+                            "timeOfDay",
+                            "timeZone"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "state": {
+                          "const": "available"
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "observedAtMs",
+                        "runs",
+                        "schedule",
+                        "state"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "latestSuccessfulAtMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 8640000000000000
+                        },
+                        "nextRunAtMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 8640000000000000
+                        },
+                        "observedAtMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 8640000000000000
+                        },
+                        "runs": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "finishedAtMs": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 8640000000000000
+                              },
+                              "queuedAtMs": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 8640000000000000
+                              },
+                              "startedAtMs": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 8640000000000000
+                              },
+                              "state": {
+                                "enum": [
+                                  "cancelled",
+                                  "failed",
+                                  "queued",
+                                  "running",
+                                  "succeeded",
+                                  "timed-out"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "queuedAtMs",
+                              "state"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "maxItems": 10
+                        },
+                        "schedule": {
+                          "type": "object",
+                          "properties": {
+                            "timeOfDay": {
+                              "const": "02:40"
+                            },
+                            "timeZone": {
+                              "const": "Europe/Oslo"
+                            }
+                          },
+                          "required": [
+                            "timeOfDay",
+                            "timeZone"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "staleSinceMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 8640000000000000
+                        },
+                        "state": {
+                          "const": "last-known-good"
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "observedAtMs",
+                        "runs",
+                        "schedule",
+                        "staleSinceMs",
+                        "state"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "reason": {
+                          "const": "maintenance-unavailable"
+                        },
+                        "state": {
+                          "const": "unavailable"
+                        }
+                      },
+                      "required": [
+                        "reason",
+                        "state"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "restoreVerification": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "backupBytes": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "backupCreatedAtMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 8640000000000000
+                        },
+                        "observedAtMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 8640000000000000
+                        },
+                        "verifiedAtMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 8640000000000000
+                        },
+                        "state": {
+                          "const": "verified"
+                        }
+                      },
+                      "required": [
+                        "backupBytes",
+                        "backupCreatedAtMs",
+                        "observedAtMs",
+                        "verifiedAtMs",
+                        "state"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "backupBytes": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "backupCreatedAtMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 8640000000000000
+                        },
+                        "observedAtMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 8640000000000000
+                        },
+                        "verifiedAtMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 8640000000000000
+                        },
+                        "staleSinceMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 8640000000000000
+                        },
+                        "state": {
+                          "const": "last-known-good"
+                        }
+                      },
+                      "required": [
+                        "backupBytes",
+                        "backupCreatedAtMs",
+                        "observedAtMs",
+                        "verifiedAtMs",
+                        "staleSinceMs",
+                        "state"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "reason": {
+                          "enum": [
+                            "no-verified-backup",
+                            "verification-unavailable"
+                          ],
+                          "type": "string"
+                        },
+                        "state": {
+                          "const": "unavailable"
+                        }
+                      },
+                      "required": [
+                        "reason",
+                        "state"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "backupInventory",
+                "maintenance",
+                "restoreVerification"
+              ],
+              "additionalProperties": false
+            },
+            "migrations": {
+              "type": "object",
+              "properties": {
+                "applied": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 64
+                },
+                "available": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 64
+                },
+                "current": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "applied",
+                "available",
+                "current"
+              ],
+              "additionalProperties": false,
+              "$comment": "Live Valibot validation additionally requires applied migrations not to exceed the bundled graph and current status to agree with the counts."
+            },
+            "storage": {
+              "type": "object",
+              "properties": {
+                "databaseBytes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "freeBytes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "freePages": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "freePercent": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                "pageCount": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "pageSizeBytes": {
+                  "type": "integer",
+                  "minimum": 512,
+                  "maximum": 65536,
+                  "$comment": "Live Valibot validation additionally requires the SQLite page size to be a power of two."
+                },
+                "permissions": {
+                  "type": "object",
+                  "properties": {
+                    "dataDirectory": {
+                      "type": "string",
+                      "pattern": "^0[0-7]{3}$"
+                    },
+                    "database": {
+                      "type": "string",
+                      "pattern": "^0[0-7]{3}$"
+                    },
+                    "secure": {
+                      "type": "boolean"
+                    },
+                    "shm": {
+                      "type": "string",
+                      "pattern": "^0[0-7]{3}$"
+                    },
+                    "wal": {
+                      "type": "string",
+                      "pattern": "^0[0-7]{3}$"
+                    }
+                  },
+                  "required": [
+                    "dataDirectory",
+                    "database",
+                    "secure"
+                  ],
+                  "additionalProperties": false
+                },
+                "requiresVacuumReview": {
+                  "type": "boolean"
+                },
+                "shmBytes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "storageBytes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "walBytes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "databaseBytes",
+                "freeBytes",
+                "freePages",
+                "freePercent",
+                "pageCount",
+                "pageSizeBytes",
+                "permissions",
+                "requiresVacuumReview",
+                "shmBytes",
+                "storageBytes",
+                "walBytes"
+              ],
+              "additionalProperties": false,
+              "$comment": "Live Valibot validation additionally requires SQLite file totals, reusable pages and bytes, percentages, permission security, and VACUUM review status to agree exactly."
+            },
+            "observedAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            },
+            "state": {
+              "const": "fresh"
+            }
+          },
+          "required": [
+            "connection",
+            "fileName",
+            "lifecycle",
+            "migrations",
+            "storage",
+            "observedAtMs",
+            "state"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "type": "object",
+              "properties": {
+                "busyPolicy": {
+                  "const": "non-blocking"
+                },
+                "checksEnforced": {
+                  "const": true
+                },
+                "foreignKeysEnabled": {
+                  "const": true
+                },
+                "journalMode": {
+                  "const": "wal"
+                },
+                "synchronousMode": {
+                  "const": "full"
+                },
+                "trustedSchemaEnabled": {
+                  "const": false
+                },
+                "walAutoCheckpointPages": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1000000
+                }
+              },
+              "required": [
+                "busyPolicy",
+                "checksEnforced",
+                "foreignKeysEnabled",
+                "journalMode",
+                "synchronousMode",
+                "trustedSchemaEnabled",
+                "walAutoCheckpointPages"
+              ],
+              "additionalProperties": false
+            },
+            "fileName": {
+              "const": "mira-dashboard.db"
+            },
+            "lifecycle": {
+              "type": "object",
+              "properties": {
+                "backupInventory": {
+                  "anyOf": [
+                    {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "backups": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "bytes": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "createdAtMs": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 8640000000000000
+                                  },
+                                  "kind": {
+                                    "enum": [
+                                      "cutover",
+                                      "scheduled"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "restoreVerifiedAtMs": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 8640000000000000
+                                  },
+                                  "verificationLevel": {
+                                    "enum": [
+                                      "manifest-verified",
+                                      "restore-copy-verified"
+                                    ],
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "bytes",
+                                  "createdAtMs",
+                                  "kind",
+                                  "verificationLevel"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "maxItems": 32
+                            },
+                            "observedAtMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 8640000000000000
+                            },
+                            "totalBytes": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "state": {
+                              "const": "available"
+                            }
+                          },
+                          "required": [
+                            "backups",
+                            "observedAtMs",
+                            "totalBytes",
+                            "state"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "backups": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "bytes": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "createdAtMs": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 8640000000000000
+                                  },
+                                  "kind": {
+                                    "enum": [
+                                      "cutover",
+                                      "scheduled"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "restoreVerifiedAtMs": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 8640000000000000
+                                  },
+                                  "verificationLevel": {
+                                    "enum": [
+                                      "manifest-verified",
+                                      "restore-copy-verified"
+                                    ],
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "bytes",
+                                  "createdAtMs",
+                                  "kind",
+                                  "verificationLevel"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "maxItems": 32
+                            },
+                            "observedAtMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 8640000000000000
+                            },
+                            "totalBytes": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "staleSinceMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 8640000000000000
+                            },
+                            "state": {
+                              "const": "last-known-good"
+                            }
+                          },
+                          "required": [
+                            "backups",
+                            "observedAtMs",
+                            "totalBytes",
+                            "staleSinceMs",
+                            "state"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "reason": {
+                          "const": "inventory-unavailable"
+                        },
+                        "state": {
+                          "const": "unavailable"
+                        }
+                      },
+                      "required": [
+                        "reason",
+                        "state"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "maintenance": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "latestSuccessfulAtMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 8640000000000000
+                        },
+                        "nextRunAtMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 8640000000000000
+                        },
+                        "observedAtMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 8640000000000000
+                        },
+                        "runs": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "finishedAtMs": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 8640000000000000
+                              },
+                              "queuedAtMs": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 8640000000000000
+                              },
+                              "startedAtMs": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 8640000000000000
+                              },
+                              "state": {
+                                "enum": [
+                                  "cancelled",
+                                  "failed",
+                                  "queued",
+                                  "running",
+                                  "succeeded",
+                                  "timed-out"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "queuedAtMs",
+                              "state"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "maxItems": 10
+                        },
+                        "schedule": {
+                          "type": "object",
+                          "properties": {
+                            "timeOfDay": {
+                              "const": "02:40"
+                            },
+                            "timeZone": {
+                              "const": "Europe/Oslo"
+                            }
+                          },
+                          "required": [
+                            "timeOfDay",
+                            "timeZone"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "state": {
+                          "const": "available"
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "observedAtMs",
+                        "runs",
+                        "schedule",
+                        "state"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "latestSuccessfulAtMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 8640000000000000
+                        },
+                        "nextRunAtMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 8640000000000000
+                        },
+                        "observedAtMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 8640000000000000
+                        },
+                        "runs": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "finishedAtMs": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 8640000000000000
+                              },
+                              "queuedAtMs": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 8640000000000000
+                              },
+                              "startedAtMs": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 8640000000000000
+                              },
+                              "state": {
+                                "enum": [
+                                  "cancelled",
+                                  "failed",
+                                  "queued",
+                                  "running",
+                                  "succeeded",
+                                  "timed-out"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "queuedAtMs",
+                              "state"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "maxItems": 10
+                        },
+                        "schedule": {
+                          "type": "object",
+                          "properties": {
+                            "timeOfDay": {
+                              "const": "02:40"
+                            },
+                            "timeZone": {
+                              "const": "Europe/Oslo"
+                            }
+                          },
+                          "required": [
+                            "timeOfDay",
+                            "timeZone"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "staleSinceMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 8640000000000000
+                        },
+                        "state": {
+                          "const": "last-known-good"
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "observedAtMs",
+                        "runs",
+                        "schedule",
+                        "staleSinceMs",
+                        "state"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "reason": {
+                          "const": "maintenance-unavailable"
+                        },
+                        "state": {
+                          "const": "unavailable"
+                        }
+                      },
+                      "required": [
+                        "reason",
+                        "state"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "restoreVerification": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "backupBytes": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "backupCreatedAtMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 8640000000000000
+                        },
+                        "observedAtMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 8640000000000000
+                        },
+                        "verifiedAtMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 8640000000000000
+                        },
+                        "state": {
+                          "const": "verified"
+                        }
+                      },
+                      "required": [
+                        "backupBytes",
+                        "backupCreatedAtMs",
+                        "observedAtMs",
+                        "verifiedAtMs",
+                        "state"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "backupBytes": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "backupCreatedAtMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 8640000000000000
+                        },
+                        "observedAtMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 8640000000000000
+                        },
+                        "verifiedAtMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 8640000000000000
+                        },
+                        "staleSinceMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 8640000000000000
+                        },
+                        "state": {
+                          "const": "last-known-good"
+                        }
+                      },
+                      "required": [
+                        "backupBytes",
+                        "backupCreatedAtMs",
+                        "observedAtMs",
+                        "verifiedAtMs",
+                        "staleSinceMs",
+                        "state"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "reason": {
+                          "enum": [
+                            "no-verified-backup",
+                            "verification-unavailable"
+                          ],
+                          "type": "string"
+                        },
+                        "state": {
+                          "const": "unavailable"
+                        }
+                      },
+                      "required": [
+                        "reason",
+                        "state"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "backupInventory",
+                "maintenance",
+                "restoreVerification"
+              ],
+              "additionalProperties": false
+            },
+            "migrations": {
+              "type": "object",
+              "properties": {
+                "applied": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 64
+                },
+                "available": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 64
+                },
+                "current": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "applied",
+                "available",
+                "current"
+              ],
+              "additionalProperties": false,
+              "$comment": "Live Valibot validation additionally requires applied migrations not to exceed the bundled graph and current status to agree with the counts."
+            },
+            "storage": {
+              "type": "object",
+              "properties": {
+                "databaseBytes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "freeBytes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "freePages": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "freePercent": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                "pageCount": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "pageSizeBytes": {
+                  "type": "integer",
+                  "minimum": 512,
+                  "maximum": 65536,
+                  "$comment": "Live Valibot validation additionally requires the SQLite page size to be a power of two."
+                },
+                "permissions": {
+                  "type": "object",
+                  "properties": {
+                    "dataDirectory": {
+                      "type": "string",
+                      "pattern": "^0[0-7]{3}$"
+                    },
+                    "database": {
+                      "type": "string",
+                      "pattern": "^0[0-7]{3}$"
+                    },
+                    "secure": {
+                      "type": "boolean"
+                    },
+                    "shm": {
+                      "type": "string",
+                      "pattern": "^0[0-7]{3}$"
+                    },
+                    "wal": {
+                      "type": "string",
+                      "pattern": "^0[0-7]{3}$"
+                    }
+                  },
+                  "required": [
+                    "dataDirectory",
+                    "database",
+                    "secure"
+                  ],
+                  "additionalProperties": false
+                },
+                "requiresVacuumReview": {
+                  "type": "boolean"
+                },
+                "shmBytes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "storageBytes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "walBytes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "databaseBytes",
+                "freeBytes",
+                "freePages",
+                "freePercent",
+                "pageCount",
+                "pageSizeBytes",
+                "permissions",
+                "requiresVacuumReview",
+                "shmBytes",
+                "storageBytes",
+                "walBytes"
+              ],
+              "additionalProperties": false,
+              "$comment": "Live Valibot validation additionally requires SQLite file totals, reusable pages and bytes, percentages, permission security, and VACUUM review status to agree exactly."
+            },
+            "observedAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            },
+            "staleSinceMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            },
+            "state": {
+              "const": "last-known-good"
+            }
+          },
+          "required": [
+            "connection",
+            "fileName",
+            "lifecycle",
+            "migrations",
+            "storage",
+            "observedAtMs",
+            "staleSinceMs",
+            "state"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+  "required": [
+    "checkedAtMs",
+    "postgresql",
+    "sqlite"
+  ],
+  "additionalProperties": false,
+  "$comment": "Live Valibot validation additionally requires SQLite observation and stale timestamps to remain causally ordered within the response check time, and enforces the PostgreSQL 128 KiB UTF-8 payload budget, canonical unique rows, contiguous statement ranks, exact aggregate sizes and connection bounds, and coherent maintenance assessment.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

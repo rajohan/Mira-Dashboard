@@ -62,10 +62,10 @@
             "navigationPosition": 11,
             "pageModule": "../pages/Database",
             "path": "/database",
-            "searchNormalizer": null,
+            "searchNormalizer": "normalizeDatabaseSearch",
             "sourceRouteName": "database",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "path": "/database",
                 "phase": "phase-5"
             }

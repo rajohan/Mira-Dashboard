@@ -969,16 +969,16 @@ The existing API endpoint list is an input to the parity inventory, not a contra
 Each old endpoint must map to a new procedure, a raw protocol route, or an explicit removal
 reason showing that no current frontend or automation behavior depends on it.
 
-The Database vertical is one read-only slice rather than an implicit backup or Docker
-control plane. `database.overview` will expose a session-only, bounded projection: live
+The implemented Database vertical is one read-only slice rather than an implicit backup or Docker
+control plane. `database.overview` exposes a session-only, bounded projection: live
 Dashboard-owned SQLite lifecycle facts from the retained database runtime plus a worker-owned
-last-known-good PostgreSQL/PgBouncer snapshot. `/database` will preserve the reviewed source
+last-known-good PostgreSQL/PgBouncer snapshot. `/database` preserves the reviewed source
 picker, responsive summary/table layout, explicit unavailable/stale states, and non-blocking
 refresh warnings. It must not expose credentials, host paths, raw provider failures, arbitrary
 SQL, or mutation authority. The six Kopia/WAL-G status/control rows and all database
-backup/restore operations remain separately planned. Neither the procedure nor `/database` is
-recorded as implemented until the contract, provider, production composition, browser route, and
-acceptance tests exist together. Its SQLite inventory recognizes only two canonical greenfield
+backup/restore operations remain separately planned. The contract, provider, production
+composition, browser route, and acceptance tests now land together. Its SQLite inventory
+recognizes only two canonical greenfield
 provenances: scheduled maintenance snapshots below `backups/sqlite-maintenance/` and activation
 snapshots below `backups/<transitionId>` classified as `cutover`. The activation snapshot securely
 consolidates the recovery purpose of legacy pre-deploy and pre-migration copies; those legacy

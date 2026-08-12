@@ -273,6 +273,7 @@ export const procedureExpectedErrorPolicy = freezeProcedureExpectedErrorPolicy({
         "SERVICE_UNAVAILABLE",
         "UNAUTHORIZED",
     ],
+    "database.overview": ["FORBIDDEN", "UNAUTHORIZED"],
     "files.getWriteStatus": [
         "FORBIDDEN",
         "NOT_FOUND",

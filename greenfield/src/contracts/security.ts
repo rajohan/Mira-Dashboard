@@ -98,6 +98,7 @@ export const applicationCapabilities = [
     "cache:write",
     "chat:read",
     "chat:write",
+    "database:read",
     "files:read",
     "files:write",
     "gateway-sessions:read",

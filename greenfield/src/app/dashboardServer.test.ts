@@ -15,6 +15,10 @@ import {
 import { chatHistoryOutputSchema, type ChatHistoryOutput } from "../contracts/chat.ts";
 import { chatHistoryRetainedPageMaximum } from "../contracts/chatModel.ts";
 import {
+    type DatabaseObservabilityCachePayload,
+    databaseOverviewSchema,
+} from "../contracts/database.ts";
+import {
     type GatewaySession,
     deriveGatewaySessionStats,
     type ListGatewaySessionsResult,
@@ -32,6 +36,8 @@ import {
 import { listSchedulesResultSchema } from "../contracts/schedules.ts";
 import { authSessions } from "../server/database/schema/authSessions.ts";
 import { automationPrincipalCapabilities } from "../server/database/schema/automationPrincipalCapabilities.ts";
+import { cacheEntries } from "../server/database/schema/cacheEntries.ts";
+import { jobRuns } from "../server/database/schema/jobRuns.ts";
 import { users } from "../server/database/schema/users.ts";
 import { automationPrincipalCapabilityInsertSchema } from "../server/database/validation/automationPrincipalCapabilities.ts";
 import type { JobRunRecord } from "../server/domains/jobs/records.ts";
@@ -66,6 +72,7 @@ import {
     createTestApplicationRuntime,
     createTestStructuredLogger,
 } from "../server/test/support/requestContext.ts";
+import { databaseObservabilityMetricDatabases } from "../shared/databaseObservabilityPolicy.ts";
 import { createDashboardLogsService } from "./dashboardLogs.ts";
 import {
     createDashboardChatMediaReferenceRefreshClass,
@@ -80,6 +87,50 @@ import {
 import { createDashboardTerminalComposition } from "./dashboardTerminal.ts";
 
 const mediaRefreshObservedAtMs = 1_800_000_000_000;
+const dashboardServerTestPostgresqlSnapshot = Object.freeze({
+    databases: databaseObservabilityMetricDatabases.map((name) => ({
+        cacheHitRatio: 99,
+        committedTransactions: name === "comet" ? 100 : 0,
+        connections: name === "comet" ? 2 : 0,
+        name,
+        rolledBackTransactions: name === "comet" ? 1 : 0,
+        sizeBytes: name === "comet" ? 4096 : 0,
+    })),
+    pgbouncer: {
+        averageQueryMs: 5,
+        averageTransactionMs: 8,
+        clientConnections: 2,
+        maxWaitSeconds: 0,
+        serverConnections: 1,
+        waitingClients: 0,
+    },
+    statements: [],
+    summary: {
+        activeConnections: 1,
+        averageCacheHitRatio: 99,
+        idleConnections: 1,
+        maintenance: {
+            assessedPhysicalBytes: 0,
+            assessmentComplete: true,
+            estimatedReclaimableBytes: 0,
+            estimatedReclaimablePercent: 0,
+            highDeadTupleTableCount: 0,
+            requiresBloatReview: false,
+            slowStatementCount: 0,
+            status: "healthy",
+            unassessedPhysicalBytes: 0,
+            unassessedTableCount: 0,
+        },
+        pgStatStatementsEnabled: false,
+        totalConnections: 2,
+        totalDatabaseSizeBytes: 4096,
+    },
+    tableHealth: [],
+    torrentCounts: {
+        bitmagnet: { state: "unavailable" },
+        comet: { count: 42, state: "available" },
+    },
+} as const satisfies DatabaseObservabilityCachePayload);
 
 function unavailableDashboardGatewayRequest(): Promise<never> {
     return Promise.reject(new Error("unused Gateway operation"));
@@ -1519,15 +1570,94 @@ describe("Dashboard security composition", () => {
                 database,
                 authenticationTestNow
             );
+            const databaseObservationRunId = "019f6212-0300-7000-8000-000000000001";
+            const databaseObservationQueuedAt = new Date(
+                authenticationTestNow.getTime() - 2000
+            );
+            const databaseObservationStartedAt = new Date(
+                authenticationTestNow.getTime() - 1000
+            );
+            database
+                .insert(jobRuns)
+                .values({
+                    actionKey: "cache.refresh.database-observability",
+                    attemptCount: 1,
+                    attemptLimit: 3,
+                    availableAt: databaseObservationQueuedAt,
+                    cancellationPolicy: "cooperative",
+                    cancelRequestedAt: null,
+                    cancelRequestedById: null,
+                    cancelRequestedByKind: null,
+                    displayName: "Database observability cache",
+                    enqueueSha256: "a".repeat(64),
+                    eventBytes: 0,
+                    eventCount: 0,
+                    finishedAt: authenticationTestNow,
+                    firstStartedAt: databaseObservationStartedAt,
+                    heartbeatAt: null,
+                    id: databaseObservationRunId,
+                    idempotencyKey: "A".repeat(32),
+                    lastAttemptStartedAt: databaseObservationStartedAt,
+                    leaseExpiresAt: null,
+                    leaseOwnerId: null,
+                    leaseToken: null,
+                    payloadEventCount: 0,
+                    payloadJson: '{"key":"database.observability"}',
+                    priority: 0,
+                    queuedAt: databaseObservationQueuedAt,
+                    requestedById: "system.database-observability",
+                    requestedByKind: "system",
+                    resourceClass: "light",
+                    resourceKeysJson: '["network.database-observability"]',
+                    resultJson: "{}",
+                    retrySafe: true,
+                    scheduledForAt: null,
+                    scheduledJobId: null,
+                    scheduledJobVersion: null,
+                    state: "succeeded",
+                    stateVersion: 2,
+                    terminalCode: null,
+                    terminalMessage: null,
+                    timeoutMs: 65_000,
+                    triggerType: "system",
+                    updatedAt: authenticationTestNow,
+                })
+                .run();
+            database
+                .insert(cacheEntries)
+                .values({
+                    consecutiveFailures: 0,
+                    expiresAt: new Date(authenticationTestNow.getTime() + 90 * 60_000),
+                    failureCode: null,
+                    failureMessage: null,
+                    key: "database.observability",
+                    lastAttemptAt: authenticationTestNow,
+                    lastAttemptDurationMs: 100,
+                    lastAttemptNumber: 1,
+                    lastAttemptRunId: databaseObservationRunId,
+                    lastAttemptStatus: "succeeded",
+                    lastSuccessAt: authenticationTestNow,
+                    metadataJson: "{}",
+                    payloadJson: JSON.stringify(dashboardServerTestPostgresqlSnapshot),
+                    schemaId: "database.observability.v1",
+                    source: "postgresql.pgbouncer",
+                    updatedAt: authenticationTestNow,
+                })
+                .run();
             database
                 .insert(automationPrincipalCapabilities)
-                .values(
+                .values([
+                    v.parse(automationPrincipalCapabilityInsertSchema, {
+                        capability: "cache:read",
+                        grantedAt: authenticationTestNow,
+                        principalId: authenticationTestPrincipalId,
+                    }),
                     v.parse(automationPrincipalCapabilityInsertSchema, {
                         capability: "monitoring:write",
                         grantedAt: authenticationTestNow,
                         principalId: authenticationTestPrincipalId,
-                    })
-                )
+                    }),
+                ])
                 .run();
             server = await createDashboardServer({
                 applicationRuntime,
@@ -1538,6 +1668,59 @@ describe("Dashboard security composition", () => {
                 readiness: createReadinessController(),
                 totpSecretCipher: testTotpSecretCipher,
             });
+            const databaseResponse = await fetch(
+                new URL("/trpc/database.overview", server.url),
+                {
+                    headers: {
+                        cookie: `${dashboardSessionCookieName}=${fixture.session.token}`,
+                    },
+                }
+            );
+            expect(databaseResponse.status).toBe(200);
+            const databaseOverview = v.parse(
+                databaseOverviewSchema,
+                await readTrpcResult(databaseResponse)
+            );
+            expect(databaseOverview).toMatchObject({
+                checkedAtMs: authenticationTestNow.getTime(),
+                postgresql: {
+                    observedAtMs: authenticationTestNow.getTime(),
+                    state: "fresh",
+                    torrentCounts: {
+                        bitmagnet: { state: "unavailable" },
+                        comet: { count: 42, state: "available" },
+                    },
+                },
+                sqlite: {
+                    migrations: { current: true },
+                    observedAtMs: authenticationTestNow.getTime(),
+                    state: "fresh",
+                },
+            });
+            expect(
+                databaseOverview.postgresql.state === "unavailable"
+                    ? undefined
+                    : databaseOverview.postgresql.databases.find(
+                          ({ name }) => name === "comet"
+                      )
+            ).toMatchObject({ name: "comet", sizeBytes: 4096 });
+            expect(JSON.stringify(databaseOverview)).not.toContain(stateDirectory);
+            expect(JSON.stringify(databaseOverview)).not.toContain("initialize-empty");
+            expect(JSON.stringify(databaseOverview)).not.toContain("postgresql://");
+            expect(JSON.stringify(databaseOverview)).not.toContain("SELECT");
+            const cacheInput = encodeURIComponent(
+                JSON.stringify({ json: { key: "database.observability" } })
+            );
+            const genericCacheResponse = await fetch(
+                new URL(`/trpc/cache.getEntry?input=${cacheInput}`, server.url),
+                {
+                    headers: {
+                        authorization: `Bearer ${fixture.automation.token}`,
+                    },
+                }
+            );
+            expect(genericCacheResponse.status).toBe(404);
+            expect(await genericCacheResponse.text()).not.toContain("comet");
             const input = encodeURIComponent(JSON.stringify({ json: {} }));
             const response = await fetch(
                 new URL(
@@ -1566,7 +1749,7 @@ describe("Dashboard security composition", () => {
                 result.principals.find(({ id }) => id === authenticationTestPrincipalId)
             ).toMatchObject({
                 activeCredentialCount: 1,
-                capabilities: ["monitoring:write", "reports:read"],
+                capabilities: ["cache:read", "monitoring:write", "reports:read"],
                 disabled: false,
                 id: authenticationTestPrincipalId,
             });
@@ -1702,27 +1885,39 @@ describe("Dashboard security composition", () => {
                 scheduleBody.result?.data?.json
             );
             expect(schedules.schedules.map(({ id }) => id)).toEqual([
+                "cache.database-observability",
                 "cache.moltbook-dashboard",
                 "cache.system-host",
+                "database.sqlite-maintenance",
                 "maintenance.rotate-managed-logs",
                 "system.worker-smoke",
             ]);
             expect(schedules.schedules[0]).toMatchObject({
+                actionKey: "cache.refresh.database-observability",
+                enabled: true,
+                id: "cache.database-observability",
+            });
+            expect(schedules.schedules[1]).toMatchObject({
                 actionKey: "cache.refresh.moltbook-dashboard",
                 enabled: true,
                 id: "cache.moltbook-dashboard",
             });
-            expect(schedules.schedules[1]).toMatchObject({
+            expect(schedules.schedules[2]).toMatchObject({
                 actionKey: "cache.refresh.system-host",
                 enabled: true,
                 id: "cache.system-host",
             });
-            expect(schedules.schedules[2]).toMatchObject({
+            expect(schedules.schedules[3]).toMatchObject({
+                actionKey: "database.sqlite-maintenance",
+                enabled: true,
+                id: "database.sqlite-maintenance",
+            });
+            expect(schedules.schedules[4]).toMatchObject({
                 actionKey: "maintenance.rotate-logs",
                 enabled: true,
                 id: "maintenance.rotate-managed-logs",
             });
-            expect(schedules.schedules[3]).toMatchObject({
+            expect(schedules.schedules[5]).toMatchObject({
                 actionKey: "system.worker-smoke",
                 enabled: false,
                 id: "system.worker-smoke",
@@ -1785,12 +1980,22 @@ describe("Dashboard security composition", () => {
             ).toEqual([
                 {
                     defaultEnabled: true,
+                    id: "cache.database-observability",
+                    state: "present",
+                },
+                {
+                    defaultEnabled: true,
                     id: "cache.moltbook-dashboard",
                     state: "present",
                 },
                 {
                     defaultEnabled: true,
                     id: "cache.system-host",
+                    state: "present",
+                },
+                {
+                    defaultEnabled: true,
+                    id: "database.sqlite-maintenance",
                     state: "present",
                 },
                 {

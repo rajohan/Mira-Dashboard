@@ -8,6 +8,7 @@
 | `/account-security` | Browser session | Hidden | `security` | Manages password, MFA factors, recovery codes, and browser sessions. |
 | `/agents` | Browser session | Agents | `agents` | Shows the reviewed agent directory, task state, and durable history. |
 | `/chat` | Browser session | Chat | `chat` | Runs the bounded persistent Gateway chat and attachment workflow. |
+| `/database` | Browser session | Database | `database` | Shows bounded read-only health and lifecycle observations for Dashboard databases. |
 | `/files` | Browser session | Files | `files` | Browses, previews, downloads, uploads, and CAS-replaces workspace files. |
 | `/incidents` | Browser session | Hidden | `monitoring` | Lists and inspects persisted monitoring incident generations. |
 | `/jobs` | Browser session | Jobs | `jobs` | Shows Dashboard jobs, schedules, worker state, and OpenClaw cron. |

@@ -11,6 +11,7 @@ import type { AgentService } from "../../domains/agents/service.ts";
 import { createTestAgentService } from "../../domains/agents/testSupport/service.ts";
 import type { CacheService } from "../../domains/cache/service.ts";
 import { createTestCacheService } from "../../domains/cache/testSupport/service.ts";
+import type { DatabaseObservabilityService } from "../../domains/database/service.ts";
 import {
     createGatewayConnectionService,
     type GatewayConnectionService,
@@ -172,6 +173,21 @@ const unavailableSystemHealthDiagnostics = Object.freeze({
  */
 export function createTestSystemHealthDiagnosticsService(): SystemHealthDiagnosticsService {
     return Object.freeze({ read: () => unavailableSystemHealthDiagnostics });
+}
+
+/**
+ * Creates stable fail-closed SQLite observability for generic request tests.
+ * @returns An inert identity-free database observability service.
+ */
+export function createTestDatabaseObservabilityService(): DatabaseObservabilityService {
+    return Object.freeze({
+        read: () =>
+            Promise.resolve({
+                checkedAtMs: 1_800_000_000_000,
+                postgresql: { state: "unavailable" as const },
+                sqlite: { state: "unavailable" as const },
+            }),
+    });
 }
 
 /**
@@ -564,6 +580,7 @@ export interface TestServerSecurityServices {
     readonly authenticationLifecycle: AuthenticationLifecycleService;
     readonly automationSecurityLifecycle: AutomationSecurityLifecycleService;
     readonly cacheService: CacheService["Service"];
+    readonly databaseObservabilityService: DatabaseObservabilityService;
     readonly gatewayConnectionService: GatewayConnectionService;
     readonly gatewaySessionsService: GatewaySessionsService;
     readonly mfaAccountLifecycle: MfaAccountLifecycleService;
@@ -599,6 +616,9 @@ export function createTestServerSecurityServices(
             overrides.automationSecurityLifecycle ??
             createTestAutomationSecurityLifecycleService(),
         cacheService: overrides.cacheService ?? createTestCacheService(),
+        databaseObservabilityService:
+            overrides.databaseObservabilityService ??
+            createTestDatabaseObservabilityService(),
         gatewayConnectionService:
             overrides.gatewayConnectionService ?? createTestGatewayConnectionService(),
         gatewaySessionsService:
@@ -706,6 +726,7 @@ export function createTestRequestContext(
         readonly authenticationLifecycle?: AuthenticationLifecycleService;
         readonly automationSecurityLifecycle?: AutomationSecurityLifecycleService;
         readonly cacheService?: CacheService["Service"];
+        readonly databaseObservabilityService?: DatabaseObservabilityService;
         readonly gatewayConnectionService?: GatewayConnectionService;
         readonly gatewaySessionsService?: GatewaySessionsService;
         readonly mfaAccountLifecycle?: MfaAccountLifecycleService;
@@ -739,6 +760,9 @@ export function createTestRequestContext(
             createTestAutomationSecurityLifecycleService(),
         authenticateCredential: () => createTestAuthenticationResolution(authentication),
         cacheService: options.cacheService ?? createTestCacheService(),
+        databaseObservabilityService:
+            options.databaseObservabilityService ??
+            createTestDatabaseObservabilityService(),
         gatewayConnectionService:
             options.gatewayConnectionService ?? createTestGatewayConnectionService(),
         gatewaySessionsService:

@@ -231,6 +231,10 @@
             "name": "chat.updateSessionSettings"
         },
         {
+            "kind": "query",
+            "name": "database.overview"
+        },
+        {
             "kind": "subscription",
             "name": "events.stream"
         },

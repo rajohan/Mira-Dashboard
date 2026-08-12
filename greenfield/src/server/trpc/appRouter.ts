@@ -2,6 +2,10 @@ import { agentProcedureNames, agentRouter } from "../domains/agents/procedures.t
 import { cacheProcedureNames, cacheRouter } from "../domains/cache/procedures.ts";
 import { chatProcedureNames, chatRouter } from "../domains/chat/procedures.ts";
 import {
+    databaseProcedureNames,
+    databaseRouter,
+} from "../domains/database/procedures.ts";
+import {
     workspaceFileProcedureNames,
     workspaceFilesRouter,
 } from "../domains/files/procedures.ts";
@@ -87,6 +91,7 @@ export const appRouter = router({
     automationSecurity: automationSecurityRouter,
     cache: cacheRouter,
     chat: chatRouter,
+    database: databaseRouter,
     events: eventsRouter,
     files: workspaceFilesRouter,
     gateway: gatewayRouter,
@@ -117,6 +122,7 @@ export const appRouterProcedureNames = Object.freeze([
     ...namespacedProcedureNames("automationSecurity", automationSecurityProcedureNames),
     ...namespacedProcedureNames("cache", cacheProcedureNames),
     ...namespacedProcedureNames("chat", chatProcedureNames),
+    ...namespacedProcedureNames("database", databaseProcedureNames),
     ...namespacedProcedureNames("events", eventsProcedureNames),
     ...namespacedProcedureNames("files", workspaceFileProcedureNames),
     ...namespacedProcedureNames("gateway", gatewayProcedureNames),
