@@ -629,8 +629,9 @@ describe("chat raw HTTP media boundary", () => {
                     ),
             },
             mediaReferences: references,
-            refreshMediaReferences: () => {
+            refreshMediaReferences: (_signal, requestedAttachmentId) => {
                 refreshCount += 1;
+                expect(requestedAttachmentId).toBe(attachmentId);
                 references.register({
                     attachmentId,
                     messageId: "message-after-restart",

@@ -50,6 +50,7 @@ import {
     seedAuthenticationTestDatabase,
     testTotpSecretCipher,
 } from "../server/domains/security/testSupport/authentication.ts";
+import { createInMemoryChatMediaReferences } from "../server/platform/chat/inMemoryChatMediaReferences.ts";
 import { resolveReviewedOpenClawFileRoot } from "../server/platform/files/openClawFileRootConfiguration.ts";
 import type { PersistentGatewayTransport } from "../server/platform/gateway/persistentGatewayTransport.ts";
 import type { PersistentOpenClawCronTransport } from "../server/platform/gateway/persistentOpenClawCronProvider.ts";
@@ -346,6 +347,46 @@ describe("Dashboard chat media-reference refresh", () => {
 
         await refresh(new AbortController().signal);
 
+        expect(calls).toHaveLength(dashboardChatMediaReferenceRefreshPageMaximum);
+    });
+
+    test("prioritizes the attachment's encoded session before the global page budget", async () => {
+        const targetSessionKey = "agent:target:main";
+        const references = createInMemoryChatMediaReferences({
+            localMediaRoot: "/srv/openclaw/media",
+        });
+        const attachmentId = references.registerLocal({
+            candidate: "reports/target.txt",
+            messageId: "message-target",
+            sessionKey: targetSessionKey,
+            sourceSlot: "structured:0",
+        })!.attachmentId;
+        references.dispose();
+        const calls: string[] = [];
+        const refresh = createDashboardChatMediaReferenceRefresh({
+            chatService: {
+                history: (input) => {
+                    calls.push(input.sessionKey);
+                    return Promise.reject(new Error("unavailable history"));
+                },
+            },
+            gatewaySessionsService: {
+                list: () =>
+                    Promise.resolve(
+                        mediaRefreshSessionSnapshot([
+                            ...Array.from(
+                                { length: 40 },
+                                (_, index) => `agent:unrelated-${index}:main`
+                            ),
+                            targetSessionKey,
+                        ])
+                    ),
+            },
+        });
+
+        await refresh(new AbortController().signal, attachmentId);
+
+        expect(calls[0]).toBe(targetSessionKey);
         expect(calls).toHaveLength(dashboardChatMediaReferenceRefreshPageMaximum);
     });
 });

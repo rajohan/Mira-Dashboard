@@ -1,7 +1,10 @@
 import { Redacted } from "effect";
 
 import type { ChatMessageGetOutput } from "../../contracts/chat.ts";
-import { chatAttachmentLimits } from "../../contracts/chatMedia.ts";
+import {
+    chatAttachmentLimits,
+    chatTextPreviewMaximumBytes,
+} from "../../contracts/chatMedia.ts";
 import type { AuthenticatedPrincipal } from "../../contracts/security.ts";
 import { parseAuthenticationResolution } from "../domains/security/authenticationResolution.ts";
 import type { InMemoryChatAttachmentStore } from "../platform/chat/inMemoryChatAttachmentStore.ts";
@@ -14,7 +17,7 @@ import { readAuthenticationHttpCredentials } from "./authenticationCredentials.t
 import { isAllowedRequestSource } from "./requestSecurity.ts";
 
 export const chatOutgoingMediaMaximumBytes = 16 * 1024 * 1024;
-export const chatOutgoingTextPreviewMaximumBytes = 1024 * 1024;
+export const chatOutgoingTextPreviewMaximumBytes = chatTextPreviewMaximumBytes;
 export const chatOutgoingMediaTimeoutMs = 30_000;
 export const chatAttachmentUploadTimeoutMs = 60_000;
 export const chatMediaReferenceRefreshTimeoutMs = 15_000;
@@ -184,7 +187,10 @@ export interface ChatRawHttpHandlerOptions {
     readonly browserOrigin?: string;
     readonly mediaFetcher: OpenClawOutgoingMediaFetcher;
     readonly mediaReferences: InMemoryChatMediaReferences;
-    readonly refreshMediaReferences?: (signal: AbortSignal) => Promise<void>;
+    readonly refreshMediaReferences?: (
+        signal: AbortSignal,
+        attachmentId?: string
+    ) => Promise<void>;
     readonly scheduler?: ChatRawHttpScheduler;
     readonly uploadTimeoutMs?: number;
     readonly workLimits?: ChatRawHttpWorkLimits;
@@ -703,7 +709,7 @@ export function createChatRawHttpHandler(
           }>
         | undefined;
     let mediaReferenceRefreshNotBeforeMs = 0;
-    const refreshMediaReferences = async (): Promise<void> => {
+    const refreshMediaReferences = async (attachmentId: string): Promise<void> => {
         if (options.refreshMediaReferences === undefined) return;
         const activeRefresh = mediaReferenceRefresh;
         if (activeRefresh !== undefined) {
@@ -720,7 +726,7 @@ export function createChatRawHttpHandler(
             rejectDeadline = reject;
         });
         const work = Promise.resolve().then(() =>
-            options.refreshMediaReferences!(deadlineController.signal)
+            options.refreshMediaReferences!(deadlineController.signal, attachmentId)
         );
         const wait = Promise.race([work, deadline]);
         const refresh = Object.freeze({ wait, work });
@@ -842,7 +848,7 @@ export function createChatRawHttpHandler(
         let reference = options.mediaReferences.resolve(media![1]!);
         if (reference === undefined) {
             try {
-                await refreshMediaReferences();
+                await refreshMediaReferences(media![1]!);
             } catch {
                 // A refresh failure is intentionally indistinguishable from absence.
             }

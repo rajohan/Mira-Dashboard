@@ -117,7 +117,10 @@ import { createTaskService } from "../server/domains/tasks/service.ts";
 import { createDescriptorOpenClawLocalHistoryMediaFetcher } from "../server/platform/chat/descriptorOpenClawLocalHistoryMediaFetcher.ts";
 import { createElevenLabsSpeechProvider } from "../server/platform/chat/elevenLabsSpeechProvider.ts";
 import { createInMemoryChatAttachmentStore } from "../server/platform/chat/inMemoryChatAttachmentStore.ts";
-import { createInMemoryChatMediaReferences } from "../server/platform/chat/inMemoryChatMediaReferences.ts";
+import {
+    chatLocalHistoryMediaAttachmentMatchesSession,
+    createInMemoryChatMediaReferences,
+} from "../server/platform/chat/inMemoryChatMediaReferences.ts";
 import {
     type WebConfiguration,
     parseWebConfiguration,
@@ -275,14 +278,32 @@ export const dashboardChatMediaReferenceRefreshPageMaximum = 32;
  */
 export function createDashboardChatMediaReferenceRefresh(
     dependencies: DashboardChatMediaReferenceRefreshDependencies
-): (signal: AbortSignal) => Promise<void> {
-    return async (signal) => {
+): (signal: AbortSignal, attachmentId?: string) => Promise<void> {
+    return async (signal, attachmentId) => {
         const snapshot = await dependencies.gatewaySessionsService.list(
             { filter: "ALL" },
             signal
         );
+        const sessions =
+            attachmentId === undefined
+                ? snapshot.sessions
+                : snapshot.sessions.toSorted(
+                      (left, right) =>
+                          Number(
+                              chatLocalHistoryMediaAttachmentMatchesSession(
+                                  attachmentId,
+                                  right.key
+                              )
+                          ) -
+                          Number(
+                              chatLocalHistoryMediaAttachmentMatchesSession(
+                                  attachmentId,
+                                  left.key
+                              )
+                          )
+                  );
         let pagesRead = 0;
-        for (const session of snapshot.sessions) {
+        for (const session of sessions) {
             if (pagesRead >= dashboardChatMediaReferenceRefreshPageMaximum) break;
             try {
                 let cursor = "0";

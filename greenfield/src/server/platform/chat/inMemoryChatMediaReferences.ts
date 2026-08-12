@@ -73,6 +73,41 @@ function uuidV4FromHash(hash: Uint8Array): string {
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
+const localHistoryMediaSessionFingerprintBytes = 6;
+
+function localHistoryMediaSessionFingerprint(sessionKey: string): Uint8Array {
+    return lengthPrefixedHash([
+        "mira-chat-local-history-media-session-v1",
+        boundedIdentity(sessionKey, 512),
+    ]).subarray(0, localHistoryMediaSessionFingerprintBytes);
+}
+
+/**
+ * Identifies the candidate session encoded into a local-history attachment id.
+ * This is a routing hint only; the raw handler still reauthorizes the exact
+ * transcript association before any descriptor-backed file access.
+ * @param attachmentId Opaque UUID-shaped local-history attachment identifier.
+ * @param sessionKey Candidate canonical Gateway session key.
+ * @returns Whether the identifier carries the candidate session fingerprint.
+ */
+export function chatLocalHistoryMediaAttachmentMatchesSession(
+    attachmentId: string,
+    sessionKey: string
+): boolean {
+    const parsed = v.safeParse(chatAttachmentIdSchema, attachmentId, {
+        abortEarly: true,
+    });
+    if (!parsed.success) return false;
+    try {
+        const prefix = Buffer.from(
+            localHistoryMediaSessionFingerprint(sessionKey)
+        ).toString("hex");
+        return parsed.output.replaceAll("-", "").startsWith(prefix);
+    } catch {
+        return false;
+    }
+}
+
 function normalizedFileUrlPath(candidate: string): string | undefined {
     if (!candidate.toLowerCase().startsWith("file:")) return candidate;
     try {
@@ -287,15 +322,15 @@ class InMemoryChatMediaReferencesImplementation implements InMemoryChatMediaRefe
         const locatorFingerprint = Buffer.from(
             lengthPrefixedHash(["mira-chat-local-media-locator-v1", ...segments])
         ).toString("hex");
-        const attachmentId = uuidV4FromHash(
-            lengthPrefixedHash([
-                "mira-chat-local-history-media-v1",
-                sessionKey,
-                messageId,
-                sourceSlot,
-                ...segments,
-            ])
-        );
+        const identifierHash = lengthPrefixedHash([
+            "mira-chat-local-history-media-v1",
+            sessionKey,
+            messageId,
+            sourceSlot,
+            ...segments,
+        ]);
+        identifierHash.set(localHistoryMediaSessionFingerprint(sessionKey), 0);
+        const attachmentId = uuidV4FromHash(identifierHash);
         this.#register({
             attachmentId,
             messageId,

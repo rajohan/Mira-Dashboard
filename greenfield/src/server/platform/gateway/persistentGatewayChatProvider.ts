@@ -11,7 +11,10 @@ import {
     type ChatModelsListOutput,
     type ChatSessionSettingsOutput,
 } from "../../../contracts/chat.ts";
-import { chatAttachmentLimits } from "../../../contracts/chatMedia.ts";
+import {
+    chatAttachmentLimits,
+    chatTextPreviewMaximumBytes,
+} from "../../../contracts/chatMedia.ts";
 import {
     chatMessageHydrationMaximumBytes,
     chatMessageSchema,
@@ -708,10 +711,18 @@ function projectedAttachment(
     fileName: string,
     mediaType: string,
     partId: string,
-    sizeBytes?: number
+    sizeBytes?: number,
+    enforceTextPreviewMaximum = false
 ): ProjectedChatMessagePart {
     const url = `/api/chat/media/${attachmentId}`;
-    const renderPolicy = attachmentRenderPolicy(mediaType);
+    const candidateRenderPolicy = attachmentRenderPolicy(mediaType);
+    const renderPolicy =
+        enforceTextPreviewMaximum &&
+        candidateRenderPolicy === "bounded-text" &&
+        sizeBytes !== undefined &&
+        sizeBytes > chatTextPreviewMaximumBytes
+            ? "download-only"
+            : candidateRenderPolicy;
     return {
         downloadUrl: `${url}?disposition=download`,
         fileName,
@@ -827,14 +838,17 @@ function projectLocalHistoryMedia(
         const key = `local:${registered.locatorFingerprint}`;
         if (seen.has(key)) continue;
         seen.add(key);
-        const mediaType = localHistoryMediaType(fact.contentType, registered.fileName);
+        // Local bytes are classified again by the descriptor fetcher. Only a
+        // filename-derived type is reproducible without trusting provider metadata.
+        const mediaType = localHistoryMediaType(undefined, registered.fileName);
         attachments.push(
             projectedAttachment(
                 registered.attachmentId,
                 registered.fileName,
                 mediaType,
                 `history-media:${attachments.length + 1}`,
-                localHistoryMediaSize(fact.sizeBytes)
+                localHistoryMediaSize(fact.sizeBytes),
+                true
             )
         );
     }

@@ -20,6 +20,9 @@ export const chatAttachmentLimits = Object.freeze({
     ticketTtlMs: 5 * 60 * 1000,
 });
 
+/** Maximum body exposed by a browser-renderable local or managed text preview. */
+export const chatTextPreviewMaximumBytes = 1024 * 1024;
+
 /** Prefixes intentionally exposed by OpenClaw's reviewed attachment picker. */
 export const chatAttachmentAllowedMimePrefixes = Object.freeze(["text/"] as const);
 

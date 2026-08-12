@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { chatTextPreviewMaximumBytes } from "../../../contracts/chatMedia.ts";
 import {
     chatHistoryResponseMaximumBytes,
     type ChatMessage,
@@ -1099,6 +1100,75 @@ describe("persistent Gateway chat provider", () => {
                     reference.source.segments.join("/") === "retired/ignored.png"
             )
         ).toBeFalse();
+    });
+
+    test("keeps irreproducible and oversized local text previews download-only", async () => {
+        const harness = createHarness({
+            "chat.history": {
+                messages: [
+                    {
+                        __openclaw: {
+                            media: [
+                                {
+                                    contentType: "text/plain",
+                                    path: "reports/extensionless",
+                                },
+                                {
+                                    contentType: "text/plain",
+                                    path: "reports/oversized.txt",
+                                    sizeBytes: chatTextPreviewMaximumBytes + 1,
+                                },
+                            ],
+                        },
+                        content: "Local text media",
+                        id: "message-local-text-policy",
+                        role: "assistant",
+                    },
+                ],
+                offset: 0,
+                sessionKey,
+            },
+        });
+
+        const history = await harness.provider.history({
+            limit: 1,
+            maxChars: 64 * 1024,
+            offset: 0,
+            sessionKey,
+        });
+        const content = history.messages[0]!.content;
+        expect(content.kind).toBe("complete");
+        if (content.kind !== "complete") throw new Error("Expected complete history");
+        expect(
+            content.parts.flatMap((part) =>
+                part.kind === "attachment"
+                    ? [
+                          {
+                              fileName: part.fileName,
+                              mediaType: part.mediaType,
+                              renderPolicy: part.renderPolicy,
+                              sizeBytes: part.sizeBytes,
+                              usesDownloadUrl: part.url.endsWith("?disposition=download"),
+                          },
+                      ]
+                    : []
+            )
+        ).toEqual([
+            {
+                fileName: "extensionless",
+                mediaType: "application/octet-stream",
+                renderPolicy: "download-only",
+                sizeBytes: undefined,
+                usesDownloadUrl: true,
+            },
+            {
+                fileName: "oversized.txt",
+                mediaType: "text/plain",
+                renderPolicy: "download-only",
+                sizeBytes: chatTextPreviewMaximumBytes + 1,
+                usesDownloadUrl: true,
+            },
+        ]);
     });
 
     test("strips but never registers MEDIA directives from non-assistant roles", async () => {

@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
-import { createInMemoryChatMediaReferences } from "./inMemoryChatMediaReferences.ts";
+import {
+    chatLocalHistoryMediaAttachmentMatchesSession,
+    createInMemoryChatMediaReferences,
+} from "./inMemoryChatMediaReferences.ts";
 
 const attachmentId = "00000000-0000-4000-8000-000000000001";
 const reference = {
@@ -58,6 +61,18 @@ describe("in-memory chat media references", () => {
             /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u
         );
         expect(relative?.fileName).toBe("report final.png");
+        expect(
+            chatLocalHistoryMediaAttachmentMatchesSession(
+                relative!.attachmentId,
+                "agent:main:main"
+            )
+        ).toBeTrue();
+        expect(
+            chatLocalHistoryMediaAttachmentMatchesSession(
+                relative!.attachmentId,
+                "agent:other:main"
+            )
+        ).toBeFalse();
         expect(JSON.stringify(relative)).not.toContain("/srv/openclaw");
         expect(references.resolve(relative!.attachmentId)).toEqual({
             attachmentId: relative!.attachmentId,
