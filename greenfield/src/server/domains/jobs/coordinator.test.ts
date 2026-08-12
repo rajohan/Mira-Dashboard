@@ -508,6 +508,26 @@ describe("durable job worker coordinator", () => {
         expect(await coordinator.completion).toBeUndefined();
     });
 
+    test("advertises only action definitions backed by an executable resolver", async () => {
+        const workerId = Bun.randomUUIDv7();
+        const fixture = repositoryFixture();
+        const options = coordinatorOptions(fixture.repository, workerId);
+        const coordinator = createJobWorkerCoordinator({
+            ...options,
+            actionDefinitions: Object.freeze([
+                ...(options.actionDefinitions ?? []),
+                openClawGatewayRestartJobActionDefinition,
+            ]),
+        });
+
+        await coordinator.initialize();
+        await coordinator.dispose();
+
+        expect(fixture.registrations[0]?.worker.actionKeysJson).toBe(
+            '["system.worker-smoke"]'
+        );
+    });
+
     test("claims the conditionally registered Gateway restart without scheduling it", async () => {
         const workerId = Bun.randomUUIDv7();
         const definition = openClawGatewayRestartJobActionDefinition;

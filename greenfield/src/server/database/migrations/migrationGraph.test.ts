@@ -184,6 +184,9 @@ describe("database migration graph", () => {
         expect(foundationSql).toContain(
             'CONSTRAINT "monitor_runs_submission_sha256_check" CHECK(length("submission_sha256") = 64 AND instr("submission_sha256", char(0)) = 0'
         );
+        expect(foundationSql).toContain(
+            'CONSTRAINT "worker_instances_action_keys_json_check" CHECK(length(CAST("action_keys_json" AS BLOB)) <= 4096 AND CASE WHEN json_valid("action_keys_json") THEN json_type("action_keys_json") = \'array\' ELSE 0 END AND CASE WHEN json_valid("action_keys_json") THEN json_array_length("action_keys_json") <= 32 ELSE 0 END)'
+        );
         expect(foundationSql).not.toContain("legacy");
         expect(foundationSql).not.toContain("SET fingerprint = fingerprint");
         expect(foundationSql).not.toContain("SET submission_sha256 = submission_sha256");

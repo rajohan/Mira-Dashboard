@@ -341,7 +341,7 @@ export function createOpenClawGatewayRestartJobExecutor(
  */
 export function createHostOperationJobExecutor(
     hostOperations: FixedHostOperationsExecutionPort,
-    operationId: "system-restart" | "system-update"
+    operationId: HostOperationId
 ): JobActionExecutor {
     return (context, payload) =>
         Effect.tryPromise({
@@ -532,6 +532,14 @@ export function createJobWorkerActionResolver(
                       workspaceFileReplaceJobActionDefinition,
                   ]),
         ]);
+    const registeredActionKeys = new Set(definitions.map(({ actionKey }) => actionKey));
+    const gatedExecutor = (
+        actionKey: string,
+        execute: JobActionExecutor | undefined
+    ): readonly JobActionExecutorEntry[] =>
+        execute === undefined || !registeredActionKeys.has(actionKey)
+            ? []
+            : [Object.freeze({ actionKey, execute })];
     const executors = [
         Object.freeze({
             actionKey: "cache.refresh.system-host",
@@ -557,58 +565,42 @@ export function createJobWorkerActionResolver(
                       ),
                   }),
               ]),
-        ...(dependencies.openClawServiceActions === undefined ||
-        !definitions.some(
-            ({ actionKey }) => actionKey === openClawSessionsCleanupJobActionKey
-        )
-            ? []
-            : [
-                  Object.freeze({
-                      actionKey: openClawSessionsCleanupJobActionKey,
-                      execute: createOpenClawServiceActionJobExecutor(
-                          dependencies.openClawServiceActions,
-                          "openclaw-cleanup"
-                      ),
-                  }),
-              ]),
-        ...(dependencies.openClawServiceActions === undefined ||
-        !definitions.some(
-            ({ actionKey }) => actionKey === openClawInstallationUpdateJobActionKey
-        )
-            ? []
-            : [
-                  Object.freeze({
-                      actionKey: openClawInstallationUpdateJobActionKey,
-                      execute: createOpenClawServiceActionJobExecutor(
-                          dependencies.openClawServiceActions,
-                          "openclaw-update"
-                      ),
-                  }),
-              ]),
-        ...(dependencies.hostOperations === undefined ||
-        !definitions.some(({ actionKey }) => actionKey === hostSystemRestartJobActionKey)
-            ? []
-            : [
-                  Object.freeze({
-                      actionKey: hostSystemRestartJobActionKey,
-                      execute: createHostOperationJobExecutor(
-                          dependencies.hostOperations,
-                          "system-restart"
-                      ),
-                  }),
-              ]),
-        ...(dependencies.hostOperations === undefined ||
-        !definitions.some(({ actionKey }) => actionKey === hostSystemUpdateJobActionKey)
-            ? []
-            : [
-                  Object.freeze({
-                      actionKey: hostSystemUpdateJobActionKey,
-                      execute: createHostOperationJobExecutor(
-                          dependencies.hostOperations,
-                          "system-update"
-                      ),
-                  }),
-              ]),
+        ...gatedExecutor(
+            openClawSessionsCleanupJobActionKey,
+            dependencies.openClawServiceActions === undefined
+                ? undefined
+                : createOpenClawServiceActionJobExecutor(
+                      dependencies.openClawServiceActions,
+                      "openclaw-cleanup"
+                  )
+        ),
+        ...gatedExecutor(
+            openClawInstallationUpdateJobActionKey,
+            dependencies.openClawServiceActions === undefined
+                ? undefined
+                : createOpenClawServiceActionJobExecutor(
+                      dependencies.openClawServiceActions,
+                      "openclaw-update"
+                  )
+        ),
+        ...gatedExecutor(
+            hostSystemRestartJobActionKey,
+            dependencies.hostOperations === undefined
+                ? undefined
+                : createHostOperationJobExecutor(
+                      dependencies.hostOperations,
+                      "system-restart"
+                  )
+        ),
+        ...gatedExecutor(
+            hostSystemUpdateJobActionKey,
+            dependencies.hostOperations === undefined
+                ? undefined
+                : createHostOperationJobExecutor(
+                      dependencies.hostOperations,
+                      "system-update"
+                  )
+        ),
         Object.freeze({
             actionKey: "system.worker-smoke",
             execute: workerSmokeExecutor,

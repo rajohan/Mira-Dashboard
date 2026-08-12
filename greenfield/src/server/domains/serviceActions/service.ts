@@ -279,7 +279,9 @@ export function createServiceActionsService(
                 throw authorizationFailure;
             }
             let mapped: unknown;
-            if (error instanceof ServiceActionQueueError) {
+            if (error instanceof ServiceActionsServiceError) {
+                mapped = error;
+            } else if (error instanceof ServiceActionQueueError) {
                 mapped = queueFailure(error);
             } else if (error instanceof v.ValiError) {
                 mapped = new ServiceActionsServiceError("unknown-outcome", {

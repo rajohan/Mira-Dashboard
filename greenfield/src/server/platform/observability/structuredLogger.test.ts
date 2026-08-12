@@ -1,5 +1,6 @@
 import { expect, spyOn, test } from "bun:test";
 
+import { serviceActionIds } from "../../../contracts/serviceActions.ts";
 import { createStructuredLogger, type StructuredLogSink } from "./structuredLogger.ts";
 
 const identity = Object.freeze({
@@ -372,6 +373,37 @@ test("records only fixed Service Actions audit settlement fields", () => {
     });
     expect(JSON.parse(lines[0] ?? "null")).not.toHaveProperty("fields.kind");
     expect(lines[0]).not.toContain("private provider detail");
+
+    for (const actionId of serviceActionIds) {
+        logger.error({
+            component: "service-actions-audit",
+            event: "service_actions.audit_settlement.failed",
+            fields: {
+                actionId,
+                kind: "service-actions-audit-settlement",
+                settlement: "failed",
+            },
+        });
+    }
+    logger.error({
+        component: "service-actions-audit",
+        event: "service_actions.audit_settlement.failed",
+        fields: {
+            actionId: "unreviewed-action" as never,
+            kind: "service-actions-audit-settlement",
+            settlement: "failed",
+        },
+    });
+
+    expect(
+        lines
+            .slice(1, 1 + serviceActionIds.length)
+            .map(
+                (line) =>
+                    (JSON.parse(line) as { fields: { actionId: string } }).fields.actionId
+            )
+    ).toEqual(serviceActionIds);
+    expect(JSON.parse(lines.at(-1) ?? "null")).not.toHaveProperty("fields");
 });
 
 test("normalizes unknown events and drops extra fields instead of relying on secret names", () => {

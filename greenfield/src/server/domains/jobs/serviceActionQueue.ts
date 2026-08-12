@@ -107,7 +107,10 @@ function prepareDefinitions(
                 );
                 if (
                     definition.actionKey !== serviceActionJobActionKeys[actionId] ||
-                    definition.manualExposure !== "none"
+                    definition.manualExposure !== "none" ||
+                    definition.attemptLimit !== 1 ||
+                    definition.cancellationPolicy !== "never" ||
+                    definition.retrySafe
                 ) {
                     throw new TypeError("Service Action definition is invalid");
                 }

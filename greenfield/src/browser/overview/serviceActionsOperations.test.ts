@@ -8,6 +8,7 @@ import {
     authenticatedServiceActionIdentity,
     clearServiceActionRecovery,
     readOrCreateServiceActionIdempotencyKey,
+    serviceActionPresentations,
     serviceActionRecoveryExists,
     serviceActionRequestInput,
 } from "./serviceActionsOperations.ts";
@@ -102,6 +103,22 @@ describe("service action browser operations", () => {
             actionId: "system-update",
             confirmation: "update-system",
             idempotencyKey,
+        });
+    });
+
+    test("keeps explicit retry labels for every fixed action", () => {
+        expect(
+            Object.fromEntries(
+                Object.entries(serviceActionPresentations).map(([id, presentation]) => [
+                    id,
+                    presentation.retryLabel,
+                ])
+            )
+        ).toEqual({
+            "openclaw-cleanup": "Retry OpenClaw cleanup request",
+            "openclaw-update": "Retry OpenClaw update request",
+            "system-restart": "Retry system restart request",
+            "system-update": "Retry system update request",
         });
     });
 });

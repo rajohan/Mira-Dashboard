@@ -272,7 +272,7 @@ export interface ScheduleUpdateChanges {
     readonly schedule?: ScheduleConfiguration;
 }
 
-export interface ScheduleQueuedCancellation {
+export interface ScheduleQueuedTermination {
     readonly at: Date;
     readonly terminalCode: string;
     readonly terminalMessage: string;
@@ -286,7 +286,7 @@ export interface UpdateScheduleRepositoryInput extends JobMutationSideEffects {
     readonly id: string;
     readonly insertDisableIntent?: JobDisableIntentInsert;
     readonly patch: ScheduleUpdateChanges;
-    readonly queuedCancellation?: ScheduleQueuedCancellation;
+    readonly queuedCancellation?: ScheduleQueuedTermination;
     readonly queuedCancellationSideEffects?: (
         run: JobRunRecord
     ) => JobMutationSideEffects;
@@ -540,7 +540,7 @@ export interface JobRepository extends JobRepositoryReader {
     claimNextRun(input: ClaimNextRunInput): Promise<JobClaimResult>;
     enqueueManualRun(
         input: EnqueueManualRunInput,
-        beforeInsert?: () => void
+        authorizeAdmittedEnqueue?: () => void
     ): Promise<EnqueueManualRunResult>;
     enqueueNextDueSchedule(
         input: DueScheduleEnqueueInput
@@ -1486,10 +1486,7 @@ class DrizzleJobWriter extends DrizzleJobReader {
         return records;
     }
 
-    public enqueueManualRun(
-        input: EnqueueManualRunInput,
-        beforeInsert?: () => void
-    ): EnqueueManualRunResult {
+    public enqueueManualRun(input: EnqueueManualRunInput): EnqueueManualRunResult {
         const run = v.parse(jobRunInsertSchema, input.run);
         if (input.queuedEvent.jobRunId !== run.id) {
             throw new Error("Queued event does not belong to the inserted manual run");
@@ -1523,7 +1520,6 @@ class DrizzleJobWriter extends DrizzleJobReader {
                 .get();
             if (active !== undefined) return { kind: "active", run: parseRun(active) };
         }
-        beforeInsert?.();
         const inserted = this.#transaction.insert(jobRuns).values(run).returning().get();
         const record = parseRun(requiredRow(inserted, "manual run insert"));
         this.#insertSuppliedEvent(input.queuedEvent);
@@ -2545,7 +2541,7 @@ class DrizzleJobWriter extends DrizzleJobReader {
     #cancelQueuedRun(
         run: JobRunRecord,
         actor: JobActor,
-        input: ScheduleQueuedCancellation
+        input: ScheduleQueuedTermination
     ): JobRunRecord {
         const at = maximumDate(run.updatedAt, input.at);
         const row = this.#transaction
@@ -2587,7 +2583,7 @@ class DrizzleJobWriter extends DrizzleJobReader {
         return requiredRow(this.findRun(run.id), "cancelled run refresh");
     }
 
-    #failQueuedRun(run: JobRunRecord, input: ScheduleQueuedCancellation): JobRunRecord {
+    #failQueuedRun(run: JobRunRecord, input: ScheduleQueuedTermination): JobRunRecord {
         const at = maximumDate(run.updatedAt, input.at);
         const row = this.#transaction
             .update(jobRuns)
@@ -2608,7 +2604,7 @@ class DrizzleJobWriter extends DrizzleJobReader {
             )
             .returning()
             .get();
-        parseRun(requiredRow(row, "queued run failure"));
+        requiredRow(row, "queued run failure");
         this.#appendEvent(run.id, {
             attempt: run.attemptCount,
             kind: "failed",
@@ -2836,16 +2832,20 @@ export function createJobRepository(
         runTransaction((transaction) => callback(new DrizzleJobReader(transaction)), {
             behavior: "deferred",
         });
-    const write = <T>(callback: (writer: DrizzleJobWriter) => T): Promise<T> =>
-        writeAdmission.run((markTransactionStarted) =>
-            runTransaction(
+    const write = <T>(
+        callback: (writer: DrizzleJobWriter) => T,
+        authorizeAdmittedWrite?: () => void
+    ): Promise<T> =>
+        writeAdmission.run((markTransactionStarted) => {
+            authorizeAdmittedWrite?.();
+            return runTransaction(
                 (transaction) => {
                     markTransactionStarted();
                     return callback(new DrizzleJobWriter(transaction));
                 },
                 { behavior: "immediate" }
-            )
-        );
+            );
+        });
 
     return Object.freeze({
         appendClaimEvent: (input: AppendClaimEventInput) =>
@@ -2856,8 +2856,10 @@ export function createJobRepository(
             write((writer) => writer.cancelRun(input)),
         claimNextRun: (input: ClaimNextRunInput) =>
             write((writer) => writer.claimNextRun(input)),
-        enqueueManualRun: (input: EnqueueManualRunInput, beforeInsert?: () => void) =>
-            write((writer) => writer.enqueueManualRun(input, beforeInsert)),
+        enqueueManualRun: (
+            input: EnqueueManualRunInput,
+            authorizeAdmittedEnqueue?: () => void
+        ) => write((writer) => writer.enqueueManualRun(input), authorizeAdmittedEnqueue),
         enqueueNextDueSchedule: (input: DueScheduleEnqueueInput) =>
             write((writer) => writer.enqueueNextDueSchedule(input)),
         expireDisableIntents: (input: ExpireDisableIntentsInput) =>

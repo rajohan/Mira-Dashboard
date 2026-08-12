@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import * as v from "valibot";
 
+import { workerActionKeysMaximumBytes } from "../schema/jobChecks.ts";
 import { incidentObservationInsertSchema } from "./incidentObservations.ts";
 import {
     incidentInsertSchema,
@@ -723,20 +724,31 @@ describe("Drizzle-generated Valibot row schemas", () => {
                 stoppedAt: null,
             })
         ).toThrow();
-        expect(() =>
-            v.parse(workerInstanceInsertSchema, {
-                actionKeysJson: '["host.system.update","host.system.restart"]',
-                capacity: 2,
-                drainingAt: null,
-                heartbeatAt: jobUpdatedAt,
-                id: jobWorkerId,
-                pid: 1234,
-                releaseId: "b".repeat(40),
-                startedAt: jobCreatedAt,
-                state: "online",
-                stoppedAt: null,
-            })
-        ).toThrow("Stored worker action keys are invalid");
+        const validWorkerInsert = {
+            actionKeysJson: '["host.system.restart","host.system.update"]',
+            capacity: 2,
+            drainingAt: null,
+            heartbeatAt: jobUpdatedAt,
+            id: jobWorkerId,
+            pid: 1234,
+            releaseId: "b".repeat(40),
+            startedAt: jobCreatedAt,
+            state: "online" as const,
+            stoppedAt: null,
+        };
+        expect(v.parse(workerInstanceInsertSchema, validWorkerInsert)).toBeDefined();
+        for (const actionKeysJson of [
+            '["host.system.update","host.system.restart"]',
+            ' ["host.system.restart","host.system.update"]',
+            `${" ".repeat(workerActionKeysMaximumBytes)}[]`,
+        ]) {
+            expect(() =>
+                v.parse(workerInstanceInsertSchema, {
+                    ...validWorkerInsert,
+                    actionKeysJson,
+                })
+            ).toThrow("Stored worker action keys are invalid");
+        }
         expect(() =>
             v.parse(resourceLeaseSelectSchema, {
                 acquiredAt: jobCreatedAt,

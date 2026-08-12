@@ -8,20 +8,26 @@ import {
     createRouter,
     RouterProvider,
 } from "@tanstack/react-router";
+import { act } from "react";
 
 import type { AuthStatus } from "../../contracts/auth.ts";
+import type { RealtimeStreamOutput } from "../../contracts/events.ts";
 import type { JobRunSummary } from "../../contracts/jobModel.ts";
+import { jobRealtimeTopics } from "../../contracts/jobRealtime.ts";
 import type {
     GetServiceActionsStatusResult,
     RequestServiceActionResult,
 } from "../../contracts/serviceActions.ts";
 import { createDashboardQueryClient } from "../api/queryClient.ts";
+import { DashboardRealtimeProvider } from "../api/realtimeContext.tsx";
 import {
     createDashboardTrpcClient,
     type DashboardTrpcTransport,
 } from "../api/trpcClient.ts";
 import { DashboardTrpcProvider } from "../api/trpcContext.tsx";
 import { authStatusQueryKey } from "../auth/authQueries.ts";
+import { jobRealtimeRefreshDelayMs } from "../jobs/useJobRealtimeInvalidation.ts";
+import { ControlledDashboardRealtimeClient } from "../test/realtime.ts";
 import { OverviewServiceActionsSection } from "./OverviewServiceActionsSection.tsx";
 
 const { render, screen, waitFor } = await import("@testing-library/react");
@@ -196,6 +202,7 @@ class ServiceActionsTransport implements DashboardTrpcTransport {
 
 interface SectionHarness {
     readonly queryClient: ReturnType<typeof createDashboardQueryClient>;
+    readonly realtimeClient: ControlledDashboardRealtimeClient;
     readonly transport: ServiceActionsTransport;
     readonly view: ReturnType<typeof render>;
 }
@@ -225,6 +232,7 @@ function renderSection(
     queryClient.setQueryData(authStatusQueryKey, authenticatedStatus);
     const transport = new ServiceActionsTransport(queryOutputs, mutationOutputs);
     const trpcClient = createDashboardTrpcClient(transport);
+    const realtimeClient = new ControlledDashboardRealtimeClient();
     const rootRoute = createRootRoute();
     const overviewRoute = createRoute({
         component: OverviewServiceActionsSection,
@@ -242,14 +250,41 @@ function renderSection(
     });
     const view = render(
         <QueryClientProvider client={queryClient}>
-            <DashboardTrpcProvider client={trpcClient}>
-                <RouterProvider router={router} />
-            </DashboardTrpcProvider>
+            <DashboardRealtimeProvider client={realtimeClient}>
+                <DashboardTrpcProvider client={trpcClient}>
+                    <RouterProvider router={router} />
+                </DashboardTrpcProvider>
+            </DashboardRealtimeProvider>
         </QueryClientProvider>
     );
-    const harness = { queryClient, transport, view };
+    const harness = { queryClient, realtimeClient, transport, view };
     harnesses.push(harness);
     return harness;
+}
+
+async function emitJobRunChange(
+    realtimeClient: ControlledDashboardRealtimeClient
+): Promise<void> {
+    const output: RealtimeStreamOutput = {
+        data: {
+            event: {
+                entityId: runningRun.id,
+                entityType: "job-run",
+                occurredAtMs: timestampMs + 200,
+                operation: "updated",
+                payload: { id: runningRun.id },
+                topic: jobRealtimeTopics.runs,
+            },
+            kind: "change",
+        },
+        id: "42",
+    };
+    await act(async () => {
+        realtimeClient.emit(output);
+        await new Promise((resolve) =>
+            setTimeout(resolve, jobRealtimeRefreshDelayMs + 20)
+        );
+    });
 }
 
 function operationOutcomeUnknownError(): Error {
@@ -294,6 +329,29 @@ describe("OverviewServiceActionsSection", () => {
         expect(screen.getByRole("link", { name: "View Dashboard jobs" })).toHaveAttribute(
             "href",
             "/jobs"
+        );
+    });
+
+    test("clears an active action after a same-tab job-run event", async () => {
+        const harness = renderSection([actionStatus, allAvailableStatus]);
+
+        expect(await screen.findByText("Active job")).toBeTruthy();
+        expect(
+            screen.getByRole("button", { name: "Queue system restart" })
+        ).toBeDisabled();
+        expect(harness.realtimeClient.input?.topics).toEqual([jobRealtimeTopics.runs]);
+
+        const callCountBeforeRealtimeChange = harness.transport.queryCalls.length;
+        await emitJobRunChange(harness.realtimeClient);
+
+        await waitFor(() =>
+            expect(
+                screen.getByRole("button", { name: "Queue system restart" })
+            ).toBeEnabled()
+        );
+        expect(screen.queryByText("Active job")).toBeNull();
+        expect(harness.transport.queryCalls.length).toBeGreaterThan(
+            callCountBeforeRealtimeChange
         );
     });
 
@@ -388,11 +446,11 @@ describe("OverviewServiceActionsSection", () => {
         );
         expect(
             await screen.findByRole("button", {
-                name: "Retry openclaw cleanup request",
+                name: "Retry OpenClaw cleanup request",
             })
         ).toBeTruthy();
         await user.click(
-            screen.getByRole("button", { name: "Retry openclaw cleanup request" })
+            screen.getByRole("button", { name: "Retry OpenClaw cleanup request" })
         );
         expect(
             screen.getByText(/retry uses the retained request identity/iu)
@@ -450,7 +508,7 @@ describe("OverviewServiceActionsSection", () => {
         await screen.findByRole("heading", { name: "Service actions" });
         await user.click(
             screen.getByRole("button", {
-                name: "Retry openclaw cleanup request",
+                name: "Retry OpenClaw cleanup request",
             })
         );
         await user.click(screen.getByRole("button", { name: "Retry request" }));

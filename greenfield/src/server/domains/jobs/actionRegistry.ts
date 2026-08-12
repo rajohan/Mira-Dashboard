@@ -100,7 +100,7 @@ export const openClawSessionsCleanupJobResultSchema = v.strictObject({
     entriesPruned: openClawOperationCountSchema,
     missingEntriesRemoved: openClawOperationCountSchema,
     modelRunsPruned: openClawOperationCountSchema,
-    status: v.literal("completed"),
+    status: v.literal("completed", "OpenClaw cleanup result is invalid"),
     storesProcessed: openClawOperationCountSchema,
 });
 
@@ -109,7 +109,7 @@ export const openClawInstallationUpdateJobResultSchema = v.strictObject({
     afterVersion: v.optional(openClawOperationVersionSchema),
     beforeVersion: v.optional(openClawOperationVersionSchema),
     completedAtMs: jobTimestampSchema,
-    status: v.picklist(["accepted", "completed"]),
+    status: v.picklist(["accepted", "completed"], "OpenClaw update result is invalid"),
 });
 
 export type JobCacheAttemptCommit =

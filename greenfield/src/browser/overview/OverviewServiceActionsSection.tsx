@@ -1,6 +1,12 @@
-import { queryOptions, useMutation, useQuery } from "@tanstack/react-query";
+import {
+    type QueryClient,
+    queryOptions,
+    useMutation,
+    useQuery,
+} from "@tanstack/react-query";
 import { useState } from "react";
 
+import { jobRealtimeTopics } from "../../contracts/jobRealtime.ts";
 import type { ServiceActionId } from "../../contracts/serviceActions.ts";
 import type { DashboardProcedureOutput, DashboardTrpcClient } from "../api/trpcClient.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
@@ -10,7 +16,12 @@ import {
     isDashboardOperationOutcomeUnknown,
     retryDashboardUnavailableRead,
 } from "../api/trpcError.ts";
+import { useRealtimeQueryInvalidation } from "../api/useRealtimeQueryInvalidation.ts";
 import { useAuthenticatedMutationBoundary } from "../auth/useAuthenticatedMutationBoundary.ts";
+import {
+    jobRealtimeFallbackRefreshIntervalMs,
+    jobRealtimeRefreshDelayMs,
+} from "../jobs/useJobRealtimeInvalidation.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Card } from "../ui/Card.tsx";
 import { PageState } from "../ui/PageState.tsx";
@@ -37,6 +48,24 @@ function serviceActionsStatusQueryOptions(client: DashboardTrpcClient) {
         retry: retryDashboardUnavailableRead,
         retryDelay: dashboardUnavailableReadRetryDelay,
         staleTime: 0,
+    });
+}
+
+async function refreshServiceActionsStatus(queryClient: QueryClient): Promise<void> {
+    await queryClient.invalidateQueries({
+        exact: true,
+        queryKey: serviceActionsStatusQueryKey,
+        refetchType: "active",
+    });
+}
+
+/** Refreshes active fixed-action projections after durable job-run changes. */
+function useServiceActionsRealtimeInvalidation(): void {
+    useRealtimeQueryInvalidation({
+        fallbackRefreshIntervalMs: jobRealtimeFallbackRefreshIntervalMs,
+        refreshDelayMs: jobRealtimeRefreshDelayMs,
+        refreshQueries: refreshServiceActionsStatus,
+        topic: jobRealtimeTopics.runs,
     });
 }
 
@@ -125,6 +154,7 @@ function useServiceActionRequest() {
 
 /** @returns Fixed service-action status, requests, and partial-read handling. */
 export function OverviewServiceActionsSection() {
+    useServiceActionsRealtimeInvalidation();
     const client = useDashboardTrpcClient();
     const query = useQuery(serviceActionsStatusQueryOptions(client));
     const request = useServiceActionRequest();

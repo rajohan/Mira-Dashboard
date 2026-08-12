@@ -6,7 +6,13 @@ import {
     timestampMillisecondsCheck,
     uuidV7TextCheck,
 } from "./checks.ts";
-import { boundedJsonArrayCheck, workerActionKeysMaximumBytes } from "./jobChecks.ts";
+import {
+    boundedJsonArrayCheck,
+    workerActionKeyMaximum,
+    workerActionKeysMaximumBytes,
+} from "./jobChecks.ts";
+
+const workerActionKeyMaximumSql = sql.raw(String(workerActionKeyMaximum));
 
 /** Durable worker registration and heartbeat state shared across rolling releases. */
 export const workerInstances = sqliteTable(
@@ -26,7 +32,7 @@ export const workerInstances = sqliteTable(
     (table) => [
         check(
             "worker_instances_action_keys_json_check",
-            boundedJsonArrayCheck(table.actionKeysJson, workerActionKeysMaximumBytes)
+            sql`${boundedJsonArrayCheck(table.actionKeysJson, workerActionKeysMaximumBytes)} AND CASE WHEN json_valid(${table.actionKeysJson}) THEN json_array_length(${table.actionKeysJson}) <= ${workerActionKeyMaximumSql} ELSE 0 END`
         ),
         check("worker_instances_capacity_check", sql`${table.capacity} BETWEEN 1 AND 16`),
         check("worker_instances_id_check", uuidV7TextCheck(table.id)),

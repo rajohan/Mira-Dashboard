@@ -18,6 +18,7 @@ export interface ServiceActionPresentation {
     readonly confirmationLabel: string;
     readonly confirmationTitle: string;
     readonly description: string;
+    readonly retryLabel: string;
     readonly warning: string;
 }
 
@@ -29,6 +30,7 @@ export const serviceActionPresentations = Object.freeze({
         confirmationTitle: "Queue OpenClaw cleanup?",
         description:
             "Runs source-owned OpenClaw session and artifact maintenance without generic filesystem or Docker cleanup.",
+        retryLabel: "Retry OpenClaw cleanup request",
         warning:
             "This queues OpenClaw's own bounded session and artifact maintenance. Review Dashboard jobs for the durable result.",
     },
@@ -39,6 +41,7 @@ export const serviceActionPresentations = Object.freeze({
         confirmationTitle: "Queue OpenClaw update?",
         description:
             "Requests the source-owned OpenClaw update workflow through a fixed worker action.",
+        retryLabel: "Retry OpenClaw update request",
         warning:
             "OpenClaw updates can take time and may restart the Gateway. The Dashboard only confirms that the durable request was queued.",
     },
@@ -49,6 +52,7 @@ export const serviceActionPresentations = Object.freeze({
         confirmationTitle: "Queue a system restart?",
         description:
             "Requests a fixed host restart through the separately provisioned worker boundary.",
+        retryLabel: "Retry system restart request",
         warning:
             "A system restart request interrupts Dashboard, OpenClaw, and other host services. Success here means the restart request was accepted for durable processing, not that the host restarted.",
     },
@@ -59,6 +63,7 @@ export const serviceActionPresentations = Object.freeze({
         confirmationTitle: "Queue a system update?",
         description:
             "Runs the fixed host package-update workflow through the separately provisioned worker boundary.",
+        retryLabel: "Retry system update request",
         warning:
             "System updates can take a long time and may affect running services. Review Dashboard jobs for the durable result.",
     },

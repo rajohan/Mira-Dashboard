@@ -154,7 +154,15 @@ describe("persistent Gateway OpenClaw Service Actions provider", () => {
             message: "OpenClaw Service Action failed",
             reason: "unknown-outcome",
         });
-        expect(JSON.stringify(unknownFailure)).not.toContain("systemctl");
+        const renderedUnknownFailure =
+            unknownFailure instanceof Error
+                ? [
+                      unknownFailure.name,
+                      unknownFailure.message,
+                      unknownFailure.stack ?? "",
+                  ].join("\n")
+                : String(unknownFailure);
+        expect(renderedUnknownFailure).not.toContain("systemctl");
         expect(attempts).toBe(2);
     });
 

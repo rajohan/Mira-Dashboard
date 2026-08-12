@@ -106,9 +106,7 @@ function ServiceActionRow({
                     onClick={() => onSelect(action.id)}
                     variant={action.id === "system-restart" ? "danger" : "secondary"}
                 >
-                    {recoveryPending
-                        ? `Retry ${presentation.actionLabel.toLowerCase()} request`
-                        : presentation.buttonLabel}
+                    {recoveryPending ? presentation.retryLabel : presentation.buttonLabel}
                 </Button>
             </div>
             <dl className="mt-4 grid gap-3 sm:grid-cols-2">

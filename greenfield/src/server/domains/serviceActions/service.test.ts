@@ -346,6 +346,30 @@ describe("service actions service", () => {
         expect(JSON.stringify(failure)).not.toContain("systemctl");
     });
 
+    test("preserves a classified service failure raised during dispatch preflight", async () => {
+        const classifiedFailure = new ServiceActionsServiceError("unknown-outcome");
+        const state = fixture({
+            queue: {
+                enqueue: async (request) => {
+                    await request.authorizeDispatch();
+                    throw new Error("authorizeDispatch should have rejected");
+                },
+            },
+            statuses: {
+                read: () => Promise.reject(classifiedFailure),
+            },
+        });
+
+        const failure = await captureFailure(() =>
+            state.service.request(input, state.context)
+        );
+        expect(failure).toBe(classifiedFailure);
+        expect(state.auditEvents.map(({ settlement }) => settlement)).toEqual([
+            "attempted",
+            "partial",
+        ]);
+    });
+
     test("does not replace a confirmed queued result when settlement audit fails", async () => {
         const state = fixture({ auditFailure: "succeeded" });
         expect(await state.service.request(input, state.context)).toMatchObject({

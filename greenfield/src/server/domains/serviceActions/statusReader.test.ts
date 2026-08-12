@@ -118,13 +118,19 @@ describe("Service Action status reader", () => {
     test("rejects an already-aborted read before persistence", async () => {
         const controller = new AbortController();
         controller.abort(new Error("request closed"));
-        let called = false;
+        const repositoryReads = {
+            actionSnapshots: 0,
+            workerAvailability: 0,
+        };
         const reader = createSqliteServiceActionStatusReader({
             expectedReleaseId,
             repository: {
-                readActionPayloadRunSnapshots: () => [],
+                readActionPayloadRunSnapshots: () => {
+                    repositoryReads.actionSnapshots += 1;
+                    return [];
+                },
                 readWorkerActionAvailability: () => {
-                    called = true;
+                    repositoryReads.workerAvailability += 1;
                     return [];
                 },
             },
@@ -138,6 +144,9 @@ describe("Service Action status reader", () => {
         }
         expect(failure).toBeInstanceOf(Error);
         expect((failure as Error).message).toBe("request closed");
-        expect(called).toBeFalse();
+        expect(repositoryReads).toEqual({
+            actionSnapshots: 0,
+            workerAvailability: 0,
+        });
     });
 });

@@ -8427,7 +8427,7 @@
       "table": "users"
     },
     {
-      "value": "length(CAST(\"action_keys_json\" AS BLOB)) <= 4096 AND CASE WHEN json_valid(\"action_keys_json\") THEN json_type(\"action_keys_json\") = 'array' ELSE 0 END",
+      "value": "length(CAST(\"action_keys_json\" AS BLOB)) <= 4096 AND CASE WHEN json_valid(\"action_keys_json\") THEN json_type(\"action_keys_json\") = 'array' ELSE 0 END AND CASE WHEN json_valid(\"action_keys_json\") THEN json_array_length(\"action_keys_json\") <= 32 ELSE 0 END",
       "name": "worker_instances_action_keys_json_check",
       "entityType": "checks",
       "table": "worker_instances"

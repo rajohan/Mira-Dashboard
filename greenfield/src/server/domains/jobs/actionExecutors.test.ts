@@ -79,6 +79,8 @@ describe("worker-only job executor registry", () => {
         });
         expect(findAction("openclaw.sessions.cleanup")).toBeDefined();
         expect(findAction("openclaw.installation.update")).toBeDefined();
+        expect(findAction("host.system.restart")).toBeUndefined();
+        expect(findAction("host.system.update")).toBeUndefined();
         expect(findAction("system.shell")).toBeUndefined();
     });
 
@@ -233,7 +235,8 @@ describe("worker-only job executor registry", () => {
             )(executionContext([]), {})
         ).catch((error: unknown) => error);
         expect(failure).toBeInstanceOf(Error);
-        expect(JSON.stringify(failure)).not.toContain("../../private");
+        expect(String(failure)).not.toContain("../../private");
+        expect((failure as Error).message).not.toContain("private");
 
         const unknownFailure = await Effect.runPromise(
             createOpenClawServiceActionJobExecutor(
@@ -248,7 +251,8 @@ describe("worker-only job executor registry", () => {
             )(executionContext([]), {})
         ).catch((error: unknown) => error);
         expect(unknownFailure).toBeInstanceOf(JobActionOutcomeUnknownError);
-        expect(JSON.stringify(unknownFailure)).not.toContain("Gateway");
+        expect(String(unknownFailure)).not.toContain("Gateway");
+        expect((unknownFailure as Error).message).not.toContain("Gateway");
     });
 
     test("fails closed for missing, extra, and duplicate executor keys", () => {

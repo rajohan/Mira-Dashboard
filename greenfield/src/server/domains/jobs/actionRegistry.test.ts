@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
+import * as v from "valibot";
+
 import {
     findJobActionDefinition,
     hostSystemRestartJobActionDefinition,
@@ -7,7 +9,9 @@ import {
     isRegisteredJobSchedule,
     openClawGatewayRestartJobActionDefinition,
     openClawInstallationUpdateJobActionDefinition,
+    openClawInstallationUpdateJobResultSchema,
     openClawSessionsCleanupJobActionDefinition,
+    openClawSessionsCleanupJobResultSchema,
     parseJobActionOutputMessage,
     parseJobActionProgress,
     validateJobActionRegistration,
@@ -185,5 +189,32 @@ describe("durable job action registry", () => {
         expect(hostSystemUpdateJobActionDefinition.timeoutMs).toBe(7_200_000);
         expect(openClawSessionsCleanupJobActionDefinition.timeoutMs).toBe(630_000);
         expect(openClawInstallationUpdateJobActionDefinition.timeoutMs).toBe(2_130_000);
+    });
+
+    test("reports explicit validation errors for invalid OpenClaw result statuses", () => {
+        expect(() =>
+            v.parse(openClawSessionsCleanupJobResultSchema, {
+                artifactsRemoved: 0,
+                bytesFreed: 0,
+                completedAtMs: 1,
+                diskEntriesRemoved: 0,
+                diskFilesRemoved: 0,
+                dmScopesRetired: 0,
+                entriesAfter: 0,
+                entriesBefore: 0,
+                entriesCapped: 0,
+                entriesPruned: 0,
+                missingEntriesRemoved: 0,
+                modelRunsPruned: 0,
+                status: "failed",
+                storesProcessed: 0,
+            })
+        ).toThrow("OpenClaw cleanup result is invalid");
+        expect(() =>
+            v.parse(openClawInstallationUpdateJobResultSchema, {
+                completedAtMs: 1,
+                status: "failed",
+            })
+        ).toThrow("OpenClaw update result is invalid");
     });
 });

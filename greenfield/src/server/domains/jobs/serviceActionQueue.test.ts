@@ -4,9 +4,22 @@ import {
     type ServiceActionId,
     serviceActionIds,
 } from "../../../contracts/serviceActions.ts";
+import {
+    securityUserId,
+    sessionSelector,
+    validAuthSessionInsert,
+    validUserInsert,
+} from "../../database/validation/testSupport/securityRows.ts";
+import { testImmediateDatabaseWriteAdmission } from "../../test/support/databaseWriteAdmission.ts";
+import { openFreshMigratedDatabase } from "../../test/support/freshDatabase.ts";
+import { createAuthenticationLifecycleRepository } from "../security/authenticationLifecycleRepository.ts";
 import type { JobUnscheduledActionDefinition } from "./actionRegistry.ts";
 import type { JobRunRecord } from "./records.ts";
-import type { EnqueueManualRunInput, EnqueueManualRunResult } from "./repository.ts";
+import {
+    createJobRepository,
+    type EnqueueManualRunInput,
+    type EnqueueManualRunResult,
+} from "./repository.ts";
 import {
     createServiceActionQueue,
     serviceActionJobActionKeys,
@@ -49,8 +62,11 @@ function repositoryFixture() {
     const idempotencyReads: [JobRunRecord["requestedByKind"], string, string][] = [];
     let stored: JobRunRecord | undefined;
     const repository: ServiceActionQueueDependencies["repository"] = {
-        enqueueManualRun(input, beforeInsert): Promise<EnqueueManualRunResult> {
-            beforeInsert?.();
+        enqueueManualRun(
+            input,
+            authorizeAdmittedEnqueue
+        ): Promise<EnqueueManualRunResult> {
+            authorizeAdmittedEnqueue?.();
             enqueues.push(input);
             stored = {
                 ...input.run,
@@ -147,6 +163,7 @@ describe("Service Action durable queue", () => {
             expect(authorizationChecks).toBe(1);
             expect(wakeCalls).toEqual([actionId]);
             expect(fixture.enqueues).toHaveLength(1);
+            expect(fixture.enqueues[0]?.rejectWhenActionActive).toBe(true);
             expect(fixture.enqueues[0]?.run).toMatchObject({
                 actionKey: serviceActionJobActionKeys[actionId],
                 attemptLimit: 1,
@@ -156,6 +173,7 @@ describe("Service Action durable queue", () => {
                 requestedById: actor.id,
                 requestedByKind: "user",
                 resourceClass: "exclusive",
+                resourceKeysJson: JSON.stringify(definitions[actionId].resourceKeys),
                 retrySafe: false,
                 triggerType: "manual",
             });
@@ -319,6 +337,78 @@ describe("Service Action durable queue", () => {
         expect(fixture.run()).toBeUndefined();
     });
 
+    test("runs the final session read after admission but before the SQLite write transaction", async () => {
+        const database = await openFreshMigratedDatabase();
+        const authenticationRepository = createAuthenticationLifecycleRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        const jobRepository = createJobRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        const runIds = [
+            "019fdf50-0000-7000-8000-000000000030",
+            "019fdf50-0000-7000-8000-000000000031",
+            "019fdf50-0000-7000-8000-000000000032",
+            "019fdf50-0000-7000-8000-000000000033",
+        ];
+        const queue = createServiceActionQueue({
+            definitions,
+            generateId: () => runIds.shift()!,
+            nowMs: () => 1000,
+            repository: jobRepository,
+        });
+        const authorizationFailure = new Error("authorization expired");
+        const authenticatedActor = Object.freeze({
+            authenticatorId: sessionSelector,
+            id: securityUserId,
+            kind: "user" as const,
+        });
+        const authorizeDispatch = () =>
+            Promise.resolve(() => {
+                const session = authenticationRepository.withReadTransaction((reader) =>
+                    reader.findSession(securityUserId, sessionSelector)
+                );
+                if (session === undefined) throw authorizationFailure;
+            });
+
+        try {
+            await authenticationRepository.withImmediateTransaction((unit) => {
+                unit.insertUser(validUserInsert);
+                unit.insertSession(validAuthSessionInsert);
+            });
+
+            const accepted = await queue.enqueue(
+                request("system-update", {
+                    actor: authenticatedActor,
+                    authorizeDispatch,
+                    idempotencyKey: "019fdf50-0000-4000-8000-000000000040",
+                })
+            );
+            expect(jobRepository.findRun(accepted.jobRunId)).toBeDefined();
+
+            await authenticationRepository.withImmediateTransaction((unit) => {
+                expect(unit.deleteSession(securityUserId, sessionSelector)).toBe(true);
+            });
+            const rejectedRunId = "019fdf50-0000-7000-8000-000000000032";
+            const failure = await queue
+                .enqueue(
+                    request("system-update", {
+                        actor: authenticatedActor,
+                        authorizeDispatch,
+                        idempotencyKey: "019fdf50-0000-4000-8000-000000000041",
+                    })
+                )
+                .catch((error: unknown) => error);
+
+            expect(failure).toBe(authorizationFailure);
+            expect(jobRepository.findRun(rejectedRunId)).toBeUndefined();
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
     test("rejects unsafe injected action mappings at composition", () => {
         expect(() =>
             createServiceActionQueue({
@@ -332,5 +422,24 @@ describe("Service Action durable queue", () => {
                 repository: repositoryFixture().repository,
             })
         ).toThrow("Service Action definition is invalid");
+
+        for (const unsafePolicy of [
+            { attemptLimit: 2 },
+            { cancellationPolicy: "queued-only" as const },
+            { retrySafe: true },
+        ]) {
+            expect(() =>
+                createServiceActionQueue({
+                    definitions: {
+                        ...definitions,
+                        "system-update": {
+                            ...definitions["system-update"],
+                            ...unsafePolicy,
+                        },
+                    },
+                    repository: repositoryFixture().repository,
+                })
+            ).toThrow("Service Action definition is invalid");
+        }
     });
 });

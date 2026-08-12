@@ -1501,14 +1501,10 @@ export function parsePersistentGatewayOpenClawServiceActionResponse(
         throw new TypeError("Persistent Gateway OpenClaw operation response is invalid");
     }
     let status: "accepted" | "completed" | "failed" = "failed";
-    if (parsed.output.ok && parsed.output.result.status === "ok") {
-        status = "completed";
-    } else if (
-        parsed.output.ok &&
-        parsed.output.result.status === "skipped" &&
-        parsed.output.handoff?.status === "started"
-    ) {
+    if (parsed.output.handoff?.status === "started") {
         status = "accepted";
+    } else if (parsed.output.ok && parsed.output.result.status === "ok") {
+        status = "completed";
     }
     return Object.freeze({
         ...(parsed.output.result.after === undefined

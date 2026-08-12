@@ -68,7 +68,21 @@ export function serializeWorkerActionKeys(actionKeys: readonly string[]): string
  * @returns Frozen validated canonical action identities.
  */
 export function parseWorkerActionKeysJson(value: string): readonly string[] {
-    const parsed = v.parse(workerActionKeysSchema, parseJsonText(value));
+    const boundedValue = v.parse(
+        v.pipe(
+            v.string("Stored worker action keys are invalid"),
+            v.check(
+                (candidate) => utf8ByteLength(candidate) <= workerActionKeysMaximumBytes,
+                "Stored worker action keys are invalid"
+            )
+        ),
+        value
+    );
+    const parsed = v.parse(workerActionKeysSchema, parseJsonText(boundedValue));
+    v.parse(
+        v.literal(JSON.stringify(parsed), "Stored worker action keys are invalid"),
+        boundedValue
+    );
     return Object.freeze([...parsed]);
 }
 

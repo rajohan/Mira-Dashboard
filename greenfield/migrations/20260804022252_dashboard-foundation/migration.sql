@@ -1094,7 +1094,7 @@ CREATE TABLE `worker_instances` (
 	`started_at` integer NOT NULL,
 	`state` text NOT NULL,
 	`stopped_at` integer,
-	CONSTRAINT "worker_instances_action_keys_json_check" CHECK(length(CAST("action_keys_json" AS BLOB)) <= 4096 AND CASE WHEN json_valid("action_keys_json") THEN json_type("action_keys_json") = 'array' ELSE 0 END),
+	CONSTRAINT "worker_instances_action_keys_json_check" CHECK(length(CAST("action_keys_json" AS BLOB)) <= 4096 AND CASE WHEN json_valid("action_keys_json") THEN json_type("action_keys_json") = 'array' ELSE 0 END AND CASE WHEN json_valid("action_keys_json") THEN json_array_length("action_keys_json") <= 32 ELSE 0 END),
 	CONSTRAINT "worker_instances_capacity_check" CHECK("capacity" BETWEEN 1 AND 16),
 	CONSTRAINT "worker_instances_id_check" CHECK(length("id") = 36 AND instr("id", char(0)) = 0 AND length(replace("id", '-', '')) = 32 AND replace("id", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr("id", 9, 1) = '-' AND substr("id", 14, 1) = '-' AND substr("id", 15, 1) = '7' AND substr("id", 19, 1) = '-' AND substr("id", 20, 1) GLOB '[89ab]' AND substr("id", 24, 1) = '-'),
 	CONSTRAINT "worker_instances_pid_check" CHECK("pid" BETWEEN 1 AND 2147483647),

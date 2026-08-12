@@ -4040,6 +4040,41 @@ describe("explicit OpenClaw source audit", () => {
         }
     });
 
+    test("rejects cleanup disk-budget enforcement before lifecycle mutation", async () => {
+        await withTemporaryDirectory(
+            "mira-openclaw-cleanup-order-drift-",
+            async (sourceRoot) => {
+                await writeSyntheticOpenClawPackage(sourceRoot);
+                const artifactPath = path.join(
+                    sourceRoot,
+                    "dist",
+                    "cleanup-service-fixture.js"
+                );
+                const source = await readFile(artifactPath, "utf8");
+                const lifecycleCall =
+                    "const lifecycleResult = await applySqliteSessionEntryLifecycleMutation({";
+                const diskBudgetCall =
+                    "const appliedDiskBudget = await enforceSqliteSessionHistoryDiskBudget({";
+                const lifecycleIndex = source.indexOf(lifecycleCall);
+                const diskBudgetIndex = source.indexOf(diskBudgetCall);
+                expect(lifecycleIndex).toBeGreaterThanOrEqual(0);
+                expect(diskBudgetIndex).toBeGreaterThan(lifecycleIndex);
+                const reordered =
+                    source.slice(0, lifecycleIndex) +
+                    diskBudgetCall +
+                    source.slice(lifecycleIndex + lifecycleCall.length, diskBudgetIndex) +
+                    lifecycleCall +
+                    source.slice(diskBudgetIndex + diskBudgetCall.length);
+                await writeFile(artifactPath, reordered, "utf8");
+
+                const error = await rejectedError(auditInstalledOpenClaw(sourceRoot));
+                expect(error.message).toContain(
+                    "sessions.cleanup no longer applies lifecycle mutation before disk budget enforcement"
+                );
+            }
+        );
+    });
+
     test("rejects drift in the system.info read permission", async () => {
         await withTemporaryDirectory(
             "mira-openclaw-system-scope-",

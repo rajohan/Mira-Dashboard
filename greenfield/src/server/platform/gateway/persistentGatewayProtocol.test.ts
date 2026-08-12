@@ -589,8 +589,24 @@ describe("persistent Gateway protocol-v4 boundary", () => {
         expect(
             parsePersistentGatewayOpenClawServiceActionResponse("update.run", {
                 handoff: { status: "started" },
-                ok: true,
+                ok: false,
                 restart: { pid: 43 },
+                result: { status: "error" },
+                sentinel: {},
+            })
+        ).toEqual({ method: "update.run", status: "accepted" });
+        expect(
+            parsePersistentGatewayOpenClawServiceActionResponse("update.run", {
+                ok: true,
+                restart: null,
+                result: { status: "ok" },
+                sentinel: {},
+            })
+        ).toEqual({ method: "update.run", status: "completed" });
+        expect(
+            parsePersistentGatewayOpenClawServiceActionResponse("update.run", {
+                ok: false,
+                restart: null,
                 result: { status: "error" },
                 sentinel: {},
             })

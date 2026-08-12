@@ -3111,16 +3111,20 @@ function assertOpenClawOperationsSemantics(
         32 * 1024,
         "sessions.cleanup execution"
     );
+    const cleanupLifecycleMutationCall =
+        "const lifecycleResult = await applySqliteSessionEntryLifecycleMutation({";
+    const cleanupDiskBudgetCall =
+        "const appliedDiskBudget = await enforceSqliteSessionHistoryDiskBudget({";
     assertRequiredMarkers(cleanupExecution, "sessions.cleanup execution", [
         "const maintenance = resolveMaintenanceConfig()",
         'const mode = opts.enforce ? "enforce" : maintenance.mode',
         "fixMissing: Boolean(opts.fixMissing)",
         "fixDmScope: Boolean(opts.fixDmScope)",
-        "const lifecycleResult = await applySqliteSessionEntryLifecycleMutation({",
+        cleanupLifecycleMutationCall,
         "activeSessionKey: opts.activeKey",
         "maintenanceOverride: {",
         'const appliedUnreferencedArtifacts = mode === "warn" ? null : await pruneUnreferencedSessionArtifacts({',
-        "const appliedDiskBudget = await enforceSqliteSessionHistoryDiskBudget({",
+        cleanupDiskBudgetCall,
         "agentId: target.agentId",
         "storePath: target.storePath",
         "mode: appliedReport.mode",
@@ -3138,6 +3142,14 @@ function assertOpenClawOperationsSemantics(
         "applied: true",
         "appliedCount: lifecycleResult.afterCount",
     ]);
+    if (
+        cleanupExecution.indexOf(cleanupLifecycleMutationCall) >
+        cleanupExecution.indexOf(cleanupDiskBudgetCall)
+    ) {
+        throw new Error(
+            "OpenClaw sessions.cleanup no longer applies lifecycle mutation before disk budget enforcement"
+        );
+    }
 
     const maintenancePolicy = artifactByRole(
         artifacts,

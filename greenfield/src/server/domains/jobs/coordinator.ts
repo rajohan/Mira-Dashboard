@@ -785,7 +785,9 @@ export function createJobWorkerCoordinator(
     const findAction = options.findAction ?? findNoAction;
     const actionDefinitions = options.actionDefinitions ?? jobActionDefinitions;
     const actionKeysJson = serializeWorkerActionKeys(
-        actionDefinitions.map(({ actionKey }) => actionKey)
+        actionDefinitions.flatMap(({ actionKey }) =>
+            findAction(actionKey) === undefined ? [] : [actionKey]
+        )
     );
     const abortController = new AbortController();
     let activeExecution: Promise<void> | undefined;
