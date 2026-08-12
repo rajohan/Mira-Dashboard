@@ -712,15 +712,14 @@ function projectedAttachment(
     mediaType: string,
     partId: string,
     sizeBytes?: number,
-    enforceTextPreviewMaximum = false
+    requireKnownBoundedTextSize = false
 ): ProjectedChatMessagePart {
     const url = `/api/chat/media/${attachmentId}`;
     const candidateRenderPolicy = attachmentRenderPolicy(mediaType);
     const renderPolicy =
-        enforceTextPreviewMaximum &&
+        requireKnownBoundedTextSize &&
         candidateRenderPolicy === "bounded-text" &&
-        sizeBytes !== undefined &&
-        sizeBytes > chatTextPreviewMaximumBytes
+        (sizeBytes === undefined || sizeBytes > chatTextPreviewMaximumBytes)
             ? "download-only"
             : candidateRenderPolicy;
     return {

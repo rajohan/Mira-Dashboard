@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
-import { chatTextPreviewMaximumBytes } from "../../../contracts/chatMedia.ts";
+import {
+    chatAttachmentLimits,
+    chatTextPreviewMaximumBytes,
+} from "../../../contracts/chatMedia.ts";
 import {
     chatHistoryResponseMaximumBytes,
     type ChatMessage,
@@ -1071,21 +1074,21 @@ describe("persistent Gateway chat provider", () => {
                 fileName: "readme.md",
                 id: "history-media:2",
                 mediaType: "text/markdown",
-                renderPolicy: "bounded-text",
+                renderPolicy: "download-only",
                 sizeBytes: undefined,
             },
             {
                 fileName: "data.csv",
                 id: "history-media:3",
                 mediaType: "text/csv",
-                renderPolicy: "bounded-text",
+                renderPolicy: "download-only",
                 sizeBytes: undefined,
             },
             {
                 fileName: "quoted file.txt",
                 id: "history-media:4",
                 mediaType: "text/plain",
-                renderPolicy: "bounded-text",
+                renderPolicy: "download-only",
                 sizeBytes: undefined,
             },
         ]);
@@ -1102,7 +1105,7 @@ describe("persistent Gateway chat provider", () => {
         ).toBeFalse();
     });
 
-    test("keeps irreproducible and oversized local text previews download-only", async () => {
+    test("previews only local text with a known bounded size", async () => {
         const harness = createHarness({
             "chat.history": {
                 messages: [
@@ -1117,6 +1120,21 @@ describe("persistent Gateway chat provider", () => {
                                     contentType: "text/plain",
                                     path: "reports/oversized.txt",
                                     sizeBytes: chatTextPreviewMaximumBytes + 1,
+                                },
+                                {
+                                    path: "reports/unknown.json",
+                                },
+                                {
+                                    path: "reports/bounded.json",
+                                    sizeBytes: chatTextPreviewMaximumBytes,
+                                },
+                                {
+                                    path: "reports/malformed.json",
+                                    sizeBytes: "1024",
+                                },
+                                {
+                                    path: "reports/unsafe.json",
+                                    sizeBytes: chatAttachmentLimits.maximumFileBytes + 1,
                                 },
                             ],
                         },
@@ -1166,6 +1184,34 @@ describe("persistent Gateway chat provider", () => {
                 mediaType: "text/plain",
                 renderPolicy: "download-only",
                 sizeBytes: chatTextPreviewMaximumBytes + 1,
+                usesDownloadUrl: true,
+            },
+            {
+                fileName: "unknown.json",
+                mediaType: "application/json",
+                renderPolicy: "download-only",
+                sizeBytes: undefined,
+                usesDownloadUrl: true,
+            },
+            {
+                fileName: "bounded.json",
+                mediaType: "application/json",
+                renderPolicy: "bounded-text",
+                sizeBytes: chatTextPreviewMaximumBytes,
+                usesDownloadUrl: false,
+            },
+            {
+                fileName: "malformed.json",
+                mediaType: "application/json",
+                renderPolicy: "download-only",
+                sizeBytes: undefined,
+                usesDownloadUrl: true,
+            },
+            {
+                fileName: "unsafe.json",
+                mediaType: "application/json",
+                renderPolicy: "download-only",
+                sizeBytes: undefined,
                 usesDownloadUrl: true,
             },
         ]);
