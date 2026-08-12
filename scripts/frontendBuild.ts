@@ -13,8 +13,8 @@ import {
     measureFrontendBundle,
     writeFrontendHtmlAppEntrypoint,
     writePrecompressedFrontendAssets,
-} from "./frontendBuildArtifacts.ts";
-import reactCompilerPlugin from "./reactCompilerPlugin.ts";
+} from "./frontendBuildArtifacts";
+import reactCompilerPlugin from "./reactCompilerPlugin";
 
 type FrontendBuildMode = "development" | "production";
 
@@ -70,8 +70,8 @@ export async function buildFrontend({
         outdir: resolvedOutdir,
         plugins: [
             ...(isProduction ? [productionDevtoolsPlugin] : []),
-            reactCompilerPlugin,
             tailwindPlugin,
+            reactCompilerPlugin,
         ],
         publicPath: "/",
         sourcemap: isProduction ? "none" : "linked",

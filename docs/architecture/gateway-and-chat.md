@@ -1,12 +1,5 @@
 # Gateway And Chat Runtime
 
-> **Current-production parity input — not the greenfield protocol specification.** This document
-> describes the legacy Dashboard implementation that must be accounted for during parity work.
-> Before any greenfield OpenClaw integration, inspect the source and protocol of the OpenClaw
-> version currently installed; that installed behavior is authoritative and this implementation
-> may be replaced. The Phase 2 greenfield slice qualifies only a one-shot bootstrap credential
-> verifier, not the persistent Gateway/chat runtime described below.
-
 Dashboard has two WebSocket layers:
 
 ```text
