@@ -1513,7 +1513,9 @@ full-browser parity, production rehearsal, cutover, and legacy deletion remain o
   the exact descriptor-anchored `openclaw.json` bytes. The session- and authenticator-bound raw
   `GET`/`HEAD` route is same-origin, recent-MFA protected, private/no-store, single-use on `GET`,
   and bounded by stored-secret and in-flight-download admission. Expiry, consumption, cancellation,
-  and process shutdown erase retained byte buffers. Raw configuration never enters tRPC results,
+  and process shutdown erase retained byte buffers. Ownership is explicit at each copy boundary:
+  the descriptor result, service source, consumed store buffer, and stream buffer are independently
+  zeroed on all success, failure, abort, and disposal paths. Raw configuration never enters tRPC results,
   Query cache, audit, logs, provider errors, or durable job records.
 - `openClawSettings.restartGateway` admits one caller-idempotent, exclusive durable
   `openclaw.gateway.restart` run after fail-closed audit and a dispatch-time authorization check.

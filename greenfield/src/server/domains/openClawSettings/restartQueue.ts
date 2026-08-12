@@ -107,17 +107,24 @@ function terminalResult(run: JobRunRecord): RestartOpenClawGatewayResult | undef
     if (run.state !== "succeeded" || run.resultJson === null) {
         throw new OpenClawGatewayRestartQueueError("unknown-outcome");
     }
-    const result = v.safeParse(
-        openClawGatewayRestartJobResultSchema,
-        parseJsonText(run.resultJson)
-    );
+    let parsedResult: unknown;
+    try {
+        parsedResult = parseJsonText(run.resultJson);
+    } catch {
+        throw new OpenClawGatewayRestartQueueError("unknown-outcome");
+    }
+    const result = v.safeParse(openClawGatewayRestartJobResultSchema, parsedResult);
     if (!result.success) {
         throw new OpenClawGatewayRestartQueueError("unknown-outcome");
     }
-    return v.parse(restartOpenClawGatewayResultSchema, {
+    const output = v.safeParse(restartOpenClawGatewayResultSchema, {
         ...result.output,
         jobRunId: run.id,
     });
+    if (!output.success) {
+        throw new OpenClawGatewayRestartQueueError("unknown-outcome");
+    }
+    return output.output;
 }
 
 /**

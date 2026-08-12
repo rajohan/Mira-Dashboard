@@ -47,21 +47,27 @@ function repositoryFixture() {
                 : undefined;
         },
     };
+    const completeWithResultJson = (resultJson: string): void => {
+        if (stored === undefined) throw new Error("Run was not queued");
+        stored = {
+            ...stored,
+            finishedAt: new Date(1001),
+            resultJson,
+            state: "succeeded",
+            stateVersion: stored.stateVersion + 1,
+            updatedAt: new Date(1001),
+        };
+    };
     return {
         complete() {
-            if (stored === undefined) throw new Error("Run was not queued");
-            stored = {
-                ...stored,
-                finishedAt: new Date(1001),
-                resultJson: JSON.stringify({
+            completeWithResultJson(
+                JSON.stringify({
                     completedAtMs: 1001,
                     status: "restarted",
-                }),
-                state: "succeeded",
-                stateVersion: stored.stateVersion + 1,
-                updatedAt: new Date(1001),
-            };
+                })
+            );
         },
+        completeWithResultJson,
         enqueues,
         idempotencyReads,
         repository,
@@ -241,5 +247,60 @@ describe("OpenClaw Gateway restart queue", () => {
             [actor.kind, actor.id, idempotencyKey],
         ]);
         expect(wakeCount).toBe(0);
+    });
+
+    test("maps malformed and invalid terminal responses to the sanitized unknown outcome", async () => {
+        const fixture = repositoryFixture();
+        const originalEnqueue = fixture.repository.enqueueManualRun;
+        fixture.repository.enqueueManualRun = async (input) => {
+            const result = await originalEnqueue(input);
+            fixture.completeWithResultJson("{");
+            return result;
+        };
+        const ids = [
+            "019fdf50-0000-7000-8000-000000000060",
+            "019fdf50-0000-7000-8000-000000000061",
+        ];
+        const queue = createOpenClawGatewayRestartQueue({
+            generateId: () => ids.shift()!,
+            nowMs: () => 1000,
+            repository: fixture.repository,
+        });
+
+        const failure = await queue
+            .restart(request(async () => {}))
+            .catch((error: unknown) => error);
+
+        expect(failure).toBeInstanceOf(OpenClawGatewayRestartQueueError);
+        expect(failure).toMatchObject({ reason: "unknown-outcome" });
+
+        const invalidOutputFixture = repositoryFixture();
+        const enqueueInvalidOutput = invalidOutputFixture.repository.enqueueManualRun;
+        invalidOutputFixture.repository.enqueueManualRun = async (input) => {
+            const result = await enqueueInvalidOutput(input);
+            invalidOutputFixture.complete();
+            return result;
+        };
+        const findInvalidOutput = invalidOutputFixture.repository.findRun;
+        invalidOutputFixture.repository.findRun = (id) => {
+            const run = findInvalidOutput(id);
+            return run === undefined ? undefined : { ...run, id: "invalid-run-id" };
+        };
+        const outputIds = [
+            "019fdf50-0000-7000-8000-000000000062",
+            "019fdf50-0000-7000-8000-000000000063",
+        ];
+        const invalidOutputQueue = createOpenClawGatewayRestartQueue({
+            generateId: () => outputIds.shift()!,
+            nowMs: () => 1000,
+            repository: invalidOutputFixture.repository,
+        });
+
+        const invalidOutputFailure = await invalidOutputQueue
+            .restart(request(async () => {}))
+            .catch((error: unknown) => error);
+
+        expect(invalidOutputFailure).toBeInstanceOf(OpenClawGatewayRestartQueueError);
+        expect(invalidOutputFailure).toMatchObject({ reason: "unknown-outcome" });
     });
 });

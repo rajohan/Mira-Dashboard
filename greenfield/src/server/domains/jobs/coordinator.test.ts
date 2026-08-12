@@ -11,6 +11,7 @@ import {
     type JobActionExecutionContext,
     JobActionRetryableError,
     jobActionDefinitions,
+    openClawGatewayRestartJobActionDefinition,
 } from "./actionRegistry.ts";
 import {
     createJobWorkerCoordinator,
@@ -497,6 +498,54 @@ describe("durable job worker coordinator", () => {
             fixture.events.indexOf("stop")
         );
         expect(await coordinator.completion).toBeUndefined();
+    });
+
+    test("claims the conditionally registered Gateway restart without scheduling it", async () => {
+        const workerId = Bun.randomUUIDv7();
+        const definition = openClawGatewayRestartJobActionDefinition;
+        const run: JobRunRecord = {
+            ...claimedRun(workerId, definition.actionKey),
+            attemptLimit: definition.attemptLimit,
+            cancellationPolicy: definition.cancellationPolicy,
+            displayName: definition.displayName,
+            priority: definition.priority,
+            requestedById: Bun.randomUUIDv7(),
+            requestedByKind: "user",
+            resourceClass: definition.resourceClass,
+            resourceKeysJson: JSON.stringify(definition.resourceKeys),
+            retrySafe: definition.retrySafe,
+            timeoutMs: definition.timeoutMs,
+            triggerType: "manual",
+        };
+        const fixture = repositoryFixture({ claim: { kind: "claimed", run } });
+        let restartCount = 0;
+        const actionDefinitions = Object.freeze([...jobActionDefinitions, definition]);
+        const coordinator = createJobWorkerCoordinator({
+            ...coordinatorOptions(fixture.repository, workerId),
+            actionDefinitions,
+            findAction: createJobWorkerActionResolver({
+                actionDefinitions,
+                logMaintenance: { run: () => Promise.resolve(undefined) },
+                moltbook: testMoltbookCollector,
+                openClawGateway: {
+                    restart() {
+                        restartCount += 1;
+                        return Promise.resolve();
+                    },
+                },
+            }),
+        });
+
+        await coordinator.initialize();
+        await waitUntil(() => fixture.settlements.length === 1);
+        await coordinator.dispose();
+
+        expect(fixture.events).toContain(`reconcile:${jobActionDefinitions.length}`);
+        expect(restartCount).toBe(1);
+        expect(fixture.settlements[0]?.outcome).toMatchObject({
+            kind: "succeeded",
+            resultJson: expect.stringContaining('"status":"restarted"'),
+        });
     });
 
     test("derives drain and stop queue effects inside durable worker callbacks", async () => {

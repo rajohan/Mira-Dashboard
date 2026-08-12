@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 
 import type { AuthenticatedPrincipal } from "../../../contracts/security.ts";
 import { dashboardSessionCookieName } from "../../rawHttp/authenticationCredentials.ts";
@@ -19,6 +19,7 @@ const ticketId = "10000000-0000-4000-8000-000000000001";
 const secondTicketId = "10000000-0000-4000-8000-000000000002";
 const thirdTicketId = "10000000-0000-4000-8000-000000000003";
 const bytes = new TextEncoder().encode('{"secret":"private"}\n');
+const ticketStores: OpenClawConfigurationBackupTicketStore[] = [];
 
 async function waitForResponseCleanup(): Promise<void> {
     await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 0));
@@ -40,7 +41,8 @@ function principal(
 function request(
     method: string,
     requestOrigin = origin,
-    requestedTicketId = ticketId
+    requestedTicketId = ticketId,
+    signal?: AbortSignal
 ): Request {
     return new Request(
         `${origin}/api/openclaw-settings/configuration-backups/${requestedTicketId}`,
@@ -51,18 +53,26 @@ function request(
                 "sec-fetch-site": requestOrigin === origin ? "same-origin" : "cross-site",
             },
             method,
+            signal,
         }
     );
+}
+
+function trackTicketStore<T extends OpenClawConfigurationBackupTicketStore>(store: T): T {
+    ticketStores.push(store);
+    return store;
 }
 
 function fixture(
     authorization: "authorized" | "session-changed" | "step-up-required" = "authorized",
     principalValue: AuthenticatedPrincipal = principal()
 ) {
-    const tickets = createOpenClawConfigurationBackupTicketStore({
-        generateId: () => ticketId,
-        nowMs: () => 1000,
-    });
+    const tickets = trackTicketStore(
+        createOpenClawConfigurationBackupTicketStore({
+            generateId: () => ticketId,
+            nowMs: () => 1000,
+        })
+    );
     tickets.issue(actor, bytes);
     const handler = createOpenClawConfigurationBackupRawHttpHandler({
         authenticateCredential: () => ({
@@ -90,6 +100,10 @@ async function response(
     if (result === undefined) throw new Error("Expected backup handler response");
     return result;
 }
+
+afterEach(() => {
+    for (const store of ticketStores.splice(0)) store.dispose();
+});
 
 describe("OpenClaw configuration export raw HTTP", () => {
     test("supports non-consuming HEAD and one same-origin authenticated GET", async () => {
@@ -143,33 +157,37 @@ describe("OpenClaw configuration export raw HTTP", () => {
 
     test("holds bounded download admission and exact secret bytes through EOF or cancel", async () => {
         const ids = [ticketId, secondTicketId, thirdTicketId];
-        const backingStore = createOpenClawConfigurationBackupTicketStore({
-            generateId: () => ids.shift()!,
-            nowMs: () => 1000,
-        });
+        const backingStore = trackTicketStore(
+            createOpenClawConfigurationBackupTicketStore({
+                generateId: () => ids.shift()!,
+                nowMs: () => 1000,
+            })
+        );
         backingStore.issue(actor, bytes);
         backingStore.issue(actor, bytes);
         backingStore.issue(actor, bytes);
         const consumedBytes: Uint8Array[] = [];
-        const tickets: OpenClawConfigurationBackupTicketStore = Object.freeze({
-            consume(
-                backupActor: OpenClawConfigurationBackupActor,
-                requestedTicketId: string
-            ) {
-                const content = backingStore.consume(backupActor, requestedTicketId);
-                consumedBytes.push(content.bytes);
-                return content;
-            },
-            dispose: () => backingStore.dispose(),
-            inspect: (
-                backupActor: OpenClawConfigurationBackupActor,
-                requestedTicketId: string
-            ) => backingStore.inspect(backupActor, requestedTicketId),
-            issue: (
-                backupActor: OpenClawConfigurationBackupActor,
-                sourceBytes: Uint8Array
-            ) => backingStore.issue(backupActor, sourceBytes),
-        });
+        const tickets = trackTicketStore<OpenClawConfigurationBackupTicketStore>(
+            Object.freeze({
+                consume(
+                    backupActor: OpenClawConfigurationBackupActor,
+                    requestedTicketId: string
+                ) {
+                    const content = backingStore.consume(backupActor, requestedTicketId);
+                    consumedBytes.push(content.bytes);
+                    return content;
+                },
+                dispose: () => backingStore.dispose(),
+                inspect: (
+                    backupActor: OpenClawConfigurationBackupActor,
+                    requestedTicketId: string
+                ) => backingStore.inspect(backupActor, requestedTicketId),
+                issue: (
+                    backupActor: OpenClawConfigurationBackupActor,
+                    sourceBytes: Uint8Array
+                ) => backingStore.issue(backupActor, sourceBytes),
+            })
+        );
         const handler = createOpenClawConfigurationBackupRawHttpHandler({
             authenticateCredential: () => ({
                 authentication: {
@@ -197,14 +215,15 @@ describe("OpenClaw configuration export raw HTTP", () => {
 
         const first = await respond(request("GET", origin, ticketId));
         expect(first.status).toBe(200);
-        expect(consumedBytes[0]).toEqual(bytes);
+        expect(consumedBytes[0]).toEqual(new Uint8Array(bytes.byteLength));
         const concurrentDenial = await respond(request("GET", origin, secondTicketId));
         expect(concurrentDenial.status).toBe(429);
 
         const firstReader = first.body!.getReader();
         const firstChunk = await firstReader.read();
         expect(firstChunk).toEqual({ done: false, value: bytes });
-        expect(consumedBytes[0]).toEqual(bytes);
+        expect(firstChunk.value).not.toBe(consumedBytes[0]);
+        expect(consumedBytes[0]).toEqual(new Uint8Array(bytes.byteLength));
         const deliveryDenial = await respond(request("GET", origin, secondTicketId));
         expect(deliveryDenial.status).toBe(429);
         expect(await firstReader.read()).toEqual({ done: true, value: undefined });
@@ -213,6 +232,7 @@ describe("OpenClaw configuration export raw HTTP", () => {
 
         const second = await respond(request("GET", origin, secondTicketId));
         expect(second.status).toBe(200);
+        expect(consumedBytes[1]).toEqual(new Uint8Array(bytes.byteLength));
         await second.body!.cancel("test cancellation");
         expect(consumedBytes[1]).toEqual(new Uint8Array(bytes.byteLength));
 
@@ -224,10 +244,12 @@ describe("OpenClaw configuration export raw HTTP", () => {
 
     test("enforces the aggregate in-flight byte budget without consuming denied tickets", async () => {
         const ids = [ticketId, secondTicketId];
-        const tickets = createOpenClawConfigurationBackupTicketStore({
-            generateId: () => ids.shift()!,
-            nowMs: () => 1000,
-        });
+        const tickets = trackTicketStore(
+            createOpenClawConfigurationBackupTicketStore({
+                generateId: () => ids.shift()!,
+                nowMs: () => 1000,
+            })
+        );
         tickets.issue(actor, bytes);
         tickets.issue(actor, bytes);
         const handler = createOpenClawConfigurationBackupRawHttpHandler({
@@ -265,5 +287,72 @@ describe("OpenClaw configuration export raw HTTP", () => {
         expect(second.status).toBe(200);
         await second.body!.cancel("test cleanup");
         tickets.dispose();
+    });
+
+    test("erases both consumed and streamed copies when the request aborts", async () => {
+        const backingStore = trackTicketStore(
+            createOpenClawConfigurationBackupTicketStore({
+                generateId: () => ticketId,
+                nowMs: () => 1000,
+            })
+        );
+        backingStore.issue(actor, bytes);
+        let consumedBytes: Uint8Array | undefined;
+        const tickets = trackTicketStore<OpenClawConfigurationBackupTicketStore>(
+            Object.freeze({
+                consume(
+                    backupActor: OpenClawConfigurationBackupActor,
+                    requestedTicketId: string
+                ) {
+                    const content = backingStore.consume(backupActor, requestedTicketId);
+                    consumedBytes = content.bytes;
+                    return content;
+                },
+                dispose: () => backingStore.dispose(),
+                inspect: (
+                    backupActor: OpenClawConfigurationBackupActor,
+                    requestedTicketId: string
+                ) => backingStore.inspect(backupActor, requestedTicketId),
+                issue: (
+                    backupActor: OpenClawConfigurationBackupActor,
+                    sourceBytes: Uint8Array
+                ) => backingStore.issue(backupActor, sourceBytes),
+            })
+        );
+        const handler = createOpenClawConfigurationBackupRawHttpHandler({
+            authenticateCredential: () => ({
+                authentication: {
+                    kind: "authenticated" as const,
+                    principal: principal(),
+                },
+                lease: {
+                    expiresAtMs: 4_000_000_000_000_000,
+                    revalidate: () => Promise.resolve(),
+                },
+            }),
+            authorizeAccess: () => "authorized",
+            browserOrigin: origin,
+            tickets,
+        });
+        const controller = new AbortController();
+        const incoming = request("GET", origin, ticketId, controller.signal);
+        const result = await handler(incoming, new URL(incoming.url));
+        if (result === undefined) throw new Error("Expected backup response");
+        expect(result.status).toBe(200);
+        expect(consumedBytes).toEqual(new Uint8Array(bytes.byteLength));
+
+        const reader = result.body!.getReader();
+        const first = await reader.read();
+        expect(first).toEqual({ done: false, value: bytes });
+        const streamedValue: unknown = first.value;
+        if (!(streamedValue instanceof Uint8Array)) {
+            throw new TypeError("Expected streamed backup bytes");
+        }
+        controller.abort(new DOMException("test abort", "AbortError"));
+        expect(await reader.read().catch((error: unknown) => error)).toBeInstanceOf(
+            DOMException
+        );
+        expect(streamedValue).toEqual(new Uint8Array(bytes.byteLength));
+        expect(consumedBytes).toEqual(new Uint8Array(bytes.byteLength));
     });
 });

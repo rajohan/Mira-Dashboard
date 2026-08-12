@@ -709,7 +709,10 @@ function openedFilePresentation(
                 root,
                 fd,
                 stat,
-                workspaceFileLimits.maximumTextPreviewBytes,
+                Math.min(
+                    workspaceFileLimits.maximumTextPreviewBytes,
+                    entry.maximumSizeBytes
+                ),
                 signal
             )
         );
@@ -1040,7 +1043,10 @@ export function createDescriptorWorkspaceFileReader(
                               opened.root,
                               opened.fd,
                               opened.stat,
-                              workspaceFileLimits.maximumTextPreviewBytes,
+                              Math.min(
+                                  workspaceFileLimits.maximumTextPreviewBytes,
+                                  entry.maximumSizeBytes
+                              ),
                               signal
                           )
                       )

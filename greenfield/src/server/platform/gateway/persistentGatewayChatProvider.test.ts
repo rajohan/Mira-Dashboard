@@ -1102,11 +1102,15 @@ describe("persistent Gateway chat provider", () => {
     });
 
     test("strips but never registers MEDIA directives from non-assistant roles", async () => {
+        const discardedCandidates = Array.from(
+            { length: 33 },
+            (_, index) => `private/secret-${index}.txt`
+        );
         const harness = createHarness({
             "chat.history": {
                 messages: [
                     {
-                        content: "Visible user text\nMeDiA: private/secret.txt",
+                        content: `Visible user text\nMeDiA: ${discardedCandidates.join(" ")}`,
                         id: "message-user-media-directive",
                         role: "user",
                     },
@@ -1128,7 +1132,68 @@ describe("persistent Gateway chat provider", () => {
             parts: [{ id: "1", kind: "text", text: "Visible user text" }],
         });
         expect(harness.references).toEqual([]);
-        expect(JSON.stringify(history.messages[0])).not.toContain("private/secret.txt");
+        expect(JSON.stringify(history.messages[0])).not.toContain("private/secret-");
+    });
+
+    test("resolves structured paths and URLs independently while preferring a valid path", async () => {
+        const harness = createHarness({
+            "chat.history": {
+                messages: [
+                    {
+                        __openclaw: {
+                            media: [
+                                {
+                                    path: "images/preferred.png",
+                                    url: "file:///srv/openclaw/media/images/fallback.png",
+                                },
+                            ],
+                        },
+                        content: "Preferred path",
+                        id: "message-preferred-path",
+                        role: "assistant",
+                    },
+                    {
+                        __openclaw: {
+                            media: [
+                                {
+                                    path: "/srv/openclaw/openclaw.json",
+                                    url: "file:///srv/openclaw/media/images/resolved-url.png",
+                                },
+                            ],
+                        },
+                        content: "Fallback URL",
+                        id: "message-fallback-url",
+                        role: "assistant",
+                    },
+                ],
+                offset: 0,
+                sessionKey,
+            },
+        });
+
+        const history = await harness.provider.history({
+            limit: 2,
+            maxChars: 64 * 1024,
+            offset: 0,
+            sessionKey,
+        });
+
+        expect(
+            history.messages.map((message) =>
+                message.content.kind === "complete"
+                    ? message.content.parts.flatMap((part) =>
+                          part.kind === "attachment" ? [part.fileName] : []
+                      )
+                    : []
+            )
+        ).toEqual([["preferred.png"], ["resolved-url.png"]]);
+        expect(
+            harness.references.map((reference) =>
+                reference.source.kind === "openclaw-local-history"
+                    ? reference.source.segments.join("/")
+                    : reference.source.kind
+            )
+        ).toEqual(["images/preferred.png", "images/resolved-url.png"]);
     });
 
     test("supports retired media and exact legacy plural and singular fallback slots", async () => {

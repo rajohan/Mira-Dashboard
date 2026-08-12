@@ -69,6 +69,8 @@ export interface OpenClawConfigurationBackupTicketStoreOptions {
 
 function actorKey(actor: OpenClawConfigurationBackupActor): string {
     if (
+        typeof actor.id !== "string" ||
+        typeof actor.authenticatorId !== "string" ||
         actor.id.length === 0 ||
         actor.authenticatorId.length === 0 ||
         actor.id.includes("\0") ||
@@ -128,8 +130,9 @@ export function createOpenClawConfigurationBackupTicketStore(
     }
 
     function remove(record: BackupTicketRecord, erase: boolean): void {
-        if (!tickets.delete(record.ticketId)) return;
-        storedBytes -= record.bytes.byteLength;
+        if (tickets.delete(record.ticketId)) {
+            storedBytes -= record.bytes.byteLength;
+        }
         if (erase) record.bytes.fill(0);
     }
 
@@ -203,6 +206,7 @@ export function createOpenClawConfigurationBackupTicketStore(
         ticketId: string,
         consume: boolean
     ): BackupTicketRecord {
+        const key = actorKey(actor);
         const at = now();
         sweepExpired(at);
         scheduleExpiry(at);
@@ -210,7 +214,6 @@ export function createOpenClawConfigurationBackupTicketStore(
         if (!parsedId.success) {
             throw new OpenClawConfigurationBackupError("not-found");
         }
-        const key = actorKey(actor);
         const expired = expiredTickets.get(parsedId.output);
         if (expired !== undefined && expired.actorKey === key) {
             throw new OpenClawConfigurationBackupError("expired");
@@ -248,6 +251,7 @@ export function createOpenClawConfigurationBackupTicketStore(
             return metadata(resolve(actor, ticketId, false));
         },
         issue(actor: OpenClawConfigurationBackupActor, bytes: Uint8Array) {
+            const key = actorKey(actor);
             const at = now();
             sweepExpired(at);
             scheduleExpiry(at);
@@ -285,14 +289,20 @@ export function createOpenClawConfigurationBackupTicketStore(
                 ticketId,
             });
             const stored = Uint8Array.from(bytes);
-            tickets.set(ticketId, {
-                actorKey: actorKey(actor),
+            const record: BackupTicketRecord = {
+                actorKey: key,
                 bytes: stored,
                 expiresAtMs,
                 ticketId,
-            });
-            storedBytes += stored.byteLength;
-            scheduleExpiry(at);
+            };
+            try {
+                tickets.set(ticketId, record);
+                storedBytes += stored.byteLength;
+                scheduleExpiry(at);
+            } catch (error) {
+                remove(record, true);
+                throw error;
+            }
             return result;
         },
     });

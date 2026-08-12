@@ -388,6 +388,7 @@ export function createJobWorkerActionRegistry(
  * @returns A fail-closed resolver containing every reviewed worker action.
  */
 export interface JobWorkerActionResolverDependencies {
+    readonly actionDefinitions?: readonly JobExecutableActionDefinition[];
     readonly logMaintenance: LogMaintenanceExecutionPort;
     readonly moltbook: MoltbookDashboardCollector;
     readonly openClawGateway?: OpenClawGatewayLifecycleExecutionPort;
@@ -398,18 +399,20 @@ export function createJobWorkerActionResolver(
     dependencies: JobWorkerActionResolverDependencies
 ): JobWorkerActionResolver {
     const workspaceFiles = dependencies.workspaceFiles;
-    const definitions = Object.freeze([
-        ...jobActionDefinitions,
-        ...(dependencies.openClawGateway === undefined
-            ? []
-            : [openClawGatewayRestartJobActionDefinition]),
-        ...(workspaceFiles === undefined
-            ? []
-            : [
-                  workspaceFileWriteJobActionDefinition,
-                  workspaceFileReplaceJobActionDefinition,
-              ]),
-    ]);
+    const definitions =
+        dependencies.actionDefinitions ??
+        Object.freeze([
+            ...jobActionDefinitions,
+            ...(dependencies.openClawGateway === undefined
+                ? []
+                : [openClawGatewayRestartJobActionDefinition]),
+            ...(workspaceFiles === undefined
+                ? []
+                : [
+                      workspaceFileWriteJobActionDefinition,
+                      workspaceFileReplaceJobActionDefinition,
+                  ]),
+        ]);
     const executors = [
         Object.freeze({
             actionKey: "cache.refresh.system-host",

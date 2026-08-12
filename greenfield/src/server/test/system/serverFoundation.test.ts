@@ -328,6 +328,41 @@ describe("system foundation", () => {
         ]);
     });
 
+    test("passes unrelated configuration-export paths to the chat fallback", async () => {
+        const observed: string[] = [];
+        const server = await createServer({
+            ...createTestServerSecurityServices(),
+            applicationRuntime: createTestApplicationRuntime(),
+            chatRawHttpHandler: (_request, requestUrl) => {
+                observed.push(`chat:${requestUrl.pathname}`);
+                return Promise.resolve(new Response("chat-fallback"));
+            },
+            frontendAssets: (_request, requestUrl) => {
+                observed.push(`frontend:${requestUrl.pathname}`);
+                return Promise.resolve(new Response("browser-fallback"));
+            },
+            hostname: "127.0.0.1",
+            openClawConfigurationBackupRawHttpHandler: (_request, requestUrl) => {
+                observed.push(`backup:${requestUrl.pathname}`);
+                return Promise.resolve(undefined);
+            },
+            port: 0,
+            readiness: createReadinessController(),
+        });
+        servers.push(server);
+
+        const response = await fetch(
+            new URL("/api/chat/media/unrelated-reference", server.url)
+        );
+
+        expect(response.status).toBe(200);
+        expect(await response.text()).toBe("chat-fallback");
+        expect(observed).toEqual([
+            "backup:/api/chat/media/unrelated-reference",
+            "chat:/api/chat/media/unrelated-reference",
+        ]);
+    });
+
     test("emits one correlated response-created event for every response class", async () => {
         const { logger, logLines } = createCapturingTestStructuredLogger();
         const server = await createServer({

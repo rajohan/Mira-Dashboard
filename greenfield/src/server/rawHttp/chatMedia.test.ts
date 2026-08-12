@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, jest, test } from "bun:test";
 
 import { Redacted } from "effect";
 
@@ -9,6 +9,7 @@ import { createInMemoryChatMediaReferences } from "../platform/chat/inMemoryChat
 import { dashboardSessionCookieName } from "./authenticationCredentials.ts";
 import {
     chatMessageAuthorizesMediaReference,
+    chatMediaReferenceRefreshCooldownMs,
     chatMediaReferenceRefreshTimeoutMs,
     chatOutgoingMediaMaximumBytes,
     chatOutgoingTextPreviewMaximumBytes,
@@ -807,6 +808,94 @@ describe("chat raw HTTP media boundary", () => {
         references.dispose();
     });
 
+    test("releases only the timed-out shared refresh slot when work ignores abort", async () => {
+        const store = createInMemoryChatAttachmentStore();
+        const references = createInMemoryChatMediaReferences();
+        const scheduler = new ManualChatRawHttpScheduler();
+        const firstWork = Promise.withResolvers<void>();
+        const secondWork = Promise.withResolvers<void>();
+        const refreshSignals: AbortSignal[] = [];
+        let nowMs = 1000;
+        const dateNow = jest.spyOn(Date, "now").mockImplementation(() => nowMs);
+        const handler = createChatRawHttpHandler({
+            attachmentStore: store,
+            authenticateCredential: authentication(principal()),
+            authorizeMedia: () => true,
+            browserOrigin: origin,
+            mediaFetcher: { fetch: () => Promise.resolve(new Response(png)) },
+            mediaReferences: references,
+            refreshMediaReferences: (signal) => {
+                refreshSignals.push(signal);
+                return refreshSignals.length === 1
+                    ? firstWork.promise
+                    : secondWork.promise;
+            },
+            scheduler,
+            workLimits: {
+                ...singleChatMediaWorkLimits,
+                maximumConcurrentDownloads: 2,
+                maximumDownloadBytes: 2 * chatOutgoingMediaMaximumBytes,
+            },
+        });
+        try {
+            const firstRequest = handlerStatus(
+                handler,
+                authenticatedRequest(
+                    `/api/chat/media/${attachmentId}?disposition=download`
+                )
+            );
+            await Promise.resolve();
+            await Promise.resolve();
+            scheduler.advance(chatMediaReferenceRefreshTimeoutMs);
+            expect(await firstRequest).toBe(404);
+            expect(refreshSignals).toHaveLength(1);
+            expect(refreshSignals[0]?.aborted).toBeTrue();
+
+            expect(
+                await handlerStatus(
+                    handler,
+                    authenticatedRequest(
+                        `/api/chat/media/${crossSessionAttachmentId}?disposition=download`
+                    )
+                )
+            ).toBe(404);
+            expect(refreshSignals).toHaveLength(1);
+
+            nowMs += chatMediaReferenceRefreshCooldownMs;
+            const secondRequest = handlerStatus(
+                handler,
+                authenticatedRequest(
+                    `/api/chat/media/${attachmentId}?disposition=download`
+                )
+            );
+            for (let index = 0; index < 5; index += 1) await Promise.resolve();
+            expect(refreshSignals).toHaveLength(2);
+
+            firstWork.resolve();
+            await Promise.resolve();
+            const sharedSecondRequest = handlerStatus(
+                handler,
+                authenticatedRequest(
+                    `/api/chat/media/${crossSessionAttachmentId}?disposition=download`
+                )
+            );
+            await Promise.resolve();
+            expect(refreshSignals).toHaveLength(2);
+
+            secondWork.resolve();
+            expect(await Promise.all([secondRequest, sharedSecondRequest])).toEqual([
+                404, 404,
+            ]);
+            expect(scheduler.pendingCount).toBe(0);
+        } finally {
+            dateNow.mockRestore();
+            firstWork.resolve();
+            secondWork.resolve();
+            store.dispose();
+            references.dispose();
+        }
+    });
+
     test("denies cross-owner media and forces active SVG content to download", async () => {
         const store = createInMemoryChatAttachmentStore();
         const references = createInMemoryChatMediaReferences({ nowMs: () => 1000 });
@@ -1302,8 +1391,15 @@ describe("chat raw HTTP media boundary", () => {
         });
         expect(await localResponse.text()).toBe("local");
         expect(managedRequests).toHaveLength(1);
-        expect(localRequests).toHaveLength(1);
-        expect(JSON.stringify(localRequests)).not.toContain("/home/");
+        expect(localRequests).toEqual([
+            {
+                ...sharedRequest,
+                source: {
+                    kind: "openclaw-local-history",
+                    segments: ["history", "diagram.png"],
+                },
+            },
+        ]);
 
         const managedOnly = createChatMediaSourceFetcher({
             gatewayManaged: { fetch: () => Promise.resolve(new Response("managed")) },

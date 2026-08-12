@@ -109,10 +109,12 @@ function createDownloadAdmission(
 }
 
 function secretDownloadBody(
-    bytes: Uint8Array,
+    consumedBytes: Uint8Array,
     lease: DownloadLease,
     signal: AbortSignal
 ): ReadableStream<Uint8Array> {
+    const bytes = Uint8Array.from(consumedBytes);
+    consumedBytes.fill(0);
     let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
     let emitted = false;
     let releaseTimer: ReturnType<typeof globalThis.setTimeout> | undefined;
@@ -125,8 +127,11 @@ function secretDownloadBody(
             releaseTimer = undefined;
         }
         signal.removeEventListener("abort", abort);
-        bytes.fill(0);
-        lease.release();
+        try {
+            bytes.fill(0);
+        } finally {
+            lease.release();
+        }
     };
     const releaseAfterClose = () => {
         if (settled || releaseTimer !== undefined) return;
@@ -143,29 +148,39 @@ function secretDownloadBody(
         );
         release();
     };
-    return new ReadableStream<Uint8Array>(
-        {
-            cancel() {
-                release();
+    try {
+        return new ReadableStream<Uint8Array>(
+            {
+                cancel() {
+                    release();
+                },
+                pull(activeController) {
+                    if (settled) return;
+                    if (!emitted) {
+                        try {
+                            activeController.enqueue(bytes);
+                            emitted = true;
+                        } catch (error) {
+                            release();
+                            throw error;
+                        }
+                        return;
+                    }
+                    activeController.close();
+                    releaseAfterClose();
+                },
+                start(activeController) {
+                    controller = activeController;
+                    signal.addEventListener("abort", abort, { once: true });
+                    if (signal.aborted) abort();
+                },
             },
-            pull(activeController) {
-                if (settled) return;
-                if (!emitted) {
-                    emitted = true;
-                    activeController.enqueue(bytes);
-                    return;
-                }
-                activeController.close();
-                releaseAfterClose();
-            },
-            start(activeController) {
-                controller = activeController;
-                signal.addEventListener("abort", abort, { once: true });
-                if (signal.aborted) abort();
-            },
-        },
-        { highWaterMark: 0 }
-    );
+            { highWaterMark: 0 }
+        );
+    } catch (error) {
+        release();
+        throw error;
+    }
 }
 
 function actor(principal: AuthenticatedPrincipal): OpenClawConfigurationBackupActor {
@@ -339,8 +354,11 @@ export function createOpenClawConfigurationBackupRawHttpHandler(
                 });
             } catch (error) {
                 if (body === undefined) {
-                    content?.bytes.fill(0);
-                    lease.release();
+                    try {
+                        content?.bytes.fill(0);
+                    } finally {
+                        lease.release();
+                    }
                 } else {
                     await body
                         .cancel("OpenClaw configuration export response failed")

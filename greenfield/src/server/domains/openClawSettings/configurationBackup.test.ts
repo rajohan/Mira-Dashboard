@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 
 import { openClawConfigurationBackupTicketTtlMs } from "../../../contracts/openClawSettings.ts";
 import type {
@@ -9,6 +9,7 @@ import type {
 import {
     OpenClawConfigurationBackupError,
     openClawConfigurationBackupLocator,
+    type OpenClawConfigurationBackupTicketStore,
 } from "./configurationBackup.ts";
 import { createWorkspaceFileOpenClawConfigurationBackupSource } from "./configurationBackupSource.ts";
 import {
@@ -23,6 +24,7 @@ const actor = Object.freeze({
 });
 const bytes = new TextEncoder().encode('{"token":"private"}\n');
 const revision = "a".repeat(64);
+const ticketStores: OpenClawConfigurationBackupTicketStore[] = [];
 class ManualTicketScheduler implements OpenClawConfigurationBackupTicketScheduler {
     public nowMs = 1000;
     public unrefCount = 0;
@@ -68,8 +70,13 @@ class ManualTicketScheduler implements OpenClawConfigurationBackupTicketSchedule
 function readerFixture(
     nodeOverrides: Partial<WorkspaceFileNode> = {},
     resultOverrides: Partial<WorkspaceFileReadResult> = {}
-): { readonly calls: string[]; readonly reader: WorkspaceFileReader } {
+): {
+    readonly calls: string[];
+    readonly reader: WorkspaceFileReader;
+    readonly resultBytes: Uint8Array;
+} {
     const calls: string[] = [];
+    const resultBytes = resultOverrides.bytes ?? Uint8Array.from(bytes);
     const node: WorkspaceFileNode = {
         kind: "file",
         locator: openClawConfigurationBackupLocator,
@@ -84,13 +91,13 @@ function readerFixture(
         ...nodeOverrides,
     };
     const result: WorkspaceFileReadResult = {
-        bytes,
         fileName: "openclaw.json",
         mimeType: "application/json",
         previewKind: "text",
         revision,
         sizeBytes: bytes.byteLength,
         ...resultOverrides,
+        bytes: resultBytes,
     };
     return {
         calls,
@@ -109,8 +116,21 @@ function readerFixture(
             },
             roots: () => [],
         },
+        resultBytes,
     };
 }
+
+function ticketStore(
+    options: Parameters<typeof createOpenClawConfigurationBackupTicketStore>[0]
+): OpenClawConfigurationBackupTicketStore {
+    const store = createOpenClawConfigurationBackupTicketStore(options);
+    ticketStores.push(store);
+    return store;
+}
+
+afterEach(() => {
+    for (const store of ticketStores.splice(0)) store.dispose();
+});
 
 describe("OpenClaw configuration export source and tickets", () => {
     test("reads only the exact complete secret-bearing descriptor representation", async () => {
@@ -122,7 +142,10 @@ describe("OpenClaw configuration export source and tickets", () => {
         const exported = await source.read();
 
         expect(exported).toEqual(bytes);
-        expect(exported).not.toBe(bytes);
+        expect(exported).not.toBe(fixture.resultBytes);
+        expect(fixture.resultBytes).toEqual(
+            new Uint8Array(fixture.resultBytes.byteLength)
+        );
         expect(fixture.calls).toEqual([
             "describe:openclaw-config:reveal-secrets",
             `read:openclaw.json:${revision}:undefined:reveal-secrets`,
@@ -155,9 +178,36 @@ describe("OpenClaw configuration export source and tickets", () => {
         expect(mismatchFailure).toMatchObject({ reason: "invalid-source" });
     });
 
+    test("rejects and erases incomplete or inconsistent read results", async () => {
+        const fixtures = [
+            readerFixture({}, { sourceSizeBytes: bytes.byteLength + 1 }),
+            readerFixture({}, { truncated: true }),
+            readerFixture(
+                {},
+                {
+                    bytes: Uint8Array.from(bytes.subarray(1)),
+                    sizeBytes: bytes.byteLength,
+                }
+            ),
+        ];
+
+        for (const fixture of fixtures) {
+            const failure = await createWorkspaceFileOpenClawConfigurationBackupSource(
+                fixture.reader
+            )
+                .read()
+                .catch((error: unknown) => error);
+            expect(failure).toMatchObject({ reason: "invalid-source" });
+            expect(fixture.calls).toHaveLength(2);
+            expect(fixture.resultBytes).toEqual(
+                new Uint8Array(fixture.resultBytes.byteLength)
+            );
+        }
+    });
+
     test("binds exact bytes to one actor/session and consumes each ticket once", () => {
         let now = 1000;
-        const store = createOpenClawConfigurationBackupTicketStore({
+        const store = ticketStore({
             generateId: () => "10000000-0000-4000-8000-000000000001",
             nowMs: () => now,
         });
@@ -171,12 +221,15 @@ describe("OpenClaw configuration export source and tickets", () => {
         expect(() =>
             store.inspect({ ...actor, authenticatorId: "session-2" }, issued.ticketId)
         ).toThrow(OpenClawConfigurationBackupError);
-        expect(store.consume(actor, issued.ticketId).bytes).toEqual(bytes);
+        const consumed = store.consume(actor, issued.ticketId).bytes;
+        expect(consumed).toEqual(bytes);
+        expect(consumed).not.toBe(bytes);
+        consumed.fill(0);
         expect(() => store.consume(actor, issued.ticketId)).toThrow(
             OpenClawConfigurationBackupError
         );
 
-        const expiring = createOpenClawConfigurationBackupTicketStore({
+        const expiring = ticketStore({
             generateId: () => "10000000-0000-4000-8000-000000000002",
             nowMs: () => now,
         });
@@ -193,7 +246,7 @@ describe("OpenClaw configuration export source and tickets", () => {
             "10000000-0000-4000-8000-000000000010",
             "10000000-0000-4000-8000-000000000011",
         ];
-        const store = createOpenClawConfigurationBackupTicketStore({
+        const store = ticketStore({
             generateId: () => ids.shift()!,
             maximumStoredBytes: bytes.byteLength,
             maximumTickets: 1,
@@ -222,7 +275,7 @@ describe("OpenClaw configuration export source and tickets", () => {
             "10000000-0000-4000-8000-000000000003",
             "10000000-0000-4000-8000-000000000004",
         ];
-        const store = createOpenClawConfigurationBackupTicketStore({
+        const store = ticketStore({
             generateId: () => ids.shift()!,
             maximumStoredBytes: bytes.byteLength * 2,
             maximumTickets: 1,
@@ -230,5 +283,52 @@ describe("OpenClaw configuration export source and tickets", () => {
         });
         store.issue(actor, bytes);
         expect(() => store.issue(actor, bytes)).toThrow(OpenClawConfigurationBackupError);
+    });
+
+    test("validates actors before clock, capacity, sweep, or ID work", () => {
+        let generateIdCalls = 0;
+        let nowCalls = 0;
+        const store = ticketStore({
+            generateId: () => {
+                generateIdCalls += 1;
+                return "10000000-0000-4000-8000-000000000020";
+            },
+            maximumStoredBytes: bytes.byteLength,
+            maximumTickets: 1,
+            nowMs: () => {
+                nowCalls += 1;
+                return 1000;
+            },
+        });
+        const invalidActor = { ...actor, id: "" };
+
+        expect(() => store.issue(invalidActor, bytes)).toThrow(
+            expect.objectContaining({ reason: "unavailable" })
+        );
+        expect(() =>
+            store.inspect(invalidActor, "10000000-0000-4000-8000-000000000020")
+        ).toThrow(expect.objectContaining({ reason: "unavailable" }));
+        expect(generateIdCalls).toBe(0);
+        expect(nowCalls).toBe(0);
+    });
+
+    test("releases stored-byte accounting when ownership transfers on consume", () => {
+        const ids = [
+            "10000000-0000-4000-8000-000000000030",
+            "10000000-0000-4000-8000-000000000031",
+        ];
+        const store = ticketStore({
+            generateId: () => ids.shift()!,
+            maximumStoredBytes: bytes.byteLength,
+            maximumTickets: 1,
+            nowMs: () => 1000,
+        });
+        const first = store.issue(actor, bytes);
+
+        const consumed = store.consume(actor, first.ticketId).bytes;
+        const second = store.issue(actor, bytes);
+
+        expect(second.ticketId).toBe("10000000-0000-4000-8000-000000000031");
+        consumed.fill(0);
     });
 });

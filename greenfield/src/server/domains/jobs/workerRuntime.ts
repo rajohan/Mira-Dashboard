@@ -22,7 +22,12 @@ import {
     type LogMaintenanceExecutionPort,
     type WorkspaceFileWriteExecutionPort,
 } from "./actionExecutors.ts";
-import { jobActionDefinitions } from "./actionRegistry.ts";
+import {
+    jobActionDefinitions,
+    openClawGatewayRestartJobActionDefinition,
+    workspaceFileReplaceJobActionDefinition,
+    workspaceFileWriteJobActionDefinition,
+} from "./actionRegistry.ts";
 import {
     createJobWorkerCoordinator,
     type JobWorkerCoordinator,
@@ -399,7 +404,18 @@ export function createDashboardWorkerRuntime(
                 database.database,
                 database.writeAdmission
             );
+            const actionDefinitions = Object.freeze([
+                ...jobActionDefinitions,
+                openClawGatewayRestartJobActionDefinition,
+                ...(options.workspaceFiles === undefined
+                    ? []
+                    : [
+                          workspaceFileWriteJobActionDefinition,
+                          workspaceFileReplaceJobActionDefinition,
+                      ]),
+            ]);
             const findAction = createJobWorkerActionResolver({
+                actionDefinitions,
                 logMaintenance: options.logMaintenance,
                 moltbook: options.moltbook,
                 openClawGateway: options.openClawGateway,
@@ -408,7 +424,7 @@ export function createDashboardWorkerRuntime(
                     : { workspaceFiles: options.workspaceFiles }),
             });
             coordinator = dependencies.createCoordinator({
-                actionDefinitions: jobActionDefinitions,
+                actionDefinitions,
                 commitCacheAttempt: (input) => cacheRepository.commitAttempt(input),
                 databaseReleaseId: options.releaseId,
                 findAction,

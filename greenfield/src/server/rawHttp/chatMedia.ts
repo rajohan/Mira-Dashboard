@@ -719,21 +719,23 @@ export function createChatRawHttpHandler(
         const deadline = new Promise<never>((_resolve, reject) => {
             rejectDeadline = reject;
         });
-        const deadlineHandle = scheduler.setTimeout(() => {
-            deadlineController.abort();
-            rejectDeadline(new DOMException("The operation timed out", "TimeoutError"));
-        }, chatMediaReferenceRefreshTimeoutMs);
         const work = Promise.resolve().then(() =>
             options.refreshMediaReferences!(deadlineController.signal)
         );
         const wait = Promise.race([work, deadline]);
         const refresh = Object.freeze({ wait, work });
         mediaReferenceRefresh = refresh;
+        const deadlineHandle = scheduler.setTimeout(() => {
+            deadlineController.abort();
+            if (mediaReferenceRefresh === refresh) {
+                mediaReferenceRefresh = undefined;
+            }
+            rejectDeadline(new DOMException("The operation timed out", "TimeoutError"));
+        }, chatMediaReferenceRefreshTimeoutMs);
         void work
             .finally(() => {
                 scheduler.clearTimeout(deadlineHandle);
-                if (mediaReferenceRefresh?.work === work)
-                    mediaReferenceRefresh = undefined;
+                if (mediaReferenceRefresh === refresh) mediaReferenceRefresh = undefined;
             })
             .catch(() => {});
         await wait;

@@ -952,6 +952,77 @@ describe("Dashboard Settings route", () => {
         }
     });
 
+    test("preserves restart recovery when retry and discard confirmations are declined", async () => {
+        const transport = new SettingsTransport();
+        transport.mutationHandler = (path) =>
+            path === "openClawSettings.restartGateway"
+                ? Promise.reject(unknownOutcomeError())
+                : Promise.reject(new TypeError(`Unexpected mutation: ${path}`));
+        const confirmRestart = spyOn(globalThis, "confirm").mockReturnValue(true);
+        try {
+            renderSettings(transport);
+            const user = userEvent.setup();
+            await screen.findByRole("textbox", { name: "Primary model" });
+            await user.click(
+                screen.getByRole("button", { name: "Restart OpenClaw Gateway" })
+            );
+            await screen.findByText(
+                /could not confirm whether the Gateway restart completed/iu
+            );
+            const restartCalls = () =>
+                transport.calls.filter(
+                    ({ kind, path }) =>
+                        kind === "mutation" && path === "openClawSettings.restartGateway"
+                );
+            expect(restartCalls()).toHaveLength(1);
+            const recoveryKey = Array.from(
+                { length: globalThis.sessionStorage.length },
+                (_, index) => globalThis.sessionStorage.key(index)
+            ).find((key) => key?.startsWith(openClawGatewayRestartRecoveryStoragePrefix));
+            if (recoveryKey === undefined || recoveryKey === null) {
+                throw new Error("Gateway restart recovery key was not persisted");
+            }
+            const recoveryValue = globalThis.sessionStorage.getItem(recoveryKey);
+            if (recoveryValue === null) {
+                throw new Error("Gateway restart recovery value was not persisted");
+            }
+            expect(recoveryValue).toMatch(/^[0-9a-f]{32}$/u);
+
+            confirmRestart.mockReturnValue(false);
+            await user.click(
+                screen.getByRole("button", {
+                    name: "Retry Gateway restart request",
+                })
+            );
+            expect(restartCalls()).toHaveLength(1);
+            expect(globalThis.sessionStorage.getItem(recoveryKey)).toBe(recoveryValue);
+            expect(
+                screen.getByRole("button", {
+                    name: "Retry Gateway restart request",
+                })
+            ).toBeEnabled();
+
+            await user.click(
+                screen.getByRole("button", {
+                    name: "Discard recovery key for new intent",
+                })
+            );
+            expect(restartCalls()).toHaveLength(1);
+            expect(globalThis.sessionStorage.getItem(recoveryKey)).toBe(recoveryValue);
+            expect(
+                screen.getByRole("button", {
+                    name: "Discard recovery key for new intent",
+                })
+            ).toBeEnabled();
+            expect(
+                screen.queryByText(/Previous Gateway restart recovery key discarded/iu)
+            ).toBeNull();
+            expect(confirmRestart).toHaveBeenCalledTimes(3);
+        } finally {
+            confirmRestart.mockRestore();
+        }
+    });
+
     test("isolates persisted restart recovery by exact authenticated identity", async () => {
         const firstTransport = new SettingsTransport();
         firstTransport.mutationHandler = () => Promise.reject(unknownOutcomeError());

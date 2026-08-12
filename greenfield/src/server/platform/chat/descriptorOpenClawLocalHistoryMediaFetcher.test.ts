@@ -105,6 +105,12 @@ describe("descriptor OpenClaw local-history media fetcher", () => {
         const suffix = await fetcher.fetch(request(relative!, { range: "bytes=-2" }));
         expect(suffix.status).toBe(206);
         expect(new Uint8Array(await suffix.arrayBuffer())).toEqual(png.subarray(-2));
+        const unparsable = await fetcher.fetch(
+            request(relative!, { range: "bytes=0-1,4-5" })
+        );
+        expect(unparsable.status).toBe(200);
+        expect(unparsable.headers.get("content-range")).toBeNull();
+        expect(new Uint8Array(await unparsable.arrayBuffer())).toEqual(png);
         const unsatisfiable = await fetcher.fetch(
             request(relative!, { range: "bytes=99-" })
         );
@@ -207,6 +213,8 @@ describe("descriptor OpenClaw local-history media fetcher", () => {
         expect(text.headers.get("content-type")).toBe("text/plain");
         expect(active.headers.get("content-type")).toBe("application/octet-stream");
         expect(spoofed.headers.get("content-type")).toBe("application/octet-stream");
+        expect(active.headers.get("content-disposition")).toBe("attachment");
+        expect(spoofed.headers.get("content-disposition")).toBe("attachment");
     });
 
     test("retains its descriptor anchor across a configured-root path swap", async () => {

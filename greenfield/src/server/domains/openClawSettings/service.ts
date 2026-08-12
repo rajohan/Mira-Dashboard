@@ -478,15 +478,15 @@ export function createOpenClawSettingsService(
                     context.reauthorize();
                     signal?.throwIfAborted();
                     try {
-                        const bytes = await source.read(signal);
+                        const sourceBytes = await source.read(signal);
                         try {
                             signal?.throwIfAborted();
                             return v.parse(
                                 createOpenClawConfigurationBackupResultSchema,
-                                tickets.issue(context.actor, bytes)
+                                tickets.issue(context.actor, sourceBytes)
                             );
                         } finally {
-                            bytes.fill(0);
+                            sourceBytes.fill(0);
                         }
                     } catch (error) {
                         if (signal?.aborted) throw error;

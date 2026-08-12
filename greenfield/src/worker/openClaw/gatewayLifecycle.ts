@@ -100,8 +100,10 @@ export function createFixedOpenClawGatewayLifecycle(
             let exitCode: number;
             try {
                 exitCode = await restartProcess.run(argv, environment, operationSignal);
-            } catch {
-                throw new Error("OpenClaw Gateway restart process failed");
+            } catch (error) {
+                throw new Error("OpenClaw Gateway restart process failed", {
+                    cause: error,
+                });
             }
             if (exitCode !== 0) {
                 throw new Error("OpenClaw Gateway restart process failed");

@@ -481,40 +481,25 @@ export async function createDashboardServer(
         if (compositionDisposed) return;
         compositionDisposed = true;
         let failure: unknown;
-        try {
-            await chatMaintenance?.stop();
-        } catch (error) {
-            failure = error;
-        }
-        try {
-            await chatTranscriptLifecycleSupervisor?.stop();
-        } catch (error) {
-            failure ??= error;
-        }
-        try {
-            await openClawTasksSupervisor?.stop();
-        } catch (error) {
-            failure ??= error;
-        }
-        try {
-            await workspaceFilesService?.dispose();
-        } catch (error) {
-            failure ??= error;
-        }
-        try {
-            await openClawCronHeartbeatReader?.disposeHeartbeat();
-        } catch (error) {
-            failure ??= error;
-        }
-        try {
-            await chatService?.dispose();
-        } catch (error) {
-            failure ??= error;
-        }
-        openClawConfigurationBackupTickets?.dispose();
-        openClawLocalHistoryMediaFetcher?.dispose();
-        chatAttachmentStore?.dispose();
-        chatMediaReferences?.dispose();
+        const disposeIndependently = async (
+            dispose: () => Promise<void> | void
+        ): Promise<void> => {
+            try {
+                await dispose();
+            } catch (error) {
+                failure ??= error;
+            }
+        };
+        await disposeIndependently(() => chatMaintenance?.stop());
+        await disposeIndependently(() => chatTranscriptLifecycleSupervisor?.stop());
+        await disposeIndependently(() => openClawTasksSupervisor?.stop());
+        await disposeIndependently(() => workspaceFilesService?.dispose());
+        await disposeIndependently(() => openClawCronHeartbeatReader?.disposeHeartbeat());
+        await disposeIndependently(() => chatService?.dispose());
+        await disposeIndependently(() => openClawConfigurationBackupTickets?.dispose());
+        await disposeIndependently(() => openClawLocalHistoryMediaFetcher?.dispose());
+        await disposeIndependently(() => chatAttachmentStore?.dispose());
+        await disposeIndependently(() => chatMediaReferences?.dispose());
         if (failure instanceof Error) throw failure;
         if (failure !== undefined) {
             throw new Error("Dashboard composition disposal failed", {

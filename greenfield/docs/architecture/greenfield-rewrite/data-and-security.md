@@ -563,8 +563,11 @@ proxy mode names exact proxies and requires them to overwrite forwarded identity
   recent-MFA procedure reads only descriptor-anchored `openclaw.json` and returns an opaque
   actor/authenticator-bound ticket, never the secret bytes. Its same-origin raw route is
   private/no-store, permits metadata-only `HEAD`, consumes `GET` once, and applies both stored-byte
-  capacity and live transfer concurrency/byte admission. Ticket expiry, transfer completion or
-  cancellation, and shutdown zero retained byte buffers. Raw configuration is excluded from tRPC,
+  capacity and live transfer concurrency/byte admission. The descriptor adapter zeroes its read
+  result after producing a caller-owned source copy; ticket issue synchronously copies that source,
+  the service zeroes its copy on every outcome, and consumption transfers the stored copy to the raw
+  handler for immediate zeroing after it creates a stream-owned copy. Ticket expiry, transfer
+  completion or cancellation, and shutdown zero every retained byte buffer. Raw configuration is excluded from tRPC,
   browser caches, audit, logs, provider errors, and job state.
 - Gateway restart is a distinct durable worker action. Fail-closed audit and recent-MFA/session
   authority must both succeed before enqueue; an idempotency-key readback reconciles ambiguous

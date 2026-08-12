@@ -755,10 +755,10 @@ export const openClawSettingsProcedureContracts = [
 ] as const satisfies readonly ProcedureContract[];
 
 /** One-shot, same-origin secret-bearing configuration export. */
-export const openClawSettingsRawHttpContracts = (["GET", "HEAD"] as const).map(
-    (method): RawHttpContract => ({
+export const openClawSettingsRawHttpContracts = [
+    {
         access: controlAccess,
-        method,
+        method: "GET",
         path: "/api/openclaw-settings/configuration-backups/:ticketId",
         rangeRequests: "none",
         requestBody: { kind: "none" },
@@ -769,6 +769,23 @@ export const openClawSettingsRawHttpContracts = (["GET", "HEAD"] as const).map(
             transfer: "buffered",
         },
         statusCodes: [200, 400, 401, 403, 404, 405, 410, 429, 500, 503],
-        summary: `${method === "HEAD" ? "Inspects" : "Consumes"} one actor-bound no-store OpenClaw configuration export ticket.`,
-    })
-);
+        summary:
+            "Consumes one actor-bound no-store OpenClaw configuration export ticket.",
+    },
+    {
+        access: controlAccess,
+        method: "HEAD",
+        path: "/api/openclaw-settings/configuration-backups/:ticketId",
+        rangeRequests: "none",
+        requestBody: { kind: "none" },
+        response: {
+            contentTypes: ["application/json"],
+            kind: "binary",
+            maximumBytes: openClawConfigurationBackupMaximumBytes,
+            transfer: "buffered",
+        },
+        statusCodes: [200, 400, 401, 403, 404, 405, 410, 429, 500, 503],
+        summary:
+            "Inspects one actor-bound no-store OpenClaw configuration export ticket.",
+    },
+] as const satisfies readonly RawHttpContract[];

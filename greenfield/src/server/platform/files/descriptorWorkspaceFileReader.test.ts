@@ -440,6 +440,69 @@ describe("descriptor workspace file reader", () => {
         ).toBe("invalid-input");
     });
 
+    test("bounds oversized manifest prefixes by the entry ceiling", async () => {
+        const root = Fs.mkdtempSync(Path.join(Os.tmpdir(), "mira-manifest-prefix-"));
+        temporaryDirectories.push(root);
+        Fs.chmodSync(root, 0o700);
+        const fileName = "limited.json";
+        const maximumSizeBytes = 512 * 1024;
+        const sourceSizeBytes = 600 * 1024;
+        Fs.writeFileSync(Path.join(root, fileName), "a".repeat(sourceSizeBytes));
+        Fs.chmodSync(Path.join(root, fileName), 0o600);
+        const reader = createDescriptorWorkspaceFileReader({
+            roots: [
+                {
+                    id: "limited-manifest",
+                    label: "Limited manifest",
+                    manifest: [
+                        {
+                            contentPolicy: "redacted-config-json",
+                            maximumSizeBytes,
+                            segments: [fileName],
+                            uploadContentPolicy: "reject-redaction-sentinel",
+                            writable: true,
+                        },
+                    ],
+                    path: root,
+                    writable: false,
+                },
+            ],
+        });
+        readers.push(reader);
+        const locator = {
+            rootId: "limited-manifest",
+            segments: [fileName],
+        } as const;
+
+        expect(
+            reason(await reader.describe(locator).catch((error: unknown) => error))
+        ).toBe("too-large");
+        const described = await reader.describe(locator, undefined, "reveal-secrets");
+        expect(described).toMatchObject({
+            requiresSecretReveal: true,
+            sizeBytes: maximumSizeBytes,
+            sourceSizeBytes,
+            truncated: true,
+            writable: false,
+        });
+        expect(described.sourceSizeBytes).toBeGreaterThan(described.sizeBytes!);
+        const result = await reader.read(
+            locator,
+            described.revision,
+            undefined,
+            undefined,
+            "reveal-secrets"
+        );
+        expect(result).toMatchObject({
+            sizeBytes: maximumSizeBytes,
+            sourceSizeBytes,
+            truncated: true,
+        });
+        expect(result.sourceSizeBytes).toBeGreaterThan(result.sizeBytes);
+        expect(result.bytes).toHaveLength(maximumSizeBytes);
+        expect(result.bytes.every((byte) => byte === 0x61)).toBe(true);
+    });
+
     test("keeps oversized masked config closed until reveal and then exposes only its prefix", async () => {
         const { reader, root } = openClawFixture();
         const configPath = Path.join(root, "openclaw.json");

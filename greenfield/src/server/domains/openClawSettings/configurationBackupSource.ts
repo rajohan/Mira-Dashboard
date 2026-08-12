@@ -37,6 +37,7 @@ function sourceFailure(error: unknown, signal?: AbortSignal): never {
 /**
  * Adapts the reviewed descriptor reader to the one exact secret-bearing config source.
  * Redacted, truncated, changed, empty, or oversized representations fail closed.
+ * Reader-owned bytes are erased after validation; each successful read returns a caller-owned copy.
  * @returns The exact descriptor-rooted configuration source.
  */
 export function createWorkspaceFileOpenClawConfigurationBackupSource(
@@ -73,21 +74,26 @@ export function createWorkspaceFileOpenClawConfigurationBackupSource(
                     signal,
                     "reveal-secrets"
                 );
-                if (
-                    result.fileName !== openClawConfigurationBackupFileName ||
-                    result.mimeType !== openClawConfigurationBackupMimeType ||
-                    result.revision !== node.revision ||
-                    result.sizeBytes !== node.sizeBytes ||
-                    result.bytes.byteLength !== node.sizeBytes ||
-                    result.bytes.byteLength < 1 ||
-                    result.bytes.byteLength > openClawConfigurationUpstreamMaximumBytes ||
-                    result.sourceSizeBytes !== undefined ||
-                    result.truncated === true
-                ) {
-                    throw new OpenClawConfigurationBackupError("invalid-source");
+                try {
+                    if (
+                        result.fileName !== openClawConfigurationBackupFileName ||
+                        result.mimeType !== openClawConfigurationBackupMimeType ||
+                        result.revision !== node.revision ||
+                        result.sizeBytes !== node.sizeBytes ||
+                        result.bytes.byteLength !== node.sizeBytes ||
+                        result.bytes.byteLength < 1 ||
+                        result.bytes.byteLength >
+                            openClawConfigurationUpstreamMaximumBytes ||
+                        result.sourceSizeBytes !== undefined ||
+                        result.truncated === true
+                    ) {
+                        throw new OpenClawConfigurationBackupError("invalid-source");
+                    }
+                    signal?.throwIfAborted();
+                    return Uint8Array.from(result.bytes);
+                } finally {
+                    result.bytes.fill(0);
                 }
-                signal?.throwIfAborted();
-                return Uint8Array.from(result.bytes);
             } catch (error) {
                 if (error instanceof OpenClawConfigurationBackupError) throw error;
                 return sourceFailure(error, signal);

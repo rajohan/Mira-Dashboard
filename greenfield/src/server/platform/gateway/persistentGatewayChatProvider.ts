@@ -459,7 +459,7 @@ async function requestReadMutation(
 }
 
 interface LocalHistoryMediaFact {
-    readonly candidate: string;
+    readonly candidates: readonly string[];
     readonly contentType?: unknown;
     readonly fileName?: unknown;
     readonly sizeBytes?: unknown;
@@ -500,7 +500,11 @@ function structuredLocalHistoryMedia(
     const paths = mediaArray(message.MediaPaths);
     const urls = mediaArray(message.MediaUrls);
     const types = mediaArray(message.MediaTypes);
-    if ([canonical, paths, urls, types].some((values) => values.length > 32)) {
+    if (
+        [canonical, paths, urls, types].some(
+            (values) => values.length > localHistoryMediaMaximum
+        )
+    ) {
         return undefined;
     }
     const singularPresent =
@@ -531,10 +535,13 @@ function structuredLocalHistoryMedia(
             (paths.length > 0 || index === 0
                 ? mediaCandidate(message.MediaUrl)
                 : undefined);
-        const candidate = canonicalPath ?? canonicalUrl ?? legacyPath ?? legacyUrl;
-        if (candidate === undefined) continue;
+        const candidates = [canonicalPath, canonicalUrl, legacyPath, legacyUrl].filter(
+            (candidate, candidateIndex, values): candidate is string =>
+                candidate !== undefined && values.indexOf(candidate) === candidateIndex
+        );
+        if (candidates.length === 0) continue;
         facts.push({
-            candidate,
+            candidates: Object.freeze(candidates),
             contentType:
                 canonicalFact?.contentType ??
                 legacyTypes[index] ??
@@ -763,14 +770,44 @@ function projectLocalHistoryMedia(
     }
     const attachments: ProjectedChatMessagePart[] = [];
     for (const fact of facts) {
-        const managedUrl = managedMediaUrl(
-            fact.candidate,
-            sessionKey,
-            messageId,
-            registrar
-        );
-        const managedAttachmentId = managedUrl?.slice("/api/chat/media/".length);
-        if (managedAttachmentId !== undefined) {
+        let resolved:
+            | Readonly<{ attachmentId: string; kind: "managed" }>
+            | Readonly<{
+                  kind: "local";
+                  registered: PersistentGatewayRegisteredLocalMedia;
+              }>
+            | undefined;
+        for (const candidate of fact.candidates) {
+            const managedUrl = managedMediaUrl(
+                candidate,
+                sessionKey,
+                messageId,
+                registrar
+            );
+            const managedAttachmentId = managedUrl?.slice("/api/chat/media/".length);
+            if (managedAttachmentId !== undefined) {
+                resolved = { attachmentId: managedAttachmentId, kind: "managed" };
+                break;
+            }
+            let registered: PersistentGatewayRegisteredLocalMedia | undefined;
+            try {
+                registered = registrar.registerLocal({
+                    candidate,
+                    messageId,
+                    sessionKey,
+                    sourceSlot: fact.sourceSlot,
+                });
+            } catch {
+                throw new ChatProviderUnavailableError();
+            }
+            if (registered !== undefined) {
+                resolved = { kind: "local", registered };
+                break;
+            }
+        }
+        if (resolved === undefined) continue;
+        if (resolved.kind === "managed") {
+            const managedAttachmentId = resolved.attachmentId;
             const key = `managed:${managedAttachmentId}`;
             if (seen.has(key)) continue;
             seen.add(key);
@@ -786,18 +823,7 @@ function projectLocalHistoryMedia(
             );
             continue;
         }
-        let registered: PersistentGatewayRegisteredLocalMedia | undefined;
-        try {
-            registered = registrar.registerLocal({
-                candidate: fact.candidate,
-                messageId,
-                sessionKey,
-                sourceSlot: fact.sourceSlot,
-            });
-        } catch {
-            throw new ChatProviderUnavailableError();
-        }
-        if (registered === undefined) continue;
+        const registered = resolved.registered;
         const key = `local:${registered.locatorFingerprint}`;
         if (seen.has(key)) continue;
         seen.add(key);
@@ -838,14 +864,14 @@ function projectMessageParts(
         const raw = boundedString(value, maximum);
         if (raw === undefined) return undefined;
         const parsed = parseMediaDirectiveText(raw);
-        directiveOverflow ||= parsed.overflow;
+        if (acceptsDirectiveMedia) directiveOverflow ||= parsed.overflow;
         for (const candidate of acceptsDirectiveMedia ? parsed.candidates : []) {
             if (directiveMedia.length >= localHistoryMediaMaximum) {
                 directiveOverflow = true;
                 break;
             }
             directiveMedia.push({
-                candidate,
+                candidates: Object.freeze([candidate]),
                 sourceSlot: `directive:${directiveMedia.length}`,
             });
         }

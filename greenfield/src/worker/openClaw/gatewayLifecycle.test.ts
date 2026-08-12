@@ -17,21 +17,25 @@ describe("fixed OpenClaw Gateway lifecycle", () => {
 
         await lifecycle.restart();
 
-        expect(calls).toMatchObject([
+        if (typeof process.getuid !== "function") {
+            throw new TypeError("Gateway lifecycle test requires a POSIX runtime");
+        }
+        const runtimeDirectory = `/run/user/${process.getuid()}`;
+        expect(calls).toEqual([
             {
                 argv: ["/home/dashboard/.local/bin/openclaw", "gateway", "restart"],
                 environment: {
+                    DBUS_SESSION_BUS_ADDRESS: `unix:path=${runtimeDirectory}/bus`,
                     HOME: "/home/dashboard",
+                    LANG: "C",
+                    LC_ALL: "C",
                     OPENCLAW_NO_RESPAWN: "1",
                     PATH: "/usr/local/bin:/usr/bin:/bin",
+                    XDG_RUNTIME_DIR: runtimeDirectory,
                 },
                 signal: expect.any(AbortSignal),
             },
         ]);
-        const environment = (calls[0] as { environment: Record<string, string> })
-            .environment;
-        expect(Object.keys(environment)).not.toContain("OPENCLAW_GATEWAY_TOKEN");
-        expect(Object.keys(environment)).not.toContain("MOLTBOOK_API_KEY");
     });
 
     test("sanitizes caller aborts propagated into the fixed process", async () => {
@@ -56,7 +60,10 @@ describe("fixed OpenClaw Gateway lifecycle", () => {
 
         expect(observedSignal?.aborted).toBeTrue();
         expect(observedSignal?.reason).toBe(privateReason);
-        expect(failure).toEqual(new Error("OpenClaw Gateway restart process failed"));
+        expect(failure).toMatchObject({
+            cause: privateReason,
+            message: "OpenClaw Gateway restart process failed",
+        });
         expect(String(failure)).not.toContain("private caller abort detail");
     });
 
@@ -81,7 +88,10 @@ describe("fixed OpenClaw Gateway lifecycle", () => {
             const failure = await lifecycle.restart().catch((error: unknown) => error);
 
             expect(timeout.mock.calls).toEqual([[1000]]);
-            expect(failure).toEqual(new Error("OpenClaw Gateway restart process failed"));
+            expect(failure).toMatchObject({
+                cause: privateReason,
+                message: "OpenClaw Gateway restart process failed",
+            });
             expect(String(failure)).not.toContain("private timeout detail");
         } finally {
             timeout.mockRestore();
@@ -89,19 +99,22 @@ describe("fixed OpenClaw Gateway lifecycle", () => {
     });
 
     test("sanitizes thrown process failures", async () => {
+        const processFailure = new Error(
+            "spawn /home/dashboard/.local/bin/openclaw EACCES"
+        );
         const lifecycle = createFixedOpenClawGatewayLifecycle({
             openClawRoot: "/home/dashboard/.openclaw",
             process: {
-                run: () =>
-                    Promise.reject(
-                        new Error("spawn /home/dashboard/.local/bin/openclaw EACCES")
-                    ),
+                run: () => Promise.reject(processFailure),
             },
         });
 
         const failure = await lifecycle.restart().catch((error: unknown) => error);
 
-        expect(failure).toEqual(new Error("OpenClaw Gateway restart process failed"));
+        expect(failure).toMatchObject({
+            cause: processFailure,
+            message: "OpenClaw Gateway restart process failed",
+        });
         expect(String(failure)).not.toContain("/home/dashboard");
         expect(String(failure)).not.toContain("EACCES");
     });
@@ -114,7 +127,8 @@ describe("fixed OpenClaw Gateway lifecycle", () => {
             },
         });
         const failure = await lifecycle.restart().catch((error: unknown) => error);
-        expect(failure).toBeInstanceOf(Error);
+        expect(failure).toEqual(new Error("OpenClaw Gateway restart process failed"));
+        expect(failure).not.toHaveProperty("cause");
         expect(String(failure)).not.toContain("/home/dashboard");
 
         expect(() =>

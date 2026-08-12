@@ -454,8 +454,11 @@ Configuration export and Gateway restart remain separate privileged boundaries. 
 the exact descriptor-anchored `openclaw.json` source after recent-MFA reauthorization, copies it
 into a short-lived capacity-bounded actor/authenticator ticket, and serves it once through a
 same-origin private/no-store raw `GET`; `HEAD` inspects metadata without consuming the ticket.
-Stored and in-flight secret bytes are erased on expiry, consumption, cancellation, or shutdown and
-never enter tRPC, Query cache, audit, logs, or durable records. Restart instead enqueues the fixed
+The descriptor adapter erases its read result after returning a caller-owned copy; ticket issue
+copies synchronously while the service erases its source copy, and consumption transfers the stored
+copy to the raw handler, which erases it immediately after creating a separate stream-owned copy.
+Stored and in-flight secret bytes are erased on expiry, transfer settlement, cancellation, or
+shutdown and never enter tRPC, Query cache, audit, logs, or durable records. Restart instead enqueues the fixed
 `openclaw.gateway.restart` action after fail-closed audit and dispatch-time authorization. The job
 is exclusive, caller-idempotent, single-attempt, non-retry-safe, and non-cancellable; only the
 worker owns its fixed no-shell lifecycle command. Ambiguous enqueue or terminal settlement is

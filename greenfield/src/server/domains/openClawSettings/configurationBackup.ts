@@ -39,16 +39,18 @@ export interface OpenClawConfigurationBackupMetadata {
 }
 
 export interface OpenClawConfigurationBackupContent extends OpenClawConfigurationBackupMetadata {
+    /** Exclusive consumed ticket buffer; the consumer must erase it on every settlement path. */
     readonly bytes: Uint8Array;
 }
 
-/** Secret-bearing descriptor source. Implementations return exact bytes only. */
+/** Secret-bearing descriptor source. The caller owns and must erase each returned exact copy. */
 export interface OpenClawConfigurationBackupSource {
     readonly read: (signal?: AbortSignal) => Promise<Uint8Array>;
 }
 
 /** Process-local, actor/session-bound one-shot ticket lifecycle. */
 export interface OpenClawConfigurationBackupTicketStore {
+    /** Transfers exclusive ownership of the stored copy to the caller for prompt erasure. */
     readonly consume: (
         actor: OpenClawConfigurationBackupActor,
         ticketId: string
@@ -58,6 +60,7 @@ export interface OpenClawConfigurationBackupTicketStore {
         actor: OpenClawConfigurationBackupActor,
         ticketId: string
     ) => OpenClawConfigurationBackupMetadata;
+    /** Copies bytes synchronously; input ownership and erasure remain with the caller. */
     readonly issue: (
         actor: OpenClawConfigurationBackupActor,
         bytes: Uint8Array

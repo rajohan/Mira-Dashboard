@@ -43,7 +43,7 @@ interface OpenRoot {
 
 interface OpenFile {
     readonly close: () => Promise<void>;
-    readonly fd: number;
+    readonly handle: Fs.promises.FileHandle;
     readonly stat: Fs.BigIntStats;
 }
 
@@ -282,7 +282,7 @@ async function openLocalFile(
                     handles.toReversed().map((handle) => handle.close())
                 );
             },
-            fd: final.fd,
+            handle: final,
             stat: finalStat,
         };
     } catch (error) {
@@ -300,30 +300,36 @@ function numberSize(stat: Fs.BigIntStats): number | undefined {
         : undefined;
 }
 
-function readExact(
-    fd: number,
+async function readExact(
+    handle: Fs.promises.FileHandle,
     start: number,
     length: number,
     signal: AbortSignal
-): Uint8Array<ArrayBuffer> {
+): Promise<Uint8Array<ArrayBuffer>> {
     const bytes = new Uint8Array(length);
     let offset = 0;
     while (offset < length) {
         abortIfRequested(signal);
-        const read = Fs.readSync(fd, bytes, offset, length - offset, start + offset);
-        if (read === 0) break;
-        offset += read;
+        const { bytesRead } = await handle.read(
+            bytes,
+            offset,
+            length - offset,
+            start + offset
+        );
+        abortIfRequested(signal);
+        if (bytesRead === 0) break;
+        offset += bytesRead;
     }
     if (offset !== length) throw new Error("Local media is unavailable");
     return bytes;
 }
 
 function readPrefix(
-    fd: number,
+    handle: Fs.promises.FileHandle,
     sizeBytes: number,
     signal: AbortSignal
-): Uint8Array<ArrayBuffer> {
-    return readExact(fd, 0, Math.min(sizeBytes, contentSniffBytes), signal);
+): Promise<Uint8Array<ArrayBuffer>> {
+    return readExact(handle, 0, Math.min(sizeBytes, contentSniffBytes), signal);
 }
 
 function isUtf8TextPrefix(bytes: Uint8Array): boolean {
@@ -406,6 +412,9 @@ function responseHeaders(
             `bytes ${selected.start}-${selected.endExclusive - 1}/${sizeBytes}`
         );
     }
+    if (mimeType === "application/octet-stream") {
+        headers.set("content-disposition", "attachment");
+    }
     return headers;
 }
 
@@ -476,16 +485,17 @@ export function createDescriptorOpenClawLocalHistoryMediaFetcher(
                     return notFoundResponse();
                 }
                 const parsedRange = requestedByteRange(request.range);
-                if (request.range !== undefined && parsedRange === undefined) {
-                    return rangeNotSatisfiableResponse(0);
-                }
                 try {
                     abortIfRequested(request.signal);
                     const opened = await openLocalFile(root, segments, request.signal);
                     try {
                         const sizeBytes = numberSize(opened.stat);
                         if (sizeBytes === undefined) return notFoundResponse();
-                        const prefix = readPrefix(opened.fd, sizeBytes, request.signal);
+                        const prefix = await readPrefix(
+                            opened.handle,
+                            sizeBytes,
+                            request.signal
+                        );
                         const mimeType = mediaMimeType(segments.at(-1)!, prefix);
                         const selected =
                             parsedRange === undefined
@@ -497,15 +507,17 @@ export function createDescriptorOpenClawLocalHistoryMediaFetcher(
                         const body =
                             request.method === "HEAD"
                                 ? null
-                                : readExact(
-                                      opened.fd,
+                                : await readExact(
+                                      opened.handle,
                                       selected?.start ?? 0,
                                       selected === undefined
                                           ? sizeBytes
                                           : selected.endExclusive - selected.start,
                                       request.signal
                                   );
-                        const after = Fs.fstatSync(opened.fd, { bigint: true });
+                        abortIfRequested(request.signal);
+                        const after = await opened.handle.stat({ bigint: true });
+                        abortIfRequested(request.signal);
                         if (!isStableFileStat(root, opened.stat, after)) {
                             return notFoundResponse();
                         }
