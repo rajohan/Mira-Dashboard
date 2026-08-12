@@ -790,7 +790,7 @@ describe("persistent Gateway chat provider", () => {
         ]);
     });
 
-    test("projects separate bounded-text preview and full download URLs", async () => {
+    test("keeps known bounded managed text previewable", async () => {
         const textAttachmentId = "019fe633-9133-4ba0-8b80-809dd80dfb42";
         const harness = createHarness({
             "chat.history": {
@@ -802,7 +802,7 @@ describe("persistent Gateway chat provider", () => {
                                 attachment: {
                                     label: "notes.txt",
                                     mimeType: "text/plain",
-                                    sizeBytes: 2 * 1024 * 1024,
+                                    sizeBytes: chatTextPreviewMaximumBytes,
                                     url: `/api/chat/media/outgoing/${encodeURIComponent(
                                         sessionKey
                                     )}/${textAttachmentId}/full`,
@@ -837,11 +837,130 @@ describe("persistent Gateway chat provider", () => {
                     kind: "attachment",
                     mediaType: "text/plain",
                     renderPolicy: "bounded-text",
-                    sizeBytes: 2 * 1024 * 1024,
+                    sizeBytes: chatTextPreviewMaximumBytes,
                     url: `/api/chat/media/${projectedManagedAttachmentId}?disposition=preview`,
                 },
             ],
         });
+    });
+
+    test("keeps direct managed text without a known size download-only", async () => {
+        const directAttachmentId = "019fe633-9133-4ba0-8b80-809dd80dfb45";
+        const harness = createHarness({
+            "chat.history": {
+                messages: [
+                    {
+                        content: [
+                            {
+                                attachment: {
+                                    label: "unknown.txt",
+                                    mimeType: "text/plain",
+                                    url: `/api/chat/media/outgoing/${encodeURIComponent(
+                                        sessionKey
+                                    )}/${directAttachmentId}/full`,
+                                },
+                                type: "attachment",
+                            },
+                        ],
+                        id: "message-direct-managed-text-policy",
+                        role: "assistant",
+                    },
+                ],
+                offset: 0,
+                sessionKey,
+            },
+        });
+
+        const history = await harness.provider.history({
+            limit: 1,
+            maxChars: 64 * 1024,
+            offset: 0,
+            sessionKey,
+        });
+        expect(history.messages[0]?.content).toMatchObject({
+            kind: "complete",
+            parts: [
+                {
+                    fileName: "unknown.txt",
+                    kind: "attachment",
+                    renderPolicy: "download-only",
+                },
+            ],
+        });
+    });
+
+    test("keeps managed history text with unknown or oversized bytes download-only", async () => {
+        const unknownAttachmentId = "019fe633-9133-4ba0-8b80-809dd80dfb43";
+        const oversizedAttachmentId = "019fe633-9133-4ba0-8b80-809dd80dfb44";
+        const harness = createHarness({
+            "chat.history": {
+                messages: [
+                    {
+                        __openclaw: {
+                            media: [
+                                {
+                                    contentType: "text/plain",
+                                    fileName: "unknown.txt",
+                                    url: `/api/chat/media/outgoing/${encodeURIComponent(
+                                        sessionKey
+                                    )}/${unknownAttachmentId}/full`,
+                                },
+                                {
+                                    contentType: "application/json",
+                                    fileName: "oversized.json",
+                                    sizeBytes: chatTextPreviewMaximumBytes + 1,
+                                    url: `/api/chat/media/outgoing/${encodeURIComponent(
+                                        sessionKey
+                                    )}/${oversizedAttachmentId}/full`,
+                                },
+                            ],
+                        },
+                        content: "Managed history text",
+                        id: "message-managed-history-text-policy",
+                        role: "assistant",
+                    },
+                ],
+                offset: 0,
+                sessionKey,
+            },
+        });
+
+        const history = await harness.provider.history({
+            limit: 1,
+            maxChars: 64 * 1024,
+            offset: 0,
+            sessionKey,
+        });
+        const content = history.messages[0]!.content;
+        expect(content.kind).toBe("complete");
+        if (content.kind !== "complete") throw new Error("Expected complete history");
+        expect(
+            content.parts.flatMap((part) =>
+                part.kind === "attachment"
+                    ? [
+                          {
+                              fileName: part.fileName,
+                              renderPolicy: part.renderPolicy,
+                              sizeBytes: part.sizeBytes,
+                              usesDownloadUrl: part.url.endsWith("?disposition=download"),
+                          },
+                      ]
+                    : []
+            )
+        ).toEqual([
+            {
+                fileName: "unknown.txt",
+                renderPolicy: "download-only",
+                sizeBytes: undefined,
+                usesDownloadUrl: true,
+            },
+            {
+                fileName: "oversized.json",
+                renderPolicy: "download-only",
+                sizeBytes: chatTextPreviewMaximumBytes + 1,
+                usesDownloadUrl: true,
+            },
+        ]);
     });
 
     test("omits provider message keys that are not canonical Dashboard idempotency keys", async () => {

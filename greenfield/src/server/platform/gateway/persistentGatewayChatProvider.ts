@@ -762,7 +762,8 @@ function projectAttachmentPart(
         fileName,
         mediaType,
         partId,
-        sizeBytes
+        sizeBytes,
+        true
     );
 }
 
@@ -833,7 +834,8 @@ function projectLocalHistoryMedia(
                     fileName,
                     localHistoryMediaType(fact.contentType, fileName),
                     `history-media:${attachments.length + 1}`,
-                    localHistoryMediaSize(fact.sizeBytes)
+                    localHistoryMediaSize(fact.sizeBytes),
+                    true
                 )
             );
             continue;
