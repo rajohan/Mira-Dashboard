@@ -7,8 +7,13 @@ import {
     type LogMaintenanceExecutionSummary,
     logMaintenancePolicyIdSchema,
 } from "../../../contracts/logs.ts";
+import type { FixedHostOperationsExecutionPort } from "../../../shared/hostOperations.ts";
 import type { JsonObject } from "../../../shared/json.ts";
 import type { OpenClawGatewayLifecycleExecutionPort } from "../../../shared/openClawGatewayLifecycle.ts";
+import {
+    OpenClawServiceActionsExecutionError,
+    type OpenClawServiceActionsExecutionPort,
+} from "../../../shared/openClawServiceActions.ts";
 import { collectSystemHostPayload } from "../cache/systemHostProvider.ts";
 import { parseWorkspaceFileJobPayload } from "../files/jobPayload.ts";
 import type { MoltbookDashboardCollector } from "../moltbook/provider.ts";
@@ -17,12 +22,25 @@ import {
     type JobExecutableActionDefinition,
     type JobActionRegistration,
     type JobActionSuccessfulSettlementHandler,
+    JobActionOutcomeUnknownError,
     JobActionRetryableError,
+    hostSystemRestartJobActionDefinition,
+    hostSystemRestartJobActionKey,
+    hostSystemRestartJobResultSchema,
+    hostSystemUpdateJobActionDefinition,
+    hostSystemUpdateJobActionKey,
+    hostSystemUpdateJobResultSchema,
     jobActionDefinitions,
     logMaintenanceJobActionKey,
     openClawGatewayRestartJobActionDefinition,
     openClawGatewayRestartJobActionKey,
     openClawGatewayRestartJobResultSchema,
+    openClawInstallationUpdateJobActionDefinition,
+    openClawInstallationUpdateJobActionKey,
+    openClawInstallationUpdateJobResultSchema,
+    openClawSessionsCleanupJobActionDefinition,
+    openClawSessionsCleanupJobActionKey,
+    openClawSessionsCleanupJobResultSchema,
     validateJobActionRegistration,
     workspaceFileReplaceJobActionDefinition,
     workspaceFileReplaceJobActionKey,
@@ -292,6 +310,69 @@ export function createOpenClawGatewayRestartJobExecutor(
 }
 
 /**
+ * Adapts a separately privileged fixed host-operation port without persisting output.
+ * @param hostOperations Worker-only separately privileged fixed-operation authority.
+ * @param operationId Exact reviewed host operation.
+ * @returns A non-retryable empty-payload executor with a constant result surface.
+ */
+export function createHostOperationJobExecutor(
+    hostOperations: FixedHostOperationsExecutionPort,
+    operationId: "system-restart" | "system-update"
+): JobActionExecutor {
+    return (context, payload) =>
+        Effect.tryPromise({
+            catch: () => new Error("Fixed host operation failed"),
+            try: async (signal) => {
+                v.parse(emptyPayloadSchema, payload);
+                const result = await hostOperations.request(operationId, signal);
+                if (operationId === "system-restart") {
+                    return v.parse(hostSystemRestartJobResultSchema, {
+                        completedAtMs: context.nowMs(),
+                        status: result.status,
+                    });
+                }
+                return v.parse(hostSystemUpdateJobResultSchema, {
+                    completedAtMs: context.nowMs(),
+                    status: result.status,
+                });
+            },
+        });
+}
+
+/**
+ * Adapts one exact worker-only OpenClaw operation to a secret-free job result.
+ * @returns A non-retryable empty-payload executor for the selected operation.
+ */
+export function createOpenClawServiceActionJobExecutor(
+    serviceActions: OpenClawServiceActionsExecutionPort,
+    operationId: "openclaw-cleanup" | "openclaw-update"
+): JobActionExecutor {
+    return (context, payload) =>
+        Effect.tryPromise({
+            catch: (error) =>
+                error instanceof OpenClawServiceActionsExecutionError &&
+                error.reason === "unknown-outcome"
+                    ? new JobActionOutcomeUnknownError()
+                    : new Error("Fixed OpenClaw Service Action failed"),
+            try: async (signal) => {
+                v.parse(emptyPayloadSchema, payload);
+                if (operationId === "openclaw-cleanup") {
+                    const result = await serviceActions.cleanupSessions(signal);
+                    return v.parse(openClawSessionsCleanupJobResultSchema, {
+                        ...result,
+                        completedAtMs: context.nowMs(),
+                    });
+                }
+                const result = await serviceActions.updateInstallation(signal);
+                return v.parse(openClawInstallationUpdateJobResultSchema, {
+                    ...result,
+                    completedAtMs: context.nowMs(),
+                });
+            },
+        });
+}
+
+/**
  * Adapts one schema-validated spooled command to the worker-only structural writer.
  * @param writer Worker-owned descriptor writer.
  * @returns Durable action executor without web-process filesystem authority.
@@ -390,8 +471,10 @@ export function createJobWorkerActionRegistry(
 export interface JobWorkerActionResolverDependencies {
     readonly actionDefinitions?: readonly JobExecutableActionDefinition[];
     readonly logMaintenance: LogMaintenanceExecutionPort;
+    readonly hostOperations?: FixedHostOperationsExecutionPort;
     readonly moltbook: MoltbookDashboardCollector;
     readonly openClawGateway?: OpenClawGatewayLifecycleExecutionPort;
+    readonly openClawServiceActions?: OpenClawServiceActionsExecutionPort;
     readonly workspaceFiles?: WorkspaceFileWriteExecutionPort;
 }
 
@@ -406,6 +489,18 @@ export function createJobWorkerActionResolver(
             ...(dependencies.openClawGateway === undefined
                 ? []
                 : [openClawGatewayRestartJobActionDefinition]),
+            ...(dependencies.openClawServiceActions === undefined
+                ? []
+                : [
+                      openClawSessionsCleanupJobActionDefinition,
+                      openClawInstallationUpdateJobActionDefinition,
+                  ]),
+            ...(dependencies.hostOperations === undefined
+                ? []
+                : [
+                      hostSystemRestartJobActionDefinition,
+                      hostSystemUpdateJobActionDefinition,
+                  ]),
             ...(workspaceFiles === undefined
                 ? []
                 : [
@@ -435,6 +530,58 @@ export function createJobWorkerActionResolver(
                       actionKey: openClawGatewayRestartJobActionKey,
                       execute: createOpenClawGatewayRestartJobExecutor(
                           dependencies.openClawGateway
+                      ),
+                  }),
+              ]),
+        ...(dependencies.openClawServiceActions === undefined ||
+        !definitions.some(
+            ({ actionKey }) => actionKey === openClawSessionsCleanupJobActionKey
+        )
+            ? []
+            : [
+                  Object.freeze({
+                      actionKey: openClawSessionsCleanupJobActionKey,
+                      execute: createOpenClawServiceActionJobExecutor(
+                          dependencies.openClawServiceActions,
+                          "openclaw-cleanup"
+                      ),
+                  }),
+              ]),
+        ...(dependencies.openClawServiceActions === undefined ||
+        !definitions.some(
+            ({ actionKey }) => actionKey === openClawInstallationUpdateJobActionKey
+        )
+            ? []
+            : [
+                  Object.freeze({
+                      actionKey: openClawInstallationUpdateJobActionKey,
+                      execute: createOpenClawServiceActionJobExecutor(
+                          dependencies.openClawServiceActions,
+                          "openclaw-update"
+                      ),
+                  }),
+              ]),
+        ...(dependencies.hostOperations === undefined ||
+        !definitions.some(({ actionKey }) => actionKey === hostSystemRestartJobActionKey)
+            ? []
+            : [
+                  Object.freeze({
+                      actionKey: hostSystemRestartJobActionKey,
+                      execute: createHostOperationJobExecutor(
+                          dependencies.hostOperations,
+                          "system-restart"
+                      ),
+                  }),
+              ]),
+        ...(dependencies.hostOperations === undefined ||
+        !definitions.some(({ actionKey }) => actionKey === hostSystemUpdateJobActionKey)
+            ? []
+            : [
+                  Object.freeze({
+                      actionKey: hostSystemUpdateJobActionKey,
+                      execute: createHostOperationJobExecutor(
+                          dependencies.hostOperations,
+                          "system-update"
                       ),
                   }),
               ]),

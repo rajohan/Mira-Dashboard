@@ -1,0 +1,462 @@
+{
+  "$id": "urn:mira-dashboard:serviceActions.getStatus.output",
+  "type": "object",
+  "properties": {
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "activeRun": {
+            "type": "object",
+            "properties": {
+              "actionKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[a-z0-9][a-z0-9._-]*$"
+              },
+              "attemptCount": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 10
+              },
+              "attemptLimit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10
+              },
+              "availableAtMs": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8640000000000000
+              },
+              "cancellationPolicy": {
+                "enum": [
+                  "cooperative",
+                  "never",
+                  "queued-only"
+                ],
+                "type": "string"
+              },
+              "cancelRequestedAtMs": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8640000000000000
+              },
+              "displayName": {
+                "type": "string",
+                "maxLength": 160,
+                "minLength": 1,
+                "pattern": "\\S",
+                "allOf": [
+                  {
+                    "pattern": "^[^\\u0000]*$"
+                  },
+                  {
+                    "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                  }
+                ]
+              },
+              "eventCount": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000
+              },
+              "finishedAtMs": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8640000000000000
+              },
+              "firstStartedAtMs": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8640000000000000
+              },
+              "id": {
+                "type": "string",
+                "minLength": 36,
+                "maxLength": 36,
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              "lastAttemptStartedAtMs": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8640000000000000
+              },
+              "priority": {
+                "type": "integer",
+                "minimum": -100,
+                "maximum": 100
+              },
+              "queuedAtMs": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8640000000000000
+              },
+              "resourceClass": {
+                "enum": [
+                  "exclusive",
+                  "host-heavy",
+                  "interactive",
+                  "light",
+                  "network"
+                ],
+                "type": "string"
+              },
+              "resourceKeys": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[a-z0-9][a-z0-9._-]*$"
+                },
+                "maxItems": 32,
+                "$comment": "Live Valibot validation additionally requires resource keys to be unique, strictly sorted, and within their aggregate UTF-8 byte budget."
+              },
+              "retrySafe": {
+                "type": "boolean"
+              },
+              "scheduledForAtMs": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8640000000000000
+              },
+              "scheduledJobId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80,
+                "pattern": "^[a-z0-9][a-z0-9._-]*$"
+              },
+              "scheduledJobVersion": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "state": {
+                "enum": [
+                  "cancelled",
+                  "failed",
+                  "queued",
+                  "running",
+                  "succeeded",
+                  "timed-out"
+                ],
+                "type": "string"
+              },
+              "stateVersion": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "terminalCode": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[a-z0-9][a-z0-9._/-]*$"
+              },
+              "terminalMessage": {
+                "type": "string",
+                "maxLength": 2000,
+                "minLength": 1,
+                "pattern": "\\S",
+                "allOf": [
+                  {
+                    "pattern": "^[^\\u0000]*$"
+                  },
+                  {
+                    "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                  }
+                ]
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 1000,
+                "maximum": 86400000
+              },
+              "triggerType": {
+                "enum": [
+                  "manual",
+                  "schedule",
+                  "startup",
+                  "system"
+                ],
+                "type": "string"
+              },
+              "updatedAtMs": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8640000000000000
+              }
+            },
+            "required": [
+              "actionKey",
+              "attemptCount",
+              "attemptLimit",
+              "availableAtMs",
+              "cancellationPolicy",
+              "displayName",
+              "eventCount",
+              "id",
+              "priority",
+              "queuedAtMs",
+              "resourceClass",
+              "resourceKeys",
+              "retrySafe",
+              "state",
+              "stateVersion",
+              "timeoutMs",
+              "triggerType",
+              "updatedAtMs"
+            ],
+            "additionalProperties": false,
+            "$comment": "Live Valibot validation additionally requires run provenance, attempts, state, cancellation, and timestamps to agree."
+          },
+          "availability": {
+            "enum": [
+              "available",
+              "unavailable"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "enum": [
+              "openclaw-cleanup",
+              "openclaw-update",
+              "system-restart",
+              "system-update"
+            ],
+            "type": "string"
+          },
+          "latestRun": {
+            "type": "object",
+            "properties": {
+              "actionKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[a-z0-9][a-z0-9._-]*$"
+              },
+              "attemptCount": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 10
+              },
+              "attemptLimit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10
+              },
+              "availableAtMs": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8640000000000000
+              },
+              "cancellationPolicy": {
+                "enum": [
+                  "cooperative",
+                  "never",
+                  "queued-only"
+                ],
+                "type": "string"
+              },
+              "cancelRequestedAtMs": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8640000000000000
+              },
+              "displayName": {
+                "type": "string",
+                "maxLength": 160,
+                "minLength": 1,
+                "pattern": "\\S",
+                "allOf": [
+                  {
+                    "pattern": "^[^\\u0000]*$"
+                  },
+                  {
+                    "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                  }
+                ]
+              },
+              "eventCount": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000
+              },
+              "finishedAtMs": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8640000000000000
+              },
+              "firstStartedAtMs": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8640000000000000
+              },
+              "id": {
+                "type": "string",
+                "minLength": 36,
+                "maxLength": 36,
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              "lastAttemptStartedAtMs": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8640000000000000
+              },
+              "priority": {
+                "type": "integer",
+                "minimum": -100,
+                "maximum": 100
+              },
+              "queuedAtMs": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8640000000000000
+              },
+              "resourceClass": {
+                "enum": [
+                  "exclusive",
+                  "host-heavy",
+                  "interactive",
+                  "light",
+                  "network"
+                ],
+                "type": "string"
+              },
+              "resourceKeys": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[a-z0-9][a-z0-9._-]*$"
+                },
+                "maxItems": 32,
+                "$comment": "Live Valibot validation additionally requires resource keys to be unique, strictly sorted, and within their aggregate UTF-8 byte budget."
+              },
+              "retrySafe": {
+                "type": "boolean"
+              },
+              "scheduledForAtMs": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8640000000000000
+              },
+              "scheduledJobId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80,
+                "pattern": "^[a-z0-9][a-z0-9._-]*$"
+              },
+              "scheduledJobVersion": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "state": {
+                "enum": [
+                  "cancelled",
+                  "failed",
+                  "queued",
+                  "running",
+                  "succeeded",
+                  "timed-out"
+                ],
+                "type": "string"
+              },
+              "stateVersion": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "terminalCode": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[a-z0-9][a-z0-9._/-]*$"
+              },
+              "terminalMessage": {
+                "type": "string",
+                "maxLength": 2000,
+                "minLength": 1,
+                "pattern": "\\S",
+                "allOf": [
+                  {
+                    "pattern": "^[^\\u0000]*$"
+                  },
+                  {
+                    "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                  }
+                ]
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 1000,
+                "maximum": 86400000
+              },
+              "triggerType": {
+                "enum": [
+                  "manual",
+                  "schedule",
+                  "startup",
+                  "system"
+                ],
+                "type": "string"
+              },
+              "updatedAtMs": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8640000000000000
+              }
+            },
+            "required": [
+              "actionKey",
+              "attemptCount",
+              "attemptLimit",
+              "availableAtMs",
+              "cancellationPolicy",
+              "displayName",
+              "eventCount",
+              "id",
+              "priority",
+              "queuedAtMs",
+              "resourceClass",
+              "resourceKeys",
+              "retrySafe",
+              "state",
+              "stateVersion",
+              "timeoutMs",
+              "triggerType",
+              "updatedAtMs"
+            ],
+            "additionalProperties": false,
+            "$comment": "Live Valibot validation additionally requires run provenance, attempts, state, cancellation, and timestamps to agree."
+          }
+        },
+        "required": [
+          "availability",
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "maxItems": 4,
+      "$comment": "Live Valibot validation additionally requires the four fixed service-action rows to be complete, unique, and canonically ordered."
+    },
+    "observedAtMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 8640000000000000
+    }
+  },
+  "required": [
+    "actions",
+    "observedAtMs"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

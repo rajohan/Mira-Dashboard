@@ -18,7 +18,7 @@ export const automationPrincipalCapabilities = sqliteTable(
     (table) => [
         check(
             "automation_principal_capabilities_capability_check",
-            sql`${table.capability} IN ('agents:read', 'agents:write', 'cache:read', 'cache:write', 'chat:read', 'chat:write', 'files:read', 'files:write', 'gateway-sessions:read', 'gateway-sessions:write', 'jobs:read', 'jobs:write', 'logs:read', 'logs:write', 'monitoring:write', 'notifications:read', 'notifications:write', 'openclaw-settings:read', 'openclaw-settings:write', 'openclaw-tasks:read', 'openclaw-tasks:write', 'reports:read', 'reports:write', 'tasks:read', 'tasks:write', 'terminal:read', 'terminal:write')`
+            sql`${table.capability} IN ('agents:read', 'agents:write', 'cache:read', 'cache:write', 'chat:read', 'chat:write', 'files:read', 'files:write', 'gateway-sessions:read', 'gateway-sessions:write', 'jobs:read', 'jobs:write', 'logs:read', 'logs:write', 'monitoring:write', 'notifications:read', 'notifications:write', 'openclaw-settings:read', 'openclaw-settings:write', 'openclaw-tasks:read', 'openclaw-tasks:write', 'reports:read', 'reports:write', 'service-actions:read', 'service-actions:write', 'tasks:read', 'tasks:write', 'terminal:read', 'terminal:write')`
         ),
         check(
             "automation_principal_capabilities_granted_at_check",

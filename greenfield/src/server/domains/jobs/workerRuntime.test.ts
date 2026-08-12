@@ -36,6 +36,25 @@ const baseRuntimeOptions = {
     openClawGateway: Object.freeze({
         restart: () => Promise.resolve(),
     }),
+    openClawServiceActions: Object.freeze({
+        cleanupSessions: () =>
+            Promise.resolve({
+                artifactsRemoved: 0,
+                bytesFreed: 0,
+                diskEntriesRemoved: 0,
+                diskFilesRemoved: 0,
+                dmScopesRetired: 0,
+                entriesAfter: 0,
+                entriesBefore: 0,
+                entriesCapped: 0,
+                entriesPruned: 0,
+                missingEntriesRemoved: 0,
+                modelRunsPruned: 0,
+                status: "completed" as const,
+                storesProcessed: 0,
+            }),
+        updateInstallation: () => Promise.resolve({ status: "accepted" as const }),
+    }),
     pid: 123,
     releaseId: "a".repeat(40),
     sideEffects: {
@@ -100,6 +119,8 @@ function runtimeFixture(initializationFailure?: Error) {
     });
     let dieNotificationLoop: ((error: unknown) => void) | undefined;
     const persistentGatewayTransport = Object.freeze({
+        requestOpenClawServiceAction: () =>
+            Promise.reject(new Error("OpenClaw operations are unavailable in fixture")),
         start() {
             events.push("gateway-start");
         },
@@ -152,6 +173,8 @@ function runtimeFixture(initializationFailure?: Error) {
                 resourceClass: "exclusive",
                 retrySafe: false,
             });
+            expect(options.findAction?.("openclaw.sessions.cleanup")).toBeDefined();
+            expect(options.findAction?.("openclaw.installation.update")).toBeDefined();
             return coordinator;
         },
         createDatabaseRuntime() {
@@ -331,6 +354,44 @@ describe("Dashboard worker runtime", () => {
         expect(fixture.events.indexOf("workspace-files-dispose")).toBeLessThan(
             fixture.events.indexOf("gateway-stop")
         );
+    });
+
+    test("registers only fixed host operations reported available at worker startup", async () => {
+        const fixture = runtimeFixture();
+        let requests = 0;
+        const options: DashboardWorkerRuntimeOptions = {
+            ...fixture.options,
+            hostOperations: {
+                availableOperations: () => Promise.resolve(["system-restart"]),
+                request: () => {
+                    requests += 1;
+                    return Promise.resolve({ status: "accepted" });
+                },
+            },
+        };
+        const dependencies: DashboardWorkerRuntimeDependencies = {
+            ...fixture.dependencies,
+            createCoordinator(coordinatorOptions) {
+                expect(
+                    coordinatorOptions.findAction?.("host.system.restart")
+                ).toBeDefined();
+                expect(
+                    coordinatorOptions.findAction?.("host.system.update")
+                ).toBeUndefined();
+                expect(
+                    coordinatorOptions.actionDefinitions?.map(
+                        ({ actionKey }) => actionKey
+                    )
+                ).toContain("host.system.restart");
+                return fixture.dependencies.createCoordinator(coordinatorOptions);
+            },
+        };
+        const runtime = createDashboardWorkerRuntime(options, dependencies);
+
+        await runtime.initialize();
+        await runtime.dispose();
+
+        expect(requests).toBe(0);
     });
 
     test("forces teardown when durable notification release stalls", async () => {

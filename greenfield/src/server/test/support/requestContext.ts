@@ -43,6 +43,7 @@ import type { AutomationSecurityLifecycleService } from "../../domains/security/
 import type { MfaAccountLifecycleService } from "../../domains/security/mfa/accountLifecycle.ts";
 import type { MfaLoginLifecycleService } from "../../domains/security/mfa/loginLifecycle.ts";
 import type { SecurityAuditLifecycleService } from "../../domains/security/securityAuditLifecycle.ts";
+import type { ServiceActionsService } from "../../domains/serviceActions/service.ts";
 import type { SystemHealthDiagnosticsService } from "../../domains/system/healthDiagnosticsService.ts";
 import {
     SystemMetricsUnavailableError,
@@ -91,6 +92,10 @@ function unavailableOpenClawCronCall(): Promise<never> {
 
 function unavailableOpenClawSettingsCall(): Promise<never> {
     return Promise.reject(new Error("OpenClaw settings unavailable"));
+}
+
+function unavailableServiceActionsCall(): Promise<never> {
+    return Promise.reject(new Error("Service actions unavailable"));
 }
 
 /**
@@ -166,6 +171,17 @@ export function createTestOpenClawSettingsService(): OpenClawSettingsService {
         restartGateway: unavailableOpenClawSettingsCall,
         setSkillEnabled: unavailableOpenClawSettingsCall,
         updateConfiguration: unavailableOpenClawSettingsCall,
+    });
+}
+
+/**
+ * Creates a stable fail-closed Service Actions service for generic request tests.
+ * @returns An inert fixed-action service.
+ */
+export function createTestServiceActionsService(): ServiceActionsService {
+    return Object.freeze({
+        getStatus: unavailableServiceActionsCall,
+        request: unavailableServiceActionsCall,
     });
 }
 
@@ -526,6 +542,7 @@ export interface TestServerSecurityServices {
     readonly openClawCronService: OpenClawCronService;
     readonly openClawSettingsService: OpenClawSettingsService;
     readonly securityAuditLifecycle: SecurityAuditLifecycleService;
+    readonly serviceActionsService: ServiceActionsService;
     readonly systemHealthDiagnosticsService: SystemHealthDiagnosticsService;
     readonly taskService: TaskService["Service"];
 }
@@ -568,6 +585,8 @@ export function createTestServerSecurityServices(
             overrides.openClawSettingsService ?? createTestOpenClawSettingsService(),
         securityAuditLifecycle:
             overrides.securityAuditLifecycle ?? createTestSecurityAuditLifecycleService(),
+        serviceActionsService:
+            overrides.serviceActionsService ?? createTestServiceActionsService(),
         systemHealthDiagnosticsService:
             overrides.systemHealthDiagnosticsService ??
             createTestSystemHealthDiagnosticsService(),
@@ -667,6 +686,7 @@ export function createTestRequestContext(
         readonly requestId?: string;
         readonly responseHeaders?: Headers;
         readonly securityAuditLifecycle?: SecurityAuditLifecycleService;
+        readonly serviceActionsService?: ServiceActionsService;
         readonly systemHealthDiagnosticsService?: SystemHealthDiagnosticsService;
         readonly taskService?: TaskService["Service"];
     } = {}
@@ -708,6 +728,8 @@ export function createTestRequestContext(
         responseHeaders: options.responseHeaders ?? new Headers(),
         securityAuditLifecycle:
             options.securityAuditLifecycle ?? createTestSecurityAuditLifecycleService(),
+        serviceActionsService:
+            options.serviceActionsService ?? createTestServiceActionsService(),
         systemHealthDiagnosticsService:
             options.systemHealthDiagnosticsService ??
             createTestSystemHealthDiagnosticsService(),

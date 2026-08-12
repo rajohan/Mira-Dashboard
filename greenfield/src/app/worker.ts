@@ -17,6 +17,7 @@ import {
     type DashboardProjectLayout,
     resolveDashboardProjectLayout,
 } from "../server/platform/filesystem/projectLayout.ts";
+import { createPersistentGatewayOpenClawServiceActionsProvider } from "../server/platform/gateway/persistentGatewayOpenClawServiceActionsProvider.ts";
 import {
     createPersistentGatewayTaskNotificationTransport,
     type PersistentGatewayTaskNotificationTransport,
@@ -38,7 +39,9 @@ import {
     createProcessTerminationController,
     type ProcessTerminationController,
 } from "../server/platform/runtime/processSignals.ts";
+import type { FixedHostOperationsExecutionPort } from "../shared/hostOperations.ts";
 import type { OpenClawGatewayLifecycleExecutionPort } from "../shared/openClawGatewayLifecycle.ts";
+import type { OpenClawServiceActionsExecutionPort } from "../shared/openClawServiceActions.ts";
 import {
     createDescriptorWorkspaceFileStructuralWriter,
     type WorkerWorkspaceFileRootConfiguration,
@@ -93,19 +96,25 @@ export interface DashboardWorkerProcessDependencies {
     readonly createLogMaintenanceExecutor: (
         layout: DashboardProjectLayout
     ) => LogMaintenanceExecutor;
+    readonly createHostOperations?: () => FixedHostOperationsExecutionPort | undefined;
     readonly createOpenClawGatewayLifecycle: (
         openClawRoot: string
-    ) => OpenClawGatewayLifecycleExecutionPort;
+    ) => OpenClawGatewayLifecycleExecutionPort | undefined;
+    readonly createOpenClawServiceActions: (
+        transport: PersistentGatewayTaskNotificationTransport
+    ) => OpenClawServiceActionsExecutionPort | undefined;
     readonly createRuntime: (
         layout: DashboardProjectLayout,
         release: RuntimeRelease,
         logger: StructuredLogger,
         persistentGatewayTransport: PersistentGatewayTaskNotificationTransport,
-        openClawGateway: OpenClawGatewayLifecycleExecutionPort,
+        openClawGateway: OpenClawGatewayLifecycleExecutionPort | undefined,
+        openClawServiceActions: OpenClawServiceActionsExecutionPort | undefined,
         workspaceRoot: WorkerWorkspaceFileRootConfiguration,
         openClawRoot: WorkerWorkspaceFileRootConfiguration,
         logMaintenance: LogMaintenanceExecutor,
-        moltbook: MoltbookDashboardCollector
+        moltbook: MoltbookDashboardCollector,
+        hostOperations: FixedHostOperationsExecutionPort | undefined
     ) => DashboardWorkerRuntime;
     readonly createTerminationController: () => ProcessTerminationController;
     readonly loadRelease: (
@@ -180,16 +189,19 @@ const defaultDependencies = Object.freeze({
     createLogMaintenanceExecutor: createWorkerLogMaintenanceExecutor,
     createOpenClawGatewayLifecycle: (openClawRoot) =>
         createFixedOpenClawGatewayLifecycle({ openClawRoot }),
+    createOpenClawServiceActions: createPersistentGatewayOpenClawServiceActionsProvider,
     createRuntime: (
         layout,
         release,
         _logger,
         gatewayTransport,
         openClawGateway,
+        openClawServiceActions,
         workspaceRoot,
         openClawRoot,
         logMaintenance,
-        moltbook
+        moltbook,
+        hostOperations
     ) => {
         const writer = createDescriptorWorkspaceFileStructuralWriter({
             roots: [workspaceRoot, openClawRoot],
@@ -204,7 +216,9 @@ const defaultDependencies = Object.freeze({
             },
             logMaintenance,
             moltbook,
-            openClawGateway,
+            ...(openClawGateway === undefined ? {} : { openClawGateway }),
+            ...(openClawServiceActions === undefined ? {} : { openClawServiceActions }),
+            ...(hostOperations === undefined ? {} : { hostOperations }),
             persistentGatewayTransport: gatewayTransport,
             pid: process.pid,
             releaseId: release.manifest.source.commitSha,
@@ -313,6 +327,9 @@ export async function runDashboardWorkerProcess(
         const openClawGateway = dependencies.createOpenClawGatewayLifecycle(
             openClawRoot.path
         );
+        const openClawServiceActions =
+            dependencies.createOpenClawServiceActions(gatewayTransport);
+        const hostOperations = dependencies.createHostOperations?.();
         const moltbook = createMoltbookDashboardCollector({
             agentName: configuration.moltbookAgentName,
             apiKey: configuration.moltbookApiKey,
@@ -323,10 +340,12 @@ export async function runDashboardWorkerProcess(
             logger,
             gatewayTransport,
             openClawGateway,
+            openClawServiceActions,
             workspaceRoot,
             openClawRoot,
             logMaintenance,
-            moltbook
+            moltbook,
+            hostOperations
         );
         const runtimeCompletion = runtime.completion.then(
             () => ({ kind: "stopped" as const }),

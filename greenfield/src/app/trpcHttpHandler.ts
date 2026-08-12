@@ -18,6 +18,7 @@ import type { AutomationSecurityLifecycleService } from "../server/domains/secur
 import type { MfaAccountLifecycleService } from "../server/domains/security/mfa/accountLifecycle.ts";
 import type { MfaLoginLifecycleService } from "../server/domains/security/mfa/loginLifecycle.ts";
 import type { SecurityAuditLifecycleService } from "../server/domains/security/securityAuditLifecycle.ts";
+import type { ServiceActionsService } from "../server/domains/serviceActions/service.ts";
 import type { SystemHealthDiagnosticsService } from "../server/domains/system/healthDiagnosticsService.ts";
 import type { TaskService } from "../server/domains/tasks/service.ts";
 import type { TerminalService } from "../server/domains/terminal/service.ts";
@@ -64,6 +65,7 @@ export interface TrpcHttpHandlerOptions {
     readonly openClawSettingsService: OpenClawSettingsService;
     readonly openClawTasksService?: OpenClawTasksService;
     readonly securityAuditLifecycle: SecurityAuditLifecycleService;
+    readonly serviceActionsService: ServiceActionsService;
     readonly systemHealthDiagnosticsService: SystemHealthDiagnosticsService;
     readonly taskService: TaskService["Service"];
     readonly terminalService?: TerminalService;
@@ -266,6 +268,7 @@ export function createTrpcHttpHandler(options: TrpcHttpHandlerOptions) {
                     requestId,
                     responseHeaders: resHeaders,
                     securityAuditLifecycle: options.securityAuditLifecycle,
+                    serviceActionsService: options.serviceActionsService,
                     systemHealthDiagnosticsService:
                         options.systemHealthDiagnosticsService,
                     taskService: options.taskService,

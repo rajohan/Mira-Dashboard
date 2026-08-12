@@ -1241,6 +1241,7 @@ describe("Dashboard OpenClaw operations composition", () => {
             await jobRepository.registerWorker({
                 ...noJobSideEffects,
                 worker: {
+                    actionKeysJson: '["openclaw.gateway.restart"]',
                     capacity: 1,
                     drainingAt: null,
                     heartbeatAt: authenticationTestNow,

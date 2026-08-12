@@ -511,6 +511,7 @@ describe("Drizzle-generated Valibot row schemas", () => {
         expect(v.parse(jobRunEventSelectSchema, jobEvent)).toBeDefined();
 
         const worker = {
+            actionKeysJson: '["host.system.update"]',
             capacity: 2,
             drainingAt: null,
             heartbeatAt: jobUpdatedAt,
@@ -681,6 +682,7 @@ describe("Drizzle-generated Valibot row schemas", () => {
         ).toThrow();
         expect(() =>
             v.parse(workerInstanceSelectSchema, {
+                actionKeysJson: "[]",
                 capacity: 1,
                 drainingAt: null,
                 heartbeatAt: jobUpdatedAt,
@@ -692,6 +694,20 @@ describe("Drizzle-generated Valibot row schemas", () => {
                 stoppedAt: null,
             })
         ).toThrow();
+        expect(() =>
+            v.parse(workerInstanceInsertSchema, {
+                actionKeysJson: '["host.system.update","host.system.restart"]',
+                capacity: 2,
+                drainingAt: null,
+                heartbeatAt: jobUpdatedAt,
+                id: jobWorkerId,
+                pid: 1234,
+                releaseId: "b".repeat(40),
+                startedAt: jobCreatedAt,
+                state: "online",
+                stoppedAt: null,
+            })
+        ).toThrow("Stored worker action keys are invalid");
         expect(() =>
             v.parse(resourceLeaseSelectSchema, {
                 acquiredAt: jobCreatedAt,

@@ -4139,6 +4139,16 @@
       "table": "users"
     },
     {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "'[]'",
+      "generated": null,
+      "name": "action_keys_json",
+      "entityType": "columns",
+      "table": "worker_instances"
+    },
+    {
       "type": "integer",
       "notNull": true,
       "autoincrement": false,
@@ -7097,7 +7107,7 @@
       "table": "automation_credentials"
     },
     {
-      "value": "\"capability\" IN ('agents:read', 'agents:write', 'cache:read', 'cache:write', 'chat:read', 'chat:write', 'files:read', 'files:write', 'gateway-sessions:read', 'gateway-sessions:write', 'jobs:read', 'jobs:write', 'logs:read', 'logs:write', 'monitoring:write', 'notifications:read', 'notifications:write', 'openclaw-settings:read', 'openclaw-settings:write', 'openclaw-tasks:read', 'openclaw-tasks:write', 'reports:read', 'reports:write', 'tasks:read', 'tasks:write', 'terminal:read', 'terminal:write')",
+      "value": "\"capability\" IN ('agents:read', 'agents:write', 'cache:read', 'cache:write', 'chat:read', 'chat:write', 'files:read', 'files:write', 'gateway-sessions:read', 'gateway-sessions:write', 'jobs:read', 'jobs:write', 'logs:read', 'logs:write', 'monitoring:write', 'notifications:read', 'notifications:write', 'openclaw-settings:read', 'openclaw-settings:write', 'openclaw-tasks:read', 'openclaw-tasks:write', 'reports:read', 'reports:write', 'service-actions:read', 'service-actions:write', 'tasks:read', 'tasks:write', 'terminal:read', 'terminal:write')",
       "name": "automation_principal_capabilities_capability_check",
       "entityType": "checks",
       "table": "automation_principal_capabilities"
@@ -8415,6 +8425,12 @@
       "name": "users_username_check",
       "entityType": "checks",
       "table": "users"
+    },
+    {
+      "value": "length(CAST(\"action_keys_json\" AS BLOB)) <= 4096 AND CASE WHEN json_valid(\"action_keys_json\") THEN json_type(\"action_keys_json\") = 'array' ELSE 0 END",
+      "name": "worker_instances_action_keys_json_check",
+      "entityType": "checks",
+      "table": "worker_instances"
     },
     {
       "value": "\"capacity\" BETWEEN 1 AND 16",

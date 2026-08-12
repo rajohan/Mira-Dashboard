@@ -8,6 +8,7 @@ import {
     chatHistoryPageMaximum,
     chatHistoryRetainedPageMaximum,
 } from "../contracts/chatModel.ts";
+import { serviceActionIds } from "../contracts/serviceActions.ts";
 import { createAgentRepository } from "../server/domains/agents/repository.ts";
 import { createAgentService } from "../server/domains/agents/service.ts";
 import {
@@ -44,11 +45,18 @@ import {
     createGatewaySessionsService,
     type GatewaySessionsService,
 } from "../server/domains/gatewaySessions/service.ts";
+import {
+    hostSystemRestartJobActionDefinition,
+    hostSystemUpdateJobActionDefinition,
+    openClawInstallationUpdateJobActionDefinition,
+    openClawSessionsCleanupJobActionDefinition,
+} from "../server/domains/jobs/actionRegistry.ts";
 import { createJobRepository } from "../server/domains/jobs/repository.ts";
 import {
     createJobService,
     reconcileJobSchedules,
 } from "../server/domains/jobs/service.ts";
+import { createServiceActionQueue } from "../server/domains/jobs/serviceActionQueue.ts";
 import { createMonitoringCatalogService } from "../server/domains/monitoring/catalogService.ts";
 import { createMonitoringRepository } from "../server/domains/monitoring/repository.ts";
 import { createMonitoringService } from "../server/domains/monitoring/service.ts";
@@ -111,6 +119,9 @@ import { createRequestAuthenticator } from "../server/domains/security/requestAu
 import { createRequestAuthenticationRepository } from "../server/domains/security/requestAuthenticationRepository.ts";
 import { createSecurityAuditLifecycleService } from "../server/domains/security/securityAuditLifecycle.ts";
 import { createSecurityAuditLifecycleRepository } from "../server/domains/security/securityAuditLifecycleRepository.ts";
+import { createSqliteServiceActionAuditWriter } from "../server/domains/serviceActions/operationAudit.ts";
+import { createServiceActionsService } from "../server/domains/serviceActions/service.ts";
+import { createSqliteServiceActionStatusReader } from "../server/domains/serviceActions/statusReader.ts";
 import { createSystemHealthDiagnosticsService } from "../server/domains/system/healthDiagnosticsService.ts";
 import { createTaskRepository } from "../server/domains/tasks/repository.ts";
 import { createTaskService } from "../server/domains/tasks/service.ts";
@@ -223,6 +234,7 @@ export interface DashboardServerOptions extends Omit<
     | "openClawSettingsService"
     | "openClawTasksService"
     | "securityAuditLifecycle"
+    | "serviceActionsService"
     | "systemHealthDiagnosticsService"
     | "taskService"
     | "terminalService"
@@ -746,6 +758,62 @@ export async function createDashboardServer(
             ...(domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }),
             repository: jobRepository,
             wakeEventPump,
+        });
+        const serviceActionDefinitions = Object.freeze({
+            "openclaw-cleanup": openClawSessionsCleanupJobActionDefinition,
+            "openclaw-update": openClawInstallationUpdateJobActionDefinition,
+            "system-restart": hostSystemRestartJobActionDefinition,
+            "system-update": hostSystemUpdateJobActionDefinition,
+        });
+        const serviceActionsService = createServiceActionsService({
+            auditWriter: createSqliteServiceActionAuditWriter({
+                ...(domainNow === undefined ? {} : { clock: domainNow }),
+                database,
+                writeAdmission: databaseRuntime,
+            }),
+            ...(domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }),
+            onAuditSettlementFailure: ({ actionId, cause, settlement }) =>
+                options.applicationRuntime.logger.error({
+                    component: "service-actions-audit",
+                    event: "service_actions.audit_settlement.failed",
+                    failure: cause,
+                    fields: {
+                        actionId,
+                        kind: "service-actions-audit-settlement",
+                        settlement,
+                    },
+                    outcome: "server-error",
+                }),
+            queue: createServiceActionQueue({
+                definitions: serviceActionDefinitions,
+                ...(domainNow === undefined
+                    ? {}
+                    : { nowMs: () => domainNow().getTime() }),
+                repository: jobRepository,
+                wakeEventPump,
+            }),
+            statusReader:
+                options.verifiedReleaseId === undefined
+                    ? Object.freeze({
+                          read(signal?: AbortSignal) {
+                              signal?.throwIfAborted();
+                              return Promise.resolve(
+                                  serviceActionIds.map((id) =>
+                                      Object.freeze({
+                                          availability: "unavailable" as const,
+                                          id,
+                                      })
+                                  )
+                              );
+                          },
+                      })
+                    : createSqliteServiceActionStatusReader({
+                          expectedReleaseId: options.verifiedReleaseId,
+                          ...(domainNow === undefined
+                              ? {}
+                              : { nowMs: () => domainNow().getTime() }),
+                          repository: jobRepository,
+                      }),
         });
         const logsService =
             options.dashboardLogsRoot === undefined ||
@@ -1354,6 +1422,7 @@ export async function createDashboardServer(
             port: options.port,
             readiness: options.readiness,
             securityAuditLifecycle,
+            serviceActionsService,
             systemHealthDiagnosticsService,
             taskService,
             ...(terminalComposition === undefined

@@ -36,17 +36,22 @@ export async function runDevelopmentWorkerProcess(
     const defaults = createDefaultDashboardWorkerProcessDependencies();
     const dependencies = Object.freeze({
         ...defaults,
+        createHostOperations: () => void 0,
         createLogMaintenanceExecutor: createDevelopmentLogMaintenanceExecutor,
+        createOpenClawGatewayLifecycle: () => void 0,
+        createOpenClawServiceActions: () => void 0,
         createRuntime: (
             layout,
             source,
             _logger,
             gatewayTransport,
             openClawGateway,
+            openClawServiceActions,
             workspaceRoot,
             openClawRoot,
             logMaintenance,
-            moltbook
+            moltbook,
+            hostOperations
         ) => {
             const writer = createDescriptorWorkspaceFileStructuralWriter({
                 roots: [workspaceRoot, openClawRoot],
@@ -61,7 +66,11 @@ export async function runDevelopmentWorkerProcess(
                 },
                 logMaintenance,
                 moltbook,
-                openClawGateway,
+                ...(openClawGateway === undefined ? {} : { openClawGateway }),
+                ...(openClawServiceActions === undefined
+                    ? {}
+                    : { openClawServiceActions }),
+                ...(hostOperations === undefined ? {} : { hostOperations }),
                 persistentGatewayTransport: gatewayTransport,
                 pid: process.pid,
                 releaseId: source.manifest.source.commitSha,

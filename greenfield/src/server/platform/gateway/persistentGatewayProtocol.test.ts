@@ -9,6 +9,7 @@ import {
     assertPersistentGatewayChatWriteParameters,
     assertPersistentGatewayOpenClawSettingsReadParameters,
     assertPersistentGatewayOpenClawSettingsWriteParameters,
+    assertPersistentGatewayOpenClawServiceActionParameters,
     assertPersistentGatewayReadWriteParameters,
     assertPersistentGatewayTaskReadParameters,
     assertPersistentGatewayTaskWriteParameters,
@@ -16,6 +17,7 @@ import {
     isPersistentGatewayAdminMethod,
     isPersistentGatewayOpenClawSettingsReadMethod,
     isPersistentGatewayOpenClawSettingsWriteMethod,
+    isPersistentGatewayOpenClawServiceActionMethod,
     isPersistentGatewayReadWriteMethod,
     parsePersistentGatewayChallenge,
     parsePersistentGatewayChatSendAcknowledgement,
@@ -23,6 +25,7 @@ import {
     parsePersistentGatewayEventEnvelope,
     parsePersistentGatewayHello,
     parsePersistentGatewayPrivateChatEvent,
+    parsePersistentGatewayOpenClawServiceActionResponse,
     parsePersistentGatewayResponse,
     parsePersistentGatewaySessionMessagesSubscriptionAcknowledgement,
     parsePersistentGatewaySessionsSubscriptionAcknowledgement,
@@ -39,6 +42,9 @@ import {
     persistentGatewayOpenClawSettingsReadMethods,
     persistentGatewayOpenClawSettingsPatchMaximumBytes,
     persistentGatewayOpenClawSettingsWriteMethods,
+    persistentGatewayOpenClawCleanupStoreMaximum,
+    persistentGatewayOpenClawServiceActionMethods,
+    persistentGatewayOpenClawServiceActionResponseMaximumBytes,
     persistentGatewaySessionScopedEventsCapability,
     persistentGatewayTaskNotificationMethod,
     persistentGatewayTaskReadMethods,
@@ -203,6 +209,10 @@ describe("persistent Gateway protocol-v4 boundary", () => {
             "config.patch",
             "skills.update",
         ]);
+        expect(persistentGatewayOpenClawServiceActionMethods).toEqual([
+            "sessions.cleanup",
+            "update.run",
+        ]);
         expect(isPersistentGatewayReadWriteMethod("sessions.list")).toBe(true);
         expect(isPersistentGatewayReadWriteMethod("chat.send")).toBe(false);
         expect(isPersistentGatewayReadWriteMethod("config.patch")).toBe(false);
@@ -212,6 +222,13 @@ describe("persistent Gateway protocol-v4 boundary", () => {
         expect(isPersistentGatewayOpenClawSettingsWriteMethod("config.patch")).toBe(true);
         expect(isPersistentGatewayOpenClawSettingsWriteMethod("skills.update")).toBe(
             true
+        );
+        expect(isPersistentGatewayOpenClawServiceActionMethod("sessions.cleanup")).toBe(
+            true
+        );
+        expect(isPersistentGatewayOpenClawServiceActionMethod("update.run")).toBe(true);
+        expect(isPersistentGatewayOpenClawServiceActionMethod("config.patch")).toBe(
+            false
         );
     });
 
@@ -446,6 +463,191 @@ describe("persistent Gateway protocol-v4 boundary", () => {
                 note: "Updated from Mira Dashboard settings",
                 raw: "\u00E5".repeat(
                     persistentGatewayOpenClawSettingsPatchMaximumBytes / 2 + 1
+                ),
+            })
+        ).toThrow(TypeError);
+    });
+
+    test("strictly binds and sanitizes worker-only OpenClaw Service Actions", () => {
+        expect(() =>
+            assertPersistentGatewayOpenClawServiceActionParameters("sessions.cleanup", {
+                allAgents: true,
+                enforce: true,
+            })
+        ).not.toThrow();
+        expect(() =>
+            assertPersistentGatewayOpenClawServiceActionParameters("update.run", {
+                timeoutMs: 1_200_000,
+            })
+        ).not.toThrow();
+        for (const parameters of [
+            {},
+            { allAgents: false, enforce: true },
+            { allAgents: true, enforce: true, fixMissing: true },
+        ]) {
+            expect(() =>
+                assertPersistentGatewayOpenClawServiceActionParameters(
+                    "sessions.cleanup",
+                    parameters
+                )
+            ).toThrow(TypeError);
+        }
+        for (const parameters of [
+            {},
+            { timeoutMs: 120_000 },
+            { note: "unsafe", timeoutMs: 1_200_000 },
+        ]) {
+            expect(() =>
+                assertPersistentGatewayOpenClawServiceActionParameters(
+                    "update.run",
+                    parameters
+                )
+            ).toThrow(TypeError);
+        }
+
+        expect(
+            parsePersistentGatewayOpenClawServiceActionResponse("sessions.cleanup", {
+                allAgents: true,
+                dryRun: false,
+                mode: "enforce",
+                stores: [
+                    {
+                        afterCount: 5,
+                        agentId: "main",
+                        applied: true,
+                        appliedCount: 5,
+                        beforeCount: 8,
+                        capped: 1,
+                        diskBudget: {
+                            freedBytes: 200,
+                            highWaterBytes: 800,
+                            maxBytes: 1000,
+                            overBudget: false,
+                            removedEntries: 2,
+                            removedFiles: 1,
+                            totalBytesAfter: 500,
+                            totalBytesBefore: 700,
+                        },
+                        dmScopeRetired: 0,
+                        dryRun: false,
+                        missing: 1,
+                        mode: "enforce",
+                        modelRunPruned: 0,
+                        pruned: 2,
+                        storePath: "/private/openclaw/agents/main/sessions.db",
+                        unreferencedArtifacts: {
+                            freedBytes: 100,
+                            olderThanMs: 86_400_000,
+                            removedFiles: 3,
+                            scannedFiles: 10,
+                        },
+                        wouldMutate: true,
+                    },
+                ],
+            })
+        ).toEqual({
+            method: "sessions.cleanup",
+            stores: [
+                {
+                    artifactsRemoved: 3,
+                    bytesFreed: 300,
+                    diskEntriesRemoved: 2,
+                    diskFilesRemoved: 1,
+                    dmScopesRetired: 0,
+                    entriesAfter: 5,
+                    entriesBefore: 8,
+                    entriesCapped: 1,
+                    entriesPruned: 2,
+                    missingEntriesRemoved: 1,
+                    modelRunsPruned: 0,
+                },
+            ],
+        });
+        expect(
+            parsePersistentGatewayOpenClawServiceActionResponse("update.run", {
+                handoff: {
+                    command: "private command",
+                    pid: 42,
+                    status: "started",
+                },
+                ok: true,
+                restart: { pid: 43 },
+                result: {
+                    before: { version: "2026.7.2-beta.7" },
+                    cwd: "/private",
+                    root: "/private/openclaw",
+                    status: "skipped",
+                    steps: [{ stderrTail: "secret" }],
+                },
+                sentinel: { payload: { root: "/private/openclaw" } },
+            })
+        ).toEqual({
+            beforeVersion: "2026.7.2-beta.7",
+            method: "update.run",
+            status: "accepted",
+        });
+        expect(
+            parsePersistentGatewayOpenClawServiceActionResponse("update.run", {
+                handoff: { status: "started" },
+                ok: true,
+                restart: { pid: 43 },
+                result: { status: "error" },
+                sentinel: {},
+            })
+        ).toEqual({ method: "update.run", status: "failed" });
+        expect(() =>
+            parsePersistentGatewayOpenClawServiceActionResponse("update.run", {
+                ok: true,
+                restart: null,
+                result: {
+                    before: { version: "../../private" },
+                    status: "ok",
+                },
+                sentinel: {},
+            })
+        ).toThrow(TypeError);
+        expect(() =>
+            parsePersistentGatewayOpenClawServiceActionResponse("update.run", {
+                ok: false,
+                restart: null,
+                result: { status: "error" },
+                sentinel: "x".repeat(
+                    persistentGatewayOpenClawServiceActionResponseMaximumBytes
+                ),
+            })
+        ).toThrow(TypeError);
+
+        const cleanupStore = {
+            afterCount: 0,
+            agentId: "main",
+            applied: true,
+            appliedCount: 0,
+            beforeCount: 0,
+            capped: 0,
+            diskBudget: null,
+            dmScopeRetired: 0,
+            dryRun: false,
+            missing: 0,
+            mode: "enforce",
+            modelRunPruned: 0,
+            pruned: 0,
+            storePath: "/private/openclaw/sessions.db",
+            unreferencedArtifacts: {
+                freedBytes: 0,
+                olderThanMs: 86_400_000,
+                removedFiles: 0,
+                scannedFiles: 0,
+            },
+            wouldMutate: false,
+        } as const;
+        expect(() =>
+            parsePersistentGatewayOpenClawServiceActionResponse("sessions.cleanup", {
+                allAgents: true,
+                dryRun: false,
+                mode: "enforce",
+                stores: Array.from(
+                    { length: persistentGatewayOpenClawCleanupStoreMaximum + 1 },
+                    (_, index) => ({ ...cleanupStore, agentId: `agent-${index}` })
                 ),
             })
         ).toThrow(TypeError);

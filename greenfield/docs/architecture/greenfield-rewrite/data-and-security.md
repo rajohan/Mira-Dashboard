@@ -281,6 +281,24 @@ deploys, builds, Git mutations, Docker mutations, backups, restores, systemd cha
 restarts, or unbounded shell commands. Those operations become durable `job_runs` consumed by
 the worker.
 
+Service Actions are a separate fixed-intent boundary, not a generic exec facade. The contract
+contains exactly `openclaw-cleanup`, `openclaw-update`, `system-restart`, and `system-update`; a
+caller can supply only one of those IDs plus an actor-bound idempotency key. Reads and requests are
+session-only under dedicated capabilities, requests require recent MFA, and audit attempt must
+commit before the durable enqueue handoff. That handoff rechecks exact-release worker
+availability, the current browser session, and recent MFA. Enqueue uncertainty is reconciled by
+the same principal/idempotency intent, and post-dispatch uncertainty never authorizes a replay.
+
+The production worker advertises only actions for which its composition owns an exact executor.
+OpenClaw cleanup and update are worker-only, fixed-parameter Gateway operations with bounded,
+sanitized results. Host restart and host update remain canonical contract/UI rows but are
+unavailable in production because the web and worker currently share one Unix identity. A shared
+group or polkit grant would therefore collapse the web/worker trust boundary. This rewrite ships
+no shared-user host broker, polkit rule, root helper, or host-operation systemd unit. Future host
+enablement requires a distinct worker OS identity, root-owned immutable worker execution, exact
+subject and operation policy, and reviewed install/rollback evidence before either action key can
+be advertised.
+
 The `cache:read` automation heartbeat is a separate sanitized projection, not a shortcut around
 session, task, job, or cron detail authorization. It reads process-local validated Gateway
 summaries plus bounded payload-free cache status and purpose-built SQLite task/Dashboard-job
@@ -367,7 +385,7 @@ Retain the current security behavior while simplifying its structure:
 - durable browser sessions use random opaque validators, store only their hashes, and enforce
   idle and absolute expiry;
 - recent high-assurance verification is required for secrets, credentials, deploy, rollback,
-  restore, exec, Docker mutation, and security administration;
+  restore, Service Actions, Docker mutation, and security administration;
 - the process Effect runtime bounds Gateway, password/Argon2, TOTP AES/HMAC, and WebAuthn
   parsing/signature work with separate concurrency and queue limits; rolling in-memory budgets
   stop parallel requests before expensive work can outrun durable cooldowns, and a failed authentication attempt retains its active-work
@@ -589,8 +607,8 @@ proxy mode names exact proxies and requires them to overwrite forwarded identity
   units.
 - Markdown and HTML are sanitized at the rendering boundary. A raw HTML feature is not an
   authorization boundary.
-- Exec, terminal, Git, Docker, systemd, backup, restore, and OpenClaw adapters each have a
-  command/operation allowlist and a structured audit record.
+- Terminal, Service Actions, Git, Docker, systemd, backup, restore, and OpenClaw adapters each have
+  a command/operation allowlist and a structured audit record. No generic exec adapter is retained.
 - Logs and audit details pass a central redactor before persistence and again before browser
   output.
 - CSP, frame denial, MIME-sniff prevention, referrer policy, permissions policy, and request ID

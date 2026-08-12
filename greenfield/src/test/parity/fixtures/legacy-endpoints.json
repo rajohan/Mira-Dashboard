@@ -506,12 +506,16 @@
             "id": "GET /api/exec/:jobId",
             "method": "GET",
             "path": "/api/exec/:jobId",
-            "purpose": "Reads persisted exec output/state.",
+            "purpose": "Reads durable fixed-action state or the caller's active interactive terminal state without retaining PTY contents.",
             "section": "Exec And Terminal",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
-                "names": ["terminal.getExecution"],
+                "names": [
+                    "jobs.getRun",
+                    "serviceActions.getStatus",
+                    "terminal.getActiveSession"
+                ],
                 "phase": "phase-5"
             }
         },
@@ -1567,10 +1571,9 @@
             "purpose": "Queues one command and observes its persisted result.",
             "section": "Exec And Terminal",
             "target": {
-                "delivery": "planned",
-                "kind": "procedure",
-                "names": ["terminal.startExecution"],
-                "phase": "phase-5"
+                "consumerEvidence": "no-current-consumers",
+                "kind": "reviewed-removal",
+                "reason": "No production browser route or scoped automation caller uses the synchronous generic command endpoint; interactive work runs inside the bounded PTY and fixed privileged operations use purpose-built durable Service Actions jobs."
             }
         },
         {
@@ -1580,9 +1583,9 @@
             "purpose": "Requests exec cancellation.",
             "section": "Exec And Terminal",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
-                "names": ["terminal.stopExecution"],
+                "names": ["terminal.terminateSession"],
                 "phase": "phase-5"
             }
         },
@@ -1593,9 +1596,9 @@
             "purpose": "Queues a worker-owned long-running exec job.",
             "section": "Exec And Terminal",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
-                "names": ["terminal.startExecution"],
+                "names": ["serviceActions.request", "terminal.prepareSession"],
                 "phase": "phase-5"
             }
         },
@@ -1945,9 +1948,10 @@
             "purpose": "Resolves validated directory changes.",
             "section": "Exec And Terminal",
             "target": {
-                "delivery": "planned",
-                "kind": "procedure",
-                "names": ["terminal.resolveDirectory"],
+                "delivery": "implemented",
+                "kind": "raw-http",
+                "method": "GET",
+                "path": "/api/terminal/sessions/:sessionId/socket",
                 "phase": "phase-5"
             }
         },
@@ -1958,9 +1962,10 @@
             "purpose": "Returns shell/path completions.",
             "section": "Exec And Terminal",
             "target": {
-                "delivery": "planned",
-                "kind": "procedure",
-                "names": ["terminal.complete"],
+                "delivery": "implemented",
+                "kind": "raw-http",
+                "method": "GET",
+                "path": "/api/terminal/sessions/:sessionId/socket",
                 "phase": "phase-5"
             }
         },

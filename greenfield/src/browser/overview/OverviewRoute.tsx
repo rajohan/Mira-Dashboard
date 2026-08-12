@@ -5,6 +5,7 @@ import { OverviewIncidentsSection } from "./OverviewIncidentsSection.tsx";
 import { OverviewJobsSection } from "./OverviewJobsSection.tsx";
 import { OverviewNotificationsSection } from "./OverviewNotificationsSection.tsx";
 import { OverviewReportsSection } from "./OverviewReportsSection.tsx";
+import { OverviewServiceActionsSection } from "./OverviewServiceActionsSection.tsx";
 import { OverviewTasksSection } from "./OverviewTasksSection.tsx";
 import { SystemMetricsSection } from "./SystemMetricsSection.tsx";
 
@@ -28,6 +29,9 @@ export function OverviewRoute() {
             </div>
             <div className="mt-10">
                 <OverviewJobsSection />
+            </div>
+            <div className="mt-10">
+                <OverviewServiceActionsSection />
             </div>
             <div className="mt-10">
                 <OverviewReportsSection />

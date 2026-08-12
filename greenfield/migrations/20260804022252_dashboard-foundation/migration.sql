@@ -139,7 +139,7 @@ CREATE TABLE `automation_principal_capabilities` (
 	`principal_id` text NOT NULL,
 	CONSTRAINT `automation_principal_capabilities_pk` PRIMARY KEY(`principal_id`, `capability`),
 	CONSTRAINT `fk_automation_principal_capabilities_principal_id_automation_principals_id_fk` FOREIGN KEY (`principal_id`) REFERENCES `automation_principals`(`id`) ON DELETE CASCADE,
-	CONSTRAINT "automation_principal_capabilities_capability_check" CHECK("capability" IN ('agents:read', 'agents:write', 'cache:read', 'cache:write', 'chat:read', 'chat:write', 'files:read', 'files:write', 'gateway-sessions:read', 'gateway-sessions:write', 'jobs:read', 'jobs:write', 'logs:read', 'logs:write', 'monitoring:write', 'notifications:read', 'notifications:write', 'openclaw-settings:read', 'openclaw-settings:write', 'openclaw-tasks:read', 'openclaw-tasks:write', 'reports:read', 'reports:write', 'tasks:read', 'tasks:write', 'terminal:read', 'terminal:write')),
+	CONSTRAINT "automation_principal_capabilities_capability_check" CHECK("capability" IN ('agents:read', 'agents:write', 'cache:read', 'cache:write', 'chat:read', 'chat:write', 'files:read', 'files:write', 'gateway-sessions:read', 'gateway-sessions:write', 'jobs:read', 'jobs:write', 'logs:read', 'logs:write', 'monitoring:write', 'notifications:read', 'notifications:write', 'openclaw-settings:read', 'openclaw-settings:write', 'openclaw-tasks:read', 'openclaw-tasks:write', 'reports:read', 'reports:write', 'service-actions:read', 'service-actions:write', 'tasks:read', 'tasks:write', 'terminal:read', 'terminal:write')),
 	CONSTRAINT "automation_principal_capabilities_granted_at_check" CHECK("granted_at" BETWEEN 0 AND 8640000000000000)
 ) STRICT;
 --> statement-breakpoint
@@ -1084,6 +1084,7 @@ CREATE TABLE `scheduled_jobs` (
 ) STRICT, WITHOUT ROWID;
 --> statement-breakpoint
 CREATE TABLE `worker_instances` (
+	`action_keys_json` text DEFAULT '[]' NOT NULL,
 	`capacity` integer NOT NULL,
 	`draining_at` integer,
 	`heartbeat_at` integer NOT NULL,
@@ -1093,6 +1094,7 @@ CREATE TABLE `worker_instances` (
 	`started_at` integer NOT NULL,
 	`state` text NOT NULL,
 	`stopped_at` integer,
+	CONSTRAINT "worker_instances_action_keys_json_check" CHECK(length(CAST("action_keys_json" AS BLOB)) <= 4096 AND CASE WHEN json_valid("action_keys_json") THEN json_type("action_keys_json") = 'array' ELSE 0 END),
 	CONSTRAINT "worker_instances_capacity_check" CHECK("capacity" BETWEEN 1 AND 16),
 	CONSTRAINT "worker_instances_id_check" CHECK(length("id") = 36 AND instr("id", char(0)) = 0 AND length(replace("id", '-', '')) = 32 AND replace("id", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr("id", 9, 1) = '-' AND substr("id", 14, 1) = '-' AND substr("id", 15, 1) = '7' AND substr("id", 19, 1) = '-' AND substr("id", 20, 1) GLOB '[89ab]' AND substr("id", 24, 1) = '-'),
 	CONSTRAINT "worker_instances_pid_check" CHECK("pid" BETWEEN 1 AND 2147483647),
@@ -1808,8 +1810,31 @@ BEGIN
 	SELECT RAISE(ABORT, 'worker_instances identity is immutable');
 END;
 --> statement-breakpoint
+CREATE TRIGGER worker_instances_validate_action_keys_insert
+BEFORE INSERT ON worker_instances
+WHEN json_array_length(NEW.action_keys_json) > 32
+    OR EXISTS (
+        SELECT 1
+        FROM json_each(NEW.action_keys_json) AS entry
+        WHERE entry.type <> 'text'
+           OR length(CAST(entry.value AS TEXT)) NOT BETWEEN 1 AND 128
+           OR CAST(entry.value AS TEXT) <> lower(CAST(entry.value AS TEXT))
+           OR substr(CAST(entry.value AS TEXT), 1, 1) NOT GLOB '[a-z0-9]'
+           OR CAST(entry.value AS TEXT) GLOB '*[^a-z0-9._-]*'
+    )
+    OR EXISTS (
+        SELECT 1
+        FROM json_each(NEW.action_keys_json) AS current
+        JOIN json_each(NEW.action_keys_json) AS previous
+          ON previous.key = current.key - 1
+        WHERE CAST(current.value AS TEXT) <= CAST(previous.value AS TEXT)
+    )
+BEGIN
+	SELECT RAISE(ABORT, 'worker_instances action keys must be canonical');
+END;
+--> statement-breakpoint
 CREATE TRIGGER worker_instances_reject_identity_update
-BEFORE UPDATE OF id, release_id, pid, capacity, started_at ON worker_instances
+BEFORE UPDATE OF id, release_id, pid, capacity, started_at, action_keys_json ON worker_instances
 BEGIN
 	SELECT RAISE(ABORT, 'worker_instances identity is immutable');
 END;

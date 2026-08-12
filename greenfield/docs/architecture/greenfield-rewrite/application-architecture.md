@@ -213,7 +213,7 @@ Every application operation controlled by this repository becomes a tRPC procedu
 - settings, authentication, MFA, WebAuthn, and session administration;
 - Docker inventory, updater policy, and actions;
 - database, cache, quota, backup, and log-rotation operations;
-- Moltbook, files, logs, terminal helpers, and exec jobs; and
+- Moltbook, files, logs, terminal sessions, and purpose-built Service Actions; and
 - TypeScript automation calls from OpenClaw scripts.
 
 The browser uses `@trpc/tanstack-react-query`, a singleton `QueryClient`, and a singleton
@@ -463,6 +463,38 @@ shutdown and never enter tRPC, Query cache, audit, logs, or durable records. Res
 is exclusive, caller-idempotent, single-attempt, non-retry-safe, and non-cancellable; only the
 worker owns its fixed no-shell lifecycle command. Ambiguous enqueue or terminal settlement is
 reconciled by durable run identity and never blindly dispatches a second restart.
+
+### Purpose-built Service Actions replace generic exec
+
+The Overview exposes exactly four fixed Service Actions through
+`serviceActions.getStatus` and `serviceActions.request`: OpenClaw session cleanup, OpenClaw
+installation update, host restart, and host update. The browser submits only a fixed action ID and
+a caller-owned idempotency key. The web process commits a sanitized attempt audit, checks a fresh
+exact-release worker advertisement, and revalidates the browser session plus recent MFA at the
+durable enqueue handoff. It returns a job-run ID rather than waiting for a privileged effect and
+links all progress and terminal state to the existing Jobs surface.
+
+OpenClaw cleanup and update are implemented worker-only through the hash-pinned
+`sessions.cleanup` and `update.run` Gateway methods. Their providers accept no browser parameters,
+persist only bounded schema-validated summaries, never return raw Gateway results, and never
+blindly replay a post-dispatch unknown outcome. Cleanup deliberately uses OpenClaw's source-owned
+session/artifact maintenance instead of reproducing legacy recursive deletion. The legacy broad
+`system_cleanup` behavior is not restored: package, journal, and Docker deletion cross separate
+ownership domains, and Docker cleanup remains part of the Docker domain.
+
+The contract and Overview retain fixed rows for host restart and host update, but production marks
+both unavailable. The current web and worker processes share one Unix identity, so a group- or
+shared-user polkit rule would also give a compromised web process the worker's root authority. No
+such broker, polkit rule, root helper, or host-operation unit ships in this slice. Enabling either
+host action later requires a distinct worker OS identity, a root-owned immutable worker boundary,
+and separately reviewed provisioning and rollback before the worker may advertise the action key.
+
+The interactive PTY remains the sole terminal boundary. Shell `cd` and completion are owned by the
+connected shell/readline protocol, termination uses the bounded terminal session control, and no
+new generic command, cwd, or completion API is introduced. The unused synchronous `POST /api/exec`
+endpoint is a reviewed removal because no current browser or scoped automation consumer depends on
+it; legacy long-running exec consumers map to either the PTY or the fixed durable Service Actions
+queue.
 
 ### Current-protocol Control UI projections
 

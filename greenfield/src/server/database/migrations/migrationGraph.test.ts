@@ -173,6 +173,7 @@ describe("database migration graph", () => {
             "worker_instances_reject_active_delete",
             "worker_instances_reject_identity_update",
             "worker_instances_reject_replace",
+            "worker_instances_validate_action_keys_insert",
             "worker_instances_validate_lifecycle_update",
         ]) {
             expect(foundationSql).toContain(`CREATE TRIGGER ${trigger}`);

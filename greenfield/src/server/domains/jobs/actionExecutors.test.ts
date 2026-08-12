@@ -2,15 +2,18 @@ import { describe, expect, test } from "bun:test";
 
 import { Effect } from "effect";
 
+import { OpenClawServiceActionsExecutionError } from "../../../shared/openClawServiceActions.ts";
 import {
     testMoltbookCollector,
     testMoltbookDashboardSnapshot,
 } from "../../test/support/moltbook.ts";
 import {
     createJobWorkerActionResolver,
+    createHostOperationJobExecutor,
     createLogMaintenanceJobExecutor,
     createMoltbookDashboardExecutor,
     createOpenClawGatewayRestartJobExecutor,
+    createOpenClawServiceActionJobExecutor,
     createSystemHostExecutor,
     createWorkspaceFileWriteJobExecutor,
     createJobWorkerActionRegistry,
@@ -19,6 +22,7 @@ import {
 import {
     type JobActionExecutionContext,
     type JobCacheAttemptCommit,
+    JobActionOutcomeUnknownError,
     JobActionRetryableError,
     jobActionDefinitions,
 } from "./actionRegistry.ts";
@@ -45,6 +49,25 @@ describe("worker-only job executor registry", () => {
             logMaintenance: { run: () => Promise.resolve(undefined) },
             moltbook: testMoltbookCollector,
             openClawGateway: { restart: () => Promise.resolve() },
+            openClawServiceActions: {
+                cleanupSessions: () =>
+                    Promise.resolve({
+                        artifactsRemoved: 0,
+                        bytesFreed: 0,
+                        diskEntriesRemoved: 0,
+                        diskFilesRemoved: 0,
+                        dmScopesRetired: 0,
+                        entriesAfter: 0,
+                        entriesBefore: 0,
+                        entriesCapped: 0,
+                        entriesPruned: 0,
+                        missingEntriesRemoved: 0,
+                        modelRunsPruned: 0,
+                        status: "completed",
+                        storesProcessed: 0,
+                    }),
+                updateInstallation: () => Promise.resolve({ status: "accepted" }),
+            },
         });
         expect(findAction("system.worker-smoke")).toBeDefined();
         expect(findAction("cache.refresh.system-host")).toBeDefined();
@@ -54,6 +77,8 @@ describe("worker-only job executor registry", () => {
             resourceClass: "exclusive",
             retrySafe: false,
         });
+        expect(findAction("openclaw.sessions.cleanup")).toBeDefined();
+        expect(findAction("openclaw.installation.update")).toBeDefined();
         expect(findAction("system.shell")).toBeUndefined();
     });
 
@@ -75,6 +100,155 @@ describe("worker-only job executor registry", () => {
             executor(executionContext([]), { command: "shell" })
         ).catch((error: unknown) => error);
         expect(failure).toBeInstanceOf(Error);
+    });
+
+    test("persists only fixed host-operation settlement and rejects mismatched results", async () => {
+        const calls: unknown[] = [];
+        const hostOperations = {
+            availableOperations: () => Promise.resolve([]),
+            request(
+                operationId: "system-restart" | "system-update",
+                signal?: AbortSignal
+            ) {
+                calls.push({ operationId, signal });
+                return Promise.resolve(
+                    operationId === "system-restart"
+                        ? ({ status: "accepted" } as const)
+                        : ({ status: "completed" } as const)
+                );
+            },
+        };
+        expect(
+            await Effect.runPromise(
+                createHostOperationJobExecutor(hostOperations, "system-restart")(
+                    executionContext([]),
+                    {}
+                )
+            )
+        ).toEqual({ completedAtMs: 5000, status: "accepted" });
+        expect(
+            await Effect.runPromise(
+                createHostOperationJobExecutor(hostOperations, "system-update")(
+                    executionContext([]),
+                    {}
+                )
+            )
+        ).toEqual({ completedAtMs: 5000, status: "completed" });
+        expect(calls).toMatchObject([
+            { operationId: "system-restart", signal: expect.any(AbortSignal) },
+            { operationId: "system-update", signal: expect.any(AbortSignal) },
+        ]);
+
+        const failure = await Effect.runPromise(
+            createHostOperationJobExecutor(
+                {
+                    availableOperations: () => Promise.resolve([]),
+                    request: () => Promise.resolve({ status: "completed" }),
+                },
+                "system-restart"
+            )(executionContext([]), {})
+        ).catch((error: unknown) => error);
+        expect(failure).toBeInstanceOf(Error);
+    });
+
+    test("persists only aggregate OpenClaw cleanup and validated update summaries", async () => {
+        const signals: AbortSignal[] = [];
+        const serviceActions = {
+            cleanupSessions(signal?: AbortSignal) {
+                if (signal !== undefined) signals.push(signal);
+                return Promise.resolve({
+                    artifactsRemoved: 2,
+                    bytesFreed: 1024,
+                    diskEntriesRemoved: 1,
+                    diskFilesRemoved: 1,
+                    dmScopesRetired: 3,
+                    entriesAfter: 4,
+                    entriesBefore: 8,
+                    entriesCapped: 0,
+                    entriesPruned: 2,
+                    missingEntriesRemoved: 1,
+                    modelRunsPruned: 1,
+                    status: "completed" as const,
+                    storesProcessed: 2,
+                });
+            },
+            updateInstallation(signal?: AbortSignal) {
+                if (signal !== undefined) signals.push(signal);
+                return Promise.resolve({
+                    afterVersion: "2026.8.0",
+                    beforeVersion: "2026.7.2-beta.7",
+                    status: "completed" as const,
+                });
+            },
+        };
+        expect(
+            await Effect.runPromise(
+                createOpenClawServiceActionJobExecutor(
+                    serviceActions,
+                    "openclaw-cleanup"
+                )(executionContext([]), {})
+            )
+        ).toEqual({
+            artifactsRemoved: 2,
+            bytesFreed: 1024,
+            completedAtMs: 5000,
+            diskEntriesRemoved: 1,
+            diskFilesRemoved: 1,
+            dmScopesRetired: 3,
+            entriesAfter: 4,
+            entriesBefore: 8,
+            entriesCapped: 0,
+            entriesPruned: 2,
+            missingEntriesRemoved: 1,
+            modelRunsPruned: 1,
+            status: "completed",
+            storesProcessed: 2,
+        });
+        expect(
+            await Effect.runPromise(
+                createOpenClawServiceActionJobExecutor(serviceActions, "openclaw-update")(
+                    executionContext([]),
+                    {}
+                )
+            )
+        ).toEqual({
+            afterVersion: "2026.8.0",
+            beforeVersion: "2026.7.2-beta.7",
+            completedAtMs: 5000,
+            status: "completed",
+        });
+        expect(signals).toEqual([expect.any(AbortSignal), expect.any(AbortSignal)]);
+
+        const failure = await Effect.runPromise(
+            createOpenClawServiceActionJobExecutor(
+                {
+                    cleanupSessions: (signal) => serviceActions.cleanupSessions(signal),
+                    updateInstallation: () =>
+                        Promise.resolve({
+                            afterVersion: "../../private",
+                            status: "completed",
+                        }),
+                },
+                "openclaw-update"
+            )(executionContext([]), {})
+        ).catch((error: unknown) => error);
+        expect(failure).toBeInstanceOf(Error);
+        expect(JSON.stringify(failure)).not.toContain("../../private");
+
+        const unknownFailure = await Effect.runPromise(
+            createOpenClawServiceActionJobExecutor(
+                {
+                    cleanupSessions: () =>
+                        Promise.reject(
+                            new OpenClawServiceActionsExecutionError("unknown-outcome")
+                        ),
+                    updateInstallation: () => Promise.resolve({ status: "accepted" }),
+                },
+                "openclaw-cleanup"
+            )(executionContext([]), {})
+        ).catch((error: unknown) => error);
+        expect(unknownFailure).toBeInstanceOf(JobActionOutcomeUnknownError);
+        expect(JSON.stringify(unknownFailure)).not.toContain("Gateway");
     });
 
     test("fails closed for missing, extra, and duplicate executor keys", () => {

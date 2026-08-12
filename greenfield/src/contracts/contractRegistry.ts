@@ -44,6 +44,7 @@ import {
 import { reportProcedureContracts } from "./reports.ts";
 import { scheduleProcedureContracts } from "./schedules.ts";
 import { securityAuditProcedureContracts } from "./securityAudit.ts";
+import { serviceActionProcedureContracts } from "./serviceActions.ts";
 import { systemProcedureContracts, systemRawHttpContracts } from "./system.ts";
 import { taskRealtimeEventContract } from "./taskRealtime.ts";
 import { taskProcedureContracts } from "./tasks.ts";
@@ -73,6 +74,7 @@ const registeredProcedureContracts = [
     ...reportProcedureContracts,
     ...scheduleProcedureContracts,
     ...securityAuditProcedureContracts,
+    ...serviceActionProcedureContracts,
     ...systemProcedureContracts,
     ...taskProcedureContracts,
     ...terminalProcedureContracts,

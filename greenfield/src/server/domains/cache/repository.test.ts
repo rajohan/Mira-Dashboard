@@ -63,6 +63,7 @@ async function runningClaim(
     await jobs.registerWorker({
         ...noSideEffects,
         worker: {
+            actionKeysJson: "[]",
             capacity: 1,
             drainingAt: null,
             heartbeatAt: new Date(1000),

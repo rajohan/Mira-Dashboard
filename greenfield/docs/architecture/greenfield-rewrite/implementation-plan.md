@@ -101,6 +101,14 @@ including restart during streaming.
 - treat the configured Terminal workspace root as an initial working-directory catalog only. A
   real interactive shell can change directory and access anything permitted by its OS identity;
   filesystem isolation requires a separate mount, namespace, or container sandbox.
+- keep shell `cd`, completion, and termination inside the implemented bounded PTY. Replace consumed
+  legacy exec behavior only with purpose-built durable Service Actions; do not restore a generic
+  command, shell, or cwd API for the unused synchronous exec route.
+- expose the four fixed Service Action intents in contract/UI, but advertise only exact executors
+  owned by a fresh worker on the current release. OpenClaw cleanup/update use reviewed worker-only
+  Gateway methods. Host restart/update remain unavailable until web and worker have distinct OS
+  identities and a root-owned immutable worker boundary with reviewed provisioning and rollback;
+  a shared-user/group polkit grant is forbidden.
 
 **Exit gate:** capability, step-up, audit, cancellation, resource-limit, and failure-recovery
 tests pass for every privileged operation.

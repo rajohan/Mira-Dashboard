@@ -2,8 +2,12 @@ import { describe, expect, test } from "bun:test";
 
 import {
     findJobActionDefinition,
+    hostSystemRestartJobActionDefinition,
+    hostSystemUpdateJobActionDefinition,
     isRegisteredJobSchedule,
     openClawGatewayRestartJobActionDefinition,
+    openClawInstallationUpdateJobActionDefinition,
+    openClawSessionsCleanupJobActionDefinition,
     parseJobActionOutputMessage,
     parseJobActionProgress,
     validateJobActionRegistration,
@@ -141,5 +145,45 @@ describe("durable job action registry", () => {
         expect(openClawGatewayRestartJobActionDefinition).not.toHaveProperty(
             "scheduleId"
         );
+    });
+
+    test("publishes four fixed Service Actions with cross-domain exclusive locks", () => {
+        for (const definition of [
+            openClawSessionsCleanupJobActionDefinition,
+            hostSystemRestartJobActionDefinition,
+            hostSystemUpdateJobActionDefinition,
+        ]) {
+            expect(definition).toMatchObject({
+                attemptLimit: 1,
+                cancellationPolicy: "never",
+                manualExposure: "none",
+                priority: 20,
+                resourceClass: "exclusive",
+                retrySafe: false,
+            });
+            expect(definition).not.toHaveProperty("scheduleId");
+        }
+        expect(openClawSessionsCleanupJobActionDefinition.resourceKeys).toEqual([
+            "host.mutation",
+            "openclaw.gateway",
+        ]);
+        expect(hostSystemRestartJobActionDefinition.resourceKeys).toEqual([
+            "host.mutation",
+        ]);
+        expect(hostSystemUpdateJobActionDefinition.resourceKeys).toEqual([
+            "host.mutation",
+        ]);
+        expect(openClawInstallationUpdateJobActionDefinition).toMatchObject({
+            attemptLimit: 1,
+            cancellationPolicy: "never",
+            manualExposure: "none",
+            resourceClass: "exclusive",
+            resourceKeys: ["host.mutation", "openclaw.gateway"],
+            retrySafe: false,
+        });
+        expect(hostSystemRestartJobActionDefinition.timeoutMs).toBe(60_000);
+        expect(hostSystemUpdateJobActionDefinition.timeoutMs).toBe(7_200_000);
+        expect(openClawSessionsCleanupJobActionDefinition.timeoutMs).toBe(630_000);
+        expect(openClawInstallationUpdateJobActionDefinition.timeoutMs).toBe(2_130_000);
     });
 });

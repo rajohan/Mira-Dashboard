@@ -2,6 +2,7 @@ import {
     logMaintenancePolicyIds,
     type LogMaintenancePolicyId,
 } from "../../../contracts/logs.ts";
+import type { ServiceActionId } from "../../../contracts/serviceActions.ts";
 import type { SafeFailureDescriptor } from "../errors/safeFailure.ts";
 import { describeSafeFailure } from "../errors/safeFailure.ts";
 
@@ -89,6 +90,11 @@ export type StructuredLogFields =
           readonly queueDepth: number;
       }
     | {
+          readonly actionId: ServiceActionId;
+          readonly kind: "service-actions-audit-settlement";
+          readonly settlement: "failed" | "partial" | "succeeded";
+      }
+    | {
           readonly kind: "http-request";
           readonly method: string;
       }
@@ -165,6 +171,7 @@ const structuredEventComponents = Object.freeze({
     "runtime.start_failed": "runtime",
     "runtime.started": "runtime",
     "runtime.stopped": "runtime",
+    "service_actions.audit_settlement.failed": "service-actions-audit",
     "trpc.request.defect": "trpc",
 } as const);
 
@@ -376,6 +383,24 @@ function safeEventFields(
                 return undefined;
             }
             return { queueDepth: fields.queueDepth };
+        }
+        case "service-actions-audit-settlement": {
+            if (
+                eventName !== "service_actions.audit_settlement.failed" ||
+                (fields.actionId !== "openclaw-cleanup" &&
+                    fields.actionId !== "openclaw-update" &&
+                    fields.actionId !== "system-restart" &&
+                    fields.actionId !== "system-update") ||
+                (fields.settlement !== "failed" &&
+                    fields.settlement !== "partial" &&
+                    fields.settlement !== "succeeded")
+            ) {
+                return undefined;
+            }
+            return {
+                actionId: fields.actionId,
+                settlement: fields.settlement,
+            };
         }
         case "realtime-runner-failure": {
             return eventName === "realtime.runner.failed" &&

@@ -1662,6 +1662,25 @@ describe("jobs baseline schema", () => {
             insertWorker(database, workerId, 1001);
             insertWorker(database, otherWorkerId, 1002);
             insertWorker(database, lifecycleWorkerId, 1003);
+            expect(() =>
+                database.sqlite.run(
+                    `INSERT INTO worker_instances (
+                        action_keys_json, capacity, heartbeat_at, id, pid,
+                        release_id, started_at, state
+                    ) VALUES (?, 1, 1000, ?, 1004, ?, 1000, 'online')`,
+                    [
+                        '["openclaw.sessions.cleanup","host.system.update"]',
+                        uuid(43),
+                        releaseId,
+                    ]
+                )
+            ).toThrow("worker_instances action keys must be canonical");
+            expect(() =>
+                database.sqlite.run(
+                    `UPDATE worker_instances SET action_keys_json = '[]' WHERE id = ?`,
+                    [lifecycleWorkerId]
+                )
+            ).toThrow("worker_instances identity is immutable");
             insertQueuedRun(database, {
                 id: runId,
                 idempotencyKey: idempotencyKey(43),

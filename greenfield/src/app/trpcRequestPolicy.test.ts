@@ -97,6 +97,10 @@ describe("tRPC request policy", () => {
             rejectsBatch: false,
             requestBodyMaximumBytes: trpcRequestBodyMaximumBytes,
         });
+        expect(policy("/trpc/serviceActions.request?batch=1")).toEqual({
+            rejectsBatch: true,
+            requestBodyMaximumBytes: trpcRequestBodyMaximumBytes,
+        });
         expect(policy("/trpc/tasks.create")).toEqual({
             rejectsBatch: false,
             requestBodyMaximumBytes: taskContentRequestBodyMaximumBytes,

@@ -44,11 +44,72 @@ export const workspaceFileWriteJobActionKey = "workspace-files.apply-write";
 export const workspaceFileReplaceJobActionKey = "workspace-files.apply-replacement";
 /** Fixed non-retryable worker action for one operator-requested Gateway restart. */
 export const openClawGatewayRestartJobActionKey = "openclaw.gateway.restart";
+/** Fixed worker-only OpenClaw maintenance identity selected by Service Actions. */
+export const openClawSessionsCleanupJobActionKey = "openclaw.sessions.cleanup";
+/** Fixed worker-only OpenClaw update identity selected by Service Actions. */
+export const openClawInstallationUpdateJobActionKey = "openclaw.installation.update";
+/** Fixed root-brokered host restart identity selected by Service Actions. */
+export const hostSystemRestartJobActionKey = "host.system.restart";
+/** Fixed root-brokered host update identity selected by Service Actions. */
+export const hostSystemUpdateJobActionKey = "host.system.update";
 
 /** Secret-free terminal payload persisted by the fixed Gateway restart executor. */
 export const openClawGatewayRestartJobResultSchema = v.strictObject({
     completedAtMs: jobTimestampSchema,
     status: v.literal("restarted", "OpenClaw Gateway restart result is invalid"),
+});
+
+/** Redacted accepted-only result for a host restart request. */
+export const hostSystemRestartJobResultSchema = v.strictObject({
+    completedAtMs: jobTimestampSchema,
+    status: v.literal("accepted", "Host restart result is invalid"),
+});
+
+/** Redacted terminal result for one fixed host update unit. */
+export const hostSystemUpdateJobResultSchema = v.strictObject({
+    completedAtMs: jobTimestampSchema,
+    status: v.literal("completed", "Host update result is invalid"),
+});
+
+const openClawOperationCountSchema = v.pipe(
+    v.number("OpenClaw operation count is invalid"),
+    v.safeInteger("OpenClaw operation count is invalid"),
+    v.minValue(0, "OpenClaw operation count is invalid")
+);
+const openClawOperationVersionSchema = v.pipe(
+    v.string("OpenClaw operation version is invalid"),
+    v.minLength(1, "OpenClaw operation version is invalid"),
+    v.maxLength(128, "OpenClaw operation version is invalid"),
+    v.regex(
+        /^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u,
+        "OpenClaw operation version is invalid"
+    )
+);
+
+/** Aggregate-only result for source-owned OpenClaw session maintenance. */
+export const openClawSessionsCleanupJobResultSchema = v.strictObject({
+    artifactsRemoved: openClawOperationCountSchema,
+    bytesFreed: openClawOperationCountSchema,
+    completedAtMs: jobTimestampSchema,
+    diskEntriesRemoved: openClawOperationCountSchema,
+    diskFilesRemoved: openClawOperationCountSchema,
+    dmScopesRetired: openClawOperationCountSchema,
+    entriesAfter: openClawOperationCountSchema,
+    entriesBefore: openClawOperationCountSchema,
+    entriesCapped: openClawOperationCountSchema,
+    entriesPruned: openClawOperationCountSchema,
+    missingEntriesRemoved: openClawOperationCountSchema,
+    modelRunsPruned: openClawOperationCountSchema,
+    status: v.literal("completed"),
+    storesProcessed: openClawOperationCountSchema,
+});
+
+/** Version/status-only result for source-owned OpenClaw installation updates. */
+export const openClawInstallationUpdateJobResultSchema = v.strictObject({
+    afterVersion: v.optional(openClawOperationVersionSchema),
+    beforeVersion: v.optional(openClawOperationVersionSchema),
+    completedAtMs: jobTimestampSchema,
+    status: v.picklist(["accepted", "completed"]),
 });
 
 export type JobCacheAttemptCommit =
@@ -89,6 +150,14 @@ export class JobActionRetryableError extends Error {
             cause === undefined ? undefined : { cause }
         );
         this.name = "JobActionRetryableError";
+    }
+}
+
+/** Explicit action-owned classification for irreversible effects with unknown settlement. */
+export class JobActionOutcomeUnknownError extends Error {
+    constructor() {
+        super("The job action outcome is unknown");
+        this.name = "JobActionOutcomeUnknownError";
     }
 }
 
@@ -398,6 +467,61 @@ export const openClawGatewayRestartJobActionDefinition =
         retrySafe: false,
         timeoutMs: 60_000,
     });
+
+function serviceActionDefinition(input: {
+    readonly actionKey: string;
+    readonly description: string;
+    readonly displayName: string;
+    readonly resourceKeys?: readonly string[];
+    readonly timeoutMs: number;
+}): JobUnscheduledActionDefinition {
+    return validateJobUnscheduledActionDefinition({
+        ...input,
+        attemptLimit: 1,
+        cancellationPolicy: "never",
+        manualExposure: "none",
+        priority: 20,
+        resourceClass: "exclusive",
+        resourceKeys: Object.freeze(input.resourceKeys ?? ["host.mutation"]),
+        retrySafe: false,
+    });
+}
+
+/** Non-retryable source-owned OpenClaw session/artifact maintenance. */
+export const openClawSessionsCleanupJobActionDefinition = serviceActionDefinition({
+    actionKey: openClawSessionsCleanupJobActionKey,
+    description:
+        "Runs source-owned OpenClaw session and artifact maintenance with fixed enforcement policy.",
+    displayName: "Clean up OpenClaw sessions",
+    resourceKeys: Object.freeze(["host.mutation", "openclaw.gateway"]),
+    timeoutMs: 10 * 60_000 + 30_000,
+});
+
+/** Non-retryable source-owned OpenClaw installation update and handoff. */
+export const openClawInstallationUpdateJobActionDefinition = serviceActionDefinition({
+    actionKey: openClawInstallationUpdateJobActionKey,
+    description:
+        "Runs the fixed OpenClaw installation update and managed restart handoff.",
+    displayName: "Update OpenClaw",
+    resourceKeys: Object.freeze(["host.mutation", "openclaw.gateway"]),
+    timeoutMs: 35 * 60_000 + 30_000,
+});
+
+/** Accepted-only host restart request reserved for a separately privileged adapter. */
+export const hostSystemRestartJobActionDefinition = serviceActionDefinition({
+    actionKey: hostSystemRestartJobActionKey,
+    description: "Requests a host restart through a separately privileged fixed adapter.",
+    displayName: "Restart host system",
+    timeoutMs: 60_000,
+});
+
+/** Non-retryable host package update reserved for a separately privileged adapter. */
+export const hostSystemUpdateJobActionDefinition = serviceActionDefinition({
+    actionKey: hostSystemUpdateJobActionKey,
+    description: "Runs a fixed host update through a separately privileged adapter.",
+    displayName: "Update host system",
+    timeoutMs: 2 * 60 * 60_000,
+});
 
 /** Complete reviewed pure-definition registry for this slice. */
 export const jobActionDefinitions = Object.freeze([

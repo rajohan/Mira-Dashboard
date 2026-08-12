@@ -337,6 +337,43 @@ test("records only fixed log-maintenance audit settlement fields", () => {
     });
 });
 
+test("records only fixed Service Actions audit settlement fields", () => {
+    const lines: string[] = [];
+    const logger = createStructuredLogger({
+        identity,
+        sink: {
+            write(line) {
+                lines.push(line);
+            },
+        },
+    });
+
+    logger.error({
+        component: "service-actions-audit",
+        event: "service_actions.audit_settlement.failed",
+        failure: new Error("private provider detail"),
+        fields: {
+            actionId: "openclaw-update",
+            kind: "service-actions-audit-settlement",
+            settlement: "partial",
+        },
+        outcome: "server-error",
+    });
+
+    expect(JSON.parse(lines[0] ?? "null")).toMatchObject({
+        component: "service-actions-audit",
+        event: "service_actions.audit_settlement.failed",
+        fields: {
+            actionId: "openclaw-update",
+            settlement: "partial",
+        },
+        level: "error",
+        outcome: "server-error",
+    });
+    expect(JSON.parse(lines[0] ?? "null")).not.toHaveProperty("fields.kind");
+    expect(lines[0]).not.toContain("private provider detail");
+});
+
 test("normalizes unknown events and drops extra fields instead of relying on secret names", () => {
     const lines: string[] = [];
     const logger = createStructuredLogger({

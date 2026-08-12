@@ -423,6 +423,23 @@ target-directory write access for its private stage file, `renameat2` exchange, 
 at runtime. Descriptor validation, per-file bounds, CAS, and the fixed worker manifest are the write
 boundary.
 
+The fixed Service Actions contract and Overview include host restart and host update, but the
+production release does not install or compose authority for them. Web and worker still run as the
+same Unix user, so granting that identity a root helper, polkit action, or root-owned operation unit
+would also grant the web process the same authority. Consequently both host actions remain
+`unavailable`, the worker does not advertise their action keys, and enqueue rechecks fail closed.
+No host-operation helper, polkit rule, or operation unit is included in release staging.
+
+Future host-action enablement is a delivery/topology change rather than an application toggle. It
+must introduce a distinct worker OS identity, keep the web principal outside that identity and its
+groups, execute only root-owned immutable worker code/configuration, constrain authorization to
+the exact worker principal and fixed operation, and ship manifest-verified provisioning plus
+explicit rollback. Only after that boundary has executable installation, identity, availability,
+and rollback evidence may production compose a host broker and advertise either host action.
+OpenClaw cleanup and update do not use this deferred host authority: their exact worker-only
+Gateway operations are already implemented and remain available only when a fresh exact-release
+worker advertises them.
+
 The web process also derives the fixed `<MIRA_DASHBOARD_OPENCLAW_ROOT>/media` descriptor boundary
 from that same reviewed root. It exposes no configurable media directory, recursive listing, or
 browser-supplied path route. Local-history transcript carriers become opaque session/message-bound

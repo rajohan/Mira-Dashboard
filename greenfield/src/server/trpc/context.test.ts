@@ -21,6 +21,7 @@ import {
     createTestOpenClawCronService,
     createTestOpenClawSettingsService,
     createTestSecurityAuditLifecycleService,
+    createTestServiceActionsService,
     createTestSystemHealthDiagnosticsService,
 } from "../test/support/requestContext.ts";
 import { createRequestContext } from "./context.ts";
@@ -45,6 +46,7 @@ describe("tRPC request context", () => {
         const jobService = createTestJobService();
         const cacheService = createTestCacheService();
         const responseHeaders = new Headers();
+        const serviceActionsService = createTestServiceActionsService();
 
         const context = await createRequestContext({
             agentService: createTestAgentService(),
@@ -87,6 +89,7 @@ describe("tRPC request context", () => {
             requestId: "request-context-1",
             responseHeaders,
             securityAuditLifecycle: createTestSecurityAuditLifecycleService(),
+            serviceActionsService,
             systemHealthDiagnosticsService: createTestSystemHealthDiagnosticsService(),
             taskService: createTestTaskService(),
         });
@@ -121,6 +124,7 @@ describe("tRPC request context", () => {
             },
         });
         expect(context.responseHeaders).toBe(responseHeaders);
+        expect(context.serviceActionsService).toBe(serviceActionsService);
         expect(context.requestId).toBe("request-context-1");
         expect(context.userAgent).toBe("Context Test Browser");
         expect("dispose" in context.services).toBe(false);
@@ -158,6 +162,7 @@ describe("tRPC request context", () => {
             requestId: "request-context-2",
             responseHeaders: new Headers(),
             securityAuditLifecycle: createTestSecurityAuditLifecycleService(),
+            serviceActionsService: createTestServiceActionsService(),
             systemHealthDiagnosticsService: createTestSystemHealthDiagnosticsService(),
             taskService: createTestTaskService(),
         });
@@ -206,6 +211,7 @@ describe("tRPC request context", () => {
                 requestId: "request-context-3",
                 responseHeaders: new Headers(),
                 securityAuditLifecycle: createTestSecurityAuditLifecycleService(),
+                serviceActionsService: createTestServiceActionsService(),
                 systemHealthDiagnosticsService:
                     createTestSystemHealthDiagnosticsService(),
                 taskService: createTestTaskService(),

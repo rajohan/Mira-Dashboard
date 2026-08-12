@@ -1,16 +1,19 @@
 import { sql } from "drizzle-orm";
 import { check, index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
+import { workerActionKeysMaximumBytes } from "../workerActionKeyPolicy.ts";
 import {
     lowercaseHexTextCheck,
     timestampMillisecondsCheck,
     uuidV7TextCheck,
 } from "./checks.ts";
+import { boundedJsonArrayCheck } from "./jobChecks.ts";
 
 /** Durable worker registration and heartbeat state shared across rolling releases. */
 export const workerInstances = sqliteTable(
     "worker_instances",
     {
+        actionKeysJson: text("action_keys_json").notNull().default("[]"),
         capacity: integer("capacity").notNull(),
         drainingAt: integer("draining_at", { mode: "timestamp_ms" }),
         heartbeatAt: integer("heartbeat_at", { mode: "timestamp_ms" }).notNull(),
@@ -22,6 +25,10 @@ export const workerInstances = sqliteTable(
         stoppedAt: integer("stopped_at", { mode: "timestamp_ms" }),
     },
     (table) => [
+        check(
+            "worker_instances_action_keys_json_check",
+            boundedJsonArrayCheck(table.actionKeysJson, workerActionKeysMaximumBytes)
+        ),
         check("worker_instances_capacity_check", sql`${table.capacity} BETWEEN 1 AND 16`),
         check("worker_instances_id_check", uuidV7TextCheck(table.id)),
         check("worker_instances_pid_check", sql`${table.pid} BETWEEN 1 AND 2147483647`),

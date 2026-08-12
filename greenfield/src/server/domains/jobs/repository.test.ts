@@ -122,8 +122,13 @@ function queuedEvent(run: JobRunInsert): JobRunEventInsert {
     };
 }
 
-function worker(id: string, capacity = 1): WorkerInstanceInsert {
+function worker(
+    id: string,
+    capacity = 1,
+    actionKeysJson = '["system.worker-smoke"]'
+): WorkerInstanceInsert {
     return {
+        actionKeysJson,
         capacity,
         drainingAt: null,
         heartbeatAt: new Date(2000),
@@ -2366,6 +2371,169 @@ describe("durable jobs repository", () => {
         }
     });
 
+    test("reads only fresh online exact-release worker actions and preserves identity", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createJobRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        const minimumHeartbeatAt = new Date(10_000);
+        const expectedReleaseId = "b".repeat(40);
+        const exactWorkerId = uuid(710);
+        try {
+            database.orm
+                .insert(workerInstances)
+                .values([
+                    {
+                        ...worker(exactWorkerId),
+                        actionKeysJson:
+                            '["host.system.update","openclaw.sessions.cleanup"]',
+                        heartbeatAt: minimumHeartbeatAt,
+                        releaseId: expectedReleaseId,
+                        startedAt: new Date(9000),
+                    },
+                    {
+                        ...worker(uuid(711)),
+                        actionKeysJson: '["openclaw.installation.update"]',
+                        heartbeatAt: new Date(minimumHeartbeatAt.getTime() - 1),
+                        releaseId: expectedReleaseId,
+                        startedAt: new Date(9000),
+                    },
+                    {
+                        ...worker(uuid(712)),
+                        actionKeysJson: '["host.system.restart"]',
+                        heartbeatAt: minimumHeartbeatAt,
+                        releaseId: "c".repeat(40),
+                        startedAt: new Date(9000),
+                    },
+                    {
+                        ...worker(uuid(713)),
+                        actionKeysJson: '["host.system.restart"]',
+                        drainingAt: minimumHeartbeatAt,
+                        heartbeatAt: minimumHeartbeatAt,
+                        releaseId: expectedReleaseId,
+                        startedAt: new Date(9000),
+                        state: "draining" as const,
+                    },
+                ])
+                .run();
+
+            expect(
+                repository.readWorkerActionAvailability({
+                    actionKeys: [
+                        "openclaw.sessions.cleanup",
+                        "host.system.update",
+                        "host.system.restart",
+                        "openclaw.installation.update",
+                    ],
+                    expectedReleaseId,
+                    minimumHeartbeatAt,
+                })
+            ).toEqual(["host.system.update", "openclaw.sessions.cleanup"]);
+
+            const heartbeat = await repository.heartbeatWorker({
+                at: new Date(11_000),
+                workerId: exactWorkerId,
+            });
+            expect(heartbeat?.actionKeysJson).toBe(
+                '["host.system.update","openclaw.sessions.cleanup"]'
+            );
+            const draining = await repository.beginWorkerDrain({
+                at: new Date(12_000),
+                sideEffectsForWorker: () => noSideEffects,
+                workerId: exactWorkerId,
+            });
+            expect(draining).toMatchObject({
+                kind: "updated",
+                worker: {
+                    actionKeysJson: '["host.system.update","openclaw.sessions.cleanup"]',
+                },
+            });
+            const stopped = await repository.stopWorker({
+                at: new Date(13_000),
+                sideEffectsForWorker: () => noSideEffects,
+                workerId: exactWorkerId,
+            });
+            expect(stopped).toMatchObject({
+                kind: "updated",
+                worker: {
+                    actionKeysJson: '["host.system.update","openclaw.sessions.cleanup"]',
+                },
+            });
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("claims only actions advertised by each heterogeneous worker", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createJobRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        const installationRun = queuedRun(714, {
+            actionKey: "openclaw.installation.update",
+            resourceKeysJson: "[]",
+            scheduledJobId: null,
+            scheduledJobVersion: null,
+        });
+        const hostRun = queuedRun(715, {
+            actionKey: "host.system.update",
+            resourceKeysJson: "[]",
+            scheduledJobId: null,
+            scheduledJobVersion: null,
+        });
+        try {
+            for (const run of [installationRun, hostRun]) {
+                await repository.enqueueManualRun({
+                    ...noSideEffects,
+                    queuedEvent: queuedEvent(run),
+                    run,
+                });
+            }
+            await repository.registerWorker({
+                ...noSideEffects,
+                worker: worker(workerOneId, 1, '["host.system.update"]'),
+            });
+            await repository.registerWorker({
+                ...noSideEffects,
+                worker: worker(workerTwoId, 1, '["openclaw.installation.update"]'),
+            });
+
+            expect(
+                await repository.claimNextRun({
+                    at: new Date(5000),
+                    leaseExpiresAt: new Date(35_000),
+                    leaseToken: uuid(716),
+                    minimumHeartbeatAt: new Date(1000),
+                    sideEffectsForClaim: () => noSideEffects,
+                    workerId: workerOneId,
+                })
+            ).toMatchObject({
+                kind: "claimed",
+                run: { actionKey: "host.system.update", id: hostRun.id },
+            });
+            expect(
+                await repository.claimNextRun({
+                    at: new Date(5001),
+                    leaseExpiresAt: new Date(35_001),
+                    leaseToken: uuid(717),
+                    minimumHeartbeatAt: new Date(1000),
+                    sideEffectsForClaim: () => noSideEffects,
+                    workerId: workerTwoId,
+                })
+            ).toMatchObject({
+                kind: "claimed",
+                run: {
+                    actionKey: "openclaw.installation.update",
+                    id: installationRun.id,
+                },
+            });
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
     test("reserves the terminal event when payload consumes the byte budget", async () => {
         const database = await openFreshMigratedDatabase();
         const repository = createJobRepository(
@@ -3067,7 +3235,7 @@ describe("durable jobs repository", () => {
             });
             await repository.registerWorker({
                 ...noSideEffects,
-                worker: worker(workerOneId),
+                worker: worker(workerOneId, 1, '["maintenance.rotate-logs"]'),
             });
             const activeReal = await enqueue(83, realPayload);
             expect(

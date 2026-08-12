@@ -11,6 +11,7 @@ import {
 } from "../../../shared/validation.ts";
 import { workerInstances } from "../schema/workerInstances.ts";
 import { nonnegativeDateSchema, uuidV7TextSchema } from "./scalars.ts";
+import { parseWorkerActionKeysJson } from "./workerActionKeys.ts";
 
 const workerCapacitySchema = v.pipe(
     positiveSafeIntegerSchema("Stored worker capacity is invalid"),
@@ -19,6 +20,17 @@ const workerCapacitySchema = v.pipe(
 const workerPidSchema = v.pipe(
     positiveSafeIntegerSchema("Stored worker pid is invalid"),
     v.maxValue(2_147_483_647, "Stored worker pid is invalid")
+);
+const workerActionKeysJsonSchema = v.pipe(
+    v.string("Stored worker action keys are invalid"),
+    v.check((value) => {
+        try {
+            parseWorkerActionKeysJson(value);
+            return true;
+        } catch {
+            return false;
+        }
+    }, "Stored worker action keys are invalid")
 );
 
 interface StoredWorkerInstance {
@@ -49,6 +61,7 @@ function workerLifecycleIsConsistent(worker: StoredWorkerInstance): boolean {
 }
 
 const workerRefinements = {
+    actionKeysJson: () => workerActionKeysJsonSchema,
     capacity: () => workerCapacitySchema,
     drainingAt: nonnegativeDateSchema,
     heartbeatAt: nonnegativeDateSchema,
@@ -81,9 +94,10 @@ const generatedWorkerInstanceInsertSchema = createInsertSchema(
     workerInstances,
     workerRefinements
 );
-const workerInstanceInsertObjectSchema = v.strictObject(
-    generatedWorkerInstanceInsertSchema.entries
-);
+const workerInstanceInsertObjectSchema = v.strictObject({
+    ...generatedWorkerInstanceInsertSchema.entries,
+    actionKeysJson: workerActionKeysJsonSchema,
+});
 
 /** Validates one initially-online worker registration before insertion. */
 export const workerInstanceInsertSchema = v.pipe(

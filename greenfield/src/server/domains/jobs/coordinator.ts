@@ -10,6 +10,7 @@ import {
 } from "../../../contracts/jobModel.ts";
 import type { JsonObject } from "../../../shared/json.ts";
 import { parseJsonText } from "../../../shared/json.ts";
+import { serializeWorkerActionKeys } from "../../database/validation/workerActionKeys.ts";
 import { sha256Hex } from "../../shared/crypto.ts";
 import {
     type JobActionDefinition,
@@ -18,6 +19,7 @@ import {
     type JobCacheAttemptCommit,
     type JobCacheAttemptWriteResult,
     type JobExecutableActionDefinition,
+    JobActionOutcomeUnknownError,
     JobActionRetryableError,
     jobActionDefinitions,
     logMaintenanceJobActionKey,
@@ -466,6 +468,14 @@ function executionOutcome(
             terminalMessage: "The job action was cancelled.",
         };
     }
+    if (actionFailure instanceof JobActionOutcomeUnknownError) {
+        return {
+            kind: "failed",
+            terminalCode: "operation-outcome-unknown",
+            terminalMessage:
+                "The action may have taken effect; inspect current state before retrying.",
+        };
+    }
     const shutdown = abortReason instanceof JobCoordinatorShutdownError;
     return actionFailureOutcome(
         run,
@@ -772,6 +782,9 @@ export function createJobWorkerCoordinator(
     const generateId = options.generateId ?? (() => Bun.randomUUIDv7());
     const findAction = options.findAction ?? findNoAction;
     const actionDefinitions = options.actionDefinitions ?? jobActionDefinitions;
+    const actionKeysJson = serializeWorkerActionKeys(
+        actionDefinitions.map(({ actionKey }) => actionKey)
+    );
     const abortController = new AbortController();
     let activeExecution: Promise<void> | undefined;
     let initializePromise: Promise<void> | undefined;
@@ -1096,6 +1109,7 @@ export function createJobWorkerCoordinator(
                 }),
         });
         const worker: WorkerInstanceInsert = {
+            actionKeysJson,
             capacity: jobWorkerCapacity,
             drainingAt: null,
             heartbeatAt: at,

@@ -277,6 +277,7 @@ describe("durable jobs service", () => {
             await repository.registerWorker({
                 ...noSideEffects,
                 worker: {
+                    actionKeysJson: '["system.worker-smoke"]',
                     capacity: 1,
                     drainingAt: null,
                     heartbeatAt: transitionAt,
@@ -1204,6 +1205,7 @@ describe("durable jobs service", () => {
                 id: string,
                 heartbeatAt: Date
             ): WorkerInstanceRecord => ({
+                actionKeysJson: "[]",
                 capacity: 1,
                 drainingAt: null,
                 heartbeatAt,

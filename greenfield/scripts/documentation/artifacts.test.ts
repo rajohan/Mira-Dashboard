@@ -114,6 +114,12 @@ describe("generated contract documentation", () => {
             "| `terminal.prepareSession` | mutation | terminal | Authenticated browser session: terminal:write; MFA enrollment required; recent MFA when enabled |"
         );
         expect(procedureDocumentation).toContain(
+            "| `serviceActions.getStatus` | query | service-actions | Authenticated browser session: service-actions:read |"
+        );
+        expect(procedureDocumentation).toContain(
+            "| `serviceActions.request` | mutation | service-actions | Authenticated browser session: service-actions:write; MFA enrollment required; recent MFA when enabled |"
+        );
+        expect(procedureDocumentation).toContain(
             "| None | None | Returns bootstrap, pending MFA"
         );
         expect(procedureDocumentation).toContain("`events.stream`");
@@ -188,6 +194,14 @@ describe("generated contract documentation", () => {
         expect(first.has("schemas/terminal.prepareSession.output.schema.json")).toBe(
             true
         );
+        for (const artifact of [
+            "schemas/serviceActions.getStatus.input.schema.json",
+            "schemas/serviceActions.getStatus.output.schema.json",
+            "schemas/serviceActions.request.input.schema.json",
+            "schemas/serviceActions.request.output.schema.json",
+        ]) {
+            expect(first.has(artifact)).toBe(true);
+        }
         expect(first.get("schemas/files.list.output.schema.json")).toContain(
             "rejects traversal names and path separators"
         );

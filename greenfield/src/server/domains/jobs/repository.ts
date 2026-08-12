@@ -31,6 +31,7 @@ import {
     jobResourceClasses,
     jobResourceKeysSchema,
     jobRunStates,
+    jobTimestampSchema,
     jobWorkerSummaryMaximum,
     type JobResourceClass,
     type JobRunState,
@@ -52,6 +53,7 @@ import {
     logMaintenanceJobActionKey,
     logMaintenanceJobPayloadIndexMaximumBytes,
 } from "../../../shared/logMaintenanceUnits.ts";
+import { fullCommitShaSchema } from "../../../shared/validation.ts";
 import type { ImmediateDatabaseWriteAdmission } from "../../database/immediateWriteAdmission.ts";
 import { auditEvents } from "../../database/schema/auditEvents.ts";
 import { jobDisableIntents } from "../../database/schema/jobDisableIntents.ts";
@@ -89,6 +91,11 @@ import {
     scheduledJobInsertSchema,
     scheduledJobSelectSchema,
 } from "../../database/validation/scheduledJobs.ts";
+import { parseWorkerActionKeysJson } from "../../database/validation/workerActionKeys.ts";
+import {
+    canonicalWorkerActionKeys,
+    workerActionKeysSchema,
+} from "../../database/validation/workerActionKeys.ts";
 import {
     workerInstanceInsertSchema,
     workerInstanceSelectSchema,
@@ -158,6 +165,19 @@ export interface JobHealthState {
 export interface ReadJobHealthStateInput {
     readonly expectedReleaseId?: string;
     readonly minimumHeartbeatAt: Date;
+}
+
+export interface ReadWorkerActionAvailabilityInput {
+    readonly actionKeys: readonly string[];
+    readonly expectedReleaseId: string;
+    readonly minimumHeartbeatAt: Date;
+}
+
+/** Narrow exact-release executable-action inventory reader. */
+export interface WorkerActionAvailabilityReader {
+    readWorkerActionAvailability(
+        input: ReadWorkerActionAvailabilityInput
+    ): readonly string[];
 }
 
 /** Narrow aggregate reader kept separate from the ordinary job-service repository port. */
@@ -1159,6 +1179,47 @@ class DrizzleJobReader implements JobRepositoryReader {
         };
     }
 
+    public readWorkerActionAvailability(
+        input: ReadWorkerActionAvailabilityInput
+    ): readonly string[] {
+        const actionKeys = canonicalWorkerActionKeys(input.actionKeys);
+        if (actionKeys.length === 0) return Object.freeze([]);
+        const expectedReleaseId = v.parse(
+            fullCommitShaSchema("Expected worker release id is invalid"),
+            input.expectedReleaseId
+        );
+        const minimumHeartbeatAtMs = v.parse(
+            jobTimestampSchema,
+            getTime(input.minimumHeartbeatAt)
+        );
+        const rows = this.database.all<unknown>(sql`
+            SELECT DISTINCT CAST(action.value AS TEXT) AS actionKey
+            FROM ${workerInstances} AS worker
+            JOIN json_each(worker.action_keys_json) AS action
+            WHERE worker.state = 'online'
+              AND worker.release_id = ${expectedReleaseId}
+              AND worker.heartbeat_at >= ${minimumHeartbeatAtMs}
+              AND CAST(action.value AS TEXT) IN (${sql.join(
+                  actionKeys.map((actionKey) => sql`${actionKey}`),
+                  sql`, `
+              )})
+            ORDER BY actionKey ASC
+            LIMIT ${actionKeys.length}
+        `);
+        const parsed = v
+            .parse(
+                v.array(
+                    v.strictObject({
+                        actionKey: v.string("Worker action key is invalid"),
+                    }),
+                    "Worker action availability is invalid"
+                ),
+                rows
+            )
+            .map(({ actionKey }) => actionKey);
+        return Object.freeze([...v.parse(workerActionKeysSchema, parsed)]);
+    }
+
     public readWorkerControl(): JobWorkerControlRecord {
         const row = this.database
             .select()
@@ -2084,6 +2145,8 @@ class DrizzleJobWriter extends DrizzleJobReader {
             "worker active count"
         ).value;
         if (activeCount >= worker.capacity) return { kind: "worker-unavailable" };
+        const workerActionKeys = parseWorkerActionKeysJson(worker.actionKeysJson);
+        if (workerActionKeys.length === 0) return { kind: "empty" };
 
         const availableThrough = input.cursor?.availableThrough ?? input.at;
         const candidates: JobRunRecord[] = [];
@@ -2098,6 +2161,7 @@ class DrizzleJobWriter extends DrizzleJobReader {
                         and(
                             eq(jobRuns.state, "queued"),
                             lte(jobRuns.availableAt, availableThrough),
+                            inArray(jobRuns.actionKey, workerActionKeys),
                             range
                         )
                     )
@@ -2700,7 +2764,7 @@ class DrizzleJobWriter extends DrizzleJobReader {
 export function createJobRepository(
     database: SQLiteBunDatabase,
     writeAdmission: ImmediateDatabaseWriteAdmission
-): JobRepository & JobHealthStateReader {
+): JobRepository & JobHealthStateReader & WorkerActionAvailabilityReader {
     // Drizzle exposes the synchronous transaction overload through a conditional
     // return type that cannot preserve our generic callback without this narrowing.
     const runTransaction = database.transaction.bind(database) as unknown as <T>(
@@ -2783,6 +2847,8 @@ export function createJobRepository(
         readQueueState: (input: ReadQueueStateInput) =>
             read((reader) => reader.readQueueState(input)),
         readWorkerControl: () => read((reader) => reader.readWorkerControl()),
+        readWorkerActionAvailability: (input: ReadWorkerActionAvailabilityInput) =>
+            read((reader) => reader.readWorkerActionAvailability(input)),
         reconcileSchedules: (input: ReconcileSchedulesInput) =>
             write((writer) => writer.reconcileSchedules(input)),
         recoverExpiredClaims: (input: RecoverExpiredClaimsInput) =>

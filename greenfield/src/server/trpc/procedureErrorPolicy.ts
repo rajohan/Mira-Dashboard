@@ -528,6 +528,13 @@ export const procedureExpectedErrorPolicy = freezeProcedureExpectedErrorPolicy({
         "UNAUTHORIZED",
     ],
     "securityAudit.listEvents": ["FORBIDDEN", "UNAUTHORIZED"],
+    "serviceActions.getStatus": ["FORBIDDEN", "SERVICE_UNAVAILABLE", "UNAUTHORIZED"],
+    "serviceActions.request": [
+        "CONFLICT",
+        "FORBIDDEN",
+        "SERVICE_UNAVAILABLE",
+        "UNAUTHORIZED",
+    ],
     "system.healthDiagnostics": ["FORBIDDEN", "UNAUTHORIZED"],
     "system.metrics": ["FORBIDDEN", "SERVICE_UNAVAILABLE", "UNAUTHORIZED"],
     "system.runtimeIdentity": [],

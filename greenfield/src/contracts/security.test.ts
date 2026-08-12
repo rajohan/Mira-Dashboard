@@ -39,6 +39,8 @@ describe("request authentication contract", () => {
             "openclaw-tasks:write",
             "reports:read",
             "reports:write",
+            "service-actions:read",
+            "service-actions:write",
             "tasks:read",
             "tasks:write",
             "terminal:read",

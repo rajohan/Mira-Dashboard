@@ -1,0 +1,169 @@
+{
+    "domain": "operations",
+    "methodAccess": [
+        {
+            "controlPlaneWrite": false,
+            "lane": "one-shot-admin",
+            "method": "sessions.cleanup",
+            "scope": "operator.admin"
+        },
+        {
+            "controlPlaneWrite": true,
+            "lane": "one-shot-admin",
+            "method": "update.run",
+            "scope": "operator.admin"
+        }
+    ],
+    "methods": ["sessions.cleanup", "update.run"],
+    "schemaVersion": 1,
+    "sessionsCleanup": {
+        "handlerValidatesParams": true,
+        "method": "sessions.cleanup",
+        "mutation": {
+            "diskBudgetEnforcedAfterEntryMaintenance": true,
+            "entryStateRecheckedBeforeRemoval": true,
+            "unreferencedArtifactsPrunedOutsideWarnMode": true,
+            "usesSqliteLifecycleMutation": true
+        },
+        "outcome": {
+            "automaticReplaySafe": false,
+            "handlerTimeoutParameter": false,
+            "idempotencyParameter": false,
+            "postDispatchTransportTimeout": "outcome-unknown"
+        },
+        "preservation": {
+            "activeKeyAndParentsPreserved": true,
+            "activeWorkAdmissionsPreserved": true,
+            "archivedEntriesPreserved": true,
+            "groupChannelAndThreadEntriesPreserved": true,
+            "modelSelectionLockedEntriesPreserved": true,
+            "primarySessionsPreserved": true,
+            "registeredRuntimeKeysPreserved": true
+        },
+        "request": {
+            "acceptedParams": [
+                "activeKey",
+                "agent",
+                "allAgents",
+                "enforce",
+                "fixDmScope",
+                "fixMissing"
+            ],
+            "closedObject": true,
+            "requiredParams": []
+        },
+        "response": {
+            "appliedStoreFields": [
+                "agentId",
+                "storePath",
+                "mode",
+                "dryRun",
+                "beforeCount",
+                "afterCount",
+                "missing",
+                "dmScopeRetired",
+                "modelRunPruned",
+                "pruned",
+                "capped",
+                "unreferencedArtifacts",
+                "diskBudget",
+                "wouldMutate",
+                "applied",
+                "appliedCount"
+            ],
+            "diskBudgetFields": [
+                "totalBytesBefore",
+                "totalBytesAfter",
+                "removedFiles",
+                "removedEntries",
+                "freedBytes",
+                "maxBytes",
+                "highWaterBytes",
+                "overBudget"
+            ],
+            "formattedUpstreamErrorMustBeSanitized": true,
+            "multiStoreFields": ["allAgents", "mode", "dryRun", "stores"],
+            "sensitivePaths": ["storePath", "stores[].storePath"],
+            "unreferencedArtifactFields": [
+                "scannedFiles",
+                "removedFiles",
+                "freedBytes",
+                "olderThanMs"
+            ]
+        },
+        "semantics": {
+            "activeKeyOptional": true,
+            "enforceTrueOverridesConfiguredMode": true,
+            "fixDmScopeDefaultsFalse": true,
+            "fixMissingDefaultsFalse": true,
+            "maintenanceConfigSource": "session.maintenance",
+            "rpcAlwaysAppliesRatherThanDryRuns": true
+        }
+    },
+    "updateRun": {
+        "handlerValidatesParams": true,
+        "managedHandoff": {
+            "activeFlightJoinedWithoutSecondSpawn": true,
+            "detachedChild": true,
+            "gitRequiresSupervisor": true,
+            "globalInstallRequiresHandoff": true,
+            "readyMarkerTimeoutMs": 30000,
+            "sensitiveTemporaryFilesRemoved": true,
+            "startedHandoffCountsAsAccepted": true,
+            "systemdMinimumRestartDelayMs": 2000,
+            "systemdRequiresUnitContext": true,
+            "systemdUsesUserScope": true
+        },
+        "method": "update.run",
+        "outcome": {
+            "automaticReplaySafe": false,
+            "handlerAbortSignal": false,
+            "idempotencyParameter": false,
+            "operationalErrorsUseRpcSuccess": true,
+            "postDispatchTransportTimeout": "outcome-unknown"
+        },
+        "request": {
+            "acceptedParams": [
+                "continuationMessage",
+                "deliveryContext",
+                "note",
+                "restartDelayMs",
+                "sessionKey",
+                "timeoutMs"
+            ],
+            "closedObject": true,
+            "requiredParams": [],
+            "restartDelayMinimumMs": 0,
+            "timeoutMinimumMs": 1
+        },
+        "response": {
+            "okWhenHandoffStarted": true,
+            "okWhenResultStatusOk": true,
+            "resultStatuses": ["error", "ok", "skipped"],
+            "sentinelPersistenceBestEffort": true,
+            "sensitivePaths": [
+                "handoff.command",
+                "handoff.message",
+                "handoff.pid",
+                "result.root",
+                "result.steps[].command",
+                "result.steps[].cwd",
+                "result.steps[].stderrTail",
+                "result.steps[].stdoutTail",
+                "restart.pid",
+                "sentinel.payload"
+            ],
+            "topLevelFields": ["ok", "result", "handoff", "restart", "sentinel"]
+        },
+        "restart": {
+            "directSuccessSchedulesSigusr1": true,
+            "managedSystemdSkipsCooldownAndDeferral": true,
+            "packageSwapSkipsCooldownAndDeferral": true
+        },
+        "timeout": {
+            "defaultRunnerPerStepMs": 1200000,
+            "handlerFloorMs": 1000,
+            "perStepRatherThanWholeOperation": true
+        }
+    }
+}
