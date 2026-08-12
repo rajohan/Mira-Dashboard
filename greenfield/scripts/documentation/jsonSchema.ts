@@ -282,7 +282,7 @@ const noNulJsonSchemaPattern = String.raw`^[^\u0000]*$`;
 const runtimeCheckComments = new Map<unknown, string>([
     [
         serviceActionStatusesAreCanonical,
-        "Live Valibot validation additionally requires the four fixed service-action rows to be complete, unique, and canonically ordered.",
+        "Live Valibot validation additionally requires the six fixed service-action rows to be complete, unique, and canonically ordered.",
     ],
     [
         workspaceFileContentTicketIsConsistent,

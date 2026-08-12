@@ -51,13 +51,15 @@ export async function runDevelopmentWorkerProcess(
             openClawRoot,
             logMaintenance,
             moltbook,
-            hostOperations
+            hostOperations,
+            bootIdentity
         ) => {
             const writer = createDescriptorWorkspaceFileStructuralWriter({
                 roots: [workspaceRoot, openClawRoot],
                 spoolRoot: layout.production.state.workspaceFileUploads,
             });
             return createDashboardWorkerRuntime({
+                bootIdentity,
                 database: {
                     migrationsDirectory: path.join(source.releaseRoot, "migrations"),
                     releaseId: source.manifest.source.commitSha,

@@ -2,6 +2,7 @@ import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { OpenClawCronBrowser } from "../openClawCron/OpenClawCronBrowser.tsx";
+import { OverviewServiceActionsSection } from "../overview/OverviewServiceActionsSection.tsx";
 import { Button } from "../ui/Button.tsx";
 import { PageHeader } from "../ui/PageHeader.tsx";
 import { parseJobsRouteSearch } from "./jobRouteSearch.ts";
@@ -18,6 +19,7 @@ function DashboardJobsContent() {
 
     return (
         <div className="space-y-12">
+            <OverviewServiceActionsSection showJobsLink={false} />
             <JobRunBrowser
                 focusRunId={focusRunId}
                 onRequestRunFocus={setFocusRunId}
@@ -41,7 +43,7 @@ export function JobsRoute() {
     return (
         <div>
             <PageHeader
-                description="View Dashboard background jobs and manage OpenClaw's own scheduled jobs."
+                description="Run fixed Service Actions, view Dashboard background jobs, and manage OpenClaw's own scheduled jobs."
                 eyebrow="Operations"
                 title="Jobs"
             />

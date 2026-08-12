@@ -316,11 +316,11 @@ describe("reviewed pre-cutover parity inventory", () => {
             kind: "reviewed-removal",
             reason: expect.stringContaining("synchronous generic command endpoint"),
         });
-        expect(endpoints[3]?.purpose).toContain("Docker prune in Docker control");
-        expect(endpoints[3]?.purpose).toContain(
-            "apt cleanup in host/package maintenance"
-        );
-        expect(endpoints[3]?.purpose).toContain("journald vacuum in log maintenance");
+        expect(endpoints[3]?.purpose).toContain("package autoremove/cache cleanup");
+        expect(endpoints[3]?.purpose).toContain("14-day and 1 GiB retention");
+        expect(endpoints[3]?.purpose).toContain("older than 168 hours");
+        expect(endpoints[3]?.purpose).toContain("never deletes volumes");
+        expect(endpoints[3]?.purpose).toContain("distinct-worker production topology");
     });
 
     test("records the bounded OpenClaw settings and operations slice", async () => {
@@ -358,7 +358,11 @@ describe("reviewed pre-cutover parity inventory", () => {
                 "implemented",
                 ["openClawSettings.createConfigurationBackup"],
             ],
-            ["POST /api/restart", "implemented", ["openClawSettings.restartGateway"]],
+            [
+                "POST /api/restart",
+                "implemented",
+                ["openClawSettings.restartGateway", "serviceActions.request"],
+            ],
             [
                 "POST /api/skills/:name",
                 "implemented",

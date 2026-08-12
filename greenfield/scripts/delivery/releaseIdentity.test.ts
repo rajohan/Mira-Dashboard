@@ -117,6 +117,10 @@ async function releaseFixture(): Promise<{
             path.join(releaseRoot, "migrations")
         ),
         copyDirectory(
+            path.join(sourceProjectRoot, "scripts/delivery/provisioning/host-operations"),
+            path.join(releaseRoot, "scripts/delivery/provisioning/host-operations")
+        ),
+        copyDirectory(
             path.join(sourceProjectRoot, "scripts/delivery/provisioning/log-maintenance"),
             path.join(releaseRoot, "scripts/delivery/provisioning/log-maintenance")
         ),
@@ -171,6 +175,17 @@ describe("release identity", () => {
                 .filter(({ path: artifactPath }) => artifactPath.startsWith("scripts/"))
                 .map(({ path: artifactPath }) => artifactPath)
         ).toEqual([
+            "scripts/delivery/provisioning/host-operations/60-mira-dashboard-host-operations.rules",
+            "scripts/delivery/provisioning/host-operations/README.md",
+            "scripts/delivery/provisioning/host-operations/hostOperationsProvisioningFilesystem.ts",
+            "scripts/delivery/provisioning/host-operations/installHostOperationsProvisioning.ts",
+            "scripts/delivery/provisioning/host-operations/mira-dashboard-deferred-reboot.service",
+            "scripts/delivery/provisioning/host-operations/mira-dashboard-deferred-reboot.timer",
+            "scripts/delivery/provisioning/host-operations/mira-dashboard-host-operation",
+            "scripts/delivery/provisioning/host-operations/mira-dashboard-host-system-cleanup.service",
+            "scripts/delivery/provisioning/host-operations/mira-dashboard-host-system-restart.service",
+            "scripts/delivery/provisioning/host-operations/mira-dashboard-host-system-update.service",
+            "scripts/delivery/provisioning/host-operations/policy.ts",
             "scripts/delivery/provisioning/log-maintenance/60-mira-dashboard-log-maintenance.rules",
             "scripts/delivery/provisioning/log-maintenance/README.md",
             "scripts/delivery/provisioning/log-maintenance/installLogMaintenanceProvisioning.ts",

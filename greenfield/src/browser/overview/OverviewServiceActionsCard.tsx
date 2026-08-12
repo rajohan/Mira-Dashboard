@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router";
 import { Wrench } from "lucide-react";
 import { useId, useState } from "react";
 
@@ -48,7 +49,17 @@ function RunObservation({ label, run }: RunObservationProps) {
                     {formatDashboardDateTime(run.updatedAtMs)}
                 </time>
             </dd>
-            <dd className="text-primary-400 mt-1 text-xs break-all">Run {run.id}</dd>
+            <dd className="text-primary-400 mt-1 text-xs break-all">
+                Run{" "}
+                <Link
+                    aria-label={`Open Dashboard job ${run.id}`}
+                    className="text-accent-300 hover:text-accent-200 font-mono"
+                    search={{ runId: run.id }}
+                    to="/jobs"
+                >
+                    {run.id}
+                </Link>
+            </dd>
         </div>
     );
 }
@@ -131,6 +142,7 @@ export interface OverviewServiceActionsCardProps {
     readonly recoveryPending: (actionId: ServiceActionId) => boolean;
     readonly requestActionId: ServiceActionId | undefined;
     readonly requestBusy: boolean;
+    readonly showJobsLink?: boolean;
 }
 
 /**
@@ -149,6 +161,7 @@ export function OverviewServiceActionsCard({
     recoveryPending,
     requestActionId,
     requestBusy,
+    showJobsLink = true,
 }: OverviewServiceActionsCardProps) {
     const headingId = useId();
     const [selectedActionId, setSelectedActionId] = useState<ServiceActionId>();
@@ -172,15 +185,17 @@ export function OverviewServiceActionsCard({
                             Service actions
                         </Heading>
                         <Text className="mt-1" size="sm" tone="muted">
-                            Queue four fixed, audited worker operations. Recent
-                            multi-factor authentication is required; arbitrary commands
-                            are not accepted.
+                            Queue fixed, audited worker operations. Recent multi-factor
+                            authentication is required; arbitrary commands are not
+                            accepted.
                         </Text>
                     </div>
                 </div>
-                <ActionLink size="sm" to="/jobs" variant="secondary">
-                    View Dashboard jobs
-                </ActionLink>
+                {showJobsLink && (
+                    <ActionLink size="sm" to="/jobs" variant="secondary">
+                        View Dashboard jobs
+                    </ActionLink>
+                )}
             </div>
 
             <Alert

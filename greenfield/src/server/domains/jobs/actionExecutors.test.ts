@@ -24,11 +24,14 @@ import {
     type JobCacheAttemptCommit,
     JobActionOutcomeUnknownError,
     JobActionRetryableError,
+    hostSystemRestartJobActionDefinition,
     jobActionDefinitions,
 } from "./actionRegistry.ts";
 
 function executionContext(attempts: JobCacheAttemptCommit[]): JobActionExecutionContext {
     return {
+        armHostRestartClaimFence: () => Promise.resolve(),
+        clearHostRestartClaimFence: () => Promise.resolve(),
         commitCacheAttempt: (attempt) => {
             attempts.push(attempt);
             return Promise.resolve("committed");
@@ -79,6 +82,7 @@ describe("worker-only job executor registry", () => {
         });
         expect(findAction("openclaw.sessions.cleanup")).toBeDefined();
         expect(findAction("openclaw.installation.update")).toBeDefined();
+        expect(findAction("host.system.cleanup")).toBeUndefined();
         expect(findAction("host.system.restart")).toBeUndefined();
         expect(findAction("host.system.update")).toBeUndefined();
         expect(findAction("system.shell")).toBeUndefined();
@@ -106,10 +110,22 @@ describe("worker-only job executor registry", () => {
 
     test("persists only fixed host-operation settlement and rejects mismatched results", async () => {
         const calls: unknown[] = [];
+        const fenceEvents: string[] = [];
+        const restartContext: JobActionExecutionContext = {
+            ...executionContext([]),
+            armHostRestartClaimFence: () => {
+                fenceEvents.push("arm");
+                return Promise.resolve();
+            },
+            clearHostRestartClaimFence: () => {
+                fenceEvents.push("clear");
+                return Promise.resolve();
+            },
+        };
         const hostOperations = {
             availableOperations: () => Promise.resolve([]),
             request(
-                operationId: "system-restart" | "system-update",
+                operationId: "system-cleanup" | "system-restart" | "system-update",
                 signal?: AbortSignal
             ) {
                 calls.push({ operationId, signal });
@@ -123,11 +139,20 @@ describe("worker-only job executor registry", () => {
         expect(
             await Effect.runPromise(
                 createHostOperationJobExecutor(hostOperations, "system-restart")(
-                    executionContext([]),
+                    restartContext,
                     {}
                 )
             )
         ).toEqual({ completedAtMs: 5000, status: "accepted" });
+        expect(fenceEvents).toEqual(["arm"]);
+        expect(
+            await Effect.runPromise(
+                createHostOperationJobExecutor(hostOperations, "system-cleanup")(
+                    executionContext([]),
+                    {}
+                )
+            )
+        ).toEqual({ completedAtMs: 5000, status: "completed" });
         expect(
             await Effect.runPromise(
                 createHostOperationJobExecutor(hostOperations, "system-update")(
@@ -138,6 +163,7 @@ describe("worker-only job executor registry", () => {
         ).toEqual({ completedAtMs: 5000, status: "completed" });
         expect(calls).toMatchObject([
             { operationId: "system-restart", signal: expect.any(AbortSignal) },
+            { operationId: "system-cleanup", signal: expect.any(AbortSignal) },
             { operationId: "system-update", signal: expect.any(AbortSignal) },
         ]);
 
@@ -148,9 +174,46 @@ describe("worker-only job executor registry", () => {
                     request: () => Promise.resolve({ status: "completed" }),
                 },
                 "system-restart"
-            )(executionContext([]), {})
+            )(restartContext, {})
         ).catch((error: unknown) => error);
         expect(failure).toBeInstanceOf(Error);
+        expect(fenceEvents).toEqual(["arm", "arm"]);
+
+        let restartDispatchAccepted = false;
+        const brokerFailure = await Effect.runPromise(
+            createHostOperationJobExecutor(
+                {
+                    availableOperations: () => Promise.resolve([]),
+                    request: () => {
+                        restartDispatchAccepted = true;
+                        return Promise.reject(
+                            new Error("response lost after systemctl accepted dispatch")
+                        );
+                    },
+                },
+                "system-restart"
+            )(restartContext, {})
+        ).catch((error: unknown) => error);
+        expect(brokerFailure).toBeInstanceOf(Error);
+        expect((brokerFailure as Error).message).toBe("Fixed host operation failed");
+        expect((brokerFailure as Error).message).not.toContain("systemctl");
+        expect(restartDispatchAccepted).toBeTrue();
+        expect(fenceEvents).toEqual(["arm", "arm", "arm"]);
+        expect(hostSystemRestartJobActionDefinition).toMatchObject({
+            attemptLimit: 1,
+            retrySafe: false,
+        });
+
+        const cleanupFailure = await Effect.runPromise(
+            createHostOperationJobExecutor(
+                {
+                    availableOperations: () => Promise.resolve([]),
+                    request: () => Promise.resolve({ status: "accepted" }),
+                },
+                "system-cleanup"
+            )(executionContext([]), {})
+        ).catch((error: unknown) => error);
+        expect(cleanupFailure).toBeInstanceOf(Error);
     });
 
     test("persists only aggregate OpenClaw cleanup and validated update summaries", async () => {

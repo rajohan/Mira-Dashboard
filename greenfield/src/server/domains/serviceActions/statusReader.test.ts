@@ -38,6 +38,7 @@ function run(id: string, actionKey: string, state: "failed" | "queued"): JobRunR
         queuedAt,
         requestedById: actorId,
         requestedByKind: "user",
+        requiredWorkerReleaseId: null,
         resourceClass: "exclusive",
         resourceKeysJson: '["host.mutation"]',
         resultJson: null,
@@ -84,6 +85,7 @@ describe("Service Action status reader", () => {
                     availabilityInputs.push(input);
                     return Object.freeze([
                         serviceActionJobActionKeys["openclaw-cleanup"],
+                        serviceActionJobActionKeys["openclaw-restart"],
                         serviceActionJobActionKeys["system-update"],
                     ]);
                 },
@@ -92,7 +94,9 @@ describe("Service Action status reader", () => {
 
         expect(await reader.read()).toEqual([
             { availability: "available", id: "openclaw-cleanup" },
+            { availability: "available", id: "openclaw-restart" },
             { availability: "unavailable", id: "openclaw-update" },
+            { availability: "unavailable", id: "system-cleanup" },
             { availability: "unavailable", id: "system-restart" },
             {
                 activeRun: expect.objectContaining({ id: active.id, state: "queued" }),
@@ -105,7 +109,9 @@ describe("Service Action status reader", () => {
             {
                 actionKeys: [
                     "openclaw.sessions.cleanup",
+                    "openclaw.gateway.restart",
                     "openclaw.installation.update",
+                    "host.system.cleanup",
                     "host.system.restart",
                     "host.system.update",
                 ],

@@ -30,13 +30,21 @@ import {
 } from "../../../contracts/jobModel.ts";
 import { utf8ByteLength } from "../../../shared/encoding.ts";
 import { parseJsonText } from "../../../shared/json.ts";
-import { nonnegativeSafeIntegerSchema } from "../../../shared/validation.ts";
+import {
+    fullCommitShaAction,
+    nonnegativeSafeIntegerSchema,
+} from "../../../shared/validation.ts";
 import { jobRuns } from "../schema/jobRuns.ts";
 import { jobActorIdentityIsValid } from "./jobActors.ts";
 import { nonnegativeDateSchema, uuidV7TextSchema } from "./scalars.ts";
 import { sha256TextSchema } from "./securityScalars.ts";
 
 const actorKindSchema = v.picklist(["automation", "system", "user"]);
+const requiredWorkerReleaseIdMessage = "Stored required worker release id is invalid";
+const requiredWorkerReleaseIdSchema = v.pipe(
+    v.string(requiredWorkerReleaseIdMessage),
+    fullCommitShaAction(requiredWorkerReleaseIdMessage)
+);
 
 function jsonObjectTextSchema(
     maximumBytes: number,
@@ -253,7 +261,7 @@ function jobRunIsConsistent(run: StoredJobRun): boolean {
     );
 }
 
-const jobRunRefinements = {
+const jobRunSharedRefinements = {
     actionKey: () => jobActionKeySchema,
     attemptCount: () => jobAttemptCountSchema,
     attemptLimit: () => jobAttemptLimitSchema,
@@ -296,7 +304,11 @@ const jobRunRefinements = {
     updatedAt: nonnegativeDateSchema,
 };
 
-const generatedJobRunSelectSchema = createSelectSchema(jobRuns, jobRunRefinements);
+const generatedJobRunSelectSchema = createSelectSchema(jobRuns, {
+    ...jobRunSharedRefinements,
+    requiredWorkerReleaseId: (schema: v.StringSchema<undefined>) =>
+        v.pipe(schema, fullCommitShaAction(requiredWorkerReleaseIdMessage)),
+});
 const jobRunSelectObjectSchema = v.strictObject(generatedJobRunSelectSchema.entries);
 
 /** Validates one complete durable job-run row read from SQLite. */
@@ -306,7 +318,13 @@ export const jobRunSelectSchema = v.pipe(
 );
 
 const generatedJobRunInsertSchema = v.omit(
-    createInsertSchema(jobRuns, jobRunRefinements),
+    createInsertSchema(jobRuns, {
+        ...jobRunSharedRefinements,
+        requiredWorkerReleaseId: v.optional(
+            v.nullable(requiredWorkerReleaseIdSchema),
+            null
+        ),
+    }),
     ["attemptCount", "eventBytes", "eventCount", "payloadEventCount", "stateVersion"]
 );
 const jobRunInsertObjectSchema = v.strictObject(generatedJobRunInsertSchema.entries);

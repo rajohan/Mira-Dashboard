@@ -963,6 +963,7 @@ CREATE TABLE `job_runs` (
 	`queued_at` integer NOT NULL,
 	`requested_by_id` text NOT NULL,
 	`requested_by_kind` text NOT NULL,
+	`required_worker_release_id` text,
 	`resource_class` text NOT NULL,
 	`resource_keys_json` text NOT NULL,
 	`result_json` text,
@@ -993,6 +994,7 @@ CREATE TABLE `job_runs` (
 	CONSTRAINT "job_runs_payload_json_check" CHECK(length(CAST("payload_json" AS BLOB)) <= 65536 AND CASE WHEN json_valid("payload_json") THEN json_type("payload_json") = 'object' ELSE 0 END),
 	CONSTRAINT "job_runs_priority_check" CHECK("priority" BETWEEN -100 AND 100),
 	CONSTRAINT "job_runs_requested_actor_check" CHECK((("requested_by_kind" = 'user' AND length("requested_by_id") = 36 AND instr("requested_by_id", char(0)) = 0 AND length(replace("requested_by_id", '-', '')) = 32 AND replace("requested_by_id", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr("requested_by_id", 9, 1) = '-' AND substr("requested_by_id", 14, 1) = '-' AND substr("requested_by_id", 15, 1) = '7' AND substr("requested_by_id", 19, 1) = '-' AND substr("requested_by_id", 20, 1) GLOB '[89ab]' AND substr("requested_by_id", 24, 1) = '-') OR ("requested_by_kind" = 'automation' AND length("requested_by_id") BETWEEN 1 AND 64 AND instr("requested_by_id", char(0)) = 0 AND "requested_by_id" = lower("requested_by_id") AND substr("requested_by_id", 1, 1) GLOB '[a-z0-9]' AND "requested_by_id" NOT GLOB '*[^a-z0-9._-]*') OR ("requested_by_kind" = 'system' AND length("requested_by_id") BETWEEN 1 AND 128 AND instr("requested_by_id", char(0)) = 0 AND "requested_by_id" = lower("requested_by_id") AND substr("requested_by_id", 1, 1) GLOB '[a-z0-9]' AND "requested_by_id" NOT GLOB '*[^a-z0-9._-]*'))),
+	CONSTRAINT "job_runs_required_worker_release_id_check" CHECK("required_worker_release_id" IS NULL OR length("required_worker_release_id") = 40 AND instr("required_worker_release_id", char(0)) = 0 AND "required_worker_release_id" NOT GLOB '*[^0-9a-f]*'),
 	CONSTRAINT "job_runs_resource_class_check" CHECK("resource_class" IN ('exclusive', 'host-heavy', 'interactive', 'light', 'network')),
 	CONSTRAINT "job_runs_resource_keys_json_check" CHECK(length(CAST("resource_keys_json" AS BLOB)) <= 4096 AND CASE WHEN json_valid("resource_keys_json") THEN json_type("resource_keys_json") = 'array' ELSE 0 END),
 	CONSTRAINT "job_runs_result_json_check" CHECK("result_json" IS NULL OR (length(CAST("result_json" AS BLOB)) <= 65536 AND CASE WHEN json_valid("result_json") THEN json_type("result_json") = 'object' ELSE 0 END)),
@@ -1103,6 +1105,22 @@ CREATE TABLE `worker_instances` (
 	CONSTRAINT "worker_instances_time_check" CHECK("started_at" BETWEEN 0 AND 8640000000000000 AND "heartbeat_at" BETWEEN 0 AND 8640000000000000 AND "heartbeat_at" >= "started_at" AND ("draining_at" IS NULL OR ("draining_at" BETWEEN 0 AND 8640000000000000 AND "draining_at" >= "started_at")) AND ("stopped_at" IS NULL OR ("stopped_at" BETWEEN 0 AND 8640000000000000 AND "stopped_at" >= "draining_at")))
 ) STRICT, WITHOUT ROWID;
 --> statement-breakpoint
+CREATE TABLE `host_restart_claim_fence` (
+	`armed_at` integer NOT NULL,
+	`boot_identity` text NOT NULL,
+	`expires_at` integer NOT NULL,
+	`id` integer PRIMARY KEY NOT NULL,
+	`job_run_id` text NOT NULL,
+	`lease_token` text NOT NULL,
+	`worker_instance_id` text NOT NULL,
+	CONSTRAINT `fk_host_restart_claim_fence_job_run_id_job_runs_id_fk` FOREIGN KEY (`job_run_id`) REFERENCES `job_runs`(`id`) ON UPDATE RESTRICT ON DELETE RESTRICT,
+	CONSTRAINT `fk_host_restart_claim_fence_worker_instance_id_worker_instances_id_fk` FOREIGN KEY (`worker_instance_id`) REFERENCES `worker_instances`(`id`) ON UPDATE RESTRICT ON DELETE RESTRICT,
+	CONSTRAINT "host_restart_claim_fence_boot_identity_check" CHECK(length("boot_identity") = 36 AND instr("boot_identity", char(0)) = 0 AND length(replace("boot_identity", '-', '')) = 32 AND replace("boot_identity", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr("boot_identity", 9, 1) = '-' AND substr("boot_identity", 14, 1) = '-' AND substr("boot_identity", 19, 1) = '-' AND substr("boot_identity", 24, 1) = '-'),
+	CONSTRAINT "host_restart_claim_fence_id_check" CHECK("id" = 1),
+	CONSTRAINT "host_restart_claim_fence_lease_token_check" CHECK(length("lease_token") = 36 AND instr("lease_token", char(0)) = 0 AND length(replace("lease_token", '-', '')) = 32 AND replace("lease_token", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr("lease_token", 9, 1) = '-' AND substr("lease_token", 14, 1) = '-' AND substr("lease_token", 15, 1) = '7' AND substr("lease_token", 19, 1) = '-' AND substr("lease_token", 20, 1) GLOB '[89ab]' AND substr("lease_token", 24, 1) = '-'),
+	CONSTRAINT "host_restart_claim_fence_time_check" CHECK("armed_at" BETWEEN 0 AND 8640000000000000 AND "expires_at" BETWEEN 0 AND 8640000000000000 AND "expires_at" > "armed_at")
+) STRICT, WITHOUT ROWID;
+--> statement-breakpoint
 CREATE UNIQUE INDEX `job_disable_intents_active_schedule_unique` ON `job_disable_intents` (`scheduled_job_id`) WHERE "job_disable_intents"."scheduled_job_id" IS NOT NULL AND "job_disable_intents"."ended_at" IS NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX `job_disable_intents_active_external_unique` ON `job_disable_intents` (`external_provider`,`external_job_id`) WHERE "job_disable_intents"."external_job_id" IS NOT NULL AND "job_disable_intents"."ended_at" IS NULL;--> statement-breakpoint
 CREATE INDEX `job_disable_intents_active_expiry_idx` ON `job_disable_intents` (`expires_at`,`id`) WHERE "job_disable_intents"."expires_at" IS NOT NULL AND "job_disable_intents"."ended_at" IS NULL;--> statement-breakpoint
@@ -1114,6 +1132,7 @@ CREATE INDEX `job_runs_claim_idx` ON `job_runs` ("available_at" asc,"priority" d
 CREATE UNIQUE INDEX `job_runs_one_active_schedule_idx` ON `job_runs` (`scheduled_job_id`) WHERE "job_runs"."scheduled_job_id" IS NOT NULL AND "job_runs"."state" IN ('queued', 'running');--> statement-breakpoint
 CREATE INDEX `job_runs_action_active_idx` ON `job_runs` (`action_key`,"state" desc,"queued_at" desc,"id" desc) WHERE "job_runs"."state" IN ('queued', 'running');--> statement-breakpoint
 CREATE INDEX `job_runs_action_payload_terminal_idx` ON `job_runs` (`action_key`,`payload_json`,"queued_at" desc,"id" desc) WHERE "job_runs"."action_key" = 'maintenance.rotate-logs' AND length(CAST("job_runs"."payload_json" AS BLOB)) <= 128 AND "job_runs"."state" IN ('cancelled', 'failed', 'succeeded', 'timed-out');--> statement-breakpoint
+CREATE INDEX `job_runs_service_action_terminal_idx` ON `job_runs` (`action_key`,"queued_at" desc,"id" desc) WHERE "job_runs"."action_key" IN ('openclaw.sessions.cleanup', 'openclaw.gateway.restart', 'openclaw.installation.update', 'host.system.cleanup', 'host.system.restart', 'host.system.update') AND "job_runs"."payload_json" = '{}' AND "job_runs"."state" IN ('cancelled', 'failed', 'succeeded', 'timed-out');--> statement-breakpoint
 CREATE INDEX `job_runs_queued_id_idx` ON `job_runs` (`queued_at`,`id`);--> statement-breakpoint
 CREATE INDEX `job_runs_schedule_queued_id_idx` ON `job_runs` (`scheduled_job_id`,`queued_at`,`id`);--> statement-breakpoint
 CREATE INDEX `job_runs_running_lease_idx` ON `job_runs` (`lease_expires_at`,`id`) WHERE "job_runs"."state" = 'running';--> statement-breakpoint
@@ -2546,4 +2565,32 @@ CREATE TRIGGER task_events_reject_delete
 BEFORE DELETE ON task_events
 BEGIN
 	SELECT RAISE(ABORT, 'task_events is append-only');
+END;
+--> statement-breakpoint
+CREATE TRIGGER host_restart_claim_fence_validate_insert
+BEFORE INSERT ON host_restart_claim_fence
+WHEN NOT EXISTS (
+	SELECT 1
+	FROM job_runs
+	WHERE id = NEW.job_run_id
+		AND action_key = 'host.system.restart'
+		AND payload_json = '{}'
+		AND state = 'running'
+		AND lease_owner_id = NEW.worker_instance_id
+		AND lease_token = NEW.lease_token
+		AND lease_expires_at > NEW.armed_at
+)
+	OR EXISTS (
+		SELECT 1
+		FROM job_runs
+		WHERE state = 'running' AND id <> NEW.job_run_id
+	)
+BEGIN
+	SELECT RAISE(ABORT, 'host restart fence requires the only running exact restart claim');
+END;
+--> statement-breakpoint
+CREATE TRIGGER host_restart_claim_fence_reject_update
+BEFORE UPDATE ON host_restart_claim_fence
+BEGIN
+	SELECT RAISE(ABORT, 'host restart claim fence is immutable');
 END;

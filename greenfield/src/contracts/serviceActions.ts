@@ -12,7 +12,9 @@ import type { ProcedureContract } from "./registry.ts";
 /** Fixed privileged operations accepted by the purpose-built service-actions boundary. */
 export const serviceActionIds = [
     "openclaw-cleanup",
+    "openclaw-restart",
     "openclaw-update",
+    "system-cleanup",
     "system-restart",
     "system-update",
 ] as const;
@@ -85,10 +87,26 @@ export const requestServiceActionInputSchema = v.variant("actionId", [
         ...serviceActionRequestBase,
     }),
     v.strictObject({
+        actionId: v.literal("openclaw-restart"),
+        confirmation: v.literal(
+            "restart-openclaw",
+            "OpenClaw restart confirmation is invalid"
+        ),
+        ...serviceActionRequestBase,
+    }),
+    v.strictObject({
         actionId: v.literal("openclaw-update"),
         confirmation: v.literal(
             "update-openclaw",
             "OpenClaw update confirmation is invalid"
+        ),
+        ...serviceActionRequestBase,
+    }),
+    v.strictObject({
+        actionId: v.literal("system-cleanup"),
+        confirmation: v.literal(
+            "cleanup-system",
+            "System cleanup confirmation is invalid"
         ),
         ...serviceActionRequestBase,
     }),

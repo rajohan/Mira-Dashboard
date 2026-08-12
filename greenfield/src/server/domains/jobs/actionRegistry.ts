@@ -48,6 +48,8 @@ export const openClawGatewayRestartJobActionKey = "openclaw.gateway.restart";
 export const openClawSessionsCleanupJobActionKey = "openclaw.sessions.cleanup";
 /** Fixed worker-only OpenClaw update identity selected by Service Actions. */
 export const openClawInstallationUpdateJobActionKey = "openclaw.installation.update";
+/** Fixed root-brokered host cleanup identity selected by Service Actions. */
+export const hostSystemCleanupJobActionKey = "host.system.cleanup";
 /** Fixed root-brokered host restart identity selected by Service Actions. */
 export const hostSystemRestartJobActionKey = "host.system.restart";
 /** Fixed root-brokered host update identity selected by Service Actions. */
@@ -63,6 +65,12 @@ export const openClawGatewayRestartJobResultSchema = v.strictObject({
 export const hostSystemRestartJobResultSchema = v.strictObject({
     completedAtMs: jobTimestampSchema,
     status: v.literal("accepted", "Host restart result is invalid"),
+});
+
+/** Redacted terminal result for one fixed host cleanup unit. */
+export const hostSystemCleanupJobResultSchema = v.strictObject({
+    completedAtMs: jobTimestampSchema,
+    status: v.literal("completed", "Host cleanup result is invalid"),
 });
 
 /** Redacted terminal result for one fixed host update unit. */
@@ -168,6 +176,8 @@ const jobActionOutputMessageSchema = v.pipe(
 
 /** Safe execution context supplied by the worker without host or shell authority. */
 export interface JobActionExecutionContext {
+    readonly armHostRestartClaimFence: () => Promise<void>;
+    readonly clearHostRestartClaimFence: () => Promise<void>;
     readonly commitCacheAttempt: (
         attempt: JobCacheAttemptCommit
     ) => Promise<JobCacheAttemptWriteResult>;
@@ -463,7 +473,7 @@ export const openClawGatewayRestartJobActionDefinition =
         manualExposure: "none",
         priority: 20,
         resourceClass: "exclusive",
-        resourceKeys: Object.freeze(["openclaw.gateway"]),
+        resourceKeys: Object.freeze(["host.mutation", "openclaw.gateway"]),
         retrySafe: false,
         timeoutMs: 60_000,
     });
@@ -505,6 +515,16 @@ export const openClawInstallationUpdateJobActionDefinition = serviceActionDefini
     displayName: "Update OpenClaw",
     resourceKeys: Object.freeze(["host.mutation", "openclaw.gateway"]),
     timeoutMs: 35 * 60_000 + 30_000,
+});
+
+/** Non-retryable bounded host cleanup reserved for a separately privileged adapter. */
+export const hostSystemCleanupJobActionDefinition = serviceActionDefinition({
+    actionKey: hostSystemCleanupJobActionKey,
+    description:
+        "Cleans orphan packages and caches, bounded journal history, and unused Docker content older than seven days without deleting volumes.",
+    displayName: "Clean up host system",
+    resourceKeys: Object.freeze(["host.logs", "host.mutation"]),
+    timeoutMs: 35 * 60_000,
 });
 
 /** Accepted-only host restart request reserved for a separately privileged adapter. */

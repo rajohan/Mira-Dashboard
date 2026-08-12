@@ -110,8 +110,16 @@ const actionStatus = Object.freeze({
             id: "openclaw-cleanup",
         },
         {
+            availability: "available",
+            id: "openclaw-restart",
+        },
+        {
             availability: "unavailable",
             id: "openclaw-update",
+        },
+        {
+            availability: "available",
+            id: "system-cleanup",
         },
         {
             activeRun: runningRun,
@@ -321,11 +329,11 @@ describe("OverviewServiceActionsSection", () => {
         ).toBeTruthy();
         expect(harness.transport.queryCalls[0]?.input).toEqual({});
         expect(screen.getByRole("heading", { name: "OpenClaw cleanup" })).toBeTruthy();
+        expect(screen.getByRole("heading", { name: "OpenClaw restart" })).toBeTruthy();
         expect(screen.getByRole("heading", { name: "OpenClaw update" })).toBeTruthy();
+        expect(screen.getByRole("heading", { name: "System cleanup" })).toBeTruthy();
         expect(screen.getByRole("heading", { name: "System restart" })).toBeTruthy();
         expect(screen.getByRole("heading", { name: "System update" })).toBeTruthy();
-        expect(screen.queryByText(/Gateway restart/iu)).toBeNull();
-        expect(screen.queryByText(/system cleanup/iu)).toBeNull();
         expect(screen.queryByText(/terminal|command to run/iu)).toBeNull();
         expect(
             screen.getByRole("button", { name: "Queue OpenClaw update" })
@@ -343,6 +351,16 @@ describe("OverviewServiceActionsSection", () => {
             "href",
             "/jobs"
         );
+        expect(
+            screen.getByRole("link", {
+                name: `Open Dashboard job ${runningRun.id}`,
+            })
+        ).toHaveAttribute("href", `/jobs?runId=${runningRun.id}`);
+        expect(
+            screen.getByRole("link", {
+                name: `Open Dashboard job ${succeededRun.id}`,
+            })
+        ).toHaveAttribute("href", `/jobs?runId=${succeededRun.id}`);
     });
 
     test("clears an active action after a same-tab job-run event", async () => {
@@ -416,8 +434,26 @@ describe("OverviewServiceActionsSection", () => {
         expect(screen.getByText(/System updates can take a long time/iu)).toBeTruthy();
         await user.click(screen.getByRole("button", { name: "Cancel" }));
 
+        await user.click(screen.getByRole("button", { name: "Queue system cleanup" }));
+        const cleanupDialog = screen.getByRole("dialog", {
+            name: "Queue a system cleanup?",
+        });
+        expect(cleanupDialog).toHaveTextContent(
+            /unused Docker content older than seven days/iu
+        );
+        expect(cleanupDialog).toHaveTextContent(/Docker volumes are never deleted/iu);
+        await user.click(screen.getByRole("button", { name: "Cancel" }));
+
         await user.click(screen.getByRole("button", { name: "Queue OpenClaw update" }));
         expect(screen.getByText(/OpenClaw updates can take time/iu)).toBeTruthy();
+        await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+        await user.click(screen.getByRole("button", { name: "Queue OpenClaw restart" }));
+        expect(screen.getByText(/interrupts active Gateway sessions/iu)).toBeTruthy();
+        expect(screen.getByText(/durable result/iu)).toBeTruthy();
+        expect(
+            screen.getByText(/does not confirm that the restart completed/iu)
+        ).toBeTruthy();
         await user.click(screen.getByRole("button", { name: "Cancel" }));
 
         await user.click(screen.getByRole("button", { name: "Queue OpenClaw cleanup" }));

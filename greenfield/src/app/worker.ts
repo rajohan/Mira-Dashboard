@@ -40,6 +40,7 @@ import {
     createProcessTerminationController,
     type ProcessTerminationController,
 } from "../server/platform/runtime/processSignals.ts";
+import type { LinuxBootIdentity } from "../shared/linuxBootIdentity.ts";
 import type { OpenClawGatewayLifecycleExecutionPort } from "../shared/openClawGatewayLifecycle.ts";
 import type { OpenClawServiceActionsExecutionPort } from "../shared/openClawServiceActions.ts";
 import {
@@ -70,6 +71,7 @@ import {
 } from "../worker/logs/managedLogRotation.ts";
 import { createFixedOpenClawGatewayLifecycle } from "../worker/openClaw/gatewayLifecycle.ts";
 import { type DashboardWorkerRuntime } from "../worker/runtime.ts";
+import { readLinuxBootIdentity } from "../worker/system/linuxBootIdentity.ts";
 import { taskNotificationWorkerLoop } from "../worker/taskNotifications.ts";
 import {
     startWorkerTerminalBrokerLifecycle,
@@ -86,6 +88,7 @@ export interface DashboardWorkerProcessOptions {
 
 /** Injectable process boundaries used by deterministic composition tests. */
 export interface DashboardWorkerProcessDependencies {
+    readonly readBootIdentity: () => Promise<LinuxBootIdentity>;
     readonly createGatewayTransport: (
         options: PersistentGatewayTransportOptions
     ) => PersistentGatewayTaskNotificationTransport;
@@ -114,7 +117,8 @@ export interface DashboardWorkerProcessDependencies {
         openClawRoot: WorkerWorkspaceFileRootConfiguration,
         logMaintenance: LogMaintenanceExecutor,
         moltbook: MoltbookDashboardCollector,
-        hostOperations: FixedHostOperationsExecutionPort | undefined
+        hostOperations: FixedHostOperationsExecutionPort | undefined,
+        bootIdentity: LinuxBootIdentity
     ) => DashboardWorkerRuntime;
     readonly createTerminationController: () => ProcessTerminationController;
     readonly loadRelease: (
@@ -201,13 +205,15 @@ const defaultDependencies = Object.freeze({
         openClawRoot,
         logMaintenance,
         moltbook,
-        hostOperations
+        hostOperations,
+        bootIdentity
     ) => {
         const writer = createDescriptorWorkspaceFileStructuralWriter({
             roots: [workspaceRoot, openClawRoot],
             spoolRoot: layout.production.state.workspaceFileUploads,
         });
         return createDashboardWorkerRuntime({
+            bootIdentity,
             database: {
                 migrationsDirectory: path.join(release.releaseRoot, "migrations"),
                 releaseId: release.manifest.source.commitSha,
@@ -234,6 +240,7 @@ const defaultDependencies = Object.freeze({
     resolveProjectLayout: resolveDashboardProjectLayout,
     resolveOpenClawFileRoot: resolveReviewedWorkerOpenClawFileRoot,
     resolveWorkspaceFileRoot: resolveReviewedWorkerWorkspaceFileRoot,
+    readBootIdentity: readLinuxBootIdentity,
     startLogMaintenanceAvailability: startLogMaintenanceAvailabilityPublisher,
     startTerminalBroker: startWorkerTerminalBrokerLifecycle,
 } satisfies DashboardWorkerProcessDependencies);
@@ -330,6 +337,7 @@ export async function runDashboardWorkerProcess(
         const openClawServiceActions =
             dependencies.createOpenClawServiceActions(gatewayTransport);
         const hostOperations = dependencies.createHostOperations?.();
+        const bootIdentity = await dependencies.readBootIdentity();
         const moltbook = createMoltbookDashboardCollector({
             agentName: configuration.moltbookAgentName,
             apiKey: configuration.moltbookApiKey,
@@ -345,7 +353,8 @@ export async function runDashboardWorkerProcess(
             openClawRoot,
             logMaintenance,
             moltbook,
-            hostOperations
+            hostOperations,
+            bootIdentity
         );
         const runtimeCompletion = runtime.completion.then(
             () => ({ kind: "stopped" as const }),

@@ -98,6 +98,11 @@ async function repositoryFixture(): Promise<string> {
             { recursive: true }
         ),
         cp(
+            path.join(sourceProjectRoot, "scripts/delivery/provisioning/host-operations"),
+            path.join(repositoryRoot, "scripts/delivery/provisioning/host-operations"),
+            { recursive: true }
+        ),
+        cp(
             path.join(sourceProjectRoot, "scripts/delivery/provisioning/log-maintenance"),
             path.join(repositoryRoot, "scripts/delivery/provisioning/log-maintenance"),
             { recursive: true }

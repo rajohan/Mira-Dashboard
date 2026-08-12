@@ -82,16 +82,26 @@ describe("service action browser operations", () => {
         queryClient.clear();
     });
 
-    test("builds only the four exact confirmation inputs", () => {
+    test("builds only the six exact confirmation inputs", () => {
         const idempotencyKey = "a".repeat(32);
         expect(serviceActionRequestInput("openclaw-cleanup", idempotencyKey)).toEqual({
             actionId: "openclaw-cleanup",
             confirmation: "cleanup-openclaw",
             idempotencyKey,
         });
+        expect(serviceActionRequestInput("openclaw-restart", idempotencyKey)).toEqual({
+            actionId: "openclaw-restart",
+            confirmation: "restart-openclaw",
+            idempotencyKey,
+        });
         expect(serviceActionRequestInput("openclaw-update", idempotencyKey)).toEqual({
             actionId: "openclaw-update",
             confirmation: "update-openclaw",
+            idempotencyKey,
+        });
+        expect(serviceActionRequestInput("system-cleanup", idempotencyKey)).toEqual({
+            actionId: "system-cleanup",
+            confirmation: "cleanup-system",
             idempotencyKey,
         });
         expect(serviceActionRequestInput("system-restart", idempotencyKey)).toEqual({
@@ -116,9 +126,27 @@ describe("service action browser operations", () => {
             )
         ).toEqual({
             "openclaw-cleanup": "Retry OpenClaw cleanup request",
+            "openclaw-restart": "Retry OpenClaw restart request",
             "openclaw-update": "Retry OpenClaw update request",
+            "system-cleanup": "Retry system cleanup request",
             "system-restart": "Retry system restart request",
             "system-update": "Retry system update request",
         });
+    });
+
+    test("states the bounded system cleanup policy without volume deletion", () => {
+        const presentation = serviceActionPresentations["system-cleanup"];
+
+        expect(presentation.description).toContain("orphan packages and caches");
+        expect(presentation.description).toContain("older than seven days");
+        expect(presentation.warning).toContain("volumes are never deleted");
+    });
+
+    test("states OpenClaw Gateway interruption and durable-result semantics", () => {
+        const presentation = serviceActionPresentations["openclaw-restart"];
+
+        expect(presentation.warning).toContain("interrupts active Gateway sessions");
+        expect(presentation.warning).toContain("durable result");
+        expect(presentation.warning).toContain("does not confirm");
     });
 });

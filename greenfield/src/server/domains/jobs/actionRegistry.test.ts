@@ -4,6 +4,7 @@ import * as v from "valibot";
 
 import {
     findJobActionDefinition,
+    hostSystemCleanupJobActionDefinition,
     hostSystemRestartJobActionDefinition,
     hostSystemUpdateJobActionDefinition,
     isRegisteredJobSchedule,
@@ -143,7 +144,7 @@ describe("durable job action registry", () => {
             cancellationPolicy: "never",
             manualExposure: "none",
             resourceClass: "exclusive",
-            resourceKeys: ["openclaw.gateway"],
+            resourceKeys: ["host.mutation", "openclaw.gateway"],
             retrySafe: false,
         });
         expect(openClawGatewayRestartJobActionDefinition).not.toHaveProperty(
@@ -151,9 +152,11 @@ describe("durable job action registry", () => {
         );
     });
 
-    test("publishes four fixed Service Actions with cross-domain exclusive locks", () => {
+    test("publishes six fixed Service Actions with cross-domain exclusive locks", () => {
         for (const definition of [
             openClawSessionsCleanupJobActionDefinition,
+            openClawGatewayRestartJobActionDefinition,
+            hostSystemCleanupJobActionDefinition,
             hostSystemRestartJobActionDefinition,
             hostSystemUpdateJobActionDefinition,
         ]) {
@@ -171,7 +174,15 @@ describe("durable job action registry", () => {
             "host.mutation",
             "openclaw.gateway",
         ]);
+        expect(openClawGatewayRestartJobActionDefinition.resourceKeys).toEqual([
+            "host.mutation",
+            "openclaw.gateway",
+        ]);
         expect(hostSystemRestartJobActionDefinition.resourceKeys).toEqual([
+            "host.mutation",
+        ]);
+        expect(hostSystemCleanupJobActionDefinition.resourceKeys).toEqual([
+            "host.logs",
             "host.mutation",
         ]);
         expect(hostSystemUpdateJobActionDefinition.resourceKeys).toEqual([
@@ -186,6 +197,7 @@ describe("durable job action registry", () => {
             retrySafe: false,
         });
         expect(hostSystemRestartJobActionDefinition.timeoutMs).toBe(60_000);
+        expect(hostSystemCleanupJobActionDefinition.timeoutMs).toBe(2_100_000);
         expect(hostSystemUpdateJobActionDefinition.timeoutMs).toBe(7_200_000);
         expect(openClawSessionsCleanupJobActionDefinition.timeoutMs).toBe(630_000);
         expect(openClawInstallationUpdateJobActionDefinition.timeoutMs).toBe(2_130_000);

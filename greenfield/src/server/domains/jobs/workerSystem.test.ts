@@ -73,6 +73,7 @@ describe("durable job worker system", () => {
         const runId = Bun.randomUUIDv7();
         const coordinator = createJobWorkerCoordinator({
             actionDefinitions: jobActionDefinitions,
+            bootIdentity: "00000000-0000-0000-0000-000000000001",
             databaseReleaseId: "a".repeat(40),
             findAction: findJobWorkerAction,
             generateId: () => Bun.randomUUIDv7(),
@@ -198,6 +199,7 @@ describe("durable job worker system", () => {
         const workerId = Bun.randomUUIDv7();
         const coordinator = createJobWorkerCoordinator({
             actionDefinitions: [definition],
+            bootIdentity: "00000000-0000-0000-0000-000000000001",
             commitCacheAttempt: (input) => cacheRepository.commitAttempt(input),
             databaseReleaseId: "a".repeat(40),
             findAction: (actionKey) =>

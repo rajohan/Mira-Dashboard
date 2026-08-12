@@ -50,6 +50,7 @@ function repositoryFixture() {
                 eventBytes: 0,
                 eventCount: 1,
                 payloadEventCount: 0,
+                requiredWorkerReleaseId: input.run.requiredWorkerReleaseId ?? null,
                 stateVersion: 1,
             };
             return Promise.resolve({ kind: "inserted", run: stored });

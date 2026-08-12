@@ -28,10 +28,56 @@
       "type": "object",
       "properties": {
         "actionId": {
+          "const": "openclaw-restart"
+        },
+        "confirmation": {
+          "const": "restart-openclaw"
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 32,
+          "maxLength": 128,
+          "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
+        }
+      },
+      "required": [
+        "actionId",
+        "confirmation",
+        "idempotencyKey"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "actionId": {
           "const": "openclaw-update"
         },
         "confirmation": {
           "const": "update-openclaw"
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 32,
+          "maxLength": 128,
+          "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
+        }
+      },
+      "required": [
+        "actionId",
+        "confirmation",
+        "idempotencyKey"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "actionId": {
+          "const": "system-cleanup"
+        },
+        "confirmation": {
+          "const": "cleanup-system"
         },
         "idempotencyKey": {
           "type": "string",

@@ -14,6 +14,7 @@ import { openFreshMigratedDatabase } from "../../test/support/freshDatabase.ts";
 import type { WorkerInstanceRecord } from "./records.ts";
 import {
     createJobRepository,
+    hostRestartClaimFenceDurationMs,
     type JobMutationSideEffects,
     type JobRunEventInsert,
     type JobRunInsert,
@@ -92,6 +93,7 @@ function queuedRun(index: number, overrides: Partial<JobRunInsert> = {}): JobRun
         queuedAt,
         requestedById: userId,
         requestedByKind: "user",
+        requiredWorkerReleaseId: null,
         resourceClass: "light",
         resourceKeysJson: '["database"]',
         resultJson: null,
@@ -1511,6 +1513,7 @@ describe("durable jobs repository", () => {
             });
             expect(
                 await repository.claimNextRun({
+                    bootIdentity: "00000000-0000-0000-0000-000000000001",
                     at: new Date(101_000),
                     leaseExpiresAt: new Date(130_000),
                     leaseToken,
@@ -1621,6 +1624,7 @@ describe("durable jobs repository", () => {
 
             let claimSideEffectAt: Date | undefined;
             const firstClaim = await repository.claimNextRun({
+                bootIdentity: "00000000-0000-0000-0000-000000000001",
                 sideEffectsForClaim: (claimed) => {
                     claimSideEffectAt = claimed.updatedAt;
                     return noSideEffects;
@@ -1678,6 +1682,7 @@ describe("durable jobs repository", () => {
                 renewedAt: new Date(25_000),
             });
             const secondClaim = await repository.claimNextRun({
+                bootIdentity: "00000000-0000-0000-0000-000000000001",
                 sideEffectsForClaim: () => noSideEffects,
                 at: new Date(3000),
                 leaseExpiresAt: new Date(13_000),
@@ -1767,6 +1772,7 @@ describe("durable jobs repository", () => {
             expect(settlementSideEffectAt).toEqual(new Date(25_000));
 
             const nowUnblocked = await repository.claimNextRun({
+                bootIdentity: "00000000-0000-0000-0000-000000000001",
                 sideEffectsForClaim: () => noSideEffects,
                 at: new Date(7000),
                 leaseExpiresAt: new Date(17_000),
@@ -1806,6 +1812,360 @@ describe("durable jobs repository", () => {
         }
     });
 
+    test("claims release-fenced work only from the exact worker release", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createJobRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        const requiredReleaseId = "b".repeat(40);
+        const fenced = queuedRun(133, {
+            requiredWorkerReleaseId: requiredReleaseId,
+            resourceKeysJson: "[]",
+            scheduledJobId: null,
+            scheduledJobVersion: null,
+        });
+        const general = queuedRun(134, {
+            resourceKeysJson: "[]",
+            scheduledJobId: null,
+            scheduledJobVersion: null,
+        });
+
+        try {
+            for (const run of [fenced, general]) {
+                expect(
+                    await repository.enqueueManualRun({
+                        ...noSideEffects,
+                        queuedEvent: queuedEvent(run),
+                        run,
+                    })
+                ).toMatchObject({ kind: "inserted" });
+            }
+            await repository.registerWorker({
+                ...noSideEffects,
+                worker: worker(workerOneId),
+            });
+            await repository.registerWorker({
+                ...noSideEffects,
+                worker: { ...worker(workerTwoId), releaseId: requiredReleaseId },
+            });
+
+            const oldReleaseClaim = await repository.claimNextRun({
+                bootIdentity: "00000000-0000-0000-0000-000000000001",
+                at: new Date(3000),
+                leaseExpiresAt: new Date(13_000),
+                leaseToken: uuid(135),
+                minimumHeartbeatAt: new Date(1000),
+                sideEffectsForClaim: () => noSideEffects,
+                workerId: workerOneId,
+            });
+            expect(oldReleaseClaim).toMatchObject({
+                kind: "claimed",
+                run: { id: general.id, requiredWorkerReleaseId: null },
+            });
+            expect(
+                await repository.settleClaim({
+                    at: new Date(4000),
+                    leaseToken: uuid(135),
+                    outcome: { kind: "succeeded", resultJson: '{"status":"ok"}' },
+                    runId: general.id,
+                    sideEffectsForRun: () => noSideEffects,
+                    workerId: workerOneId,
+                })
+            ).toMatchObject({ kind: "settled" });
+            expect(
+                await repository.claimNextRun({
+                    bootIdentity: "00000000-0000-0000-0000-000000000001",
+                    at: new Date(5000),
+                    leaseExpiresAt: new Date(15_000),
+                    leaseToken: uuid(136),
+                    minimumHeartbeatAt: new Date(1000),
+                    sideEffectsForClaim: () => noSideEffects,
+                    workerId: workerOneId,
+                })
+            ).toEqual({ kind: "empty" });
+            expect(
+                await repository.claimNextRun({
+                    bootIdentity: "00000000-0000-0000-0000-000000000001",
+                    at: new Date(5000),
+                    leaseExpiresAt: new Date(15_000),
+                    leaseToken: uuid(137),
+                    minimumHeartbeatAt: new Date(1000),
+                    sideEffectsForClaim: () => noSideEffects,
+                    workerId: workerTwoId,
+                })
+            ).toMatchObject({
+                kind: "claimed",
+                run: { id: fenced.id, requiredWorkerReleaseId: requiredReleaseId },
+            });
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("blocks every repository claim behind one claim-owned restart fence", async () => {
+        const database = await openFreshMigratedDatabase();
+        const restartRepository = createJobRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        const secondRepository = createJobRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        const bootIdentity = "00000000-0000-0000-0000-000000000001";
+        const nextBootIdentity = "00000000-0000-0000-0000-000000000002";
+        const restartLeaseToken = uuid(813);
+        const restartRun = queuedRun(813, {
+            actionKey: "host.system.restart",
+            attemptLimit: 1,
+            cancellationPolicy: "never",
+            displayName: "Restart host system",
+            priority: 20,
+            requiredWorkerReleaseId: "a".repeat(40),
+            resourceClass: "exclusive",
+            resourceKeysJson: '["host.mutation"]',
+            retrySafe: false,
+            scheduledJobId: null,
+            scheduledJobVersion: null,
+        });
+        const ordinaryRun = queuedRun(814, {
+            resourceKeysJson: "[]",
+            scheduledJobId: null,
+            scheduledJobVersion: null,
+        });
+        const afterRebootRun = queuedRun(815, {
+            resourceKeysJson: "[]",
+            scheduledJobId: null,
+            scheduledJobVersion: null,
+        });
+        try {
+            await restartRepository.enqueueManualRun({
+                ...noSideEffects,
+                queuedEvent: queuedEvent(restartRun),
+                run: restartRun,
+            });
+            for (const workerId of [workerOneId, workerTwoId]) {
+                await restartRepository.registerWorker({
+                    ...noSideEffects,
+                    worker: worker(
+                        workerId,
+                        1,
+                        '["host.system.restart","system.worker-smoke"]'
+                    ),
+                });
+            }
+            expect(
+                await restartRepository.claimNextRun({
+                    at: new Date(3000),
+                    bootIdentity,
+                    leaseExpiresAt: new Date(600_000),
+                    leaseToken: restartLeaseToken,
+                    minimumHeartbeatAt: new Date(1000),
+                    sideEffectsForClaim: () => noSideEffects,
+                    workerId: workerOneId,
+                })
+            ).toMatchObject({ kind: "claimed", run: { id: restartRun.id } });
+            expect(
+                await restartRepository.armHostRestartClaimFence({
+                    at: new Date(3998),
+                    bootIdentity,
+                    leaseToken: uuid(899),
+                    runId: restartRun.id,
+                    workerId: workerOneId,
+                })
+            ).toEqual({ kind: "lost-claim" });
+            expect(
+                await restartRepository.armHostRestartClaimFence({
+                    at: new Date(3999),
+                    bootIdentity,
+                    leaseToken: restartLeaseToken,
+                    runId: restartRun.id,
+                    workerId: workerTwoId,
+                })
+            ).toEqual({ kind: "lost-claim" });
+            const armed = await restartRepository.armHostRestartClaimFence({
+                at: new Date(4000),
+                bootIdentity,
+                leaseToken: restartLeaseToken,
+                runId: restartRun.id,
+                workerId: workerOneId,
+            });
+            expect(armed).toMatchObject({ kind: "armed" });
+            if (armed.kind !== "armed") throw new Error("Expected restart fence");
+
+            await secondRepository.enqueueManualRun({
+                ...noSideEffects,
+                queuedEvent: queuedEvent(ordinaryRun),
+                run: ordinaryRun,
+            });
+            expect(
+                await secondRepository.claimNextRun({
+                    at: new Date(5000),
+                    bootIdentity,
+                    leaseExpiresAt: new Date(30_000),
+                    leaseToken: uuid(814),
+                    minimumHeartbeatAt: new Date(1000),
+                    sideEffectsForClaim: () => noSideEffects,
+                    workerId: workerTwoId,
+                })
+            ).toEqual({ kind: "restart-fenced" });
+            expect(
+                await restartRepository.clearHostRestartClaimFence({
+                    armedAt: armed.fence.armedAt,
+                    at: new Date(6000),
+                    bootIdentity: armed.fence.bootIdentity,
+                    expiresAt: armed.fence.expiresAt,
+                    leaseToken: restartLeaseToken,
+                    runId: restartRun.id,
+                    workerId: workerOneId,
+                })
+            ).toEqual({ kind: "cleared" });
+
+            const rearmed = await restartRepository.armHostRestartClaimFence({
+                at: new Date(7000),
+                bootIdentity,
+                leaseToken: restartLeaseToken,
+                runId: restartRun.id,
+                workerId: workerOneId,
+            });
+            expect(rearmed.kind).toBe("armed");
+            expect(
+                await secondRepository.claimNextRun({
+                    at: new Date(8000),
+                    bootIdentity: nextBootIdentity,
+                    leaseExpiresAt: new Date(30_000),
+                    leaseToken: uuid(815),
+                    minimumHeartbeatAt: new Date(1000),
+                    sideEffectsForClaim: () => noSideEffects,
+                    workerId: workerTwoId,
+                })
+            ).toMatchObject({ kind: "claimed", run: { id: ordinaryRun.id } });
+            await secondRepository.settleClaim({
+                at: new Date(9000),
+                leaseToken: uuid(815),
+                outcome: { kind: "succeeded", resultJson: "{}" },
+                runId: ordinaryRun.id,
+                sideEffectsForRun: () => noSideEffects,
+                workerId: workerTwoId,
+            });
+
+            const expiryArmAt = new Date(10_000);
+            expect(
+                await restartRepository.armHostRestartClaimFence({
+                    at: expiryArmAt,
+                    bootIdentity: nextBootIdentity,
+                    leaseToken: restartLeaseToken,
+                    runId: restartRun.id,
+                    workerId: workerOneId,
+                })
+            ).toMatchObject({ kind: "armed" });
+            await secondRepository.enqueueManualRun({
+                ...noSideEffects,
+                queuedEvent: queuedEvent(afterRebootRun),
+                run: afterRebootRun,
+            });
+            expect(
+                await secondRepository.claimNextRun({
+                    at: new Date(
+                        expiryArmAt.getTime() + hostRestartClaimFenceDurationMs + 1
+                    ),
+                    bootIdentity: nextBootIdentity,
+                    leaseExpiresAt: new Date(
+                        expiryArmAt.getTime() + hostRestartClaimFenceDurationMs + 30_000
+                    ),
+                    leaseToken: uuid(816),
+                    minimumHeartbeatAt: new Date(1000),
+                    sideEffectsForClaim: () => noSideEffects,
+                    workerId: workerTwoId,
+                })
+            ).toMatchObject({ kind: "claimed", run: { id: afterRebootRun.id } });
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("refuses restart fence arming while any other run is globally running", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createJobRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        const bootIdentity = "00000000-0000-0000-0000-000000000001";
+        const restartLeaseToken = uuid(817);
+        const ordinaryLeaseToken = uuid(818);
+        const restartRun = queuedRun(817, {
+            actionKey: "host.system.restart",
+            attemptLimit: 1,
+            cancellationPolicy: "never",
+            displayName: "Restart host system",
+            priority: 20,
+            requiredWorkerReleaseId: "a".repeat(40),
+            resourceClass: "exclusive",
+            resourceKeysJson: "[]",
+            retrySafe: false,
+            scheduledJobId: null,
+            scheduledJobVersion: null,
+        });
+        const ordinaryRun = queuedRun(818, {
+            resourceKeysJson: "[]",
+            scheduledJobId: null,
+            scheduledJobVersion: null,
+        });
+        try {
+            for (const run of [restartRun, ordinaryRun]) {
+                await repository.enqueueManualRun({
+                    ...noSideEffects,
+                    queuedEvent: queuedEvent(run),
+                    run,
+                });
+            }
+            for (const workerId of [workerOneId, workerTwoId]) {
+                await repository.registerWorker({
+                    ...noSideEffects,
+                    worker: worker(
+                        workerId,
+                        1,
+                        '["host.system.restart","system.worker-smoke"]'
+                    ),
+                });
+            }
+            expect(
+                await repository.claimNextRun({
+                    at: new Date(3000),
+                    bootIdentity,
+                    leaseExpiresAt: new Date(30_000),
+                    leaseToken: restartLeaseToken,
+                    minimumHeartbeatAt: new Date(1000),
+                    sideEffectsForClaim: () => noSideEffects,
+                    workerId: workerOneId,
+                })
+            ).toMatchObject({ kind: "claimed", run: { id: restartRun.id } });
+            expect(
+                await repository.claimNextRun({
+                    at: new Date(3001),
+                    bootIdentity,
+                    leaseExpiresAt: new Date(30_000),
+                    leaseToken: ordinaryLeaseToken,
+                    minimumHeartbeatAt: new Date(1000),
+                    sideEffectsForClaim: () => noSideEffects,
+                    workerId: workerTwoId,
+                })
+            ).toMatchObject({ kind: "claimed", run: { id: ordinaryRun.id } });
+            expect(
+                await repository.armHostRestartClaimFence({
+                    at: new Date(4000),
+                    bootIdentity,
+                    leaseToken: restartLeaseToken,
+                    runId: restartRun.id,
+                    workerId: workerOneId,
+                })
+            ).toEqual({ kind: "lost-claim" });
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
     test("settles a durable cancellation that races worker shutdown as cancelled", async () => {
         const database = await openFreshMigratedDatabase();
         const repository = createJobRepository(
@@ -1839,6 +2199,7 @@ describe("durable jobs repository", () => {
             });
             expect(
                 await repository.claimNextRun({
+                    bootIdentity: "00000000-0000-0000-0000-000000000001",
                     at: new Date(3000),
                     leaseExpiresAt: new Date(30_000),
                     leaseToken,
@@ -2039,6 +2400,7 @@ describe("durable jobs repository", () => {
             });
             expect(
                 await repository.claimNextRun({
+                    bootIdentity: "00000000-0000-0000-0000-000000000001",
                     at: new Date(10_000),
                     leaseExpiresAt: new Date(30_000),
                     leaseToken: uuid(140),
@@ -2072,6 +2434,7 @@ describe("durable jobs repository", () => {
             }
 
             const firstPage = await repository.claimNextRun({
+                bootIdentity: "00000000-0000-0000-0000-000000000001",
                 at: new Date(11_000),
                 leaseExpiresAt: new Date(31_000),
                 leaseToken: uuid(141),
@@ -2103,6 +2466,7 @@ describe("durable jobs repository", () => {
             ).toMatchObject({ kind: "inserted" });
             expect(
                 await repository.claimNextRun({
+                    bootIdentity: "00000000-0000-0000-0000-000000000001",
                     at: new Date(12_000),
                     cursor: firstPage.cursor,
                     leaseExpiresAt: new Date(32_000),
@@ -2117,6 +2481,7 @@ describe("durable jobs repository", () => {
             });
             expect(
                 await repository.claimNextRun({
+                    bootIdentity: "00000000-0000-0000-0000-000000000001",
                     at: new Date(12_000),
                     cursor: firstPage.cursor,
                     leaseExpiresAt: new Date(32_000),
@@ -2212,6 +2577,7 @@ describe("durable jobs repository", () => {
             });
             expect(
                 await repository.claimNextRun({
+                    bootIdentity: "00000000-0000-0000-0000-000000000001",
                     at: new Date(3000),
                     leaseExpiresAt: new Date(30_000),
                     leaseToken: uuid(450),
@@ -2226,6 +2592,7 @@ describe("durable jobs repository", () => {
 
             expect(
                 await repository.claimNextRun({
+                    bootIdentity: "00000000-0000-0000-0000-000000000001",
                     at: new Date(6000),
                     cursor,
                     leaseExpiresAt: new Date(36_000),
@@ -2572,6 +2939,7 @@ describe("durable jobs repository", () => {
 
             expect(
                 await repository.claimNextRun({
+                    bootIdentity: "00000000-0000-0000-0000-000000000001",
                     at: new Date(5000),
                     leaseExpiresAt: new Date(35_000),
                     leaseToken: uuid(716),
@@ -2585,6 +2953,7 @@ describe("durable jobs repository", () => {
             });
             expect(
                 await repository.claimNextRun({
+                    bootIdentity: "00000000-0000-0000-0000-000000000001",
                     at: new Date(5001),
                     leaseExpiresAt: new Date(35_001),
                     leaseToken: uuid(717),
@@ -2638,6 +3007,7 @@ describe("durable jobs repository", () => {
             });
             expect(
                 await repository.claimNextRun({
+                    bootIdentity: "00000000-0000-0000-0000-000000000001",
                     sideEffectsForClaim: () => noSideEffects,
                     at: new Date(3000),
                     leaseExpiresAt: new Date(30_000),
@@ -2725,6 +3095,7 @@ describe("durable jobs repository", () => {
                 leaseToken = uuid(160 + attempt);
                 expect(
                     await repository.claimNextRun({
+                        bootIdentity: "00000000-0000-0000-0000-000000000001",
                         sideEffectsForClaim: () => noSideEffects,
                         at: retryAt,
                         leaseExpiresAt: new Date(retryAt.getTime() + 30_000),
@@ -3055,6 +3426,7 @@ describe("durable jobs repository", () => {
             ).toMatchObject({ control: { version: 2 }, kind: "updated" });
             expect(
                 await repository.claimNextRun({
+                    bootIdentity: "00000000-0000-0000-0000-000000000001",
                     sideEffectsForClaim: () => noSideEffects,
                     at: new Date(3000),
                     leaseExpiresAt: new Date(5000),
@@ -3072,6 +3444,7 @@ describe("durable jobs repository", () => {
             });
             expect(
                 await repository.claimNextRun({
+                    bootIdentity: "00000000-0000-0000-0000-000000000001",
                     sideEffectsForClaim: () => noSideEffects,
                     at: new Date(3000),
                     leaseExpiresAt: new Date(5000),
@@ -3144,6 +3517,7 @@ describe("durable jobs repository", () => {
                 run: regressedRun,
             });
             await repository.claimNextRun({
+                bootIdentity: "00000000-0000-0000-0000-000000000001",
                 at: new Date(8000),
                 leaseExpiresAt: new Date(10_000),
                 leaseToken: uuid(82),
@@ -3310,6 +3684,7 @@ describe("durable jobs repository", () => {
             const activeReal = await enqueue(83, realPayload);
             expect(
                 await repository.claimNextRun({
+                    bootIdentity: "00000000-0000-0000-0000-000000000001",
                     at: new Date(4000),
                     leaseExpiresAt: new Date(10_000),
                     leaseToken: uuid(830),
@@ -3405,6 +3780,73 @@ describe("durable jobs repository", () => {
                     payloadJsons: [JSON.stringify({ value: "x".repeat(128) })],
                 })
             ).toThrow("outside its status budget");
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("reads the latest terminal empty-payload Service Action run", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createJobRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        async function enqueueAndCancel(index: number, payloadJson: string) {
+            const run = queuedRun(index, {
+                actionKey: "host.system.update",
+                attemptLimit: 1,
+                cancellationPolicy: "cooperative",
+                displayName: "Update host system",
+                payloadJson,
+                resourceClass: "exclusive",
+                resourceKeysJson: '["host.mutation"]',
+                retrySafe: false,
+                scheduledJobId: null,
+                scheduledJobVersion: null,
+            });
+            await repository.enqueueManualRun({
+                ...noSideEffects,
+                queuedEvent: queuedEvent(run),
+                run,
+            });
+            await repository.cancelRun({
+                actor: { id: userId, kind: "user" },
+                at: new Date(2000 + index),
+                id: run.id,
+                sideEffectsForRun: () => noSideEffects,
+                terminalCode: "job/cancel-requested",
+                terminalMessage: "Cancel the Service Action fixture.",
+            });
+            return run;
+        }
+        try {
+            const older = await enqueueAndCancel(86, "{}");
+            const latest = await enqueueAndCancel(87, "{}");
+            const otherPayload = await enqueueAndCancel(88, '{"unexpected":true}');
+
+            expect(
+                repository.readActionPayloadRunSnapshots({
+                    actionKey: "host.system.update",
+                    payloadJsons: ["{}"],
+                })
+            ).toMatchObject([
+                {
+                    lastRun: { id: latest.id, state: "cancelled" },
+                    payloadJson: "{}",
+                },
+            ]);
+            expect(
+                repository.readActionPayloadRunSnapshots({
+                    actionKey: "host.system.update",
+                    payloadJsons: ['{"unexpected":true}'],
+                })
+            ).toMatchObject([
+                {
+                    lastRun: { id: otherPayload.id, state: "cancelled" },
+                    payloadJson: '{"unexpected":true}',
+                },
+            ]);
+            expect(older.id).not.toBe(latest.id);
         } finally {
             database.sqlite.close(true);
         }

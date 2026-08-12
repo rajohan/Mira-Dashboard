@@ -28,6 +28,7 @@ const workspaceRoot = "/srv/mira-workspace";
 const releaseId = "b".repeat(40);
 const revision = "a".repeat(40);
 const checksum = "c".repeat(64);
+const bootIdentity = "00000000-0000-0000-0000-000000000001";
 const layout = deriveDashboardProjectLayout(projectRoot);
 const release: RuntimeRelease = Object.freeze({
     manifest: parseReleaseManifest({
@@ -212,7 +213,8 @@ function processFixture(
             observedOpenClawRoot,
             observedLogMaintenance,
             _observedMoltbook,
-            observedHostOperations
+            observedHostOperations,
+            observedBootIdentity
         ) {
             expect(observedLayout).toBe(layout);
             expect(observedRelease).toBe(release);
@@ -244,6 +246,7 @@ function processFixture(
             });
             expect(observedLogMaintenance).toBe(logMaintenance);
             expect(observedHostOperations).toBeUndefined();
+            expect(observedBootIdentity).toBe(bootIdentity);
             expect(Object.keys(observedGatewayTransport).toSorted()).toEqual([
                 "requestOpenClawServiceAction",
                 "start",
@@ -307,6 +310,9 @@ function processFixture(
                     writable: true,
                 })
             );
+        },
+        readBootIdentity() {
+            return Promise.resolve(bootIdentity);
         },
         startLogMaintenanceAvailability(options) {
             expect(options.availablePolicies).toBe(logMaintenance.availablePolicies);

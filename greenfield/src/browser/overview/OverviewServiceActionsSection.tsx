@@ -152,8 +152,14 @@ function useServiceActionRequest() {
     };
 }
 
+export interface OverviewServiceActionsSectionProps {
+    readonly showJobsLink?: boolean;
+}
+
 /** @returns Fixed service-action status, requests, and partial-read handling. */
-export function OverviewServiceActionsSection() {
+export function OverviewServiceActionsSection({
+    showJobsLink = true,
+}: OverviewServiceActionsSectionProps = {}) {
     useServiceActionsRealtimeInvalidation();
     const client = useDashboardTrpcClient();
     const query = useQuery(serviceActionsStatusQueryOptions(client));
@@ -201,6 +207,7 @@ export function OverviewServiceActionsSection() {
                 recoveryPending={request.recoveryPending}
                 requestActionId={request.variables}
                 requestBusy={request.isPending}
+                showJobsLink={showJobsLink}
             />
         </div>
     );

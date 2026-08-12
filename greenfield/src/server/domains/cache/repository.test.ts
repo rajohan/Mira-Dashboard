@@ -130,6 +130,7 @@ async function runningClaim(
         },
     });
     const claim = await jobs.claimNextRun({
+        bootIdentity: "00000000-0000-0000-0000-000000000001",
         at: new Date(2000),
         leaseExpiresAt: new Date(20_000),
         leaseToken,
@@ -308,6 +309,7 @@ describe("cache repository", () => {
             });
             const nextLeaseToken = uuid(4);
             const next = await fixture.jobs.claimNextRun({
+                bootIdentity: "00000000-0000-0000-0000-000000000001",
                 at: new Date(5000),
                 leaseExpiresAt: new Date(30_000),
                 leaseToken: nextLeaseToken,

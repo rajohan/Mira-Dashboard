@@ -5,7 +5,9 @@
     "actionId": {
       "enum": [
         "openclaw-cleanup",
+        "openclaw-restart",
         "openclaw-update",
+        "system-cleanup",
         "system-restart",
         "system-update"
       ],

@@ -46,8 +46,10 @@ import {
     type GatewaySessionsService,
 } from "../server/domains/gatewaySessions/service.ts";
 import {
+    hostSystemCleanupJobActionDefinition,
     hostSystemRestartJobActionDefinition,
     hostSystemUpdateJobActionDefinition,
+    openClawGatewayRestartJobActionDefinition,
     openClawInstallationUpdateJobActionDefinition,
     openClawSessionsCleanupJobActionDefinition,
 } from "../server/domains/jobs/actionRegistry.ts";
@@ -763,7 +765,9 @@ export async function createDashboardServer(
         });
         const serviceActionDefinitions = Object.freeze({
             "openclaw-cleanup": openClawSessionsCleanupJobActionDefinition,
+            "openclaw-restart": openClawGatewayRestartJobActionDefinition,
             "openclaw-update": openClawInstallationUpdateJobActionDefinition,
+            "system-cleanup": hostSystemCleanupJobActionDefinition,
             "system-restart": hostSystemRestartJobActionDefinition,
             "system-update": hostSystemUpdateJobActionDefinition,
         });
@@ -792,6 +796,9 @@ export async function createDashboardServer(
                     ? {}
                     : { nowMs: () => domainNow().getTime() }),
                 repository: jobRepository,
+                ...(options.verifiedReleaseId === undefined
+                    ? {}
+                    : { requiredWorkerReleaseId: options.verifiedReleaseId }),
                 wakeEventPump,
             }),
             statusReader:

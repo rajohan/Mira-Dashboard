@@ -291,6 +291,7 @@ describe("durable jobs service", () => {
             });
             expect(
                 await repository.claimNextRun({
+                    bootIdentity: "00000000-0000-0000-0000-000000000001",
                     at: transitionAt,
                     leaseExpiresAt: new Date(transitionAt.getTime() + 30_000),
                     leaseToken,

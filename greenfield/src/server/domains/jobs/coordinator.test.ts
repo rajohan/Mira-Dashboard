@@ -123,6 +123,7 @@ function claimedRun(workerId: string, actionKey = "system.worker-smoke"): JobRun
         queuedAt: at,
         requestedById: "system.scheduler",
         requestedByKind: "system",
+        requiredWorkerReleaseId: null,
         resourceClass: "light",
         resourceKeysJson: '["database"]',
         resultJson: null,
@@ -286,6 +287,9 @@ function repositoryFixture(options: RepositoryFixtureOptions = {}) {
     const eventRun = claims.find((result) => result.kind === "claimed")?.run;
     let dueSchedules = [...(options.dueSchedules ?? [])];
     const repository = {
+        armHostRestartClaimFence() {
+            return Promise.resolve({ kind: "lost-claim" as const });
+        },
         appendClaimEvent(input) {
             events.push(`append:${input.kind}`);
             const result = options.appendEvent?.(input) ?? { kind: "dropped" };
@@ -317,6 +321,9 @@ function repositoryFixture(options: RepositoryFixtureOptions = {}) {
                 kind: "updated" as const,
                 worker,
             });
+        },
+        clearHostRestartClaimFence() {
+            return Promise.resolve({ kind: "changed" as const });
         },
         async claimNextRun(input) {
             claimInputs.push(input);
@@ -459,6 +466,7 @@ function coordinatorOptions(
     );
     if (smokeDefinition === undefined) throw new Error("Missing smoke definition");
     return {
+        bootIdentity: "00000000-0000-0000-0000-000000000001",
         databaseReleaseId: releaseId,
         actionDefinitions: [smokeDefinition],
         findAction: findJobWorkerAction,

@@ -34,6 +34,17 @@ export const serviceActionPresentations = Object.freeze({
         warning:
             "This queues OpenClaw's own bounded session and artifact maintenance. Review Dashboard jobs for the durable result.",
     },
+    "openclaw-restart": {
+        actionLabel: "OpenClaw restart",
+        buttonLabel: "Queue OpenClaw restart",
+        confirmationLabel: "Queue restart",
+        confirmationTitle: "Queue an OpenClaw restart?",
+        description:
+            "Restarts the OpenClaw Gateway through the existing fixed worker-owned lifecycle action.",
+        retryLabel: "Retry OpenClaw restart request",
+        warning:
+            "Restarting the OpenClaw Gateway interrupts active Gateway sessions. Review Dashboard jobs for the durable result; a queued request does not confirm that the restart completed.",
+    },
     "openclaw-update": {
         actionLabel: "OpenClaw update",
         buttonLabel: "Queue OpenClaw update",
@@ -44,6 +55,17 @@ export const serviceActionPresentations = Object.freeze({
         retryLabel: "Retry OpenClaw update request",
         warning:
             "OpenClaw updates can take time and may restart the Gateway. The Dashboard only confirms that the durable request was queued.",
+    },
+    "system-cleanup": {
+        actionLabel: "System cleanup",
+        buttonLabel: "Queue system cleanup",
+        confirmationLabel: "Queue cleanup",
+        confirmationTitle: "Queue a system cleanup?",
+        description:
+            "Cleans orphan packages and caches, bounds journal retention, and removes unused Docker content older than seven days without deleting volumes.",
+        retryLabel: "Retry system cleanup request",
+        warning:
+            "System cleanup removes only fixed categories: orphan packages and caches, bounded journal history, and unused Docker content older than seven days. Docker volumes are never deleted. Review Dashboard jobs for the durable result.",
     },
     "system-restart": {
         actionLabel: "System restart",
@@ -184,10 +206,24 @@ export function serviceActionRequestInput(
                 idempotencyKey,
             };
         }
+        case "openclaw-restart": {
+            return {
+                actionId,
+                confirmation: "restart-openclaw",
+                idempotencyKey,
+            };
+        }
         case "openclaw-update": {
             return {
                 actionId,
                 confirmation: "update-openclaw",
+                idempotencyKey,
+            };
+        }
+        case "system-cleanup": {
+            return {
+                actionId,
+                confirmation: "cleanup-system",
                 idempotencyKey,
             };
         }

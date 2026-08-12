@@ -45,6 +45,7 @@ interface QueuedRunFixture {
     idempotencyKey: string;
     requestedById: string;
     requestedByKind: "automation" | "system" | "user";
+    requiredWorkerReleaseId: string | null;
     resourceKeysJson: string;
     retrySafe: number;
     scheduledForAt: number | null;
@@ -170,6 +171,7 @@ function insertQueuedRun(
         cancellationPolicy: "cooperative",
         requestedById: "job-scheduler",
         requestedByKind: "system",
+        requiredWorkerReleaseId: null,
         resourceKeysJson: "[]",
         retrySafe: 1,
         scheduledForAt: null,
@@ -184,12 +186,13 @@ function insertQueuedRun(
             action_key, attempt_limit, available_at, cancellation_policy,
             display_name, enqueue_sha256, id, idempotency_key, payload_json,
             priority, queued_at, requested_by_id, requested_by_kind,
-            resource_class, resource_keys_json, retry_safe, scheduled_for_at,
+            required_worker_release_id, resource_class, resource_keys_json,
+            retry_safe, scheduled_for_at,
             scheduled_job_id, scheduled_job_version, state, timeout_ms,
             trigger_type, updated_at
         ) VALUES (
             'system.worker-smoke', ?, 1000, ?, 'Worker smoke', ?, ?, ?, '{}',
-            0, 1000, ?, ?, 'light', ?, ?, ?, ?, ?, 'queued', 10000, ?, 1000
+            0, 1000, ?, ?, ?, 'light', ?, ?, ?, ?, ?, 'queued', 10000, ?, 1000
         )`,
         [
             fixture.attemptLimit,
@@ -199,6 +202,7 @@ function insertQueuedRun(
             fixture.idempotencyKey,
             fixture.requestedById,
             fixture.requestedByKind,
+            fixture.requiredWorkerReleaseId,
             fixture.resourceKeysJson,
             fixture.retrySafe,
             fixture.scheduledForAt,
@@ -321,7 +325,8 @@ describe("jobs baseline schema", () => {
                         SELECT name, strict, wr
                         FROM pragma_table_list
                         WHERE name IN (
-                            'job_disable_intents', 'job_run_events', 'job_runs',
+                            'host_restart_claim_fence', 'job_disable_intents',
+                            'job_run_events', 'job_runs',
                             'job_worker_control', 'resource_leases',
                             'scheduled_jobs', 'worker_instances'
                         )
@@ -330,6 +335,7 @@ describe("jobs baseline schema", () => {
                     )
                     .all()
             ).toEqual([
+                { name: "host_restart_claim_fence", strict: 1, wr: 1 },
                 { name: "job_disable_intents", strict: 1, wr: 1 },
                 { name: "job_run_events", strict: 1, wr: 1 },
                 { name: "job_runs", strict: 1, wr: 1 },
@@ -665,6 +671,13 @@ describe("jobs baseline schema", () => {
                     resourceKeysJson: '["UPPER",7,"duplicate","duplicate"]',
                 })
             ).toThrow("job_runs resource keys must be canonical");
+            expect(() =>
+                insertQueuedRun(database, {
+                    id: uuid(13),
+                    idempotencyKey: idempotencyKey(13),
+                    requiredWorkerReleaseId: "A".repeat(40),
+                })
+            ).toThrow("job_runs_required_worker_release_id_check");
         } finally {
             database.sqlite.close(true);
         }
@@ -2260,6 +2273,18 @@ describe("jobs baseline schema", () => {
                 "job_runs_action_payload_terminal_idx",
                 ['{"policyId":"docker-managed"}'],
                 "action_key=? AND payload_json=?"
+            );
+            expectUsesIndexWithoutTemporarySort(
+                database,
+                `SELECT id FROM job_runs
+                 WHERE action_key = ?
+                   AND action_key IN ('openclaw.sessions.cleanup', 'openclaw.gateway.restart', 'openclaw.installation.update', 'host.system.cleanup', 'host.system.restart', 'host.system.update')
+                   AND payload_json = '{}'
+                   AND state IN ('cancelled', 'failed', 'succeeded', 'timed-out')
+                 ORDER BY queued_at DESC, id DESC LIMIT 1`,
+                "job_runs_service_action_terminal_idx",
+                ["openclaw.sessions.cleanup"],
+                "action_key=?"
             );
             expectUsesIndexWithoutTemporarySort(
                 database,

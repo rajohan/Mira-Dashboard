@@ -21,8 +21,10 @@ const noSideEffects = Object.freeze({
     auditEvents: Object.freeze([]),
     realtimeEvents: Object.freeze([]),
 });
+const bootIdentity = "00000000-0000-0000-0000-000000000001";
 
 const baseRuntimeOptions = {
+    bootIdentity,
     database: {
         migrationsDirectory: "/srv/mira-dashboard/releases/test/migrations",
         releaseId: "a".repeat(40),
@@ -155,6 +157,7 @@ function runtimeFixture(initializationFailure?: Error) {
         },
         createCoordinator(options) {
             events.push("coordinator-create");
+            expect(options.bootIdentity).toBe(bootIdentity);
             expect(options.repository).toBe(repository);
             expect(options.commitCacheAttempt).toBeFunction();
             expect(options.findAction?.("maintenance.rotate-logs")).toBeDefined();
@@ -362,10 +365,15 @@ describe("Dashboard worker runtime", () => {
         const options: DashboardWorkerRuntimeOptions = {
             ...fixture.options,
             hostOperations: {
-                availableOperations: () => Promise.resolve(["system-restart"]),
-                request: () => {
+                availableOperations: () =>
+                    Promise.resolve(["system-restart", "system-cleanup"]),
+                request: (operationId) => {
                     requests += 1;
-                    return Promise.resolve({ status: "accepted" });
+                    return Promise.resolve(
+                        operationId === "system-restart"
+                            ? ({ status: "accepted" } as const)
+                            : ({ status: "completed" } as const)
+                    );
                 },
             },
         };
@@ -376,6 +384,9 @@ describe("Dashboard worker runtime", () => {
                     coordinatorOptions.findAction?.("host.system.restart")
                 ).toBeDefined();
                 expect(
+                    coordinatorOptions.findAction?.("host.system.cleanup")
+                ).toBeDefined();
+                expect(
                     coordinatorOptions.findAction?.("host.system.update")
                 ).toBeUndefined();
                 expect(
@@ -383,6 +394,11 @@ describe("Dashboard worker runtime", () => {
                         ({ actionKey }) => actionKey
                     )
                 ).toContain("host.system.restart");
+                expect(
+                    coordinatorOptions.actionDefinitions?.map(
+                        ({ actionKey }) => actionKey
+                    )
+                ).toContain("host.system.cleanup");
                 return fixture.dependencies.createCoordinator(coordinatorOptions);
             },
         };

@@ -90,7 +90,9 @@ function fixture(
             read: () =>
                 Promise.resolve([
                     { availability: "available", id: "openclaw-cleanup" },
+                    { availability: "available", id: "openclaw-restart" },
                     { availability: "available", id: "openclaw-update" },
+                    { availability: "unavailable", id: "system-cleanup" },
                     { availability: "unavailable", id: "system-restart" },
                     {
                         activeRun: queuedRun(jobRunId),
@@ -182,7 +184,9 @@ describe("service actions service", () => {
         expect(result).toMatchObject({
             actions: [
                 { availability: "available", id: "openclaw-cleanup" },
+                { availability: "available", id: "openclaw-restart" },
                 { availability: "available", id: "openclaw-update" },
+                { availability: "unavailable", id: "system-cleanup" },
                 { availability: "unavailable", id: "system-restart" },
                 {
                     activeRun: { id: jobRunId, state: "queued" },
@@ -219,7 +223,9 @@ describe("service actions service", () => {
                 read: () =>
                     Promise.resolve([
                         { availability: "available", id: "openclaw-cleanup" },
+                        { availability: "available", id: "openclaw-restart" },
                         { availability: "available", id: "openclaw-update" },
+                        { availability: "available", id: "system-cleanup" },
                         { availability: "available", id: "system-restart" },
                         { availability: "available", id: "system-update" },
                     ]),
@@ -279,7 +285,9 @@ describe("service actions service", () => {
                 read: () =>
                     Promise.resolve([
                         { availability: "available", id: "openclaw-cleanup" },
+                        { availability: "available", id: "openclaw-restart" },
                         { availability: "available", id: "openclaw-update" },
+                        { availability: "available", id: "system-cleanup" },
                         { availability: "available", id: "system-restart" },
                         { availability: "unavailable", id: "system-update" },
                     ]),

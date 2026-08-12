@@ -1593,7 +1593,7 @@
             "id": "POST /api/exec/start",
             "method": "POST",
             "path": "/api/exec/start",
-            "purpose": "Partially replaced by the bounded PTY and fixed Service Actions. This row stays planned until legacy system_cleanup is decomposed without feature loss: Docker prune in Docker control, apt cleanup in host/package maintenance, and journald vacuum in log maintenance.",
+            "purpose": "Partially replaced by the bounded PTY and fixed Service Actions without a generic command API. The system-cleanup foundation preserves package autoremove/cache cleanup, journald rotation with 14-day and 1 GiB retention bounds, and Docker pruning only for unused content older than 168 hours; it never deletes volumes. This row remains planned until the distinct-worker production topology and separately approved root provisioning make that host action executable.",
             "section": "Exec And Terminal",
             "target": {
                 "delivery": "planned",
@@ -1845,7 +1845,7 @@
             "target": {
                 "delivery": "implemented",
                 "kind": "procedure",
-                "names": ["openClawSettings.restartGateway"],
+                "names": ["openClawSettings.restartGateway", "serviceActions.request"],
                 "phase": "phase-5"
             }
         },

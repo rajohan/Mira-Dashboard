@@ -6,10 +6,13 @@ import {
     serviceActionIds,
 } from "../../../contracts/serviceActions.ts";
 import { parseJsonText } from "../../../shared/json.ts";
+import { fullCommitShaSchema } from "../../../shared/validation.ts";
 import { sha256Hex } from "../../shared/crypto.ts";
 import {
+    hostSystemCleanupJobActionKey,
     hostSystemRestartJobActionKey,
     hostSystemUpdateJobActionKey,
+    openClawGatewayRestartJobActionKey,
     openClawInstallationUpdateJobActionKey,
     openClawSessionsCleanupJobActionKey,
     type JobUnscheduledActionDefinition,
@@ -27,7 +30,9 @@ const emptyPayloadSchema = v.strictObject({});
 /** Exact worker action selected by each browser-visible Service Action. */
 export const serviceActionJobActionKeys = Object.freeze({
     "openclaw-cleanup": openClawSessionsCleanupJobActionKey,
+    "openclaw-restart": openClawGatewayRestartJobActionKey,
     "openclaw-update": openClawInstallationUpdateJobActionKey,
+    "system-cleanup": hostSystemCleanupJobActionKey,
     "system-restart": hostSystemRestartJobActionKey,
     "system-update": hostSystemUpdateJobActionKey,
 } as const satisfies Readonly<Record<ServiceActionId, string>>);
@@ -76,6 +81,7 @@ export interface ServiceActionQueueDependencies {
     >;
     readonly generateId?: () => string;
     readonly nowMs?: () => number;
+    readonly requiredWorkerReleaseId?: string;
     readonly repository: Pick<JobRepository, "enqueueManualRun" | "findRunByIdempotency">;
     readonly wakeEventPump?: () => Promise<void> | void;
 }
@@ -151,7 +157,7 @@ function result(
 }
 
 /**
- * Creates the actor- and authenticator-bound durable queue for four exact Service Actions.
+ * Creates the actor- and authenticator-bound durable queue for six exact Service Actions.
  * The queue returns after durable admission and never waits for worker settlement.
  * @returns The purpose-built fixed-action enqueue boundary.
  */
@@ -161,6 +167,15 @@ export function createServiceActionQueue(
     const definitions = prepareDefinitions(dependencies.definitions);
     const generateId = dependencies.generateId ?? (() => Bun.randomUUIDv7());
     const nowMs = dependencies.nowMs ?? Date.now;
+    const requiredWorkerReleaseId =
+        dependencies.requiredWorkerReleaseId === undefined
+            ? undefined
+            : v.parse(
+                  fullCommitShaSchema(
+                      "Required Service Action worker release is invalid"
+                  ),
+                  dependencies.requiredWorkerReleaseId
+              );
 
     async function wakeQueuedRun(run: JobRunRecord): Promise<void> {
         if (run.state !== "queued") return;
@@ -202,6 +217,9 @@ export function createServiceActionQueue(
                 const run = matchingRun(replay.run, request, prepared);
                 if (run === undefined) throw new ServiceActionQueueError("conflict");
                 return result(request.actionId, run);
+            }
+            if (requiredWorkerReleaseId === undefined) {
+                throw new ServiceActionQueueError("unavailable");
             }
 
             const atMs = nowMs();
@@ -259,6 +277,7 @@ export function createServiceActionQueue(
                     queuedAt: at,
                     requestedById: request.actor.id,
                     requestedByKind: request.actor.kind,
+                    requiredWorkerReleaseId,
                     resourceClass: definition.resourceClass,
                     resourceKeysJson: JSON.stringify(definition.resourceKeys),
                     resultJson: null,

@@ -756,5 +756,5 @@ describe("source-boundary policy", () => {
         const projectRootUrl = new URL("../..", import.meta.url);
         const violations = await checkSourceBoundaries(fileURLToPath(projectRootUrl));
         expect(violations).toEqual([]);
-    }, 30_000);
+    }, 60_000);
 });

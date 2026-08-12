@@ -7,6 +7,7 @@ import {
     type LogMaintenanceExecutionSummary,
     logMaintenancePolicyIdSchema,
 } from "../../../contracts/logs.ts";
+import type { HostOperationId } from "../../../shared/hostOperations.ts";
 import type { JsonObject } from "../../../shared/json.ts";
 import type { OpenClawGatewayLifecycleExecutionPort } from "../../../shared/openClawGatewayLifecycle.ts";
 import {
@@ -23,6 +24,9 @@ import {
     type JobActionSuccessfulSettlementHandler,
     JobActionOutcomeUnknownError,
     JobActionRetryableError,
+    hostSystemCleanupJobActionDefinition,
+    hostSystemCleanupJobActionKey,
+    hostSystemCleanupJobResultSchema,
     hostSystemRestartJobActionDefinition,
     hostSystemRestartJobActionKey,
     hostSystemRestartJobResultSchema,
@@ -47,14 +51,7 @@ import {
     workspaceFileWriteJobActionKey,
 } from "./actionRegistry.ts";
 
-/** Complete contract-ordered inventory of reviewed privileged host operations. */
-export const hostOperationIds = Object.freeze([
-    "system-restart",
-    "system-update",
-] as const);
-
-/** One exact reviewed privileged host operation. */
-export type HostOperationId = (typeof hostOperationIds)[number];
+export { hostOperationIds } from "../../../shared/hostOperations.ts";
 
 /** Secret-free result returned by one future, separately privileged host adapter. */
 export type FixedHostOperationResult =
@@ -348,9 +345,21 @@ export function createHostOperationJobExecutor(
             catch: () => new Error("Fixed host operation failed"),
             try: async (signal) => {
                 v.parse(emptyPayloadSchema, payload);
-                const result = await hostOperations.request(operationId, signal);
                 if (operationId === "system-restart") {
+                    await context.armHostRestartClaimFence();
+                    // The fixed broker cannot prove that an error happened before
+                    // `systemctl start --no-block` accepted the reboot timer. Once
+                    // armed, retain the fence for new-boot reconciliation or its
+                    // bounded same-boot expiry on every ambiguous dispatch outcome.
+                    const result = await hostOperations.request(operationId, signal);
                     return v.parse(hostSystemRestartJobResultSchema, {
+                        completedAtMs: context.nowMs(),
+                        status: result.status,
+                    });
+                }
+                const result = await hostOperations.request(operationId, signal);
+                if (operationId === "system-cleanup") {
+                    return v.parse(hostSystemCleanupJobResultSchema, {
                         completedAtMs: context.nowMs(),
                         status: result.status,
                     });
@@ -522,6 +531,7 @@ export function createJobWorkerActionResolver(
             ...(dependencies.hostOperations === undefined
                 ? []
                 : [
+                      hostSystemCleanupJobActionDefinition,
                       hostSystemRestartJobActionDefinition,
                       hostSystemUpdateJobActionDefinition,
                   ]),
@@ -581,6 +591,15 @@ export function createJobWorkerActionResolver(
                 : createOpenClawServiceActionJobExecutor(
                       dependencies.openClawServiceActions,
                       "openclaw-update"
+                  )
+        ),
+        ...gatedExecutor(
+            hostSystemCleanupJobActionKey,
+            dependencies.hostOperations === undefined
+                ? undefined
+                : createHostOperationJobExecutor(
+                      dependencies.hostOperations,
+                      "system-cleanup"
                   )
         ),
         ...gatedExecutor(

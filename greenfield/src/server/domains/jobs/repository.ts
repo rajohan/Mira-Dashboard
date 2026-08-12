@@ -50,12 +50,17 @@ import {
 import { utf8ByteLength } from "../../../shared/encoding.ts";
 import { parseJsonText } from "../../../shared/json.ts";
 import {
+    linuxBootIdentitySchema,
+    type LinuxBootIdentity,
+} from "../../../shared/linuxBootIdentity.ts";
+import {
     logMaintenanceJobActionKey,
     logMaintenanceJobPayloadIndexMaximumBytes,
 } from "../../../shared/logMaintenanceUnits.ts";
 import { fullCommitShaSchema } from "../../../shared/validation.ts";
 import type { ImmediateDatabaseWriteAdmission } from "../../database/immediateWriteAdmission.ts";
 import { auditEvents } from "../../database/schema/auditEvents.ts";
+import { hostRestartClaimFence } from "../../database/schema/hostRestartClaimFence.ts";
 import { jobDisableIntents } from "../../database/schema/jobDisableIntents.ts";
 import { jobRunEvents } from "../../database/schema/jobRunEvents.ts";
 import { jobRuns } from "../../database/schema/jobRuns.ts";
@@ -65,6 +70,10 @@ import { resourceLeases } from "../../database/schema/resourceLeases.ts";
 import { scheduledJobs } from "../../database/schema/scheduledJobs.ts";
 import { workerInstances } from "../../database/schema/workerInstances.ts";
 import { auditEventInsertSchema } from "../../database/validation/auditEvents.ts";
+import {
+    hostRestartClaimFenceInsertSchema,
+    hostRestartClaimFenceSelectSchema,
+} from "../../database/validation/hostRestartClaimFence.ts";
 import {
     jobDisableIntentCloseSchema,
     jobDisableIntentInsertSchema,
@@ -100,6 +109,15 @@ import {
 } from "../../database/validation/workerInstances.ts";
 import type { SecurityAuditEvent } from "../security/audit.ts";
 import {
+    hostSystemCleanupJobActionKey,
+    hostSystemRestartJobActionKey,
+    hostSystemUpdateJobActionKey,
+    openClawGatewayRestartJobActionKey,
+    openClawInstallationUpdateJobActionKey,
+    openClawSessionsCleanupJobActionKey,
+} from "./actionRegistry.ts";
+import {
+    type HostRestartClaimFenceRecord,
     type JobDisableIntentRecord,
     type JobRunEventRecord,
     type JobRunRecord,
@@ -114,11 +132,14 @@ type JobPersistenceDatabase = JobTransaction | SQLiteBunDatabase;
 
 export type JobDisableIntentInsert = v.InferOutput<typeof jobDisableIntentInsertSchema>;
 export type JobDisableIntentClose = v.InferOutput<typeof jobDisableIntentCloseSchema>;
-export type JobRunInsert = v.InferOutput<typeof jobRunInsertSchema>;
+export type JobRunInsert = v.InferInput<typeof jobRunInsertSchema>;
 export type JobRunEventInsert = v.InferOutput<typeof jobRunEventInsertSchema>;
 export type JobRealtimeEventInsert = v.InferOutput<typeof realtimeEventInsertSchema>;
 export type ScheduledJobInsert = v.InferOutput<typeof scheduledJobInsertSchema>;
 export type WorkerInstanceInsert = v.InferOutput<typeof workerInstanceInsertSchema>;
+
+/** Same-boot recovery ceiling when an accepted restart never reboots the host. */
+export const hostRestartClaimFenceDurationMs = 5 * 60_000;
 
 export interface JobMutationSideEffects {
     readonly auditEvents: readonly SecurityAuditEvent[];
@@ -418,6 +439,7 @@ export interface JobClaimCursor {
 
 export interface ClaimNextRunInput {
     readonly at: Date;
+    readonly bootIdentity: LinuxBootIdentity;
     readonly cursor?: JobClaimCursor;
     readonly leaseExpiresAt: Date;
     readonly leaseToken: string;
@@ -434,6 +456,7 @@ export type JobClaimResult =
           readonly kind: "page-exhausted";
       }
     | { readonly kind: "paused" }
+    | { readonly kind: "restart-fenced" }
     | { readonly kind: "worker-unavailable" };
 
 export interface ClaimFenceInput {
@@ -442,6 +465,24 @@ export interface ClaimFenceInput {
     readonly runId: string;
     readonly workerId: string;
 }
+
+export interface ArmHostRestartClaimFenceInput extends ClaimFenceInput {
+    readonly bootIdentity: LinuxBootIdentity;
+}
+
+export type ArmHostRestartClaimFenceResult =
+    | { readonly fence: HostRestartClaimFenceRecord; readonly kind: "armed" }
+    | { readonly kind: "lost-claim" };
+
+export interface ClearHostRestartClaimFenceInput extends ClaimFenceInput {
+    readonly armedAt: Date;
+    readonly bootIdentity: LinuxBootIdentity;
+    readonly expiresAt: Date;
+}
+
+export type ClearHostRestartClaimFenceResult =
+    | { readonly kind: "cleared" }
+    | { readonly kind: "changed" };
 
 export interface RenewClaimInput extends ClaimFenceInput {
     readonly leaseExpiresAt: Date;
@@ -534,9 +575,15 @@ export interface JobRunPageSnapshot {
 }
 
 export interface JobRepository extends JobRepositoryReader {
+    armHostRestartClaimFence(
+        input: ArmHostRestartClaimFenceInput
+    ): Promise<ArmHostRestartClaimFenceResult>;
     appendClaimEvent(input: AppendClaimEventInput): Promise<JobAppendEventResult>;
     beginWorkerDrain(input: WorkerLifecycleMutationInput): Promise<WorkerLifecycleResult>;
     cancelRun(input: CancelRunRepositoryInput): Promise<CancelRunRepositoryResult>;
+    clearHostRestartClaimFence(
+        input: ClearHostRestartClaimFenceInput
+    ): Promise<ClearHostRestartClaimFenceResult>;
     claimNextRun(input: ClaimNextRunInput): Promise<JobClaimResult>;
     enqueueManualRun(
         input: EnqueueManualRunInput,
@@ -581,6 +628,15 @@ const terminalRunStateList = [
     "succeeded",
     "timed-out",
 ] as const satisfies readonly JobRunState[];
+const serviceActionJobActionKeyList = [
+    openClawSessionsCleanupJobActionKey,
+    openClawGatewayRestartJobActionKey,
+    openClawInstallationUpdateJobActionKey,
+    hostSystemCleanupJobActionKey,
+    hostSystemRestartJobActionKey,
+    hostSystemUpdateJobActionKey,
+] as const;
+const serviceActionJobActionKeys = new Set<string>(serviceActionJobActionKeyList);
 // SQLite partial-index matching requires the same literal state predicates as the DDL.
 function literalStateList(states: readonly JobRunState[]): SQL {
     return sql.raw(states.map((state) => `'${state}'`).join(", "));
@@ -588,6 +644,7 @@ function literalStateList(states: readonly JobRunState[]): SQL {
 const activeStateFilter = sql`${jobRuns.state} IN (${literalStateList(activeRunStateList)})`;
 const terminalStateFilter = sql`${jobRuns.state} IN (${literalStateList(terminalRunStateList)})`;
 const logMaintenanceSnapshotScopeFilter = sql`${jobRuns.actionKey} = ${sql.raw(`'${logMaintenanceJobActionKey}'`)} AND length(CAST(${jobRuns.payloadJson} AS BLOB)) <= ${sql.raw(String(logMaintenanceJobPayloadIndexMaximumBytes))}`;
+const serviceActionSnapshotScopeFilter = sql`${jobRuns.actionKey} IN (${sql.raw(serviceActionJobActionKeyList.map((actionKey) => `'${actionKey}'`).join(", "))}) AND ${jobRuns.payloadJson} = '{}'`;
 const terminalRunStates = new Set<JobRunState>(terminalRunStateList);
 
 function requiredRow<T>(row: T | undefined, operation: string): T {
@@ -869,6 +926,7 @@ class DrizzleJobReader implements JobRepositoryReader {
             "action payload run snapshot"
         );
         const usesMaintenanceStatusIndex = actionKey === logMaintenanceJobActionKey;
+        const usesServiceActionStatusIndex = serviceActionJobActionKeys.has(actionKey);
         const payloadJsons = input.payloadJsons.map((payloadJson) => {
             if (utf8ByteLength(payloadJson) > jobPayloadMaximumBytes) {
                 throw new TypeError(
@@ -895,6 +953,12 @@ class DrizzleJobReader implements JobRepositoryReader {
         }
         return payloadJsons.map((payloadJson) => {
             const actionCondition = eq(jobRuns.actionKey, actionKey);
+            let terminalScopeCondition = actionCondition;
+            if (usesMaintenanceStatusIndex) {
+                terminalScopeCondition = logMaintenanceSnapshotScopeFilter;
+            } else if (usesServiceActionStatusIndex && payloadJson === "{}") {
+                terminalScopeCondition = sql`${actionCondition} AND ${serviceActionSnapshotScopeFilter}`;
+            }
             const activeRow = this.database
                 .select()
                 .from(jobRuns)
@@ -912,9 +976,7 @@ class DrizzleJobReader implements JobRepositoryReader {
                 .from(jobRuns)
                 .where(
                     and(
-                        usesMaintenanceStatusIndex
-                            ? logMaintenanceSnapshotScopeFilter
-                            : actionCondition,
+                        terminalScopeCondition,
                         eq(jobRuns.payloadJson, payloadJson),
                         terminalStateFilter
                     )
@@ -1333,6 +1395,136 @@ class DrizzleJobWriter extends DrizzleJobReader {
     public constructor(transaction: JobTransaction) {
         super(transaction);
         this.#transaction = transaction;
+    }
+
+    #reconcileHostRestartClaimFence(
+        bootIdentity: LinuxBootIdentity,
+        at: Date
+    ): HostRestartClaimFenceRecord | undefined {
+        const row = this.#transaction
+            .select()
+            .from(hostRestartClaimFence)
+            .where(eq(hostRestartClaimFence.id, 1))
+            .get();
+        if (row === undefined) return;
+        const fence = v.parse(hostRestartClaimFenceSelectSchema, row);
+        if (
+            fence.bootIdentity === bootIdentity &&
+            getTime(fence.expiresAt) > getTime(at)
+        ) {
+            return fence;
+        }
+        const removed = this.#transaction
+            .delete(hostRestartClaimFence)
+            .where(
+                and(
+                    eq(hostRestartClaimFence.id, fence.id),
+                    eq(hostRestartClaimFence.armedAt, fence.armedAt),
+                    eq(hostRestartClaimFence.bootIdentity, fence.bootIdentity),
+                    eq(hostRestartClaimFence.expiresAt, fence.expiresAt),
+                    eq(hostRestartClaimFence.jobRunId, fence.jobRunId),
+                    eq(hostRestartClaimFence.leaseToken, fence.leaseToken),
+                    eq(hostRestartClaimFence.workerInstanceId, fence.workerInstanceId)
+                )
+            )
+            .returning({ id: hostRestartClaimFence.id })
+            .get();
+        if (removed === undefined) {
+            throw new Error("Host restart claim fence reconciliation failed");
+        }
+        return;
+    }
+
+    public armHostRestartClaimFence(
+        input: ArmHostRestartClaimFenceInput
+    ): ArmHostRestartClaimFenceResult {
+        const bootIdentity = v.parse(linuxBootIdentitySchema, input.bootIdentity);
+        const atMs = v.parse(jobTimestampSchema, getTime(input.at));
+        const at = new Date(atMs);
+        if (this.#reconcileHostRestartClaimFence(bootIdentity, at) !== undefined) {
+            return { kind: "lost-claim" };
+        }
+        const run = this.#transaction
+            .select()
+            .from(jobRuns)
+            .where(
+                and(
+                    eq(jobRuns.id, input.runId),
+                    eq(jobRuns.actionKey, hostSystemRestartJobActionKey),
+                    eq(jobRuns.payloadJson, "{}"),
+                    eq(jobRuns.state, "running"),
+                    eq(jobRuns.leaseOwnerId, input.workerId),
+                    eq(jobRuns.leaseToken, input.leaseToken),
+                    gt(jobRuns.leaseExpiresAt, at)
+                )
+            )
+            .get();
+        if (run === undefined) return { kind: "lost-claim" };
+        parseRun(run);
+        const runningCount = requiredRow(
+            this.#transaction
+                .select({ value: count() })
+                .from(jobRuns)
+                .where(eq(jobRuns.state, "running"))
+                .get(),
+            "host restart global running count"
+        ).value;
+        if (runningCount !== 1) return { kind: "lost-claim" };
+        const expiresAt = new Date(
+            v.parse(jobTimestampSchema, atMs + hostRestartClaimFenceDurationMs)
+        );
+        const inserted = this.#transaction
+            .insert(hostRestartClaimFence)
+            .values(
+                v.parse(hostRestartClaimFenceInsertSchema, {
+                    armedAt: at,
+                    bootIdentity,
+                    expiresAt,
+                    id: 1,
+                    jobRunId: input.runId,
+                    leaseToken: input.leaseToken,
+                    workerInstanceId: input.workerId,
+                })
+            )
+            .returning()
+            .get();
+        return {
+            fence: v.parse(
+                hostRestartClaimFenceSelectSchema,
+                requiredRow(inserted, "host restart claim fence insert")
+            ),
+            kind: "armed",
+        };
+    }
+
+    public clearHostRestartClaimFence(
+        input: ClearHostRestartClaimFenceInput
+    ): ClearHostRestartClaimFenceResult {
+        const expected = v.parse(hostRestartClaimFenceInsertSchema, {
+            armedAt: input.armedAt,
+            bootIdentity: input.bootIdentity,
+            expiresAt: input.expiresAt,
+            id: 1,
+            jobRunId: input.runId,
+            leaseToken: input.leaseToken,
+            workerInstanceId: input.workerId,
+        });
+        const removed = this.#transaction
+            .delete(hostRestartClaimFence)
+            .where(
+                and(
+                    eq(hostRestartClaimFence.id, expected.id),
+                    eq(hostRestartClaimFence.armedAt, expected.armedAt),
+                    eq(hostRestartClaimFence.bootIdentity, expected.bootIdentity),
+                    eq(hostRestartClaimFence.expiresAt, expected.expiresAt),
+                    eq(hostRestartClaimFence.jobRunId, expected.jobRunId),
+                    eq(hostRestartClaimFence.leaseToken, expected.leaseToken),
+                    eq(hostRestartClaimFence.workerInstanceId, expected.workerInstanceId)
+                )
+            )
+            .returning({ id: hostRestartClaimFence.id })
+            .get();
+        return { kind: removed === undefined ? "changed" : "cleared" };
     }
 
     public reconcileSchedules(input: ReconcileSchedulesInput): ScheduledJobRecord[] {
@@ -2136,6 +2328,11 @@ class DrizzleJobWriter extends DrizzleJobReader {
     }
 
     public claimNextRun(input: ClaimNextRunInput): JobClaimResult {
+        const bootIdentity = v.parse(linuxBootIdentitySchema, input.bootIdentity);
+        const at = new Date(v.parse(jobTimestampSchema, getTime(input.at)));
+        if (this.#reconcileHostRestartClaimFence(bootIdentity, at) !== undefined) {
+            return { kind: "restart-fenced" };
+        }
         if (getTime(input.leaseExpiresAt) <= getTime(input.at)) {
             throw new RangeError("Claim lease expiry must be after claim time");
         }
@@ -2187,6 +2384,10 @@ class DrizzleJobWriter extends DrizzleJobReader {
                             eq(jobRuns.state, "queued"),
                             lte(jobRuns.availableAt, availableThrough),
                             inArray(jobRuns.actionKey, workerActionKeys),
+                            or(
+                                isNull(jobRuns.requiredWorkerReleaseId),
+                                eq(jobRuns.requiredWorkerReleaseId, worker.releaseId)
+                            ),
                             range
                         )
                     )
@@ -2265,7 +2466,11 @@ class DrizzleJobWriter extends DrizzleJobReader {
                         eq(jobRuns.id, candidate.id),
                         eq(jobRuns.state, "queued"),
                         eq(jobRuns.stateVersion, candidate.stateVersion),
-                        lte(jobRuns.availableAt, availableThrough)
+                        lte(jobRuns.availableAt, availableThrough),
+                        or(
+                            isNull(jobRuns.requiredWorkerReleaseId),
+                            eq(jobRuns.requiredWorkerReleaseId, worker.releaseId)
+                        )
                     )
                 )
                 .returning()
@@ -2848,12 +3053,16 @@ export function createJobRepository(
         });
 
     return Object.freeze({
+        armHostRestartClaimFence: (input: ArmHostRestartClaimFenceInput) =>
+            write((writer) => writer.armHostRestartClaimFence(input)),
         appendClaimEvent: (input: AppendClaimEventInput) =>
             write((writer) => writer.appendClaimEvent(input)),
         beginWorkerDrain: (input: WorkerLifecycleMutationInput) =>
             write((writer) => writer.beginWorkerDrain(input)),
         cancelRun: (input: CancelRunRepositoryInput) =>
             write((writer) => writer.cancelRun(input)),
+        clearHostRestartClaimFence: (input: ClearHostRestartClaimFenceInput) =>
+            write((writer) => writer.clearHostRestartClaimFence(input)),
         claimNextRun: (input: ClaimNextRunInput) =>
             write((writer) => writer.claimNextRun(input)),
         enqueueManualRun: (

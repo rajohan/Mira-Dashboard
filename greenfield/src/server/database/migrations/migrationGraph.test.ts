@@ -44,6 +44,7 @@ const expectedTables: string[] = [
     "chat_runs",
     "chat_runtime_snapshots",
     "chat_transcript_generations",
+    "host_restart_claim_fence",
     "incident_observations",
     "incidents",
     "job_disable_intents",
@@ -131,6 +132,8 @@ describe("database migration graph", () => {
             "chat_transcript_generations_reject_identity_update",
             "chat_transcript_generations_reject_replace",
             "chat_transcript_generations_validate_monotonic_update",
+            "host_restart_claim_fence_reject_update",
+            "host_restart_claim_fence_validate_insert",
             "reports_validate_metadata_insert",
             "reports_validate_metadata_update",
             "incidents_validate_details_insert",
@@ -220,6 +223,7 @@ describe("database migration graph", () => {
             ).toBe(1);
             for (const tableName of [
                 "cache_entries",
+                "host_restart_claim_fence",
                 "job_disable_intents",
                 "job_run_events",
                 "job_runs",

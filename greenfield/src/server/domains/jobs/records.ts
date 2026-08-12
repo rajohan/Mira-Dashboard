@@ -21,6 +21,7 @@ import {
     scheduleSummarySchema,
 } from "../../../contracts/jobModel.ts";
 import { parseJsonText } from "../../../shared/json.ts";
+import { hostRestartClaimFenceSelectSchema } from "../../database/validation/hostRestartClaimFence.ts";
 import { jobDisableIntentSelectSchema } from "../../database/validation/jobDisableIntents.ts";
 import { jobRunEventSelectSchema } from "../../database/validation/jobRunEvents.ts";
 import { jobRunSelectSchema } from "../../database/validation/jobRuns.ts";
@@ -30,6 +31,9 @@ import { workerInstanceSelectSchema } from "../../database/validation/workerInst
 import { findJobActionDefinition, isRegisteredJobSchedule } from "./actionRegistry.ts";
 
 export type JobDisableIntentRecord = v.InferOutput<typeof jobDisableIntentSelectSchema>;
+export type HostRestartClaimFenceRecord = v.InferOutput<
+    typeof hostRestartClaimFenceSelectSchema
+>;
 export type JobRunEventRecord = v.InferOutput<typeof jobRunEventSelectSchema>;
 export type JobRunRecord = v.InferOutput<typeof jobRunSelectSchema>;
 export type JobWorkerControlRecord = v.InferOutput<typeof jobWorkerControlSelectSchema>;

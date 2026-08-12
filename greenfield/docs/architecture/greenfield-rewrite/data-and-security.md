@@ -179,38 +179,39 @@ queryable lifecycle.
 
 ### Index plan
 
-| Query shape                   | Index or constraint                                                                       |
-| ----------------------------- | ----------------------------------------------------------------------------------------- |
-| Session lookup                | unique `auth_sessions(validator_hash)`                                                    |
-| Session expiry cleanup        | `auth_sessions(expires_at_ms)`                                                            |
-| User credentials              | `user_webauthn_credentials(user_id, created_at, id)` and unique credential ID             |
-| WebAuthn challenge            | unique partial binding/purpose indexes plus `(expires_at, id)` cleanup                    |
-| Automation principal history  | `automation_principals_created_id_idx` plus `automation_principals_active_created_id_idx` |
-| Automation credential history | `automation_credentials_principal_created_idx`                                            |
-| Active automation credentials | partial `automation_credentials_active_principal_created_idx` while unrevoked             |
-| Staged credential rotation    | full `automation_credentials_replacement_idx` plus a unique partial replacement index     |
-| Task board                    | `tasks(status, priority, updated_at_ms DESC)`                                             |
-| Task label filter             | `task_labels(label, task_id)`                                                             |
-| Task timeline                 | `task_updates(task_id, created_at_ms, id)` and equivalent event index                     |
-| Agent task history            | unique active-agent partial index plus `(agent_id, started_at_ms, id)`                    |
-| Latest reports                | `reports(kind, occurred_at_ms DESC, id DESC)`                                             |
-| Heartbeat stream              | `reports(source, source_job_id, occurred_at_ms DESC, id DESC)`                            |
-| Active incidents              | partial `incidents(monitor_key, last_seen_at_ms DESC) WHERE state = 'active'`             |
-| Incident identity             | unique `incidents(monitor_key, fingerprint)`                                              |
-| Unread notifications          | partial `notifications(occurred_at_ms DESC) WHERE read_at_ms IS NULL`                     |
-| Incident notification         | unique `(incident_id, incident_generation, channel)` when incident is non-null            |
-| Queue claim                   | partial `job_runs(available_at, priority DESC, queued_at, id) WHERE state = 'queued'`     |
-| One active scheduled run      | unique partial `job_runs(scheduled_job_id) WHERE state IN ('queued', 'running')`          |
-| Active action status          | partial `job_runs_action_active_idx`; exact predicate below                               |
-| Terminal maintenance status   | partial `job_runs_action_payload_terminal_idx`; exact predicate below                     |
-| Worker expiry                 | `worker_instances(heartbeat_at, id)`                                                      |
-| Job timeline                  | `job_run_events(job_run_id, sequence)`                                                    |
-| Realtime catch-up             | `realtime_events(topic, id)`                                                              |
-| Chat replay                   | unique `chat_run_events(chat_run_id, sequence)`                                           |
-| Deployment history            | `deployments(state, updated_at_ms DESC)`                                                  |
-| Docker history                | `docker_update_events(managed_service_id, created_at_ms DESC)`                            |
-| Cache refresh/expiry          | `cache_entries(last_attempt_status, expires_at_ms, key)`                                  |
-| Audit cursor                  | `audit_events(occurred_at_ms DESC, id DESC)` plus request/target indexes                  |
+| Query shape                    | Index or constraint                                                                       |
+| ------------------------------ | ----------------------------------------------------------------------------------------- |
+| Session lookup                 | unique `auth_sessions(validator_hash)`                                                    |
+| Session expiry cleanup         | `auth_sessions(expires_at_ms)`                                                            |
+| User credentials               | `user_webauthn_credentials(user_id, created_at, id)` and unique credential ID             |
+| WebAuthn challenge             | unique partial binding/purpose indexes plus `(expires_at, id)` cleanup                    |
+| Automation principal history   | `automation_principals_created_id_idx` plus `automation_principals_active_created_id_idx` |
+| Automation credential history  | `automation_credentials_principal_created_idx`                                            |
+| Active automation credentials  | partial `automation_credentials_active_principal_created_idx` while unrevoked             |
+| Staged credential rotation     | full `automation_credentials_replacement_idx` plus a unique partial replacement index     |
+| Task board                     | `tasks(status, priority, updated_at_ms DESC)`                                             |
+| Task label filter              | `task_labels(label, task_id)`                                                             |
+| Task timeline                  | `task_updates(task_id, created_at_ms, id)` and equivalent event index                     |
+| Agent task history             | unique active-agent partial index plus `(agent_id, started_at_ms, id)`                    |
+| Latest reports                 | `reports(kind, occurred_at_ms DESC, id DESC)`                                             |
+| Heartbeat stream               | `reports(source, source_job_id, occurred_at_ms DESC, id DESC)`                            |
+| Active incidents               | partial `incidents(monitor_key, last_seen_at_ms DESC) WHERE state = 'active'`             |
+| Incident identity              | unique `incidents(monitor_key, fingerprint)`                                              |
+| Unread notifications           | partial `notifications(occurred_at_ms DESC) WHERE read_at_ms IS NULL`                     |
+| Incident notification          | unique `(incident_id, incident_generation, channel)` when incident is non-null            |
+| Queue claim                    | partial `job_runs(available_at, priority DESC, queued_at, id) WHERE state = 'queued'`     |
+| One active scheduled run       | unique partial `job_runs(scheduled_job_id) WHERE state IN ('queued', 'running')`          |
+| Active action status           | partial `job_runs_action_active_idx`; exact predicate below                               |
+| Terminal maintenance status    | partial `job_runs_action_payload_terminal_idx`; exact predicate below                     |
+| Terminal Service Action status | partial `job_runs_service_action_terminal_idx`; exact predicate below                     |
+| Worker expiry                  | `worker_instances(heartbeat_at, id)`                                                      |
+| Job timeline                   | `job_run_events(job_run_id, sequence)`                                                    |
+| Realtime catch-up              | `realtime_events(topic, id)`                                                              |
+| Chat replay                    | unique `chat_run_events(chat_run_id, sequence)`                                           |
+| Deployment history             | `deployments(state, updated_at_ms DESC)`                                                  |
+| Docker history                 | `docker_update_events(managed_service_id, created_at_ms DESC)`                            |
+| Cache refresh/expiry           | `cache_entries(last_attempt_status, expires_at_ms, key)`                                  |
+| Audit cursor                   | `audit_events(occurred_at_ms DESC, id DESC)` plus request/target indexes                  |
 
 The action-status indexes intentionally mirror the repository's literal predicates:
 
@@ -221,6 +222,10 @@ The action-status indexes intentionally mirror the repository's literal predicat
   `(action_key, payload_json, queued_at DESC, id DESC)` where
   `action_key = 'maintenance.rotate-logs'`, `length(CAST(payload_json AS BLOB)) <= 128`,
   and `state IN ('cancelled', 'failed', 'succeeded', 'timed-out')`.
+- `job_runs_service_action_terminal_idx` indexes
+  `(action_key, queued_at DESC, id DESC)` where `action_key` is one of the six fixed
+  Service Action keys, `payload_json = '{}'`, and
+  `state IN ('cancelled', 'failed', 'succeeded', 'timed-out')`.
 
 Primary keys and unique constraints already create indexes; the schema does not add redundant
 copies. Partial-index predicates must match query predicates exactly enough for SQLite to use
@@ -282,27 +287,38 @@ restarts, or unbounded shell commands. Those operations become durable `job_runs
 the worker.
 
 Service Actions are a separate fixed-intent boundary, not a generic exec facade. The contract
-contains exactly `openclaw-cleanup`, `openclaw-update`, `system-restart`, and `system-update`; a
-caller can supply only one of those IDs plus an actor-bound idempotency key. Reads and requests are
-session-only under dedicated capabilities, requests require recent MFA, and audit attempt must
-commit before the durable enqueue handoff. That handoff rechecks exact-release worker
-availability, the current browser session, and recent MFA. Enqueue uncertainty is reconciled by
-the same principal/idempotency intent, and post-dispatch uncertainty never authorizes a replay.
+contains exactly `openclaw-cleanup`, `openclaw-restart`, `openclaw-update`, `system-cleanup`,
+`system-restart`, and `system-update`; a caller can supply only one of those IDs plus an actor-bound
+idempotency key.
+Reads and requests are session-only under dedicated capabilities, requests require recent MFA, and
+audit attempt must commit before the durable enqueue handoff. That handoff rechecks exact-release
+worker availability, the current browser session, and recent MFA. Enqueue uncertainty is
+reconciled by the same principal/idempotency intent, and post-dispatch uncertainty never authorizes
+a replay.
 
 The production worker advertises only actions for which its composition owns an exact executor.
 OpenClaw cleanup and update are worker-only, fixed-parameter Gateway operations with bounded,
-sanitized results. Host restart and host update remain canonical contract/UI rows but are
-unavailable in production because the web and worker currently share one Unix identity. A shared
-group or polkit grant would therefore collapse the web/worker trust boundary. This rewrite ships
-no shared-user host broker, polkit rule, root helper, or host-operation systemd unit. Future host
-enablement requires a distinct worker OS identity, root-owned immutable worker execution, exact
-subject and operation policy, and reviewed install/rollback evidence before either action key can
-be advertised.
+sanitized results. OpenClaw restart reuses the existing fixed `openclaw.gateway.restart` worker
+definition, executor, and provider already used by Settings; its `host.mutation` plus
+`openclaw.gateway` resource locks serialize it with both host maintenance and other Gateway
+mutations. Host cleanup, restart, and update have one separately provisioned fixed broker
+whose only input is the reviewed operation ID and whose only output is an accepted/completed
+status. The root-owned units use fixed paths, fixed arguments, bounded output and deadlines, and no
+shell or caller-controlled environment. Manifest-bound provisioning validates no-follow file
+identity, ownership, modes, and content integrity and retains explicit rollback to the previous
+immutable release. Production does not compose that broker while web and worker share one Unix
+identity: the host actions stay unavailable until a distinct worker OS principal exists and
+separately approved provisioning binds only that principal, excludes the web process, reloads the
+reviewed policy and units, and composes the broker.
 
-This boundary is a partial secure replacement for `POST /api/exec/start`, not a feature-removal
-claim. The legacy `system_cleanup` intent remains planned as three separately authorized effects:
-Docker prune in the Docker slice, apt cleanup in host/package maintenance, and journald vacuum in
-log maintenance. None may be smuggled back through a generic shell or shared-user privilege grant.
+`system-cleanup` attempts all fixed phases and fails if any phase fails: package autoremove,
+package-cache cleanup, journald rotation plus 14-day/1 GiB retention, and Docker system prune for
+unused content older than 168 hours. It never prunes volumes. The durable definition is exclusive,
+single-attempt, non-cancellable, non-retry-safe, and reserves both `host.mutation` and `host.logs`.
+Together with the bounded PTY, this defines the narrow replacement for the consumed
+`POST /api/exec/start` behavior without reintroducing a generic shell, command, path, or
+shared-user privilege grant. The parity row remains planned until the distinct-worker production
+topology and separately approved provisioning make this host action executable.
 
 The `cache:read` automation heartbeat is a separate sanitized projection, not a shortcut around
 session, task, job, or cron detail authorization. It reads process-local validated Gateway
@@ -322,6 +338,13 @@ Queue behavior is explicit:
 
 - a strict singleton `job_worker_control` row persists cross-process claim pause state and
   versioned operator changes; its absence is an integrity failure, never an implicit resume;
+- the separate singleton `host_restart_claim_fence` is armed atomically only when its exact
+  `host.system.restart` lease is the sole globally running run; every worker refuses new claims
+  while that fence is unexpired for the kernel-owned Linux boot identity;
+- after dispatch begins, an error or lost response cannot prove that `systemctl --no-block` failed
+  before accepting the reboot timer, so both accepted and ambiguous outcomes retain the fence; a
+  changed boot identity removes it, and bounded same-boot expiry restores admission if reboot
+  never occurs;
 - one immediate transaction considers at most 32 totally ordered candidates, skips candidates
   with occupied resources, and atomically assigns the first eligible run plus every required
   resource lease;

@@ -117,6 +117,7 @@ const validJobRunRow = Object.freeze({
     queuedAt: jobUpdatedAt,
     requestedById: jobUserId,
     requestedByKind: "user" as const,
+    requiredWorkerReleaseId: null,
     resourceClass: "light" as const,
     resourceKeysJson: '["database"]',
     resultJson: null,

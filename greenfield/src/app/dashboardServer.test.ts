@@ -1286,6 +1286,7 @@ describe("Dashboard OpenClaw operations composition", () => {
             const claimAt = new Date(authenticationTestNow.getTime() + 1);
             const claim = await jobRepository.claimNextRun({
                 at: claimAt,
+                bootIdentity: "00000000-0000-0000-0000-000000000001",
                 leaseExpiresAt: new Date(authenticationTestNow.getTime() + 30_000),
                 leaseToken,
                 minimumHeartbeatAt: new Date(authenticationTestNow.getTime() - 1),

@@ -34,6 +34,7 @@ const actor = Object.freeze({
     kind: "user" as const,
 });
 const idempotencyKey = "019fdf50-0000-4000-8000-000000000012";
+const requiredWorkerReleaseId = "b".repeat(40);
 
 function definition(actionId: ServiceActionId): JobUnscheduledActionDefinition {
     return Object.freeze({
@@ -74,6 +75,7 @@ function repositoryFixture() {
                 eventBytes: 0,
                 eventCount: 1,
                 payloadEventCount: 0,
+                requiredWorkerReleaseId: input.run.requiredWorkerReleaseId ?? null,
                 stateVersion: 1,
             };
             return Promise.resolve({ kind: "inserted", run: stored });
@@ -129,6 +131,7 @@ function queueFixture(
             generateId: () => ids.shift()!,
             nowMs: () => 1000,
             repository: fixture.repository,
+            requiredWorkerReleaseId,
             ...overrides,
         }),
     };
@@ -172,6 +175,7 @@ describe("Service Action durable queue", () => {
                 payloadJson: "{}",
                 requestedById: actor.id,
                 requestedByKind: "user",
+                requiredWorkerReleaseId,
                 resourceClass: "exclusive",
                 resourceKeysJson: JSON.stringify(definitions[actionId].resourceKeys),
                 retrySafe: false,
@@ -206,6 +210,28 @@ describe("Service Action durable queue", () => {
 
         expect(replay).toEqual(first);
         expect(authorizationChecks).toBe(0);
+        expect(fixture.enqueues).toHaveLength(1);
+    });
+
+    test("fails closed without a verified release while preserving durable replays", async () => {
+        const fixture = repositoryFixture();
+        const admitted = queueFixture(fixture);
+        const first = await admitted.queue.enqueue(request("system-update"));
+        const unverified = queueFixture(fixture, {
+            requiredWorkerReleaseId: undefined,
+        });
+
+        expect(await unverified.queue.enqueue(request("system-update"))).toEqual(first);
+        const failure = await unverified.queue
+            .enqueue(
+                request("system-update", {
+                    idempotencyKey: "019fdf50-0000-4000-8000-000000000099",
+                })
+            )
+            .catch((error: unknown) => error);
+
+        expect(failure).toBeInstanceOf(ServiceActionQueueError);
+        expect(failure).toMatchObject({ reason: "unavailable" });
         expect(fixture.enqueues).toHaveLength(1);
     });
 
@@ -358,6 +384,7 @@ describe("Service Action durable queue", () => {
             generateId: () => runIds.shift()!,
             nowMs: () => 1000,
             repository: jobRepository,
+            requiredWorkerReleaseId,
         });
         const authorizationFailure = new Error("authorization expired");
         const authenticatedActor = Object.freeze({
@@ -420,6 +447,7 @@ describe("Service Action durable queue", () => {
                     },
                 },
                 repository: repositoryFixture().repository,
+                requiredWorkerReleaseId,
             })
         ).toThrow("Service Action definition is invalid");
 
@@ -438,6 +466,7 @@ describe("Service Action durable queue", () => {
                         },
                     },
                     repository: repositoryFixture().repository,
+                    requiredWorkerReleaseId,
                 })
             ).toThrow("Service Action definition is invalid");
         }

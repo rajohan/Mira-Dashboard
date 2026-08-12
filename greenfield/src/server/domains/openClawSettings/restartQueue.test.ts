@@ -31,6 +31,7 @@ function repositoryFixture() {
                 eventBytes: 0,
                 eventCount: 1,
                 payloadEventCount: 0,
+                requiredWorkerReleaseId: input.run.requiredWorkerReleaseId ?? null,
                 stateVersion: 1,
             };
             return Promise.resolve({ kind: "inserted", run: stored });
@@ -137,6 +138,9 @@ describe("OpenClaw Gateway restart queue", () => {
             retrySafe: false,
         });
         expect(fixture.enqueues[0]?.run.payloadJson).toBe("{}");
+        expect(fixture.enqueues[0]?.run.resourceKeysJson).toBe(
+            '["host.mutation","openclaw.gateway"]'
+        );
         expect(fixture.enqueues[0]?.auditEvents).toMatchObject([
             {
                 action: "openclaw.settings.restart.enqueue",

@@ -78,6 +78,7 @@ export const jobRuns = sqliteTable(
         requestedByKind: text("requested_by_kind", {
             enum: ["automation", "system", "user"],
         }).notNull(),
+        requiredWorkerReleaseId: text("required_worker_release_id"),
         resourceClass: text("resource_class", {
             enum: ["exclusive", "host-heavy", "interactive", "light", "network"],
         }).notNull(),
@@ -153,6 +154,10 @@ export const jobRuns = sqliteTable(
             })
         ),
         check(
+            "job_runs_required_worker_release_id_check",
+            sql`${table.requiredWorkerReleaseId} IS NULL OR ${lowercaseHexTextCheck(table.requiredWorkerReleaseId, 40)}`
+        ),
+        check(
             "job_runs_resource_class_check",
             sql`${table.resourceClass} IN ('exclusive', 'host-heavy', 'interactive', 'light', 'network')`
         ),
@@ -218,6 +223,11 @@ export const jobRuns = sqliteTable(
             .on(table.actionKey, table.payloadJson, desc(table.queuedAt), desc(table.id))
             .where(
                 sql`${table.actionKey} = ${sql.raw(`'${logMaintenanceJobActionKey}'`)} AND length(CAST(${table.payloadJson} AS BLOB)) <= ${sql.raw(String(logMaintenanceJobPayloadIndexMaximumBytes))} AND ${table.state} IN ('cancelled', 'failed', 'succeeded', 'timed-out')`
+            ),
+        index("job_runs_service_action_terminal_idx")
+            .on(table.actionKey, desc(table.queuedAt), desc(table.id))
+            .where(
+                sql`${table.actionKey} IN ('openclaw.sessions.cleanup', 'openclaw.gateway.restart', 'openclaw.installation.update', 'host.system.cleanup', 'host.system.restart', 'host.system.update') AND ${table.payloadJson} = '{}' AND ${table.state} IN ('cancelled', 'failed', 'succeeded', 'timed-out')`
             ),
         index("job_runs_queued_id_idx").on(table.queuedAt, table.id),
         index("job_runs_schedule_queued_id_idx").on(

@@ -128,7 +128,9 @@ describe("service action contracts", () => {
     test("accepts only exact fixed action confirmations and idempotency keys", () => {
         const valid = [
             ["openclaw-cleanup", "cleanup-openclaw"],
+            ["openclaw-restart", "restart-openclaw"],
             ["openclaw-update", "update-openclaw"],
+            ["system-cleanup", "cleanup-system"],
             ["system-restart", "restart-system"],
             ["system-update", "update-system"],
         ] as const;
@@ -145,13 +147,18 @@ describe("service action contracts", () => {
 
         for (const input of [
             {
+                actionId: "openclaw-restart",
+                confirmation: "restart-openclaw-gateway",
+                idempotencyKey,
+            },
+            {
                 actionId: "system-restart",
                 confirmation: "update-system",
                 idempotencyKey,
             },
             {
                 actionId: "system-cleanup",
-                confirmation: "cleanup-system",
+                confirmation: "cleanup-host",
                 idempotencyKey,
             },
             {
@@ -183,7 +190,7 @@ describe("service action contracts", () => {
     test("requires the complete canonical fixed inventory and bounded run projections", () => {
         const actions = serviceActionIds.map((id, index) => ({
             ...(index === 0 ? { activeRun: queuedRun("openclaw.sessions.cleanup") } : {}),
-            availability: index === 3 ? "unavailable" : "available",
+            availability: index === 5 ? "unavailable" : "available",
             id,
         }));
         expect(

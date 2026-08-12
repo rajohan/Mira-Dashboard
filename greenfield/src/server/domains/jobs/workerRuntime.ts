@@ -1,5 +1,6 @@
 import { Cause, Effect, Exit, Fiber, ManagedRuntime } from "effect";
 
+import type { LinuxBootIdentity } from "../../../shared/linuxBootIdentity.ts";
 import type { OpenClawGatewayLifecycleExecutionPort } from "../../../shared/openClawGatewayLifecycle.ts";
 import type { OpenClawServiceActionsExecutionPort } from "../../../shared/openClawServiceActions.ts";
 import type {
@@ -27,6 +28,7 @@ import {
 } from "./actionExecutors.ts";
 import {
     jobActionDefinitions,
+    hostSystemCleanupJobActionDefinition,
     hostSystemRestartJobActionDefinition,
     hostSystemUpdateJobActionDefinition,
     openClawGatewayRestartJobActionDefinition,
@@ -48,6 +50,7 @@ import {
 } from "./sideEffects.ts";
 
 export interface DashboardWorkerRuntimeOptions {
+    readonly bootIdentity: LinuxBootIdentity;
     readonly database: DatabaseRuntimeLayerOptions;
     readonly logMaintenance: LogMaintenanceExecutionPort;
     readonly hostOperations?: FixedHostOperationsExecutionPort;
@@ -437,6 +440,9 @@ export function createDashboardWorkerRuntime(
                           openClawSessionsCleanupJobActionDefinition,
                           openClawInstallationUpdateJobActionDefinition,
                       ]),
+                ...(availableHostOperationSet.has("system-cleanup")
+                    ? [hostSystemCleanupJobActionDefinition]
+                    : []),
                 ...(availableHostOperationSet.has("system-restart")
                     ? [hostSystemRestartJobActionDefinition]
                     : []),
@@ -470,6 +476,7 @@ export function createDashboardWorkerRuntime(
             });
             coordinator = dependencies.createCoordinator({
                 actionDefinitions,
+                bootIdentity: options.bootIdentity,
                 commitCacheAttempt: (input) => cacheRepository.commitAttempt(input),
                 databaseReleaseId: options.releaseId,
                 findAction,
