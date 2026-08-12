@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import type {
     DashboardProcedureInput,
@@ -77,15 +77,10 @@ export function useOpenClawSettingsMutations() {
         pending: openClawRestartRecoveryExists(restartIdentity),
     }));
 
-    useEffect(() => {
-        const pending = openClawRestartRecoveryExists(restartIdentity);
-        setRestartRecovery((current) => {
-            if (current.identity === restartIdentity && current.pending === pending) {
-                return current;
-            }
-            return { identity: restartIdentity, pending };
-        });
-    }, [restartIdentity]);
+    const restartRecoveryPending =
+        restartRecovery.identity === restartIdentity
+            ? restartRecovery.pending
+            : openClawRestartRecoveryExists(restartIdentity);
 
     async function refreshCurrentState(successMessage?: string): Promise<boolean> {
         if (!boundary.completionIsCurrent()) return false;
@@ -255,13 +250,16 @@ export function useOpenClawSettingsMutations() {
         mutationKey: [...openClawSettingsMutationKey, "gateway-restart"],
         onError: (mutationError) => {
             if (!boundary.completionIsCurrent()) return;
-            setError(
-                mutationError instanceof GatewayRestartRecoveryError
-                    ? "Dashboard could not persist a safe Gateway restart recovery key in this browser session. The restart was not submitted."
-                    : isDashboardOperationOutcomeUnknown(mutationError)
-                      ? openClawGatewayRestartUnknownOutcomeMessage
-                      : mutationFailureMessage(mutationError)
-            );
+            let message: string;
+            if (mutationError instanceof GatewayRestartRecoveryError) {
+                message =
+                    "Dashboard could not persist a safe Gateway restart recovery key in this browser session. The restart was not submitted.";
+            } else if (isDashboardOperationOutcomeUnknown(mutationError)) {
+                message = openClawGatewayRestartUnknownOutcomeMessage;
+            } else {
+                message = mutationFailureMessage(mutationError);
+            }
+            setError(message);
         },
         onMutate: () => {
             setError(undefined);
@@ -315,8 +313,7 @@ export function useOpenClawSettingsMutations() {
         reconciliationBusy,
         reconciliationRequired,
         restart,
-        restartRecoveryPending:
-            restartRecovery.identity === restartIdentity && restartRecovery.pending,
+        restartRecoveryPending,
         skill,
         snapshotGeneration,
         startNewRestartIntent,

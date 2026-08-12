@@ -39,7 +39,10 @@ export class GatewayRestartRecoveryError extends Error {
     }
 }
 
-/** @returns Fixed browser-safe feedback for a ticket or raw download failure. */
+/**
+ * @param error Browser-side ticket or raw download failure.
+ * @returns Fixed browser-safe feedback for the failure.
+ */
 export function openClawConfigurationBackupFailureMessage(error: unknown): string {
     if (!(error instanceof ConfigurationBackupDownloadError)) {
         return dashboardBrowserFailureMessage(error);
@@ -170,7 +173,11 @@ export async function downloadOpenClawConfigurationBackup(
                     URL.revokeObjectURL(objectUrl);
                     resolve();
                 } catch (error) {
-                    reject(error);
+                    reject(
+                        error instanceof Error
+                            ? error
+                            : new Error("Configuration backup cleanup failed")
+                    );
                 }
             }, 0);
         });
@@ -191,7 +198,10 @@ function restartRecoveryStorageKey(identity: string): string {
     return `${openClawGatewayRestartRecoveryStoragePrefix}${identity}`;
 }
 
-/** @returns Whether this exact authenticated identity owns a retained restart intent. */
+/**
+ * @param identity Exact authenticated browser identity, when available.
+ * @returns Whether this identity owns a retained restart intent.
+ */
 export function openClawRestartRecoveryExists(identity: string | undefined): boolean {
     if (identity === undefined) return false;
     try {
@@ -207,6 +217,8 @@ export function openClawRestartRecoveryExists(identity: string | undefined): boo
 /**
  * Returns one existing identity-bound restart key or persists a fresh key before use.
  * Invalid/unavailable storage fails closed so a restart is never sent unrecoverably.
+ * @param identity Exact authenticated browser identity.
+ * @returns The retained or newly persisted idempotency key.
  */
 export function readOrCreateOpenClawRestartIdempotencyKey(identity: string): string {
     const storageKey = restartRecoveryStorageKey(identity);
@@ -233,7 +245,10 @@ export function readOrCreateOpenClawRestartIdempotencyKey(identity: string): str
     return created;
 }
 
-/** @returns Whether the exact identity-bound recovery key was observably removed. */
+/**
+ * @param identity Exact authenticated browser identity.
+ * @returns Whether the exact identity-bound recovery key was observably removed.
+ */
 export function clearOpenClawRestartRecovery(identity: string): boolean {
     const storageKey = restartRecoveryStorageKey(identity);
     try {

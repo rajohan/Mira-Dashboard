@@ -42,10 +42,10 @@ describe("fixed OpenClaw Gateway lifecycle", () => {
         const lifecycle = createFixedOpenClawGatewayLifecycle({
             openClawRoot: "/home/dashboard/.openclaw",
             process: {
-                run: async (_argv, _environment, signal) => {
+                run: (_argv, _environment, signal) => {
                     observedSignal = signal;
                     signal.throwIfAborted();
-                    return 0;
+                    return Promise.resolve(0);
                 },
             },
         });
@@ -69,18 +69,18 @@ describe("fixed OpenClaw Gateway lifecycle", () => {
             const lifecycle = createFixedOpenClawGatewayLifecycle({
                 openClawRoot: "/home/dashboard/.openclaw",
                 process: {
-                    run: async (_argv, _environment, signal) => {
+                    run: (_argv, _environment, signal) => {
                         deadline.abort(privateReason);
                         signal.throwIfAborted();
-                        return 0;
+                        return Promise.resolve(0);
                     },
                 },
-                timeoutMs: 1_000,
+                timeoutMs: 1000,
             });
 
             const failure = await lifecycle.restart().catch((error: unknown) => error);
 
-            expect(timeout.mock.calls).toEqual([[1_000]]);
+            expect(timeout.mock.calls).toEqual([[1000]]);
             expect(failure).toEqual(new Error("OpenClaw Gateway restart process failed"));
             expect(String(failure)).not.toContain("private timeout detail");
         } finally {

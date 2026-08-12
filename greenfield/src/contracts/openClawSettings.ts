@@ -553,7 +553,10 @@ type CreateOpenClawConfigurationBackupResultCandidate = v.InferOutput<
     typeof createOpenClawConfigurationBackupResultShapeSchema
 >;
 
-/** Binds the actor-bound download URL to the exact issued ticket identity. */
+/**
+ * Binds the actor-bound download URL to the exact issued ticket identity.
+ * @returns Whether the raw URL and ticket identity match.
+ */
 export function openClawConfigurationBackupTicketIsConsistent({
     downloadUrl,
     ticketId,

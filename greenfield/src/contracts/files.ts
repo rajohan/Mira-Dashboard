@@ -253,7 +253,10 @@ type WorkspaceFileContentTicketCandidate = v.InferOutput<
     typeof workspaceFileContentTicketShapeSchema
 >;
 
-/** Keeps source-prefix metadata internally consistent at the live boundary. */
+/**
+ * Keeps source-prefix metadata internally consistent at the live boundary.
+ * @returns Whether the ticket's truncation and source-size metadata agree.
+ */
 export function workspaceFileContentTicketIsConsistent(
     ticket: WorkspaceFileContentTicketCandidate
 ): boolean {
