@@ -2602,12 +2602,29 @@ class PersistentGatewayTransportImplementation
                         return;
                     }
                     void (async () => {
+                        let timeoutHandle: TimerHandle | undefined;
                         try {
-                            await beforeDispatch();
+                            await Promise.race([
+                                beforeDispatch(),
+                                new Promise<never>((_resolve, reject) => {
+                                    timeoutHandle = this.#resolved.scheduler.setTimeout(
+                                        () =>
+                                            reject(
+                                                new PersistentGatewayTimeoutError(method)
+                                            ),
+                                        options.timeoutMs ??
+                                            this.#resolved.requestTimeoutMs
+                                    );
+                                }),
+                            ]);
                             if (settled) return;
                             dispatch();
                         } catch (error) {
                             rejectOutcome(error);
+                        } finally {
+                            if (timeoutHandle !== undefined) {
+                                this.#resolved.scheduler.clearTimeout(timeoutHandle);
+                            }
                         }
                     })();
                 },

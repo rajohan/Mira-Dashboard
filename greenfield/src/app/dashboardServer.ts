@@ -793,13 +793,16 @@ export async function createDashboardServer(
                 database,
                 writeAdmission: databaseRuntime,
             }),
-            onAuditSettlementFailure: ({ operation, settlement, targetFingerprint }) =>
+            onAuditSettlementFailure: ({
+                cause,
+                operation,
+                settlement,
+                targetFingerprint,
+            }) =>
                 options.applicationRuntime.logger.warn({
                     component: "openclaw-settings-audit",
                     event: "openclaw_settings.audit_settlement.failed",
-                    failure: new Error(
-                        "OpenClaw settings audit settlement append failed"
-                    ),
+                    failure: cause,
                     fields: {
                         kind: "openclaw-settings-audit-settlement",
                         operation,
@@ -807,6 +810,17 @@ export async function createDashboardServer(
                         targetFingerprint,
                     },
                     outcome: "server-error",
+                }),
+            onMutationQueueWait: ({ queueDepth, waitMs }) =>
+                options.applicationRuntime.logger.info({
+                    component: "openclaw-settings",
+                    durationMs: waitMs,
+                    event: "openclaw_settings.mutation_queue.waited",
+                    fields: {
+                        kind: "openclaw-settings-mutation-queue",
+                        queueDepth,
+                    },
+                    outcome: "success",
                 }),
             provider:
                 persistentGatewayTransport === undefined

@@ -26,33 +26,16 @@ import {
     OpenClawSettingsServiceError,
 } from "./service.ts";
 
-interface OpenClawSettingsContextPorts {
+interface OpenClawSettingsMutationAccessContextPort {
     readonly openClawSettingsMutationAccess?: OpenClawSettingsMutationAccess;
-    readonly openClawSettingsService?: OpenClawSettingsService;
-}
-
-function isOpenClawSettingsService(value: unknown): value is OpenClawSettingsService {
-    if (typeof value !== "object" || value === null) return false;
-    const candidate = value as Partial<OpenClawSettingsService>;
-    return (
-        typeof candidate.getConfiguration === "function" &&
-        typeof candidate.listSkills === "function" &&
-        typeof candidate.setSkillEnabled === "function" &&
-        typeof candidate.updateConfiguration === "function"
-    );
 }
 
 function service(context: RequestContext): OpenClawSettingsService {
-    const candidate = (context as RequestContext & OpenClawSettingsContextPorts)
-        .openClawSettingsService;
-    if (!isOpenClawSettingsService(candidate)) {
-        throw new Error("Request context is missing the OpenClaw settings service");
-    }
-    return candidate;
+    return context.openClawSettingsService;
 }
 
 function mutationAccess(context: RequestContext): OpenClawSettingsMutationAccess {
-    const ports = context as RequestContext & OpenClawSettingsContextPorts;
+    const ports = context as RequestContext & OpenClawSettingsMutationAccessContextPort;
     return ports.openClawSettingsMutationAccess ?? context.authenticationLifecycle;
 }
 

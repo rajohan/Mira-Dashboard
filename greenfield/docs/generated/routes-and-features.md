@@ -5,7 +5,7 @@
 | Path | Access | Navigation | Feature owner | Summary |
 | --- | --- | --- | --- | --- |
 | `/` | Browser session | Dashboard | `overview` | Shows bounded operational summaries for implemented Dashboard domains. |
-| `/account-security` | Browser session | Account security | `security` | Manages password, MFA factors, recovery codes, and browser sessions. |
+| `/account-security` | Browser session | Hidden | `security` | Manages password, MFA factors, recovery codes, and browser sessions. |
 | `/agents` | Browser session | Agents | `agents` | Shows the reviewed agent directory, task state, and durable history. |
 | `/chat` | Browser session | Chat | `chat` | Runs the bounded persistent Gateway chat and attachment workflow. |
 | `/files` | Browser session | Files | `files` | Browses, previews, downloads, uploads, and CAS-replaces workspace files. |

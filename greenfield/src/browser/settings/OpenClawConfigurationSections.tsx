@@ -4,8 +4,9 @@ import * as v from "valibot";
 import {
     type OpenClawConfigurationSnapshot,
     type OpenClawConfigurationUpdate,
-    updateOpenClawConfigurationInputSchema,
+    openClawConfigurationUpdateSchema,
 } from "../../contracts/openClawSettings.ts";
+import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -56,20 +57,11 @@ function focusFirstInvalid(formId: string): void {
     }, 0);
 }
 
-function reviewedUpdate(
-    baseHash: string,
-    update: unknown
-): OpenClawConfigurationUpdate | undefined {
-    const parsed = v.safeParse(
-        updateOpenClawConfigurationInputSchema,
-        {
-            baseHash,
-            confirmation: "apply-reviewed-settings",
-            update,
-        },
-        { abortEarly: true }
-    );
-    return parsed.success ? parsed.output.update : undefined;
+function reviewedUpdate(update: unknown): OpenClawConfigurationUpdate | undefined {
+    const parsed = v.safeParse(openClawConfigurationUpdateSchema, update, {
+        abortEarly: true,
+    });
+    return parsed.success ? parsed.output : undefined;
 }
 
 function optionalTrimmed(value: string): string | undefined {
@@ -78,9 +70,9 @@ function optionalTrimmed(value: string): string | undefined {
 }
 
 function positiveInteger(value: string): number | undefined {
-    if (!/^[1-9]\d*$/u.test(value)) return;
+    if (!/^\d+$/u.test(value)) return;
     const parsed = Number(value);
-    return Number.isSafeInteger(parsed) ? parsed : undefined;
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 function arraysMatch(left: readonly string[], right: readonly string[]): boolean {
@@ -88,6 +80,13 @@ function arraysMatch(left: readonly string[], right: readonly string[]): boolean
         left.length === right.length &&
         left.every((value, index) => value === right[index])
     );
+}
+
+function formatConfigurationLastTouchedAt(value: string | undefined): ReactNode {
+    if (value === undefined) return "Not reported";
+    const timestampMs = Date.parse(value);
+    if (Number.isNaN(timestampMs)) return value;
+    return <time dateTime={value}>{formatDashboardDateTime(timestampMs)}</time>;
 }
 
 interface SectionSaveButtonProps {
@@ -107,14 +106,13 @@ function SectionSaveButton({ busy, disabled, label }: SectionSaveButtonProps) {
 }
 
 interface ModelsFormProps {
-    readonly baseHash: string;
     readonly busy: boolean;
     readonly disabled: boolean;
     readonly models: OpenClawConfigurationSnapshot["models"];
     readonly onSave: OpenClawConfigurationSectionsProps["onSave"];
 }
 
-function ModelsForm({ baseHash, busy, disabled, models, onSave }: ModelsFormProps) {
+function ModelsForm({ busy, disabled, models, onSave }: ModelsFormProps) {
     const formId = useId();
     const [primary, setPrimary] = useState(models.primary ?? "");
     const [fallbacksText, setFallbacksText] = useState(models.fallbacks.join("\n"));
@@ -123,7 +121,7 @@ function ModelsForm({ baseHash, busy, disabled, models, onSave }: ModelsFormProp
         .split(/\r?\n/u)
         .map((fallback) => fallback.trim())
         .filter((fallback) => fallback.length > 0);
-    const update = reviewedUpdate(baseHash, {
+    const update = reviewedUpdate({
         fallbacks,
         primary: primary.trim(),
         section: "models",
@@ -187,17 +185,23 @@ function ModelsForm({ baseHash, busy, disabled, models, onSave }: ModelsFormProp
 }
 
 interface ChannelsFormProps {
-    readonly baseHash: string;
     readonly busy: boolean;
     readonly channels: OpenClawConfigurationSnapshot["channels"];
     readonly disabled: boolean;
     readonly onSave: OpenClawConfigurationSectionsProps["onSave"];
+    readonly truncated: boolean;
 }
 
-function ChannelsForm({ baseHash, busy, channels, disabled, onSave }: ChannelsFormProps) {
+function ChannelsForm({
+    busy,
+    channels,
+    disabled,
+    onSave,
+    truncated,
+}: ChannelsFormProps) {
     const [draft, setDraft] = useState(channels);
     const [error, setError] = useState<string>();
-    const update = reviewedUpdate(baseHash, { channels: draft, section: "channels" });
+    const update = reviewedUpdate({ channels: draft, section: "channels" });
     const changed = draft.some(
         (channel, index) => channel.enabled !== channels[index]?.enabled
     );
@@ -219,6 +223,14 @@ function ChannelsForm({ baseHash, busy, channels, disabled, onSave }: ChannelsFo
         >
             <Form onSubmit={submit}>
                 <Alert className="mb-4" message={error} />
+                {truncated && (
+                    <Alert
+                        className="mb-4"
+                        focusOnError={false}
+                        message="Some OpenClaw channel identifiers are outside this bounded editor and remain unchanged."
+                        variant="info"
+                    />
+                )}
                 {draft.length === 0 ? (
                     <Text tone="muted">No configured channels were reported.</Text>
                 ) : (
@@ -254,8 +266,10 @@ function ChannelsForm({ baseHash, busy, channels, disabled, onSave }: ChannelsFo
     );
 }
 
-type ExecAsk = OpenClawConfigurationSnapshot["tools"]["execAsk"];
-type ExecSecurity = OpenClawConfigurationSnapshot["tools"]["execSecurity"];
+type ExecPolicy = OpenClawConfigurationSnapshot["tools"]["execPolicy"];
+type ExplicitExecPolicy = Extract<ExecPolicy, { readonly state: "explicit" }>;
+type ExecAsk = ExplicitExecPolicy["ask"];
+type ExecSecurity = ExplicitExecPolicy["security"];
 type VisibilitySelection =
     | "default"
     | NonNullable<OpenClawConfigurationSnapshot["tools"]["sessionsVisibility"]>;
@@ -285,8 +299,7 @@ function toolsMatch(
     return (
         left.agentToAgentEnabled === right.agentToAgentEnabled &&
         left.elevatedEnabled === right.elevatedEnabled &&
-        left.execAsk === right.execAsk &&
-        left.execSecurity === right.execSecurity &&
+        execPoliciesMatch(left.execPolicy, right.execPolicy) &&
         left.profile === right.profile &&
         left.sessionsVisibility === right.sessionsVisibility &&
         left.webFetchEnabled === right.webFetchEnabled &&
@@ -295,15 +308,44 @@ function toolsMatch(
     );
 }
 
+function execPoliciesMatch(left: ExecPolicy, right: ExecPolicy): boolean {
+    if (left.state !== right.state) return false;
+    if (left.state === "explicit" && right.state === "explicit") {
+        return left.ask === right.ask && left.security === right.security;
+    }
+    if (left.state === "legacy-mode" && right.state === "legacy-mode") {
+        return left.mode === right.mode;
+    }
+    return true;
+}
+
+function updateExplicitExecPolicy(
+    policy: ExecPolicy,
+    update: Partial<Pick<ExplicitExecPolicy, "ask" | "security">>
+): ExecPolicy {
+    return policy.state === "explicit" ? { ...policy, ...update } : policy;
+}
+
+function lockedExecPolicyMessage(
+    policy: Exclude<ExecPolicy, ExplicitExecPolicy>
+): string {
+    if (policy.state === "legacy-mode") {
+        return `Exec policy is locked because OpenClaw uses legacy mode “${policy.mode}”. Unrelated tool changes preserve that mode.`;
+    }
+    if (policy.state === "partial") {
+        return "Exec policy is locked because OpenClaw inherits part of it from runtime context. Unrelated tool changes preserve the current configuration.";
+    }
+    return "Exec policy is inherited from OpenClaw runtime context. Unrelated tool changes preserve it.";
+}
+
 interface ToolsFormProps {
-    readonly baseHash: string;
     readonly busy: boolean;
     readonly disabled: boolean;
     readonly onSave: OpenClawConfigurationSectionsProps["onSave"];
     readonly tools: OpenClawConfigurationSnapshot["tools"];
 }
 
-function ToolsForm({ baseHash, busy, disabled, onSave, tools }: ToolsFormProps) {
+function ToolsForm({ busy, disabled, onSave, tools }: ToolsFormProps) {
     const formId = useId();
     const [draft, setDraft] = useState(tools);
     const [error, setError] = useState<string>();
@@ -312,11 +354,12 @@ function ToolsForm({ baseHash, busy, disabled, onSave, tools }: ToolsFormProps) 
         profile: optionalTrimmed(draft.profile ?? ""),
         webSearchProvider: optionalTrimmed(draft.webSearchProvider ?? ""),
     };
-    const update = reviewedUpdate(baseHash, {
+    const update = reviewedUpdate({
         section: "tools",
         settings: normalized,
     });
     const changed = !toolsMatch(normalized, tools);
+    const execPolicy = draft.execPolicy;
 
     async function submit(): Promise<void> {
         if (update === undefined) {
@@ -378,28 +421,51 @@ function ToolsForm({ baseHash, busy, disabled, onSave, tools }: ToolsFormProps) 
                     />
                 </div>
                 <div className="grid gap-4 lg:grid-cols-2">
-                    <FormField disabled={disabled} label="Exec approval policy">
-                        <Select
-                            className="mt-2"
-                            disabled={disabled}
-                            onChange={(execAsk) =>
-                                setDraft((current) => ({ ...current, execAsk }))
-                            }
-                            options={execAskOptions}
-                            value={draft.execAsk}
+                    {execPolicy.state === "explicit" ? (
+                        <>
+                            <FormField disabled={disabled} label="Exec approval policy">
+                                <Select
+                                    className="mt-2"
+                                    disabled={disabled}
+                                    onChange={(ask) =>
+                                        setDraft((current) => ({
+                                            ...current,
+                                            execPolicy: updateExplicitExecPolicy(
+                                                current.execPolicy,
+                                                { ask }
+                                            ),
+                                        }))
+                                    }
+                                    options={execAskOptions}
+                                    value={execPolicy.ask}
+                                />
+                            </FormField>
+                            <FormField disabled={disabled} label="Exec security mode">
+                                <Select
+                                    className="mt-2"
+                                    disabled={disabled}
+                                    onChange={(security) =>
+                                        setDraft((current) => ({
+                                            ...current,
+                                            execPolicy: updateExplicitExecPolicy(
+                                                current.execPolicy,
+                                                { security }
+                                            ),
+                                        }))
+                                    }
+                                    options={execSecurityOptions}
+                                    value={execPolicy.security}
+                                />
+                            </FormField>
+                        </>
+                    ) : (
+                        <Alert
+                            className="lg:col-span-2"
+                            focusOnError={false}
+                            message={lockedExecPolicyMessage(execPolicy)}
+                            variant="info"
                         />
-                    </FormField>
-                    <FormField disabled={disabled} label="Exec security mode">
-                        <Select
-                            className="mt-2"
-                            disabled={disabled}
-                            onChange={(execSecurity) =>
-                                setDraft((current) => ({ ...current, execSecurity }))
-                            }
-                            options={execSecurityOptions}
-                            value={draft.execSecurity}
-                        />
-                    </FormField>
+                    )}
                     <FormField
                         description="Leave blank to keep OpenClaw's default profile."
                         disabled={disabled}
@@ -463,27 +529,50 @@ function ToolsForm({ baseHash, busy, disabled, onSave, tools }: ToolsFormProps) 
 }
 
 interface SessionResetFormProps {
-    readonly baseHash: string;
     readonly busy: boolean;
     readonly disabled: boolean;
     readonly onSave: OpenClawConfigurationSectionsProps["onSave"];
     readonly sessionReset: OpenClawConfigurationSnapshot["sessionReset"];
 }
 
+function sessionResetReadOnlyMessage(
+    sessionReset: OpenClawConfigurationSnapshot["sessionReset"]
+): string {
+    switch (sessionReset.state) {
+        case "implicit-daily": {
+            return "Session reset is locked because the current OpenClaw object implicitly enables a daily reset.";
+        }
+        case "locked-mode": {
+            return `Session reset is locked in OpenClaw mode “${sessionReset.mode}”.`;
+        }
+        case "partial-idle": {
+            return "Session reset is locked because the explicit idle policy has no editable bounded timeout.";
+        }
+        case "explicit-idle": {
+            return "";
+        }
+        case "inherited-none": {
+            return "Session reset uses OpenClaw's inherited no-reset policy.";
+        }
+    }
+}
+
 function SessionResetForm({
-    baseHash,
     busy,
     disabled,
     onSave,
     sessionReset,
 }: SessionResetFormProps) {
     const formId = useId();
-    const initial = sessionReset.idleMinutes?.toString() ?? "";
+    const editable = sessionReset.state === "explicit-idle";
+    const initialMinutes = editable ? sessionReset.idleMinutes : undefined;
+    const initial = initialMinutes?.toString() ?? "";
     const [idleMinutes, setIdleMinutes] = useState(initial);
     const [error, setError] = useState<string>();
     const parsedMinutes = positiveInteger(idleMinutes);
-    const update = reviewedUpdate(baseHash, {
+    const update = reviewedUpdate({
         idleMinutes: parsedMinutes,
+        mode: "idle",
         section: "session-reset",
     });
 
@@ -503,50 +592,53 @@ function SessionResetForm({
             id="openclaw-session-reset-settings"
             title="Session reset"
         >
-            <Form id={formId} onSubmit={submit}>
-                <FormField
-                    disabled={disabled}
-                    error={error}
-                    label="Idle timeout (minutes)"
-                >
-                    <Input
-                        className="mt-2"
+            {editable ? (
+                <Form id={formId} onSubmit={submit}>
+                    <FormField
                         disabled={disabled}
-                        inputMode="numeric"
-                        max="10080"
-                        min="1"
-                        onChange={(event) => setIdleMinutes(event.currentTarget.value)}
-                        required
-                        step="1"
-                        type="number"
-                        value={idleMinutes}
+                        error={error}
+                        label="Idle timeout (minutes)"
+                    >
+                        <Input
+                            className="mt-2"
+                            disabled={disabled}
+                            inputMode="numeric"
+                            max="10080"
+                            min="1"
+                            onChange={(event) =>
+                                setIdleMinutes(event.currentTarget.value)
+                            }
+                            required
+                            step="1"
+                            type="number"
+                            value={idleMinutes}
+                        />
+                    </FormField>
+                    <SectionSaveButton
+                        busy={busy}
+                        disabled={disabled || parsedMinutes === initialMinutes}
+                        label="Save session reset"
                     />
-                </FormField>
-                <SectionSaveButton
-                    busy={busy}
-                    disabled={disabled || idleMinutes === initial}
-                    label="Save session reset"
+                </Form>
+            ) : (
+                <Alert
+                    focusOnError={false}
+                    message={sessionResetReadOnlyMessage(sessionReset)}
+                    variant="info"
                 />
-            </Form>
+            )}
         </SettingsSection>
     );
 }
 
 interface HeartbeatFormProps {
-    readonly baseHash: string;
     readonly busy: boolean;
     readonly disabled: boolean;
     readonly heartbeat: OpenClawConfigurationSnapshot["heartbeat"];
     readonly onSave: OpenClawConfigurationSectionsProps["onSave"];
 }
 
-function HeartbeatForm({
-    baseHash,
-    busy,
-    disabled,
-    heartbeat,
-    onSave,
-}: HeartbeatFormProps) {
+function HeartbeatForm({ busy, disabled, heartbeat, onSave }: HeartbeatFormProps) {
     const formId = useId();
     const initialInterval = heartbeat.everySeconds?.toString() ?? "";
     const initialTarget = heartbeat.target ?? "";
@@ -555,11 +647,14 @@ function HeartbeatForm({
     const [error, setError] = useState<string>();
     const parsedSeconds = positiveInteger(everySeconds);
     const normalizedTarget = optionalTrimmed(target) ?? null;
-    const update = reviewedUpdate(baseHash, {
+    const update = reviewedUpdate({
         everySeconds: parsedSeconds,
         section: "heartbeat",
         target: normalizedTarget,
     });
+    const changed =
+        parsedSeconds !== heartbeat.everySeconds ||
+        normalizedTarget !== (heartbeat.target ?? null);
 
     async function submit(): Promise<void> {
         if (update === undefined) {
@@ -614,10 +709,7 @@ function HeartbeatForm({
                 <div className="sm:col-span-2">
                     <SectionSaveButton
                         busy={busy}
-                        disabled={
-                            disabled ||
-                            (everySeconds === initialInterval && target === initialTarget)
-                        }
+                        disabled={disabled || !changed}
                         label="Save heartbeat settings"
                     />
                 </div>
@@ -699,7 +791,7 @@ function ConfigurationSummary({
                 <div>
                     <dt className="text-primary-400 text-xs">Last touched</dt>
                     <dd className="text-primary-100 mt-1 text-sm wrap-anywhere">
-                        {configuration.lastTouchedAt ?? "Not reported"}
+                        {formatConfigurationLastTouchedAt(configuration.lastTouchedAt)}
                     </dd>
                 </div>
             </dl>
@@ -714,49 +806,47 @@ export function OpenClawConfigurationSections({
     disabled,
     onSave,
 }: OpenClawConfigurationSectionsProps) {
-    const controlsDisabled = disabled || !configuration.valid;
+    if (!configuration.valid) {
+        return (
+            <Alert
+                focusOnError={false}
+                message="OpenClaw reports invalid configuration. Reviewed values stay hidden because the redacted snapshot cannot be treated as effective state. Repair the configuration in OpenClaw, then refresh this page."
+            />
+        );
+    }
+
     return (
         <div className="grid gap-6">
             <ConfigurationSummary configuration={configuration} />
-            {!configuration.valid && (
-                <Alert
-                    focusOnError={false}
-                    message="OpenClaw reports invalid configuration. Reviewed settings controls stay disabled until the configuration is repaired outside this narrow editor."
-                />
-            )}
             <ModelsForm
-                baseHash={configuration.hash}
                 busy={busy}
-                disabled={controlsDisabled}
+                disabled={disabled}
                 models={configuration.models}
                 onSave={onSave}
             />
             <ChannelsForm
-                baseHash={configuration.hash}
                 busy={busy}
                 channels={configuration.channels}
-                disabled={controlsDisabled}
+                disabled={disabled}
                 onSave={onSave}
+                truncated={configuration.channelsTruncated}
             />
             <ToolsForm
-                baseHash={configuration.hash}
                 busy={busy}
-                disabled={controlsDisabled}
+                disabled={disabled}
                 onSave={onSave}
                 tools={configuration.tools}
             />
             <SecuritySummary security={configuration.security} />
             <SessionResetForm
-                baseHash={configuration.hash}
                 busy={busy}
-                disabled={controlsDisabled}
+                disabled={disabled}
                 onSave={onSave}
                 sessionReset={configuration.sessionReset}
             />
             <HeartbeatForm
-                baseHash={configuration.hash}
                 busy={busy}
-                disabled={controlsDisabled}
+                disabled={disabled}
                 heartbeat={configuration.heartbeat}
                 onSave={onSave}
             />

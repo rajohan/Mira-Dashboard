@@ -37,6 +37,7 @@ import {
     persistentGatewayChatReadMutationMethods,
     persistentGatewayChatWriteMethods,
     persistentGatewayOpenClawSettingsReadMethods,
+    persistentGatewayOpenClawSettingsPatchMaximumBytes,
     persistentGatewayOpenClawSettingsWriteMethods,
     persistentGatewaySessionScopedEventsCapability,
     persistentGatewayTaskNotificationMethod,
@@ -198,7 +199,10 @@ describe("persistent Gateway protocol-v4 boundary", () => {
             "config.get",
             "skills.status",
         ]);
-        expect(persistentGatewayOpenClawSettingsWriteMethods).toEqual(["config.patch"]);
+        expect(persistentGatewayOpenClawSettingsWriteMethods).toEqual([
+            "config.patch",
+            "skills.update",
+        ]);
         expect(isPersistentGatewayReadWriteMethod("sessions.list")).toBe(true);
         expect(isPersistentGatewayReadWriteMethod("chat.send")).toBe(false);
         expect(isPersistentGatewayReadWriteMethod("config.patch")).toBe(false);
@@ -207,7 +211,7 @@ describe("persistent Gateway protocol-v4 boundary", () => {
         expect(isPersistentGatewayOpenClawSettingsReadMethod("config.get")).toBe(true);
         expect(isPersistentGatewayOpenClawSettingsWriteMethod("config.patch")).toBe(true);
         expect(isPersistentGatewayOpenClawSettingsWriteMethod("skills.update")).toBe(
-            false
+            true
         );
     });
 
@@ -232,6 +236,29 @@ describe("persistent Gateway protocol-v4 boundary", () => {
                 agentId: "main",
             })
         ).toThrow(TypeError);
+        const skillUpdate = { enabled: false, skillKey: "imagegen" };
+        expect(() =>
+            assertPersistentGatewayOpenClawSettingsWriteParameters(
+                "skills.update",
+                skillUpdate
+            )
+        ).not.toThrow();
+        for (const invalidSkillUpdate of [
+            { ...skillUpdate, unexpected: true },
+            { skillKey: "imagegen" },
+            { enabled: false },
+            { enabled: false, skillKey: "constructor" },
+            { enabled: false, skillKey: "prototype" },
+            { enabled: false, skillKey: "__proto__" },
+            { enabled: false, skillKey: "a".repeat(129) },
+        ]) {
+            expect(() =>
+                assertPersistentGatewayOpenClawSettingsWriteParameters(
+                    "skills.update",
+                    invalidSkillUpdate
+                )
+            ).toThrow(TypeError);
+        }
         const baseHash = "a".repeat(64);
         const modelPatch = {
             baseHash,
@@ -266,7 +293,19 @@ describe("persistent Gateway protocol-v4 boundary", () => {
                 "config.patch",
                 skillPatch
             )
-        ).not.toThrow();
+        ).toThrow(TypeError);
+        expect(() =>
+            assertPersistentGatewayOpenClawSettingsWriteParameters(
+                "config.patch",
+                skillUpdate
+            )
+        ).toThrow(TypeError);
+        expect(() =>
+            assertPersistentGatewayOpenClawSettingsWriteParameters(
+                "skills.update",
+                skillPatch
+            )
+        ).toThrow(TypeError);
         const agentToolPatch = {
             baseHash,
             note: "Updated from Mira Dashboard settings",
@@ -369,7 +408,6 @@ describe("persistent Gateway protocol-v4 boundary", () => {
                         elevated: { enabled: false },
                         exec: {
                             ask: "on-miss",
-                            mode: null,
                             security: "allowlist",
                         },
                         profile: "coding",
@@ -399,16 +437,188 @@ describe("persistent Gateway protocol-v4 boundary", () => {
             assertPersistentGatewayOpenClawSettingsWriteParameters("config.patch", {
                 baseHash,
                 note: "Updated from Mira Dashboard settings",
-                raw: "x".repeat(64 * 1024 + 1),
+                raw: "x".repeat(persistentGatewayOpenClawSettingsPatchMaximumBytes + 1),
             })
         ).toThrow(TypeError);
         expect(() =>
             assertPersistentGatewayOpenClawSettingsWriteParameters("config.patch", {
                 baseHash,
                 note: "Updated from Mira Dashboard settings",
-                raw: "\u00E5".repeat(32 * 1024 + 1),
+                raw: "\u00E5".repeat(
+                    persistentGatewayOpenClawSettingsPatchMaximumBytes / 2 + 1
+                ),
             })
         ).toThrow(TypeError);
+    });
+
+    test("admits every exact Settings leaf delta and rejects adjacent shapes", () => {
+        const baseHash = "a".repeat(64);
+        const parameters = (
+            raw: unknown,
+            replacePaths?: readonly string[]
+        ): Readonly<Record<string, unknown>> => ({
+            baseHash,
+            note: "Updated from Mira Dashboard settings",
+            raw: JSON.stringify(raw),
+            ...(replacePaths === undefined ? {} : { replacePaths }),
+        });
+        const fallbackPath = ["agents.defaults.model.fallbacks"] as const;
+        const accepted = [
+            parameters({
+                agents: { defaults: { model: { primary: "openai/gpt-5.6-sol" } } },
+            }),
+            parameters(
+                { agents: { defaults: { model: { fallbacks: [] } } } },
+                fallbackPath
+            ),
+            parameters(
+                {
+                    agents: {
+                        defaults: {
+                            model: {
+                                fallbacks: ["openai/gpt-5.6-terra"],
+                                primary: "openai/gpt-5.6-sol",
+                            },
+                        },
+                    },
+                },
+                fallbackPath
+            ),
+            parameters({
+                agents: { defaults: { heartbeat: { every: "3600s" } } },
+            }),
+            parameters({
+                agents: { defaults: { heartbeat: { target: "telegram" } } },
+            }),
+            parameters({ agents: { defaults: { heartbeat: { target: null } } } }),
+            parameters({
+                agents: {
+                    defaults: {
+                        heartbeat: { every: "3600s", target: "telegram" },
+                    },
+                },
+            }),
+            parameters({ session: { reset: { idleMinutes: 60, mode: "idle" } } }),
+            parameters({ channels: { discord: { enabled: false } } }),
+            parameters({ tools: { agentToAgent: { enabled: false } } }),
+            parameters({ tools: { elevated: { enabled: true } } }),
+            parameters({ tools: { exec: { ask: "always", security: "deny" } } }),
+            parameters({ tools: { profile: null } }),
+            parameters({ tools: { sessions: { visibility: null } } }),
+            parameters({ tools: { web: { fetch: { enabled: true } } } }),
+            parameters({ tools: { web: { search: { enabled: false } } } }),
+            parameters({ tools: { web: { search: { provider: null } } } }),
+            parameters({
+                tools: {
+                    agentToAgent: { enabled: false },
+                    elevated: { enabled: true },
+                    exec: { ask: "off", security: "full" },
+                    profile: "coding",
+                    sessions: { visibility: "tree" },
+                    web: {
+                        fetch: { enabled: true },
+                        search: { enabled: false, provider: "brave" },
+                    },
+                },
+            }),
+        ];
+        for (const candidate of accepted) {
+            expect(() =>
+                assertPersistentGatewayOpenClawSettingsWriteParameters(
+                    "config.patch",
+                    candidate
+                )
+            ).not.toThrow();
+        }
+
+        const invalid = [
+            parameters({ agents: { defaults: { model: {} } } }),
+            parameters(
+                {
+                    agents: {
+                        defaults: {
+                            model: {
+                                fallbacks: [
+                                    "openai/gpt-5.6-terra",
+                                    "openai/gpt-5.6-terra",
+                                ],
+                            },
+                        },
+                    },
+                },
+                fallbackPath
+            ),
+            parameters({
+                agents: {
+                    defaults: {
+                        model: {
+                            extra: true,
+                            primary: "openai/gpt-5.6-sol",
+                        },
+                    },
+                },
+            }),
+            parameters({ agents: { defaults: { model: { fallbacks: [] } } } }),
+            parameters(
+                {
+                    agents: {
+                        defaults: { model: { primary: "openai/gpt-5.6-sol" } },
+                    },
+                },
+                fallbackPath
+            ),
+            parameters({ agents: { defaults: { heartbeat: {} } } }),
+            parameters({
+                agents: { defaults: { heartbeat: { every: "9s" } } },
+            }),
+            parameters({
+                agents: { defaults: { heartbeat: { target: "x".repeat(129) } } },
+            }),
+            parameters({
+                agents: { defaults: { heartbeat: { target: "\u200B" } } },
+            }),
+            parameters({
+                agents: {
+                    defaults: { heartbeat: { every: "3600s", unexpected: true } },
+                },
+            }),
+            parameters(
+                { agents: { defaults: { heartbeat: { every: "3600s" } } } },
+                fallbackPath
+            ),
+            parameters({ session: { reset: { idleMinutes: 60 } } }),
+            parameters({ session: { reset: { idleMinutes: 60, mode: "daily" } } }),
+            parameters({
+                session: { reset: { idleMinutes: 60, mode: "idle", extra: true } },
+            }),
+            parameters({ channels: {} }),
+            parameters({ channels: { defaults: { enabled: true } } }),
+            parameters({ channels: { constructor: { enabled: true } } }),
+            parameters({ channels: { prototype: { enabled: true } } }),
+            parameters({ channels: { discord: { enabled: true, token: "secret" } } }),
+            parameters({ tools: {} }),
+            parameters({ tools: { web: {} } }),
+            parameters({ tools: { web: { search: {} } } }),
+            parameters({ tools: { exec: { ask: "off" } } }),
+            parameters({
+                tools: { exec: { ask: "off", mode: null, security: "full" } },
+            }),
+            parameters({ tools: { profile: "x".repeat(65) } }),
+            parameters({ tools: { profile: " " } }),
+            parameters({
+                tools: { web: { search: { provider: "x".repeat(65) } } },
+            }),
+            parameters({ skills: { entries: { imagegen: { enabled: false } } } }),
+            parameters({ gateway: { auth: { token: "secret" } } }),
+        ];
+        for (const candidate of invalid) {
+            expect(() =>
+                assertPersistentGatewayOpenClawSettingsWriteParameters(
+                    "config.patch",
+                    candidate
+                )
+            ).toThrow(TypeError);
+        }
     });
 
     test("strictly validates every audited chat request shape", () => {

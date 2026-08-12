@@ -29,9 +29,6 @@ export function normalizeSettingsSearch(search: unknown): SettingsRouteSearch {
     return parsed.success ? parsed.output : {};
 }
 
-/** Backwards-compatible descriptive alias for local callers. */
-export const parseSettingsRouteSearch = normalizeSettingsSearch;
-
 /** @returns The explicit view or the stable Dashboard default. */
 export function settingsRouteView(search: SettingsRouteSearch): SettingsRouteView {
     return search.view === "openclaw" ? "openclaw" : "dashboard";

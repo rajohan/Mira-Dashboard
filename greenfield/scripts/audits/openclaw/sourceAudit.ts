@@ -38,6 +38,15 @@ const distributionArtifactSpecs: readonly DistributionArtifactSpec[] = [
         role: "agent-config-schema",
     },
     {
+        fileNamePattern: /^session-visibility-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "function createAgentToAgentPolicy(cfg)",
+            "function a2aDisabledMessage(action)",
+            "function createSessionVisibilityCheckerImpl(params)",
+        ],
+        role: "agent-to-agent-runtime",
+    },
+    {
         fileNamePattern: /^zod-schema\.agent-runtime-[A-Za-z0-9_-]+\.js$/u,
         markers: [
             "const ToolPolicySchema = object({",
@@ -60,6 +69,24 @@ const distributionArtifactSpecs: readonly DistributionArtifactSpec[] = [
         fileNamePattern: /^chat-abort-[A-Za-z0-9_-]+\.js$/u,
         markers: ["const plan = run?.planSnapshot", "const withoutText"],
         role: "chat-run-projection",
+    },
+    {
+        fileNamePattern: /^zod-schema\.channels-config-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "const ChannelModelByChannelSchema",
+            "function addLegacyChannelAcpBindingIssues",
+            "const ChannelsSchema = object({",
+        ],
+        role: "channel-config-schema",
+    },
+    {
+        fileNamePattern: /^channel-selection-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "function isConfiguredChannel(cfg, channelId)",
+            "function listConfiguredOfficialExternalRepairHints(cfg)",
+            "function resolveAvailableKnownChannel(params)",
+        ],
+        role: "channel-enabled-default",
     },
     {
         fileNamePattern: /^chat-[A-Za-z0-9_-]+\.js$/u,
@@ -87,6 +114,24 @@ const distributionArtifactSpecs: readonly DistributionArtifactSpec[] = [
         role: "models-handlers",
     },
     {
+        fileNamePattern: /^model-input-normalization-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "function normalizeAgentScopes(agents)",
+            "function normalizeProviderCatalogs(models, modelIdNormalizationPolicies)",
+            "function normalizeSubmittedConfigModelRefs(cfg, modelIdNormalizationPolicies)",
+        ],
+        role: "model-input-normalization",
+    },
+    {
+        fileNamePattern: /^model-input-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "const GOOGLE_PROVIDER_IDS",
+            "function normalizeAgentModelRefForConfig(model)",
+            "function normalizeAgentModelMapForConfig(models)",
+        ],
+        role: "model-ref-normalization",
+    },
+    {
         fileNamePattern: /^server-chat-[A-Za-z0-9_-]+\.js$/u,
         markers: ["flushBufferedChatDeltaIfNeeded", "run.deltaSentAt"],
         role: "chat-streaming",
@@ -110,6 +155,15 @@ const distributionArtifactSpecs: readonly DistributionArtifactSpec[] = [
         role: "config-get-response",
     },
     {
+        fileNamePattern: /^io-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "function createConfigFileSnapshot(params)",
+            "async function readConfigFileSnapshotInternal(context, options = {})",
+            "async function writeConfigFileFromContext(context, cfg, options, readSnapshot)",
+        ],
+        role: "config-io",
+    },
+    {
         fileNamePattern: /^config-[A-Za-z0-9_-]+\.js$/u,
         markers: [
             'const HASHLESS_PATCH_LWW_PATH_PREFIXES = ["ui.prefs"]',
@@ -127,6 +181,15 @@ const distributionArtifactSpecs: readonly DistributionArtifactSpec[] = [
             "function isMergePatchObjectKeyAllowed(key, parentPath)",
         ],
         role: "config-merge-patch",
+    },
+    {
+        fileNamePattern: /^mutate-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "async function tryWriteSingleTopLevelIncludeMutation(params)",
+            "async function replaceConfigFileUnlocked(params)",
+            "async function mutateConfigFileWithRetry(params)",
+        ],
+        role: "config-mutation",
     },
     {
         fileNamePattern: /^redact-snapshot-[A-Za-z0-9_-]+\.js$/u,
@@ -190,6 +253,33 @@ const distributionArtifactSpecs: readonly DistributionArtifactSpec[] = [
             '"cron.runs"',
         ],
         role: "cron-handlers",
+    },
+    {
+        fileNamePattern: /^get-reply-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "function resolveElevatedPermissions(params)",
+            "function resolveElevatedAllowList(allowFrom, provider, fallbackAllowFrom)",
+            "function isApprovedElevatedSender(params)",
+        ],
+        role: "elevated-tool-runtime",
+    },
+    {
+        fileNamePattern: /^exec-defaults-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "function resolveExecConfigState(params)",
+            "function resolveNodeExecEligibility(params)",
+            "function resolveExecDefaults(params)",
+        ],
+        role: "exec-defaults-runtime",
+    },
+    {
+        fileNamePattern: /^exec-approvals-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "function resolveExecModeFromPolicy(params)",
+            "function resolveExecPolicyForMode(mode)",
+            "function resolveExecModePolicy(params)",
+        ],
+        role: "exec-mode-policy",
     },
     {
         fileNamePattern: /^jobs-[A-Za-z0-9_-]+\.js$/u,
@@ -290,6 +380,16 @@ const distributionArtifactSpecs: readonly DistributionArtifactSpec[] = [
         role: "gateway-websocket",
     },
     {
+        fileNamePattern: /^restart-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "function scheduleGatewaySigusr1Restart(opts)",
+            'signal: "SIGUSR1"',
+            "cooldownMsApplied,",
+            "emitHooksQueued",
+        ],
+        role: "gateway-restart-scheduler",
+    },
+    {
         fileNamePattern: /^core-descriptors-[A-Za-z0-9_-]+\.js$/u,
         markers: [
             'name: "tasks.list"',
@@ -328,6 +428,15 @@ const distributionArtifactSpecs: readonly DistributionArtifactSpec[] = [
             "const SessionsCompanionAskParamsSchema",
         ],
         role: "protocol-schemas",
+    },
+    {
+        fileNamePattern: /^provider-model-id-normalize-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "function normalizeGooglePreviewModelId(id)",
+            "function normalizeTogetherModelId(id)",
+            "function normalizeAntigravityPreviewModelId(id)",
+        ],
+        role: "provider-model-id-normalization",
     },
     {
         fileNamePattern: /^version-[A-Za-z0-9_-]+\.js$/u,
@@ -369,6 +478,15 @@ const distributionArtifactSpecs: readonly DistributionArtifactSpec[] = [
             "dropIfSlow: true",
         ],
         role: "session-change-event",
+    },
+    {
+        fileNamePattern: /^reset-policy-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            'const DEFAULT_RESET_MODE = "none"',
+            "const DEFAULT_RESET_AT_HOUR = 4",
+            "function resolveSessionResetPolicy(params)",
+        ],
+        role: "session-reset-policy",
     },
     {
         fileNamePattern: /^session-event-payload-[A-Za-z0-9_-]+\.js$/u,
@@ -455,6 +573,43 @@ const distributionArtifactSpecs: readonly DistributionArtifactSpec[] = [
         role: "skills-handlers",
     },
     {
+        fileNamePattern: /^frontmatter-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "function resolveOpenClawMetadata(frontmatter)",
+            "function resolveSkillInvocationPolicy(frontmatter)",
+            "function resolveSkillKey(skill, entry)",
+        ],
+        role: "skill-key-resolution",
+    },
+    {
+        fileNamePattern: /^workspace-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "function loadSkillEntries(workspaceDir, opts)",
+            'source: "openclaw-bundled"',
+            'source: "openclaw-node"',
+            'source: "openclaw-workspace"',
+        ],
+        role: "skills-discovery",
+    },
+    {
+        fileNamePattern: /^store-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "function buildSkillIndexEntries(entries, opts)",
+            "function createSkillIndexEntry(entry, opts, agentSkillSet)",
+            "const source = resolveSkillSource(entry.skill)",
+        ],
+        role: "skills-index",
+    },
+    {
+        fileNamePattern: /^source-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "function resolveSkillSource(skill)",
+            "function resolveSkillTelemetrySourceValue(value)",
+            "function resolveSkillTelemetrySource(skill)",
+        ],
+        role: "skills-source-resolution",
+    },
+    {
         fileNamePattern: /^status-[A-Za-z0-9_-]+\.js$/u,
         markers: [
             "function buildSkillStatus(indexed, context)",
@@ -499,11 +654,30 @@ const distributionArtifactSpecs: readonly DistributionArtifactSpec[] = [
         fileNamePattern: /^tool-policy-[A-Za-z0-9_-]+\.js$/u,
         markers: [
             "const TOOL_NAME_ALIASES = {",
+            'bash: "exec"',
             'cron: "automations"',
             "function normalizeToolName(name)",
             "function normalizeToolList(list)",
         ],
         role: "tool-policy-normalization",
+    },
+    {
+        fileNamePattern: /^runtime-(?!api-)[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "function resolveWebFetchEnabled(params)",
+            "function resolveWebFetchProviderId(params)",
+            "function resolveWebFetchDefinition(options)",
+        ],
+        role: "web-fetch-runtime",
+    },
+    {
+        fileNamePattern: /^runtime-(?!api-)[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "function resolveWebSearchEnabled(params)",
+            "function resolveWebSearchProviderId(params)",
+            "function resolveWebSearchCandidates(options)",
+        ],
+        role: "web-search-runtime",
     },
 ];
 
@@ -687,6 +861,20 @@ function assertRequiredMarkers(
 ): void {
     for (const marker of markers) {
         if (!source.includes(marker)) {
+            throw new Error(
+                `OpenClaw ${surface} changed outside the reviewed source-backed shape`
+            );
+        }
+    }
+}
+
+function assertForbiddenMarkers(
+    source: string,
+    surface: string,
+    markers: readonly string[]
+): void {
+    for (const marker of markers) {
+        if (source.includes(marker)) {
             throw new Error(
                 `OpenClaw ${surface} changed outside the reviewed source-backed shape`
             );
@@ -3667,6 +3855,52 @@ const reviewedAgentAccessCoreToolIds = [
     "write",
 ] as const;
 
+const reviewedSkillSourceTaxonomy = [
+    "agents-skills-personal",
+    "agents-skills-project",
+    "openclaw-bundled",
+    "openclaw-extra",
+    "openclaw-managed",
+    "openclaw-node",
+    "openclaw-workspace",
+    "unknown",
+] as const;
+
+const reviewedGoogleModelAliases = [
+    "gemini-3-pro=>gemini-3.1-pro-preview",
+    "gemini-3-pro-preview=>gemini-3.1-pro-preview",
+    "gemini-3-flash=>gemini-3-flash-preview",
+    "gemini-3.1-pro=>gemini-3.1-pro-preview",
+    "gemini-3.1-flash-lite-preview=>gemini-3.1-flash-lite",
+    "gemini-3.1-flash=>gemini-3-flash-preview",
+    "gemini-3.1-flash-preview=>gemini-3-flash-preview",
+    "gemma-4-26b=>gemma-4-26b-a4b-it",
+] as const;
+
+const reviewedTogetherModelAliases = [
+    "moonshotai/Kimi-K2.5=>moonshotai/Kimi-K2.6",
+] as const;
+
+const reviewedAgentModelScopeCollections = ["defaults", "entries", "list"] as const;
+const reviewedAgentSelectionFields = [
+    "imageModel",
+    "model",
+    "pdfModel",
+    "utilityModel",
+    "voiceModel",
+] as const;
+const reviewedMediaSelectionFields = ["image", "music", "video"] as const;
+const reviewedModelSelectionShapes = ["fallbacks[]", "primary", "string"] as const;
+const reviewedNestedAgentModelPaths = [
+    "compaction.memoryFlush.model",
+    "compaction.model",
+    "heartbeat.model",
+    "models.<key>",
+    "subagents.fallbacks[]",
+    "subagents.model",
+    "subagents.primary",
+] as const;
+
 function assertSourceMarkerExactlyOnce(
     source: string,
     marker: string,
@@ -3775,6 +4009,7 @@ function assertAgentAccessSemantics(
     const toolPolicy = artifactByRole(artifacts, "tool-policy-normalization").contents;
     assertRequiredMarkers(toolPolicy, "tool policy alias normalization", [
         "const TOOL_NAME_ALIASES = {",
+        'bash: "exec"',
         'cron: "automations"',
         "function normalizeToolName(name)",
         "return TOOL_NAME_ALIASES[normalized] ?? normalized",
@@ -3801,6 +4036,8 @@ function assertAgentAccessSemantics(
     );
     assertRequiredMarkers(applyMergePatch, "config merge-patch array replacement", [
         "const path = formatMergePatchPath(options.path, key)",
+        "if (value === null) {",
+        "delete result[key]",
         "if (options.replaceArrayPaths?.has(path)) {",
         "result[key] = value",
         "const mergedArray = mergeObjectArraysById(result[key], value, options, path)",
@@ -3833,6 +4070,7 @@ function assertAgentAccessSemantics(
             storageShape: "record-by-id",
         },
         toolsPolicy: {
+            aliases: ["bash=>exec", "cron=>automations"],
             nonEmptyAllowAndAlsoAllowConflictRejected: true,
             optionalStringArrayFields: ["allow", "alsoAllow", "deny"],
         },
@@ -3843,6 +4081,31 @@ function assertSettingsSemantics(
     artifacts: readonly LoadedSourceArtifact[]
 ): SourceAuditResult["settings"] {
     const agentAccess = assertAgentAccessSemantics(artifacts);
+    const agentToolsSchema = artifactByRole(artifacts, "agent-tools-schema").contents;
+    const heartbeatSchema = boundedSourceRegion(
+        agentToolsSchema,
+        "const HeartbeatSchema = object({",
+        "const SandboxDockerSchema = object({",
+        8 * 1024,
+        "agent heartbeat schema"
+    );
+    assertRequiredMarkers(heartbeatSchema, "agent heartbeat schema", [
+        "target: string().optional()",
+    ]);
+    assertRequiredMarkers(agentToolsSchema, "agent heartbeat attachment", [
+        "heartbeat: HeartbeatSchema",
+    ]);
+    const agentConfigSchema = artifactByRole(artifacts, "agent-config-schema").contents;
+    const agentDefaultsSchema = boundedSourceRegion(
+        agentConfigSchema,
+        "const AgentDefaultsSchema = object({",
+        "const AgentEntryConfigSchema = preprocess",
+        32 * 1024,
+        "agent heartbeat defaults schema"
+    );
+    assertRequiredMarkers(agentDefaultsSchema, "agent heartbeat defaults schema", [
+        "heartbeat: HeartbeatSchema.unwrap().safeExtend({ agentId: string().trim().min(1).optional() }).optional()",
+    ]);
     const descriptors = artifactByRole(artifacts, "method-descriptors").contents;
     assertMethodPermission(descriptors, "config.get", "operator.read", false);
     assertMethodPermission(descriptors, "config.patch", "operator.admin", true);
@@ -3931,6 +4194,19 @@ function assertSettingsSemantics(
         "appliedConfigHash: getRuntimeConfigAppliedHash()",
         "createConfigGetResponse(await readConfigFileSnapshot(), params.loadUiHints())",
     ]);
+    assertRequiredMarkers(getResponse, "config.get response cache", [
+        'if (!getHotReloadStatus || getHotReloadStatus() !== "active") return createConfigGetResponse(await readConfigFileSnapshot(), params.loadUiHints())',
+        "const appliedConfigHash = getRuntimeConfigAppliedHash()",
+        "const pluginRegistryVersion = getActivePluginRegistryVersion()",
+        "configGetResponseCache?.getHotReloadStatus === getHotReloadStatus",
+        "configGetResponseCache.appliedConfigHash === appliedConfigHash",
+        "configGetResponseCache.pluginRegistryVersion === pluginRegistryVersion",
+        "return await configGetResponseCache.promise",
+        "const promise = (async () => createConfigGetResponse(await readConfigFileSnapshot(), params.loadUiHints()))()",
+        "if (configGetResponseCache?.promise === promise) configGetResponseCache = void 0",
+        "function invalidateConfigGetResponseCache()",
+        "configGetResponseCache = void 0",
+    ]);
 
     const redaction = artifactByRole(artifacts, "config-redaction").contents;
     assertRequiredMarkers(redaction, "config redaction sentinel", [
@@ -3960,6 +4236,134 @@ function assertSettingsSemantics(
         "parsed: null",
     ]);
 
+    const configIo = artifactByRole(artifacts, "config-io").contents;
+    const configSnapshotFactory = boundedSourceRegion(
+        configIo,
+        "function createConfigFileSnapshot(params) {",
+        "async function finalizeReadConfigSnapshotInternalResult(deps, result, options) {",
+        8 * 1024,
+        "config snapshot projection"
+    );
+    assertRequiredMarkers(configSnapshotFactory, "config snapshot projection", [
+        "includedPaths: [...params.includedPaths ?? []]",
+        "sourceConfig,",
+        "resolved: sourceConfig",
+        "runtimeConfig,",
+        "config: runtimeConfig",
+        "hash: params.hash",
+    ]);
+    const configSnapshotRead = boundedSourceRegion(
+        configIo,
+        "function listResolvedIncludePaths(includeFilePathsForWatch) {",
+        "async function readConfigFileSnapshotFromContext(context, options = {}) {",
+        48 * 1024,
+        "config snapshot read"
+    );
+    assertRequiredMarkers(configSnapshotRead, "config snapshot read", [
+        "return [...includeFilePathsForWatch].toSorted()",
+        'const rawHash = await deps.measure("config.snapshot.read.hash", () => hashConfigRaw$1(raw))',
+        "const effectiveParsed = parsedRes.parsed",
+        "resolveConfigIncludesForRead(effectiveParsed, configPath, deps, includeFileHashesForWrite, includeFileTargetsForWrite, includeFilePathsForWatch",
+        'deps.measure("config.snapshot.read.env", () => resolveConfigForRead(resolved, deps.env, deps.lowerPrecedenceEnv))',
+        "const rosterMigration = migratePersistedImplicitMainRoster(readResolution.resolvedConfigRaw)",
+        "const effectiveConfigRaw = rosterMigration.config",
+        "const snapshotRaw = raw",
+        "const snapshotParsed = effectiveParsed",
+        "const snapshotHash = rawHash",
+        'materializeRuntimeConfig(validated.config, "snapshot"',
+        "sourceConfig: coerceConfig(effectiveConfigRaw)",
+        "runtimeConfig: snapshotConfig",
+        "includedPaths: listResolvedIncludePaths(includeFilePathsForWatch)",
+    ]);
+    const configEnvironmentRead = boundedSourceRegion(
+        configIo,
+        "function resolveConfigForRead(resolvedIncludes, env, lowerPrecedenceEnv = {}) {",
+        "function snapshotEnv(env) {",
+        2 * 1024,
+        "config environment read"
+    );
+    assertRequiredMarkers(configEnvironmentRead, "config environment read", [
+        "resolvedConfigRaw: resolveConfigEnvVars(resolvedIncludes, env",
+        "envSnapshotForRestore: { ...env }",
+    ]);
+    const configEnvironmentRestore = boundedSourceRegion(
+        configIo,
+        "function restoreEnvVarRefs(incoming, parsed, env = process.env) {",
+        "function parentPath(value) {",
+        8 * 1024,
+        "config environment reference restoration"
+    );
+    assertRequiredMarkers(
+        configEnvironmentRestore,
+        "config environment reference restoration",
+        [
+            "if (tryResolveString(parsed, env) === incoming) return parsed",
+            "return incoming",
+        ]
+    );
+    const configWrite = boundedSourceRegion(
+        configIo,
+        "function hasJSON5Comments(raw) {",
+        "//#region src/config/io.factory.ts",
+        64 * 1024,
+        "config root write"
+    );
+    assertRequiredMarkers(configWrite, "config root write", [
+        "return true",
+        "function warnIfJSON5CommentsWillBeStripped(params)",
+        "`Config write will strip JSON5 comments from ${params.filePath}.`",
+        String.raw`const json = JSON.stringify(stampedOutputConfig, null, 2).trimEnd().concat("\n")`,
+        "const nextHash = hashConfigRaw$1(json)",
+        "persistedHash: nextHash",
+        "persistedConfig: stampedOutputConfig",
+    ]);
+    const configWriteDispatch = boundedSourceRegion(
+        configIo,
+        "async function writeConfigFile(cfg, options = {}) {",
+        "async function finalizeCommittedConfigWrite(params) {",
+        32 * 1024,
+        "config post-commit dispatch"
+    );
+    assertRequiredMarkers(configWriteDispatch, "config post-commit dispatch", [
+        "const writeResult = await io.writeConfigFile(nextCfg, {",
+        "return await finalizeCommittedConfigWrite({",
+        "writeResult,",
+    ]);
+    const configWriteSettlement = boundedSourceRegion(
+        configIo,
+        "async function finalizeCommittedConfigWrite(params) {",
+        "//#endregion",
+        32 * 1024,
+        "config post-commit settlement"
+    );
+    assertRequiredMarkers(configWriteSettlement, "config post-commit settlement", [
+        "const freshSnapshot = await io.readConfigFileSnapshot()",
+        "await finalizeRuntimeSnapshotWrite({",
+        "if (await rollbackConfigFileWriteIfUnchanged({",
+        "committedHash: writeResult.persistedHash",
+        "writeResult[configWritePostCommitRollback]?.()",
+        "throw new ConfigRuntimeRefreshError(`${formatErrorMessage(error)} Rollback failed: ${formatErrorMessage(rollbackError)}`, { cause: error })",
+        "throw error",
+    ]);
+
+    const configMutation = artifactByRole(artifacts, "config-mutation").contents;
+    const includeTargetMutation = boundedSourceRegion(
+        configMutation,
+        "async function tryWriteSingleTopLevelIncludeMutation(params) {",
+        "function resolveConfigWriteResult(result, fallbackConfig) {",
+        24 * 1024,
+        "included config mutation"
+    );
+    assertRequiredMarkers(includeTargetMutation, "included config mutation", [
+        'if (changedKeys.length !== 1 || changedKeys[0] === "<root>") return null',
+        "const includePath = getSingleTopLevelIncludeTarget({",
+        "await writeRootBoundJsonFile({",
+        "refreshed = await readConfigSnapshotForMutation({",
+        "const persistedHash = resolveConfigSnapshotHash(refreshedSnapshot)",
+        "persistedHash,",
+        "persistedConfig: refreshedSnapshot.sourceConfig",
+    ]);
+
     const configHandlers = artifactByRole(artifacts, "config-handlers").contents;
     const configGetHandler = boundedSourceRegion(
         configHandlers,
@@ -3983,14 +4387,368 @@ function assertSettingsSemantics(
     assertRequiredMarkers(configPatchHandler, "config.patch handler", [
         'assertValidParams(params, validateConfigPatchParams, "config.patch", respond)',
         "const hashlessPatch = resolveBaseHashParam(params) === null",
+        "const normalizedPatch = normalizeSubmittedConfigModelRefs(parsedRes.parsed, modelIdNormalizationPolicies)",
         "if (hashlessPatch && !hasHashlessPatchLwwStructure(normalizedPatch))",
         "applyMergePatch(snapshot.config, normalizedPatch, {",
         "mergeObjectArraysById: true",
         "replaceArrayPaths: replacePaths",
         "restoreRedactedValues(merged, snapshot.config, schemaPatch.uiHints)",
         "if (hashlessPatch && !restoredChangedPaths.every(isHashlessPatchLwwPath))",
+        "const validationCandidate = normalizeSubmittedConfigModelRefs(stripBundledProviderRuntimeDefaults({",
+        "candidate: restoredMerge.result",
+        "sourceConfig: snapshot.sourceConfig",
+        "const sourceValidated = validateConfigObjectRawWithPlugins(validationCandidate)",
+        "const writeConfig = validationCandidate",
+        "const validated = validateConfigObjectWithPlugins(validationCandidate)",
         "respondConfigPatchNoop({",
         "await respondWithConfigRestartWrite({",
+    ]);
+    assertRequiredMarkers(configHandlers, "config.get write invalidation", [
+        "async function commitGatewayConfigWrite(params)",
+        "invalidateConfigGetResponseCache()",
+    ]);
+
+    const channelsSchema = boundedSourceRegion(
+        artifactByRole(artifacts, "channel-config-schema").contents,
+        "const ChannelsSchema = object({",
+        "//#endregion",
+        4 * 1024,
+        "channel config schema"
+    );
+    assertExactIndentedFields(
+        channelsSchema,
+        1,
+        ["defaults", "modelByChannel"],
+        "channel reserved config keys"
+    );
+    assertRequiredMarkers(channelsSchema, "channel config schema", [
+        "}).passthrough().superRefine((value, ctx) => {",
+    ]);
+    const channelEnabledDefault = boundedSourceRegion(
+        artifactByRole(artifacts, "channel-enabled-default").contents,
+        "function isConfiguredChannel(cfg, channelId) {",
+        "function listConfiguredOfficialExternalRepairHints(cfg) {",
+        2 * 1024,
+        "channel enabled default"
+    );
+    assertRequiredMarkers(channelEnabledDefault, "channel enabled default", [
+        "const entry = channels[channelId]",
+        "return entry.enabled !== false",
+    ]);
+
+    const modelInputNormalization = artifactByRole(
+        artifacts,
+        "model-input-normalization"
+    ).contents;
+    const modelSelectionKeysRegion = boundedSourceRegion(
+        modelInputNormalization,
+        "const MODEL_SELECTION_KEYS = [",
+        "];",
+        1024,
+        "model selection keys"
+    );
+    const observedModelSelectionKeys = [
+        ...modelSelectionKeysRegion.matchAll(/^\s*"([A-Za-z]+)",?\s*$/gmu),
+    ].map((match) => match[1]!);
+    if (
+        JSON.stringify(observedModelSelectionKeys) !==
+        JSON.stringify(["model", "imageModel", "voiceModel", "pdfModel"])
+    ) {
+        throw new Error("OpenClaw model selection keys changed");
+    }
+    const mediaModelKeysRegion = boundedSourceRegion(
+        modelInputNormalization,
+        "const MEDIA_MODEL_KEYS = [",
+        "];",
+        1024,
+        "media model keys"
+    );
+    const observedMediaModelKeys = [
+        ...mediaModelKeysRegion.matchAll(/^\s*"([A-Za-z]+)",?\s*$/gmu),
+    ].map((match) => match[1]!);
+    if (
+        JSON.stringify(observedMediaModelKeys) !==
+        JSON.stringify(["image", "video", "music"])
+    ) {
+        throw new Error("OpenClaw media model keys changed");
+    }
+    const modelSelectionNormalization = boundedSourceRegion(
+        modelInputNormalization,
+        "function normalizeModelSelection(value) {",
+        "function normalizeStringModelRef(value) {",
+        4 * 1024,
+        "model selection normalization"
+    );
+    assertRequiredMarkers(modelSelectionNormalization, "model selection normalization", [
+        'if (typeof value === "string") return normalizeAgentModelRefForConfig(value)',
+        'if (typeof value.primary === "string") assign("primary", normalizeAgentModelRefForConfig(value.primary))',
+        "if (Array.isArray(value.fallbacks))",
+        "normalizeAgentModelRefForConfig(fallback)",
+    ]);
+    const agentModelScopeNormalization = boundedSourceRegion(
+        modelInputNormalization,
+        "function normalizeAgentModelScope(value) {",
+        "function normalizeAgentScopes(agents) {",
+        12 * 1024,
+        "agent model scope normalization"
+    );
+    assertRequiredMarkers(
+        agentModelScopeNormalization,
+        "agent model scope normalization",
+        [
+            "for (const key of MODEL_SELECTION_KEYS)",
+            'assign("utilityModel", normalizeStringModelRef(value.utilityModel))',
+            "for (const key of MEDIA_MODEL_KEYS)",
+            'assign("heartbeat", normalizeNestedModelField(value.heartbeat, "model", normalizeStringModelRef))',
+            'assign("subagents", normalizeNestedModelField(value.subagents, "model", normalizeModelSelection))',
+            'normalizeNestedModelField(value.compaction, "model", normalizeStringModelRef)',
+            'normalizeNestedModelField(compaction.memoryFlush, "model", normalizeStringModelRef)',
+            'assign("models", normalizeAgentModelMapForConfig(value.models))',
+        ]
+    );
+    const agentScopesNormalization = boundedSourceRegion(
+        modelInputNormalization,
+        "function normalizeAgentScopes(agents) {",
+        "function normalizeProviderCatalogs(models, modelIdNormalizationPolicies) {",
+        8 * 1024,
+        "agent scopes model normalization"
+    );
+    assertRequiredMarkers(agentScopesNormalization, "agent scopes model normalization", [
+        'Object.hasOwn(agents, "defaults")',
+        'assign("defaults", normalizeAgentModelScope(agents.defaults))',
+        "if (isRecord(agents.entries))",
+        "Object.entries(agents.entries).map",
+        "normalizeAgentModelScope(entry)",
+        "if (Array.isArray(agents.list))",
+        "originalList.map(normalizeAgentModelScope)",
+    ]);
+    const providerCatalogNormalization = boundedSourceRegion(
+        modelInputNormalization,
+        "function normalizeProviderCatalogs(models, modelIdNormalizationPolicies) {",
+        "/** Canonicalize model refs submitted through a config mutation API before persistence. */",
+        8 * 1024,
+        "provider catalog model normalization"
+    );
+    assertRequiredMarkers(
+        providerCatalogNormalization,
+        "provider catalog model normalization",
+        [
+            "isRecord(models.providers)",
+            "Object.entries(models.providers).map",
+            "Array.isArray(providerValue.models)",
+            'typeof model.id !== "string"',
+            "normalizeConfiguredProviderCatalogModelId(providerId, trimmed, modelIdNormalizationPolicies)",
+        ]
+    );
+    const submittedModelNormalization = boundedSourceRegion(
+        modelInputNormalization,
+        "function normalizeSubmittedConfigModelRefs(cfg, modelIdNormalizationPolicies) {",
+        "//#endregion",
+        4 * 1024,
+        "submitted config model normalization"
+    );
+    assertRequiredMarkers(
+        submittedModelNormalization,
+        "submitted config model normalization",
+        [
+            "const agents = normalizeAgentScopes(cfg.agents)",
+            "const models = normalizeProviderCatalogs(cfg.models, modelIdNormalizationPolicies)",
+        ]
+    );
+    const modelRefNormalizationArtifact = artifactByRole(
+        artifacts,
+        "model-ref-normalization"
+    ).contents;
+    const googleProviderIds = boundedSourceRegion(
+        modelRefNormalizationArtifact,
+        "const GOOGLE_PROVIDER_IDS = /* @__PURE__ */ new Set([",
+        "]);",
+        1024,
+        "model ref Google providers"
+    );
+    const observedGoogleProviderIds = [
+        ...googleProviderIds.matchAll(/^\s*"([a-z-]+)",?\s*$/gmu),
+    ].map((match) => match[1]!);
+    if (
+        JSON.stringify(observedGoogleProviderIds) !==
+        JSON.stringify(["google", "google-gemini-cli", "google-vertex"])
+    ) {
+        throw new Error("OpenClaw model ref Google providers changed");
+    }
+    const modelRefNormalization = boundedSourceRegion(
+        modelRefNormalizationArtifact,
+        "function normalizeAgentModelRefForConfig(model) {",
+        "function mergeAgentModelEntryForConfig(existing, incoming) {",
+        4 * 1024,
+        "model ref normalization"
+    );
+    assertRequiredMarkers(modelRefNormalization, "model ref normalization", [
+        'GOOGLE_PROVIDER_IDS.has(provider) || modelSuffix.startsWith("google/") ? normalizeGooglePreviewModelId(modelSuffix)',
+        'provider === "together" ? normalizeTogetherModelId(modelSuffix)',
+    ]);
+    const providerModelIdNormalization = artifactByRole(
+        artifacts,
+        "provider-model-id-normalization"
+    ).contents;
+    const googleModelIdNormalization = boundedSourceRegion(
+        providerModelIdNormalization,
+        "function normalizeGooglePreviewModelId(id) {",
+        "function normalizeTogetherModelId(id) {",
+        4 * 1024,
+        "Google model id normalization"
+    );
+    assertRequiredMarkers(googleModelIdNormalization, "Google model id normalization", [
+        'if (id === "gemini-3-pro" || id === "gemini-3-pro-preview") return "gemini-3.1-pro-preview"',
+        'if (id === "gemini-3-flash") return "gemini-3-flash-preview"',
+        'if (id === "gemini-3.1-pro") return "gemini-3.1-pro-preview"',
+        'if (id === "gemini-3.1-flash-lite-preview") return "gemini-3.1-flash-lite"',
+        'if (id === "gemini-3.1-flash" || id === "gemini-3.1-flash-preview") return "gemini-3-flash-preview"',
+        'if (id === "gemma-4-26b") return "gemma-4-26b-a4b-it"',
+    ]);
+    if ([...googleModelIdNormalization.matchAll(/\bif \(/gu)].length !== 7) {
+        throw new Error("OpenClaw Google model id aliases changed");
+    }
+    const togetherModelIdNormalization = boundedSourceRegion(
+        providerModelIdNormalization,
+        "function normalizeTogetherModelId(id) {",
+        "function normalizeAntigravityPreviewModelId(id) {",
+        1024,
+        "Together model id normalization"
+    );
+    assertRequiredMarkers(
+        togetherModelIdNormalization,
+        "Together model id normalization",
+        ['if (id === "moonshotai/Kimi-K2.5") return "moonshotai/Kimi-K2.6"', "return id"]
+    );
+    if ([...togetherModelIdNormalization.matchAll(/\bif \(/gu)].length !== 1) {
+        throw new Error("OpenClaw Together model id aliases changed");
+    }
+
+    const elevatedPermissions = boundedSourceRegion(
+        artifactByRole(artifacts, "elevated-tool-runtime").contents,
+        "function resolveElevatedPermissions(params) {",
+        "function collapseInlineHorizontalWhitespace(value) {",
+        16 * 1024,
+        "elevated tool defaults"
+    );
+    assertRequiredMarkers(elevatedPermissions, "elevated tool defaults", [
+        "const globalEnabled = globalConfig?.enabled !== false",
+        "const agentEnabled = agentConfig?.enabled !== false",
+        "const enabled = globalEnabled && agentEnabled",
+    ]);
+    const agentToAgentPolicy = boundedSourceRegion(
+        artifactByRole(artifacts, "agent-to-agent-runtime").contents,
+        "function createAgentToAgentPolicy(cfg) {",
+        "function actionPrefix(action) {",
+        8 * 1024,
+        "agent-to-agent default"
+    );
+    assertRequiredMarkers(agentToAgentPolicy, "agent-to-agent default", [
+        "const enabled = routingA2A?.enabled === true",
+        "if (!enabled) return false",
+    ]);
+
+    const webFetchEnabled = boundedSourceRegion(
+        artifactByRole(artifacts, "web-fetch-runtime").contents,
+        "function resolveWebFetchEnabled(params) {",
+        "function resolveFetchConfig(config) {",
+        1024,
+        "web_fetch enabled default"
+    );
+    assertRequiredMarkers(webFetchEnabled, "web_fetch enabled default", [
+        'if (typeof params.fetch?.enabled === "boolean") return params.fetch.enabled',
+        "return true",
+    ]);
+    const webSearchEnabled = boundedSourceRegion(
+        artifactByRole(artifacts, "web-search-runtime").contents,
+        "function resolveWebSearchEnabled(params) {",
+        "function hasEntryCredential(provider, config, search, agentDir) {",
+        1024,
+        "web_search enabled default"
+    );
+    assertRequiredMarkers(webSearchEnabled, "web_search enabled default", [
+        'if (typeof params.search?.enabled === "boolean") return params.search.enabled',
+        "if (params.sandboxed) return true",
+        "return true",
+    ]);
+
+    const resetPolicy = artifactByRole(artifacts, "session-reset-policy").contents;
+    const sessionResetPolicy = boundedSourceRegion(
+        resetPolicy,
+        "function resolveSessionResetPolicy(params) {",
+        "/** Evaluates whether a persisted session is still fresh under the resolved reset policy. */",
+        8 * 1024,
+        "session reset policy"
+    );
+    assertRequiredMarkers(sessionResetPolicy, "session reset policy", [
+        "const configured = Boolean(baseReset || typeReset)",
+        'const inheritedTypeMode = typeReset && baseReset?.mode !== "none" ? baseReset?.mode : void 0',
+        'const mode = typeReset?.mode ?? inheritedTypeMode ?? (typeReset ? "daily" : void 0) ?? baseReset?.mode ?? (baseReset ? "daily" : DEFAULT_RESET_MODE)',
+        "const atHour = normalizeResetAtHour(typeReset?.atHour ?? baseReset?.atHour ?? DEFAULT_RESET_AT_HOUR)",
+        'else if (mode === "idle") idleMinutes = 0',
+    ]);
+
+    const execDefaults = artifactByRole(artifacts, "exec-defaults-runtime").contents;
+    const execConfigState = boundedSourceRegion(
+        execDefaults,
+        "function resolveExecConfigState(params) {",
+        "/** Resolves whether node exec is usable and any effective node binding. */",
+        4 * 1024,
+        "exec config defaults"
+    );
+    assertRequiredMarkers(execConfigState, "exec config defaults", [
+        'globalExec?.host ?? "auto"',
+    ]);
+    const execDefaultResolution = boundedSourceRegion(
+        execDefaults,
+        "function resolveExecDefaults(params) {",
+        "//#endregion",
+        16 * 1024,
+        "exec effective defaults"
+    );
+    assertRequiredMarkers(execDefaultResolution, "exec effective defaults", [
+        'const defaultSecurity = resolved.effectiveHost === "sandbox" ? "deny" : "full"',
+        'const approvalDefaults = resolved.effectiveHost === "sandbox" ? void 0 : resolveExecApprovalsFromFile({',
+        'ask: "off"',
+        "applyExecPolicyLayer(applySessionLegacyExecPolicyLayer(applyExecPolicyLayer(applyExecPolicyLayer({",
+        "}, globalExec), agentExec), params.sessionEntry), params.execOverrides)",
+        "const security = approvalDefaults?.security !== void 0 ? minSecurity(modePolicy.security, approvalDefaults.security) : modePolicy.security",
+        "const ask = approvalDefaults?.ask !== void 0 ? maxAsk(modePolicy.ask, approvalDefaults.ask) : modePolicy.ask",
+    ]);
+    const execModePolicy = boundedSourceRegion(
+        artifactByRole(artifacts, "exec-mode-policy").contents,
+        "function resolveExecPolicyForMode(mode) {",
+        "const DEFAULT_EXEC_APPROVAL_TIMEOUT_MS",
+        8 * 1024,
+        "exec mode policy"
+    );
+    const observedExecModePolicies = [
+        ...execModePolicy.matchAll(
+            /case "([a-z]+)": return \{\s*security: "([a-z-]+)",\s*ask: "([a-z-]+)",\s*autoReview: (true|false)\s*\};/gu
+        ),
+    ]
+        .map(
+            (match) =>
+                `${match[1]}:${match[2]}:${match[3]}:${match[4] === "true" ? "auto-review" : "no-auto-review"}`
+        )
+        .toSorted(compareStrings);
+    const reviewedExecModePolicies = [
+        "allowlist:allowlist:off:no-auto-review",
+        "ask:allowlist:on-miss:no-auto-review",
+        "auto:allowlist:on-miss:auto-review",
+        "deny:deny:off:no-auto-review",
+        "full:full:off:no-auto-review",
+    ] as const;
+    if (
+        JSON.stringify(observedExecModePolicies) !==
+        JSON.stringify(reviewedExecModePolicies)
+    ) {
+        throw new Error("OpenClaw exec mode policy changed");
+    }
+    assertRequiredMarkers(execModePolicy, "exec mode policy", [
+        "if (!params.mode) return {",
+        "mode: resolveExecModeFromPolicy({",
+        "autoReview: false",
     ]);
     assertRequiredMarkers(configHandlers, "config.patch base hash", [
         'const HASHLESS_PATCH_LWW_PATH_PREFIXES = ["ui.prefs"]',
@@ -4005,6 +4763,149 @@ function assertSettingsSemantics(
         "sentinel: {",
         "persisted: sentinelPersisted",
         "payload",
+    ]);
+    const restartSentinelPayload = boundedSourceRegion(
+        configHandlers,
+        "function buildConfigRestartSentinelPayload(params) {",
+        "async function tryWriteRestartSentinelPayload(payload) {",
+        2 * 1024,
+        "config.patch restart sentinel payload"
+    );
+    assertRequiredMarkers(
+        restartSentinelPayload,
+        "config.patch restart sentinel payload",
+        ["stats: {", "requiresRestart: params.requiresRestart"]
+    );
+    const restartWriteResponse = boundedSourceRegion(
+        configHandlers,
+        "async function respondWithConfigRestartWrite(params) {",
+        "function shouldDisconnectSharedAuthClientsForConfigWrite(params) {",
+        4 * 1024,
+        "config.patch restart response"
+    );
+    assertRequiredMarkers(restartWriteResponse, "config.patch restart response", [
+        "sentinel: {",
+        "persisted: sentinelPersisted",
+        "payload",
+    ]);
+
+    const restartScheduler = boundedSourceRegion(
+        artifactByRole(artifacts, "gateway-restart-scheduler").contents,
+        "function scheduleGatewaySigusr1Restart(opts) {",
+        "//#endregion",
+        16 * 1024,
+        "Gateway restart scheduler"
+    );
+    const schedulerResultFields = [
+        "coalesced",
+        "cooldownMsApplied",
+        "delayMs",
+        "emitHooksQueued",
+        "mode",
+        "ok",
+        "pid",
+        "reason",
+        "signal",
+    ] as const;
+    const schedulerLines = restartScheduler.split(/\r?\n/u);
+    const schedulerReturnBodies: string[][] = [];
+    for (let index = 0; index < schedulerLines.length; index += 1) {
+        if (schedulerLines[index]?.trim() !== "return {") continue;
+        const body: string[] = [];
+        for (index += 1; index < schedulerLines.length; index += 1) {
+            const line = schedulerLines[index]!;
+            if (line.trim() === "};") break;
+            body.push(line.trim());
+        }
+        schedulerReturnBodies.push(body);
+    }
+    if (schedulerReturnBodies.length === 0) {
+        throw new Error("OpenClaw Gateway restart scheduler success shape changed");
+    }
+    for (const body of schedulerReturnBodies) {
+        const fields = body
+            .map((line) => /^([A-Za-z_$][A-Za-z0-9_$]*)(?::|,|$)/u.exec(line)?.[1])
+            .filter((field): field is string => field !== undefined)
+            .toSorted(compareStrings);
+        if (
+            fields.length !== body.length ||
+            JSON.stringify(fields) !== JSON.stringify(schedulerResultFields) ||
+            !body.includes("ok: true,")
+        ) {
+            throw new Error("OpenClaw Gateway restart scheduler success shape changed");
+        }
+    }
+
+    const skillDiscovery = artifactByRole(artifacts, "skills-discovery").contents;
+    const localSkillDiscovery = boundedSourceRegion(
+        skillDiscovery,
+        "function loadSkillEntries(workspaceDir, opts) {",
+        "function filterArchivedSkillEntries(entries) {",
+        48 * 1024,
+        "skill source discovery"
+    );
+    const remoteSkillDiscovery = boundedSourceRegion(
+        skillDiscovery,
+        "function mergeRemoteNodeSkillEntries(localEntries, options) {",
+        "function resetRemoteNodeSkillsForTests() {",
+        16 * 1024,
+        "remote skill source discovery"
+    );
+    const discoveredSources = sortedUnique(
+        [localSkillDiscovery, remoteSkillDiscovery].flatMap((region) =>
+            [...region.matchAll(/source: "([a-z-]+)"/gu)].map((match) => match[1]!)
+        )
+    );
+    const skillSourceResolution = boundedSourceRegion(
+        artifactByRole(artifacts, "skills-source-resolution").contents,
+        "function resolveSkillSource(skill) {",
+        "function resolveSkillTelemetrySourceValue(value) {",
+        2 * 1024,
+        "skill source resolution"
+    );
+    assertRequiredMarkers(skillSourceResolution, "skill source resolution", [
+        'const canonical = normalizeOptionalString(compatSkill.source) ?? ""',
+        "if (canonical) return canonical",
+        'return (normalizeOptionalString(compatSkill.sourceInfo?.source) ?? "") || "unknown"',
+    ]);
+    const sourceTaxonomy = sortedUnique([...discoveredSources, "unknown"]);
+    if (JSON.stringify(sourceTaxonomy) !== JSON.stringify(reviewedSkillSourceTaxonomy)) {
+        throw new Error("OpenClaw skill source taxonomy changed");
+    }
+    const skillKeyResolution = boundedSourceRegion(
+        artifactByRole(artifacts, "skill-key-resolution").contents,
+        "function resolveSkillKey(skill, entry) {",
+        "//#endregion",
+        1024,
+        "skill key resolution"
+    );
+    assertRequiredMarkers(skillKeyResolution, "skill key resolution", [
+        "return entry?.metadata?.skillKey ?? skill.name",
+    ]);
+    const skillIndex = boundedSourceRegion(
+        artifactByRole(artifacts, "skills-index").contents,
+        "function createSkillIndexEntry(entry, opts, agentSkillSet) {",
+        "//#endregion",
+        4 * 1024,
+        "skill source index"
+    );
+    assertRequiredMarkers(skillIndex, "skill source index", [
+        "const skillKey = resolveSkillKey(entry.skill, entry)",
+        "const source = resolveSkillSource(entry.skill)",
+        'bundled: source === "openclaw-bundled" || source === "unknown" && opts?.bundledNames?.has(name) === true',
+    ]);
+
+    const mergePatch = artifactByRole(artifacts, "config-merge-patch").contents;
+    const mergePatchKeyPolicy = boundedSourceRegion(
+        mergePatch,
+        "function isMergePatchObjectKeyAllowed(key, parentPath) {",
+        "function mergeObjectArraysById(base, patch, options, arrayPath) {",
+        1024,
+        "config merge-patch blocked-key policy"
+    );
+    assertRequiredMarkers(mergePatchKeyPolicy, "config merge-patch blocked-key policy", [
+        "if (!isBlockedObjectKey(key)) return true",
+        'return parentPath === "browser.profiles" && (key === "constructor" || key === "prototype")',
     ]);
 
     const skillsHandlers = artifactByRole(artifacts, "skills-handlers").contents;
@@ -4049,10 +4950,22 @@ function assertSettingsSemantics(
         "const entries = { ...cfg.skills?.entries }",
         "const current = entries[skillKey] ? { ...entries[skillKey] } : {}",
         'if (typeof patch.enabled === "boolean") current.enabled = patch.enabled',
-        'if (typeof patch.apiKey === "string")',
+        'if (typeof patch.apiKey === "string") {',
+        "const trimmed = normalizeSecretInput(patch.apiKey)",
         'if (trimmed === "__OPENCLAW_REDACTED__")',
+        "else if (trimmed) current.apiKey = trimmed",
+        "else delete current.apiKey",
         'if (patch.env && typeof patch.env === "object")',
+        "const trimmedKey = key.trim()",
+        "if (!trimmedKey) continue",
+        "const trimmedVal = value.trim()",
+        'if (trimmedVal === "__OPENCLAW_REDACTED__") continue',
+        "if (!trimmedVal) delete nextEnv[trimmedKey]",
+        "else nextEnv[trimmedKey] = trimmedVal",
         "entries[skillKey] = current",
+        "...cfg",
+        "...cfg.skills",
+        "entries",
     ]);
     const updateSkillConfigEntry = boundedSourceRegion(
         skillsHandlers,
@@ -4065,7 +4978,27 @@ function assertSettingsSemantics(
         "mutateConfigFileWithRetry({",
         'afterWrite: { mode: "auto" }',
         "const next = patchSkillConfigEntry(draft, params.skillKey, params)",
+        "Object.assign(draft, next)",
         "return next.skills?.entries?.[params.skillKey] ?? {}",
+        "})).result ?? {}",
+    ]);
+    assertForbiddenMarkers(updateSkillConfigEntry, "skills.update config write", [
+        "normalizeSubmittedConfigModelRefs",
+    ]);
+    const configMutationRetry = boundedSourceRegion(
+        configMutation,
+        "async function transformConfigFileWithRetry(params) {",
+        "async function mutateConfigFile(params) {",
+        8 * 1024,
+        "config mutation retry"
+    );
+    assertRequiredMarkers(configMutationRetry, "config mutation retry", [
+        "const maxAttempts = params.maxAttempts ?? DEFAULT_CONFIG_MUTATION_RETRY_ATTEMPTS",
+        "for (let attempt = 0; attempt < maxAttempts; attempt += 1)",
+        "if (err instanceof ConfigMutationConflictError && err.retryable && attempt < maxAttempts - 1) continue",
+    ]);
+    assertRequiredMarkers(configMutation, "config mutation base", [
+        'const baseConfig = params.base === "runtime" ? snapshot.runtimeConfig : snapshot.sourceConfig',
     ]);
     const skillsUpdateHandler = boundedSourceRegion(
         skillsHandlers,
@@ -4092,6 +5025,7 @@ function assertSettingsSemantics(
         "skills.status row"
     );
     assertRequiredMarkers(skillStatusRow, "skills.status row", [
+        "const skillKey = indexed.skillKey",
         "const disabled = skillConfig?.enabled === false",
         "const eligible = !disabled && !blockedByAllowlist && requirementsSatisfied",
         "name: entry.skill.name",
@@ -4120,11 +5054,28 @@ function assertSettingsSemantics(
 
     return {
         agentAccess,
+        channels: {
+            providerEntriesArePassthrough: true,
+            providerEntryEnabledUnlessExplicitlyFalse: true,
+            reservedConfigKeys: ["defaults", "modelByChannel"],
+        },
         configGet: {
+            cache: {
+                bypassedUnlessHotReloadActive: true,
+                explicitWriteInvalidation: true,
+                keyFields: [
+                    "getHotReloadStatus-identity",
+                    "appliedConfigHash",
+                    "pluginRegistryVersion",
+                ],
+                rejectedPromiseEvicted: true,
+                sharedInFlightPromise: true,
+            },
             handlerValidatesParams: true,
             method: "config.get",
             requestParams: [],
             response: {
+                authoredParsedPrecedesEnvironmentResolution: true,
                 invalidSnapshotClearsConfigPayloads: true,
                 pluginMetadataOmitted: true,
                 redactedSnapshotFields: [
@@ -4151,6 +5102,28 @@ function assertSettingsSemantics(
             },
             handlerValidatesParams: true,
             method: "config.patch",
+            modelNormalization: {
+                agentScopeCollections: [...reviewedAgentModelScopeCollections],
+                agentSelectionFields: [...reviewedAgentSelectionFields],
+                appliedBeforeMerge: true,
+                dynamicEnvironmentRefs: {
+                    canonicalizedResolvedValueDoesNotRestoreOriginalReference: true,
+                    resolvedBeforeSnapshotValidation: true,
+                    restoredOnlyWhenResolvedValueUnchanged: true,
+                },
+                googleAliases: [...reviewedGoogleModelAliases],
+                googleProviderIds: ["google", "google-gemini-cli", "google-vertex"],
+                mediaSelectionFields: [...reviewedMediaSelectionFields],
+                modelSelectionShapes: [...reviewedModelSelectionShapes],
+                nestedAgentModelPaths: [...reviewedNestedAgentModelPaths],
+                nestedGoogleModelIdsNormalized: true,
+                normalizesAgentScopes: true,
+                normalizesProviderCatalogs: true,
+                providerCatalogModelPath: "models.providers[].models[].id",
+                togetherAliases: [...reviewedTogetherModelAliases],
+                togetherProviderId: "together",
+                wholeMergedCandidateNormalizedBeforeValidation: true,
+            },
             redaction: {
                 getAndWriteResponsesRedacted: true,
                 patchRestoresSensitiveValuesFromSnapshot: true,
@@ -4169,17 +5142,70 @@ function assertSettingsSemantics(
             restart: {
                 changedPathsDriveRequirement: true,
                 directRestartConditional: true,
+                schedulerSuccess: {
+                    ok: true,
+                    resultFields: [...schedulerResultFields],
+                },
                 sentinelPersistenceBestEffort: true,
+                sentinelRequiresRestartPath: "sentinel.payload.stats.requiresRestart",
                 sentinelResultFields: ["payload", "persisted"],
             },
             write: {
                 arraysMergeById: true,
+                heartbeatTargetPath: "agents.defaults.heartbeat.target",
+                heartbeatTargetSchema: "optional-string",
                 noChangeReturnsNoop: true,
+                nullDeletesObjectKeys: true,
                 rawFormat: "json5-object",
                 replacePathsSupported: true,
             },
         },
         domain: "settings",
+        exec: {
+            approvalFileConstrainsNonSandbox: true,
+            defaultAsk: "off",
+            defaultConfiguredHost: "auto",
+            defaultSecurityByEffectiveHost: {
+                nonSandbox: "full",
+                sandbox: "deny",
+            },
+            modePolicies: [
+                "allowlist:allowlist:off:no-auto-review",
+                "ask:allowlist:on-miss:no-auto-review",
+                "auto:allowlist:on-miss:auto-review",
+                "deny:deny:off:no-auto-review",
+                "full:full:off:no-auto-review",
+            ],
+            omittedModeDerivedFromSecurityAndAsk: true,
+            policyLayerOrder: ["global", "agent", "session-legacy", "request-overrides"],
+        },
+        io: {
+            snapshot: {
+                configAlias: "runtimeConfig",
+                includedPathsSource: "sorted-resolved-include-watch-paths",
+                parsedSource: "authored-root-before-environment-resolution",
+                resolvedAlias: "sourceConfig",
+                runtimeConfigSource: "validated-materialized-source-config",
+                snapshotHashSource: "root-raw-bytes",
+                sourceConfigSource:
+                    "include-resolved-environment-resolved-migrated-config",
+            },
+            write: {
+                includeTargetPersistedConfigSource: "refreshed-resolved-source-config",
+                includeTargetPersistedHashSource: "refreshed-root-snapshot-hash",
+                jsonFormat: "json-two-space-trailing-newline",
+                json5CommentsWarnedAndStripped: true,
+                rootPersistedHashSource: "serialized-root-json-bytes",
+                settlement: {
+                    canonicalRereadBeforeRuntimeRefresh: true,
+                    persistedBeforeCanonicalReread: true,
+                    postCommitFailureCanBeMutationOutcomeUnknown: true,
+                    rollbackFailureSurfaced: true,
+                    rollbackFalseCanLeaveCommittedBytes: true,
+                    runtimeRefreshFailureAttemptsHashGuardedRollback: true,
+                },
+            },
+        },
         methodAccess: [
             { controlPlaneWrite: false, name: "config.get", scope: "operator.read" },
             { controlPlaneWrite: true, name: "config.patch", scope: "operator.admin" },
@@ -4187,6 +5213,20 @@ function assertSettingsSemantics(
             { controlPlaneWrite: false, name: "skills.update", scope: "operator.admin" },
         ],
         schemaVersion: 1,
+        sessionReset: {
+            absentPolicyMode: "none",
+            defaultAtHour: 4,
+            explicitIdleModePreserved: true,
+            explicitNoneModePreserved: true,
+            idleWithoutMinutesDefaultsToZero: true,
+            presentPolicyWithoutMode: "daily",
+        },
+        toolActivationDefaults: {
+            agentToAgentRequiresExplicitTrue: true,
+            elevatedEnabledUnlessExplicitlyFalse: true,
+            webFetchEnabledWhenOmitted: true,
+            webSearchEnabledWhenOmitted: true,
+        },
         skillsStatus: {
             row: {
                 disabledFrom: "skills.entries[skillKey].enabled-equals-false",
@@ -4206,6 +5246,24 @@ function assertSettingsSemantics(
             handlerValidatesParams: true,
             method: "skills.status",
             requestParams: ["agentId"],
+            source: {
+                bundling: {
+                    canonicalBundledSource: "openclaw-bundled",
+                    unknownSourceUsesBundledNameFallback: true,
+                },
+                fallback: {
+                    canonicalField: "skill.source",
+                    compatibilityField: "skill.sourceInfo.source",
+                    missingSource: "unknown",
+                },
+                keyResolution: {
+                    canonicalField: "entry.metadata.skillKey",
+                    fallbackField: "skill.name",
+                    indexUsesResolver: true,
+                    statusUsesIndexedKey: true,
+                },
+                taxonomy: [...reviewedSkillSourceTaxonomy],
+            },
             workspace: {
                 defaultAgentResolved: true,
                 remoteEligibilityIncluded: true,
@@ -4220,17 +5278,32 @@ function assertSettingsSemantics(
         },
         skillsUpdate: {
             handler: {
+                apiKeySemantics: [
+                    "redacted-sentinel-preserves",
+                    "blank-deletes",
+                    "nonblank-sets",
+                ],
                 afterWriteMode: "auto",
                 configMutationUsesRetry: true,
+                enabledBooleanOnly: true,
+                envSemantics: [
+                    "blank-key-ignored",
+                    "redacted-sentinel-preserves",
+                    "blank-value-deletes",
+                    "nonblank-value-sets",
+                ],
                 localEntryPath: "skills.entries[skillKey]",
+                mutationBase: "source-config-default",
                 responseConfigRedacted: true,
                 resultFields: ["config", "ok", "skillKey"],
+                wholeConfigModelNormalization: false,
             },
             handlerValidatesParams: true,
             method: "skills.update",
             request: {
                 baseHashAccepted: false,
                 localParams: ["apiKey", "enabled", "env", "skillKey"],
+                unpatchableConfigEntryKeys: ["constructor", "prototype"],
             },
         },
     };

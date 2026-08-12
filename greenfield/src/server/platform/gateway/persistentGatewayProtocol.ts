@@ -10,6 +10,7 @@ import {
     openClawModelIdSchema,
     openClawSkillKeySchema,
 } from "../../../contracts/openClawSettings.ts";
+import { hasNoUnicodeControlOrFormat } from "../../../shared/validation.ts";
 import { openClawGatewayProtocolVersion } from "./gatewayCredentialProtocol.ts";
 
 /** Installed OpenClaw's hard application-frame ceiling after authentication. */
@@ -26,6 +27,8 @@ export const persistentGatewayOutboundFrameMaximumBytes = 1024 * 1024;
 export const persistentGatewayChatOutboundFrameMaximumBytes = 24 * 1024 * 1024;
 /** Installed Gateway ceiling for the `chat.history` `maxChars` request parameter. */
 export const persistentGatewayChatHistoryMaximumChars = 500_000;
+/** Exact serialized raw-patch ceiling shared by the Settings provider and protocol. */
+export const persistentGatewayOpenClawSettingsPatchMaximumBytes = 64 * 1024;
 
 export const persistentGatewayWebReadScopes = Object.freeze(["operator.read"] as const);
 export const persistentGatewayTaskNotificationScopes = Object.freeze([
@@ -104,6 +107,7 @@ export const persistentGatewayOpenClawSettingsReadMethods = Object.freeze([
 /** Dedicated Settings controls admitted only to fresh operator.admin sockets. */
 export const persistentGatewayOpenClawSettingsWriteMethods = Object.freeze([
     "config.patch",
+    "skills.update",
 ] as const);
 export type PersistentGatewayOpenClawSettingsReadMethod =
     (typeof persistentGatewayOpenClawSettingsReadMethods)[number];
@@ -631,14 +635,20 @@ const gatewayChatSessionPatchParamsSchema = v.strictObject({
 });
 
 const gatewayOpenClawSettingsEmptyParamsSchema = v.strictObject({});
-const gatewayOpenClawSettingsOptionalTextSchema = v.nullable(
-    v.pipe(
-        v.string("OpenClaw settings text is invalid"),
-        v.minLength(1, "OpenClaw settings text is invalid"),
-        v.maxLength(128, "OpenClaw settings text is invalid"),
-        v.check(hasNoControlCharacter, "OpenClaw settings text is invalid")
-    )
-);
+const gatewayOpenClawSkillUpdateParamsSchema = v.strictObject({
+    enabled: v.boolean("OpenClaw skill enabled state is invalid"),
+    skillKey: openClawSkillKeySchema,
+});
+const gatewayOpenClawSettingsNullableTextSchema = (maximum: number) =>
+    v.nullable(
+        v.pipe(
+            v.string("OpenClaw settings text is invalid"),
+            v.minLength(1, "OpenClaw settings text is invalid"),
+            v.maxLength(maximum, "OpenClaw settings text is invalid"),
+            v.check((value) => /\S/u.test(value), "OpenClaw settings text is invalid"),
+            v.check(hasNoUnicodeControlOrFormat, "OpenClaw settings text is invalid")
+        )
+    );
 const gatewayOpenClawSettingsHeartbeatSecondsSchema = v.pipe(
     v.string("OpenClaw heartbeat interval is invalid"),
     v.regex(/^(?:[1-9][0-9]{1,4})s$/u, "OpenClaw heartbeat interval is invalid"),
@@ -649,25 +659,37 @@ const gatewayOpenClawSettingsHeartbeatSecondsSchema = v.pipe(
 );
 const gatewayOpenClawSettingsChannelsSchema = v.pipe(
     v.record(openClawChannelIdSchema, v.strictObject({ enabled: v.boolean() })),
+    v.check((channels) => {
+        const ids = Object.keys(channels);
+        return (
+            ids.length > 0 &&
+            ids.length <= openClawChannelMaximum &&
+            !ids.includes("defaults")
+        );
+    }, "OpenClaw channels are outside their budget")
+);
+const gatewayOpenClawModelFallbacksSchema = v.pipe(
+    v.array(openClawModelIdSchema),
+    v.maxLength(openClawModelFallbackMaximum),
     v.check(
-        (channels) => Object.keys(channels).length <= openClawChannelMaximum,
-        "OpenClaw channels are outside their budget"
+        (fallbacks) => new Set(fallbacks).size === fallbacks.length,
+        "OpenClaw model fallbacks must be unique"
+    )
+);
+const gatewayOpenClawModelLeavesSchema = v.pipe(
+    v.strictObject({
+        fallbacks: v.optional(gatewayOpenClawModelFallbacksSchema),
+        primary: v.optional(openClawModelIdSchema),
+    }),
+    v.check(
+        (model) => Object.keys(model).length > 0,
+        "OpenClaw model patch must contain a changed leaf"
     )
 );
 const gatewayOpenClawModelsPatchSchema = v.strictObject({
     agents: v.strictObject({
         defaults: v.strictObject({
-            model: v.strictObject({
-                fallbacks: v.pipe(
-                    v.array(openClawModelIdSchema),
-                    v.maxLength(openClawModelFallbackMaximum),
-                    v.check(
-                        (fallbacks) => new Set(fallbacks).size === fallbacks.length,
-                        "OpenClaw model fallbacks must be unique"
-                    )
-                ),
-                primary: openClawModelIdSchema,
-            }),
+            model: gatewayOpenClawModelLeavesSchema,
         }),
     }),
 });
@@ -675,46 +697,78 @@ const gatewayOpenClawSessionResetPatchSchema = v.strictObject({
     session: v.strictObject({
         reset: v.strictObject({
             idleMinutes: v.pipe(positiveSafeIntegerSchema, v.maxValue(10_080)),
+            mode: v.literal("idle"),
         }),
     }),
 });
+const gatewayOpenClawHeartbeatLeavesSchema = v.pipe(
+    v.strictObject({
+        every: v.optional(gatewayOpenClawSettingsHeartbeatSecondsSchema),
+        target: v.optional(gatewayOpenClawSettingsNullableTextSchema(128)),
+    }),
+    v.check(
+        (heartbeat) => Object.keys(heartbeat).length > 0,
+        "OpenClaw heartbeat patch must contain a changed leaf"
+    )
+);
 const gatewayOpenClawHeartbeatPatchSchema = v.strictObject({
     agents: v.strictObject({
         defaults: v.strictObject({
-            heartbeat: v.strictObject({
-                every: gatewayOpenClawSettingsHeartbeatSecondsSchema,
-                target: gatewayOpenClawSettingsOptionalTextSchema,
-            }),
+            heartbeat: gatewayOpenClawHeartbeatLeavesSchema,
         }),
     }),
 });
-const gatewayOpenClawToolsPatchSchema = v.strictObject({
-    tools: v.strictObject({
-        agentToAgent: v.strictObject({ enabled: v.boolean() }),
-        elevated: v.strictObject({ enabled: v.boolean() }),
-        exec: v.strictObject({
-            ask: v.picklist(["off", "on-miss", "always"]),
-            mode: v.null(),
-            security: v.picklist(["allowlist", "deny", "full"]),
-        }),
-        profile: gatewayOpenClawSettingsOptionalTextSchema,
-        sessions: v.strictObject({
-            visibility: v.nullable(v.picklist(["agent", "all", "self", "tree"])),
-        }),
-        web: v.strictObject({
-            fetch: v.strictObject({ enabled: v.boolean() }),
-            search: v.strictObject({
-                enabled: v.boolean(),
-                provider: gatewayOpenClawSettingsOptionalTextSchema,
-            }),
-        }),
+const gatewayOpenClawToolsSearchPatchSchema = v.pipe(
+    v.strictObject({
+        enabled: v.optional(v.boolean()),
+        provider: v.optional(gatewayOpenClawSettingsNullableTextSchema(64)),
     }),
+    v.check(
+        (search) => Object.keys(search).length > 0,
+        "OpenClaw web-search patch must contain a changed leaf"
+    )
+);
+const gatewayOpenClawToolsWebPatchSchema = v.pipe(
+    v.strictObject({
+        fetch: v.optional(v.strictObject({ enabled: v.boolean() })),
+        search: v.optional(gatewayOpenClawToolsSearchPatchSchema),
+    }),
+    v.check(
+        (web) => Object.keys(web).length > 0,
+        "OpenClaw web-tools patch must contain a changed leaf"
+    )
+);
+const gatewayOpenClawToolsLeavesSchema = v.pipe(
+    v.strictObject({
+        agentToAgent: v.optional(v.strictObject({ enabled: v.boolean() })),
+        elevated: v.optional(v.strictObject({ enabled: v.boolean() })),
+        exec: v.optional(
+            v.strictObject({
+                ask: v.picklist(["off", "on-miss", "always"]),
+                security: v.picklist(["allowlist", "deny", "full"]),
+            })
+        ),
+        profile: v.optional(gatewayOpenClawSettingsNullableTextSchema(64)),
+        sessions: v.optional(
+            v.strictObject({
+                visibility: v.nullable(v.picklist(["agent", "all", "self", "tree"])),
+            })
+        ),
+        web: v.optional(gatewayOpenClawToolsWebPatchSchema),
+    }),
+    v.check(
+        (tools) => Object.keys(tools).length > 0,
+        "OpenClaw tools patch must contain a changed leaf"
+    )
+);
+const gatewayOpenClawToolsPatchSchema = v.strictObject({
+    tools: gatewayOpenClawToolsLeavesSchema,
 });
 const gatewayOpenClawChannelsPatchSchema = v.strictObject({
     channels: gatewayOpenClawSettingsChannelsSchema,
 });
 const gatewayOpenClawAgentToolPolicyListSchema = v.pipe(
-    v.array(v.pipe(v.string(), v.maxLength(256), v.check(hasNoControlCharacter))),
+    v.array(v.pipe(v.string(), v.maxLength(256), v.check(hasNoUnicodeControlOrFormat))),
     v.maxLength(512)
 );
 const gatewayOpenClawAgentToolPatchSchema = v.strictObject({
@@ -736,24 +790,12 @@ const gatewayOpenClawAgentToolPatchSchema = v.strictObject({
         ),
     }),
 });
-const gatewayOpenClawSkillEntryPatchSchema = v.strictObject({
-    skills: v.strictObject({
-        entries: v.pipe(
-            v.record(openClawSkillKeySchema, v.strictObject({ enabled: v.boolean() })),
-            v.check(
-                (entries) => Object.keys(entries).length === 1,
-                "OpenClaw skill patch must contain exactly one entry"
-            )
-        ),
-    }),
-});
 const gatewayOpenClawConfigPatchRawSchema = v.union([
     gatewayOpenClawAgentToolPatchSchema,
     gatewayOpenClawChannelsPatchSchema,
     gatewayOpenClawHeartbeatPatchSchema,
     gatewayOpenClawModelsPatchSchema,
     gatewayOpenClawSessionResetPatchSchema,
-    gatewayOpenClawSkillEntryPatchSchema,
     gatewayOpenClawToolsPatchSchema,
 ]);
 const gatewayOpenClawConfigPatchParamsSchema = v.strictObject({
@@ -761,9 +803,14 @@ const gatewayOpenClawConfigPatchParamsSchema = v.strictObject({
     note: v.literal("Updated from Mira Dashboard settings"),
     raw: v.pipe(
         v.string("OpenClaw settings patch is invalid"),
-        v.maxLength(64 * 1024, "OpenClaw settings patch is outside its budget"),
+        v.maxLength(
+            persistentGatewayOpenClawSettingsPatchMaximumBytes,
+            "OpenClaw settings patch is outside its budget"
+        ),
         v.check(
-            (raw) => Buffer.byteLength(raw, "utf8") <= 64 * 1024,
+            (raw) =>
+                Buffer.byteLength(raw, "utf8") <=
+                persistentGatewayOpenClawSettingsPatchMaximumBytes,
             "OpenClaw settings patch is outside its budget"
         )
     ),
@@ -789,12 +836,14 @@ function configPatchParametersAreExact(parameters: unknown): boolean {
     }
     const parsedPatch = v.safeParse(gatewayOpenClawConfigPatchRawSchema, rawPatch);
     if (!parsedPatch.success) return false;
-    const isModelsPatch = v.safeParse(gatewayOpenClawModelsPatchSchema, rawPatch).success;
-    if (isModelsPatch) {
-        return (
-            parsedParameters.output.replacePaths?.length === 1 &&
-            parsedParameters.output.replacePaths[0] === "agents.defaults.model.fallbacks"
-        );
+    const modelsPatch = v.safeParse(gatewayOpenClawModelsPatchSchema, rawPatch);
+    if (modelsPatch.success) {
+        const fallbacks = modelsPatch.output.agents.defaults.model.fallbacks;
+        return fallbacks === undefined
+            ? parsedParameters.output.replacePaths === undefined
+            : parsedParameters.output.replacePaths?.length === 1 &&
+                  parsedParameters.output.replacePaths[0] ===
+                      "agents.defaults.model.fallbacks";
     }
     const agentPatch = v.safeParse(gatewayOpenClawAgentToolPatchSchema, rawPatch);
     if (agentPatch.success) {
@@ -1225,10 +1274,14 @@ export function assertPersistentGatewayOpenClawSettingsReadParameters(
 }
 
 export function assertPersistentGatewayOpenClawSettingsWriteParameters(
-    _method: PersistentGatewayOpenClawSettingsWriteMethod,
+    method: PersistentGatewayOpenClawSettingsWriteMethod,
     parameters: unknown
 ): asserts parameters is Readonly<Record<string, unknown>> {
-    if (!configPatchParametersAreExact(parameters)) {
+    const valid =
+        method === "config.patch"
+            ? configPatchParametersAreExact(parameters)
+            : v.safeParse(gatewayOpenClawSkillUpdateParamsSchema, parameters).success;
+    if (!valid) {
         throw new TypeError("Persistent Gateway request parameters are invalid");
     }
 }

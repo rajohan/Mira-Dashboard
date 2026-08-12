@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 
 import type {
     ListOpenClawSkillsResult,
@@ -54,15 +55,21 @@ export function OpenClawSettingsPanel() {
     const configurationQuery = useQuery(openClawConfigurationQueryOptions(client));
     const skillsQuery = useQuery(openClawSkillsQueryOptions(client));
     const mutations = useOpenClawSettingsMutations();
+    const [activeAgentId, setActiveAgentId] = useState("");
     const configuration = configurationQuery.data;
     const configurationMutationBusy = mutations.configuration.isPending;
+    const configurationWritesSupported =
+        configuration !== undefined &&
+        !configuration.includesPresent &&
+        configuration.modelNormalizationState === "clean";
     const configurationControlsDisabled =
         mutations.isBusy ||
         mutations.reconciliationRequired ||
         configurationQuery.isFetching ||
         configurationQuery.isError ||
         configuration === undefined ||
-        !configuration.valid;
+        !configuration.valid ||
+        !configurationWritesSupported;
     const skillControlsEnabled =
         configuration !== undefined &&
         configuration.valid &&
@@ -80,6 +87,7 @@ export function OpenClawSettingsPanel() {
         await mutations.configuration
             .mutateAsync({
                 baseHash: current.hash,
+                baseRevisionHash: current.revisionHash,
                 confirmation: "apply-reviewed-settings",
                 update,
             })
@@ -94,6 +102,7 @@ export function OpenClawSettingsPanel() {
         await mutations.skill
             .mutateAsync({
                 baseHash: current.hash,
+                baseRevisionHash: current.revisionHash,
                 enabled,
                 skillKey: skill.key,
             })
@@ -103,11 +112,37 @@ export function OpenClawSettingsPanel() {
     return (
         <div>
             <PageHeader
-                description="Review and change only the bounded, secret-free OpenClaw settings supported by this Dashboard. Configuration writes are hash-fenced; skill changes are freshly verified. Every change is audited and requires recent multi-factor authentication."
+                description="Review and change only the bounded, secret-free OpenClaw settings supported by this Dashboard. Configuration writes are root-hash-fenced with a revision preflight; skill changes update one freshly verified leaf on the latest configuration. Every change is audited and requires recent multi-factor authentication."
                 eyebrow="Settings"
                 title="OpenClaw settings"
             />
             <div className="mt-6 grid gap-3">
+                {configuration?.valid && (
+                    <Alert
+                        focusOnError={false}
+                        message="Saving a reviewed setting makes OpenClaw rewrite the touched JSON5 config source; comments may be removed and existing formatting may be changed."
+                        variant="info"
+                    />
+                )}
+                {configuration?.valid && configuration.includesPresent && (
+                    <Alert
+                        focusOnError={false}
+                        message="Configuration changes are locked because this OpenClaw configuration uses included files. Edit the owning source in OpenClaw so an included value cannot change between review and persistence."
+                        variant="info"
+                    />
+                )}
+                {configuration?.valid &&
+                    configuration.modelNormalizationState !== "clean" && (
+                        <Alert
+                            focusOnError={false}
+                            message={
+                                configuration.modelNormalizationState === "pending"
+                                    ? "Configuration changes are locked because OpenClaw would canonicalize existing model references outside the requested setting. Save those references canonically in OpenClaw before editing here."
+                                    : "Configuration changes are locked because the existing model-reference normalization state could not be verified safely. Review and save the configuration in OpenClaw before editing here."
+                            }
+                            variant="info"
+                        />
+                    )}
                 <Alert
                     dismissLabel="Dismiss settings error"
                     message={mutations.error}
@@ -157,7 +192,7 @@ export function OpenClawSettingsPanel() {
                     {configuration !== undefined && (
                         <div
                             className={configurationQuery.isError ? "mt-6" : undefined}
-                            key={`${configuration.hash}:${mutations.snapshotGeneration}`}
+                            key={`${configuration.hash}:${configuration.revisionHash}:${configuration.modelNormalizationState}:${mutations.snapshotGeneration}`}
                         >
                             <OpenClawConfigurationSections
                                 busy={configurationMutationBusy}
@@ -165,15 +200,19 @@ export function OpenClawSettingsPanel() {
                                 disabled={configurationControlsDisabled}
                                 onSave={saveConfiguration}
                             />
-                            <div className="mt-8">
-                                <OpenClawAgentAccessSection
-                                    agents={configuration.agentAccess}
-                                    busy={configurationMutationBusy}
-                                    disabled={configurationControlsDisabled}
-                                    onSave={saveConfiguration}
-                                    truncated={configuration.agentAccessTruncated}
-                                />
-                            </div>
+                            {configuration.valid && (
+                                <div className="mt-8">
+                                    <OpenClawAgentAccessSection
+                                        activeAgentId={activeAgentId}
+                                        agents={configuration.agentAccess}
+                                        busy={configurationMutationBusy}
+                                        disabled={configurationControlsDisabled}
+                                        onSave={saveConfiguration}
+                                        onSelectAgent={setActiveAgentId}
+                                        truncated={configuration.agentAccessTruncated}
+                                    />
+                                </div>
+                            )}
                         </div>
                     )}
                 </section>
@@ -201,7 +240,6 @@ export function OpenClawSettingsPanel() {
                     {skillsQuery.data !== undefined && (
                         <div className={skillsQuery.isError ? "mt-6" : undefined}>
                             <OpenClawSkillsSection
-                                baseHash={configuration?.hash}
                                 busy={mutations.isBusy}
                                 enabled={skillControlsEnabled}
                                 onToggle={toggleSkill}

@@ -35,6 +35,7 @@ export interface OpenClawSettingsOperationAuditWriter {
 }
 
 export interface OpenClawSettingsAuditSettlementFailure {
+    readonly cause: unknown;
     readonly operation: OpenClawSettingsAuditOperation;
     readonly settlement: Exclude<OpenClawSettingsAuditSettlement, "attempted">;
     readonly targetFingerprint: string;

@@ -40,6 +40,9 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
         })}\n`,
         "zod-schema-fixture.js": `
             //#region src/config/zod-schema.agents.ts
+            const AgentDefaultsSchema = object({
+                heartbeat: HeartbeatSchema.unwrap().safeExtend({ agentId: string().trim().min(1).optional() }).optional()
+            }).strict();
             const AgentEntryConfigSchema = preprocess((value, ctx) => {
                 if (value && typeof value === "object" && !Array.isArray(value)) for (const key of Object.getOwnPropertyNames(value)) {
                     if (!isBlockedObjectKey(key)) continue;
@@ -61,6 +64,11 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
             const BindingMatchSchema = object({});
         `,
         "zod-schema.agent-runtime-fixture.js": `
+            const HeartbeatSchema = object({
+                every: string().optional(),
+                target: string().optional()
+            }).strict().optional();
+            const SandboxDockerSchema = object({});
             const ToolPolicySchema = object({
                 allow: array(string()).optional(),
                 alsoAllow: array(string()).optional(),
@@ -84,6 +92,7 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
             const MemorySearchSchema = object({});
             const AgentEntrySchema = object({
                 id: string(),
+                heartbeat: HeartbeatSchema,
                 tools: AgentToolsSchema
             }).strict();
             const ToolsSchema = object({});
@@ -136,14 +145,225 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
                 return list.map(normalizeToolName).filter(Boolean);
             }
         `,
+        "zod-schema.channels-config-fixture.js": `
+            const ChannelModelByChannelSchema = object({});
+            function addLegacyChannelAcpBindingIssues(value, ctx) {}
+            const ChannelsSchema = object({
+\tdefaults: object({}).strict().optional(),
+\tmodelByChannel: ChannelModelByChannelSchema
+            }).passthrough().superRefine((value, ctx) => {
+                addLegacyChannelAcpBindingIssues(value, ctx);
+            }).optional();
+            //#endregion
+        `,
+        "channel-selection-fixture.js": `
+            function isConfiguredChannel(cfg, channelId) {
+                const channels = cfg.channels;
+                if (!channels || typeof channels !== "object" || Array.isArray(channels)) return false;
+                const entry = channels[channelId];
+                if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
+                return entry.enabled !== false;
+            }
+            function listConfiguredOfficialExternalRepairHints(cfg) { return []; }
+            function resolveAvailableKnownChannel(params) { return undefined; }
+        `,
+        "model-input-normalization-fixture.js": `
+            const MODEL_SELECTION_KEYS = [
+                "model",
+                "imageModel",
+                "voiceModel",
+                "pdfModel"
+            ];
+            const MEDIA_MODEL_KEYS = [
+                "image",
+                "video",
+                "music"
+            ];
+            function normalizeModelSelection(value) {
+                if (typeof value === "string") return normalizeAgentModelRefForConfig(value);
+                const next = { ...value };
+                const assign = (key, normalized) => { next[key] = normalized; };
+                if (typeof value.primary === "string") assign("primary", normalizeAgentModelRefForConfig(value.primary));
+                if (Array.isArray(value.fallbacks)) next.fallbacks = value.fallbacks.map((fallback) => normalizeAgentModelRefForConfig(fallback));
+                return next;
+            }
+            function normalizeStringModelRef(value) { return value; }
+            function normalizeNestedModelField(value, key, normalizer) { return value; }
+            function normalizeAgentModelScope(value) {
+                const next = { ...value };
+                const assign = (key, normalized) => { next[key] = normalized; };
+                for (const key of MODEL_SELECTION_KEYS) assign(key, normalizeModelSelection(value[key]));
+                assign("utilityModel", normalizeStringModelRef(value.utilityModel));
+                for (const key of MEDIA_MODEL_KEYS) assign(key, normalizeModelSelection(value[key]));
+                assign("heartbeat", normalizeNestedModelField(value.heartbeat, "model", normalizeStringModelRef));
+                assign("subagents", normalizeNestedModelField(value.subagents, "model", normalizeModelSelection));
+                assign("compaction", normalizeNestedModelField(value.compaction, "model", normalizeStringModelRef));
+                normalizeNestedModelField(value.compaction, "model", normalizeStringModelRef);
+                normalizeNestedModelField(compaction.memoryFlush, "model", normalizeStringModelRef);
+                assign("models", normalizeAgentModelMapForConfig(value.models));
+                return next;
+            }
+            function normalizeAgentScopes(agents) {
+                let next = agents;
+                const assign = (key, normalized) => { next = { ...next, [key]: normalized }; };
+                if (Object.hasOwn(agents, "defaults")) assign("defaults", normalizeAgentModelScope(agents.defaults));
+                if (isRecord(agents.entries)) assign("entries", Object.fromEntries(Object.entries(agents.entries).map(([key, entry]) => [key, normalizeAgentModelScope(entry)])));
+                if (Array.isArray(agents.list)) {
+                    const originalList = agents.list;
+                    assign("list", originalList.map(normalizeAgentModelScope));
+                }
+                return next;
+            }
+            function normalizeProviderCatalogs(models, modelIdNormalizationPolicies) {
+                if (!isRecord(models.providers)) return models;
+                const providers = Object.fromEntries(Object.entries(models.providers).map(([providerId, providerValue]) => {
+                    if (!Array.isArray(providerValue.models)) return [providerId, providerValue];
+                    return [providerId, { ...providerValue, models: providerValue.models.map((model) => {
+                        if (typeof model.id !== "string") return model;
+                        const trimmed = model.id.trim();
+                        return { ...model, id: normalizeConfiguredProviderCatalogModelId(providerId, trimmed, modelIdNormalizationPolicies) };
+                    }) }];
+                }));
+                return { ...models, providers };
+            }
+            /** Canonicalize model refs submitted through a config mutation API before persistence. */
+            function normalizeSubmittedConfigModelRefs(cfg, modelIdNormalizationPolicies) {
+                let next = cfg;
+                const agents = normalizeAgentScopes(cfg.agents);
+                if (agents !== cfg.agents) next = { ...next, agents };
+                const models = normalizeProviderCatalogs(cfg.models, modelIdNormalizationPolicies);
+                if (models !== cfg.models) next = { ...next, models };
+                return next;
+            }
+            //#endregion
+        `,
+        "model-input-fixture.js": `
+            const GOOGLE_PROVIDER_IDS = /* @__PURE__ */ new Set([
+\t"google",
+\t"google-gemini-cli",
+\t"google-vertex"
+            ]);
+            function normalizeAgentModelRefForConfig(model) {
+                const { provider, modelId: modelSuffix } = parseModelCatalogRef(model);
+                return modelKey(provider, GOOGLE_PROVIDER_IDS.has(provider) || modelSuffix.startsWith("google/") ? normalizeGooglePreviewModelId(modelSuffix) : provider === "together" ? normalizeTogetherModelId(modelSuffix) : modelSuffix);
+            }
+            function mergeAgentModelEntryForConfig(existing, incoming) { return incoming; }
+            function normalizeAgentModelMapForConfig(models) { return models; }
+        `,
+        "provider-model-id-normalize-fixture.js": `
+            function normalizeGooglePreviewModelId(id) {
+                if (id.startsWith("google/")) return normalizeGooglePreviewModelId(id.slice(7));
+                if (id === "gemini-3-pro" || id === "gemini-3-pro-preview") return "gemini-3.1-pro-preview";
+                if (id === "gemini-3-flash") return "gemini-3-flash-preview";
+                if (id === "gemini-3.1-pro") return "gemini-3.1-pro-preview";
+                if (id === "gemini-3.1-flash-lite-preview") return "gemini-3.1-flash-lite";
+                if (id === "gemini-3.1-flash" || id === "gemini-3.1-flash-preview") return "gemini-3-flash-preview";
+                if (id === "gemma-4-26b") return "gemma-4-26b-a4b-it";
+                return id;
+            }
+            function normalizeTogetherModelId(id) {
+                if (id === "moonshotai/Kimi-K2.5") return "moonshotai/Kimi-K2.6";
+                return id;
+            }
+            function normalizeAntigravityPreviewModelId(id) { return id; }
+        `,
+        "get-reply-fixture.js": `
+            function resolveElevatedPermissions(params) {
+                const globalConfig = params.cfg.tools?.elevated;
+                const agentConfig = resolveAgentConfig(params.cfg, params.agentId)?.tools?.elevated;
+                const globalEnabled = globalConfig?.enabled !== false;
+                const agentEnabled = agentConfig?.enabled !== false;
+                const enabled = globalEnabled && agentEnabled;
+                return { enabled };
+            }
+            function collapseInlineHorizontalWhitespace(value) { return value; }
+            function resolveElevatedAllowList(allowFrom, provider, fallbackAllowFrom) { return []; }
+            function isApprovedElevatedSender(params) { return false; }
+        `,
+        "session-visibility-fixture.js": `
+            function createAgentToAgentPolicy(cfg) {
+                const routingA2A = cfg.tools?.agentToAgent;
+                const enabled = routingA2A?.enabled === true;
+                const isAllowed = () => {
+                    if (!enabled) return false;
+                    return true;
+                };
+                return { enabled, isAllowed };
+            }
+            function actionPrefix(action) { return action; }
+            function a2aDisabledMessage(action) { return action; }
+            function createSessionVisibilityCheckerImpl(params) { return params; }
+        `,
+        "exec-defaults-fixture.js": `
+            function resolveExecConfigState(params) {
+                const cfg = params.cfg ?? {};
+                const globalExec = cfg.tools?.exec;
+                const agentExec = params.agentExec;
+                return {
+                    cfg,
+                    host: params.execOverrides?.host ?? agentExec?.host ?? globalExec?.host ?? "auto",
+                    agentExec,
+                    globalExec
+                };
+            }
+            /** Resolves whether node exec is usable and any effective node binding. */
+            function resolveNodeExecEligibility(params) { return resolveExecDefaults(params); }
+            /** Resolves effective exec host, mode, approval policy, and node availability. */
+            function resolveExecDefaults(params) {
+                const { agentExec, globalExec } = resolveExecConfigState(params);
+                const resolved = { effectiveHost: params.effectiveHost };
+                const defaultSecurity = resolved.effectiveHost === "sandbox" ? "deny" : "full";
+                const approvalDefaults = resolved.effectiveHost === "sandbox" ? void 0 : resolveExecApprovalsFromFile({
+                    overrides: { security: defaultSecurity, ask: "off" }
+                }).agent;
+                const modePolicy = resolveExecModePolicy(applyExecPolicyLayer(applySessionLegacyExecPolicyLayer(applyExecPolicyLayer(applyExecPolicyLayer({
+                    security: approvalDefaults?.security ?? defaultSecurity,
+                    ask: approvalDefaults?.ask ?? "off"
+                }, globalExec), agentExec), params.sessionEntry), params.execOverrides));
+                const security = approvalDefaults?.security !== void 0 ? minSecurity(modePolicy.security, approvalDefaults.security) : modePolicy.security;
+                const ask = approvalDefaults?.ask !== void 0 ? maxAsk(modePolicy.ask, approvalDefaults.ask) : modePolicy.ask;
+                return { security, ask };
+            }
+            //#endregion
+        `,
+        "exec-approvals-fixture.js": `
+            function resolveExecModeFromPolicy(params) { return "ask"; }
+            function resolveExecPolicyForMode(mode) {
+                switch (mode) {
+                    case "deny": return { security: "deny", ask: "off", autoReview: false };
+                    case "allowlist": return { security: "allowlist", ask: "off", autoReview: false };
+                    case "ask": return { security: "allowlist", ask: "on-miss", autoReview: false };
+                    case "auto": return { security: "allowlist", ask: "on-miss", autoReview: true };
+                    case "full": return { security: "full", ask: "off", autoReview: false };
+                }
+                throw new Error("unsupported");
+            }
+            function resolveExecModePolicy(params) {
+                if (!params.mode) return {
+                    mode: resolveExecModeFromPolicy({ security: params.security, ask: params.ask }),
+                    security: params.security,
+                    ask: params.ask,
+                    autoReview: false
+                };
+                return { mode: params.mode, ...resolveExecPolicyForMode(params.mode) };
+            }
+            const DEFAULT_EXEC_APPROVAL_TIMEOUT_MS = 18e5;
+        `,
         "merge-patch-fixture.js": `
-            function isMergePatchObjectKeyAllowed(key, parentPath) { return true; }
+            function isMergePatchObjectKeyAllowed(key, parentPath) {
+                if (!isBlockedObjectKey(key)) return true;
+                return parentPath === "browser.profiles" && (key === "constructor" || key === "prototype");
+            }
             function mergeObjectArraysById(base, patch, options, arrayPath) {}
             function applyMergePatch(base, patch, options = {}) {
                 if (!isPlainObject(patch)) return patch;
                 const result = isPlainObject(base) ? { ...base } : {};
                 for (const [key, value] of Object.entries(patch)) {
                     const path = formatMergePatchPath(options.path, key);
+                    if (value === null) {
+                        delete result[key];
+                        continue;
+                    }
                     if (options.mergeObjectArraysById && Array.isArray(result[key]) && Array.isArray(value)) {
                         if (options.replaceArrayPaths?.has(path)) {
                             result[key] = value;
@@ -344,6 +564,7 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
             }
         `,
         "config-get-response-fixture.js": `
+            let configGetResponseCache;
             function createConfigGetResponse(snapshot, uiHints) {
                 return {
                     ...redactConfigSnapshot(snapshot, uiHints),
@@ -352,8 +573,146 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
                 };
             }
             async function readConfigGetResponse(params) {
-                return createConfigGetResponse(await readConfigFileSnapshot(), params.loadUiHints());
+                const getHotReloadStatus = params.getHotReloadStatus;
+                if (!getHotReloadStatus || getHotReloadStatus() !== "active") return createConfigGetResponse(await readConfigFileSnapshot(), params.loadUiHints());
+                const appliedConfigHash = getRuntimeConfigAppliedHash();
+                const pluginRegistryVersion = getActivePluginRegistryVersion();
+                if (configGetResponseCache?.getHotReloadStatus === getHotReloadStatus && configGetResponseCache.appliedConfigHash === appliedConfigHash && configGetResponseCache.pluginRegistryVersion === pluginRegistryVersion) return await configGetResponseCache.promise;
+                const promise = (async () => createConfigGetResponse(await readConfigFileSnapshot(), params.loadUiHints()))();
+                configGetResponseCache = { getHotReloadStatus, appliedConfigHash, pluginRegistryVersion, promise };
+                try { return await promise; } catch (error) {
+                    if (configGetResponseCache?.promise === promise) configGetResponseCache = void 0;
+                    throw error;
+                }
             }
+            function invalidateConfigGetResponseCache() {
+                configGetResponseCache = void 0;
+            }
+        `,
+        "io-fixture.js": `
+            function createConfigFileSnapshot(params) {
+                const sourceConfig = params.sourceConfig;
+                const runtimeConfig = params.runtimeConfig;
+                return {
+                    includedPaths: [...params.includedPaths ?? []],
+                    sourceConfig,
+                    resolved: sourceConfig,
+                    runtimeConfig,
+                    config: runtimeConfig,
+                    hash: params.hash
+                };
+            }
+            async function finalizeReadConfigSnapshotInternalResult(deps, result, options) { return result; }
+            function listResolvedIncludePaths(includeFilePathsForWatch) {
+                return [...includeFilePathsForWatch].toSorted();
+            }
+            async function readConfigFileSnapshotInternal(context, options = {}) {
+                const rawHash = await deps.measure("config.snapshot.read.hash", () => hashConfigRaw$1(raw));
+                const effectiveParsed = parsedRes.parsed;
+                resolveConfigIncludesForRead(effectiveParsed, configPath, deps, includeFileHashesForWrite, includeFileTargetsForWrite, includeFilePathsForWatch);
+                const readResolution = deps.measure("config.snapshot.read.env", () => resolveConfigForRead(resolved, deps.env, deps.lowerPrecedenceEnv));
+                const rosterMigration = migratePersistedImplicitMainRoster(readResolution.resolvedConfigRaw);
+                const effectiveConfigRaw = rosterMigration.config;
+                const snapshotRaw = raw;
+                const snapshotParsed = effectiveParsed;
+                const snapshotHash = rawHash;
+                const snapshotConfig = materializeRuntimeConfig(validated.config, "snapshot");
+                return createConfigFileSnapshot({
+                    sourceConfig: coerceConfig(effectiveConfigRaw),
+                    runtimeConfig: snapshotConfig,
+                    includedPaths: listResolvedIncludePaths(includeFilePathsForWatch)
+                });
+            }
+            async function readConfigFileSnapshotFromContext(context, options = {}) { return readConfigFileSnapshotInternal(context, options); }
+            function resolveConfigForRead(resolvedIncludes, env, lowerPrecedenceEnv = {}) {
+                return {
+                    resolvedConfigRaw: resolveConfigEnvVars(resolvedIncludes, env),
+                    envSnapshotForRestore: { ...env }
+                };
+            }
+            function snapshotEnv(env) { return { ...env }; }
+            function restoreEnvVarRefs(incoming, parsed, env = process.env) {
+                if (tryResolveString(parsed, env) === incoming) return parsed;
+                return incoming;
+            }
+            function parentPath(value) { return value; }
+            function hasJSON5Comments(raw) { return true; }
+            function warnIfJSON5CommentsWillBeStripped(params) {
+                logger.warn(\`Config write will strip JSON5 comments from \${params.filePath}.\`);
+            }
+            async function writeConfigFileFromContext(context, cfg, options, readSnapshot) {
+                const stampedOutputConfig = cfg;
+                const json = JSON.stringify(stampedOutputConfig, null, 2).trimEnd().concat("\\n");
+                const nextHash = hashConfigRaw$1(json);
+                return { persistedHash: nextHash, persistedConfig: stampedOutputConfig };
+            }
+            async function writeConfigFile(cfg, options = {}) {
+                const nextCfg = cfg;
+                const writeResult = await io.writeConfigFile(nextCfg, {
+                    afterWrite: options.afterWrite
+                });
+                return await finalizeCommittedConfigWrite({
+                    io,
+                    options,
+                    nextCfg,
+                    writeResult,
+                    baseSnapshot
+                });
+            }
+            async function finalizeCommittedConfigWrite(params) {
+                const { io, options, writeResult, baseSnapshot } = params;
+                try {
+                    const freshSnapshot = await io.readConfigFileSnapshot();
+                    await finalizeRuntimeSnapshotWrite({
+                        nextSourceConfig: freshSnapshot.sourceConfig
+                    });
+                } catch (error) {
+                    try {
+                        if (await rollbackConfigFileWriteIfUnchanged({
+                            configPath: io.configPath,
+                            previousSnapshot: baseSnapshot,
+                            committedHash: writeResult.persistedHash
+                        })) writeResult[configWritePostCommitRollback]?.();
+                    } catch (rollbackError) {
+                        throw new ConfigRuntimeRefreshError(\`\${formatErrorMessage(error)} Rollback failed: \${formatErrorMessage(rollbackError)}\`, { cause: error });
+                    }
+                    throw error;
+                }
+                return writeResult;
+            }
+            //#endregion
+            //#region src/config/io.factory.ts
+        `,
+        "mutate-fixture.js": `
+            async function tryWriteSingleTopLevelIncludeMutation(params) {
+                if (changedKeys.length !== 1 || changedKeys[0] === "<root>") return null;
+                const includePath = getSingleTopLevelIncludeTarget({ changedKeys });
+                await writeRootBoundJsonFile({ includePath });
+                refreshed = await readConfigSnapshotForMutation({ context: params.context });
+                const persistedHash = resolveConfigSnapshotHash(refreshedSnapshot);
+                return {
+                    persistedHash,
+                    persistedConfig: refreshedSnapshot.sourceConfig
+                };
+            }
+            function resolveConfigWriteResult(result, fallbackConfig) { return result; }
+            async function replaceConfigFileUnlocked(params) { return params; }
+            async function transformConfigFileAttempt(params) {
+                const snapshot = await readConfigSnapshotForMutation(params);
+                const baseConfig = params.base === "runtime" ? snapshot.runtimeConfig : snapshot.sourceConfig;
+                return params.transform(baseConfig);
+            }
+            async function transformConfigFileWithRetry(params) {
+                const maxAttempts = params.maxAttempts ?? DEFAULT_CONFIG_MUTATION_RETRY_ATTEMPTS;
+                for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+                    try { return await transformConfigFileAttempt(params); } catch (err) {
+                        if (err instanceof ConfigMutationConflictError && err.retryable && attempt < maxAttempts - 1) continue;
+                        throw err;
+                    }
+                }
+            }
+            async function mutateConfigFile(params) { return transformConfigFileWithRetry(params); }
+            async function mutateConfigFileWithRetry(params) { return transformConfigFileWithRetry(params); }
         `,
         "redact-snapshot-fixture.js": `
             const REDACTED_SENTINEL = "__OPENCLAW_REDACTED__";
@@ -401,10 +760,23 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
         `,
         "config-fixture.js": `
             async function commitGatewayConfigWrite(params) {
-                return replaceConfigFile({
+                const result = await replaceConfigFile({
                     nextConfig: params.nextConfig,
                     baseHash: resolveConfigSnapshotHash(params.snapshot) ?? void 0
                 });
+                invalidateConfigGetResponseCache();
+                return result;
+            }
+            function buildConfigRestartSentinelPayload(params) {
+                return {
+                    kind: params.kind,
+                    status: "ok",
+                    stats: {
+                        mode: params.mode,
+                        root: params.configPath,
+                        requiresRestart: params.requiresRestart
+                    }
+                };
             }
             async function tryWriteRestartSentinelPayload(payload) { return true; }
             async function resolveGatewayConfigRestartWriteResult(params) {
@@ -414,6 +786,18 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
                 }) : void 0;
                 return { payload, sentinelPersisted, restart };
             }
+            async function respondWithConfigRestartWrite(params) {
+                const { payload, sentinelPersisted, restart } = await resolveGatewayConfigRestartWriteResult(params);
+                params.respond(true, {
+                    ok: true,
+                    restart,
+                    sentinel: {
+                        persisted: sentinelPersisted,
+                        payload
+                    }
+                }, void 0);
+            }
+            function shouldDisconnectSharedAuthClientsForConfigWrite(params) { return false; }
             function formatConfigPatchPath(parentPath, key) {
                 return parentPath ? \`\${parentPath}.\${key}\` : key;
             }
@@ -453,7 +837,7 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
                     if (!assertValidParams(params, validateConfigPatchParams, "config.patch", respond)) return;
                     const hashlessPatch = resolveBaseHashParam(params) === null;
                     const parsedRes = parseConfigJson5(params.raw);
-                    const normalizedPatch = parsedRes.parsed;
+                    const normalizedPatch = normalizeSubmittedConfigModelRefs(parsedRes.parsed, modelIdNormalizationPolicies);
                     if (hashlessPatch && !hasHashlessPatchLwwStructure(normalizedPatch)) return;
                     const replacePaths = readConfigPatchReplacePaths(params);
                     const merged = applyMergePatch(snapshot.config, normalizedPatch, {
@@ -463,6 +847,13 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
                     const restoredMerge = restoreRedactedValues(merged, snapshot.config, schemaPatch.uiHints);
                     const restoredChangedPaths = diffConfigLeafPaths(snapshot.config, restoredMerge.result);
                     if (hashlessPatch && !restoredChangedPaths.every(isHashlessPatchLwwPath)) return;
+                    const validationCandidate = normalizeSubmittedConfigModelRefs(stripBundledProviderRuntimeDefaults({
+                        candidate: restoredMerge.result,
+                        sourceConfig: snapshot.sourceConfig
+                    }), modelIdNormalizationPolicies);
+                    const sourceValidated = validateConfigObjectRawWithPlugins(validationCandidate);
+                    const writeConfig = validationCandidate;
+                    const validated = validateConfigObjectWithPlugins(validationCandidate);
                     if (restoredChangedPaths.length === 0) {
                         respondConfigPatchNoop({ snapshot });
                         return;
@@ -484,10 +875,23 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
                 const current = entries[skillKey] ? { ...entries[skillKey] } : {};
                 if (typeof patch.enabled === "boolean") current.enabled = patch.enabled;
                 if (typeof patch.apiKey === "string") {
-                    const trimmed = patch.apiKey.trim();
+                    const trimmed = normalizeSecretInput(patch.apiKey);
                     if (trimmed === "__OPENCLAW_REDACTED__") {}
+                    else if (trimmed) current.apiKey = trimmed;
+                    else delete current.apiKey;
                 }
-                if (patch.env && typeof patch.env === "object") current.env = patch.env;
+                if (patch.env && typeof patch.env === "object") {
+                    const nextEnv = { ...current.env };
+                    for (const [key, value] of Object.entries(patch.env)) {
+                        const trimmedKey = key.trim();
+                        if (!trimmedKey) continue;
+                        const trimmedVal = value.trim();
+                        if (trimmedVal === "__OPENCLAW_REDACTED__") continue;
+                        if (!trimmedVal) delete nextEnv[trimmedKey];
+                        else nextEnv[trimmedKey] = trimmedVal;
+                    }
+                    current.env = nextEnv;
+                }
                 entries[skillKey] = current;
                 return { ...cfg, skills: { ...cfg.skills, entries } };
             }
@@ -496,9 +900,10 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
                     afterWrite: { mode: "auto" },
                     mutate: (draft) => {
                         const next = patchSkillConfigEntry(draft, params.skillKey, params);
+                        Object.assign(draft, next);
                         return next.skills?.entries?.[params.skillKey] ?? {};
                     }
-                })).result;
+                })).result ?? {};
             }
             //#endregion
             function resolveSkillsAgentWorkspace(params, context) {
@@ -574,6 +979,122 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
                 };
             }
             //#endregion
+        `,
+        "workspace-fixture.js": `
+            function mergeRemoteNodeSkillEntries(localEntries, options) {
+                const remoteEntries = [{
+                    skill: {
+                        source: "openclaw-node",
+                        sourceInfo: { source: "openclaw-node" }
+                    }
+                }];
+                return [...localEntries, ...remoteEntries];
+            }
+            function resetRemoteNodeSkillsForTests() {}
+            function loadSkillEntries(workspaceDir, opts) {
+                const bundledSkills = loadSkills({ source: "openclaw-bundled" });
+                const extraSkills = loadSkills({ source: "openclaw-extra" });
+                const managedSkills = loadSkills({ source: "openclaw-managed" });
+                const personalAgentsSkills = loadSkills({ source: "agents-skills-personal" });
+                const projectAgentsSkills = loadSkills({ source: "agents-skills-project" });
+                const workspaceSkills = loadSkills({ source: "openclaw-workspace" });
+                return [
+                    ...bundledSkills,
+                    ...extraSkills,
+                    ...managedSkills,
+                    ...personalAgentsSkills,
+                    ...projectAgentsSkills,
+                    ...workspaceSkills
+                ];
+            }
+            function filterArchivedSkillEntries(entries) { return entries; }
+        `,
+        "source-fixture.js": `
+            function resolveSkillSource(skill) {
+                const compatSkill = skill;
+                const canonical = normalizeOptionalString(compatSkill.source) ?? "";
+                if (canonical) return canonical;
+                return (normalizeOptionalString(compatSkill.sourceInfo?.source) ?? "") || "unknown";
+            }
+            function resolveSkillTelemetrySourceValue(value) { return value; }
+            function resolveSkillTelemetrySource(skill) { return resolveSkillSource(skill); }
+        `,
+        "frontmatter-fixture.js": `
+            function resolveOpenClawMetadata(frontmatter) { return frontmatter.metadata; }
+            function resolveSkillInvocationPolicy(frontmatter) { return frontmatter.policy; }
+            function resolveSkillKey(skill, entry) {
+                return entry?.metadata?.skillKey ?? skill.name;
+            }
+            //#endregion
+        `,
+        "store-fixture.js": `
+            function buildSkillIndexEntries(entries, opts) {
+                return entries.map((entry) => createSkillIndexEntry(entry, opts));
+            }
+            function createSkillIndexEntry(entry, opts, agentSkillSet) {
+                const name = entry.skill.name;
+                const skillKey = resolveSkillKey(entry.skill, entry);
+                const source = resolveSkillSource(entry.skill);
+                return {
+                    skillKey,
+                    source,
+                    bundled: source === "openclaw-bundled" || source === "unknown" && opts?.bundledNames?.has(name) === true
+                };
+            }
+            //#endregion
+        `,
+        "restart-fixture.js": `
+            function scheduleGatewaySigusr1Restart(opts) {
+                const cooldownMsApplied = 0;
+                return {
+                    ok: true,
+                    pid: process.pid,
+                    signal: "SIGUSR1",
+                    delayMs: 0,
+                    reason: opts.reason,
+                    mode: "signal",
+                    coalesced: false,
+                    cooldownMsApplied,
+                    emitHooksQueued: false
+                };
+            }
+            //#endregion
+        `,
+        "reset-policy-fixture.js": `
+            const DEFAULT_RESET_MODE = "none";
+            const DEFAULT_RESET_AT_HOUR = 4;
+            function resolveSessionResetPolicy(params) {
+                const baseReset = params.baseReset;
+                const typeReset = params.typeReset;
+                const configured = Boolean(baseReset || typeReset);
+                const inheritedTypeMode = typeReset && baseReset?.mode !== "none" ? baseReset?.mode : void 0;
+                const mode = typeReset?.mode ?? inheritedTypeMode ?? (typeReset ? "daily" : void 0) ?? baseReset?.mode ?? (baseReset ? "daily" : DEFAULT_RESET_MODE);
+                const atHour = normalizeResetAtHour(typeReset?.atHour ?? baseReset?.atHour ?? DEFAULT_RESET_AT_HOUR);
+                let idleMinutes;
+                if (mode === "daily") idleMinutes = undefined;
+                else if (mode === "idle") idleMinutes = 0;
+                return { mode, atHour, idleMinutes, configured };
+            }
+            /** Evaluates whether a persisted session is still fresh under the resolved reset policy. */
+        `,
+        "runtime-fetch-fixture.js": `
+            function resolveWebFetchEnabled(params) {
+                if (typeof params.fetch?.enabled === "boolean") return params.fetch.enabled;
+                return true;
+            }
+            function resolveFetchConfig(config) { return config; }
+            function resolveWebFetchProviderId(params) { return params.provider; }
+            function resolveWebFetchDefinition(options) { return options; }
+        `,
+        "runtime-search-fixture.js": `
+            function resolveWebSearchEnabled(params) {
+                if (typeof params.search?.enabled === "boolean") return params.search.enabled;
+                if (params.sandboxed) return true;
+                return true;
+            }
+            function hasEntryCredential(provider, config, search, agentDir) { return false; }
+            function resolveWebSearchProviderId(params) { return params.provider; }
+            function resolveWebSearchCandidates(options) { return []; }
         `,
         "core-descriptors-fixture.js": `
             { name: "chat.abort", scope: "operator.write" },
@@ -1937,7 +2458,7 @@ describe("reviewed OpenClaw protocol fixtures", () => {
             "chat-delta",
             "chat-terminal",
         ]);
-        expect(reviewed.audit.sourceArtifacts).toHaveLength(59);
+        expect(reviewed.audit.sourceArtifacts).toHaveLength(78);
         expect(reviewed.audit.settings.methodAccess).toEqual([
             { controlPlaneWrite: false, name: "config.get", scope: "operator.read" },
             { controlPlaneWrite: true, name: "config.patch", scope: "operator.admin" },
@@ -1955,9 +2476,129 @@ describe("reviewed OpenClaw protocol fixtures", () => {
             storagePath: "agents.entries",
             storageShape: "record-by-id",
         });
+        expect(reviewed.audit.settings.agentAccess.toolsPolicy.aliases).toEqual([
+            "bash=>exec",
+            "cron=>automations",
+        ]);
+        expect(reviewed.audit.settings.channels).toEqual({
+            providerEntriesArePassthrough: true,
+            providerEntryEnabledUnlessExplicitlyFalse: true,
+            reservedConfigKeys: ["defaults", "modelByChannel"],
+        });
+        expect(reviewed.audit.settings.configPatch.modelNormalization).toEqual({
+            agentScopeCollections: ["defaults", "entries", "list"],
+            agentSelectionFields: [
+                "imageModel",
+                "model",
+                "pdfModel",
+                "utilityModel",
+                "voiceModel",
+            ],
+            appliedBeforeMerge: true,
+            dynamicEnvironmentRefs: {
+                canonicalizedResolvedValueDoesNotRestoreOriginalReference: true,
+                resolvedBeforeSnapshotValidation: true,
+                restoredOnlyWhenResolvedValueUnchanged: true,
+            },
+            googleAliases: [
+                "gemini-3-pro=>gemini-3.1-pro-preview",
+                "gemini-3-pro-preview=>gemini-3.1-pro-preview",
+                "gemini-3-flash=>gemini-3-flash-preview",
+                "gemini-3.1-pro=>gemini-3.1-pro-preview",
+                "gemini-3.1-flash-lite-preview=>gemini-3.1-flash-lite",
+                "gemini-3.1-flash=>gemini-3-flash-preview",
+                "gemini-3.1-flash-preview=>gemini-3-flash-preview",
+                "gemma-4-26b=>gemma-4-26b-a4b-it",
+            ],
+            googleProviderIds: ["google", "google-gemini-cli", "google-vertex"],
+            mediaSelectionFields: ["image", "music", "video"],
+            modelSelectionShapes: ["fallbacks[]", "primary", "string"],
+            nestedAgentModelPaths: [
+                "compaction.memoryFlush.model",
+                "compaction.model",
+                "heartbeat.model",
+                "models.<key>",
+                "subagents.fallbacks[]",
+                "subagents.model",
+                "subagents.primary",
+            ],
+            nestedGoogleModelIdsNormalized: true,
+            normalizesAgentScopes: true,
+            normalizesProviderCatalogs: true,
+            providerCatalogModelPath: "models.providers[].models[].id",
+            togetherAliases: ["moonshotai/Kimi-K2.5=>moonshotai/Kimi-K2.6"],
+            togetherProviderId: "together",
+            wholeMergedCandidateNormalizedBeforeValidation: true,
+        });
+        expect(reviewed.audit.settings.exec).toMatchObject({
+            defaultAsk: "off",
+            defaultConfiguredHost: "auto",
+            defaultSecurityByEffectiveHost: {
+                nonSandbox: "full",
+                sandbox: "deny",
+            },
+            modePolicies: [
+                "allowlist:allowlist:off:no-auto-review",
+                "ask:allowlist:on-miss:no-auto-review",
+                "auto:allowlist:on-miss:auto-review",
+                "deny:deny:off:no-auto-review",
+                "full:full:off:no-auto-review",
+            ],
+        });
+        expect(reviewed.audit.settings.toolActivationDefaults).toEqual({
+            agentToAgentRequiresExplicitTrue: true,
+            elevatedEnabledUnlessExplicitlyFalse: true,
+            webFetchEnabledWhenOmitted: true,
+            webSearchEnabledWhenOmitted: true,
+        });
         expect(reviewed.audit.settings.skillsUpdate.request).toEqual({
             baseHashAccepted: false,
             localParams: ["apiKey", "enabled", "env", "skillKey"],
+            unpatchableConfigEntryKeys: ["constructor", "prototype"],
+        });
+        expect(reviewed.audit.settings.skillsStatus.source).toEqual({
+            bundling: {
+                canonicalBundledSource: "openclaw-bundled",
+                unknownSourceUsesBundledNameFallback: true,
+            },
+            fallback: {
+                canonicalField: "skill.source",
+                compatibilityField: "skill.sourceInfo.source",
+                missingSource: "unknown",
+            },
+            keyResolution: {
+                canonicalField: "entry.metadata.skillKey",
+                fallbackField: "skill.name",
+                indexUsesResolver: true,
+                statusUsesIndexedKey: true,
+            },
+            taxonomy: [
+                "agents-skills-personal",
+                "agents-skills-project",
+                "openclaw-bundled",
+                "openclaw-extra",
+                "openclaw-managed",
+                "openclaw-node",
+                "openclaw-workspace",
+                "unknown",
+            ],
+        });
+        expect(reviewed.audit.settings.configPatch.restart).toMatchObject({
+            schedulerSuccess: {
+                ok: true,
+                resultFields: [
+                    "coalesced",
+                    "cooldownMsApplied",
+                    "delayMs",
+                    "emitHooksQueued",
+                    "mode",
+                    "ok",
+                    "pid",
+                    "reason",
+                    "signal",
+                ],
+            },
+            sentinelRequiresRestartPath: "sentinel.payload.stats.requiresRestart",
         });
         expect(reviewed.audit.sessions.adapter.event.lifecycleProjection).toEqual({
             compactIsDestructiveOnlyWhenTrue: true,
@@ -2510,9 +3151,35 @@ describe("explicit OpenClaw source audit", () => {
                     legacySchedulerAliases: ["cron"],
                 },
                 toolsPolicy: {
+                    aliases: ["bash=>exec", "cron=>automations"],
                     nonEmptyAllowAndAlsoAllowConflictRejected: true,
                     optionalStringArrayFields: ["allow", "alsoAllow", "deny"],
                 },
+            });
+            expect(audit.settings.channels).toEqual({
+                providerEntriesArePassthrough: true,
+                providerEntryEnabledUnlessExplicitlyFalse: true,
+                reservedConfigKeys: ["defaults", "modelByChannel"],
+            });
+            expect(audit.settings.configPatch.modelNormalization).toMatchObject({
+                appliedBeforeMerge: true,
+                googleAliases: expect.arrayContaining([
+                    "gemini-3-pro=>gemini-3.1-pro-preview",
+                ]),
+                togetherAliases: ["moonshotai/Kimi-K2.5=>moonshotai/Kimi-K2.6"],
+            });
+            expect(audit.settings.exec).toMatchObject({
+                defaultAsk: "off",
+                defaultConfiguredHost: "auto",
+                modePolicies: expect.arrayContaining([
+                    "auto:allowlist:on-miss:auto-review",
+                ]),
+            });
+            expect(audit.settings.toolActivationDefaults).toEqual({
+                agentToAgentRequiresExplicitTrue: true,
+                elevatedEnabledUnlessExplicitlyFalse: true,
+                webFetchEnabledWhenOmitted: true,
+                webSearchEnabledWhenOmitted: true,
             });
             expect(audit.settings.skillsStatus.row).toMatchObject({
                 disabledFrom: "skills.entries[skillKey].enabled-equals-false",
@@ -2521,8 +3188,23 @@ describe("explicit OpenClaw source audit", () => {
             expect(audit.settings.skillsUpdate.request).toEqual({
                 baseHashAccepted: false,
                 localParams: ["apiKey", "enabled", "env", "skillKey"],
+                unpatchableConfigEntryKeys: ["constructor", "prototype"],
             });
-            expect(audit.sourceArtifacts).toHaveLength(59);
+            expect(audit.settings.skillsStatus.source.taxonomy).toEqual([
+                "agents-skills-personal",
+                "agents-skills-project",
+                "openclaw-bundled",
+                "openclaw-extra",
+                "openclaw-managed",
+                "openclaw-node",
+                "openclaw-workspace",
+                "unknown",
+            ]);
+            expect(audit.settings.configPatch.restart).toMatchObject({
+                schedulerSuccess: { ok: true },
+                sentinelRequiresRestartPath: "sentinel.payload.stats.requiresRestart",
+            });
+            expect(audit.sourceArtifacts).toHaveLength(78);
         });
     });
 
@@ -2591,6 +3273,9 @@ describe("explicit OpenClaw source audit", () => {
                     "core-descriptors-fixture.js"
                 );
                 const descriptors = await readFile(descriptorPath, "utf8");
+                expect(descriptors).toContain(
+                    '{ name: "config.patch", scope: "operator.admin", controlPlaneWrite: true }'
+                );
                 await writeFile(
                     descriptorPath,
                     descriptors.replace(
@@ -2608,6 +3293,7 @@ describe("explicit OpenClaw source audit", () => {
                 await writeSyntheticOpenClawPackage(hashRoot);
                 const configPath = path.join(hashRoot, "dist", "config-fixture.js");
                 const configSource = await readFile(configPath, "utf8");
+                expect(configSource).toContain("if (baseHash !== snapshotHash)");
                 await writeFile(
                     configPath,
                     configSource.replace(
@@ -2627,6 +3313,9 @@ describe("explicit OpenClaw source audit", () => {
                     "redact-snapshot-fixture.js"
                 );
                 const redactionSource = await readFile(redactionPath, "utf8");
+                expect(redactionSource).toContain(
+                    'assertNoRedactedSentinel(restored, "")'
+                );
                 await writeFile(
                     redactionPath,
                     redactionSource.replace(
@@ -2672,6 +3361,14 @@ describe("explicit OpenClaw source audit", () => {
                         to: '{ id: "gateway_admin" }',
                     },
                     {
+                        expected:
+                            "Expected one OpenClaw tool-policy-normalization artifact, found 0",
+                        fileName: "tool-policy-fixture.js",
+                        from: 'bash: "exec"',
+                        name: "bash-alias",
+                        to: 'bash: "shell"',
+                    },
+                    {
                         expected: "tool policy alias normalization changed",
                         fileName: "tool-policy-fixture.js",
                         from: "return TOOL_NAME_ALIASES[normalized] ?? normalized;",
@@ -2691,6 +3388,283 @@ describe("explicit OpenClaw source audit", () => {
                         from: "options.replaceArrayPaths?.has(path)",
                         name: "array-replacement",
                         to: "options.replaceArrayPaths?.has(key)",
+                    },
+                    {
+                        expected: "config merge-patch blocked-key policy changed",
+                        fileName: "merge-patch-fixture.js",
+                        from: 'parentPath === "browser.profiles"',
+                        name: "blocked-skill-key",
+                        to: 'parentPath === "skills.entries"',
+                    },
+                ] as const;
+
+                for (const driftCase of cases) {
+                    const sourceRoot = path.join(temporaryRoot, driftCase.name);
+                    await writeSyntheticOpenClawPackage(sourceRoot);
+                    const artifactPath = path.join(
+                        sourceRoot,
+                        "dist",
+                        driftCase.fileName
+                    );
+                    const source = await readFile(artifactPath, "utf8");
+                    expect(source).toContain(driftCase.from);
+                    await writeFile(
+                        artifactPath,
+                        source.replace(driftCase.from, driftCase.to),
+                        "utf8"
+                    );
+
+                    const error = await rejectedError(auditInstalledOpenClaw(sourceRoot));
+                    expect(error.message).toContain(driftCase.expected);
+                }
+            }
+        );
+    });
+
+    test("rejects drift in settings normalization and activation defaults", async () => {
+        await withTemporaryDirectory(
+            "mira-openclaw-settings-defaults-",
+            async (temporaryRoot) => {
+                const cases = [
+                    {
+                        expected: "channel config schema changed",
+                        fileName: "zod-schema.channels-config-fixture.js",
+                        from: ").passthrough().superRefine",
+                        name: "channel-passthrough",
+                        to: ").strict().superRefine",
+                    },
+                    {
+                        expected: "channel enabled default changed",
+                        fileName: "channel-selection-fixture.js",
+                        from: "return entry.enabled !== false;",
+                        name: "channel-enabled-default",
+                        to: "return entry.enabled === true;",
+                    },
+                    {
+                        expected: "config.patch handler changed",
+                        fileName: "config-fixture.js",
+                        from: "const normalizedPatch = normalizeSubmittedConfigModelRefs(parsedRes.parsed, modelIdNormalizationPolicies);",
+                        name: "model-normalization-dispatch",
+                        to: "const normalizedPatch = parsedRes.parsed;",
+                    },
+                    {
+                        expected: "Google model id normalization changed",
+                        fileName: "provider-model-id-normalize-fixture.js",
+                        from: 'return "gemini-3.1-pro-preview";',
+                        name: "google-model-alias",
+                        to: 'return "gemini-3-pro";',
+                    },
+                    {
+                        expected: "Together model id normalization changed",
+                        fileName: "provider-model-id-normalize-fixture.js",
+                        from: 'return "moonshotai/Kimi-K2.6";',
+                        name: "together-model-alias",
+                        to: 'return "moonshotai/Kimi-K2.5";',
+                    },
+                    {
+                        expected: "elevated tool defaults changed",
+                        fileName: "get-reply-fixture.js",
+                        from: "globalConfig?.enabled !== false",
+                        name: "elevated-default",
+                        to: "globalConfig?.enabled === true",
+                    },
+                    {
+                        expected: "agent-to-agent default changed",
+                        fileName: "session-visibility-fixture.js",
+                        from: "routingA2A?.enabled === true",
+                        name: "agent-to-agent-default",
+                        to: "routingA2A?.enabled !== false",
+                    },
+                    {
+                        expected: "exec config defaults changed",
+                        fileName: "exec-defaults-fixture.js",
+                        from: 'globalExec?.host ?? "auto"',
+                        name: "exec-host-default",
+                        to: 'globalExec?.host ?? "sandbox"',
+                    },
+                    {
+                        expected: "exec mode policy changed",
+                        fileName: "exec-approvals-fixture.js",
+                        from: 'case "auto": return { security: "allowlist", ask: "on-miss", autoReview: true };',
+                        name: "exec-auto-review",
+                        to: 'case "auto": return { security: "allowlist", ask: "on-miss", autoReview: false };',
+                    },
+                ] as const;
+
+                for (const driftCase of cases) {
+                    const sourceRoot = path.join(temporaryRoot, driftCase.name);
+                    await writeSyntheticOpenClawPackage(sourceRoot);
+                    const artifactPath = path.join(
+                        sourceRoot,
+                        "dist",
+                        driftCase.fileName
+                    );
+                    const source = await readFile(artifactPath, "utf8");
+                    expect(source).toContain(driftCase.from);
+                    await writeFile(
+                        artifactPath,
+                        source.replace(driftCase.from, driftCase.to),
+                        "utf8"
+                    );
+
+                    const error = await rejectedError(auditInstalledOpenClaw(sourceRoot));
+                    expect(error.message).toContain(driftCase.expected);
+                }
+            }
+        );
+    });
+
+    test("rejects drift in pinned config IO, reset, web, and skill mutation facts", async () => {
+        await withTemporaryDirectory(
+            "mira-openclaw-settings-upstream-facts-",
+            async (temporaryRoot) => {
+                const cases = [
+                    {
+                        expected: "config.patch handler changed",
+                        fileName: "config-fixture.js",
+                        from: "const validationCandidate = normalizeSubmittedConfigModelRefs(stripBundledProviderRuntimeDefaults({",
+                        name: "whole-merged-model-normalization",
+                        to: "const validationCandidate = stripBundledProviderRuntimeDefaults({",
+                    },
+                    {
+                        expected: "agent model scope normalization changed",
+                        fileName: "model-input-normalization-fixture.js",
+                        from: 'assign("heartbeat", normalizeNestedModelField(value.heartbeat, "model", normalizeStringModelRef));',
+                        name: "heartbeat-model-traversal",
+                        to: 'assign("heartbeat", value.heartbeat);',
+                    },
+                    {
+                        expected: "provider catalog model normalization changed",
+                        fileName: "model-input-normalization-fixture.js",
+                        from: "normalizeConfiguredProviderCatalogModelId(providerId, trimmed, modelIdNormalizationPolicies)",
+                        name: "provider-catalog-traversal",
+                        to: "trimmed",
+                    },
+                    {
+                        expected: "config.get response cache changed",
+                        fileName: "config-get-response-fixture.js",
+                        from: "configGetResponseCache.pluginRegistryVersion === pluginRegistryVersion",
+                        name: "config-get-cache-key",
+                        to: "true",
+                    },
+                    {
+                        expected: "config snapshot read changed",
+                        fileName: "io-fixture.js",
+                        from: "const effectiveParsed = parsedRes.parsed;",
+                        name: "authored-parsed-order",
+                        to: "const effectiveParsed = resolved;",
+                    },
+                    {
+                        expected: "config environment reference restoration changed",
+                        fileName: "io-fixture.js",
+                        from: "if (tryResolveString(parsed, env) === incoming) return parsed;",
+                        name: "environment-reference-restoration",
+                        to: "if (parsed !== incoming) return parsed;",
+                    },
+                    {
+                        expected: "included config mutation changed",
+                        fileName: "mutate-fixture.js",
+                        from: "const persistedHash = resolveConfigSnapshotHash(refreshedSnapshot);",
+                        name: "include-root-persisted-hash",
+                        to: "const persistedHash = committedIncludeHash;",
+                    },
+                    {
+                        expected: "config mutation base changed",
+                        fileName: "mutate-fixture.js",
+                        from: 'const baseConfig = params.base === "runtime" ? snapshot.runtimeConfig : snapshot.sourceConfig;',
+                        name: "skill-mutation-source-base",
+                        to: "const baseConfig = snapshot.runtimeConfig;",
+                    },
+                    {
+                        expected: "config mutation retry changed",
+                        fileName: "mutate-fixture.js",
+                        from: "err.retryable && attempt < maxAttempts - 1",
+                        name: "config-mutation-retry-fence",
+                        to: "attempt < maxAttempts - 1",
+                    },
+                    {
+                        expected: "config merge-patch array replacement changed",
+                        fileName: "merge-patch-fixture.js",
+                        from: "if (value === null) {",
+                        name: "merge-patch-null-delete",
+                        to: "if (value === undefined) {",
+                    },
+                    {
+                        expected: "agent heartbeat defaults schema changed",
+                        fileName: "zod-schema-fixture.js",
+                        from: "heartbeat: HeartbeatSchema.unwrap().safeExtend({ agentId: string().trim().min(1).optional() }).optional()",
+                        name: "heartbeat-target-defaults-path",
+                        to: "heartbeat: HeartbeatSchema.optional()",
+                    },
+                    {
+                        expected: "agent heartbeat schema changed",
+                        fileName: "zod-schema.agent-runtime-fixture.js",
+                        from: "target: string().optional()",
+                        name: "heartbeat-target-optional-leaf",
+                        to: "target: string()",
+                    },
+                    {
+                        expected: "config post-commit dispatch changed",
+                        fileName: "io-fixture.js",
+                        from: "const writeResult = await io.writeConfigFile(nextCfg, {",
+                        name: "persist-before-finalize",
+                        to: "const writeResult = await finalizeRuntimeSnapshotWrite({",
+                    },
+                    {
+                        expected: "config post-commit settlement changed",
+                        fileName: "io-fixture.js",
+                        from: "committedHash: writeResult.persistedHash",
+                        name: "hash-guarded-rollback",
+                        to: "committedHash: baseSnapshot.hash",
+                    },
+                    {
+                        expected: "session reset policy changed",
+                        fileName: "reset-policy-fixture.js",
+                        from: '(typeReset ? "daily" : void 0)',
+                        name: "reset-present-default",
+                        to: '(typeReset ? "none" : void 0)',
+                    },
+                    {
+                        expected: "skill key resolution changed",
+                        fileName: "frontmatter-fixture.js",
+                        from: "return entry?.metadata?.skillKey ?? skill.name;",
+                        name: "skill-key-fallback",
+                        to: "return skill.name;",
+                    },
+                    {
+                        expected: "skills.status row changed",
+                        fileName: "status-fixture.js",
+                        from: "const skillKey = indexed.skillKey;",
+                        name: "status-indexed-skill-key",
+                        to: "const skillKey = entry.skill.name;",
+                    },
+                    {
+                        expected: "web_fetch enabled default changed",
+                        fileName: "runtime-fetch-fixture.js",
+                        from: "return true;",
+                        name: "web-fetch-omitted-default",
+                        to: "return false;",
+                    },
+                    {
+                        expected: "web_search enabled default changed",
+                        fileName: "runtime-search-fixture.js",
+                        from: "if (params.sandboxed) return true;",
+                        name: "web-search-omitted-default",
+                        to: "if (params.sandboxed) return false;",
+                    },
+                    {
+                        expected: "skills.update mutation changed",
+                        fileName: "skills-fixture.js",
+                        from: "if (!trimmedVal) delete nextEnv[trimmedKey];",
+                        name: "skill-env-blank-delete",
+                        to: "if (!trimmedVal) nextEnv[trimmedKey] = trimmedVal;",
+                    },
+                    {
+                        expected: "skills.update config write changed",
+                        fileName: "skills-fixture.js",
+                        from: "Object.assign(draft, next);",
+                        name: "skill-no-whole-model-normalization",
+                        to: "normalizeSubmittedConfigModelRefs(draft);\n                        Object.assign(draft, next);",
                     },
                 ] as const;
 
@@ -2737,6 +3711,71 @@ describe("explicit OpenClaw source audit", () => {
                 expect(error.message).toContain(
                     "skills.update local params fields changed"
                 );
+            }
+        );
+    });
+
+    test("rejects drift in skill source and restart acknowledgement facts", async () => {
+        await withTemporaryDirectory(
+            "mira-openclaw-settings-evidence-",
+            async (temporaryRoot) => {
+                const cases = [
+                    {
+                        expected: "skill source taxonomy changed",
+                        fileName: "workspace-fixture.js",
+                        from: 'source: "openclaw-managed"',
+                        name: "source-taxonomy",
+                        to: 'source: "openclaw-system"',
+                    },
+                    {
+                        expected: "skill source resolution changed",
+                        fileName: "source-fixture.js",
+                        from: '|| "unknown"',
+                        name: "source-fallback",
+                        to: '|| "other"',
+                    },
+                    {
+                        expected: "skill source index changed",
+                        fileName: "store-fixture.js",
+                        from: 'source === "unknown" && opts?.bundledNames?.has(name) === true',
+                        name: "bundled-fallback",
+                        to: 'source === "openclaw-managed"',
+                    },
+                    {
+                        expected: "config.patch restart sentinel payload changed",
+                        fileName: "config-fixture.js",
+                        from: "requiresRestart: params.requiresRestart",
+                        name: "restart-sentinel",
+                        to: "restartRequired: params.requiresRestart",
+                    },
+                    {
+                        expected: "Gateway restart scheduler success shape changed",
+                        fileName: "restart-fixture.js",
+                        from: "ok: true",
+                        name: "restart-success",
+                        to: "ok: false",
+                    },
+                ] as const;
+
+                for (const driftCase of cases) {
+                    const sourceRoot = path.join(temporaryRoot, driftCase.name);
+                    await writeSyntheticOpenClawPackage(sourceRoot);
+                    const artifactPath = path.join(
+                        sourceRoot,
+                        "dist",
+                        driftCase.fileName
+                    );
+                    const source = await readFile(artifactPath, "utf8");
+                    expect(source).toContain(driftCase.from);
+                    await writeFile(
+                        artifactPath,
+                        source.replace(driftCase.from, driftCase.to),
+                        "utf8"
+                    );
+
+                    const error = await rejectedError(auditInstalledOpenClaw(sourceRoot));
+                    expect(error.message).toContain(driftCase.expected);
+                }
             }
         );
     });

@@ -255,6 +255,38 @@ test("records only classified OpenClaw settings audit settlement fields", () => 
     expect(lines[0]).not.toContain(sensitiveTarget);
 });
 
+test("records bounded OpenClaw settings mutation queue observations", () => {
+    const lines: string[] = [];
+    const logger = createStructuredLogger({
+        identity,
+        sink: {
+            write(line) {
+                lines.push(line);
+            },
+        },
+    });
+
+    logger.info({
+        component: "openclaw-settings",
+        durationMs: 125,
+        event: "openclaw_settings.mutation_queue.waited",
+        fields: {
+            kind: "openclaw-settings-mutation-queue",
+            queueDepth: 2,
+        },
+        outcome: "success",
+    });
+
+    expect(JSON.parse(lines[0] ?? "null")).toMatchObject({
+        component: "openclaw-settings",
+        durationMs: 125,
+        event: "openclaw_settings.mutation_queue.waited",
+        fields: { queueDepth: 2 },
+        level: "info",
+        outcome: "success",
+    });
+});
+
 test("records only fixed log-maintenance audit settlement fields", () => {
     const lines: string[] = [];
     const logger = createStructuredLogger({

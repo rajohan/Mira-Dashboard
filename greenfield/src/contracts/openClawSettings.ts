@@ -9,7 +9,6 @@ import {
     nonnegativeSafeIntegerSchema,
     positiveSafeIntegerSchema,
 } from "../shared/validation.ts";
-import { agentIdSchema } from "./agentModel.ts";
 import type { ProcedureContract } from "./registry.ts";
 
 /** Maximum authenticated raw Gateway response accepted for config.get. */
@@ -24,6 +23,14 @@ export const openClawAgentAccessMaximum = 32;
 
 export const openClawConfigHashSchema = lowercaseSha256Schema(
     "OpenClaw configuration hash is invalid"
+);
+export const openClawConfigRevisionHashSchema = v.pipe(
+    v.string("OpenClaw configuration revision hash is invalid"),
+    v.length(43, "OpenClaw configuration revision hash is invalid"),
+    v.regex(
+        /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/u,
+        "OpenClaw configuration revision hash is invalid"
+    )
 );
 
 const optionalConfigurationTextSchema = (maximum: number, message: string) =>
@@ -46,14 +53,30 @@ const openClawModelSettingsSchema = v.strictObject({
     primary: v.optional(openClawModelIdSchema),
 });
 
-const openClawSessionResetSettingsSchema = v.strictObject({
-    idleMinutes: v.optional(
-        v.pipe(
-            positiveSafeIntegerSchema("OpenClaw session reset is invalid"),
-            v.maxValue(10_080, "OpenClaw session reset is outside its budget")
-        )
-    ),
-});
+const openClawModelNormalizationStateSchema = v.picklist(
+    ["clean", "pending", "unknown"],
+    "OpenClaw model normalization state is invalid"
+);
+
+const openClawSessionResetIdleMinutesSchema = v.pipe(
+    positiveSafeIntegerSchema("OpenClaw session reset is invalid"),
+    v.maxValue(10_080, "OpenClaw session reset is outside its budget")
+);
+
+const openClawSessionResetSettingsSchema = v.variant("state", [
+    v.strictObject({
+        idleMinutes: openClawSessionResetIdleMinutesSchema,
+        mode: v.literal("idle"),
+        state: v.literal("explicit-idle"),
+    }),
+    v.strictObject({ state: v.literal("inherited-none") }),
+    v.strictObject({ state: v.literal("implicit-daily") }),
+    v.strictObject({
+        mode: v.picklist(["daily", "none"]),
+        state: v.literal("locked-mode"),
+    }),
+    v.strictObject({ state: v.literal("partial-idle") }),
+]);
 
 const openClawHeartbeatSettingsSchema = v.strictObject({
     everySeconds: v.optional(
@@ -66,17 +89,33 @@ const openClawHeartbeatSettingsSchema = v.strictObject({
     target: optionalConfigurationTextSchema(128, "OpenClaw heartbeat target is invalid"),
 });
 
+const openClawExecPolicySchema = v.variant("state", [
+    v.strictObject({
+        ask: v.picklist(
+            ["off", "on-miss", "always"],
+            "OpenClaw exec approval setting is invalid"
+        ),
+        security: v.picklist(
+            ["allowlist", "deny", "full"],
+            "OpenClaw exec security setting is invalid"
+        ),
+        state: v.literal("explicit"),
+    }),
+    v.strictObject({ state: v.literal("inherited") }),
+    v.strictObject({ state: v.literal("partial") }),
+    v.strictObject({
+        mode: v.picklist(
+            ["deny", "allowlist", "ask", "auto", "full"],
+            "OpenClaw legacy exec mode is invalid"
+        ),
+        state: v.literal("legacy-mode"),
+    }),
+]);
+
 const openClawToolSettingsSchema = v.strictObject({
     agentToAgentEnabled: v.boolean("OpenClaw agent-to-agent setting is invalid"),
     elevatedEnabled: v.boolean("OpenClaw elevated-tool setting is invalid"),
-    execAsk: v.picklist(
-        ["off", "on-miss", "always"],
-        "OpenClaw exec approval setting is invalid"
-    ),
-    execSecurity: v.picklist(
-        ["allowlist", "deny", "full"],
-        "OpenClaw exec security setting is invalid"
-    ),
+    execPolicy: openClawExecPolicySchema,
     profile: optionalConfigurationTextSchema(64, "OpenClaw tool profile is invalid"),
     sessionsVisibility: v.optional(
         v.picklist(
@@ -93,8 +132,13 @@ const openClawToolSettingsSchema = v.strictObject({
 });
 
 export const openClawChannelIdSchema = v.pipe(
-    boundedControlSafeTextSchema(64, "OpenClaw channel id is invalid"),
-    v.regex(/^[a-z0-9][a-z0-9._-]*$/u, "OpenClaw channel id is invalid")
+    v.string("OpenClaw channel id is invalid"),
+    v.minLength(1, "OpenClaw channel id is invalid"),
+    v.maxLength(64, "OpenClaw channel id is invalid"),
+    v.regex(
+        /^(?!(?:constructor|prototype)$)[a-z0-9][a-z0-9._-]*$/u,
+        "OpenClaw channel id is invalid"
+    )
 );
 
 const openClawChannelSettingsSchema = v.strictObject({
@@ -211,9 +255,11 @@ export interface OpenClawAgentAccessValue {
 }
 
 export const openClawAgentIdSchema = v.pipe(
-    agentIdSchema,
+    v.string("OpenClaw agent id is invalid"),
+    v.minLength(1, "OpenClaw agent id is invalid"),
+    v.maxLength(64, "OpenClaw agent id is invalid"),
     v.regex(
-        /^(?!(?:__proto__|constructor|prototype)$)[a-z0-9_][a-z0-9_-]{0,63}$/u,
+        /^(?!(?:__[Pp][Rr][Oo][Tt][Oo]__|[Cc][Oo][Nn][Ss][Tt][Rr][Uu][Cc][Tt][Oo][Rr]|[Pp][Rr][Oo][Tt][Oo][Tt][Yy][Pp][Ee])$)[A-Za-z0-9_][A-Za-z0-9_-]{0,63}$/,
         "OpenClaw agent id is invalid"
     )
 );
@@ -253,8 +299,10 @@ export const openClawConfigurationSnapshotSchema = v.strictObject({
     agentAccess: openClawAgentAccessListSchema,
     agentAccessTruncated: v.boolean("OpenClaw agent access truncation state is invalid"),
     channels: openClawChannelsSchema,
+    channelsTruncated: v.boolean("OpenClaw channel truncation state is invalid"),
     hash: openClawConfigHashSchema,
     heartbeat: openClawHeartbeatSettingsSchema,
+    includesPresent: v.boolean("OpenClaw include state is invalid"),
     issueCount: nonnegativeSafeIntegerSchema(
         "OpenClaw configuration issue count is invalid"
     ),
@@ -267,6 +315,8 @@ export const openClawConfigurationSnapshotSchema = v.strictObject({
         "OpenClaw last-touched version is invalid"
     ),
     models: openClawModelSettingsSchema,
+    modelNormalizationState: openClawModelNormalizationStateSchema,
+    revisionHash: openClawConfigRevisionHashSchema,
     security: openClawSecuritySummarySchema,
     sessionReset: openClawSessionResetSettingsSchema,
     tools: openClawToolSettingsSchema,
@@ -280,10 +330,8 @@ const updateOpenClawModelsSchema = v.strictObject({
 });
 
 const updateOpenClawSessionResetSchema = v.strictObject({
-    idleMinutes: v.pipe(
-        positiveSafeIntegerSchema("OpenClaw session reset is invalid"),
-        v.maxValue(10_080, "OpenClaw session reset is outside its budget")
-    ),
+    idleMinutes: openClawSessionResetIdleMinutesSchema,
+    mode: v.literal("idle"),
     section: v.literal("session-reset"),
 });
 
@@ -327,6 +375,7 @@ export const openClawConfigurationUpdateSchema = v.variant("section", [
 
 export const updateOpenClawConfigurationInputSchema = v.strictObject({
     baseHash: openClawConfigHashSchema,
+    baseRevisionHash: openClawConfigRevisionHashSchema,
     confirmation: v.literal(
         "apply-reviewed-settings",
         "OpenClaw settings confirmation is required"
@@ -343,14 +392,32 @@ export const updateOpenClawConfigurationResultSchema = v.strictObject({
 
 export const openClawSkillKeySchema = v.pipe(
     boundedControlSafeTextSchema(128, "OpenClaw skill key is invalid"),
-    v.regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/u, "OpenClaw skill key is invalid")
+    v.regex(
+        /^(?!(?:[Cc][Oo][Nn][Ss][Tt][Rr][Uu][Cc][Tt][Oo][Rr]|[Pp][Rr][Oo][Tt][Oo][Tt][Yy][Pp][Ee])$)[A-Za-z0-9][A-Za-z0-9._-]*$/u,
+        "OpenClaw skill key is invalid"
+    )
 );
 
+export const openClawGatewaySkillSources = [
+    "agents-skills-personal",
+    "agents-skills-project",
+    "openclaw-bundled",
+    "openclaw-extra",
+    "openclaw-managed",
+    "openclaw-node",
+    "openclaw-workspace",
+    "unknown",
+] as const;
+
 export const openClawSkillSources = [
+    "agents-skills-personal",
+    "agents-skills-project",
     "openclaw-bundled",
     "openclaw-configured",
+    "openclaw-extra",
     "openclaw-managed",
-    "openclaw-plugin",
+    "openclaw-node",
+    "openclaw-unknown",
     "openclaw-workspace",
 ] as const;
 
@@ -374,7 +441,7 @@ export function openClawSkillBundledSourceIsConsistent({
     bundled,
     source,
 }: OpenClawSkillValue): boolean {
-    return bundled === (source === "openclaw-bundled");
+    return source === "openclaw-unknown" || bundled === (source === "openclaw-bundled");
 }
 
 export function openClawSkillInstallationSourceIsConsistent({
@@ -433,6 +500,7 @@ export const listOpenClawSkillsResultSchema = v.strictObject({
 
 export const setOpenClawSkillEnabledInputSchema = v.strictObject({
     baseHash: openClawConfigHashSchema,
+    baseRevisionHash: openClawConfigRevisionHashSchema,
     enabled: v.boolean("OpenClaw skill enabled state is invalid"),
     skillKey: openClawSkillKeySchema,
 });
@@ -548,7 +616,7 @@ export const openClawSettingsProcedureContracts = [
         output: updateOpenClawConfigurationResultSchema,
         outputSchemaId: "openClawSettings.updateConfiguration.output",
         summary:
-            "Applies one hash-fenced server-built patch to an exact reviewed settings section after recent MFA.",
+            "Applies one root-hash-fenced server-built patch after an exact revision preflight and recent MFA.",
         transport: mutationTransport,
     },
     {
@@ -563,7 +631,7 @@ export const openClawSettingsProcedureContracts = [
         output: setOpenClawSkillEnabledResultSchema,
         outputSchemaId: "openClawSettings.setSkillEnabled.output",
         summary:
-            "Enables or disables one freshly verified exact OpenClaw skill after recent MFA.",
+            "Updates one freshly verified skill leaf on the latest OpenClaw configuration after recent MFA.",
         transport: mutationTransport,
     },
 ] as const satisfies readonly ProcedureContract[];

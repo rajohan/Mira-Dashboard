@@ -16,4 +16,7 @@ export type DashboardRoutePath = (typeof dashboardRoutePaths)[number];
 export type DashboardAuthenticatedPath = Exclude<DashboardRoutePath, "/login">;
 
 /** Authenticated routes shown in the main application navigation. */
-export type DashboardNavigationPath = Exclude<DashboardAuthenticatedPath, "/incidents">;
+export type DashboardNavigationPath = Exclude<
+    DashboardAuthenticatedPath,
+    "/account-security" | "/incidents"
+>;

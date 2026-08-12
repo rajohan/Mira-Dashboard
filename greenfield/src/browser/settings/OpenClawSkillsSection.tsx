@@ -10,7 +10,6 @@ import { Text } from "../ui/Text.tsx";
 type OpenClawSkill = ListOpenClawSkillsResult["skills"][number];
 
 interface OpenClawSkillsSectionProps {
-    readonly baseHash: string | undefined;
     readonly busy: boolean;
     readonly enabled: boolean;
     readonly onToggle: (skill: OpenClawSkill, enabled: boolean) => Promise<void>;
@@ -19,15 +18,14 @@ interface OpenClawSkillsSectionProps {
 
 /** @returns Path-free OpenClaw skill inventory with exact enabled-only controls. */
 export function OpenClawSkillsSection({
-    baseHash,
     busy,
     enabled,
     onToggle,
     result,
 }: OpenClawSkillsSectionProps) {
-    const controlsDisabled = busy || !enabled || baseHash === undefined;
+    const controlsDisabled = busy || !enabled;
     return (
-        <Card aria-labelledby="openclaw-skills-heading">
+        <Card aria-busy={busy || undefined} aria-labelledby="openclaw-skills-heading">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                     <Heading id="openclaw-skills-heading" level={2}>
@@ -39,7 +37,13 @@ export function OpenClawSkillsSection({
                         controls, and skill source files are not exposed.
                     </Text>
                 </div>
-                <Badge variant="info">{result.skills.length} reported</Badge>
+                {busy ? (
+                    <output>
+                        <Badge variant="info">Saving skill…</Badge>
+                    </output>
+                ) : (
+                    <Badge variant="info">{result.skills.length} reported</Badge>
+                )}
             </div>
             {result.truncated && (
                 <Alert

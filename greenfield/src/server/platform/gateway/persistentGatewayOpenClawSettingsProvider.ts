@@ -7,10 +7,15 @@ import {
     listOpenClawSkillsResultSchema,
     openClawAgentAccessMaximum,
     openClawAgentIdSchema,
+    openClawChannelIdSchema,
+    openClawChannelMaximum,
     openClawConfigurationSnapshotSchema,
     openClawConfigurationUpstreamMaximumBytes,
     openClawConfigHashSchema,
+    openClawConfigRevisionHashSchema,
+    openClawGatewaySkillSources,
     openClawModelFallbackMaximum,
+    openClawModelIdSchema,
     openClawReviewedAgentToolIds,
     openClawSkillKeySchema,
     openClawSkillMaximum,
@@ -23,6 +28,7 @@ import {
     type OpenClawAgentToolAccessValue,
     type OpenClawConfigurationSnapshot,
     type OpenClawConfigurationUpdate,
+    type OpenClawSkillValue,
     type UpdateOpenClawConfigurationResult,
 } from "../../../contracts/openClawSettings.ts";
 import {
@@ -37,6 +43,7 @@ import {
     type OpenClawSettingsProviderSetSkillEnabledResult,
     type OpenClawSettingsProviderUpdateConfigurationRequest,
 } from "../../domains/openClawSettings/provider.ts";
+import { persistentGatewayOpenClawSettingsPatchMaximumBytes } from "./persistentGatewayProtocol.ts";
 import {
     persistentGatewayConfigurationChangedReason,
     PersistentGatewayRequestError,
@@ -73,13 +80,15 @@ const upstreamControlSafeTextSchema = (maximum: number) =>
     v.pipe(upstreamTextSchema(maximum), v.check(hasNoUnicodeControlOrFormat));
 const upstreamUnknownArraySchema = v.pipe(v.array(v.unknown()), v.maxLength(4096));
 const upstreamRecordSchema = v.record(v.string(), v.unknown());
+const upstreamAgentToolPolicyMaximum = 512;
+const upstreamConfiguredSkillMaximum = 4096;
 const upstreamConfiguredSkillEntriesSchema = v.pipe(
     v.record(v.string(), v.object({ enabled: v.optional(v.boolean()) })),
-    v.check((entries) => Object.keys(entries).length <= 4096)
+    v.check((entries) => Object.keys(entries).length <= upstreamConfiguredSkillMaximum)
 );
 const upstreamAgentToolPolicyListSchema = v.pipe(
     v.array(upstreamControlSafeTextSchema(256)),
-    v.maxLength(512)
+    v.maxLength(upstreamAgentToolPolicyMaximum)
 );
 const upstreamAgentEntriesSchema = v.pipe(
     v.record(
@@ -154,9 +163,13 @@ const upstreamConfigurationSchema = v.object({
         v.object({
             reset: v.optional(
                 v.object({
+                    atHour: v.optional(
+                        v.pipe(v.number(), v.safeInteger(), v.minValue(0), v.maxValue(23))
+                    ),
                     idleMinutes: v.optional(
                         v.pipe(v.number(), v.safeInteger(), v.minValue(1))
                     ),
+                    mode: v.optional(v.picklist(["daily", "idle", "none"])),
                 })
             ),
         })
@@ -205,10 +218,14 @@ const upstreamConfigurationSchema = v.object({
 });
 
 const upstreamConfigGetResponseSchema = v.object({
-    config: upstreamConfigurationSchema,
+    config: v.unknown(),
+    configRevisionHash: openClawConfigRevisionHashSchema,
     hash: openClawConfigHashSchema,
+    includedPaths: v.pipe(v.array(upstreamTextSchema(4096)), v.maxLength(4096)),
     issues: upstreamUnknownArraySchema,
     legacyIssues: upstreamUnknownArraySchema,
+    parsed: v.unknown(),
+    sourceConfig: v.unknown(),
     valid: v.boolean(),
 });
 
@@ -228,22 +245,58 @@ const upstreamConfigPatchResponseSchema = v.object({
     ),
 });
 
+const upstreamSkillUpdateResponseSchema = v.object({
+    config: v.object({ enabled: v.optional(v.boolean()) }),
+    ok: v.literal(true),
+    skillKey: openClawSkillKeySchema,
+});
+
 const upstreamSkillSchema = v.object({
     bundled: v.boolean(),
     description: v.optional(upstreamTextSchema(64 * 1024)),
     disabled: v.boolean(),
     eligible: v.boolean(),
     name: upstreamControlSafeTextSchema(16 * 1024),
-    skillKey: openClawSkillKeySchema,
+    skillKey: upstreamControlSafeTextSchema(128),
     source: upstreamControlSafeTextSchema(256),
 });
 const upstreamSkillsStatusResponseSchema = v.object({
     skills: v.pipe(v.array(upstreamSkillSchema), v.maxLength(4096)),
 });
+const reservedOpenClawChannelKeys = new Set(["defaults", "modelByChannel"]);
+
+const gatewaySkillSourceProjection = {
+    "agents-skills-personal": "agents-skills-personal",
+    "agents-skills-project": "agents-skills-project",
+    "openclaw-bundled": "openclaw-bundled",
+    "openclaw-extra": "openclaw-extra",
+    "openclaw-managed": "openclaw-managed",
+    "openclaw-node": "openclaw-node",
+    "openclaw-workspace": "openclaw-workspace",
+    unknown: "openclaw-unknown",
+} as const satisfies Readonly<
+    Record<(typeof openClawGatewaySkillSources)[number], OpenClawSkillValue["source"]>
+>;
+
+function projectGatewaySkillSource(
+    source: string
+): OpenClawSkillValue["source"] | undefined {
+    return Object.hasOwn(gatewaySkillSourceProjection, source)
+        ? gatewaySkillSourceProjection[
+              source as keyof typeof gatewaySkillSourceProjection
+          ]
+        : undefined;
+}
 
 interface InternalConfigurationSnapshot {
     readonly configuration: OpenClawConfigurationSnapshot;
     readonly upstream: v.InferOutput<typeof upstreamConfigurationSchema>;
+}
+
+type UnknownRecord = Readonly<Record<string, unknown>>;
+
+function isUnknownRecord(value: unknown): value is UnknownRecord {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function parseBoundary<TSchema extends v.GenericSchema>(
@@ -327,6 +380,27 @@ function beforeMutationDispatch(
     };
 }
 
+function configMutationOutcomeIsUncertain(error: unknown): boolean {
+    // beforeMutationDispatch wraps every pre-dispatch failure. A direct request
+    // error therefore proves that the one-shot lane already sent the mutation.
+    // OpenClaw's audited INVALID_REQUEST responses are definitive: the canonical
+    // base-hash reason is a conflict and every other rejection is data-invalid.
+    return (
+        error instanceof PersistentGatewayUnknownOutcomeError ||
+        (error instanceof PersistentGatewayRequestError &&
+            error.code !== "INVALID_REQUEST")
+    );
+}
+
+function skillMutationNeedsReconciliation(error: unknown): boolean {
+    // skills.update has no hash fence. Any response/error after dispatch needs
+    // one readback, and an inconclusive readback must never trigger a replay.
+    return (
+        error instanceof PersistentGatewayRequestError ||
+        error instanceof PersistentGatewayUnknownOutcomeError
+    );
+}
+
 async function providerOperation<T>(
     mutation: boolean,
     operation: () => Promise<T>
@@ -338,7 +412,10 @@ async function providerOperation<T>(
     }
 }
 
-function heartbeatSeconds(value: string | undefined): number | undefined {
+function heartbeatSeconds(
+    value: string | undefined,
+    reason: "data-invalid" | "unknown-outcome" = "data-invalid"
+): number | undefined {
     if (value === undefined) return undefined;
     const normalized = value.trim().toLowerCase();
     const unitMilliseconds = Object.freeze({
@@ -355,35 +432,35 @@ function heartbeatSeconds(value: string | undefined): number | undefined {
         let consumed = 0;
         for (const match of normalized.matchAll(/(\d+(?:\.\d+)?)(ms|s|m|h|d)/gu)) {
             if (match.index !== consumed) {
-                throw new OpenClawSettingsProviderError("data-invalid");
+                throw new OpenClawSettingsProviderError(reason);
             }
             const amount = match[1];
             const unit = match[2] as DurationUnit | undefined;
             if (amount === undefined || unit === undefined) {
-                throw new OpenClawSettingsProviderError("data-invalid");
+                throw new OpenClawSettingsProviderError(reason);
             }
             milliseconds += Number(amount) * unitMilliseconds[unit];
             consumed += match[0].length;
         }
         if (consumed !== normalized.length || consumed === 0) {
-            throw new OpenClawSettingsProviderError("data-invalid");
+            throw new OpenClawSettingsProviderError(reason);
         }
     } else {
         const amount = single[1];
         const unit = (single[2] ?? "m") as DurationUnit;
         if (amount === undefined) {
-            throw new OpenClawSettingsProviderError("data-invalid");
+            throw new OpenClawSettingsProviderError(reason);
         }
         milliseconds = Number(amount) * unitMilliseconds[unit];
     }
     const seconds = milliseconds / 1000;
     if (!Number.isSafeInteger(seconds) || seconds <= 0) {
-        throw new OpenClawSettingsProviderError("data-invalid");
+        throw new OpenClawSettingsProviderError(reason);
     }
     return seconds;
 }
 
-function projectExecSettings(
+function projectExecPolicy(
     exec:
         | NonNullable<
               NonNullable<
@@ -391,31 +468,343 @@ function projectExecSettings(
               >["exec"]
           >
         | undefined
-): Readonly<{
-    execAsk: "off" | "on-miss" | "always";
-    execSecurity: "allowlist" | "deny" | "full";
-}> {
-    switch (exec?.mode) {
-        case "deny": {
-            return { execAsk: "off", execSecurity: "deny" };
+): OpenClawConfigurationSnapshot["tools"]["execPolicy"] {
+    if (exec === undefined) return { state: "inherited" };
+    if (exec.mode !== undefined) return { mode: exec.mode, state: "legacy-mode" };
+    if (exec.ask === undefined || exec.security === undefined) {
+        return { state: "partial" };
+    }
+    return { ask: exec.ask, security: exec.security, state: "explicit" };
+}
+
+function projectToolSettings(
+    tools: v.InferOutput<typeof upstreamConfigurationSchema>["tools"]
+): OpenClawConfigurationSnapshot["tools"] {
+    const visibility = tools?.sessions?.visibility;
+    return {
+        agentToAgentEnabled: tools?.agentToAgent?.enabled ?? false,
+        elevatedEnabled: tools?.elevated?.enabled !== false,
+        execPolicy: projectExecPolicy(tools?.exec),
+        ...(tools?.profile === undefined ? {} : { profile: tools.profile }),
+        ...(visibility === undefined ? {} : { sessionsVisibility: visibility }),
+        webFetchEnabled: tools?.web?.fetch?.enabled ?? true,
+        webSearchEnabled: tools?.web?.search?.enabled ?? true,
+        ...(tools?.web?.search?.provider === undefined
+            ? {}
+            : { webSearchProvider: tools.web.search.provider }),
+    };
+}
+
+function projectSessionReset(
+    reset: NonNullable<
+        v.InferOutput<typeof upstreamConfigurationSchema>["session"]
+    >["reset"]
+): OpenClawConfigurationSnapshot["sessionReset"] {
+    if (reset === undefined) return { state: "inherited-none" };
+    if (reset.mode === undefined) return { state: "implicit-daily" };
+    if (reset.mode !== "idle") {
+        return { mode: reset.mode, state: "locked-mode" };
+    }
+    if (reset.idleMinutes === undefined || reset.idleMinutes > 10_080) {
+        return { state: "partial-idle" };
+    }
+    return {
+        idleMinutes: reset.idleMinutes,
+        mode: "idle",
+        state: "explicit-idle",
+    };
+}
+
+const googleModelProviders = new Set(["google", "google-gemini-cli", "google-vertex"]);
+
+function normalizeGoogleModelId(modelId: string): string {
+    if (modelId.startsWith("google/")) {
+        return `google/${normalizeGoogleModelId(modelId.slice("google/".length))}`;
+    }
+    switch (modelId) {
+        case "gemini-3-pro":
+        case "gemini-3-pro-preview":
+        case "gemini-3.1-pro": {
+            return "gemini-3.1-pro-preview";
         }
-        case "allowlist": {
-            return { execAsk: "off", execSecurity: "allowlist" };
+        case "gemini-3-flash":
+        case "gemini-3.1-flash":
+        case "gemini-3.1-flash-preview": {
+            return "gemini-3-flash-preview";
         }
-        case "ask":
-        case "auto": {
-            return { execAsk: "on-miss", execSecurity: "allowlist" };
+        case "gemini-3.1-flash-lite-preview": {
+            return "gemini-3.1-flash-lite";
         }
-        case "full": {
-            return { execAsk: "off", execSecurity: "full" };
+        case "gemma-4-26b": {
+            return "gemma-4-26b-a4b-it";
         }
         default: {
-            return {
-                execAsk: exec?.ask ?? "always",
-                execSecurity: exec?.security ?? "deny",
-            };
+            return modelId;
         }
     }
+}
+
+/**
+ * Mirrors only the hash-pinned config.patch model-ref canonicalization surface.
+ * @param model Submitted provider/model reference.
+ * @returns The exact model reference that the reviewed Gateway will persist.
+ */
+function normalizeSubmittedModelRef(model: string): string {
+    const trimmed = model.trim();
+    const separator = trimmed.indexOf("/");
+    if (separator <= 0 || separator >= trimmed.length - 1) return trimmed;
+    const provider = trimmed.slice(0, separator).trim().toLowerCase();
+    const modelId = trimmed.slice(separator + 1).trim();
+    let normalizedModelId = modelId;
+    if (googleModelProviders.has(provider) || modelId.startsWith("google/")) {
+        normalizedModelId = normalizeGoogleModelId(modelId);
+    } else if (provider === "together" && modelId === "moonshotai/Kimi-K2.5") {
+        normalizedModelId = "moonshotai/Kimi-K2.6";
+    }
+    return normalizedModelId.toLowerCase().startsWith(`${provider}/`)
+        ? normalizedModelId
+        : `${provider}/${normalizedModelId}`;
+}
+
+function validatedSubmittedModelRef(model: string): string {
+    return parseBoundary(openClawModelIdSchema, normalizeSubmittedModelRef(model));
+}
+
+const inspectedModelReferenceMaximum = 8192;
+
+interface ModelNormalizationInspection {
+    count: number;
+    rejectDynamicSources: boolean;
+    state: OpenClawConfigurationSnapshot["modelNormalizationState"];
+}
+
+function markModelNormalizationUnknown(inspection: ModelNormalizationInspection): void {
+    inspection.state = "unknown";
+}
+
+function inspectModelReference(
+    inspection: ModelNormalizationInspection,
+    value: unknown
+): void {
+    if (inspection.state === "unknown" || typeof value !== "string") return;
+    if (inspection.rejectDynamicSources && value.includes("${")) {
+        markModelNormalizationUnknown(inspection);
+        return;
+    }
+    inspection.count += 1;
+    if (inspection.count > inspectedModelReferenceMaximum) {
+        markModelNormalizationUnknown(inspection);
+        return;
+    }
+    if (normalizeSubmittedModelRef(value) !== value) inspection.state = "pending";
+}
+
+function inspectModelSelection(
+    inspection: ModelNormalizationInspection,
+    value: unknown
+): void {
+    if (typeof value === "string") {
+        inspectModelReference(inspection, value);
+        return;
+    }
+    if (!isUnknownRecord(value)) return;
+    inspectModelReference(inspection, value.primary);
+    if (Array.isArray(value.fallbacks)) {
+        for (const fallback of value.fallbacks) {
+            inspectModelReference(inspection, fallback);
+        }
+    }
+}
+
+function inspectModelMap(inspection: ModelNormalizationInspection, value: unknown): void {
+    if (!isUnknownRecord(value) || inspection.state === "unknown") return;
+    const normalizedKeys = new Set<string>();
+    for (const key of Object.keys(value)) {
+        inspection.count += 1;
+        if (inspection.count > inspectedModelReferenceMaximum) {
+            markModelNormalizationUnknown(inspection);
+            return;
+        }
+        const normalized = normalizeSubmittedModelRef(key);
+        if (inspection.rejectDynamicSources && key.includes("${")) {
+            markModelNormalizationUnknown(inspection);
+            return;
+        }
+        if (normalized !== key || normalizedKeys.has(normalized)) {
+            inspection.state = "pending";
+        }
+        normalizedKeys.add(normalized);
+    }
+}
+
+function inspectAgentModelScope(
+    inspection: ModelNormalizationInspection,
+    value: unknown
+): void {
+    if (!isUnknownRecord(value) || inspection.state === "unknown") return;
+    for (const key of ["model", "imageModel", "voiceModel", "pdfModel"] as const) {
+        if (Object.hasOwn(value, key)) inspectModelSelection(inspection, value[key]);
+    }
+    inspectModelReference(inspection, value.utilityModel);
+    if (isUnknownRecord(value.mediaModels)) {
+        for (const key of ["image", "video", "music"] as const) {
+            if (Object.hasOwn(value.mediaModels, key)) {
+                inspectModelSelection(inspection, value.mediaModels[key]);
+            }
+        }
+    }
+    if (isUnknownRecord(value.heartbeat)) {
+        inspectModelReference(inspection, value.heartbeat.model);
+    }
+    if (isUnknownRecord(value.subagents)) {
+        inspectModelSelection(inspection, value.subagents.model);
+    }
+    if (isUnknownRecord(value.compaction)) {
+        inspectModelReference(inspection, value.compaction.model);
+        if (isUnknownRecord(value.compaction.memoryFlush)) {
+            inspectModelReference(inspection, value.compaction.memoryFlush.model);
+        }
+    }
+    inspectModelMap(inspection, value.models);
+}
+
+function inspectAgentModelScopes(
+    inspection: ModelNormalizationInspection,
+    sourceConfig: UnknownRecord
+): void {
+    if (!isUnknownRecord(sourceConfig.agents)) return;
+    inspectAgentModelScope(inspection, sourceConfig.agents.defaults);
+    if (isUnknownRecord(sourceConfig.agents.entries)) {
+        for (const entry of Object.values(sourceConfig.agents.entries)) {
+            inspectAgentModelScope(inspection, entry);
+        }
+    }
+    if (Array.isArray(sourceConfig.agents.list)) {
+        for (const entry of sourceConfig.agents.list) {
+            inspectAgentModelScope(inspection, entry);
+        }
+    }
+}
+
+function inspectProviderCatalogModelIds(
+    inspection: ModelNormalizationInspection,
+    sourceConfig: UnknownRecord,
+    runtimeConfig: UnknownRecord
+): void {
+    const sourceModels = isUnknownRecord(sourceConfig.models)
+        ? sourceConfig.models
+        : undefined;
+    const sourceProviders =
+        sourceModels !== undefined && isUnknownRecord(sourceModels.providers)
+            ? sourceModels.providers
+            : undefined;
+    if (sourceProviders === undefined) return;
+    const runtimeModels = isUnknownRecord(runtimeConfig.models)
+        ? runtimeConfig.models
+        : undefined;
+    const runtimeProviders =
+        runtimeModels !== undefined && isUnknownRecord(runtimeModels.providers)
+            ? runtimeModels.providers
+            : undefined;
+    if (runtimeProviders === undefined) {
+        markModelNormalizationUnknown(inspection);
+        return;
+    }
+    for (const [providerId, sourceProvider] of Object.entries(sourceProviders)) {
+        if (!isUnknownRecord(sourceProvider) || !Array.isArray(sourceProvider.models)) {
+            continue;
+        }
+        const runtimeProvider = runtimeProviders[providerId];
+        if (!isUnknownRecord(runtimeProvider) || !Array.isArray(runtimeProvider.models)) {
+            markModelNormalizationUnknown(inspection);
+            return;
+        }
+        for (const [index, sourceModel] of sourceProvider.models.entries()) {
+            if (!isUnknownRecord(sourceModel) || typeof sourceModel.id !== "string") {
+                continue;
+            }
+            const trimmed = sourceModel.id.trim();
+            if (trimmed.length === 0) continue;
+            inspection.count += 1;
+            if (inspection.count > inspectedModelReferenceMaximum) {
+                markModelNormalizationUnknown(inspection);
+                return;
+            }
+            const runtimeModel: unknown = runtimeProvider.models[index];
+            if (!isUnknownRecord(runtimeModel) || typeof runtimeModel.id !== "string") {
+                markModelNormalizationUnknown(inspection);
+                return;
+            }
+            if (runtimeModel.id !== sourceModel.id) inspection.state = "pending";
+        }
+    }
+}
+
+function inspectProviderCatalogDynamicSources(
+    inspection: ModelNormalizationInspection,
+    parsedConfig: UnknownRecord
+): void {
+    const models = isUnknownRecord(parsedConfig.models) ? parsedConfig.models : undefined;
+    const providers =
+        models !== undefined && isUnknownRecord(models.providers)
+            ? models.providers
+            : undefined;
+    if (providers === undefined) return;
+    for (const provider of Object.values(providers)) {
+        if (!isUnknownRecord(provider) || !Array.isArray(provider.models)) continue;
+        for (const model of provider.models) {
+            if (
+                isUnknownRecord(model) &&
+                typeof model.id === "string" &&
+                model.id.includes("${")
+            ) {
+                markModelNormalizationUnknown(inspection);
+                return;
+            }
+        }
+    }
+}
+
+function inspectModelNormalizationState(
+    sourceConfig: unknown,
+    runtimeConfig: unknown,
+    parsedConfig: unknown
+): OpenClawConfigurationSnapshot["modelNormalizationState"] {
+    if (
+        !isUnknownRecord(sourceConfig) ||
+        !isUnknownRecord(runtimeConfig) ||
+        !isUnknownRecord(parsedConfig)
+    ) {
+        return "unknown";
+    }
+    const inspection: ModelNormalizationInspection = {
+        count: 0,
+        rejectDynamicSources: true,
+        state: "clean",
+    };
+    inspectAgentModelScopes(inspection, parsedConfig);
+    inspectProviderCatalogDynamicSources(inspection, parsedConfig);
+    if (inspection.state === "unknown") return "unknown";
+    inspection.rejectDynamicSources = false;
+    inspectAgentModelScopes(inspection, sourceConfig);
+    inspectProviderCatalogModelIds(inspection, sourceConfig, runtimeConfig);
+    return inspection.state;
+}
+
+function rawChannelsWereTruncated(runtimeConfig: unknown): boolean {
+    if (!isUnknownRecord(runtimeConfig) || !isUnknownRecord(runtimeConfig.channels)) {
+        return false;
+    }
+    let supportedCount = 0;
+    for (const id of Object.keys(runtimeConfig.channels)) {
+        if (reservedOpenClawChannelKeys.has(id)) continue;
+        if (!v.safeParse(openClawChannelIdSchema, id, { abortEarly: true }).success) {
+            return true;
+        }
+        supportedCount += 1;
+        if (supportedCount > openClawChannelMaximum) return true;
+    }
+    return false;
 }
 
 type ReviewedAgentToolId = (typeof openClawReviewedAgentToolIds)[number];
@@ -469,7 +858,7 @@ function projectAgentAccess(
         const policyAmbiguous =
             (tools?.allow?.length ?? 0) > 0 ||
             [...alsoAllow, ...deny].some((value) => toolPolicyEntryIsAmbiguous(value)) ||
-            (foldedCounts.get(id) ?? 0) !== 1;
+            (foldedCounts.get(id.toLowerCase()) ?? 0) !== 1;
         const projectedTools = openClawReviewedAgentToolIds.map((toolId) => {
             const explicitlyAllowed = alsoAllow.some(
                 (value) => reviewedAgentToolId(value) === toolId
@@ -490,7 +879,13 @@ function projectAgentAccess(
             } satisfies OpenClawAgentToolAccessValue;
         });
         const parsedName = v.safeParse(
-            v.pipe(v.string(), v.maxLength(64), v.check(hasNoUnicodeControlOrFormat)),
+            v.pipe(
+                v.string(),
+                v.minLength(1),
+                v.maxLength(64),
+                v.check((value) => /\S/u.test(value)),
+                v.check(hasNoUnicodeControlOrFormat)
+            ),
             entry.name,
             { abortEarly: true }
         );
@@ -541,6 +936,10 @@ function agentToolUpdateIsAdmitted(
 function projectConfiguration(
     upstream: v.InferOutput<typeof upstreamConfigurationSchema>,
     hash: string,
+    revisionHash: string,
+    includesPresent: boolean,
+    modelNormalizationState: OpenClawConfigurationSnapshot["modelNormalizationState"],
+    rawChannelsTruncated: boolean,
     valid: boolean,
     issueCount: number,
     reason: "data-invalid" | "unknown-outcome" = "data-invalid"
@@ -548,11 +947,19 @@ function projectConfiguration(
     const rawModel = upstream.agents?.defaults?.model;
     const primary = typeof rawModel === "string" ? rawModel : rawModel?.primary;
     const fallbacks = typeof rawModel === "string" ? [] : (rawModel?.fallbacks ?? []);
-    const exec = projectExecSettings(upstream.tools?.exec);
-    const visibility = upstream.tools?.sessions?.visibility;
-    const channels = Object.entries(upstream.channels ?? {})
-        .map(([id, channel]) => ({ enabled: channel.enabled === true, id }))
+    let channelsTruncated = rawChannelsTruncated;
+    const allChannels = Object.entries(upstream.channels ?? {})
+        .flatMap(([id, channel]) => {
+            if (reservedOpenClawChannelKeys.has(id)) return [];
+            if (!v.safeParse(openClawChannelIdSchema, id, { abortEarly: true }).success) {
+                channelsTruncated = true;
+                return [];
+            }
+            return [{ enabled: channel.enabled !== false, id }];
+        })
         .toSorted((left, right) => compareStrings(left.id, right.id));
+    const channels = allChannels.slice(0, openClawChannelMaximum);
+    channelsTruncated ||= allChannels.length > channels.length;
     const agentAccess = projectAgentAccess(upstream.agents?.entries);
     return parseBoundary(
         openClawConfigurationSnapshotSchema,
@@ -560,19 +967,22 @@ function projectConfiguration(
             agentAccess: agentAccess.agents,
             agentAccessTruncated: agentAccess.truncated,
             channels,
+            channelsTruncated,
             hash,
             heartbeat: {
                 ...(upstream.agents?.defaults?.heartbeat?.every === undefined
                     ? {}
                     : {
                           everySeconds: heartbeatSeconds(
-                              upstream.agents.defaults.heartbeat.every
+                              upstream.agents.defaults.heartbeat.every,
+                              reason
                           ),
                       }),
                 ...(upstream.agents?.defaults?.heartbeat?.target === undefined
                     ? {}
                     : { target: upstream.agents.defaults.heartbeat.target }),
             },
+            includesPresent,
             issueCount,
             ...((upstream.meta?.lastTouchedAt ?? upstream.wizard?.lastRunAt) === undefined
                 ? {}
@@ -592,6 +1002,8 @@ function projectConfiguration(
                 fallbacks,
                 ...(primary === undefined ? {} : { primary }),
             },
+            modelNormalizationState,
+            revisionHash,
             security: {
                 authProfileCount: Object.keys(upstream.auth?.profiles ?? {}).length,
                 commandRestartEnabled: upstream.commands?.restart ?? true,
@@ -600,24 +1012,8 @@ function projectConfiguration(
                     ? {}
                     : { redactionMode: upstream.logging.redactSensitive }),
             },
-            sessionReset:
-                upstream.session?.reset?.idleMinutes === undefined
-                    ? {}
-                    : { idleMinutes: upstream.session.reset.idleMinutes },
-            tools: {
-                agentToAgentEnabled: upstream.tools?.agentToAgent?.enabled ?? false,
-                elevatedEnabled: upstream.tools?.elevated?.enabled ?? false,
-                ...exec,
-                ...(upstream.tools?.profile === undefined
-                    ? {}
-                    : { profile: upstream.tools.profile }),
-                ...(visibility === undefined ? {} : { sessionsVisibility: visibility }),
-                webFetchEnabled: upstream.tools?.web?.fetch?.enabled ?? true,
-                webSearchEnabled: upstream.tools?.web?.search?.enabled ?? true,
-                ...(upstream.tools?.web?.search?.provider === undefined
-                    ? {}
-                    : { webSearchProvider: upstream.tools.web.search.provider }),
-            },
+            sessionReset: projectSessionReset(upstream.session?.reset),
+            tools: projectToolSettings(upstream.tools),
             valid,
         },
         reason
@@ -636,7 +1032,22 @@ function projectSkills(
     if (new Set(sorted.map(({ skillKey }) => skillKey)).size !== sorted.length) {
         throw new OpenClawSettingsProviderError("data-invalid");
     }
-    const discovered = sorted.map((skill) => {
+    const observedKeys = new Set(sorted.map(({ skillKey }) => skillKey));
+    let omittedDiscoveredEntry = false;
+    const discovered = sorted.flatMap((skill): OpenClawSkillValue[] => {
+        if (
+            !v.safeParse(openClawSkillKeySchema, skill.skillKey, {
+                abortEarly: true,
+            }).success
+        ) {
+            omittedDiscoveredEntry = true;
+            return [];
+        }
+        const source = projectGatewaySkillSource(skill.source);
+        if (source === undefined) {
+            omittedDiscoveredEntry = true;
+            return [];
+        }
         const nameCandidate = v.safeParse(
             v.pipe(v.string(), v.maxLength(128), v.check(hasNoUnicodeControlOrFormat)),
             skill.name
@@ -649,25 +1060,27 @@ function projectSkills(
             description.length <= 1024 &&
             /\S/u.test(description) &&
             hasNoUnicodeControlOrFormat(description);
-        return {
-            bundled: skill.bundled,
-            ...(includeDescription ? { description } : {}),
-            eligible: skill.eligible,
-            enabled: !skill.disabled,
-            installed: true,
-            key: skill.skillKey,
-            name: nameCandidate,
-            source: skill.source,
-        };
+        return [
+            {
+                bundled: skill.bundled,
+                ...(includeDescription ? { description } : {}),
+                eligible: skill.eligible,
+                enabled: !skill.disabled,
+                installed: true,
+                key: skill.skillKey,
+                name: nameCandidate,
+                source,
+            },
+        ];
     });
     const byKey = new Map(discovered.map((skill) => [skill.key, skill]));
     let omittedConfiguredEntry = false;
     for (const [key, entry] of Object.entries(configuredEntries ?? {})) {
+        if (observedKeys.has(key)) continue;
         if (!v.safeParse(openClawSkillKeySchema, key, { abortEarly: true }).success) {
             omittedConfiguredEntry = true;
             continue;
         }
-        if (byKey.has(key)) continue;
         byKey.set(key, {
             bundled: false,
             eligible: false,
@@ -684,7 +1097,10 @@ function projectSkills(
     const projected = combined.slice(0, openClawSkillMaximum);
     return parseBoundary(listOpenClawSkillsResultSchema, {
         skills: projected,
-        truncated: omittedConfiguredEntry || combined.length > projected.length,
+        truncated:
+            omittedConfiguredEntry ||
+            omittedDiscoveredEntry ||
+            combined.length > projected.length,
     });
 }
 
@@ -701,9 +1117,11 @@ function buildPatch(
     update: OpenClawConfigurationUpdate,
     upstream: v.InferOutput<typeof upstreamConfigurationSchema>
 ): Readonly<{
+    matches: (configuration: OpenClawConfigurationSnapshot) => boolean;
     raw: string;
     replacePaths?: readonly string[];
 }> {
+    let matches: (configuration: OpenClawConfigurationSnapshot) => boolean;
     let patch: Readonly<Record<string, unknown>>;
     let replacePaths: readonly string[] | undefined;
     switch (update.section) {
@@ -722,6 +1140,12 @@ function buildPatch(
                 update.toolId,
                 update.override === "deny"
             );
+            if (
+                alsoAllow.length > upstreamAgentToolPolicyMaximum ||
+                deny.length > upstreamAgentToolPolicyMaximum
+            ) {
+                throw new OpenClawSettingsProviderError("data-invalid");
+            }
             patch = {
                 agents: {
                     entries: {
@@ -733,116 +1157,238 @@ function buildPatch(
                 `agents.entries.${update.agentId}.tools.alsoAllow`,
                 `agents.entries.${update.agentId}.tools.deny`,
             ];
+            matches = (configuration) =>
+                configuration.agentAccess
+                    .find(({ id }) => id === update.agentId)
+                    ?.tools.find(({ id }) => id === update.toolId)?.override ===
+                update.override;
             break;
         }
         case "channels": {
+            const changedChannels = update.channels.filter(
+                ({ enabled, id }) =>
+                    (upstream.channels?.[id]?.enabled !== false) !== enabled
+            );
+            if (changedChannels.length === 0) {
+                throw new OpenClawSettingsProviderError("data-invalid");
+            }
             patch = {
                 channels: Object.fromEntries(
-                    update.channels.map(({ enabled, id }) => [id, { enabled }])
+                    changedChannels.map(({ enabled, id }) => [id, { enabled }])
                 ),
             };
+            matches = (configuration) =>
+                changedChannels.every(({ enabled, id }) =>
+                    configuration.channels.some(
+                        (channel) => channel.id === id && channel.enabled === enabled
+                    )
+                );
             break;
         }
         case "heartbeat": {
+            const currentEverySeconds = heartbeatSeconds(
+                upstream.agents?.defaults?.heartbeat?.every
+            );
+            const currentTarget = upstream.agents?.defaults?.heartbeat?.target;
+            const target = update.target ?? undefined;
+            const everyChanged = currentEverySeconds !== update.everySeconds;
+            const targetChanged = currentTarget !== target;
+            if (!everyChanged && !targetChanged) {
+                throw new OpenClawSettingsProviderError("data-invalid");
+            }
             patch = {
                 agents: {
                     defaults: {
                         heartbeat: {
-                            every: `${update.everySeconds}s`,
-                            target: update.target,
+                            ...(everyChanged ? { every: `${update.everySeconds}s` } : {}),
+                            ...(targetChanged ? { target: update.target } : {}),
                         },
                     },
                 },
             };
+            matches = (configuration) =>
+                (!everyChanged ||
+                    configuration.heartbeat.everySeconds === update.everySeconds) &&
+                (!targetChanged || configuration.heartbeat.target === target);
             break;
         }
         case "models": {
+            const rawModel = upstream.agents?.defaults?.model;
+            const currentPrimary =
+                typeof rawModel === "string" ? rawModel : rawModel?.primary;
+            const currentFallbacks =
+                typeof rawModel === "string" ? [] : (rawModel?.fallbacks ?? []);
+            const primaryChanged = currentPrimary !== update.primary;
+            const fallbacksChanged = !isDeepStrictEqual(
+                currentFallbacks,
+                update.fallbacks
+            );
+            if (!primaryChanged && !fallbacksChanged) {
+                throw new OpenClawSettingsProviderError("data-invalid");
+            }
+            const writePrimary =
+                primaryChanged || (typeof rawModel === "string" && fallbacksChanged);
+            const primary = writePrimary
+                ? validatedSubmittedModelRef(
+                      primaryChanged ? update.primary : (currentPrimary ?? update.primary)
+                  )
+                : undefined;
+            const fallbacks = fallbacksChanged
+                ? update.fallbacks.map(validatedSubmittedModelRef)
+                : undefined;
+            if (fallbacks !== undefined && new Set(fallbacks).size !== fallbacks.length) {
+                throw new OpenClawSettingsProviderError("data-invalid");
+            }
             patch = {
                 agents: {
                     defaults: {
                         model: {
-                            fallbacks: update.fallbacks,
-                            primary: update.primary,
+                            ...(fallbacks === undefined ? {} : { fallbacks }),
+                            ...(primary === undefined ? {} : { primary }),
                         },
                     },
                 },
             };
-            replacePaths = ["agents.defaults.model.fallbacks"];
+            if (fallbacksChanged) {
+                replacePaths = ["agents.defaults.model.fallbacks"];
+            }
+            matches = (configuration) =>
+                (!writePrimary || configuration.models.primary === primary) &&
+                (!fallbacksChanged ||
+                    isDeepStrictEqual(configuration.models.fallbacks, fallbacks));
             break;
         }
         case "session-reset": {
-            patch = { session: { reset: { idleMinutes: update.idleMinutes } } };
+            const current = projectSessionReset(upstream.session?.reset);
+            if (
+                current.state !== "explicit-idle" ||
+                current.idleMinutes === update.idleMinutes
+            ) {
+                throw new OpenClawSettingsProviderError("data-invalid");
+            }
+            patch = {
+                session: {
+                    reset: { idleMinutes: update.idleMinutes, mode: "idle" },
+                },
+            };
+            matches = (configuration) =>
+                isDeepStrictEqual(configuration.sessionReset, {
+                    idleMinutes: update.idleMinutes,
+                    mode: "idle",
+                    state: "explicit-idle",
+                });
             break;
         }
         case "tools": {
-            patch = {
-                tools: {
-                    agentToAgent: { enabled: update.settings.agentToAgentEnabled },
-                    elevated: { enabled: update.settings.elevatedEnabled },
-                    exec: {
-                        ask: update.settings.execAsk,
-                        mode: null,
-                        security: update.settings.execSecurity,
-                    },
-                    profile: update.settings.profile ?? null,
-                    sessions: {
-                        visibility: update.settings.sessionsVisibility ?? null,
-                    },
-                    web: {
-                        fetch: { enabled: update.settings.webFetchEnabled },
-                        search: {
-                            enabled: update.settings.webSearchEnabled,
-                            provider: update.settings.webSearchProvider ?? null,
-                        },
-                    },
-                },
-            };
+            const current = projectToolSettings(upstream.tools);
+            const toolsPatch: Record<string, unknown> = {};
+            const agentToAgentChanged =
+                current.agentToAgentEnabled !== update.settings.agentToAgentEnabled;
+            const elevatedChanged =
+                current.elevatedEnabled !== update.settings.elevatedEnabled;
+            const execChanged = !isDeepStrictEqual(
+                current.execPolicy,
+                update.settings.execPolicy
+            );
+            const profileChanged = current.profile !== update.settings.profile;
+            const visibilityChanged =
+                current.sessionsVisibility !== update.settings.sessionsVisibility;
+            const webFetchChanged =
+                current.webFetchEnabled !== update.settings.webFetchEnabled;
+            const webSearchEnabledChanged =
+                current.webSearchEnabled !== update.settings.webSearchEnabled;
+            const webSearchProviderChanged =
+                current.webSearchProvider !== update.settings.webSearchProvider;
+            if (agentToAgentChanged) {
+                toolsPatch.agentToAgent = {
+                    enabled: update.settings.agentToAgentEnabled,
+                };
+            }
+            if (elevatedChanged) {
+                toolsPatch.elevated = { enabled: update.settings.elevatedEnabled };
+            }
+            if (execChanged) {
+                if (
+                    current.execPolicy.state !== "explicit" ||
+                    update.settings.execPolicy.state !== "explicit"
+                ) {
+                    throw new OpenClawSettingsProviderError("data-invalid");
+                }
+                toolsPatch.exec = {
+                    ask: update.settings.execPolicy.ask,
+                    security: update.settings.execPolicy.security,
+                };
+            }
+            if (profileChanged) {
+                toolsPatch.profile = update.settings.profile ?? null;
+            }
+            if (visibilityChanged) {
+                toolsPatch.sessions = {
+                    visibility: update.settings.sessionsVisibility ?? null,
+                };
+            }
+            const webPatch: Record<string, unknown> = {};
+            if (webFetchChanged) {
+                webPatch.fetch = { enabled: update.settings.webFetchEnabled };
+            }
+            if (webSearchEnabledChanged || webSearchProviderChanged) {
+                webPatch.search = {
+                    ...(webSearchEnabledChanged
+                        ? { enabled: update.settings.webSearchEnabled }
+                        : {}),
+                    ...(webSearchProviderChanged
+                        ? {
+                              provider: update.settings.webSearchProvider ?? null,
+                          }
+                        : {}),
+                };
+            }
+            if (Object.keys(webPatch).length > 0) toolsPatch.web = webPatch;
+            if (Object.keys(toolsPatch).length === 0) {
+                throw new OpenClawSettingsProviderError("data-invalid");
+            }
+            patch = { tools: toolsPatch };
+            matches = (configuration) =>
+                (!agentToAgentChanged ||
+                    configuration.tools.agentToAgentEnabled ===
+                        update.settings.agentToAgentEnabled) &&
+                (!elevatedChanged ||
+                    configuration.tools.elevatedEnabled ===
+                        update.settings.elevatedEnabled) &&
+                (!execChanged ||
+                    isDeepStrictEqual(
+                        configuration.tools.execPolicy,
+                        update.settings.execPolicy
+                    )) &&
+                (!profileChanged ||
+                    configuration.tools.profile === update.settings.profile) &&
+                (!visibilityChanged ||
+                    configuration.tools.sessionsVisibility ===
+                        update.settings.sessionsVisibility) &&
+                (!webFetchChanged ||
+                    configuration.tools.webFetchEnabled ===
+                        update.settings.webFetchEnabled) &&
+                (!webSearchEnabledChanged ||
+                    configuration.tools.webSearchEnabled ===
+                        update.settings.webSearchEnabled) &&
+                (!webSearchProviderChanged ||
+                    configuration.tools.webSearchProvider ===
+                        update.settings.webSearchProvider);
             break;
         }
+    }
+    const raw = JSON.stringify(patch);
+    if (
+        Buffer.byteLength(raw, "utf8") >
+        persistentGatewayOpenClawSettingsPatchMaximumBytes
+    ) {
+        throw new OpenClawSettingsProviderError("data-invalid");
     }
     return {
-        raw: JSON.stringify(patch),
+        matches,
+        raw,
         ...(replacePaths === undefined ? {} : { replacePaths }),
     };
-}
-
-function configurationMatchesUpdate(
-    configuration: OpenClawConfigurationSnapshot,
-    update: OpenClawConfigurationUpdate
-): boolean {
-    switch (update.section) {
-        case "agent-tool-access": {
-            return (
-                configuration.agentAccess
-                    .find(({ id }) => id === update.agentId)
-                    ?.tools.find(({ id }) => id === update.toolId)?.override ===
-                update.override
-            );
-        }
-        case "channels": {
-            return isDeepStrictEqual(configuration.channels, update.channels);
-        }
-        case "heartbeat": {
-            return isDeepStrictEqual(configuration.heartbeat, {
-                everySeconds: update.everySeconds,
-                ...(update.target === null ? {} : { target: update.target }),
-            });
-        }
-        case "models": {
-            return isDeepStrictEqual(configuration.models, {
-                fallbacks: update.fallbacks,
-                primary: update.primary,
-            });
-        }
-        case "session-reset": {
-            return isDeepStrictEqual(configuration.sessionReset, {
-                idleMinutes: update.idleMinutes,
-            });
-        }
-        case "tools": {
-            return isDeepStrictEqual(configuration.tools, update.settings);
-        }
-    }
 }
 
 function channelsMatchFreshConfiguration(
@@ -875,6 +1421,15 @@ function skillPatchReadbackMatches(
     return configuration.skills?.entries?.[skillKey]?.enabled === enabled;
 }
 
+function assertConfigPatchIsSafe(configuration: OpenClawConfigurationSnapshot): void {
+    if (
+        configuration.includesPresent ||
+        configuration.modelNormalizationState !== "clean"
+    ) {
+        throw new OpenClawSettingsProviderError("data-invalid");
+    }
+}
+
 /**
  * Creates the only raw-config-aware adapter for the OpenClaw Settings domain.
  * @param transport Dedicated, method-narrow Gateway Settings lanes.
@@ -897,15 +1452,24 @@ export function createPersistentGatewayOpenClawSettingsProvider(
             )
         );
         bytes.assertWithinBudget("data-invalid");
-        const upstream = parseBoundary(upstreamConfigGetResponseSchema, payload);
+        const response = parseBoundary(upstreamConfigGetResponseSchema, payload);
+        const upstream = parseBoundary(upstreamConfigurationSchema, response.config);
         return Object.freeze({
             configuration: projectConfiguration(
-                upstream.config,
-                upstream.hash,
-                upstream.valid,
-                upstream.issues.length + upstream.legacyIssues.length
+                upstream,
+                response.hash,
+                response.configRevisionHash,
+                response.includedPaths.length > 0,
+                inspectModelNormalizationState(
+                    response.sourceConfig,
+                    response.config,
+                    response.parsed
+                ),
+                rawChannelsWereTruncated(response.config),
+                response.valid,
+                response.issues.length + response.legacyIssues.length
             ),
-            upstream: upstream.config,
+            upstream,
         });
     }
 
@@ -930,6 +1494,37 @@ export function createPersistentGatewayOpenClawSettingsProvider(
             parseBoundary(upstreamSkillsStatusResponseSchema, payload),
             configuredEntries
         );
+    }
+
+    async function authorizeRevisionBoundDispatch(input: {
+        readonly authorizeDispatch: () => Promise<void>;
+        readonly baseHash: string;
+        readonly baseRevisionHash: string;
+        readonly requireSafeConfigPatch: boolean;
+        readonly signal: AbortSignal | undefined;
+    }): Promise<void> {
+        const latest = await loadConfiguration(input.signal);
+        if (!latest.configuration.valid) {
+            throw new OpenClawSettingsProviderError("data-invalid");
+        }
+        if (
+            latest.configuration.hash !== input.baseHash ||
+            latest.configuration.revisionHash !== input.baseRevisionHash
+        ) {
+            throw new OpenClawSettingsProviderError("conflict");
+        }
+        if (input.requireSafeConfigPatch) {
+            assertConfigPatchIsSafe(latest.configuration);
+        }
+        await input.authorizeDispatch();
+    }
+
+    async function loadMutationReadback(): Promise<InternalConfigurationSnapshot> {
+        try {
+            return await loadConfiguration(undefined);
+        } catch {
+            throw new OpenClawSettingsProviderError("unknown-outcome");
+        }
     }
 
     async function getConfiguration(
@@ -963,9 +1558,13 @@ export function createPersistentGatewayOpenClawSettingsProvider(
             if (!current.configuration.valid) {
                 throw new OpenClawSettingsProviderError("data-invalid");
             }
-            if (current.configuration.hash !== input.baseHash) {
+            if (
+                current.configuration.hash !== input.baseHash ||
+                current.configuration.revisionHash !== input.baseRevisionHash
+            ) {
                 throw new OpenClawSettingsProviderError("conflict");
             }
+            assertConfigPatchIsSafe(current.configuration);
             if (
                 input.update.section === "channels" &&
                 !channelsMatchFreshConfiguration(current.configuration, input.update)
@@ -982,25 +1581,44 @@ export function createPersistentGatewayOpenClawSettingsProvider(
             const bytes = createByteObservation(
                 openClawConfigurationUpstreamMaximumBytes
             );
-            const payload = await transport.requestOpenClawSettingsWrite(
-                "config.patch",
-                {
-                    baseHash: input.baseHash,
-                    note: "Updated from Mira Dashboard settings",
-                    raw: patch.raw,
-                    ...(patch.replacePaths === undefined
-                        ? {}
-                        : { replacePaths: patch.replacePaths }),
-                },
-                {
-                    ...requestOptions(
-                        signal,
-                        persistentGatewayOpenClawSettingsWriteTimeoutMs,
-                        bytes.observe
-                    ),
-                    beforeDispatch: beforeMutationDispatch(authorizeDispatch),
+            // A config.get readback cannot recover the ACK-only restart requirement and
+            // scheduling fields. Preserve post-dispatch uncertainty so the browser keeps
+            // controls locked until its explicit full-state reconciliation completes.
+            let payload: unknown;
+            try {
+                payload = await transport.requestOpenClawSettingsWrite(
+                    "config.patch",
+                    {
+                        baseHash: input.baseHash,
+                        note: "Updated from Mira Dashboard settings",
+                        raw: patch.raw,
+                        ...(patch.replacePaths === undefined
+                            ? {}
+                            : { replacePaths: patch.replacePaths }),
+                    },
+                    {
+                        ...requestOptions(
+                            signal,
+                            persistentGatewayOpenClawSettingsWriteTimeoutMs,
+                            bytes.observe
+                        ),
+                        beforeDispatch: beforeMutationDispatch(() =>
+                            authorizeRevisionBoundDispatch({
+                                authorizeDispatch,
+                                baseHash: input.baseHash,
+                                baseRevisionHash: input.baseRevisionHash,
+                                requireSafeConfigPatch: true,
+                                signal,
+                            })
+                        ),
+                    }
+                );
+            } catch (error) {
+                if (configMutationOutcomeIsUncertain(error)) {
+                    throw new OpenClawSettingsProviderError("unknown-outcome");
                 }
-            );
+                throw error;
+            }
             bytes.assertWithinBudget("unknown-outcome");
             const acknowledgement = parseBoundary(
                 upstreamConfigPatchResponseSchema,
@@ -1008,14 +1626,18 @@ export function createPersistentGatewayOpenClawSettingsProvider(
                 "unknown-outcome"
             );
             if (acknowledgement.noop === true) {
-                if (!configurationMatchesUpdate(current.configuration, input.update)) {
+                const readback = await loadMutationReadback();
+                if (
+                    !readback.configuration.valid ||
+                    !patch.matches(readback.configuration)
+                ) {
                     throw new OpenClawSettingsProviderError("unknown-outcome");
                 }
                 return parseBoundary(
                     updateOpenClawConfigurationResultSchema,
                     {
                         changed: false,
-                        configuration: current.configuration,
+                        configuration: readback.configuration,
                         restartRequired: false,
                         restartScheduled: false,
                     },
@@ -1024,26 +1646,25 @@ export function createPersistentGatewayOpenClawSettingsProvider(
             }
             if (
                 acknowledgement.hash === undefined ||
-                acknowledgement.hash === input.baseHash ||
                 acknowledgement.sentinel === undefined
             ) {
                 throw new OpenClawSettingsProviderError("unknown-outcome");
             }
-            const configuration = projectConfiguration(
-                acknowledgement.config,
-                acknowledgement.hash,
-                true,
-                0,
-                "unknown-outcome"
-            );
-            if (!configurationMatchesUpdate(configuration, input.update)) {
+            const readback = await loadMutationReadback();
+            if (
+                !readback.configuration.valid ||
+                readback.configuration.hash !== acknowledgement.hash ||
+                (readback.configuration.hash === input.baseHash &&
+                    readback.configuration.revisionHash === input.baseRevisionHash) ||
+                !patch.matches(readback.configuration)
+            ) {
                 throw new OpenClawSettingsProviderError("unknown-outcome");
             }
             return parseBoundary(
                 updateOpenClawConfigurationResultSchema,
                 {
                     changed: true,
-                    configuration,
+                    configuration: readback.configuration,
                     restartRequired:
                         acknowledgement.sentinel.payload.stats.requiresRestart,
                     restartScheduled: acknowledgement.restart !== undefined,
@@ -1063,8 +1684,18 @@ export function createPersistentGatewayOpenClawSettingsProvider(
             if (!current.configuration.valid) {
                 throw new OpenClawSettingsProviderError("data-invalid");
             }
-            if (current.configuration.hash !== input.baseHash) {
+            if (
+                current.configuration.hash !== input.baseHash ||
+                current.configuration.revisionHash !== input.baseRevisionHash
+            ) {
                 throw new OpenClawSettingsProviderError("conflict");
+            }
+            const configuredEntries = current.upstream.skills?.entries ?? {};
+            if (
+                !Object.hasOwn(configuredEntries, input.skillKey) &&
+                Object.keys(configuredEntries).length >= upstreamConfiguredSkillMaximum
+            ) {
+                throw new OpenClawSettingsProviderError("data-invalid");
             }
             const skills = await loadSkills(signal, current.upstream.skills?.entries);
             const installedSkill = skills.skills.find(
@@ -1082,17 +1713,10 @@ export function createPersistentGatewayOpenClawSettingsProvider(
             let payload: unknown;
             try {
                 payload = await transport.requestOpenClawSettingsWrite(
-                    "config.patch",
+                    "skills.update",
                     {
-                        baseHash: input.baseHash,
-                        note: "Updated from Mira Dashboard settings",
-                        raw: JSON.stringify({
-                            skills: {
-                                entries: {
-                                    [input.skillKey]: { enabled: input.enabled },
-                                },
-                            },
-                        }),
+                        enabled: input.enabled,
+                        skillKey: input.skillKey,
                     },
                     {
                         ...requestOptions(
@@ -1100,18 +1724,25 @@ export function createPersistentGatewayOpenClawSettingsProvider(
                             persistentGatewayOpenClawSettingsWriteTimeoutMs,
                             bytes.observe
                         ),
-                        beforeDispatch: beforeMutationDispatch(authorizeDispatch),
+                        beforeDispatch: beforeMutationDispatch(() =>
+                            authorizeRevisionBoundDispatch({
+                                authorizeDispatch,
+                                baseHash: input.baseHash,
+                                baseRevisionHash: input.baseRevisionHash,
+                                requireSafeConfigPatch: false,
+                                signal,
+                            })
+                        ),
                     }
                 );
             } catch (error) {
-                if (!(error instanceof PersistentGatewayUnknownOutcomeError)) {
+                if (!skillMutationNeedsReconciliation(error)) {
                     throw error;
                 }
                 try {
                     const reconciled = await loadConfiguration(undefined);
                     if (
                         reconciled.configuration.valid &&
-                        reconciled.configuration.hash !== input.baseHash &&
                         skillPatchReadbackMatches(
                             reconciled.upstream,
                             input.skillKey,
@@ -1127,24 +1758,24 @@ export function createPersistentGatewayOpenClawSettingsProvider(
             }
             bytes.assertWithinBudget("unknown-outcome");
             const acknowledgement = parseBoundary(
-                upstreamConfigPatchResponseSchema,
+                upstreamSkillUpdateResponseSchema,
                 payload,
                 "unknown-outcome"
             );
             if (
-                !skillPatchReadbackMatches(
-                    acknowledgement.config,
-                    input.skillKey,
-                    input.enabled
-                )
+                acknowledgement.skillKey !== input.skillKey ||
+                acknowledgement.config.enabled !== input.enabled
             ) {
                 throw new OpenClawSettingsProviderError("unknown-outcome");
             }
+            const readback = await loadMutationReadback();
             if (
-                acknowledgement.noop !== true &&
-                (acknowledgement.hash === undefined ||
-                    acknowledgement.hash === input.baseHash ||
-                    acknowledgement.sentinel === undefined)
+                !readback.configuration.valid ||
+                !skillPatchReadbackMatches(
+                    readback.upstream,
+                    input.skillKey,
+                    input.enabled
+                )
             ) {
                 throw new OpenClawSettingsProviderError("unknown-outcome");
             }

@@ -15,6 +15,7 @@ import {
 } from "./provider.ts";
 import {
     createOpenClawSettingsService,
+    openClawSettingsMutationMaximumPending,
     OpenClawSettingsServiceError,
 } from "./service.ts";
 
@@ -22,22 +23,29 @@ const configuration = Object.freeze({
     agentAccess: [],
     agentAccessTruncated: false,
     channels: [{ enabled: true, id: "discord" }],
+    channelsTruncated: false,
     hash: "a".repeat(64),
     heartbeat: { everySeconds: 3600, target: "last" },
+    includesPresent: false,
     issueCount: 0,
     models: { fallbacks: ["openai/gpt-5.6-sol"], primary: "openai/gpt-5.6" },
+    modelNormalizationState: "clean" as const,
+    revisionHash: `${"R".repeat(42)}A`,
     security: {
         authProfileCount: 2,
         commandRestartEnabled: false,
         ownerAllowFromCount: 1,
         redactionMode: "tools",
     },
-    sessionReset: { idleMinutes: 60 },
+    sessionReset: {
+        idleMinutes: 60,
+        mode: "idle",
+        state: "explicit-idle",
+    },
     tools: {
         agentToAgentEnabled: false,
         elevatedEnabled: false,
-        execAsk: "always",
-        execSecurity: "deny",
+        execPolicy: { ask: "always", security: "deny", state: "explicit" },
         profile: "coding",
         sessionsVisibility: "tree",
         webFetchEnabled: true,
@@ -104,6 +112,7 @@ const controlContext = Object.freeze({
 
 const modelUpdate = Object.freeze({
     baseHash: configuration.hash,
+    baseRevisionHash: configuration.revisionHash,
     confirmation: "apply-reviewed-settings" as const,
     update: {
         fallbacks: ["openai/gpt-5.6-sol"],
@@ -223,6 +232,7 @@ describe("OpenClaw settings service", () => {
         await service.updateConfiguration(
             {
                 baseHash: configuration.hash,
+                baseRevisionHash: configuration.revisionHash,
                 confirmation: "apply-reviewed-settings",
                 update: {
                     agentId: "main",
@@ -291,6 +301,140 @@ describe("OpenClaw settings service", () => {
         expect(dispatchCalls).toBe(0);
     });
 
+    test("serializes hash-fenced mutations until the prior operation settles", async () => {
+        const order: string[] = [];
+        const queueObservations: { queueDepth: number; waitMs: number }[] = [];
+        let clockMs = 100;
+        let providerCalls = 0;
+        const firstStarted = Promise.withResolvers<void>();
+        const releaseFirst = Promise.withResolvers<void>();
+        const service = createOpenClawSettingsService({
+            auditWriter: { record: () => Promise.resolve() },
+            mutationClockMs: () => clockMs,
+            onMutationQueueWait: (observation) => queueObservations.push(observation),
+            provider: provider({
+                updateConfiguration: async ({ authorizeDispatch }) => {
+                    providerCalls += 1;
+                    const call = providerCalls;
+                    order.push(`provider:${call}:start`);
+                    await authorizeDispatch();
+                    if (call === 1) {
+                        firstStarted.resolve();
+                        await releaseFirst.promise;
+                    }
+                    order.push(`provider:${call}:end`);
+                    return updateResult;
+                },
+            }),
+        });
+
+        const first = service.updateConfiguration(modelUpdate, controlContext);
+        await firstStarted.promise;
+        clockMs = 110;
+        const second = service.updateConfiguration(modelUpdate, controlContext);
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(providerCalls).toBe(1);
+
+        clockMs = 160;
+        releaseFirst.resolve();
+        await Promise.all([first, second]);
+        expect(order).toEqual([
+            "provider:1:start",
+            "provider:1:end",
+            "provider:2:start",
+            "provider:2:end",
+        ]);
+        expect(queueObservations).toEqual([{ queueDepth: 1, waitMs: 50 }]);
+    });
+
+    test("removes an aborted queued mutation before admitting the next waiter", async () => {
+        let providerCalls = 0;
+        const firstStarted = Promise.withResolvers<void>();
+        const releaseFirst = Promise.withResolvers<void>();
+        const service = createOpenClawSettingsService({
+            auditWriter: { record: () => Promise.resolve() },
+            provider: provider({
+                updateConfiguration: async ({ authorizeDispatch }) => {
+                    providerCalls += 1;
+                    await authorizeDispatch();
+                    if (providerCalls === 1) {
+                        firstStarted.resolve();
+                        await releaseFirst.promise;
+                    }
+                    return updateResult;
+                },
+            }),
+        });
+
+        const first = service.updateConfiguration(modelUpdate, controlContext);
+        await firstStarted.promise;
+        const aborted = new AbortController();
+        const abortReason = new Error("queued request ended");
+        const secondFailure = captureFailure(() =>
+            service.updateConfiguration(modelUpdate, controlContext, aborted.signal)
+        );
+        const third = service.updateConfiguration(modelUpdate, controlContext);
+        await Promise.resolve();
+        aborted.abort(abortReason);
+
+        expect(await secondFailure).toBe(abortReason);
+        expect(providerCalls).toBe(1);
+        releaseFirst.resolve();
+        await Promise.all([first, third]);
+        expect(providerCalls).toBe(2);
+    });
+
+    test("bounds retained mutation waiters and releases every aborted admission", async () => {
+        let providerCalls = 0;
+        const firstStarted = Promise.withResolvers<void>();
+        const releaseFirst = Promise.withResolvers<void>();
+        const service = createOpenClawSettingsService({
+            auditWriter: { record: () => Promise.resolve() },
+            provider: provider({
+                updateConfiguration: async ({ authorizeDispatch }) => {
+                    providerCalls += 1;
+                    await authorizeDispatch();
+                    firstStarted.resolve();
+                    await releaseFirst.promise;
+                    return updateResult;
+                },
+            }),
+        });
+
+        const first = service.updateConfiguration(modelUpdate, controlContext);
+        await firstStarted.promise;
+        const controllers = Array.from(
+            { length: openClawSettingsMutationMaximumPending - 1 },
+            () => new AbortController()
+        );
+        const queuedFailures = controllers.map((controller) =>
+            captureFailure(() =>
+                service.updateConfiguration(
+                    modelUpdate,
+                    controlContext,
+                    controller.signal
+                )
+            )
+        );
+        const overflow = await captureFailure(() =>
+            service.updateConfiguration(modelUpdate, controlContext)
+        );
+        expect(overflow).toEqual(
+            new OpenClawSettingsServiceError("provider-unavailable")
+        );
+        expect(providerCalls).toBe(1);
+
+        const abortReason = new Error("clear bounded queue");
+        for (const controller of controllers) controller.abort(abortReason);
+        expect(await Promise.all(queuedFailures)).toEqual(
+            Array.from({ length: controllers.length }, () => abortReason)
+        );
+        releaseFirst.resolve();
+        await first;
+        expect(providerCalls).toBe(1);
+    });
+
     test("never retries an unknown skill outcome and classifies its audit as partial", async () => {
         const settlements: string[] = [];
         let providerCalls = 0;
@@ -315,6 +459,7 @@ describe("OpenClaw settings service", () => {
             service.setSkillEnabled(
                 {
                     baseHash: configuration.hash,
+                    baseRevisionHash: configuration.revisionHash,
                     enabled: false,
                     skillKey: "reviewed-skill",
                 },
@@ -348,6 +493,9 @@ describe("OpenClaw settings service", () => {
         );
         expect(failures).toEqual([
             expect.objectContaining({
+                cause: expect.objectContaining({
+                    message: "private settlement detail",
+                }),
                 operation: "update-configuration",
                 settlement: "succeeded",
                 targetFingerprint: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),

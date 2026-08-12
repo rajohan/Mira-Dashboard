@@ -21,6 +21,7 @@ import {
     createDashboardBrowserCollections,
     type DashboardBrowserCollections,
 } from "../data/dashboardCollections.ts";
+import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { createDashboardRouter, type DashboardRouter } from "../router.tsx";
 import type { DashboardWebAuthnClient } from "../security/webauthn/webauthnClient.ts";
 import { emptyNotificationListResult } from "../test/notifications.ts";
@@ -30,7 +31,8 @@ import {
     openClawSkillsQueryKey,
 } from "./openClawSettingsQueries.ts";
 
-const { render, screen, waitFor } = await import("@testing-library/react");
+const { fireEvent, render, screen, waitFor, within } =
+    await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
 const userEvent = userEventModule.default;
 
@@ -73,6 +75,7 @@ const accountSecuritySummary = Object.freeze({
     webAuthn: { available: true, rpId: "dashboard.test" },
 } satisfies AccountSecuritySummary);
 const configurationHash = "b".repeat(64);
+const configurationRevisionHash = `${"R".repeat(42)}A`;
 const configuration = Object.freeze({
     agentAccess: [
         {
@@ -90,8 +93,10 @@ const configuration = Object.freeze({
         { enabled: true, id: "discord" },
         { enabled: false, id: "webchat" },
     ],
+    channelsTruncated: false,
     hash: configurationHash,
     heartbeat: { everySeconds: 3600, target: "operations" },
+    includesPresent: false,
     issueCount: 0,
     lastTouchedAt: "2026-08-11T12:00:00.000Z",
     lastTouchedVersion: "2026.8.11",
@@ -99,18 +104,27 @@ const configuration = Object.freeze({
         fallbacks: ["openai/gpt-5.6-terra"],
         primary: "openai/gpt-5.6-sol",
     },
+    modelNormalizationState: "clean" as const,
+    revisionHash: configurationRevisionHash,
     security: {
         authProfileCount: 2,
         commandRestartEnabled: false,
         ownerAllowFromCount: 1,
         redactionMode: "strict",
     },
-    sessionReset: { idleMinutes: 60 },
+    sessionReset: {
+        idleMinutes: 60,
+        mode: "idle",
+        state: "explicit-idle",
+    },
     tools: {
         agentToAgentEnabled: true,
         elevatedEnabled: false,
-        execAsk: "on-miss",
-        execSecurity: "allowlist",
+        execPolicy: {
+            ask: "on-miss",
+            security: "allowlist",
+            state: "explicit",
+        },
         profile: "coding",
         sessionsVisibility: "agent",
         webFetchEnabled: true,
@@ -118,6 +132,33 @@ const configuration = Object.freeze({
         webSearchProvider: "brave",
     },
     valid: true,
+} satisfies OpenClawConfigurationSnapshot);
+const invalidEmptyConfiguration = Object.freeze({
+    agentAccess: [],
+    agentAccessTruncated: false,
+    channels: [],
+    channelsTruncated: false,
+    hash: configurationHash,
+    heartbeat: {},
+    includesPresent: false,
+    issueCount: 1,
+    models: { fallbacks: [] },
+    modelNormalizationState: "clean" as const,
+    revisionHash: configurationRevisionHash,
+    security: {
+        authProfileCount: 0,
+        commandRestartEnabled: true,
+        ownerAllowFromCount: 0,
+    },
+    sessionReset: { state: "inherited-none" as const },
+    tools: {
+        agentToAgentEnabled: false,
+        elevatedEnabled: true,
+        execPolicy: { state: "inherited" as const },
+        webFetchEnabled: true,
+        webSearchEnabled: true,
+    },
+    valid: false,
 } satisfies OpenClawConfigurationSnapshot);
 const skills = Object.freeze({
     skills: [
@@ -269,6 +310,22 @@ function renderSettings(
     return { queryClient, router };
 }
 
+function expectConfigurationControlsDisabled(): void {
+    const configurationRegion = screen.getByRole("region", {
+        name: "OpenClaw configuration",
+    });
+    const controls = [
+        ...within(configurationRegion).queryAllByRole("button"),
+        ...within(configurationRegion).queryAllByRole("combobox"),
+        ...within(configurationRegion).queryAllByRole("spinbutton"),
+        ...within(configurationRegion).queryAllByRole("switch"),
+        ...within(configurationRegion).queryAllByRole("textbox"),
+    ];
+
+    expect(controls.length).toBeGreaterThan(0);
+    for (const control of controls) expect(control).toBeDisabled();
+}
+
 afterEach(async () => {
     for (const view of mountedViews.splice(0)) view.unmount();
     await Promise.all(
@@ -334,6 +391,13 @@ describe("Dashboard Settings route", () => {
             "aria-selected",
             "true"
         );
+        const navigation = screen.getByRole("navigation", {
+            name: "Main navigation",
+        });
+        expect(
+            within(navigation).queryByRole("link", { name: "Account security" })
+        ).toBeNull();
+        expect(within(navigation).getByRole("link", { name: "Settings" })).toBeTruthy();
     });
 
     test("renders only bounded fields and submits one exact hash-fenced section", async () => {
@@ -378,6 +442,11 @@ describe("Dashboard Settings route", () => {
         expect(
             screen.getByRole("button", { name: "Session visibility" })
         ).toHaveTextContent("Current agent");
+        const lastTouchedAt = screen.getByText(
+            formatDashboardDateTime(Date.parse(configuration.lastTouchedAt))
+        );
+        expect(lastTouchedAt.tagName).toBe("TIME");
+        expect(lastTouchedAt).toHaveAttribute("dateTime", configuration.lastTouchedAt);
 
         await user.clear(primaryModel);
         await user.type(primaryModel, "openai/gpt-5.6-terra");
@@ -389,6 +458,7 @@ describe("Dashboard Settings route", () => {
         expect(mutations[0]).toMatchObject({
             input: {
                 baseHash: configurationHash,
+                baseRevisionHash: configurationRevisionHash,
                 confirmation: "apply-reviewed-settings",
                 update: {
                     fallbacks: ["openai/gpt-5.6-terra"],
@@ -412,6 +482,159 @@ describe("Dashboard Settings route", () => {
                 name: "Primary model",
             }).value
         ).toBe("openai/gpt-5.6-terra");
+    });
+
+    test("keeps normalized heartbeat text changes as a semantic no-op", async () => {
+        const transport = new SettingsTransport();
+        transport.configuration = {
+            ...configuration,
+            heartbeat: { everySeconds: 60, target: "operations" },
+        };
+        renderSettings(transport);
+        const user = userEvent.setup();
+        const interval = await screen.findByRole("spinbutton", {
+            name: "Interval (seconds)",
+        });
+        const target = screen.getByRole("textbox", { name: "Target" });
+
+        await user.clear(interval);
+        await user.type(interval, "060");
+        await user.type(target, "   ");
+
+        expect(
+            screen.getByRole("button", { name: "Save heartbeat settings" })
+        ).toBeDisabled();
+        expect(transport.calls.filter(({ kind }) => kind === "mutation")).toHaveLength(0);
+    });
+
+    test("explains and hides inherited or legacy exec policy values", async () => {
+        const transport = new SettingsTransport();
+        transport.configuration = {
+            ...configuration,
+            tools: {
+                ...configuration.tools,
+                execPolicy: { mode: "auto", state: "legacy-mode" },
+            },
+        };
+        renderSettings(transport);
+
+        expect(
+            await screen.findByText(
+                "Exec policy is locked because OpenClaw uses legacy mode “auto”. Unrelated tool changes preserve that mode."
+            )
+        ).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Exec approval policy" })).toBeNull();
+        expect(screen.queryByRole("button", { name: "Exec security mode" })).toBeNull();
+    });
+
+    test("edits only an explicit idle session-reset policy", async () => {
+        const transport = new SettingsTransport();
+        transport.configuration = {
+            ...configuration,
+            sessionReset: {
+                idleMinutes: 125,
+                mode: "idle",
+                state: "explicit-idle",
+            },
+        };
+        renderSettings(transport);
+
+        const idleMinutes = await screen.findByRole<HTMLInputElement>("spinbutton", {
+            name: "Idle timeout (minutes)",
+        });
+        expect(idleMinutes).toBeEnabled();
+        expect(idleMinutes.value).toBe("125");
+        expect(screen.getByRole("button", { name: "Save session reset" })).toBeDisabled();
+    });
+
+    test("keeps a leading-zero session reset value as a semantic no-op", async () => {
+        const transport = new SettingsTransport();
+        transport.configuration = {
+            ...configuration,
+            sessionReset: {
+                idleMinutes: 125,
+                mode: "idle",
+                state: "explicit-idle",
+            },
+        };
+        renderSettings(transport);
+        const idleMinutes = await screen.findByRole<HTMLInputElement>("spinbutton", {
+            name: "Idle timeout (minutes)",
+        });
+
+        fireEvent.change(idleMinutes, { target: { value: "0125" } });
+
+        expect(idleMinutes.value).toBe("0125");
+        expect(screen.getByRole("button", { name: "Save session reset" })).toBeDisabled();
+        expect(transport.calls.filter(({ kind }) => kind === "mutation")).toHaveLength(0);
+    });
+
+    for (const resetCase of [
+        {
+            message: "Session reset uses OpenClaw's inherited no-reset policy.",
+            name: "inherited-none",
+            sessionReset: { state: "inherited-none" },
+        },
+        {
+            message:
+                "Session reset is locked because the current OpenClaw object implicitly enables a daily reset.",
+            name: "implicit-daily",
+            sessionReset: { state: "implicit-daily" },
+        },
+        {
+            message: "Session reset is locked in OpenClaw mode “daily”.",
+            name: "locked-daily",
+            sessionReset: { mode: "daily", state: "locked-mode" },
+        },
+        {
+            message: "Session reset is locked in OpenClaw mode “none”.",
+            name: "locked-none",
+            sessionReset: { mode: "none", state: "locked-mode" },
+        },
+        {
+            message:
+                "Session reset is locked because the explicit idle policy has no editable bounded timeout.",
+            name: "partial-idle",
+            sessionReset: { state: "partial-idle" },
+        },
+    ] as const) {
+        test(`renders the ${resetCase.name} session-reset state as read-only`, async () => {
+            const transport = new SettingsTransport();
+            transport.configuration = {
+                ...configuration,
+                sessionReset: resetCase.sessionReset,
+            };
+            renderSettings(transport);
+
+            expect(await screen.findByText(resetCase.message)).toBeTruthy();
+            expect(
+                screen.queryByRole("spinbutton", {
+                    name: "Idle timeout (minutes)",
+                })
+            ).toBeNull();
+            expect(screen.getByRole("heading", { name: "Session reset" })).toBeTruthy();
+        });
+    }
+
+    test("renders invalid and absent last-touched values without inventing a date", async () => {
+        const invalidTransport = new SettingsTransport();
+        invalidTransport.configuration = {
+            ...configuration,
+            lastTouchedAt: "not-a-timestamp",
+        };
+        renderSettings(invalidTransport);
+
+        const invalidValue = await screen.findByText("not-a-timestamp");
+        expect(invalidValue.closest("time")).toBeNull();
+
+        const absentTransport = new SettingsTransport();
+        absentTransport.configuration = {
+            ...configuration,
+            lastTouchedAt: undefined,
+        };
+        renderSettings(absentTransport);
+
+        expect(await screen.findByText("Not reported")).toBeTruthy();
     });
 
     test("submits one exact agent tool override intent without browser policy arrays", async () => {
@@ -468,6 +691,7 @@ describe("Dashboard Settings route", () => {
         expect(mutation).toMatchObject({
             input: {
                 baseHash: configurationHash,
+                baseRevisionHash: configurationRevisionHash,
                 confirmation: "apply-reviewed-settings",
                 update: {
                     agentId: "main",
@@ -557,49 +781,185 @@ describe("Dashboard Settings route", () => {
         ).toHaveTextContent("Allow");
     });
 
-    test("locks every control and explains an invalid configuration", async () => {
+    test("resets section drafts on a same-root revision remount while preserving the selected agent", async () => {
+        const transport = new SettingsTransport();
+        const canonicalTools = configuration.agentAccess[0]!.tools;
+        transport.configuration = {
+            ...configuration,
+            agentAccess: [
+                {
+                    id: "alpha",
+                    name: "Alpha worker",
+                    tools: canonicalTools.map((tool) => ({ ...tool })),
+                },
+                {
+                    id: "beta",
+                    name: "Beta worker",
+                    tools: canonicalTools.map((tool) => ({ ...tool })),
+                },
+            ],
+        };
+        const { queryClient } = renderSettings(transport);
+        const user = userEvent.setup();
+
+        await user.click(
+            await screen.findByRole("button", { name: "Selected OpenClaw agent" })
+        );
+        await user.click(screen.getByRole("option", { name: "Beta worker (beta)" }));
+        const heartbeatTarget = screen.getByRole<HTMLInputElement>("textbox", {
+            name: "Target",
+        });
+        await user.clear(heartbeatTarget);
+        await user.type(heartbeatTarget, "stale-local-draft");
+        expect(heartbeatTarget.value).toBe("stale-local-draft");
+
+        transport.configuration = {
+            ...transport.configuration,
+            heartbeat: {
+                ...transport.configuration.heartbeat,
+                target: "fresh-server-target",
+            },
+            revisionHash: `${"S".repeat(42)}E`,
+        };
+        await act(async () => {
+            await queryClient.refetchQueries({
+                exact: true,
+                queryKey: openClawConfigurationQueryKey,
+            });
+        });
+
+        await waitFor(() =>
+            expect(
+                screen.getByRole<HTMLInputElement>("textbox", { name: "Target" }).value
+            ).toBe("fresh-server-target")
+        );
+        expect(transport.configuration.hash).toBe(configurationHash);
+        expect(
+            screen.getByRole("button", { name: "Selected OpenClaw agent" })
+        ).toHaveTextContent("Beta worker (beta)");
+        expect(
+            screen.getByRole("button", {
+                name: "Exec override for Beta worker (beta)",
+            })
+        ).toHaveTextContent("Allow");
+    });
+
+    test("locks configuration includes while leaving leaf-only skill controls available", async () => {
         const transport = new SettingsTransport();
         transport.configuration = {
             ...configuration,
-            issueCount: 2,
-            valid: false,
+            includesPresent: true,
         };
         renderSettings(transport);
 
         expect(
-            await screen.findByText(/OpenClaw reports invalid configuration/iu)
+            await screen.findByText(
+                "Configuration changes are locked because this OpenClaw configuration uses included files. Edit the owning source in OpenClaw so an included value cannot change between review and persistence."
+            )
         ).toBeTruthy();
-        const controls = [
-            ...screen.getAllByRole("textbox"),
-            ...screen.getAllByRole("spinbutton"),
-            ...screen.getAllByRole("switch"),
-            ...screen.queryAllByRole("combobox"),
-        ];
-        expect(controls.length).toBeGreaterThan(0);
-        expect(controls.every((control) => control.hasAttribute("disabled"))).toBeTrue();
+        expectConfigurationControlsDisabled();
         expect(
-            screen
-                .getAllByRole("button", { name: /^Save /u })
-                .every((button) => button.hasAttribute("disabled"))
-        ).toBeTrue();
+            screen.getByRole("switch", { name: "Enable Disabled skill" })
+        ).toBeEnabled();
+    });
+
+    for (const normalizationCase of [
+        {
+            message:
+                "Configuration changes are locked because OpenClaw would canonicalize existing model references outside the requested setting. Save those references canonically in OpenClaw before editing here.",
+            state: "pending",
+        },
+        {
+            message:
+                "Configuration changes are locked because the existing model-reference normalization state could not be verified safely. Review and save the configuration in OpenClaw before editing here.",
+            state: "unknown",
+        },
+    ] as const) {
+        test(`locks configuration for ${normalizationCase.state} model normalization while retaining reads and skills`, async () => {
+            const transport = new SettingsTransport();
+            transport.configuration = {
+                ...configuration,
+                modelNormalizationState: normalizationCase.state,
+            };
+            renderSettings(transport);
+
+            expect(await screen.findByText(normalizationCase.message)).toBeTruthy();
+            expectConfigurationControlsDisabled();
+            expect(
+                screen.getByRole<HTMLInputElement>("textbox", {
+                    name: "Primary model",
+                }).value
+            ).toBe(configuration.models.primary);
+            expect(screen.getByText(configuration.lastTouchedVersion)).toBeTruthy();
+            expect(
+                screen.getByRole("switch", { name: "Enable Disabled skill" })
+            ).toBeEnabled();
+        });
+    }
+
+    test("hides the default-looking projection produced by an invalid empty provider config", async () => {
+        const transport = new SettingsTransport();
+        transport.configuration = invalidEmptyConfiguration;
+        renderSettings(transport);
+
         expect(
-            screen.getByRole("button", { name: "Exec override for Main (main)" })
+            await screen.findByText(
+                "OpenClaw reports invalid configuration. Reviewed values stay hidden because the redacted snapshot cannot be treated as effective state. Repair the configuration in OpenClaw, then refresh this page."
+            )
+        ).toBeTruthy();
+        const configurationRegion = screen.getByRole("region", {
+            name: "OpenClaw configuration",
+        });
+        for (const role of [
+            "button",
+            "combobox",
+            "spinbutton",
+            "switch",
+            "textbox",
+        ] as const) {
+            expect(within(configurationRegion).queryAllByRole(role)).toHaveLength(0);
+        }
+        for (const heading of [
+            "Configuration status",
+            "Models",
+            "Channels",
+            "Tools",
+            "Security summary",
+            "Session reset",
+            "Heartbeat",
+            "Agent access",
+        ]) {
+            expect(screen.queryByRole("heading", { name: heading })).toBeNull();
+        }
+        expect(
+            screen.queryByText(/Saving a reviewed setting makes OpenClaw rewrite/iu)
+        ).toBeNull();
+        expect(screen.getByRole("heading", { name: "Skills" })).toBeTruthy();
+        expect(
+            screen.getByRole("switch", { name: "Enable Search first" })
         ).toBeDisabled();
     });
 
     test("allows an ineligible disabled skill to be enabled", async () => {
         const transport = new SettingsTransport();
+        let finishMutation: ((result: unknown) => void) | undefined;
         transport.mutationHandler = (path) => {
             if (path !== "openClawSettings.setSkillEnabled") {
                 return Promise.reject(new TypeError(`Unexpected mutation: ${path}`));
             }
-            transport.skills = {
-                ...skills,
-                skills: skills.skills.map((skill) =>
-                    skill.key === "disabled-skill" ? { ...skill, enabled: true } : skill
-                ),
-            };
-            return Promise.resolve({ enabled: true, skillKey: "disabled-skill" });
+            return new Promise((resolve) => {
+                finishMutation = (result) => {
+                    transport.skills = {
+                        ...skills,
+                        skills: skills.skills.map((skill) =>
+                            skill.key === "disabled-skill"
+                                ? { ...skill, enabled: true }
+                                : skill
+                        ),
+                    };
+                    resolve(result);
+                };
+            });
         };
         renderSettings(transport);
         const user = userEvent.setup();
@@ -612,6 +972,19 @@ describe("Dashboard Settings route", () => {
         expect(screen.getByText("Unavailable")).toBeTruthy();
         await user.click(toggle);
 
+        await waitFor(() =>
+            expect(
+                transport.calls.filter(({ kind }) => kind === "mutation")
+            ).toHaveLength(1)
+        );
+        expect(toggle).toBeDisabled();
+        const skillsRegion = screen.getByRole("region", { name: "Skills" });
+        expect(skillsRegion).toHaveAttribute("aria-busy", "true");
+        expect(skillsRegion.querySelector("output")).toHaveTextContent("Saving skill…");
+        act(() => {
+            finishMutation?.({ enabled: true, skillKey: "disabled-skill" });
+        });
+
         expect(
             await screen.findByText(
                 "Skill setting saved and confirmed against current OpenClaw state."
@@ -621,6 +994,7 @@ describe("Dashboard Settings route", () => {
             expect.objectContaining({
                 input: {
                     baseHash: configurationHash,
+                    baseRevisionHash: configurationRevisionHash,
                     enabled: true,
                     skillKey: "disabled-skill",
                 },

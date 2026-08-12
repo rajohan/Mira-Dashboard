@@ -22,7 +22,7 @@
         },
         {
             "file": "settings.json",
-            "sha256": "7e20bc420305290a1dfaffefc97fa5ceb1f4c344f90540caddbc6e986508e83b"
+            "sha256": "e5c032104bae76d0ed50ed4dcb7f16eab3560ce7d8e51485507d518b45b01c0a"
         },
         {
             "file": "tasks.json",
@@ -52,6 +52,12 @@
             "sha256": "5cf540efa2a15e66c35fbaaec93ba6787b2ad056bbefb949179a3a52a8ce7599"
         },
         {
+            "bytes": 12441,
+            "path": "dist/session-visibility-BFfgC8_O.js",
+            "role": "agent-to-agent-runtime",
+            "sha256": "e9df08caca27cc1af30fd27036e3e104df3967b5668555d5d36c164dffcea442"
+        },
+        {
             "bytes": 52878,
             "path": "dist/zod-schema.agent-runtime-Cl6qhVu_.js",
             "role": "agent-tools-schema",
@@ -68,6 +74,18 @@
             "path": "dist/build-info.json",
             "role": "build-info",
             "sha256": "623249d20e099eec46ac4c3c281ad8672737919b68b74d1da62f94c3432ab491"
+        },
+        {
+            "bytes": 3783,
+            "path": "dist/zod-schema.channels-config-B_tQsooR.js",
+            "role": "channel-config-schema",
+            "sha256": "2e4af12855cabe0ee094a952c25694a59c209d8438d80d49d50e82903ea8584f"
+        },
+        {
+            "bytes": 7120,
+            "path": "dist/channel-selection-DlHJ2GPc.js",
+            "role": "channel-enabled-default",
+            "sha256": "2a1876a154bf425d7afc957be08ef6bb003bb08df96614a94765b91a2ec82f4d"
         },
         {
             "bytes": 14070,
@@ -106,10 +124,22 @@
             "sha256": "868d507ed8e8337ac53b3ce6e2fd02b87b8858fabb15c127e82203c7a849af55"
         },
         {
+            "bytes": 295400,
+            "path": "dist/io-DJgzO5Lm.js",
+            "role": "config-io",
+            "sha256": "2fb39013ce5b3999ef7adc73b65dae1ee1cf45dd15f66a40a3a294e0247e93d8"
+        },
+        {
             "bytes": 4404,
             "path": "dist/merge-patch-DNAwVDQs.js",
             "role": "config-merge-patch",
             "sha256": "60118a11f4308f15649c8337aee75fabf3ecef90d69ce5fb4f14546647141dd9"
+        },
+        {
+            "bytes": 33323,
+            "path": "dist/mutate-ORhhUgzl.js",
+            "role": "config-mutation",
+            "sha256": "ac0d11de2503033ecc13ff1a6f52880df5fcbaedc2a93448fb6facbdd6b61e5b"
         },
         {
             "bytes": 21479,
@@ -178,6 +208,24 @@
             "sha256": "34b2b66ffb45c2a11a37982ea222422c956dacb8e9fd3dcb422848dc6a18b174"
         },
         {
+            "bytes": 285361,
+            "path": "dist/get-reply-C2tVPYnK.js",
+            "role": "elevated-tool-runtime",
+            "sha256": "1dad7b0edd044a04639d4a8a2a487189aaf3a92d08df2e26a934e35600b3e06d"
+        },
+        {
+            "bytes": 4056,
+            "path": "dist/exec-defaults-B25R78q4.js",
+            "role": "exec-defaults-runtime",
+            "sha256": "8a1f98d5d49c9fa806186c45f38479ffe1e4ed5cf7b360f24ff0b2b7f263e802"
+        },
+        {
+            "bytes": 46901,
+            "path": "dist/exec-approvals-Cjuu8LRa.js",
+            "role": "exec-mode-policy",
+            "sha256": "4dea1ae70aeaab48e584b5545c3bab768b681e46d001816daba360e5eb9ba370"
+        },
+        {
             "bytes": 177839,
             "path": "dist/server.impl-BinHyN0g.js",
             "role": "gateway-broadcaster",
@@ -220,6 +268,12 @@
             "sha256": "87e0150acf911d80b2af719c9550a5295d22b83a0eda94e4ab18ccdfdac54222"
         },
         {
+            "bytes": 32787,
+            "path": "dist/restart-DvYlPEK9.js",
+            "role": "gateway-restart-scheduler",
+            "sha256": "486a90909440fbc4fe956dc08d7c8e8dbf4f187018fe4c0637bc53dda8ac35e5"
+        },
+        {
             "bytes": 32788,
             "path": "dist/server-ws-runtime-BSymIEDW.js",
             "role": "gateway-websocket",
@@ -242,6 +296,18 @@
             "path": "dist/method-scopes-_t_OJmWQ.js",
             "role": "method-scopes",
             "sha256": "2661f2c38b368caa72604e4cea1f798da91844699566d7666ddeba3abea66912"
+        },
+        {
+            "bytes": 5932,
+            "path": "dist/model-input-normalization-TBo1SlYS.js",
+            "role": "model-input-normalization",
+            "sha256": "d0d0c3fa53ac95e72570cb8ce8076834dc561eca2ae9715ffe4c4ba782626eed"
+        },
+        {
+            "bytes": 3361,
+            "path": "dist/model-input-BofPWz0k.js",
+            "role": "model-ref-normalization",
+            "sha256": "a2211a148910a9994f71903fc754fc35af6a3e32538842f121802c575cf044c4"
         },
         {
             "bytes": 819,
@@ -278,6 +344,12 @@
             "path": "dist/version-CwNT1gaY.js",
             "role": "protocol-version",
             "sha256": "fb5bf01f88b38b22bb05bb91538fed58db58038359e43017b68e4c989c971f76"
+        },
+        {
+            "bytes": 1365,
+            "path": "dist/provider-model-id-normalize-DODOj1rv.js",
+            "role": "provider-model-id-normalization",
+            "sha256": "b7ce135a8dc6f33c59b1244fbfed4bff311986d8d1ac798e34cd6ac1e37ac64c"
         },
         {
             "bytes": 62049,
@@ -328,6 +400,12 @@
             "sha256": "c6f1e0ae60b0172a9a72147efc95e28402a438b559775f8f51881259840c2377"
         },
         {
+            "bytes": 3458,
+            "path": "dist/reset-policy-efjZRFhj.js",
+            "role": "session-reset-policy",
+            "sha256": "48961962bd409e60dd411c328ebe1274730bba27252f605d7d83cba0bb7e1349"
+        },
+        {
             "bytes": 42879,
             "path": "dist/session-reset-service-BkZu1SZZ.js",
             "role": "session-reset-service",
@@ -352,10 +430,34 @@
             "sha256": "e910562b7368817a01f4285dbf94306bf09deb50dcec5e686a189913efa42b24"
         },
         {
+            "bytes": 5249,
+            "path": "dist/frontmatter-r2hK9RCV.js",
+            "role": "skill-key-resolution",
+            "sha256": "1bf63255782a09d5688951c008fb75e84992d5565525bad3ae87e4b5b7fe9262"
+        },
+        {
+            "bytes": 57102,
+            "path": "dist/workspace-Cx3vp79Z.js",
+            "role": "skills-discovery",
+            "sha256": "203570f55dc7663e42fee92288c7ee3e663d1b8d6b58dbbb585e3a7ccb8b7331"
+        },
+        {
             "bytes": 88295,
             "path": "dist/skills-KDzAh4r9.js",
             "role": "skills-handlers",
             "sha256": "2c950c2096db5cd9e5a1966e369b8c406388bd22d7852198096ef98bdceb10b5"
+        },
+        {
+            "bytes": 71057,
+            "path": "dist/store-D3FLfzRs.js",
+            "role": "skills-index",
+            "sha256": "b9b93b30e1a8823c57082589ac02e0a24d314f04e41298c41dd3cad090648023"
+        },
+        {
+            "bytes": 1107,
+            "path": "dist/source-9Jdpd6BI.js",
+            "role": "skills-source-resolution",
+            "sha256": "cb93ad986c0d23a5ab6029411d7e3d6b67f3c28ec6eb60c8f2af6e9527b493c3"
         },
         {
             "bytes": 9867,
@@ -398,6 +500,18 @@
             "path": "dist/tool-policy-D0BPUirT.js",
             "role": "tool-policy-normalization",
             "sha256": "27ad84b74bbeb660d9119bb45bb87ea619bf7b5fffe4ac4da5b9f42014bc64b0"
+        },
+        {
+            "bytes": 6633,
+            "path": "dist/runtime-Etb7L8Ef.js",
+            "role": "web-fetch-runtime",
+            "sha256": "9e235018173b718b77d58d044b7a5e5b731596b5c7c47399bdf6be9ab61da314"
+        },
+        {
+            "bytes": 13083,
+            "path": "dist/runtime-B_gHZuDl.js",
+            "role": "web-search-runtime",
+            "sha256": "6c44225a08e232d7847475b1076ed85d92638b406efd77928c4bc887b315fc44"
         }
     ]
 }

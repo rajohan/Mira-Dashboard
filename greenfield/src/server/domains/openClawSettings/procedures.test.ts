@@ -21,21 +21,24 @@ const configuration: OpenClawConfigurationSnapshot = {
     agentAccess: [],
     agentAccessTruncated: false,
     channels: [],
+    channelsTruncated: false,
     hash: "a".repeat(64),
     heartbeat: {},
+    includesPresent: false,
     issueCount: 0,
     models: { fallbacks: [] },
+    modelNormalizationState: "clean",
+    revisionHash: `${"R".repeat(42)}A`,
     security: {
         authProfileCount: 0,
         commandRestartEnabled: false,
         ownerAllowFromCount: 0,
     },
-    sessionReset: {},
+    sessionReset: { state: "inherited-none" },
     tools: {
         agentToAgentEnabled: false,
         elevatedEnabled: false,
-        execAsk: "always",
-        execSecurity: "deny",
+        execPolicy: { ask: "always", security: "deny", state: "explicit" },
         webFetchEnabled: true,
         webSearchEnabled: true,
     },
@@ -133,6 +136,10 @@ function automationContext(service: OpenClawSettingsService): RequestContext {
                 kind: "automation",
             },
         },
+        authenticationLease: {
+            expiresAtMs: Number.MAX_SAFE_INTEGER,
+            revalidate: () => Promise.reject(new Error("Not used by this test")),
+        },
         openClawSettingsService: service,
         requestId: "request-1",
         responseHeaders: new Headers(),
@@ -169,6 +176,7 @@ describe("OpenClaw settings procedures", () => {
         expect(await caller.listSkills({})).toEqual(skills);
         await caller.updateConfiguration({
             baseHash: configuration.hash,
+            baseRevisionHash: configuration.revisionHash,
             confirmation: "apply-reviewed-settings",
             update: {
                 fallbacks: [],
@@ -179,6 +187,7 @@ describe("OpenClaw settings procedures", () => {
         expect(
             await caller.setSkillEnabled({
                 baseHash: configuration.hash,
+                baseRevisionHash: configuration.revisionHash,
                 enabled: false,
                 skillKey: "reviewed-skill",
             })
@@ -210,15 +219,15 @@ describe("OpenClaw settings procedures", () => {
         const anonymous = testRouter.createCaller(
             anonymousContext(service)
         ).openClawSettings;
-        expect(await captureFailure(() => anonymous.getConfiguration({}))).toBeInstanceOf(
-            TRPCError
-        );
+        expect(await captureFailure(() => anonymous.getConfiguration({}))).toMatchObject({
+            code: "UNAUTHORIZED",
+        });
         const automation = testRouter.createCaller(
             automationContext(service)
         ).openClawSettings;
-        expect(
-            await captureFailure(() => automation.getConfiguration({}))
-        ).toBeInstanceOf(TRPCError);
+        expect(await captureFailure(() => automation.getConfiguration({}))).toMatchObject(
+            { code: "FORBIDDEN" }
+        );
 
         const readOnly = testRouter.createCaller(
             sessionContext(service, access, ["openclaw-settings:read"])
@@ -228,18 +237,19 @@ describe("OpenClaw settings procedures", () => {
             await captureFailure(() =>
                 readOnly.setSkillEnabled({
                     baseHash: configuration.hash,
+                    baseRevisionHash: configuration.revisionHash,
                     enabled: true,
                     skillKey: "reviewed-skill",
                 })
             )
-        ).toBeInstanceOf(TRPCError);
+        ).toMatchObject({ code: "FORBIDDEN" });
 
         const writeOnly = testRouter.createCaller(
             sessionContext(service, access, ["openclaw-settings:write"])
         ).openClawSettings;
-        expect(await captureFailure(() => writeOnly.listSkills({}))).toBeInstanceOf(
-            TRPCError
-        );
+        expect(await captureFailure(() => writeOnly.listSkills({}))).toMatchObject({
+            code: "FORBIDDEN",
+        });
         expect(calls).toEqual(["list-skills"]);
     });
 
@@ -256,6 +266,7 @@ describe("OpenClaw settings procedures", () => {
             const failure = await captureFailure(() =>
                 testRouter.createCaller(context).openClawSettings.setSkillEnabled({
                     baseHash: configuration.hash,
+                    baseRevisionHash: configuration.revisionHash,
                     enabled: true,
                     skillKey: "reviewed-skill",
                 })
@@ -289,6 +300,7 @@ describe("OpenClaw settings procedures", () => {
             const failure = await captureFailure(() =>
                 caller.setSkillEnabled({
                     baseHash: configuration.hash,
+                    baseRevisionHash: configuration.revisionHash,
                     enabled: true,
                     skillKey: "reviewed-skill",
                 })
@@ -297,7 +309,10 @@ describe("OpenClaw settings procedures", () => {
             expect(failure).toBeInstanceOf(TRPCError);
             expect(failure).toMatchObject({ code });
             if (reason === "unknown-outcome") {
-                expect(JSON.stringify(failure)).toContain("operation_outcome_unknown");
+                expect(failure).toHaveProperty(
+                    "cause.reason",
+                    "operation_outcome_unknown"
+                );
             }
         }
     });

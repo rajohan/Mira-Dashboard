@@ -1863,7 +1863,7 @@
             "id": "POST /api/skills/:name",
             "method": "POST",
             "path": "/api/skills/:name",
-            "purpose": "Toggles one freshly verified exact discovered or configured-only skill through a recent-MFA audited hash-fenced config patch.",
+            "purpose": "Toggles one freshly verified exact discovered or configured-only skill through a recent-MFA audited leaf update on the latest configuration.",
             "section": "OpenClaw Config",
             "target": {
                 "delivery": "implemented",
@@ -1995,7 +1995,7 @@
             "id": "PUT /api/config",
             "method": "PUT",
             "path": "/api/config",
-            "purpose": "Replaces loose masked-config writes with one hash-fenced server-built patch to an exact reviewed settings section or one canonical agent/tool override.",
+            "purpose": "Replaces loose masked-config writes with one root-hash-fenced server-built patch after an exact revision preflight for one reviewed settings section or canonical agent/tool override.",
             "section": "OpenClaw Config",
             "target": {
                 "delivery": "implemented",

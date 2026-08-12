@@ -1461,35 +1461,44 @@ full-browser parity, production rehearsal, cutover, and legacy deletion remain o
   deterministically. Configuration and skill queries fail independently, retain explicit
   unavailable/invalid states, and never place raw configuration or recoverable secrets in the
   browser or Query cache.
-- `openClawSettings.getConfiguration` returns a bounded, redacted projection plus the provider hash.
+- `openClawSettings.getConfiguration` returns a bounded, redacted projection plus separate provider
+  root-hash and source-revision identities. Include presence and whole-candidate model-normalization
+  state are projected as locks without exposing source paths, raw configuration, or environment
+  values.
   Updates are strict section-specific operations for models, session reset, heartbeat, tools, and
   configured channels, plus one exact agent/tool override intent against canonical
-  `agents.entries`. The server reconstructs a narrow patch from a fresh authoritative snapshot,
-  preserves masked and unknown values server-side, fences the write with the observed hash, and
-  does not retry an unknown outcome. Agent access exposes only a fixed pinned core-tool subset and
-  marks omitted or noncanonical rows explicitly incomplete. Skill inventory is path-free and
-  bounded, retains safe configured-only entries, and toggles accept only one validated skill
-  identity, desired enabled state, and the fresh configuration hash.
+  `agents.entries`. The server reconstructs a narrow patch after a revision preflight, preserves
+  masked and unknown values server-side, fences `config.patch` atomically with the observed root
+  hash, and does not retry an unknown outcome. Include-owned sources or a pending/unknown
+  normalization state keep configuration reads available but lock writes. Agent access exposes only
+  a fixed pinned core-tool subset and marks omitted or noncanonical rows explicitly incomplete.
+  Skill inventory is path-free and bounded, retains safe configured-only entries, and toggles
+  accept only one validated skill identity and desired enabled state against the reviewed snapshot.
 - Reads require an authenticated browser session and the dedicated
   `openclaw-settings:read` capability. Configuration and skill writes require
   `openclaw-settings:write`, a recent MFA assertion revalidated immediately before dispatch, an
   admitted fail-closed audit record, and a sanitized terminal settlement. Automation principals
-  cannot use these browser-only procedures even if a capability row is provisioned.
+  cannot use these browser-only procedures even if a capability row is provisioned. A bounded
+  sixteen-operation active-plus-waiting FIFO serializes privileged Settings mutations and removes
+  aborted waiters immediately.
 - The Gateway adapter exposes source-audited `config.get` and `skills.status` on its read set and
-  only hash-fenced `config.patch` on its write set. Pinned `skills.update` remains upstream
-  comparison evidence and is deliberately not admitted because it cannot carry the configuration
-  hash. The adapter does not broaden the generic persistent request API or permit arbitrary method
-  forwarding. Reads use bounded authenticated frames; writes use fresh one-shot admin connections,
-  reauthorize after the handshake immediately before dispatch, and make post-dispatch uncertainty
-  explicit.
+  only `config.patch` plus `skills.update` on its fresh one-shot admin write set. Configuration
+  patches use the upstream root-hash CAS after an exact revision preflight. Skill toggles use one
+  exact `skills.update` leaf on the latest configuration and are explicitly last-writer-wins rather
+  than hash-fenced; uncertain outcomes receive one readback and are never replayed. The adapter does
+  not broaden the generic persistent request API or permit arbitrary method forwarding. Reads use
+  bounded authenticated frames; writes reauthorize after the handshake immediately before
+  dispatch and make post-dispatch uncertainty explicit.
 - Four legacy configuration/skill rows and the `/settings` route are recorded as implemented. The
   unused legacy Dashboard preference pair is recorded as a reviewed removal instead of restoring
   host-home JSON persistence with no current consumer. The secret-bearing configuration export and
   Gateway restart rows remain planned for separate raw-ticket and durable worker-job slices. The
   reviewed inventory now records 103 implemented, 52 planned, and two removed legacy endpoints;
   12 browser routes are implemented and four remain planned. Phase 5 remains open.
-- The lazy settings route and its bounded forms measured 898,964 aggregate JavaScript gzip bytes
-  across the production browser build. The reviewed aggregate ceiling moves from 865 KiB to
-  880 KiB for this parity slice; initial-JavaScript, largest-chunk, and stylesheet ceilings remain
-  unchanged, leaving only 2,156 bytes of aggregate headroom instead of weakening those startup
-  gates.
+- The lazy settings route and its bounded forms measured 900,607 aggregate JavaScript gzip bytes
+  identically across three frozen-tree production browser builds. The reviewed aggregate
+  completion ceiling moves from 880 KiB to 1,280 KiB because 52 endpoint replacements and the
+  `/`, `/database`, `/delivery`, and `/docker` browser routes remain in the rewrite. This leaves
+  410,113 bytes for those reviewed slices without deleting parity behavior. The tighter
+  initial-JavaScript, largest-chunk, and stylesheet ceilings remain unchanged so startup and
+  per-route regressions still fail independently.

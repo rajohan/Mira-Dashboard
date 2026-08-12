@@ -11,7 +11,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 64,
-            "pattern": "^(?!(?:__proto__|constructor|prototype)$)[a-z0-9_][a-z0-9_-]{0,63}$"
+            "pattern": "^(?!(?:__[Pp][Rr][Oo][Tt][Oo]__|[Cc][Oo][Nn][Ss][Tt][Rr][Uu][Cc][Tt][Oo][Rr]|[Pp][Rr][Oo][Tt][Oo][Tt][Yy][Pp][Ee])$)[A-Za-z0-9_][A-Za-z0-9_-]{0,63}$"
           },
           "name": {
             "type": "string",
@@ -100,17 +100,9 @@
           },
           "id": {
             "type": "string",
-            "maxLength": 64,
             "minLength": 1,
-            "pattern": "^[a-z0-9][a-z0-9._-]*$",
-            "allOf": [
-              {
-                "pattern": "^[^\\u0000]*$"
-              },
-              {
-                "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
-              }
-            ]
+            "maxLength": 64,
+            "pattern": "^(?!(?:constructor|prototype)$)[a-z0-9][a-z0-9._-]*$"
           }
         },
         "required": [
@@ -121,6 +113,9 @@
       },
       "maxItems": 64,
       "$comment": "Live Valibot validation additionally requires configured OpenClaw channel IDs to be unique and strictly ordered."
+    },
+    "channelsTruncated": {
+      "type": "boolean"
     },
     "hash": {
       "type": "string",
@@ -151,6 +146,9 @@
       },
       "required": [],
       "additionalProperties": false
+    },
+    "includesPresent": {
+      "type": "boolean"
     },
     "issueCount": {
       "type": "integer",
@@ -227,6 +225,20 @@
       ],
       "additionalProperties": false
     },
+    "modelNormalizationState": {
+      "enum": [
+        "clean",
+        "pending",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "revisionHash": {
+      "type": "string",
+      "minLength": 43,
+      "maxLength": 43,
+      "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$"
+    },
     "security": {
       "type": "object",
       "properties": {
@@ -266,16 +278,86 @@
       "additionalProperties": false
     },
     "sessionReset": {
-      "type": "object",
-      "properties": {
-        "idleMinutes": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 10080
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "idleMinutes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10080
+            },
+            "mode": {
+              "const": "idle"
+            },
+            "state": {
+              "const": "explicit-idle"
+            }
+          },
+          "required": [
+            "idleMinutes",
+            "mode",
+            "state"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "state": {
+              "const": "inherited-none"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "state": {
+              "const": "implicit-daily"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "enum": [
+                "daily",
+                "none"
+              ],
+              "type": "string"
+            },
+            "state": {
+              "const": "locked-mode"
+            }
+          },
+          "required": [
+            "mode",
+            "state"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "state": {
+              "const": "partial-idle"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "additionalProperties": false
         }
-      },
-      "required": [],
-      "additionalProperties": false
+      ]
     },
     "tools": {
       "type": "object",
@@ -286,21 +368,86 @@
         "elevatedEnabled": {
           "type": "boolean"
         },
-        "execAsk": {
-          "enum": [
-            "off",
-            "on-miss",
-            "always"
-          ],
-          "type": "string"
-        },
-        "execSecurity": {
-          "enum": [
-            "allowlist",
-            "deny",
-            "full"
-          ],
-          "type": "string"
+        "execPolicy": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "ask": {
+                  "enum": [
+                    "off",
+                    "on-miss",
+                    "always"
+                  ],
+                  "type": "string"
+                },
+                "security": {
+                  "enum": [
+                    "allowlist",
+                    "deny",
+                    "full"
+                  ],
+                  "type": "string"
+                },
+                "state": {
+                  "const": "explicit"
+                }
+              },
+              "required": [
+                "ask",
+                "security",
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "const": "inherited"
+                }
+              },
+              "required": [
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "const": "partial"
+                }
+              },
+              "required": [
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "enum": [
+                    "deny",
+                    "allowlist",
+                    "ask",
+                    "auto",
+                    "full"
+                  ],
+                  "type": "string"
+                },
+                "state": {
+                  "const": "legacy-mode"
+                }
+              },
+              "required": [
+                "mode",
+                "state"
+              ],
+              "additionalProperties": false
+            }
+          ]
         },
         "profile": {
           "type": "string",
@@ -349,8 +496,7 @@
       "required": [
         "agentToAgentEnabled",
         "elevatedEnabled",
-        "execAsk",
-        "execSecurity",
+        "execPolicy",
         "webFetchEnabled",
         "webSearchEnabled"
       ],
@@ -364,10 +510,14 @@
     "agentAccess",
     "agentAccessTruncated",
     "channels",
+    "channelsTruncated",
     "hash",
     "heartbeat",
+    "includesPresent",
     "issueCount",
     "models",
+    "modelNormalizationState",
+    "revisionHash",
     "security",
     "sessionReset",
     "tools",

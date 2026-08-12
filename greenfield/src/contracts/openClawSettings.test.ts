@@ -7,6 +7,7 @@ import {
     listOpenClawSkillsResultSchema,
     openClawConfigurationSnapshotSchema,
     openClawConfigurationUpstreamMaximumBytes,
+    openClawGatewaySkillSources,
     openClawReviewedAgentToolIds,
     openClawSettingsProcedureContracts,
     openClawSkillMaximum,
@@ -16,6 +17,7 @@ import {
 } from "./openClawSettings.ts";
 
 const configurationHash = "a".repeat(64);
+const configurationRevisionHash = `${"R".repeat(42)}A`;
 const agentTools = openClawReviewedAgentToolIds.map((id) => ({
     editable: true,
     id,
@@ -28,8 +30,10 @@ const validConfiguration = {
         { enabled: true, id: "discord" },
         { enabled: false, id: "signal" },
     ],
+    channelsTruncated: false,
     hash: configurationHash,
     heartbeat: { everySeconds: 300, target: "last" },
+    includesPresent: false,
     issueCount: 0,
     lastTouchedAt: "2026-08-11T17:00:00.000Z",
     lastTouchedVersion: "2026.7.2-beta.7",
@@ -37,18 +41,27 @@ const validConfiguration = {
         fallbacks: ["openai/gpt-5.5"],
         primary: "openai/gpt-5.6",
     },
+    modelNormalizationState: "clean" as const,
+    revisionHash: configurationRevisionHash,
     security: {
         authProfileCount: 2,
         commandRestartEnabled: false,
         ownerAllowFromCount: 1,
         redactionMode: "tools",
     },
-    sessionReset: { idleMinutes: 60 },
+    sessionReset: {
+        idleMinutes: 60,
+        mode: "idle",
+        state: "explicit-idle",
+    },
     tools: {
         agentToAgentEnabled: true,
         elevatedEnabled: false,
-        execAsk: "on-miss",
-        execSecurity: "allowlist",
+        execPolicy: {
+            ask: "on-miss",
+            security: "allowlist",
+            state: "explicit",
+        },
         profile: "coding",
         sessionsVisibility: "tree",
         webFetchEnabled: true,
@@ -61,6 +74,7 @@ const validConfiguration = {
 function updateInput(update: unknown) {
     return {
         baseHash: configurationHash,
+        baseRevisionHash: configurationRevisionHash,
         confirmation: "apply-reviewed-settings",
         update,
     };
@@ -190,7 +204,6 @@ describe("OpenClaw settings contracts", () => {
         }
 
         for (const agentId of [
-            "Main",
             "CONSTRUCTOR",
             "__Proto__",
             "__proto__",
@@ -201,6 +214,8 @@ describe("OpenClaw settings contracts", () => {
             "main%2Fchild",
             "..",
             "prototype",
+            "K",
+            "ſ",
             " main",
             "main ",
         ]) {
@@ -212,6 +227,32 @@ describe("OpenClaw settings contracts", () => {
                         override: "deny",
                         section: "agent-tool-access",
                         toolId: "exec",
+                    })
+                ).success
+            ).toBe(false);
+        }
+
+        for (const agentId of ["Main", "OPS_1", "_ops"]) {
+            expect(
+                v.safeParse(
+                    updateOpenClawConfigurationInputSchema,
+                    updateInput({
+                        agentId,
+                        override: "deny",
+                        section: "agent-tool-access",
+                        toolId: "exec",
+                    })
+                ).success
+            ).toBe(true);
+        }
+
+        for (const id of ["constructor", "prototype"]) {
+            expect(
+                v.safeParse(
+                    updateOpenClawConfigurationInputSchema,
+                    updateInput({
+                        channels: [{ enabled: true, id }],
+                        section: "channels",
                     })
                 ).success
             ).toBe(false);
@@ -240,7 +281,7 @@ describe("OpenClaw settings contracts", () => {
                 primary: "openai/gpt-5.6",
                 section: "models",
             },
-            { idleMinutes: 60, section: "session-reset" },
+            { idleMinutes: 60, mode: "idle", section: "session-reset" },
             { section: "tools", settings: validConfiguration.tools },
         ];
         for (const update of updates) {
@@ -252,6 +293,10 @@ describe("OpenClaw settings contracts", () => {
 
         for (const invalid of [
             { ...updateInput(updates[0]), baseHash: "A".repeat(64) },
+            { ...updateInput(updates[0]), baseRevisionHash: "A".repeat(42) },
+            { ...updateInput(updates[0]), baseRevisionHash: "A".repeat(44) },
+            { ...updateInput(updates[0]), baseRevisionHash: `${"A".repeat(42)}B` },
+            { ...updateInput(updates[0]), baseRevisionHash: `${"A".repeat(42)}!` },
             { ...updateInput(updates[0]), confirmation: "apply" },
             updateInput({ raw: "{}", section: "raw" }),
             updateInput({
@@ -362,7 +407,6 @@ describe("OpenClaw settings contracts", () => {
                 { id: "a-agent", tools: agentTools },
             ],
             [{ id: "__proto__", tools: agentTools }],
-            [{ id: "Main", tools: agentTools }],
             [{ id: "main.with-dot", tools: agentTools }],
         ]) {
             expect(
@@ -375,11 +419,25 @@ describe("OpenClaw settings contracts", () => {
     });
 
     test("projects stable path-free skill rows from a closed source vocabulary", () => {
+        expect(openClawGatewaySkillSources).toEqual([
+            "agents-skills-personal",
+            "agents-skills-project",
+            "openclaw-bundled",
+            "openclaw-extra",
+            "openclaw-managed",
+            "openclaw-node",
+            "openclaw-workspace",
+            "unknown",
+        ]);
         expect(openClawSkillSources).toEqual([
+            "agents-skills-personal",
+            "agents-skills-project",
             "openclaw-bundled",
             "openclaw-configured",
+            "openclaw-extra",
             "openclaw-managed",
-            "openclaw-plugin",
+            "openclaw-node",
+            "openclaw-unknown",
             "openclaw-workspace",
         ]);
         const skills = [
@@ -424,6 +482,14 @@ describe("OpenClaw settings contracts", () => {
             },
             {
                 skills: [{ ...skills[1], source: "/home/operator/skills" }],
+                truncated: false,
+            },
+            {
+                skills: [{ ...skills[1], key: "constructor" }],
+                truncated: false,
+            },
+            {
+                skills: [{ ...skills[1], key: "PROTOTYPE" }],
                 truncated: false,
             },
             {

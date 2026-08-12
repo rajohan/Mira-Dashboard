@@ -1,5 +1,3 @@
-import { useState } from "react";
-
 import type {
     OpenClawAgentAccessValue,
     OpenClawAgentToolAccessValue,
@@ -97,10 +95,12 @@ const overrideOptions = Object.freeze([
 ] satisfies readonly SelectOption<AgentToolOverride>[]);
 
 interface OpenClawAgentAccessSectionProps {
+    readonly activeAgentId: string;
     readonly agents: readonly OpenClawAgentAccessValue[];
     readonly busy: boolean;
     readonly disabled: boolean;
     readonly onSave: (update: OpenClawConfigurationUpdate) => Promise<void>;
+    readonly onSelectAgent: (agentId: string) => void;
     readonly truncated: boolean;
 }
 
@@ -110,13 +110,14 @@ function agentLabel({ id, name }: OpenClawAgentAccessValue): string {
 
 /** @returns One-intent controls for exact agent-level core-tool overrides. */
 export function OpenClawAgentAccessSection({
+    activeAgentId,
     agents,
     busy,
     disabled,
     onSave,
+    onSelectAgent,
     truncated,
 }: OpenClawAgentAccessSectionProps) {
-    const [activeAgentId, setActiveAgentId] = useState(agents[0]?.id ?? "");
     const activeAgent = agents.find(({ id }) => id === activeAgentId) ?? agents[0];
 
     return (
@@ -169,7 +170,7 @@ export function OpenClawAgentAccessSection({
                         <Select
                             ariaLabel="Selected OpenClaw agent"
                             disabled={disabled || busy}
-                            onChange={setActiveAgentId}
+                            onChange={onSelectAgent}
                             options={agents.map((agent) => ({
                                 label: agentLabel(agent),
                                 value: agent.id,

@@ -81,6 +81,10 @@ export type StructuredLogFields =
           readonly targetFingerprint: string;
       }
     | {
+          readonly kind: "openclaw-settings-mutation-queue";
+          readonly queueDepth: number;
+      }
+    | {
           readonly kind: "http-request";
           readonly method: string;
       }
@@ -150,6 +154,7 @@ const structuredEventComponents = Object.freeze({
     "openclaw_cron.audit_settlement.failed": "openclaw-cron-audit",
     "openclaw_cron.expiry_reconciliation.failed": "openclaw-cron-expiry",
     "openclaw_settings.audit_settlement.failed": "openclaw-settings-audit",
+    "openclaw_settings.mutation_queue.waited": "openclaw-settings",
     "realtime.runner.failed": "realtime-event-pump",
     "realtime.wake.failed": "realtime-event-pump",
     "runtime.logger.connected": "application-runtime",
@@ -351,6 +356,16 @@ function safeEventFields(
                 settlement: fields.settlement,
                 targetFingerprint: fields.targetFingerprint,
             };
+        }
+        case "openclaw-settings-mutation-queue": {
+            if (
+                eventName !== "openclaw_settings.mutation_queue.waited" ||
+                !Number.isSafeInteger(fields.queueDepth) ||
+                fields.queueDepth < 1
+            ) {
+                return undefined;
+            }
+            return { queueDepth: fields.queueDepth };
         }
         case "realtime-runner-failure": {
             return eventName === "realtime.runner.failed" &&
