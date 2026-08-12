@@ -5,6 +5,7 @@ import {
     count,
     desc,
     eq,
+    exists,
     gte,
     gt,
     inArray,
@@ -2147,6 +2148,21 @@ class DrizzleJobWriter extends DrizzleJobReader {
         if (activeCount >= worker.capacity) return { kind: "worker-unavailable" };
         const workerActionKeys = parseWorkerActionKeysJson(worker.actionKeysJson);
         if (workerActionKeys.length === 0) return { kind: "empty" };
+        const retiredNeverRun = and(
+            eq(jobRuns.cancellationPolicy, "never"),
+            isNotNull(jobRuns.scheduledJobId),
+            exists(
+                this.#transaction
+                    .select({ id: scheduledJobs.id })
+                    .from(scheduledJobs)
+                    .where(
+                        and(
+                            eq(scheduledJobs.id, jobRuns.scheduledJobId),
+                            eq(scheduledJobs.enabled, false)
+                        )
+                    )
+            )
+        );
 
         const availableThrough = input.cursor?.availableThrough ?? input.at;
         const candidates: JobRunRecord[] = [];
@@ -2161,7 +2177,10 @@ class DrizzleJobWriter extends DrizzleJobReader {
                         and(
                             eq(jobRuns.state, "queued"),
                             lte(jobRuns.availableAt, availableThrough),
-                            inArray(jobRuns.actionKey, workerActionKeys),
+                            or(
+                                inArray(jobRuns.actionKey, workerActionKeys),
+                                retiredNeverRun
+                            ),
                             range
                         )
                     )
