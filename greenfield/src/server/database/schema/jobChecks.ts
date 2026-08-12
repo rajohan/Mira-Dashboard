@@ -25,6 +25,7 @@ const retiredScheduledActionTerminalMessageSql = sql.raw(
 
 /**
  * Exact SQL form of the only failed lifecycle admitted before attempt one.
+ * @param columns Durable run columns participating in the canonical predicate.
  * @returns Canonical predicate shared by durable job-row constraints.
  */
 export function unstartedRetiredScheduleFailureCheck(columns: {
