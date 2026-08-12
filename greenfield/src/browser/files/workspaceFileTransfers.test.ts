@@ -100,7 +100,7 @@ describe("workspace file transfers", () => {
         expect(fetcher).not.toHaveBeenCalled();
     });
 
-    test("materializes only a validated oversized-source prefix", async () => {
+    test("binds an oversized source while validating only delivered prefix bytes", async () => {
         const sourceSizeBytes = workspaceFileLimits.maximumManifestFileBytes + 1;
         const prefixEntry: WorkspaceFileEntry = {
             ...entry,
@@ -117,6 +117,10 @@ describe("workspace file transfers", () => {
         };
         const fetcher = jest.fn(() => Promise.resolve(new Response("hello")));
 
+        expect(prefixEntry.sizeBytes).toBe(sourceSizeBytes);
+        expect(prefixTicket.sourceSizeBytes).toBe(prefixEntry.sizeBytes);
+        expect(prefixTicket.sizeBytes).toBe(5);
+
         const result = await prepareWorkspaceFilePreview(
             client({ query: () => Promise.resolve(prefixTicket) }),
             prefixEntry,
@@ -125,6 +129,18 @@ describe("workspace file transfers", () => {
         );
         expect(result).toEqual({ content: "hello", ticket: prefixTicket });
         expect(fetcher).toHaveBeenCalledTimes(1);
+
+        const wrongPrefixTicket = { ...prefixTicket, sizeBytes: 4 };
+        const wrongPrefixResponse = Promise.resolve(new Response("hello"));
+        const wrongTicketPrefixLength = await prepareWorkspaceFilePreview(
+            client({
+                query: () => Promise.resolve(wrongPrefixTicket),
+            }),
+            prefixEntry,
+            new AbortController().signal,
+            () => wrongPrefixResponse
+        ).catch((error: unknown) => error);
+        expect(wrongTicketPrefixLength).toMatchObject({ category: "protocol" });
 
         const rejected = await prepareWorkspaceFilePreview(
             client({

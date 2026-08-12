@@ -150,13 +150,17 @@ function ticketMatchesEntry(
 ): boolean {
     if (ticket.revision !== entry.revision) return false;
     if (ticket.truncated === true) {
+        // Directory rows retain the full descriptor size. The ticket separates that
+        // source size from the bounded prefix bytes delivered by the raw endpoint.
+        const sourceSizeBytes = ticket.sourceSizeBytes;
+        const prefixSizeBytes = ticket.sizeBytes;
         return (
             entry.truncated === true &&
             entry.sizeBytes !== undefined &&
-            ticket.sourceSizeBytes !== undefined &&
-            ticket.sourceSizeBytes === entry.sizeBytes &&
-            ticket.sourceSizeBytes > ticket.sizeBytes &&
-            ticket.sizeBytes <= workspaceFileLimits.maximumTextPreviewBytes
+            sourceSizeBytes !== undefined &&
+            sourceSizeBytes === entry.sizeBytes &&
+            sourceSizeBytes > prefixSizeBytes &&
+            prefixSizeBytes <= workspaceFileLimits.maximumTextPreviewBytes
         );
     }
     return entry.truncated !== true && ticket.sourceSizeBytes === undefined;
