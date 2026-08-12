@@ -128,10 +128,10 @@ including restart during streaming.
   activation snapshot as the reviewed secure consolidation of the legacy pre-deploy and
   pre-migration recovery purposes; never synthesize unsupported provenance. Retain at most
   fourteen scheduled snapshots and at most five cutover snapshots/two days of unreferenced
-   cutover age, protecting current, previous, and active-journal identities through descriptor-
-   pinned atomic-retire cleanup.
-   Keep the six Kopia/WAL-G status/control rows and database backup/restore in their separate
-   privileged slices.
+  cutover age, protecting current, previous, and active-journal identities through descriptor-
+  pinned atomic-retire cleanup.
+  Keep the six Kopia/WAL-G status/control rows and database backup/restore in their separate
+  privileged slices.
 
 **Exit gate:** capability, step-up, audit, cancellation, resource-limit, and failure-recovery
 tests pass for every privileged operation.

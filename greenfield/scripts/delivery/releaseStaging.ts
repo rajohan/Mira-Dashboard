@@ -233,13 +233,6 @@ export async function stageReleaseArtifacts(
             path.join(sources.repositoryRoot, "scripts/delivery/provisioning"),
             path.join(stagingRoot, "scripts/delivery/provisioning")
         ),
-        copyArtifactTree(
-            path.join(
-                sources.repositoryRoot,
-                "scripts/delivery/provisioning/host-operations"
-            ),
-            path.join(stagingRoot, "scripts/delivery/provisioning/host-operations")
-        ),
         copyMetadataFile(
             path.join(sources.repositoryRoot, ".bun-version"),
             sources.repositoryRoot,

@@ -18,8 +18,8 @@ import {
 } from "../buildSourceIdentity.ts";
 import { readBoundedUtf8RegularFile } from "../files/boundedFile.ts";
 import { resolveDirectPackageVersions } from "../packageIdentity.ts";
-import { hostOperationsProvisioningReleaseArtifactPaths } from "./hostOperationsProvisioningPolicy.ts";
 import { databaseObservabilityProvisioningReleaseArtifactPaths } from "./databaseObservabilityProvisioningPolicy.ts";
+import { hostOperationsProvisioningReleaseArtifactPaths } from "./hostOperationsProvisioningPolicy.ts";
 import { logMaintenanceProvisioningReleaseArtifactPaths } from "./logMaintenanceProvisioningPolicy.ts";
 import { productionSystemdUnits } from "./productionSystemdUnitPolicy.ts";
 import {
