@@ -63,7 +63,9 @@ async function runningClaim(
     await jobs.registerWorker({
         ...noSideEffects,
         worker: {
-            actionKeysJson: "[]",
+            actionKeysJson: JSON.stringify([
+                options.actionKey ?? "cache.refresh.system-host",
+            ]),
             capacity: 1,
             drainingAt: null,
             heartbeatAt: new Date(1000),
