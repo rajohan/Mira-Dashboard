@@ -226,38 +226,48 @@ export const prepareWorkspaceFileRevealInputSchema = v.strictObject({
     resourceId: workspaceFileResourceIdSchema,
 });
 
+const workspaceFileContentTicketShapeSchema = v.strictObject({
+    disposition: workspaceFileDispositionSchema,
+    expiresAtMs: timestampMillisecondsSchema(
+        "Workspace file content ticket expiry is invalid"
+    ),
+    fileName: workspaceFileNameSchema,
+    mimeType: workspaceFileMimeTypeSchema,
+    previewKind: workspaceFilePreviewKindSchema,
+    revision: workspaceFileRevisionSchema,
+    sizeBytes: workspaceFileDownloadSizeSchema,
+    sourceSizeBytes: v.optional(workspaceFileMetadataSizeSchema),
+    ticketId: workspaceFileTicketIdSchema,
+    truncated: v.optional(v.literal(true, "Workspace file truncation state is invalid")),
+    url: v.pipe(
+        v.string("Workspace file content URL is invalid"),
+        v.maxLength(96, "Workspace file content URL is invalid"),
+        v.regex(
+            /^\/api\/files\/content\/[0-9a-f-]{36}$/u,
+            "Workspace file content URL is invalid"
+        )
+    ),
+});
+
+type WorkspaceFileContentTicketCandidate = v.InferOutput<
+    typeof workspaceFileContentTicketShapeSchema
+>;
+
+/** Keeps source-prefix metadata internally consistent at the live boundary. */
+export function workspaceFileContentTicketIsConsistent(
+    ticket: WorkspaceFileContentTicketCandidate
+): boolean {
+    return ticket.truncated === true
+        ? ticket.sourceSizeBytes !== undefined &&
+              ticket.sourceSizeBytes > ticket.sizeBytes &&
+              ticket.sizeBytes <= workspaceFileLimits.maximumTextPreviewBytes
+        : ticket.sourceSizeBytes === undefined;
+}
+
 export const workspaceFileContentTicketSchema = v.pipe(
-    v.strictObject({
-        disposition: workspaceFileDispositionSchema,
-        expiresAtMs: timestampMillisecondsSchema(
-            "Workspace file content ticket expiry is invalid"
-        ),
-        fileName: workspaceFileNameSchema,
-        mimeType: workspaceFileMimeTypeSchema,
-        previewKind: workspaceFilePreviewKindSchema,
-        revision: workspaceFileRevisionSchema,
-        sizeBytes: workspaceFileDownloadSizeSchema,
-        sourceSizeBytes: v.optional(workspaceFileMetadataSizeSchema),
-        ticketId: workspaceFileTicketIdSchema,
-        truncated: v.optional(
-            v.literal(true, "Workspace file truncation state is invalid")
-        ),
-        url: v.pipe(
-            v.string("Workspace file content URL is invalid"),
-            v.maxLength(96, "Workspace file content URL is invalid"),
-            v.regex(
-                /^\/api\/files\/content\/[0-9a-f-]{36}$/u,
-                "Workspace file content URL is invalid"
-            )
-        ),
-    }),
+    workspaceFileContentTicketShapeSchema,
     v.check(
-        (ticket) =>
-            ticket.truncated === true
-                ? ticket.sourceSizeBytes !== undefined &&
-                  ticket.sourceSizeBytes > ticket.sizeBytes &&
-                  ticket.sizeBytes <= workspaceFileLimits.maximumTextPreviewBytes
-                : ticket.sourceSizeBytes === undefined,
+        workspaceFileContentTicketIsConsistent,
         "Workspace file content truncation metadata is invalid"
     )
 );

@@ -47,18 +47,39 @@ const configuration: OpenClawConfigurationSnapshot = {
 
 const skills: ListOpenClawSkillsResult = { skills: [], truncated: false };
 
+const configurationBackup = Object.freeze({
+    downloadUrl:
+        "/api/openclaw-settings/configuration-backups/00000000-0000-4000-8000-000000000001",
+    expiresAtMs: 1,
+    ticketId: "00000000-0000-4000-8000-000000000001",
+});
+
+const configurationBackupInput = Object.freeze({
+    confirmation: "export-openclaw-configuration" as const,
+});
+
+const gatewayRestart = Object.freeze({
+    completedAtMs: 1,
+    jobRunId: "019ff1c6-1a9b-7770-8f1b-d5b863b0e7b4",
+    status: "restarted" as const,
+});
+
+const gatewayRestartInput = Object.freeze({
+    confirmation: "restart-openclaw-gateway" as const,
+    idempotencyKey: "019ff1c6-1a9b-4770-8f1b-d5b863b0e7b4",
+});
+
 function testService(
     calls: string[],
     contexts: OpenClawSettingsControlContext[] = []
 ): OpenClawSettingsService {
     return {
-        createConfigurationBackup: () =>
-            Promise.resolve({
-                downloadUrl:
-                    "/api/openclaw-settings/configuration-backups/00000000-0000-4000-8000-000000000001",
-                expiresAtMs: 1,
-                ticketId: "00000000-0000-4000-8000-000000000001",
-            }),
+        createConfigurationBackup: (input, context) => {
+            context.reauthorize();
+            contexts.push(context);
+            calls.push(`backup:${input.confirmation}`);
+            return Promise.resolve(configurationBackup);
+        },
         getConfiguration: () => {
             calls.push("get-configuration");
             return Promise.resolve(configuration);
@@ -67,12 +88,12 @@ function testService(
             calls.push("list-skills");
             return Promise.resolve(skills);
         },
-        restartGateway: () =>
-            Promise.resolve({
-                completedAtMs: 1,
-                jobRunId: "019ff1c6-1a9b-7770-8f1b-d5b863b0e7b4",
-                status: "restarted",
-            }),
+        restartGateway: (input, context) => {
+            context.reauthorize();
+            contexts.push(context);
+            calls.push(`restart:${input.idempotencyKey}`);
+            return Promise.resolve(gatewayRestart);
+        },
         setSkillEnabled: (input, context) => {
             context.reauthorize();
             contexts.push(context);
@@ -187,6 +208,10 @@ describe("OpenClaw settings procedures", () => {
 
         expect(await caller.getConfiguration({})).toEqual(configuration);
         expect(await caller.listSkills({})).toEqual(skills);
+        expect(await caller.createConfigurationBackup(configurationBackupInput)).toEqual(
+            configurationBackup
+        );
+        expect(await caller.restartGateway(gatewayRestartInput)).toEqual(gatewayRestart);
         await caller.updateConfiguration({
             baseHash: configuration.hash,
             baseRevisionHash: configuration.revisionHash,
@@ -209,11 +234,13 @@ describe("OpenClaw settings procedures", () => {
         expect(calls).toEqual([
             "get-configuration",
             "list-skills",
+            "backup:export-openclaw-configuration",
+            `restart:${gatewayRestartInput.idempotencyKey}`,
             "update:models",
             "set-skill:reviewed-skill:false",
         ]);
-        expect(authorizationChecks).toBe(4);
-        expect(contexts).toHaveLength(2);
+        expect(authorizationChecks).toBe(8);
+        expect(contexts).toHaveLength(4);
         expect(contexts[0]).toMatchObject({
             actor: {
                 authenticatorId: "b".repeat(32),
@@ -241,6 +268,14 @@ describe("OpenClaw settings procedures", () => {
         expect(await captureFailure(() => automation.getConfiguration({}))).toMatchObject(
             { code: "FORBIDDEN" }
         );
+        expect(
+            await captureFailure(() =>
+                automation.createConfigurationBackup(configurationBackupInput)
+            )
+        ).toMatchObject({ code: "FORBIDDEN" });
+        expect(
+            await captureFailure(() => automation.restartGateway(gatewayRestartInput))
+        ).toMatchObject({ code: "FORBIDDEN" });
 
         const readOnly = testRouter.createCaller(
             sessionContext(service, access, ["openclaw-settings:read"])
@@ -255,6 +290,14 @@ describe("OpenClaw settings procedures", () => {
                     skillKey: "reviewed-skill",
                 })
             )
+        ).toMatchObject({ code: "FORBIDDEN" });
+        expect(
+            await captureFailure(() =>
+                readOnly.createConfigurationBackup(configurationBackupInput)
+            )
+        ).toMatchObject({ code: "FORBIDDEN" });
+        expect(
+            await captureFailure(() => readOnly.restartGateway(gatewayRestartInput))
         ).toMatchObject({ code: "FORBIDDEN" });
 
         const writeOnly = testRouter.createCaller(
@@ -276,14 +319,25 @@ describe("OpenClaw settings procedures", () => {
             const context = sessionContext(testService(calls), {
                 authorizeRecentMfa: () => status,
             });
-            const failure = await captureFailure(() =>
-                testRouter.createCaller(context).openClawSettings.setSkillEnabled({
-                    baseHash: configuration.hash,
-                    baseRevisionHash: configuration.revisionHash,
-                    enabled: true,
-                    skillKey: "reviewed-skill",
-                })
-            );
+            const caller = testRouter.createCaller(context).openClawSettings;
+            const failure = await captureFailure(() => {
+                switch (status) {
+                    case "mfa-enrollment-required": {
+                        return caller.setSkillEnabled({
+                            baseHash: configuration.hash,
+                            baseRevisionHash: configuration.revisionHash,
+                            enabled: true,
+                            skillKey: "reviewed-skill",
+                        });
+                    }
+                    case "step-up-required": {
+                        return caller.createConfigurationBackup(configurationBackupInput);
+                    }
+                    case "session-changed": {
+                        return caller.restartGateway(gatewayRestartInput);
+                    }
+                }
+            });
 
             expect(failure).toBeInstanceOf(TRPCError);
             expect(calls).toEqual([]);
@@ -293,34 +347,76 @@ describe("OpenClaw settings procedures", () => {
         }
     });
 
-    test("maps conflicts, missing skills, and unknown outcomes to fixed tRPC errors", async () => {
-        for (const [reason, code] of [
-            ["conflict", "CONFLICT"],
-            ["not-found", "NOT_FOUND"],
-            ["unknown-outcome", "SERVICE_UNAVAILABLE"],
+    test("maps exact control failures to fixed tRPC errors", async () => {
+        for (const [operation, reason, code, message] of [
+            ["skill", "conflict", "CONFLICT", "OpenClaw configuration state changed"],
+            ["skill", "not-found", "NOT_FOUND", "OpenClaw setting target was not found"],
+            [
+                "backup",
+                "capacity",
+                "TOO_MANY_REQUESTS",
+                "OpenClaw configuration export capacity is exhausted",
+            ],
+            [
+                "backup",
+                "provider-unavailable",
+                "SERVICE_UNAVAILABLE",
+                "OpenClaw settings are temporarily unavailable",
+            ],
+            [
+                "restart",
+                "unknown-outcome",
+                "SERVICE_UNAVAILABLE",
+                "OpenClaw settings outcome could not be confirmed",
+            ],
         ] as const) {
             const base = testService([]);
+            const privateDetail = `private ${operation} provider detail`;
+            const serviceFailure = new OpenClawSettingsServiceError(reason, {
+                cause: new Error(privateDetail),
+            });
             const service: OpenClawSettingsService = {
                 ...base,
-                setSkillEnabled: () =>
-                    Promise.reject(new OpenClawSettingsServiceError(reason)),
+                createConfigurationBackup:
+                    operation === "backup"
+                        ? () => Promise.reject(serviceFailure)
+                        : base.createConfigurationBackup,
+                restartGateway:
+                    operation === "restart"
+                        ? () => Promise.reject(serviceFailure)
+                        : base.restartGateway,
+                setSkillEnabled:
+                    operation === "skill"
+                        ? () => Promise.reject(serviceFailure)
+                        : base.setSkillEnabled,
             };
             const caller = testRouter.createCaller(
                 sessionContext(service, {
                     authorizeRecentMfa: () => "authorized",
                 })
             ).openClawSettings;
-            const failure = await captureFailure(() =>
-                caller.setSkillEnabled({
-                    baseHash: configuration.hash,
-                    baseRevisionHash: configuration.revisionHash,
-                    enabled: true,
-                    skillKey: "reviewed-skill",
-                })
-            );
+            const failure = await captureFailure(() => {
+                switch (operation) {
+                    case "backup": {
+                        return caller.createConfigurationBackup(configurationBackupInput);
+                    }
+                    case "restart": {
+                        return caller.restartGateway(gatewayRestartInput);
+                    }
+                    case "skill": {
+                        return caller.setSkillEnabled({
+                            baseHash: configuration.hash,
+                            baseRevisionHash: configuration.revisionHash,
+                            enabled: true,
+                            skillKey: "reviewed-skill",
+                        });
+                    }
+                }
+            });
 
             expect(failure).toBeInstanceOf(TRPCError);
-            expect(failure).toMatchObject({ code });
+            expect(failure).toMatchObject({ code, message });
+            expect(String(failure)).not.toContain(privateDetail);
             if (reason === "unknown-outcome") {
                 expect(failure).toHaveProperty(
                     "cause.reason",

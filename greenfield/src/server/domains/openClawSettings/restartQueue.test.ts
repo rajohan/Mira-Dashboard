@@ -20,6 +20,7 @@ const idempotencyKey = "019fdf50-0000-4000-8000-000000000012";
 
 function repositoryFixture() {
     const enqueues: EnqueueManualRunInput[] = [];
+    const idempotencyReads: [JobRunRecord["requestedByKind"], string, string][] = [];
     let stored: JobRunRecord | undefined;
     const repository: OpenClawGatewayRestartQueueDependencies["repository"] = {
         enqueueManualRun(input): Promise<EnqueueManualRunResult> {
@@ -38,6 +39,7 @@ function repositoryFixture() {
             return stored?.id === id ? stored : undefined;
         },
         findRunByIdempotency(requestedByKind, requestedById, observedKey) {
+            idempotencyReads.push([requestedByKind, requestedById, observedKey]);
             return stored?.requestedByKind === requestedByKind &&
                 stored.requestedById === requestedById &&
                 stored.idempotencyKey === observedKey
@@ -61,6 +63,7 @@ function repositoryFixture() {
             };
         },
         enqueues,
+        idempotencyReads,
         repository,
         run: () => stored,
     };
@@ -172,5 +175,71 @@ describe("OpenClaw Gateway restart queue", () => {
             status: "restarted",
         });
         expect(fixture.enqueues).toHaveLength(1);
+    });
+
+    test("reconciles a matching run when enqueue throws after committing", async () => {
+        const fixture = repositoryFixture();
+        const originalEnqueue = fixture.repository.enqueueManualRun;
+        let wakeCount = 0;
+        fixture.repository.enqueueManualRun = async (input) => {
+            await originalEnqueue(input);
+            throw new Error("write response was lost");
+        };
+        const ids = [
+            "019fdf50-0000-7000-8000-000000000040",
+            "019fdf50-0000-7000-8000-000000000041",
+        ];
+        const queue = createOpenClawGatewayRestartQueue({
+            generateId: () => ids.shift()!,
+            nowMs: () => 1000,
+            repository: fixture.repository,
+            wakeEventPump: () => {
+                wakeCount += 1;
+                fixture.complete();
+            },
+        });
+
+        const result = await queue.restart(request(async () => {}));
+        expect(result).toEqual({
+            completedAtMs: 1001,
+            jobRunId: "019fdf50-0000-7000-8000-000000000040",
+            status: "restarted",
+        });
+        expect(fixture.enqueues).toHaveLength(1);
+        expect(fixture.idempotencyReads).toEqual([
+            [actor.kind, actor.id, idempotencyKey],
+            [actor.kind, actor.id, idempotencyKey],
+        ]);
+        expect(wakeCount).toBe(1);
+    });
+
+    test("reports an unknown outcome when enqueue throws and readback is missing", async () => {
+        const fixture = repositoryFixture();
+        let wakeCount = 0;
+        fixture.repository.enqueueManualRun = () =>
+            Promise.reject(new Error("write response was lost"));
+        const ids = [
+            "019fdf50-0000-7000-8000-000000000050",
+            "019fdf50-0000-7000-8000-000000000051",
+        ];
+        const queue = createOpenClawGatewayRestartQueue({
+            generateId: () => ids.shift()!,
+            nowMs: () => 1000,
+            repository: fixture.repository,
+            wakeEventPump: () => {
+                wakeCount += 1;
+            },
+        });
+
+        const failure = await queue
+            .restart(request(async () => {}))
+            .catch((error: unknown) => error);
+        expect(failure).toBeInstanceOf(OpenClawGatewayRestartQueueError);
+        expect(failure).toMatchObject({ reason: "unknown-outcome" });
+        expect(fixture.idempotencyReads).toEqual([
+            [actor.kind, actor.id, idempotencyKey],
+            [actor.kind, actor.id, idempotencyKey],
+        ]);
+        expect(wakeCount).toBe(0);
     });
 });

@@ -94,8 +94,12 @@ function matchingRun(run: JobRunRecord | undefined): JobRunRecord | undefined {
     ) {
         return undefined;
     }
-    const payload = v.safeParse(emptyPayloadSchema, parseJsonText(run.payloadJson));
-    return payload.success ? run : undefined;
+    try {
+        const payload = v.safeParse(emptyPayloadSchema, parseJsonText(run.payloadJson));
+        return payload.success ? run : undefined;
+    } catch {
+        return undefined;
+    }
 }
 
 function terminalResult(run: JobRunRecord): RestartOpenClawGatewayResult | undefined {
@@ -177,6 +181,15 @@ export function createOpenClawGatewayRestartQueue(
                 throw new OpenClawGatewayRestartQueueError("unknown-outcome");
             }
             await delay(Math.min(pollIntervalMs, confirmationTimeoutMs - elapsed));
+        }
+    }
+
+    async function wakeQueuedRun(run: JobRunRecord): Promise<void> {
+        if (run.state !== "queued") return;
+        try {
+            await dependencies.wakeEventPump?.();
+        } catch {
+            // The durable run remains authoritative for worker polling.
         }
     }
 
@@ -278,7 +291,25 @@ export function createOpenClawGatewayRestartQueue(
                     },
                 });
             } catch {
-                throw new OpenClawGatewayRestartQueueError("unavailable");
+                let recovered: JobRunRecord | undefined;
+                try {
+                    recovered = dependencies.repository.findRunByIdempotency(
+                        request.actor.kind,
+                        request.actor.id,
+                        request.idempotencyKey
+                    );
+                } catch {
+                    throw new OpenClawGatewayRestartQueueError("unknown-outcome");
+                }
+                if (recovered === undefined) {
+                    throw new OpenClawGatewayRestartQueueError("unknown-outcome");
+                }
+                const run = matchingRun(recovered);
+                if (run === undefined) {
+                    throw new OpenClawGatewayRestartQueueError("conflict");
+                }
+                await wakeQueuedRun(run);
+                return waitForTerminal(run.id);
             }
             if (enqueued.kind === "idempotency-mismatch" || enqueued.kind === "active") {
                 throw new OpenClawGatewayRestartQueueError("conflict");
@@ -291,11 +322,7 @@ export function createOpenClawGatewayRestartQueue(
                 throw new OpenClawGatewayRestartQueueError("unknown-outcome");
             }
             if (enqueued.kind === "inserted") {
-                try {
-                    await dependencies.wakeEventPump?.();
-                } catch {
-                    // The durable run remains authoritative for worker polling.
-                }
+                await wakeQueuedRun(run);
             }
             return waitForTerminal(run.id);
         },

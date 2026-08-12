@@ -93,7 +93,10 @@ import {
     chatSpeechTranscriptFitsByteBudget,
     normalizeChatSpeechSynthesisText,
 } from "../../src/contracts/chatSpeech.ts";
-import { workspaceFileNameIsSafe } from "../../src/contracts/files.ts";
+import {
+    workspaceFileContentTicketIsConsistent,
+    workspaceFileNameIsSafe,
+} from "../../src/contracts/files.ts";
 import { gatewayConnectionSnapshotIsConsistent } from "../../src/contracts/gatewayConnection.ts";
 import {
     freshGatewaySessionSourceTimesAreConsistent,
@@ -180,6 +183,7 @@ import {
     openClawAgentAccessHasStableUniqueOrder,
     openClawAgentToolsAreCompleteAndOrdered,
     openClawChannelsHaveStableUniqueOrder,
+    openClawConfigurationBackupTicketIsConsistent,
     openClawSkillBundledSourceIsConsistent,
     openClawSkillInstallationSourceIsConsistent,
     openClawSkillsHaveStableUniqueOrder,
@@ -275,6 +279,14 @@ const controlSafeTextJsonSchemaPattern = `^(?![\\s\\S]*(?:${controlSafeTextExclu
 const noNulJsonSchemaPattern = String.raw`^[^\u0000]*$`;
 
 const runtimeCheckComments = new Map<unknown, string>([
+    [
+        workspaceFileContentTicketIsConsistent,
+        "Live Valibot validation additionally requires truncated workspace-file representations to carry a larger source size and stay within the bounded text-prefix budget, while full representations omit source-size metadata.",
+    ],
+    [
+        openClawConfigurationBackupTicketIsConsistent,
+        "Live Valibot validation additionally requires the actor-bound configuration export URL to end with its exact ticket ID.",
+    ],
     [
         workspaceFileNameIsSafe,
         "Live Valibot validation additionally rejects traversal names and path separators and limits the literal child name to 255 UTF-8 bytes.",

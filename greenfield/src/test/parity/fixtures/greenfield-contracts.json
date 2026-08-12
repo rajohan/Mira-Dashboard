@@ -403,12 +403,20 @@
             "name": "openClawCron.update"
         },
         {
+            "kind": "mutation",
+            "name": "openClawSettings.createConfigurationBackup"
+        },
+        {
             "kind": "query",
             "name": "openClawSettings.getConfiguration"
         },
         {
             "kind": "query",
             "name": "openClawSettings.listSkills"
+        },
+        {
+            "kind": "mutation",
+            "name": "openClawSettings.restartGateway"
         },
         {
             "kind": "mutation",
@@ -574,6 +582,11 @@
             "path": "/api/health/ready"
         },
         {
+            "id": "GET /api/openclaw-settings/configuration-backups/:ticketId",
+            "method": "GET",
+            "path": "/api/openclaw-settings/configuration-backups/:ticketId"
+        },
+        {
             "id": "GET /api/terminal/sessions/:sessionId/socket",
             "method": "GET",
             "path": "/api/terminal/sessions/:sessionId/socket"
@@ -597,6 +610,11 @@
             "id": "HEAD /api/health/ready",
             "method": "HEAD",
             "path": "/api/health/ready"
+        },
+        {
+            "id": "HEAD /api/openclaw-settings/configuration-backups/:ticketId",
+            "method": "HEAD",
+            "path": "/api/openclaw-settings/configuration-backups/:ticketId"
         },
         {
             "id": "POST /api/chat/speech/synthesize",

@@ -517,12 +517,12 @@ proxy mode names exact proxies and requires them to overwrite forwarded identity
 - Files' separate web-and-worker `MIRA_DASHBOARD_OPENCLAW_ROOT` is not a general recursive browser.
   Its descriptor adapter synthesizes only the directory prefixes needed to reach the exact reviewed
   `openclaw.json` and `hooks/transforms/agentmail.ts` manifest entries, verifies
-  same-owner/same-device regular files, rejects links, world-writable nodes, traversal, and
-  oversized content, and redacts valid configuration JSON before default ticket creation or range
-  selection. The two reviewed full-redaction/replacement entries have a 2 MiB bound, while text
-  preview remains capped at 1 MiB and larger admitted text is download-only. Legacy configuration
-  GET parity therefore remains planned: legacy lists unbounded source sizes and returns a bounded
-  prefix for oversized files, which this stricter manifest does not claim to reproduce. Invalid JSON
+  same-owner/same-device regular files, rejects links, world-writable nodes, and traversal, and
+  redacts valid configuration JSON before default ticket creation or range selection. The two
+  reviewed full-redaction/replacement entries have a 2 MiB write bound, while text preview remains
+  capped at 1 MiB. An oversized reviewed source remains listable but read-only and exposes only a
+  revision-stable prefix of at most 1 MiB with explicit truncation and source-size metadata; an
+  oversized masked configuration prefix stays fail-closed until recent-MFA reveal. Invalid JSON
   publishes only safe listing metadata so the reviewed entry stays selectable; its masked preview
   fails closed without returning bytes. Raw configuration is available only through an explicit
   recent-MFA mutation and a short-lived actor-bound no-store ticket, which lets the operator inspect
@@ -542,6 +542,18 @@ proxy mode names exact proxies and requires them to overwrite forwarded identity
   stage file beside the target, so the worker unit deliberately retains its prior writable OpenClaw
   namespace rather than claiming an exact-file systemd exception that Linux VFS cannot enforce; the
   descriptor manifest is the write boundary.
+- The exact OpenClaw configuration export is not a database or host backup. A session-only,
+  recent-MFA procedure reads only descriptor-anchored `openclaw.json` and returns an opaque
+  actor/authenticator-bound ticket, never the secret bytes. Its same-origin raw route is
+  private/no-store, permits metadata-only `HEAD`, consumes `GET` once, and applies both stored-byte
+  capacity and live transfer concurrency/byte admission. Ticket expiry, transfer completion or
+  cancellation, and shutdown zero retained byte buffers. Raw configuration is excluded from tRPC,
+  browser caches, audit, logs, provider errors, and job state.
+- Gateway restart is a distinct durable worker action. Fail-closed audit and recent-MFA/session
+  authority must both succeed before enqueue; an idempotency-key readback reconciles ambiguous
+  repository settlement. The action holds the exclusive resource class, has one attempt, is not
+  retry-safe or cancellable, and invokes a fixed argv without a shell or captured output. Unknown
+  enqueue or process completion never causes an automatic second restart.
 - Dashboard's worker-owned rotation engine uses an exact reviewed per-file manifest for Dashboard,
   OpenClaw, and managed application/container logs rather than treating a directory as a recursive
   wildcard. Ubuntu system logrotate remains responsible only for the exact `rsyslog`, `apport`,

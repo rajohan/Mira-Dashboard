@@ -7,6 +7,7 @@ import type {
 } from "../../contracts/openClawSettings.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { dashboardBrowserFailureMessage } from "../api/trpcError.ts";
+import { ActionLink } from "../ui/ActionLink.tsx";
 import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
 import { LoadingState } from "../ui/LoadingState.tsx";
@@ -185,12 +186,40 @@ export function OpenClawSettingsPanel() {
                         Both actions require recent multi-factor authentication and are
                         audited.
                     </p>
+                    {mutations.restartRecoveryPending && (
+                        <div className="mt-4 grid gap-3">
+                            <Alert
+                                focusOnError={false}
+                                message="Warning: this browser session retains a recovery key for a Gateway restart request that did not reach a confirmed success. Retrying reuses that exact request. Discarding it can enqueue a second restart if the earlier request already completed; configuration refresh does not prove restart status."
+                            />
+                            <div className="flex flex-wrap gap-3">
+                                <ActionLink to="/jobs" variant="secondary">
+                                    Review Dashboard jobs
+                                </ActionLink>
+                                <Button
+                                    disabled={mutations.isBusy}
+                                    onClick={() => {
+                                        if (
+                                            globalThis.confirm(
+                                                "WARNING: the previous Gateway restart may already have completed. Starting a new intent can restart the Gateway a second time. Review Dashboard jobs first. Discard the recovery key?"
+                                            )
+                                        ) {
+                                            mutations.startNewRestartIntent();
+                                        }
+                                    }}
+                                    variant="danger"
+                                >
+                                    Discard recovery key for new intent
+                                </Button>
+                            </div>
+                        </div>
+                    )}
                     <div className="mt-4 flex flex-wrap gap-3">
                         <Button
                             busy={mutations.backup.isPending}
                             busyLabel="Preparing backup…"
                             disabled={mutations.isBusy && !mutations.backup.isPending}
-                            onClick={() => void mutations.backup.mutateAsync().catch(() => {})}
+                            onClick={() => mutations.backup.mutate()}
                             variant="secondary"
                         >
                             Download configuration backup
@@ -202,15 +231,19 @@ export function OpenClawSettingsPanel() {
                             onClick={() => {
                                 if (
                                     globalThis.confirm(
-                                        "Restart the OpenClaw Gateway now? Active Gateway requests may be interrupted."
+                                        mutations.restartRecoveryPending
+                                            ? "Retry the unresolved Gateway restart request with the same recovery key? This does not create a new restart intent."
+                                            : "Restart the OpenClaw Gateway now? Active Gateway requests may be interrupted."
                                     )
                                 ) {
-                                    void mutations.restart.mutateAsync().catch(() => {});
+                                    mutations.restart.mutate();
                                 }
                             }}
                             variant="danger"
                         >
-                            Restart OpenClaw Gateway
+                            {mutations.restartRecoveryPending
+                                ? "Retry Gateway restart request"
+                                : "Restart OpenClaw Gateway"}
                         </Button>
                     </div>
                 </section>

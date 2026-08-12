@@ -1,12 +1,15 @@
+import { openClawConfigurationUpstreamMaximumBytes } from "../../../contracts/openClawSettings.ts";
 import type { AuthenticatedPrincipal } from "../../../contracts/security.ts";
 import { readAuthenticationHttpCredentials } from "../../rawHttp/authenticationCredentials.ts";
 import { isAllowedRequestSource } from "../../rawHttp/requestSecurity.ts";
+import { appendClearedDashboardSessionCookie } from "../../rawHttp/sessionCookie.ts";
 import type { AuthenticateCredential } from "../../trpc/context.ts";
 import { parseAuthenticationResolution } from "../security/authenticationResolution.ts";
 import type { AuthenticatedBrowserIdentity } from "../security/authenticationSession.ts";
 import {
     OpenClawConfigurationBackupError,
     type OpenClawConfigurationBackupActor,
+    type OpenClawConfigurationBackupContent,
     type OpenClawConfigurationBackupMetadata,
     type OpenClawConfigurationBackupTicketStore,
 } from "./configurationBackup.ts";
@@ -33,18 +36,136 @@ export interface OpenClawConfigurationBackupRawHttpHandlerOptions {
     readonly authorizeAccess: OpenClawConfigurationBackupRawAuthorization;
     readonly browserOrigin?: string;
     readonly tickets: OpenClawConfigurationBackupTicketStore;
+    readonly workLimits?: OpenClawConfigurationBackupRawHttpWorkLimits;
 }
+
+export interface OpenClawConfigurationBackupRawHttpWorkLimits {
+    readonly maximumConcurrentDownloads: number;
+    readonly maximumInFlightBytes: number;
+}
+
+export const openClawConfigurationBackupRawHttpDefaultWorkLimits = Object.freeze({
+    maximumConcurrentDownloads: 2,
+    maximumInFlightBytes: 2 * openClawConfigurationUpstreamMaximumBytes,
+} satisfies OpenClawConfigurationBackupRawHttpWorkLimits);
 
 export type OpenClawConfigurationBackupRawHttpHandler = (
     request: Request,
     requestUrl: URL
 ) => Promise<Response | undefined>;
 
-function noStoreResponse(body: string | null, status: number): Response {
+function noStoreResponse(
+    body: string | null,
+    status: number,
+    headers?: Headers
+): Response {
+    const responseHeaders = new Headers(headers);
+    responseHeaders.set("cache-control", "no-store");
     return new Response(body, {
-        headers: { "cache-control": "no-store" },
+        headers: responseHeaders,
         status,
     });
+}
+
+interface DownloadLease {
+    readonly release: () => void;
+}
+
+function createDownloadAdmission(
+    limits: OpenClawConfigurationBackupRawHttpWorkLimits
+): (bytes: number) => DownloadLease | undefined {
+    if (
+        !Number.isSafeInteger(limits.maximumConcurrentDownloads) ||
+        limits.maximumConcurrentDownloads < 1 ||
+        !Number.isSafeInteger(limits.maximumInFlightBytes) ||
+        limits.maximumInFlightBytes < 1
+    ) {
+        throw new TypeError("OpenClaw configuration export work limits are invalid");
+    }
+    let activeDownloads = 0;
+    let inFlightBytes = 0;
+    return (bytes) => {
+        if (
+            !Number.isSafeInteger(bytes) ||
+            bytes < 1 ||
+            bytes > limits.maximumInFlightBytes ||
+            activeDownloads >= limits.maximumConcurrentDownloads ||
+            inFlightBytes > limits.maximumInFlightBytes - bytes
+        ) {
+            return;
+        }
+        activeDownloads += 1;
+        inFlightBytes += bytes;
+        let released = false;
+        return Object.freeze({
+            release() {
+                if (released) return;
+                released = true;
+                activeDownloads -= 1;
+                inFlightBytes -= bytes;
+            },
+        });
+    };
+}
+
+function secretDownloadBody(
+    bytes: Uint8Array,
+    lease: DownloadLease,
+    signal: AbortSignal
+): ReadableStream<Uint8Array> {
+    let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
+    let emitted = false;
+    let releaseTimer: ReturnType<typeof globalThis.setTimeout> | undefined;
+    let settled = false;
+    const release = () => {
+        if (settled) return;
+        settled = true;
+        if (releaseTimer !== undefined) {
+            globalThis.clearTimeout(releaseTimer);
+            releaseTimer = undefined;
+        }
+        signal.removeEventListener("abort", abort);
+        bytes.fill(0);
+        lease.release();
+    };
+    const releaseAfterClose = () => {
+        if (settled || releaseTimer !== undefined) return;
+        releaseTimer = globalThis.setTimeout(release, 0);
+    };
+    const abort = () => {
+        if (settled) return;
+        controller?.error(
+            signal.reason ??
+                new DOMException(
+                    "OpenClaw configuration export was aborted",
+                    "AbortError"
+                )
+        );
+        release();
+    };
+    return new ReadableStream<Uint8Array>(
+        {
+            cancel() {
+                release();
+            },
+            pull(activeController) {
+                if (settled) return;
+                if (!emitted) {
+                    emitted = true;
+                    activeController.enqueue(bytes);
+                    return;
+                }
+                activeController.close();
+                releaseAfterClose();
+            },
+            start(activeController) {
+                controller = activeController;
+                signal.addEventListener("abort", abort, { once: true });
+                if (signal.aborted) abort();
+            },
+        },
+        { highWaterMark: 0 }
+    );
 }
 
 function actor(principal: AuthenticatedPrincipal): OpenClawConfigurationBackupActor {
@@ -127,6 +248,9 @@ async function authenticate(
 export function createOpenClawConfigurationBackupRawHttpHandler(
     options: OpenClawConfigurationBackupRawHttpHandlerOptions
 ): OpenClawConfigurationBackupRawHttpHandler {
+    const admitDownload = createDownloadAdmission(
+        options.workLimits ?? openClawConfigurationBackupRawHttpDefaultWorkLimits
+    );
     return async (request, requestUrl) => {
         const match = backupPathPattern.exec(requestUrl.pathname);
         if (match === null) {
@@ -167,9 +291,14 @@ export function createOpenClawConfigurationBackupRawHttpHandler(
             return noStoreResponse("OpenClaw configuration export unavailable", 503);
         }
         if (authorization !== "authorized") {
+            const headers = new Headers();
+            if (authorization === "session-changed") {
+                appendClearedDashboardSessionCookie(headers);
+            }
             return noStoreResponse(
                 authorization === "session-changed" ? "Unauthorized" : "Forbidden",
-                authorization === "session-changed" ? 401 : 403
+                authorization === "session-changed" ? 401 : 403,
+                headers
             );
         }
         if (request.signal.aborted) {
@@ -185,11 +314,40 @@ export function createOpenClawConfigurationBackupRawHttpHandler(
                     status: 200,
                 });
             }
-            const content = options.tickets.consume(backupActor, match[1]!);
-            return new Response(content.bytes, {
-                headers: contentHeaders(content),
-                status: 200,
-            });
+            const metadata = options.tickets.inspect(backupActor, match[1]!);
+            const lease = admitDownload(metadata.sizeBytes);
+            if (lease === undefined) {
+                return noStoreResponse(
+                    "OpenClaw configuration export capacity exceeded",
+                    429
+                );
+            }
+            let content: OpenClawConfigurationBackupContent | undefined;
+            let body: ReadableStream<Uint8Array> | undefined;
+            try {
+                content = options.tickets.consume(backupActor, match[1]!);
+                if (
+                    content.sizeBytes !== metadata.sizeBytes ||
+                    content.bytes.byteLength !== metadata.sizeBytes
+                ) {
+                    throw new OpenClawConfigurationBackupError("unavailable");
+                }
+                body = secretDownloadBody(content.bytes, lease, request.signal);
+                return new Response(body, {
+                    headers: contentHeaders(content),
+                    status: 200,
+                });
+            } catch (error) {
+                if (body === undefined) {
+                    content?.bytes.fill(0);
+                    lease.release();
+                } else {
+                    await body
+                        .cancel("OpenClaw configuration export response failed")
+                        .catch(() => {});
+                }
+                throw error;
+            }
         } catch (error) {
             return errorResponse(error);
         }

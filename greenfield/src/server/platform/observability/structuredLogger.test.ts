@@ -228,32 +228,44 @@ test("records only classified OpenClaw settings audit settlement fields", () => 
     const sensitiveTarget = "skill:private-skill-key";
     const targetFingerprint = `sha256:${"c".repeat(64)}`;
 
-    logger.warn({
-        component: "openclaw-settings-audit",
-        event: "openclaw_settings.audit_settlement.failed",
-        failure: new Error(`database failed for ${sensitiveTarget}`),
-        fields: {
-            kind: "openclaw-settings-audit-settlement",
-            operation: "set-skill-enabled",
-            settlement: "partial",
-            targetFingerprint,
-        },
-        outcome: "server-error",
-    });
+    const operations = [
+        "create-configuration-backup",
+        "restart-gateway",
+        "set-skill-enabled",
+        "update-configuration",
+    ] as const;
 
-    expect(JSON.parse(lines[0] ?? "null")).toMatchObject({
-        component: "openclaw-settings-audit",
-        event: "openclaw_settings.audit_settlement.failed",
-        fields: {
-            operation: "set-skill-enabled",
-            settlement: "partial",
-            targetFingerprint,
-        },
-        level: "warn",
-        outcome: "server-error",
-    });
-    expect(JSON.parse(lines[0] ?? "null")).not.toHaveProperty("fields.kind");
-    expect(lines[0]).not.toContain(sensitiveTarget);
+    for (const operation of operations) {
+        logger.warn({
+            component: "openclaw-settings-audit",
+            event: "openclaw_settings.audit_settlement.failed",
+            failure: new Error(`database failed for ${sensitiveTarget}`),
+            fields: {
+                kind: "openclaw-settings-audit-settlement",
+                operation,
+                settlement: "partial",
+                targetFingerprint,
+            },
+            outcome: "server-error",
+        });
+    }
+
+    expect(lines).toHaveLength(operations.length);
+    for (const [index, operation] of operations.entries()) {
+        expect(JSON.parse(lines[index] ?? "null")).toMatchObject({
+            component: "openclaw-settings-audit",
+            event: "openclaw_settings.audit_settlement.failed",
+            fields: {
+                operation,
+                settlement: "partial",
+                targetFingerprint,
+            },
+            level: "warn",
+            outcome: "server-error",
+        });
+        expect(JSON.parse(lines[index] ?? "null")).not.toHaveProperty("fields.kind");
+        expect(lines[index]).not.toContain(sensitiveTarget);
+    }
 });
 
 test("records bounded OpenClaw settings mutation queue observations", () => {

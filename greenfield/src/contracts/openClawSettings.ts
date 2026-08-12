@@ -537,20 +537,34 @@ export const createOpenClawConfigurationBackupInputSchema = v.strictObject({
     ),
 });
 
+const createOpenClawConfigurationBackupResultShapeSchema = v.strictObject({
+    downloadUrl: v.pipe(
+        v.string("OpenClaw configuration backup URL is invalid"),
+        v.regex(
+            /^\/api\/openclaw-settings\/configuration-backups\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+            "OpenClaw configuration backup URL is invalid"
+        )
+    ),
+    expiresAtMs: jobTimestampSchema,
+    ticketId: openClawConfigurationBackupTicketIdSchema,
+});
+
+type CreateOpenClawConfigurationBackupResultCandidate = v.InferOutput<
+    typeof createOpenClawConfigurationBackupResultShapeSchema
+>;
+
+/** Binds the actor-bound download URL to the exact issued ticket identity. */
+export function openClawConfigurationBackupTicketIsConsistent({
+    downloadUrl,
+    ticketId,
+}: CreateOpenClawConfigurationBackupResultCandidate): boolean {
+    return downloadUrl.endsWith(`/${ticketId}`);
+}
+
 export const createOpenClawConfigurationBackupResultSchema = v.pipe(
-    v.strictObject({
-        downloadUrl: v.pipe(
-            v.string("OpenClaw configuration backup URL is invalid"),
-            v.regex(
-                /^\/api\/openclaw-settings\/configuration-backups\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
-                "OpenClaw configuration backup URL is invalid"
-            )
-        ),
-        expiresAtMs: jobTimestampSchema,
-        ticketId: openClawConfigurationBackupTicketIdSchema,
-    }),
+    createOpenClawConfigurationBackupResultShapeSchema,
     v.check(
-        ({ downloadUrl, ticketId }) => downloadUrl.endsWith(`/${ticketId}`),
+        openClawConfigurationBackupTicketIsConsistent,
         "OpenClaw configuration backup ticket is inconsistent"
     )
 );

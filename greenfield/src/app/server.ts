@@ -16,6 +16,7 @@ import type { LogsService } from "../server/domains/logs/service.ts";
 import type { MonitoringCatalogService } from "../server/domains/monitoring/catalogService.ts";
 import type { MonitoringService } from "../server/domains/monitoring/service.ts";
 import type { OpenClawCronService } from "../server/domains/openClawCron/service.ts";
+import type { OpenClawConfigurationBackupRawHttpHandler } from "../server/domains/openClawSettings/configurationBackupRawHttp.ts";
 import type { OpenClawSettingsService } from "../server/domains/openClawSettings/service.ts";
 import type { OpenClawTasksService } from "../server/domains/openClawTasks/service.ts";
 import type { AuthenticationLifecycleService } from "../server/domains/security/authenticationLifecycle.ts";
@@ -215,6 +216,8 @@ export interface ServerOptions {
     readonly monitoringCatalogService: MonitoringCatalogService["Service"];
     readonly monitoringService: MonitoringService["Service"];
     readonly openClawCronService: OpenClawCronService;
+    /** One-shot secret-bearing configuration export mounted before browser assets. */
+    readonly openClawConfigurationBackupRawHttpHandler?: OpenClawConfigurationBackupRawHttpHandler;
     readonly openClawSettingsService: OpenClawSettingsService;
     readonly openClawTasksService?: OpenClawTasksService;
     readonly port: number;
@@ -331,8 +334,14 @@ export async function createServer(options: ServerOptions): Promise<ApplicationS
                                     request,
                                     requestUrl
                                 );
-                            const chatResponse =
+                            const configurationBackupResponse =
                                 workspaceFileResponse ??
+                                (await options.openClawConfigurationBackupRawHttpHandler?.(
+                                    request,
+                                    requestUrl
+                                ));
+                            const chatResponse =
+                                configurationBackupResponse ??
                                 (await options.chatRawHttpHandler?.(request, requestUrl));
                             if (chatResponse === undefined) {
                                 const frontendResponse = await options.frontendAssets?.(

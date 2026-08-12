@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { openClawConfigurationBackupTicketTtlMs } from "../../../contracts/openClawSettings.ts";
 import type {
     WorkspaceFileNode,
     WorkspaceFileReadResult,
@@ -10,7 +11,11 @@ import {
     openClawConfigurationBackupLocator,
 } from "./configurationBackup.ts";
 import { createWorkspaceFileOpenClawConfigurationBackupSource } from "./configurationBackupSource.ts";
-import { createOpenClawConfigurationBackupTicketStore } from "./configurationBackupTickets.ts";
+import {
+    createOpenClawConfigurationBackupTicketStore,
+    type OpenClawConfigurationBackupTicketScheduler,
+    type OpenClawConfigurationBackupTicketTimerHandle,
+} from "./configurationBackupTickets.ts";
 
 const actor = Object.freeze({
     authenticatorId: "session-1",
@@ -18,6 +23,47 @@ const actor = Object.freeze({
 });
 const bytes = new TextEncoder().encode('{"token":"private"}\n');
 const revision = "a".repeat(64);
+class ManualTicketScheduler implements OpenClawConfigurationBackupTicketScheduler {
+    public nowMs = 1000;
+    public unrefCount = 0;
+    #timer:
+        | {
+              readonly callback: () => void;
+              readonly dueAtMs: number;
+              readonly handle: OpenClawConfigurationBackupTicketTimerHandle;
+          }
+        | undefined;
+
+    public clearTimeout(handle: OpenClawConfigurationBackupTicketTimerHandle): void {
+        if (this.#timer?.handle === handle) this.#timer = undefined;
+    }
+
+    public setTimeout(
+        callback: () => void,
+        delayMs: number
+    ): OpenClawConfigurationBackupTicketTimerHandle {
+        const handle = Object.freeze({
+            unref: () => {
+                this.unrefCount += 1;
+            },
+        });
+        this.#timer = {
+            callback,
+            dueAtMs: this.nowMs + delayMs,
+            handle,
+        };
+        return handle;
+    }
+
+    public advanceBy(delayMs: number): void {
+        this.nowMs += delayMs;
+        while (this.#timer !== undefined && this.#timer.dueAtMs <= this.nowMs) {
+            const { callback } = this.#timer;
+            this.#timer = undefined;
+            callback();
+        }
+    }
+}
 
 function readerFixture(
     nodeOverrides: Partial<WorkspaceFileNode> = {},
@@ -139,6 +185,36 @@ describe("OpenClaw configuration export source and tickets", () => {
         expect(() => expiring.inspect(actor, expiringTicket.ticketId)).toThrow(
             OpenClawConfigurationBackupError
         );
+    });
+
+    test("actively expires secret records on an unref timer and retains bounded 410 semantics", () => {
+        const scheduler = new ManualTicketScheduler();
+        const ids = [
+            "10000000-0000-4000-8000-000000000010",
+            "10000000-0000-4000-8000-000000000011",
+        ];
+        const store = createOpenClawConfigurationBackupTicketStore({
+            generateId: () => ids.shift()!,
+            maximumStoredBytes: bytes.byteLength,
+            maximumTickets: 1,
+            nowMs: () => scheduler.nowMs,
+            scheduler,
+        });
+        const expired = store.issue(actor, bytes);
+
+        expect(scheduler.unrefCount).toBe(1);
+        scheduler.advanceBy(openClawConfigurationBackupTicketTtlMs);
+
+        expect(() => store.inspect(actor, expired.ticketId)).toThrow(
+            expect.objectContaining({ reason: "expired" })
+        );
+        expect(() =>
+            store.inspect({ ...actor, authenticatorId: "session-2" }, expired.ticketId)
+        ).toThrow(expect.objectContaining({ reason: "not-found" }));
+
+        const replacement = store.issue(actor, bytes);
+        expect(replacement.ticketId).not.toBe(expired.ticketId);
+        store.dispose();
     });
 
     test("fails closed when bounded ticket capacity is exhausted", () => {

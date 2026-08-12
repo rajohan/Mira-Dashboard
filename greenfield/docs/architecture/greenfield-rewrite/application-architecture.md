@@ -450,8 +450,16 @@ Browser reads are session-only; writes require recent MFA again after fail-close
 and at the actual post-handshake pre-dispatch boundary. The web process serializes these controls
 through a sixteen-operation active-plus-waiting ceiling; aborted waiters are removed from the FIFO
 immediately instead of retaining unbounded work behind a slow Gateway operation.
-Configuration export and Gateway restart deliberately remain separate later boundaries: the former
-needs an actor-bound no-store raw ticket, while the latter needs a durable worker-owned action.
+Configuration export and Gateway restart remain separate privileged boundaries. Export reads only
+the exact descriptor-anchored `openclaw.json` source after recent-MFA reauthorization, copies it
+into a short-lived capacity-bounded actor/authenticator ticket, and serves it once through a
+same-origin private/no-store raw `GET`; `HEAD` inspects metadata without consuming the ticket.
+Stored and in-flight secret bytes are erased on expiry, consumption, cancellation, or shutdown and
+never enter tRPC, Query cache, audit, logs, or durable records. Restart instead enqueues the fixed
+`openclaw.gateway.restart` action after fail-closed audit and dispatch-time authorization. The job
+is exclusive, caller-idempotent, single-attempt, non-retry-safe, and non-cancellable; only the
+worker owns its fixed no-shell lifecycle command. Ambiguous enqueue or terminal settlement is
+reconciled by durable run identity and never blindly dispatches a second restart.
 
 ### Current-protocol Control UI projections
 

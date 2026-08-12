@@ -1,0 +1,30 @@
+{
+  "$id": "urn:mira-dashboard:openClawSettings.createConfigurationBackup.output",
+  "type": "object",
+  "properties": {
+    "downloadUrl": {
+      "type": "string",
+      "pattern": "^\\/api\\/openclaw-settings\\/configuration-backups\\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "expiresAtMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 8640000000000000
+    },
+    "ticketId": {
+      "type": "string",
+      "minLength": 36,
+      "maxLength": 36,
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    }
+  },
+  "required": [
+    "downloadUrl",
+    "expiresAtMs",
+    "ticketId"
+  ],
+  "additionalProperties": false,
+  "$comment": "Live Valibot validation additionally requires the actor-bound configuration export URL to end with its exact ticket ID.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

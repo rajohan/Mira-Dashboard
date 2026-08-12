@@ -29,11 +29,42 @@ interface BackupTicketRecord {
     readonly ticketId: string;
 }
 
+interface ExpiredBackupTicketRecord {
+    readonly actorKey: string;
+    readonly deleteAfterMs: number;
+    readonly ticketId: string;
+}
+
+export interface OpenClawConfigurationBackupTicketTimerHandle {
+    readonly unref?: () => void;
+}
+
+export interface OpenClawConfigurationBackupTicketScheduler {
+    readonly clearTimeout: (handle: OpenClawConfigurationBackupTicketTimerHandle) => void;
+    readonly setTimeout: (
+        callback: () => void,
+        delayMs: number
+    ) => OpenClawConfigurationBackupTicketTimerHandle;
+}
+
+const defaultScheduler: OpenClawConfigurationBackupTicketScheduler = Object.freeze({
+    clearTimeout(handle: OpenClawConfigurationBackupTicketTimerHandle) {
+        globalThis.clearTimeout(handle as ReturnType<typeof globalThis.setTimeout>);
+    },
+    setTimeout(callback: () => void, delayMs: number) {
+        return globalThis.setTimeout(
+            callback,
+            delayMs
+        ) as unknown as OpenClawConfigurationBackupTicketTimerHandle;
+    },
+});
+
 export interface OpenClawConfigurationBackupTicketStoreOptions {
     readonly generateId?: () => string;
     readonly maximumStoredBytes?: number;
     readonly maximumTickets?: number;
     readonly nowMs?: () => number;
+    readonly scheduler?: OpenClawConfigurationBackupTicketScheduler;
 }
 
 function actorKey(actor: OpenClawConfigurationBackupActor): string {
@@ -80,8 +111,11 @@ export function createOpenClawConfigurationBackupTicketStore(
         "ticket capacity"
     );
     const nowMs = options.nowMs ?? Date.now;
+    const scheduler = options.scheduler ?? defaultScheduler;
+    const expiredTickets = new Map<string, ExpiredBackupTicketRecord>();
     const tickets = new Map<string, BackupTicketRecord>();
     let disposed = false;
+    let expiryTimer: OpenClawConfigurationBackupTicketTimerHandle | undefined;
     let storedBytes = 0;
 
     function now(): number {
@@ -101,8 +135,67 @@ export function createOpenClawConfigurationBackupTicketStore(
 
     function sweepExpired(at: number): void {
         for (const record of tickets.values()) {
-            if (record.expiresAtMs <= at) remove(record, true);
+            if (record.expiresAtMs > at) continue;
+            remove(record, true);
+            const deleteAfterMs =
+                record.expiresAtMs + openClawConfigurationBackupTicketTtlMs;
+            if (Number.isSafeInteger(deleteAfterMs)) {
+                expiredTickets.set(record.ticketId, {
+                    actorKey: record.actorKey,
+                    deleteAfterMs,
+                    ticketId: record.ticketId,
+                });
+                while (expiredTickets.size > maximumTickets) {
+                    const oldestTicketId = expiredTickets.keys().next().value;
+                    if (oldestTicketId === undefined) break;
+                    expiredTickets.delete(oldestTicketId);
+                }
+            }
         }
+        for (const record of expiredTickets.values()) {
+            if (record.deleteAfterMs <= at) expiredTickets.delete(record.ticketId);
+        }
+    }
+
+    function scheduleExpiry(at: number): void {
+        if (expiryTimer !== undefined) {
+            scheduler.clearTimeout(expiryTimer);
+            expiryTimer = undefined;
+        }
+        if (disposed) return;
+        let nextAtMs: number | undefined;
+        for (const record of tickets.values()) {
+            nextAtMs =
+                nextAtMs === undefined
+                    ? record.expiresAtMs
+                    : Math.min(nextAtMs, record.expiresAtMs);
+        }
+        for (const record of expiredTickets.values()) {
+            nextAtMs =
+                nextAtMs === undefined
+                    ? record.deleteAfterMs
+                    : Math.min(nextAtMs, record.deleteAfterMs);
+        }
+        if (nextAtMs === undefined) return;
+        expiryTimer = scheduler.setTimeout(
+            () => {
+                expiryTimer = undefined;
+                if (disposed) return;
+                let currentTime: number;
+                try {
+                    currentTime = now();
+                } catch {
+                    disposed = true;
+                    for (const record of tickets.values()) remove(record, true);
+                    expiredTickets.clear();
+                    return;
+                }
+                sweepExpired(currentTime);
+                scheduleExpiry(currentTime);
+            },
+            Math.max(0, nextAtMs - at)
+        );
+        expiryTimer.unref?.();
     }
 
     function resolve(
@@ -111,19 +204,25 @@ export function createOpenClawConfigurationBackupTicketStore(
         consume: boolean
     ): BackupTicketRecord {
         const at = now();
+        sweepExpired(at);
+        scheduleExpiry(at);
         const parsedId = v.safeParse(openClawConfigurationBackupTicketIdSchema, ticketId);
         if (!parsedId.success) {
             throw new OpenClawConfigurationBackupError("not-found");
         }
-        const record = tickets.get(parsedId.output);
-        if (record === undefined || record.actorKey !== actorKey(actor)) {
-            throw new OpenClawConfigurationBackupError("not-found");
-        }
-        if (record.expiresAtMs <= at) {
-            remove(record, true);
+        const key = actorKey(actor);
+        const expired = expiredTickets.get(parsedId.output);
+        if (expired !== undefined && expired.actorKey === key) {
             throw new OpenClawConfigurationBackupError("expired");
         }
-        if (consume) remove(record, false);
+        const record = tickets.get(parsedId.output);
+        if (record === undefined || record.actorKey !== key) {
+            throw new OpenClawConfigurationBackupError("not-found");
+        }
+        if (consume) {
+            remove(record, false);
+            scheduleExpiry(at);
+        }
         return record;
     }
 
@@ -138,7 +237,12 @@ export function createOpenClawConfigurationBackupTicketStore(
         dispose() {
             if (disposed) return;
             disposed = true;
+            if (expiryTimer !== undefined) {
+                scheduler.clearTimeout(expiryTimer);
+                expiryTimer = undefined;
+            }
             for (const record of tickets.values()) remove(record, true);
+            expiredTickets.clear();
         },
         inspect(actor: OpenClawConfigurationBackupActor, ticketId: string) {
             return metadata(resolve(actor, ticketId, false));
@@ -146,6 +250,7 @@ export function createOpenClawConfigurationBackupTicketStore(
         issue(actor: OpenClawConfigurationBackupActor, bytes: Uint8Array) {
             const at = now();
             sweepExpired(at);
+            scheduleExpiry(at);
             if (
                 bytes.byteLength < 1 ||
                 bytes.byteLength > openClawConfigurationUpstreamMaximumBytes
@@ -162,7 +267,11 @@ export function createOpenClawConfigurationBackupTicketStore(
                 openClawConfigurationBackupTicketIdSchema,
                 generateId()
             );
-            if (!ticketIdResult.success || tickets.has(ticketIdResult.output)) {
+            if (
+                !ticketIdResult.success ||
+                tickets.has(ticketIdResult.output) ||
+                expiredTickets.has(ticketIdResult.output)
+            ) {
                 throw new OpenClawConfigurationBackupError("unavailable");
             }
             const expiresAtMs = at + openClawConfigurationBackupTicketTtlMs;
@@ -183,6 +292,7 @@ export function createOpenClawConfigurationBackupTicketStore(
                 ticketId,
             });
             storedBytes += stored.byteLength;
+            scheduleExpiry(at);
             return result;
         },
     });

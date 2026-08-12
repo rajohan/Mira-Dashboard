@@ -66,11 +66,19 @@ import {
     type OpenClawCronHeartbeatReader,
 } from "../server/domains/openClawCron/service.ts";
 import { createSqliteOpenClawCronIntentStore } from "../server/domains/openClawCron/sqliteIntentStore.ts";
+import type { OpenClawConfigurationBackupTicketStore } from "../server/domains/openClawSettings/configurationBackup.ts";
+import {
+    createOpenClawConfigurationBackupRawHttpHandler,
+    type OpenClawConfigurationBackupRawHttpHandler,
+} from "../server/domains/openClawSettings/configurationBackupRawHttp.ts";
+import { createWorkspaceFileOpenClawConfigurationBackupSource } from "../server/domains/openClawSettings/configurationBackupSource.ts";
+import { createOpenClawConfigurationBackupTicketStore } from "../server/domains/openClawSettings/configurationBackupTickets.ts";
 import { createSqliteOpenClawSettingsOperationAuditWriter } from "../server/domains/openClawSettings/operationAudit.ts";
 import {
     OpenClawSettingsProviderError,
     type OpenClawSettingsProvider,
 } from "../server/domains/openClawSettings/provider.ts";
+import { createOpenClawGatewayRestartQueue } from "../server/domains/openClawSettings/restartQueue.ts";
 import { createOpenClawSettingsService } from "../server/domains/openClawSettings/service.ts";
 import { createOpenClawTasksRealtimePublisher } from "../server/domains/openClawTasks/realtime.ts";
 import {
@@ -206,6 +214,7 @@ export interface DashboardServerOptions extends Omit<
     | "monitoringCatalogService"
     | "monitoringService"
     | "openClawCronService"
+    | "openClawConfigurationBackupRawHttpHandler"
     | "openClawSettingsService"
     | "openClawTasksService"
     | "securityAuditLifecycle"
@@ -447,6 +456,12 @@ export async function createDashboardServer(
     let chatTranscriptLifecycleSupervisor: ChatTranscriptLifecycleSupervisor | undefined;
     let openClawTasksService: OpenClawTasksService | undefined;
     let openClawCronHeartbeatReader: OpenClawCronHeartbeatReader | undefined;
+    let openClawConfigurationBackupRawHttpHandler:
+        | OpenClawConfigurationBackupRawHttpHandler
+        | undefined;
+    let openClawConfigurationBackupTickets:
+        | OpenClawConfigurationBackupTicketStore
+        | undefined;
     let workspaceFilesService: WorkspaceFilesService | undefined;
     let openClawTasksSupervisor:
         | ReturnType<typeof createOpenClawTasksSubscriptionSupervisor>
@@ -485,6 +500,7 @@ export async function createDashboardServer(
         } catch (error) {
             failure ??= error;
         }
+        openClawConfigurationBackupTickets?.dispose();
         chatAttachmentStore?.dispose();
         chatMediaReferences?.dispose();
         if (failure instanceof Error) throw failure;
@@ -718,22 +734,26 @@ export async function createDashboardServer(
                       writeAdmission: databaseRuntime,
                   });
         let workspaceFileRawHttpHandler: WorkspaceFileRawHttpHandler | undefined;
+        let openClawConfigurationBackupSource:
+            | ReturnType<typeof createWorkspaceFileOpenClawConfigurationBackupSource>
+            | undefined;
         if (
             options.workspaceFileRoot !== undefined &&
             options.workspaceFileUploadSpoolRoot !== undefined
         ) {
+            const workspaceFileReader = createDescriptorWorkspaceFileReader({
+                roots: [
+                    options.workspaceFileRoot,
+                    ...(options.openClawFileRoot === undefined
+                        ? []
+                        : [options.openClawFileRoot]),
+                ],
+            });
             workspaceFilesService = createWorkspaceFilesService({
                 ...(domainNow === undefined
                     ? {}
                     : { nowMs: () => domainNow().getTime() }),
-                reader: createDescriptorWorkspaceFileReader({
-                    roots: [
-                        options.workspaceFileRoot,
-                        ...(options.openClawFileRoot === undefined
-                            ? []
-                            : [options.openClawFileRoot]),
-                    ],
-                }),
+                reader: workspaceFileReader,
                 scheduler: createWorkspaceFileJobScheduler({
                     ...(domainNow === undefined
                         ? {}
@@ -755,6 +775,27 @@ export async function createDashboardServer(
                 browserOrigin,
                 service: workspaceFilesService,
             });
+            if (options.openClawFileRoot !== undefined) {
+                openClawConfigurationBackupSource =
+                    createWorkspaceFileOpenClawConfigurationBackupSource(
+                        workspaceFileReader
+                    );
+                openClawConfigurationBackupTickets =
+                    createOpenClawConfigurationBackupTicketStore(
+                        domainNow === undefined
+                            ? {}
+                            : { nowMs: () => domainNow().getTime() }
+                    );
+                openClawConfigurationBackupRawHttpHandler =
+                    createOpenClawConfigurationBackupRawHttpHandler({
+                        authenticateCredential: (credential) =>
+                            authenticator.authenticate(credential),
+                        authorizeAccess: (identity) =>
+                            authenticationLifecycle.authorizeRecentMfa(identity),
+                        browserOrigin,
+                        tickets: openClawConfigurationBackupTickets,
+                    });
+            }
         }
         const gatewayConnectionService = createGatewayConnectionService({
             ...(domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }),
@@ -811,6 +852,13 @@ export async function createDashboardServer(
                     },
                     outcome: "server-error",
                 }),
+            ...(openClawConfigurationBackupSource === undefined ||
+            openClawConfigurationBackupTickets === undefined
+                ? {}
+                : {
+                      backupSource: openClawConfigurationBackupSource,
+                      backupTickets: openClawConfigurationBackupTickets,
+                  }),
             onMutationQueueWait: ({ queueDepth, waitMs }) =>
                 options.applicationRuntime.logger.info({
                     component: "openclaw-settings",
@@ -828,6 +876,13 @@ export async function createDashboardServer(
                     : createPersistentGatewayOpenClawSettingsProvider(
                           persistentGatewayTransport
                       ),
+            restartQueue: createOpenClawGatewayRestartQueue({
+                ...(domainNow === undefined
+                    ? {}
+                    : { nowMs: () => domainNow().getTime() }),
+                repository: jobRepository,
+                wakeEventPump,
+            }),
         });
         const chatRepository =
             persistentGatewayTransport === undefined
@@ -1150,6 +1205,9 @@ export async function createDashboardServer(
             monitoringCatalogService,
             monitoringService,
             openClawCronService,
+            ...(openClawConfigurationBackupRawHttpHandler === undefined
+                ? {}
+                : { openClawConfigurationBackupRawHttpHandler }),
             openClawSettingsService,
             ...(openClawTasksService === undefined ? {} : { openClawTasksService }),
             port: options.port,

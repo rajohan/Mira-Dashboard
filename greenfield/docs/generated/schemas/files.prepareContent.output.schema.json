@@ -53,12 +53,20 @@
       "minimum": 0,
       "maximum": 33554432
     },
+    "sourceSizeBytes": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
     "ticketId": {
       "type": "string",
       "minLength": 36,
       "maxLength": 36,
       "format": "uuid",
       "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "truncated": {
+      "const": true
     },
     "url": {
       "type": "string",
@@ -78,5 +86,6 @@
     "url"
   ],
   "additionalProperties": false,
+  "$comment": "Live Valibot validation additionally requires truncated workspace-file representations to carry a larger source size and stay within the bounded text-prefix budget, while full representations omit source-size metadata.",
   "$schema": "https://json-schema.org/draft/2020-12/schema"
 }

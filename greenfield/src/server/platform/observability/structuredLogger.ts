@@ -76,7 +76,11 @@ export type StructuredLogFields =
       }
     | {
           readonly kind: "openclaw-settings-audit-settlement";
-          readonly operation: "set-skill-enabled" | "update-configuration";
+          readonly operation:
+              | "create-configuration-backup"
+              | "restart-gateway"
+              | "set-skill-enabled"
+              | "update-configuration";
           readonly settlement: "failed" | "partial" | "succeeded";
           readonly targetFingerprint: string;
       }
@@ -346,7 +350,9 @@ function safeEventFields(
         case "openclaw-settings-audit-settlement": {
             if (
                 eventName !== "openclaw_settings.audit_settlement.failed" ||
-                (fields.operation !== "set-skill-enabled" &&
+                (fields.operation !== "create-configuration-backup" &&
+                    fields.operation !== "restart-gateway" &&
+                    fields.operation !== "set-skill-enabled" &&
                     fields.operation !== "update-configuration") ||
                 (fields.settlement !== "failed" &&
                     fields.settlement !== "partial" &&

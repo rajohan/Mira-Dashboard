@@ -284,6 +284,50 @@ describe("system foundation", () => {
         ]);
     });
 
+    test("mounts configuration exports before chat and browser fallbacks", async () => {
+        const observed: string[] = [];
+        const server = await createServer({
+            ...createTestServerSecurityServices(),
+            applicationRuntime: createTestApplicationRuntime(),
+            chatRawHttpHandler: (_request, requestUrl) => {
+                observed.push(`chat:${requestUrl.pathname}`);
+                return Promise.resolve(new Response("chat-fallback"));
+            },
+            frontendAssets: (_request, requestUrl) => {
+                observed.push(`frontend:${requestUrl.pathname}`);
+                return Promise.resolve(new Response("browser-fallback"));
+            },
+            hostname: "127.0.0.1",
+            openClawConfigurationBackupRawHttpHandler: (_request, requestUrl) => {
+                if (
+                    !requestUrl.pathname.startsWith(
+                        "/api/openclaw-settings/configuration-backups/"
+                    )
+                ) {
+                    return Promise.resolve(undefined);
+                }
+                observed.push(`backup:${requestUrl.pathname}`);
+                return Promise.resolve(new Response("configuration-backup"));
+            },
+            port: 0,
+            readiness: createReadinessController(),
+        });
+        servers.push(server);
+
+        const response = await fetch(
+            new URL(
+                "/api/openclaw-settings/configuration-backups/fixture-ticket",
+                server.url
+            )
+        );
+
+        expect(response.status).toBe(200);
+        expect(await response.text()).toBe("configuration-backup");
+        expect(observed).toEqual([
+            "backup:/api/openclaw-settings/configuration-backups/fixture-ticket",
+        ]);
+    });
+
     test("emits one correlated response-created event for every response class", async () => {
         const { logger, logLines } = createCapturingTestStructuredLogger();
         const server = await createServer({

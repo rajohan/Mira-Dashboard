@@ -58,7 +58,12 @@ export function authSession(
     });
 }
 
-export function sessionActor(identity: AuthenticatedBrowserIdentity): SecurityAuditActor {
+export function sessionActor(
+    identity: AuthenticatedBrowserIdentity
+): SecurityAuditActor & {
+    readonly authenticatorId: string;
+    readonly kind: "user";
+} {
     return {
         authenticatorId: identity.sessionId,
         id: identity.userId,

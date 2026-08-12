@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import type {
     DashboardProcedureInput,
@@ -13,6 +13,15 @@ import {
 } from "../api/trpcError.ts";
 import { useAuthenticatedMutationBoundary } from "../auth/useAuthenticatedMutationBoundary.ts";
 import {
+    authenticatedOpenClawRestartIdentity,
+    clearOpenClawRestartRecovery,
+    downloadOpenClawConfigurationBackup,
+    GatewayRestartRecoveryError,
+    openClawConfigurationBackupFailureMessage,
+    openClawRestartRecoveryExists,
+    readOrCreateOpenClawRestartIdempotencyKey,
+} from "./openClawSettingsOperations.ts";
+import {
     openClawConfigurationQueryKey,
     openClawConfigurationQueryOptions,
     openClawSkillsQueryKey,
@@ -23,6 +32,9 @@ export const openClawSettingsMutationKey = ["openclaw-settings", "mutation"] as 
 
 export const openClawSettingsUnknownOutcomeMessage =
     "Dashboard could not confirm whether OpenClaw applied the change. Refresh current status before submitting another change.";
+
+export const openClawGatewayRestartUnknownOutcomeMessage =
+    "Dashboard could not confirm whether the Gateway restart completed. Retrying this restart request will reuse its recovery key. Review Dashboard jobs before discarding the key; refreshing configuration does not prove restart status.";
 
 function configurationSuccessMessage(
     result: DashboardProcedureOutput<"openClawSettings.updateConfiguration">
@@ -54,12 +66,26 @@ function mutationFailureMessage(error: unknown): string {
 export function useOpenClawSettingsMutations() {
     const client = useDashboardTrpcClient();
     const boundary = useAuthenticatedMutationBoundary();
+    const restartIdentity = authenticatedOpenClawRestartIdentity(boundary.queryClient);
     const [error, setError] = useState<string>();
     const [notice, setNotice] = useState<string>();
     const [reconciliationRequired, setReconciliationRequired] = useState(false);
     const [reconciliationBusy, setReconciliationBusy] = useState(false);
     const [snapshotGeneration, setSnapshotGeneration] = useState(0);
-    const restartIdempotencyKey = useRef<string | undefined>(undefined);
+    const [restartRecovery, setRestartRecovery] = useState(() => ({
+        identity: restartIdentity,
+        pending: openClawRestartRecoveryExists(restartIdentity),
+    }));
+
+    useEffect(() => {
+        const pending = openClawRestartRecoveryExists(restartIdentity);
+        setRestartRecovery((current) => {
+            if (current.identity === restartIdentity && current.pending === pending) {
+                return current;
+            }
+            return { identity: restartIdentity, pending };
+        });
+    }, [restartIdentity]);
 
     async function refreshCurrentState(successMessage?: string): Promise<boolean> {
         if (!boundary.completionIsCurrent()) return false;
@@ -176,38 +202,28 @@ export function useOpenClawSettingsMutations() {
         retry: false,
     });
 
-    const backup = useMutation<
-        DashboardProcedureOutput<"openClawSettings.createConfigurationBackup">,
-        Error,
-        void
-    >({
+    const backup = useMutation<void, Error, void>({
         mutationFn: () =>
-            boundary.run((signal) =>
-                client.mutation(
+            boundary.run(async (signal, isActive) => {
+                const result = await client.mutation(
                     "openClawSettings.createConfigurationBackup",
                     { confirmation: "export-openclaw-configuration" },
                     { signal }
-                )
-            ),
+                );
+                await downloadOpenClawConfigurationBackup(result, signal, isActive);
+            }),
         mutationKey: [...openClawSettingsMutationKey, "configuration-backup"],
         onError: (mutationError) => {
             if (!boundary.completionIsCurrent()) return;
-            setError(dashboardBrowserFailureMessage(mutationError));
+            setError(openClawConfigurationBackupFailureMessage(mutationError));
         },
         onMutate: () => {
             setError(undefined);
             setNotice(undefined);
         },
-        onSuccess: (result) => {
+        onSuccess: () => {
             if (!boundary.completionIsCurrent()) return;
-            const anchor = document.createElement("a");
-            anchor.download = "";
-            anchor.href = result.downloadUrl;
-            anchor.rel = "noopener";
-            document.body.append(anchor);
-            anchor.click();
-            anchor.remove();
-            setNotice("OpenClaw configuration backup download started.");
+            setNotice("OpenClaw configuration backup downloaded.");
         },
         retry: false,
     });
@@ -218,24 +234,34 @@ export function useOpenClawSettingsMutations() {
         void
     >({
         mutationFn: () => {
-            const idempotencyKey =
-                restartIdempotencyKey.current ?? crypto.randomUUID();
-            restartIdempotencyKey.current = idempotencyKey;
-            return boundary.run((signal) =>
-                client.mutation(
+            return boundary.run((signal) => {
+                const identity = authenticatedOpenClawRestartIdentity(
+                    boundary.queryClient
+                );
+                if (identity === undefined) throw new GatewayRestartRecoveryError();
+                const idempotencyKey =
+                    readOrCreateOpenClawRestartIdempotencyKey(identity);
+                setRestartRecovery({ identity, pending: true });
+                return client.mutation(
                     "openClawSettings.restartGateway",
                     {
                         confirmation: "restart-openclaw-gateway",
                         idempotencyKey,
                     },
                     { signal }
-                )
-            );
+                );
+            });
         },
         mutationKey: [...openClawSettingsMutationKey, "gateway-restart"],
         onError: (mutationError) => {
             if (!boundary.completionIsCurrent()) return;
-            setError(mutationFailureMessage(mutationError));
+            setError(
+                mutationError instanceof GatewayRestartRecoveryError
+                    ? "Dashboard could not persist a safe Gateway restart recovery key in this browser session. The restart was not submitted."
+                    : isDashboardOperationOutcomeUnknown(mutationError)
+                      ? openClawGatewayRestartUnknownOutcomeMessage
+                      : mutationFailureMessage(mutationError)
+            );
         },
         onMutate: () => {
             setError(undefined);
@@ -243,11 +269,34 @@ export function useOpenClawSettingsMutations() {
         },
         onSuccess: () => {
             if (!boundary.completionIsCurrent()) return;
-            restartIdempotencyKey.current = undefined;
+            const identity = authenticatedOpenClawRestartIdentity(boundary.queryClient);
+            if (identity === undefined || !clearOpenClawRestartRecovery(identity)) {
+                setError(
+                    "The OpenClaw Gateway restart completed, but Dashboard could not clear its browser recovery key. Do not retry this request."
+                );
+                return;
+            }
+            setRestartRecovery({ identity, pending: false });
             setNotice("OpenClaw Gateway restart completed.");
         },
         retry: false,
     });
+
+    function startNewRestartIntent(): void {
+        if (restart.isPending) return;
+        const identity = authenticatedOpenClawRestartIdentity(boundary.queryClient);
+        if (identity === undefined || !clearOpenClawRestartRecovery(identity)) {
+            setError(
+                "Dashboard could not discard the previous Gateway restart recovery key. No new restart intent was created."
+            );
+            return;
+        }
+        setRestartRecovery({ identity, pending: false });
+        setError(undefined);
+        setNotice(
+            "Previous Gateway restart recovery key discarded. No new restart was submitted; the next restart action creates a new intent."
+        );
+    }
 
     return {
         backup,
@@ -266,7 +315,10 @@ export function useOpenClawSettingsMutations() {
         reconciliationBusy,
         reconciliationRequired,
         restart,
+        restartRecoveryPending:
+            restartRecovery.identity === restartIdentity && restartRecovery.pending,
         skill,
         snapshotGeneration,
+        startNewRestartIntent,
     };
 }

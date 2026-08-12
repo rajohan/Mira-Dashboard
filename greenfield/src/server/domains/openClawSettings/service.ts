@@ -479,11 +479,15 @@ export function createOpenClawSettingsService(
                     signal?.throwIfAborted();
                     try {
                         const bytes = await source.read(signal);
-                        signal?.throwIfAborted();
-                        return v.parse(
-                            createOpenClawConfigurationBackupResultSchema,
-                            tickets.issue(context.actor, bytes)
-                        );
+                        try {
+                            signal?.throwIfAborted();
+                            return v.parse(
+                                createOpenClawConfigurationBackupResultSchema,
+                                tickets.issue(context.actor, bytes)
+                            );
+                        } finally {
+                            bytes.fill(0);
+                        }
                     } catch (error) {
                         if (signal?.aborted) throw error;
                         if (error instanceof OpenClawConfigurationBackupError) {
