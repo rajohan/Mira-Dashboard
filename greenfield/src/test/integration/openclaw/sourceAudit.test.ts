@@ -765,7 +765,12 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
                     baseHash: resolveConfigSnapshotHash(params.snapshot) ?? void 0
                 });
                 invalidateConfigGetResponseCache();
-                return result;
+                return {
+                    path: resolveGatewayConfigPath(params.snapshot),
+                    config: result.nextConfig,
+                    hash: result.persistedHash,
+                    queueFollowUp: () => {}
+                };
             }
             function buildConfigRestartSentinelPayload(params) {
                 return {
@@ -790,6 +795,9 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
                 const { payload, sentinelPersisted, restart } = await resolveGatewayConfigRestartWriteResult(params);
                 params.respond(true, {
                     ok: true,
+                    path: params.writeResult.path,
+                    ...params.writeResult.hash ? { hash: params.writeResult.hash } : {},
+                    config: redactConfigObject(params.writeResult.config, params.uiHints),
                     restart,
                     sentinel: {
                         persisted: sentinelPersisted,

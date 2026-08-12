@@ -418,6 +418,7 @@ function heartbeatSeconds(
 ): number | undefined {
     if (value === undefined) return undefined;
     const normalized = value.trim().toLowerCase();
+    if (normalized.length === 0) return undefined;
     const unitMilliseconds = Object.freeze({
         d: 86_400_000,
         h: 3_600_000,
@@ -481,18 +482,22 @@ function projectToolSettings(
     tools: v.InferOutput<typeof upstreamConfigurationSchema>["tools"]
 ): OpenClawConfigurationSnapshot["tools"] {
     const visibility = tools?.sessions?.visibility;
+    const profile = optionalNonBlankUpstreamText(tools?.profile);
+    const webSearchProvider = optionalNonBlankUpstreamText(tools?.web?.search?.provider);
     return {
         agentToAgentEnabled: tools?.agentToAgent?.enabled ?? false,
         elevatedEnabled: tools?.elevated?.enabled !== false,
         execPolicy: projectExecPolicy(tools?.exec),
-        ...(tools?.profile === undefined ? {} : { profile: tools.profile }),
+        ...(profile === undefined ? {} : { profile }),
         ...(visibility === undefined ? {} : { sessionsVisibility: visibility }),
         webFetchEnabled: tools?.web?.fetch?.enabled ?? true,
         webSearchEnabled: tools?.web?.search?.enabled ?? true,
-        ...(tools?.web?.search?.provider === undefined
-            ? {}
-            : { webSearchProvider: tools.web.search.provider }),
+        ...(webSearchProvider === undefined ? {} : { webSearchProvider }),
     };
+}
+
+function optionalNonBlankUpstreamText(value: string | undefined): string | undefined {
+    return value === undefined || value.trim().length === 0 ? undefined : value;
 }
 
 function projectSessionReset(
@@ -947,6 +952,9 @@ function projectConfiguration(
     const rawModel = upstream.agents?.defaults?.model;
     const primary = typeof rawModel === "string" ? rawModel : rawModel?.primary;
     const fallbacks = typeof rawModel === "string" ? [] : (rawModel?.fallbacks ?? []);
+    const heartbeatTarget = optionalNonBlankUpstreamText(
+        upstream.agents?.defaults?.heartbeat?.target
+    );
     let channelsTruncated = rawChannelsTruncated;
     const allChannels = Object.entries(upstream.channels ?? {})
         .flatMap(([id, channel]) => {
@@ -978,9 +986,7 @@ function projectConfiguration(
                               reason
                           ),
                       }),
-                ...(upstream.agents?.defaults?.heartbeat?.target === undefined
-                    ? {}
-                    : { target: upstream.agents.defaults.heartbeat.target }),
+                ...(heartbeatTarget === undefined ? {} : { target: heartbeatTarget }),
             },
             includesPresent,
             issueCount,
@@ -1189,7 +1195,9 @@ function buildPatch(
             const currentEverySeconds = heartbeatSeconds(
                 upstream.agents?.defaults?.heartbeat?.every
             );
-            const currentTarget = upstream.agents?.defaults?.heartbeat?.target;
+            const currentTarget = optionalNonBlankUpstreamText(
+                upstream.agents?.defaults?.heartbeat?.target
+            );
             const target = update.target ?? undefined;
             const everyChanged = currentEverySeconds !== update.everySeconds;
             const targetChanged = currentTarget !== target;

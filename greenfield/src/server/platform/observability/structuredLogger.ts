@@ -186,6 +186,10 @@ function validIdentity(value: string): boolean {
     return requestIdentityPattern.test(value);
 }
 
+function validTargetFingerprint(value: string): boolean {
+    return /^sha256:[0-9a-f]{64}$/u.test(value);
+}
+
 function validateLoggerIdentity(identity: StructuredLoggerIdentity): void {
     if (
         !validStructuredName(identity.service) ||
@@ -271,7 +275,7 @@ function safeEventFields(
                     fields.action !== "reset") ||
                 (fields.auditOutcome !== "failed" &&
                     fields.auditOutcome !== "succeeded") ||
-                !/^sha256:[0-9a-f]{64}$/u.test(fields.targetFingerprint)
+                !validTargetFingerprint(fields.targetFingerprint)
             ) {
                 return undefined;
             }
@@ -329,7 +333,7 @@ function safeEventFields(
                 (fields.settlement !== "failed" &&
                     fields.settlement !== "partial" &&
                     fields.settlement !== "succeeded") ||
-                !/^sha256:[0-9a-f]{64}$/u.test(fields.targetFingerprint)
+                !validTargetFingerprint(fields.targetFingerprint)
             ) {
                 return undefined;
             }
@@ -347,7 +351,7 @@ function safeEventFields(
                 (fields.settlement !== "failed" &&
                     fields.settlement !== "partial" &&
                     fields.settlement !== "succeeded") ||
-                !/^sha256:[0-9a-f]{64}$/u.test(fields.targetFingerprint)
+                !validTargetFingerprint(fields.targetFingerprint)
             ) {
                 return undefined;
             }

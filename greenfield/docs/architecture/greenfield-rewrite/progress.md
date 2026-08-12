@@ -1497,7 +1497,7 @@ full-browser parity, production rehearsal, cutover, and legacy deletion remain o
   12 browser routes are implemented and four remain planned. Phase 5 remains open.
 - The lazy settings route and its bounded forms measured 900,607 aggregate JavaScript gzip bytes
   identically across three frozen-tree production browser builds. The reviewed aggregate
-  completion ceiling moves from 880 KiB to 1,280 KiB because 52 endpoint replacements and the
+  completion ceiling moves from 865 KiB to 1,280 KiB because 52 endpoint replacements and the
   `/`, `/database`, `/delivery`, and `/docker` browser routes remain in the rewrite. This leaves
   410,113 bytes for those reviewed slices without deleting parity behavior. The tighter
   initial-JavaScript, largest-chunk, and stylesheet ceilings remain unchanged so startup and

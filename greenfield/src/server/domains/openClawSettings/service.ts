@@ -332,6 +332,7 @@ export function createOpenClawSettingsService(
                     throw error;
                 }
             });
+            if (authorizationFailed) throw authorizationFailure;
             return parseResult(result);
         } catch (error) {
             if (authorizationFailed && error === authorizationFailure) throw error;

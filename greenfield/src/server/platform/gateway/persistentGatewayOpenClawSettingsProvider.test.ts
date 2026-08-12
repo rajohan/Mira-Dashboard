@@ -417,6 +417,113 @@ describe("persistent Gateway OpenClaw Settings provider", () => {
         expect(result.tools.execPolicy).toEqual({ state: "inherited" });
     });
 
+    test("omits blank optional heartbeat and tool text while rejecting wrong types", async () => {
+        for (const blank of ["", "   "]) {
+            const response = structuredClone(configGetFixture()) as {
+                config: {
+                    agents: {
+                        defaults: {
+                            heartbeat: { every: unknown; target: unknown };
+                        };
+                    };
+                    tools: {
+                        profile: unknown;
+                        web: { search: { provider: unknown } };
+                    };
+                };
+            };
+            response.config.agents.defaults.heartbeat.every = blank;
+            response.config.agents.defaults.heartbeat.target = blank;
+            response.config.tools.profile = blank;
+            response.config.tools.web.search.provider = blank;
+
+            const result = await createPersistentGatewayOpenClawSettingsProvider(
+                createFixtureTransport({ reads: [{ payload: response }] }).transport
+            ).getConfiguration({});
+
+            expect(result.heartbeat).toEqual({});
+            expect(result.tools).not.toHaveProperty("profile");
+            expect(result.tools).not.toHaveProperty("webSearchProvider");
+        }
+
+        for (const field of [
+            "heartbeat-every",
+            "heartbeat-target",
+            "tool-profile",
+            "web-search-provider",
+        ] as const) {
+            const response = structuredClone(configGetFixture()) as {
+                config: {
+                    agents: {
+                        defaults: {
+                            heartbeat: { every: unknown; target: unknown };
+                        };
+                    };
+                    tools: {
+                        profile: unknown;
+                        web: { search: { provider: unknown } };
+                    };
+                };
+            };
+            switch (field) {
+                case "heartbeat-every": {
+                    response.config.agents.defaults.heartbeat.every = 42;
+                    break;
+                }
+                case "heartbeat-target": {
+                    response.config.agents.defaults.heartbeat.target = 42;
+                    break;
+                }
+                case "tool-profile": {
+                    response.config.tools.profile = 42;
+                    break;
+                }
+                case "web-search-provider": {
+                    response.config.tools.web.search.provider = 42;
+                    break;
+                }
+            }
+
+            expect(
+                await captureFailure(() =>
+                    createPersistentGatewayOpenClawSettingsProvider(
+                        createFixtureTransport({ reads: [{ payload: response }] })
+                            .transport
+                    ).getConfiguration({})
+                )
+            ).toEqual(new OpenClawSettingsProviderError("data-invalid"));
+        }
+    });
+
+    test("treats a blank current heartbeat target as absent before patch comparison", async () => {
+        const response = structuredClone(configGetFixture()) as {
+            config: {
+                agents: { defaults: { heartbeat: { target: string } } };
+            };
+        };
+        response.config.agents.defaults.heartbeat.target = "   ";
+        const fixture = createFixtureTransport({ reads: [{ payload: response }] });
+
+        expect(
+            await captureFailure(() =>
+                createPersistentGatewayOpenClawSettingsProvider(
+                    fixture.transport
+                ).updateConfiguration({
+                    authorizeDispatch,
+                    baseHash: currentHash,
+                    baseRevisionHash: currentRevisionHash,
+                    confirmation: "apply-reviewed-settings",
+                    update: {
+                        everySeconds: 5400,
+                        section: "heartbeat",
+                        target: null,
+                    },
+                })
+            )
+        ).toEqual(new OpenClawSettingsProviderError("data-invalid"));
+        expect(fixture.dispatchedWrites).toHaveLength(0);
+    });
+
     test("projects the complete source-derived session reset state matrix", async () => {
         const cases = [
             [undefined, { state: "inherited-none" }],
@@ -1222,6 +1329,47 @@ describe("persistent Gateway OpenClaw Settings provider", () => {
         });
         expect(JSON.stringify(result)).not.toContain("raw");
         expect(JSON.stringify(result)).not.toContain("path");
+    });
+
+    test("rejects a config.patch acknowledgement without config and hash", async () => {
+        const fixture = createFixtureTransport({
+            reads: [{ payload: configGetFixture() }],
+            writes: [
+                {
+                    payload: {
+                        ok: true,
+                        restart: { ok: true },
+                        sentinel: {
+                            payload: { stats: { requiresRestart: true } },
+                            persisted: true,
+                        },
+                    },
+                },
+            ],
+        });
+
+        expect(
+            await captureFailure(() =>
+                createPersistentGatewayOpenClawSettingsProvider(
+                    fixture.transport
+                ).updateConfiguration({
+                    authorizeDispatch,
+                    baseHash: currentHash,
+                    baseRevisionHash: currentRevisionHash,
+                    confirmation: "apply-reviewed-settings",
+                    update: {
+                        idleMinutes: 60,
+                        mode: "idle",
+                        section: "session-reset",
+                    },
+                })
+            )
+        ).toEqual(new OpenClawSettingsProviderError("unknown-outcome"));
+        expect(fixture.calls.map(({ method }) => method)).toEqual([
+            "config.get",
+            "config.patch",
+            "config.get",
+        ]);
     });
 
     test("canonicalizes pinned model aliases before patch and acknowledgement", async () => {

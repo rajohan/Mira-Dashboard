@@ -301,6 +301,41 @@ describe("OpenClaw settings service", () => {
         expect(dispatchCalls).toBe(0);
     });
 
+    test("fails closed when the provider swallows dispatch authorization failure", async () => {
+        const settlements: string[] = [];
+        const authorizationFailure = new Error("session changed");
+        const service = createOpenClawSettingsService({
+            auditWriter: {
+                record: (input) => {
+                    settlements.push(input.settlement);
+                    return Promise.resolve();
+                },
+            },
+            provider: provider({
+                updateConfiguration: async ({ authorizeDispatch }) => {
+                    try {
+                        await authorizeDispatch();
+                    } catch {
+                        return updateResult;
+                    }
+                    throw new Error("Expected authorization to fail");
+                },
+            }),
+        });
+
+        const failure = await captureFailure(() =>
+            service.updateConfiguration(modelUpdate, {
+                ...controlContext,
+                reauthorize: () => {
+                    throw authorizationFailure;
+                },
+            })
+        );
+
+        expect(failure).toBe(authorizationFailure);
+        expect(settlements).toEqual(["attempted", "failed"]);
+    });
+
     test("serializes hash-fenced mutations until the prior operation settles", async () => {
         const order: string[] = [];
         const queueObservations: { queueDepth: number; waitMs: number }[] = [];

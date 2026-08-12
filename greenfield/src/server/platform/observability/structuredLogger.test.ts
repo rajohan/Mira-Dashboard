@@ -252,6 +252,7 @@ test("records only classified OpenClaw settings audit settlement fields", () => 
         level: "warn",
         outcome: "server-error",
     });
+    expect(JSON.parse(lines[0] ?? "null")).not.toHaveProperty("fields.kind");
     expect(lines[0]).not.toContain(sensitiveTarget);
 });
 
@@ -285,6 +286,7 @@ test("records bounded OpenClaw settings mutation queue observations", () => {
         level: "info",
         outcome: "success",
     });
+    expect(JSON.parse(lines[0] ?? "null")).not.toHaveProperty("fields.kind");
 });
 
 test("records only fixed log-maintenance audit settlement fields", () => {

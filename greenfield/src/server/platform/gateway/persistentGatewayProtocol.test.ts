@@ -593,6 +593,7 @@ describe("persistent Gateway protocol-v4 boundary", () => {
             }),
             parameters({ channels: {} }),
             parameters({ channels: { defaults: { enabled: true } } }),
+            parameters({ channels: { modelByChannel: { enabled: true } } }),
             parameters({ channels: { constructor: { enabled: true } } }),
             parameters({ channels: { prototype: { enabled: true } } }),
             parameters({ channels: { discord: { enabled: true, token: "secret" } } }),

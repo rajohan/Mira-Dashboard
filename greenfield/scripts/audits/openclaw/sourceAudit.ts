@@ -4405,6 +4405,8 @@ function assertSettingsSemantics(
     ]);
     assertRequiredMarkers(configHandlers, "config.get write invalidation", [
         "async function commitGatewayConfigWrite(params)",
+        "config: result.nextConfig",
+        "hash: result.persistedHash",
         "invalidateConfigGetResponseCache()",
     ]);
 
@@ -4784,6 +4786,9 @@ function assertSettingsSemantics(
         "config.patch restart response"
     );
     assertRequiredMarkers(restartWriteResponse, "config.patch restart response", [
+        "path: params.writeResult.path",
+        "...params.writeResult.hash ? { hash: params.writeResult.hash } : {}",
+        "config: redactConfigObject(params.writeResult.config, params.uiHints)",
         "sentinel: {",
         "persisted: sentinelPersisted",
         "payload",

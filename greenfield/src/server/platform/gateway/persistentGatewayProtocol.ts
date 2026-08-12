@@ -664,7 +664,8 @@ const gatewayOpenClawSettingsChannelsSchema = v.pipe(
         return (
             ids.length > 0 &&
             ids.length <= openClawChannelMaximum &&
-            !ids.includes("defaults")
+            !ids.includes("defaults") &&
+            !ids.includes("modelByChannel")
         );
     }, "OpenClaw channels are outside their budget")
 );
@@ -803,10 +804,6 @@ const gatewayOpenClawConfigPatchParamsSchema = v.strictObject({
     note: v.literal("Updated from Mira Dashboard settings"),
     raw: v.pipe(
         v.string("OpenClaw settings patch is invalid"),
-        v.maxLength(
-            persistentGatewayOpenClawSettingsPatchMaximumBytes,
-            "OpenClaw settings patch is outside its budget"
-        ),
         v.check(
             (raw) =>
                 Buffer.byteLength(raw, "utf8") <=
