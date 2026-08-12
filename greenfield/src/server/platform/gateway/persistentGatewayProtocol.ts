@@ -738,7 +738,7 @@ const gatewayOpenClawUpdateResultSchema = v.object({
     status: v.picklist(["error", "ok", "skipped"]),
 });
 const gatewayOpenClawUpdateHandoffSchema = v.object({
-    status: v.picklist(["already-running", "started", "unavailable"]),
+    status: v.picklist(["already-running", "joined", "started", "unavailable"]),
 });
 const gatewayOpenClawUpdateResponseSchema = v.strictObject({
     handoff: v.optional(gatewayOpenClawUpdateHandoffSchema),
@@ -1501,7 +1501,10 @@ export function parsePersistentGatewayOpenClawServiceActionResponse(
         throw new TypeError("Persistent Gateway OpenClaw operation response is invalid");
     }
     let status: "accepted" | "completed" | "failed" = "failed";
-    if (parsed.output.handoff?.status === "started") {
+    if (
+        parsed.output.handoff?.status === "started" ||
+        parsed.output.handoff?.status === "joined"
+    ) {
         status = "accepted";
     } else if (parsed.output.ok && parsed.output.result.status === "ok") {
         status = "completed";

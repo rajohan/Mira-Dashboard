@@ -68,7 +68,10 @@ function ServiceActionRow({
 }: ServiceActionRowProps) {
     const presentation = serviceActionPresentations[action.id];
     const active = action.activeRun !== undefined;
-    const disabled = action.availability === "unavailable" || active || globalBusy;
+    const disabled =
+        active ||
+        globalBusy ||
+        (action.availability === "unavailable" && !recoveryPending);
     return (
         <li className="border-primary-700 bg-primary-900/35 rounded-lg border p-4">
             <div className="flex flex-wrap items-start justify-between gap-4">
@@ -220,7 +223,8 @@ export function OverviewServiceActionsCard({
                 busy={requestBusy && requestActionId === selectedActionId}
                 confirmDisabled={
                     selectedAction === undefined ||
-                    selectedAction.availability === "unavailable" ||
+                    (selectedAction.availability === "unavailable" &&
+                        !selectedRecoveryPending) ||
                     selectedAction.activeRun !== undefined
                 }
                 confirmLabel={

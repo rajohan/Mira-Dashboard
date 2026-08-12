@@ -597,6 +597,15 @@ describe("persistent Gateway protocol-v4 boundary", () => {
         ).toEqual({ method: "update.run", status: "accepted" });
         expect(
             parsePersistentGatewayOpenClawServiceActionResponse("update.run", {
+                handoff: { status: "joined" },
+                ok: false,
+                restart: null,
+                result: { status: "skipped" },
+                sentinel: {},
+            })
+        ).toEqual({ method: "update.run", status: "accepted" });
+        expect(
+            parsePersistentGatewayOpenClawServiceActionResponse("update.run", {
                 ok: true,
                 restart: null,
                 result: { status: "ok" },

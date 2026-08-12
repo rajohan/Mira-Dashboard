@@ -135,6 +135,15 @@ const allAvailableStatus = Object.freeze({
     observedAtMs: timestampMs + 3000,
 } satisfies GetServiceActionsStatusResult);
 
+const unavailableCleanupStatus = Object.freeze({
+    actions: allAvailableStatus.actions.map((action) =>
+        action.id === "openclaw-cleanup"
+            ? { ...action, availability: "unavailable" as const }
+            : action
+    ),
+    observedAtMs: timestampMs + 4000,
+} satisfies GetServiceActionsStatusResult);
+
 const queuedResult = Object.freeze({
     actionId: "openclaw-cleanup",
     jobRunId: queuedRun.id,
@@ -441,14 +450,13 @@ describe("OverviewServiceActionsSection", () => {
         const firstIndex = harnesses.indexOf(first);
         if (firstIndex !== -1) harnesses.splice(firstIndex, 1);
         const second = renderSection(
-            [allAvailableStatus, allAvailableStatus],
+            [unavailableCleanupStatus, unavailableCleanupStatus],
             [queuedResult]
         );
-        expect(
-            await screen.findByRole("button", {
-                name: "Retry OpenClaw cleanup request",
-            })
-        ).toBeTruthy();
+        const recoveryButton = await screen.findByRole("button", {
+            name: "Retry OpenClaw cleanup request",
+        });
+        expect(recoveryButton).toBeEnabled();
         await user.click(
             screen.getByRole("button", { name: "Retry OpenClaw cleanup request" })
         );
