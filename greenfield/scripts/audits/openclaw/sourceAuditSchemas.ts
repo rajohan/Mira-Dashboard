@@ -1022,6 +1022,8 @@ export const operationsFixtureSchema = v.strictObject({
             detachedChild: v.literal(true),
             gitRequiresSupervisor: v.literal(true),
             globalInstallRequiresHandoff: v.literal(true),
+            internalJoinedStatusCrossesRpc: v.literal(false),
+            nonOwningWireStatus: v.literal("already-running"),
             readyMarkerTimeoutMs: v.literal(30_000),
             sensitiveTemporaryFilesRemoved: v.literal(true),
             startedHandoffCountsAsAccepted: v.literal(true),

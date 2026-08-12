@@ -107,6 +107,8 @@
             "detachedChild": true,
             "gitRequiresSupervisor": true,
             "globalInstallRequiresHandoff": true,
+            "internalJoinedStatusCrossesRpc": false,
+            "nonOwningWireStatus": "already-running",
             "readyMarkerTimeoutMs": 30000,
             "sensitiveTemporaryFilesRemoved": true,
             "startedHandoffCountsAsAccepted": true,

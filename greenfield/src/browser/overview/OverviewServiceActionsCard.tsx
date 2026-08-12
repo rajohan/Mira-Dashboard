@@ -69,7 +69,7 @@ function ServiceActionRow({
     const presentation = serviceActionPresentations[action.id];
     const active = action.activeRun !== undefined;
     const disabled =
-        active ||
+        (active && !recoveryPending) ||
         globalBusy ||
         (action.availability === "unavailable" && !recoveryPending);
     return (
@@ -225,7 +225,7 @@ export function OverviewServiceActionsCard({
                     selectedAction === undefined ||
                     (selectedAction.availability === "unavailable" &&
                         !selectedRecoveryPending) ||
-                    selectedAction.activeRun !== undefined
+                    (selectedAction.activeRun !== undefined && !selectedRecoveryPending)
                 }
                 confirmLabel={
                     selectedRecoveryPending

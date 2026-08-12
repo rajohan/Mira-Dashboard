@@ -135,10 +135,14 @@ const allAvailableStatus = Object.freeze({
     observedAtMs: timestampMs + 3000,
 } satisfies GetServiceActionsStatusResult);
 
-const unavailableCleanupStatus = Object.freeze({
+const unavailableActiveCleanupStatus = Object.freeze({
     actions: allAvailableStatus.actions.map((action) =>
         action.id === "openclaw-cleanup"
-            ? { ...action, availability: "unavailable" as const }
+            ? {
+                  ...action,
+                  activeRun: queuedRun,
+                  availability: "unavailable" as const,
+              }
             : action
     ),
     observedAtMs: timestampMs + 4000,
@@ -450,7 +454,7 @@ describe("OverviewServiceActionsSection", () => {
         const firstIndex = harnesses.indexOf(first);
         if (firstIndex !== -1) harnesses.splice(firstIndex, 1);
         const second = renderSection(
-            [unavailableCleanupStatus, unavailableCleanupStatus],
+            [unavailableActiveCleanupStatus, unavailableActiveCleanupStatus],
             [queuedResult]
         );
         const recoveryButton = await screen.findByRole("button", {

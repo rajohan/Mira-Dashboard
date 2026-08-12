@@ -3861,6 +3861,8 @@ describe("explicit OpenClaw source audit", () => {
             });
             expect(audit.operations.updateRun).toMatchObject({
                 managedHandoff: {
+                    internalJoinedStatusCrossesRpc: false,
+                    nonOwningWireStatus: "already-running",
                     readyMarkerTimeoutMs: 30_000,
                     sensitiveTemporaryFilesRemoved: true,
                     startedHandoffCountsAsAccepted: true,
