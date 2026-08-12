@@ -105,6 +105,10 @@ export interface PersistentGatewayRegisteredLocalMedia {
     readonly locatorFingerprint: string;
 }
 
+export interface PersistentGatewayRegisteredManagedMedia {
+    readonly attachmentId: string;
+}
+
 export interface PersistentGatewayChatMediaReferenceRegistrar {
     readonly registerLocal: (
         reference: Readonly<{
@@ -120,7 +124,7 @@ export interface PersistentGatewayChatMediaReferenceRegistrar {
             messageId: string;
             sessionKey: string;
         }>
-    ) => void;
+    ) => PersistentGatewayRegisteredManagedMedia;
 }
 
 const upstreamInFlightRunSchema = v.strictObject({
@@ -675,17 +679,18 @@ function managedMediaUrl(
     } catch {
         return undefined;
     }
-    const attachmentId = match[2]!.toLowerCase();
+    const upstreamAttachmentId = match[2]!.toLowerCase();
+    let registered: PersistentGatewayRegisteredManagedMedia;
     try {
-        registrar.registerManaged({
-            attachmentId,
+        registered = registrar.registerManaged({
+            attachmentId: upstreamAttachmentId,
             messageId,
             sessionKey: expectedSessionKey,
         });
     } catch {
         throw new ChatProviderUnavailableError();
     }
-    return `/api/chat/media/${attachmentId}`;
+    return `/api/chat/media/${registered.attachmentId}`;
 }
 
 function attachmentRenderPolicy(

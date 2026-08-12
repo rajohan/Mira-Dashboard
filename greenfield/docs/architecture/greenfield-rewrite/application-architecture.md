@@ -738,7 +738,9 @@ recognizes bounded canonical `__openclaw.media` entries plus the reviewed legacy
 `MEDIA:` carriers. Recognized directives are removed from projected text even when their candidates
 are rejected, so a local locator never becomes browser content. Valid local candidates register a
 stable opaque reference bound to the exact session, message, source slot, and normalized server-only
-locator; the reference exposes neither a host path nor directory-listing authority.
+locator; the reference exposes neither a host path nor directory-listing authority. Its stable
+48-bit session prefix is only a non-secret refresh-routing hint, not cryptographic opacity or a
+capability.
 
 Media delivery resolves that reference only after principal authentication, `chat:read`, and
 an exact `chat.message.get` reauthorization prove that the same projected message still contains the
@@ -747,6 +749,9 @@ to `<MIRA_DASHBOARD_OPENCLAW_ROOT>/media`. Managed outgoing media keeps its exis
 both sources share the raw handler's range, preview, timeout, response-header, and work-admission
 policies. Local files are limited to 16 MiB, bounded text preview is limited to 1 MiB, and the server
 determines final MIME and disposition rather than trusting transcript hints.
+Restart rehydration admits at most eight active-plus-waiting requests, serializes actual work,
+applies per-routing-class cooldowns, and enforces a global page-weighted token budget. A timed-out
+request cannot release the work slot until the underlying refresh actually settles.
 
 Chat voice is another raw protocol edge, not a second REST domain. An optional
 `ELEVENLABS_API_KEY` remains redacted in the web process and is never sent to the browser, SQLite,

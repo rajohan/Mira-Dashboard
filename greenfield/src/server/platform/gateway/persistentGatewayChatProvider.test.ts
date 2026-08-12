@@ -104,8 +104,9 @@ function createHarness(responses: Readonly<Record<string, unknown>>): Readonly<{
             return registered;
         },
         registerManaged: (reference) => {
-            referenceStore.registerManaged(reference);
-            references.push(referenceStore.resolve(reference.attachmentId)!);
+            const registered = referenceStore.registerManaged(reference);
+            references.push(referenceStore.resolve(registered.attachmentId)!);
+            return registered;
         },
     };
     return {
@@ -206,7 +207,6 @@ describe("persistent Gateway chat provider", () => {
             offset: 0,
             sessionKey,
         });
-
         expect(history.messages.map(({ content }) => content)).toEqual([
             {
                 kind: "complete",
@@ -297,6 +297,7 @@ describe("persistent Gateway chat provider", () => {
             sessionKey,
         });
 
+        const projectedManagedAttachmentId = harness.references[0]!.attachmentId;
         expect(history.messages[0]?.content).toEqual({
             kind: "complete",
             parts: [
@@ -326,20 +327,20 @@ describe("persistent Gateway chat provider", () => {
             kind: "complete",
             parts: [
                 {
-                    downloadUrl: `/api/chat/media/${attachmentId}?disposition=download`,
+                    downloadUrl: `/api/chat/media/${projectedManagedAttachmentId}?disposition=download`,
                     fileName: "diagram.png",
                     id: "1",
                     kind: "attachment",
                     mediaType: "image/png",
                     renderPolicy: "inline-image",
                     sizeBytes: 42,
-                    url: `/api/chat/media/${attachmentId}?disposition=preview`,
+                    url: `/api/chat/media/${projectedManagedAttachmentId}?disposition=preview`,
                 },
             ],
         });
         expect(harness.references).toEqual([
             {
-                attachmentId,
+                attachmentId: projectedManagedAttachmentId,
                 messageId: "message-media",
                 sessionKey,
                 source: {
@@ -394,7 +395,6 @@ describe("persistent Gateway chat provider", () => {
             offset: 0,
             sessionKey,
         });
-
         expect(history.messages.map(({ content }) => content)).toEqual([
             {
                 kind: "complete",
@@ -826,18 +826,19 @@ describe("persistent Gateway chat provider", () => {
             sessionKey,
         });
 
+        const projectedManagedAttachmentId = harness.references[0]!.attachmentId;
         expect(history.messages[0]?.content).toEqual({
             kind: "complete",
             parts: [
                 {
-                    downloadUrl: `/api/chat/media/${textAttachmentId}?disposition=download`,
+                    downloadUrl: `/api/chat/media/${projectedManagedAttachmentId}?disposition=download`,
                     fileName: "notes.txt",
                     id: "1",
                     kind: "attachment",
                     mediaType: "text/plain",
                     renderPolicy: "bounded-text",
                     sizeBytes: 2 * 1024 * 1024,
-                    url: `/api/chat/media/${textAttachmentId}?disposition=preview`,
+                    url: `/api/chat/media/${projectedManagedAttachmentId}?disposition=preview`,
                 },
             ],
         });
@@ -886,7 +887,6 @@ describe("persistent Gateway chat provider", () => {
             offset: 0,
             sessionKey,
         });
-
         expect(history.messages[0]).not.toHaveProperty("idempotencyKey");
         expect(history.messages[1]).toMatchObject({ idempotencyKey: canonicalKey });
         expect(history.sessionId).toBe("session-generation-1");
@@ -943,17 +943,18 @@ describe("persistent Gateway chat provider", () => {
             sessionKey,
         });
 
+        const projectedManagedAttachmentId = harness.references[0]!.attachmentId;
         expect(history.messages[0]?.content).toEqual({
             kind: "complete",
             parts: [
                 {
-                    downloadUrl: `/api/chat/media/${svgAttachmentId}?disposition=download`,
+                    downloadUrl: `/api/chat/media/${projectedManagedAttachmentId}?disposition=download`,
                     fileName: "active.svg",
                     id: "1",
                     kind: "attachment",
                     mediaType: "image/svg+xml",
                     renderPolicy: "download-only",
-                    url: `/api/chat/media/${svgAttachmentId}?disposition=download`,
+                    url: `/api/chat/media/${projectedManagedAttachmentId}?disposition=download`,
                 },
             ],
         });
@@ -969,7 +970,7 @@ describe("persistent Gateway chat provider", () => {
         });
         expect(harness.references).toEqual([
             {
-                attachmentId: svgAttachmentId,
+                attachmentId: projectedManagedAttachmentId,
                 messageId: "message-svg",
                 sessionKey,
                 source: {
@@ -1449,6 +1450,59 @@ describe("persistent Gateway chat provider", () => {
         expect(projectedAttachmentUrl(history.messages[0]!)).toBe(
             projectedAttachmentUrl(restartedHistory.messages[0]!)
         );
+    });
+
+    test("derives the same managed media id across history, hydration, and provider restart", async () => {
+        const message = {
+            content: [
+                {
+                    attachment: {
+                        label: "stable.png",
+                        mimeType: "image/png",
+                        url: `/api/chat/media/outgoing/${encodeURIComponent(
+                            sessionKey
+                        )}/${attachmentId}/full`,
+                    },
+                    type: "attachment",
+                },
+            ],
+            id: "message-stable-managed-media",
+            role: "assistant",
+        };
+        const harness = createHarness({
+            "chat.history": { messages: [message], offset: 0, sessionKey },
+            "chat.message.get": { message, ok: true },
+        });
+        const history = await harness.provider.history({
+            limit: 1,
+            maxChars: 64 * 1024,
+            offset: 0,
+            sessionKey,
+        });
+        const hydrated = await harness.provider.getMessage({
+            maxChars: 64 * 1024,
+            messageId: message.id,
+            sessionKey,
+        });
+        const restarted = createHarness({
+            "chat.history": { messages: [message], offset: 0, sessionKey },
+        });
+        const restartedHistory = await restarted.provider.history({
+            limit: 1,
+            maxChars: 64 * 1024,
+            offset: 0,
+            sessionKey,
+        });
+
+        expect(hydrated.status).toBe("available");
+        if (hydrated.status !== "available") throw new Error("Expected hydration");
+        expect(projectedAttachmentUrl(history.messages[0]!)).toBe(
+            projectedAttachmentUrl(hydrated.message)
+        );
+        expect(projectedAttachmentUrl(history.messages[0]!)).toBe(
+            projectedAttachmentUrl(restartedHistory.messages[0]!)
+        );
+        expect(projectedAttachmentUrl(history.messages[0]!)).not.toContain(attachmentId);
     });
 
     test("surfaces companion ask post-dispatch uncertainty without a blind retry", async () => {

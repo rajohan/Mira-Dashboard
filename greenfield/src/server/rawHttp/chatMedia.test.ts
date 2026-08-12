@@ -10,6 +10,9 @@ import { dashboardSessionCookieName } from "./authenticationCredentials.ts";
 import {
     chatMessageAuthorizesMediaReference,
     chatMediaReferenceRefreshCooldownMs,
+    chatMediaReferenceRefreshMaximumPending,
+    chatMediaReferenceRefreshTokenCapacity,
+    chatMediaReferenceRefreshTokenRefillMs,
     chatMediaReferenceRefreshTimeoutMs,
     chatOutgoingMediaMaximumBytes,
     chatOutgoingTextPreviewMaximumBytes,
@@ -31,6 +34,7 @@ const attachmentId = "00000000-0000-4000-8000-000000000002";
 const crossSessionAttachmentId = "00000000-0000-4000-8000-000000000003";
 const unknownMessageAttachmentId = "00000000-0000-4000-8000-000000000004";
 const mismatchedAttachmentId = "00000000-0000-4000-8000-000000000005";
+const differentClassAttachmentId = "11111111-1111-4000-8000-000000000001";
 const png = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const singleChatMediaWorkLimits: ChatRawHttpWorkLimits = {
     maximumConcurrentDownloads: 1,
@@ -113,6 +117,13 @@ async function handlerStatus(
 ): Promise<number | undefined> {
     const response = await handler(request, new URL(request.url));
     return response?.status;
+}
+
+function routedAttachmentId(routingClass: string, ordinal: number): string {
+    if (!/^[0-9a-f]{12}$/u.test(routingClass)) {
+        throw new TypeError("Test routing class is invalid");
+    }
+    return `${routingClass.slice(0, 8)}-${routingClass.slice(8)}-4000-8000-${ordinal.toString(16).padStart(12, "0")}`;
 }
 
 function requestInputUrl(input: string | URL | Request): string {
@@ -713,7 +724,7 @@ describe("chat raw HTTP media boundary", () => {
         references.dispose();
     });
 
-    test("does not reserve media capacity for cache-miss refreshes and cools repeated misses", async () => {
+    test("does not reserve media capacity and scopes miss cooldowns per routing class", async () => {
         const store = createInMemoryChatAttachmentStore();
         const references = createInMemoryChatMediaReferences();
         references.register({
@@ -776,17 +787,100 @@ describe("chat raw HTTP media boundary", () => {
         expect(refreshCount).toBe(1);
         releaseRefresh();
         expect(await Promise.all([first, sharedMiss])).toEqual([404, 404]);
+        expect(refreshCount).toBe(1);
         expect(
             await handlerStatus(
                 handler,
                 authenticatedRequest(
-                    `/api/chat/media/${mismatchedAttachmentId}?disposition=download`
+                    `/api/chat/media/${attachmentId}?disposition=download`
                 )
             )
         ).toBe(404);
         expect(refreshCount).toBe(1);
+        expect(
+            await handlerStatus(
+                handler,
+                authenticatedRequest(
+                    `/api/chat/media/${differentClassAttachmentId}?disposition=download`
+                )
+            )
+        ).toBe(404);
+        expect(refreshCount).toBe(2);
         store.dispose();
         references.dispose();
+    });
+
+    test("groups callback-classified legacy ids into one bounded cooldown", async () => {
+        const store = createInMemoryChatAttachmentStore();
+        const references = createInMemoryChatMediaReferences();
+        let nowMs = 10_000;
+        const dateNow = jest.spyOn(Date, "now").mockImplementation(() => nowMs);
+        let refreshCount = 0;
+        const handler = createChatRawHttpHandler({
+            attachmentStore: store,
+            authenticateCredential: authentication(principal()),
+            authorizeMedia: () => true,
+            browserOrigin: origin,
+            mediaFetcher: { fetch: () => Promise.resolve(new Response(png)) },
+            mediaReferenceRefreshClass() {},
+            mediaReferences: references,
+            refreshMediaReferences: () => {
+                refreshCount += 1;
+                return Promise.resolve();
+            },
+        });
+
+        try {
+            expect(
+                await handlerStatus(
+                    handler,
+                    authenticatedRequest(
+                        `/api/chat/media/${attachmentId}?disposition=download`
+                    )
+                )
+            ).toBe(404);
+            expect(
+                await handlerStatus(
+                    handler,
+                    authenticatedRequest(
+                        `/api/chat/media/${differentClassAttachmentId}?disposition=download`
+                    )
+                )
+            ).toBe(404);
+            expect(refreshCount).toBe(1);
+
+            for (
+                let elapsedMs = chatMediaReferenceRefreshTokenRefillMs;
+                elapsedMs < chatMediaReferenceRefreshCooldownMs;
+                elapsedMs += chatMediaReferenceRefreshTokenRefillMs
+            ) {
+                nowMs = 10_000 + elapsedMs;
+                expect(
+                    await handlerStatus(
+                        handler,
+                        authenticatedRequest(
+                            `/api/chat/media/${attachmentId}?disposition=download`
+                        )
+                    )
+                ).toBe(404);
+            }
+            expect(refreshCount).toBe(1);
+
+            nowMs = 10_000 + chatMediaReferenceRefreshCooldownMs;
+            expect(
+                await handlerStatus(
+                    handler,
+                    authenticatedRequest(
+                        `/api/chat/media/${differentClassAttachmentId}?disposition=download`
+                    )
+                )
+            ).toBe(404);
+            expect(refreshCount).toBe(2);
+        } finally {
+            dateNow.mockRestore();
+            store.dispose();
+            references.dispose();
+        }
     });
 
     test("aborts a cache-miss refresh at its absolute deadline", async () => {
@@ -821,8 +915,13 @@ describe("chat raw HTTP media boundary", () => {
             handler,
             authenticatedRequest(`/api/chat/media/${attachmentId}?disposition=download`)
         );
-        await Promise.resolve();
-        await Promise.resolve();
+        for (
+            let attempt = 0;
+            attempt < 20 && scheduler.pendingCount === 0;
+            attempt += 1
+        ) {
+            await Promise.resolve();
+        }
         expect(scheduler.pendingCount).toBe(1);
         scheduler.advance(chatMediaReferenceRefreshTimeoutMs);
         expect(await request).toBe(404);
@@ -832,7 +931,7 @@ describe("chat raw HTTP media boundary", () => {
         references.dispose();
     });
 
-    test("releases only the timed-out shared refresh slot when work ignores abort", async () => {
+    test("holds a timed-out refresh slot until ignored work actually settles", async () => {
         const store = createInMemoryChatAttachmentStore();
         const references = createInMemoryChatMediaReferences();
         const scheduler = new ManualChatRawHttpScheduler();
@@ -868,12 +967,26 @@ describe("chat raw HTTP media boundary", () => {
                     `/api/chat/media/${attachmentId}?disposition=download`
                 )
             );
-            await Promise.resolve();
-            await Promise.resolve();
+            for (
+                let attempt = 0;
+                attempt < 20 && scheduler.pendingCount === 0;
+                attempt += 1
+            ) {
+                await Promise.resolve();
+            }
             scheduler.advance(chatMediaReferenceRefreshTimeoutMs);
             expect(await firstRequest).toBe(404);
             expect(refreshSignals).toHaveLength(1);
             expect(refreshSignals[0]?.aborted).toBeTrue();
+
+            const secondRequest = handlerStatus(
+                handler,
+                authenticatedRequest(
+                    `/api/chat/media/${differentClassAttachmentId}?disposition=download`
+                )
+            );
+            for (let index = 0; index < 5; index += 1) await Promise.resolve();
+            expect(refreshSignals).toHaveLength(1);
 
             expect(
                 await handlerStatus(
@@ -885,31 +998,30 @@ describe("chat raw HTTP media boundary", () => {
             ).toBe(404);
             expect(refreshSignals).toHaveLength(1);
 
-            nowMs += chatMediaReferenceRefreshCooldownMs;
-            const secondRequest = handlerStatus(
-                handler,
-                authenticatedRequest(
-                    `/api/chat/media/${attachmentId}?disposition=download`
-                )
-            );
-            for (let index = 0; index < 5; index += 1) await Promise.resolve();
-            expect(refreshSignals).toHaveLength(2);
-
             firstWork.resolve();
-            await Promise.resolve();
-            const sharedSecondRequest = handlerStatus(
-                handler,
-                authenticatedRequest(
-                    `/api/chat/media/${crossSessionAttachmentId}?disposition=download`
-                )
-            );
-            await Promise.resolve();
+            for (
+                let attempt = 0;
+                attempt < 20 && refreshSignals.length < 2;
+                attempt += 1
+            ) {
+                await Promise.resolve();
+            }
             expect(refreshSignals).toHaveLength(2);
 
             secondWork.resolve();
-            expect(await Promise.all([secondRequest, sharedSecondRequest])).toEqual([
-                404, 404,
-            ]);
+            expect(await secondRequest).toBe(404);
+            expect(refreshSignals).toHaveLength(2);
+
+            nowMs += chatMediaReferenceRefreshCooldownMs;
+            expect(
+                await handlerStatus(
+                    handler,
+                    authenticatedRequest(
+                        `/api/chat/media/${attachmentId}?disposition=download`
+                    )
+                )
+            ).toBe(404);
+            expect(refreshSignals).toHaveLength(3);
             expect(scheduler.pendingCount).toBe(0);
         } finally {
             dateNow.mockRestore();
@@ -918,6 +1030,139 @@ describe("chat raw HTTP media boundary", () => {
             store.dispose();
             references.dispose();
         }
+    });
+
+    test("globally rate-limits unique refresh classes and refills one token", async () => {
+        const store = createInMemoryChatAttachmentStore();
+        const references = createInMemoryChatMediaReferences();
+        let nowMs = 10_000;
+        const dateNow = jest.spyOn(Date, "now").mockImplementation(() => nowMs);
+        let refreshCount = 0;
+        const handler = createChatRawHttpHandler({
+            attachmentStore: store,
+            authenticateCredential: authentication(principal()),
+            authorizeMedia: () => true,
+            browserOrigin: origin,
+            mediaFetcher: { fetch: () => Promise.resolve(new Response(png)) },
+            mediaReferences: references,
+            refreshMediaReferences: () => {
+                refreshCount += 1;
+                return Promise.resolve();
+            },
+        });
+        try {
+            for (
+                let index = 0;
+                index < chatMediaReferenceRefreshTokenCapacity;
+                index += 1
+            ) {
+                expect(
+                    await handlerStatus(
+                        handler,
+                        authenticatedRequest(
+                            `/api/chat/media/${routedAttachmentId(`${index + 1}`.repeat(12), index + 1)}?disposition=download`
+                        )
+                    )
+                ).toBe(404);
+            }
+            const limitedId = routedAttachmentId("777777777777", 7);
+            expect(
+                await handlerStatus(
+                    handler,
+                    authenticatedRequest(
+                        `/api/chat/media/${limitedId}?disposition=download`
+                    )
+                )
+            ).toBe(404);
+            expect(refreshCount).toBe(chatMediaReferenceRefreshTokenCapacity);
+
+            nowMs += chatMediaReferenceRefreshTokenRefillMs;
+            expect(
+                await handlerStatus(
+                    handler,
+                    authenticatedRequest(
+                        `/api/chat/media/${limitedId}?disposition=download`
+                    )
+                )
+            ).toBe(404);
+            expect(refreshCount).toBe(chatMediaReferenceRefreshTokenCapacity + 1);
+        } finally {
+            dateNow.mockRestore();
+            store.dispose();
+            references.dispose();
+        }
+    });
+
+    test("bounds queued refreshes and removes an aborted waiter immediately", async () => {
+        const store = createInMemoryChatAttachmentStore();
+        const references = createInMemoryChatMediaReferences();
+        const firstWork = Promise.withResolvers<void>();
+        let refreshCount = 0;
+        const handler = createChatRawHttpHandler({
+            attachmentStore: store,
+            authenticateCredential: authentication(principal()),
+            authorizeMedia: () => true,
+            browserOrigin: origin,
+            mediaFetcher: { fetch: () => Promise.resolve(new Response(png)) },
+            mediaReferences: references,
+            refreshMediaReferences: () => {
+                refreshCount += 1;
+                return refreshCount === 1 ? firstWork.promise : Promise.resolve();
+            },
+        });
+        const active = handlerStatus(
+            handler,
+            authenticatedRequest(
+                `/api/chat/media/${routedAttachmentId("111111111111", 1)}?disposition=download`
+            )
+        );
+        for (let attempt = 0; attempt < 20 && refreshCount === 0; attempt += 1) {
+            await Promise.resolve();
+        }
+        expect(refreshCount).toBe(1);
+
+        const queuedControllers = Array.from(
+            { length: chatMediaReferenceRefreshMaximumPending - 1 },
+            () => new AbortController()
+        );
+        const queued = queuedControllers.map((controller, index) =>
+            handlerStatus(
+                handler,
+                authenticatedRequest(
+                    `/api/chat/media/${routedAttachmentId(`${index + 2}`.repeat(12), index + 2)}?disposition=download`,
+                    { signal: controller.signal }
+                )
+            )
+        );
+        await Promise.resolve();
+        expect(
+            await handlerStatus(
+                handler,
+                authenticatedRequest(
+                    `/api/chat/media/${routedAttachmentId("aaaaaaaaaaaa", 10)}?disposition=download`
+                )
+            )
+        ).toBe(404);
+        expect(refreshCount).toBe(1);
+
+        queuedControllers[0]!.abort();
+        expect(await queued[0]).toBe(404);
+        const replacement = handlerStatus(
+            handler,
+            authenticatedRequest(
+                `/api/chat/media/${routedAttachmentId("bbbbbbbbbbbb", 11)}?disposition=download`
+            )
+        );
+        await Promise.resolve();
+        expect(refreshCount).toBe(1);
+
+        firstWork.resolve();
+        expect(await Promise.all([active, ...queued.slice(1), replacement])).toEqual(
+            Array.from({ length: chatMediaReferenceRefreshMaximumPending }, () => 404)
+        );
+        expect(refreshCount).toBeLessThanOrEqual(chatMediaReferenceRefreshTokenCapacity);
+        store.dispose();
+        references.dispose();
     });
 
     test("denies cross-owner media and forces active SVG content to download", async () => {

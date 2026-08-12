@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import {
-    chatLocalHistoryMediaAttachmentMatchesSession,
+    chatMediaAttachmentMatchesSession,
     createInMemoryChatMediaReferences,
 } from "./inMemoryChatMediaReferences.ts";
 
@@ -57,21 +57,16 @@ describe("in-memory chat media references", () => {
 
         expect(relative).toEqual(absolute);
         expect(relative).toEqual(fileUrl);
+        expect(relative?.attachmentId).toBe("e41399fe-2747-465e-955a-c7ef3f592708");
         expect(relative?.attachmentId).toMatch(
             /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u
         );
         expect(relative?.fileName).toBe("report final.png");
         expect(
-            chatLocalHistoryMediaAttachmentMatchesSession(
-                relative!.attachmentId,
-                "agent:main:main"
-            )
+            chatMediaAttachmentMatchesSession(relative!.attachmentId, "agent:main:main")
         ).toBeTrue();
         expect(
-            chatLocalHistoryMediaAttachmentMatchesSession(
-                relative!.attachmentId,
-                "agent:other:main"
-            )
+            chatMediaAttachmentMatchesSession(relative!.attachmentId, "agent:other:main")
         ).toBeFalse();
         expect(JSON.stringify(relative)).not.toContain("/srv/openclaw");
         expect(references.resolve(relative!.attachmentId)).toEqual({
@@ -83,6 +78,72 @@ describe("in-memory chat media references", () => {
                 segments: ["images", "report final.png"],
             },
         });
+        references.dispose();
+    });
+
+    test("wraps managed ids in stable session-routable references", () => {
+        const first = createInMemoryChatMediaReferences();
+        const second = createInMemoryChatMediaReferences();
+        const input = {
+            attachmentId,
+            messageId: "message-managed",
+            sessionKey: "agent:target:main",
+        };
+
+        const registered = first.registerManaged(input);
+        const restarted = second.registerManaged(input);
+
+        expect(registered).toEqual(restarted);
+        expect(registered.attachmentId).not.toBe(attachmentId);
+        expect(
+            chatMediaAttachmentMatchesSession(registered.attachmentId, input.sessionKey)
+        ).toBeTrue();
+        expect(
+            chatMediaAttachmentMatchesSession(
+                registered.attachmentId,
+                "agent:unrelated:main"
+            )
+        ).toBeFalse();
+        expect(first.resolve(registered.attachmentId)).toEqual({
+            attachmentId: registered.attachmentId,
+            messageId: input.messageId,
+            sessionKey: input.sessionKey,
+            source: {
+                kind: "gateway-managed",
+                upstreamAttachmentId: attachmentId,
+            },
+        });
+        expect(first.resolve(attachmentId)).toEqual({
+            attachmentId,
+            messageId: input.messageId,
+            sessionKey: input.sessionKey,
+            source: {
+                kind: "gateway-managed",
+                upstreamAttachmentId: attachmentId,
+            },
+        });
+        first.dispose();
+        second.dispose();
+    });
+
+    test("accounts compatibility aliases without reducing managed-media capacity", () => {
+        const references = createInMemoryChatMediaReferences({ maximumReferences: 4 });
+        const first = references.registerManaged({
+            attachmentId,
+            messageId: "message-1",
+            sessionKey: "agent:first:main",
+        });
+        const secondUpstreamId = "00000000-0000-4000-8000-000000000002";
+        const second = references.registerManaged({
+            attachmentId: secondUpstreamId,
+            messageId: "message-2",
+            sessionKey: "agent:second:main",
+        });
+
+        expect(references.resolve(first.attachmentId)?.messageId).toBe("message-1");
+        expect(references.resolve(attachmentId)?.messageId).toBe("message-1");
+        expect(references.resolve(second.attachmentId)?.messageId).toBe("message-2");
+        expect(references.resolve(secondUpstreamId)?.messageId).toBe("message-2");
         references.dispose();
     });
 

@@ -514,11 +514,14 @@ proxy mode names exact proxies and requires them to overwrite forwarded identity
   projection recognizes the bounded canonical and reviewed legacy transcript carriers, strips each
   recognized `MEDIA:` directive before browser delivery, and registers only an opaque non-path
   reference bound to the exact session, message, source slot, and normalized server-only locator.
+  The stable 48-bit prefix is an unkeyed, non-secret routing hint rather than cryptographic opacity.
   The identifier is not a capability: every `GET` or `HEAD /api/chat/media/:attachmentId` request
   requires an authenticated principal with `chat:read`, reprojects the exact message through
   `chat.message.get`, verifies the same attachment URL, and opens no file until that authorization
   succeeds. A bounded history refresh can reconstruct the same association after process-local
-  reference loss, but cannot widen it to another session or message.
+  reference loss, but cannot widen it to another session or message. Refresh work is globally
+  token-budgeted, class-cooled, serialized, capped at eight active-plus-waiting requests, and retains
+  its work slot after a caller deadline until the provider operation actually settles.
 - The local reader is descriptor-rooted beneath the exact
   `<MIRA_DASHBOARD_OPENCLAW_ROOT>/media` directory. It rejects traversal, network locations,
   symlinks, hardlinks, special files, cross-device nodes, unsafe ownership or modes, and file

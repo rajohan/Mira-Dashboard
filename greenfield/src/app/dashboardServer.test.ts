@@ -68,6 +68,7 @@ import {
 } from "../server/test/support/requestContext.ts";
 import { createDashboardLogsService } from "./dashboardLogs.ts";
 import {
+    createDashboardChatMediaReferenceRefreshClass,
     createDashboardChatMediaReferenceRefresh,
     createDashboardOpenClawCronProvider,
     createDashboardServer,
@@ -211,6 +212,32 @@ async function waitForPersistedRestartRun(
 }
 
 describe("Dashboard chat media-reference refresh", () => {
+    test("classifies only a unique current session routing hint", async () => {
+        const targetSessionKey = "agent:classifier-target:main";
+        const references = createInMemoryChatMediaReferences();
+        const attachmentId = references.registerManaged({
+            attachmentId: "00000000-0000-4000-8000-000000000002",
+            messageId: "message-classifier-target",
+            sessionKey: targetSessionKey,
+        }).attachmentId;
+        references.dispose();
+        let sessions = [targetSessionKey];
+        const classifier = createDashboardChatMediaReferenceRefreshClass({
+            gatewaySessionsService: {
+                list: () => Promise.resolve(mediaRefreshSessionSnapshot(sessions)),
+            },
+        });
+        const signal = new AbortController().signal;
+
+        expect(await classifier(attachmentId, signal)).toBe(
+            attachmentId.replaceAll("-", "").slice(0, 12)
+        );
+        sessions = [targetSessionKey, targetSessionKey];
+        expect(await classifier(attachmentId, signal)).toBeUndefined();
+        sessions = ["agent:unrelated:main"];
+        expect(await classifier(attachmentId, signal)).toBeUndefined();
+    });
+
     test("hydrates every bounded session while containing individual read failures", async () => {
         const controller = new AbortController();
         const historyCalls: unknown[] = [];
@@ -387,7 +414,154 @@ describe("Dashboard chat media-reference refresh", () => {
         await refresh(new AbortController().signal, attachmentId);
 
         expect(calls[0]).toBe(targetSessionKey);
-        expect(calls).toHaveLength(dashboardChatMediaReferenceRefreshPageMaximum);
+        expect(calls).toEqual([targetSessionKey]);
+    });
+
+    test("routes a managed attachment to its late owning session after restart", async () => {
+        const targetSessionKey = "agent:managed-target:main";
+        const references = createInMemoryChatMediaReferences();
+        const attachmentId = references.registerManaged({
+            attachmentId: "00000000-0000-4000-8000-000000000002",
+            messageId: "message-managed-target",
+            sessionKey: targetSessionKey,
+        }).attachmentId;
+        references.dispose();
+        const calls: string[] = [];
+        const refresh = createDashboardChatMediaReferenceRefresh({
+            chatService: {
+                history: (input) => {
+                    calls.push(input.sessionKey);
+                    return Promise.resolve(emptyMediaRefreshHistory(input.sessionKey));
+                },
+            },
+            gatewaySessionsService: {
+                list: () =>
+                    Promise.resolve(
+                        mediaRefreshSessionSnapshot([
+                            ...Array.from(
+                                { length: 40 },
+                                (_, index) => `agent:unrelated-${index}:main`
+                            ),
+                            targetSessionKey,
+                        ])
+                    ),
+            },
+        });
+
+        await refresh(new AbortController().signal, attachmentId);
+
+        expect(calls).toEqual([targetSessionKey]);
+    });
+
+    test("fails ambiguous routing hints into the bounded legacy fallback", async () => {
+        const targetSessionKey = "agent:ambiguous-target:main";
+        const references = createInMemoryChatMediaReferences();
+        const attachmentId = references.registerManaged({
+            attachmentId: "00000000-0000-4000-8000-000000000002",
+            messageId: "message-ambiguous-target",
+            sessionKey: targetSessionKey,
+        }).attachmentId;
+        references.dispose();
+        const calls: string[] = [];
+        const refresh = createDashboardChatMediaReferenceRefresh({
+            chatService: {
+                history: (input) => {
+                    calls.push(input.sessionKey);
+                    return Promise.resolve(emptyMediaRefreshHistory(input.sessionKey));
+                },
+            },
+            gatewaySessionsService: {
+                list: () =>
+                    Promise.resolve(
+                        mediaRefreshSessionSnapshot([
+                            "agent:bounded-fallback:main",
+                            targetSessionKey,
+                            targetSessionKey,
+                        ])
+                    ),
+            },
+        });
+
+        await refresh(new AbortController().signal, attachmentId);
+
+        expect(calls).toEqual([
+            "agent:bounded-fallback:main",
+            targetSessionKey,
+            targetSessionKey,
+        ]);
+    });
+
+    test("never widens a targeted refresh when its session routing turns ambiguous", async () => {
+        const targetSessionKey = "agent:stale-routing:main";
+        const references = createInMemoryChatMediaReferences();
+        const attachmentId = references.registerManaged({
+            attachmentId: "00000000-0000-4000-8000-000000000002",
+            messageId: "message-stale-routing",
+            sessionKey: targetSessionKey,
+        }).attachmentId;
+        references.dispose();
+        const calls: string[] = [];
+        const refresh = createDashboardChatMediaReferenceRefresh({
+            chatService: {
+                history: (input) => {
+                    calls.push(input.sessionKey);
+                    return Promise.resolve(emptyMediaRefreshHistory(input.sessionKey));
+                },
+            },
+            gatewaySessionsService: {
+                list: () =>
+                    Promise.resolve(
+                        mediaRefreshSessionSnapshot([
+                            "agent:unrelated:main",
+                            targetSessionKey,
+                            targetSessionKey,
+                        ])
+                    ),
+            },
+        });
+
+        await refresh(new AbortController().signal, attachmentId, "targeted");
+
+        expect(calls).toEqual([]);
+    });
+
+    test("uses a bounded rotating fallback for legacy managed ids", async () => {
+        const calls: string[] = [];
+        const refresh = createDashboardChatMediaReferenceRefresh({
+            chatService: {
+                history: (input) => {
+                    calls.push(input.sessionKey);
+                    return Promise.resolve(emptyMediaRefreshHistory(input.sessionKey));
+                },
+            },
+            gatewaySessionsService: {
+                list: () =>
+                    Promise.resolve(
+                        mediaRefreshSessionSnapshot(
+                            Array.from(
+                                { length: 40 },
+                                (_, index) => `agent:unrelated-${index}:main`
+                            )
+                        )
+                    ),
+            },
+        });
+
+        const legacyId = "00000000-0000-4000-8000-000000000001";
+        await refresh(new AbortController().signal, legacyId);
+        await refresh(new AbortController().signal, legacyId);
+
+        expect(calls).toHaveLength(2 * dashboardChatMediaReferenceRefreshPageMaximum);
+        expect(calls.slice(0, 32)).toEqual(
+            Array.from({ length: 32 }, (_, index) => `agent:unrelated-${index}:main`)
+        );
+        expect(calls.slice(32)).toEqual([
+            ...Array.from(
+                { length: 8 },
+                (_, index) => `agent:unrelated-${index + 32}:main`
+            ),
+            ...Array.from({ length: 24 }, (_, index) => `agent:unrelated-${index}:main`),
+        ]);
     });
 });
 

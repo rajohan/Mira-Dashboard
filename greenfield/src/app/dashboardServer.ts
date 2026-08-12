@@ -118,7 +118,7 @@ import { createDescriptorOpenClawLocalHistoryMediaFetcher } from "../server/plat
 import { createElevenLabsSpeechProvider } from "../server/platform/chat/elevenLabsSpeechProvider.ts";
 import { createInMemoryChatAttachmentStore } from "../server/platform/chat/inMemoryChatAttachmentStore.ts";
 import {
-    chatLocalHistoryMediaAttachmentMatchesSession,
+    chatMediaAttachmentMatchesSession,
     createInMemoryChatMediaReferences,
 } from "../server/platform/chat/inMemoryChatMediaReferences.ts";
 import {
@@ -269,7 +269,53 @@ interface DashboardChatMediaReferenceRefreshDependencies {
     readonly gatewaySessionsService: Pick<GatewaySessionsService, "list">;
 }
 
+interface DashboardChatMediaReferenceRouting {
+    readonly refreshClass?: string;
+    readonly sessions: readonly { readonly key: string }[];
+}
+
 export const dashboardChatMediaReferenceRefreshPageMaximum = 32;
+
+async function resolveDashboardChatMediaReferenceRouting(
+    gatewaySessionsService: Pick<GatewaySessionsService, "list">,
+    attachmentId: string | undefined,
+    signal: AbortSignal
+): Promise<DashboardChatMediaReferenceRouting> {
+    const snapshot = await gatewaySessionsService.list({ filter: "ALL" }, signal);
+    if (attachmentId === undefined) return { sessions: snapshot.sessions };
+    const sessions = snapshot.sessions.filter((session) =>
+        chatMediaAttachmentMatchesSession(attachmentId, session.key)
+    );
+    return sessions.length === 1
+        ? {
+              refreshClass: attachmentId.replaceAll("-", "").slice(0, 12),
+              sessions,
+          }
+        : { sessions: [] };
+}
+
+/**
+ * Classifies one cache-miss id against the current bounded session inventory.
+ * A unique routing-hint match gets its own class; legacy, random, ambiguous,
+ * and unavailable inventories share the raw handler's single fallback class.
+ * @param dependencies Bounded Gateway session read port.
+ * @returns Abort-aware asynchronous refresh classifier.
+ */
+export function createDashboardChatMediaReferenceRefreshClass(
+    dependencies: Pick<
+        DashboardChatMediaReferenceRefreshDependencies,
+        "gatewaySessionsService"
+    >
+): (attachmentId: string, signal: AbortSignal) => Promise<string | undefined> {
+    return async (attachmentId, signal) => {
+        const routing = await resolveDashboardChatMediaReferenceRouting(
+            dependencies.gatewaySessionsService,
+            attachmentId,
+            signal
+        );
+        return routing.refreshClass;
+    };
+}
 
 /**
  * Rehydrates the bounded visible media-reference window after process loss.
@@ -278,33 +324,48 @@ export const dashboardChatMediaReferenceRefreshPageMaximum = 32;
  */
 export function createDashboardChatMediaReferenceRefresh(
     dependencies: DashboardChatMediaReferenceRefreshDependencies
-): (signal: AbortSignal, attachmentId?: string) => Promise<void> {
-    return async (signal, attachmentId) => {
+): (
+    signal: AbortSignal,
+    attachmentId?: string,
+    mode?: "legacy" | "targeted"
+) => Promise<void> {
+    let legacyFallbackSessionOffset = 0;
+    return async (signal, attachmentId, mode) => {
         const snapshot = await dependencies.gatewaySessionsService.list(
             { filter: "ALL" },
             signal
         );
-        const sessions =
+        const candidateSessions =
             attachmentId === undefined
                 ? snapshot.sessions
-                : snapshot.sessions.toSorted(
-                      (left, right) =>
-                          Number(
-                              chatLocalHistoryMediaAttachmentMatchesSession(
-                                  attachmentId,
-                                  right.key
-                              )
-                          ) -
-                          Number(
-                              chatLocalHistoryMediaAttachmentMatchesSession(
-                                  attachmentId,
-                                  left.key
-                              )
-                          )
+                : snapshot.sessions.filter((session) =>
+                      chatMediaAttachmentMatchesSession(attachmentId, session.key)
                   );
+        const routedSessions =
+            attachmentId === undefined ||
+            (mode !== "legacy" && candidateSessions.length === 1)
+                ? candidateSessions
+                : [];
+        const fallbackSessionCount = snapshot.sessions.length;
+        let sessions = routedSessions;
+        if (
+            attachmentId !== undefined &&
+            routedSessions.length === 0 &&
+            mode !== "targeted"
+        ) {
+            sessions = Array.from(
+                { length: fallbackSessionCount },
+                (_, offset) =>
+                    snapshot.sessions[
+                        (legacyFallbackSessionOffset + offset) % fallbackSessionCount
+                    ]!
+            );
+        }
         let pagesRead = 0;
+        let sessionsRead = 0;
         for (const session of sessions) {
             if (pagesRead >= dashboardChatMediaReferenceRefreshPageMaximum) break;
+            sessionsRead += 1;
             try {
                 let cursor = "0";
                 const visitedCursors = new Set<string>();
@@ -331,6 +392,15 @@ export function createDashboardChatMediaReferenceRefresh(
             } catch (error) {
                 if (signal.aborted) throw error;
             }
+        }
+        if (
+            attachmentId !== undefined &&
+            routedSessions.length === 0 &&
+            fallbackSessionCount > 0
+        ) {
+            legacyFallbackSessionOffset =
+                (legacyFallbackSessionOffset + Math.max(1, sessionsRead)) %
+                fallbackSessionCount;
         }
     };
 }
@@ -1127,6 +1197,10 @@ export async function createDashboardServer(
                         chatService: activeChatService,
                         gatewaySessionsService,
                     }),
+                    mediaReferenceRefreshClass:
+                        createDashboardChatMediaReferenceRefreshClass({
+                            gatewaySessionsService,
+                        }),
                 });
                 const speechHandler = createChatSpeechRawHttpHandler({
                     authenticateCredential: (credential) =>

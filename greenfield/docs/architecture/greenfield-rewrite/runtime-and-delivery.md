@@ -431,7 +431,9 @@ projected transcript association before descriptor traversal begins. The local a
 same-owner/same-device no-follow traversal, one-link regular files, stable identity, a 16 MiB body
 ceiling, and a 1 MiB text-preview ceiling. Its retained root descriptor and process-local reference
 state are disposed with the web runtime, while bounded history refresh reconstructs only an already
-authorized association after restart.
+authorized association after restart. The stable identifier prefix is a non-secret routing hint;
+serialized refresh admission, per-class cooldown, an eight-request queue bound, and a global
+page-weighted token budget—not identifier secrecy—bound restart work.
 
 Persistent state remains inside the existing Dashboard project layout at
 `<project-root>/production/state`, but outside every immutable release directory. Production

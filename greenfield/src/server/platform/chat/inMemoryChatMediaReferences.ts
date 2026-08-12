@@ -7,9 +7,12 @@ import type {
     PersistentGatewayChatMediaReferenceRegistrar,
     PersistentGatewayChatMediaSource,
     PersistentGatewayRegisteredLocalMedia,
+    PersistentGatewayRegisteredManagedMedia,
 } from "../gateway/persistentGatewayChatProvider.ts";
 
-export const chatMediaReferenceMaximum = 2048;
+// Managed media keeps a compatibility alias alongside its routed identifier.
+// Preserve the original effective 2,048 projected-attachment capacity.
+export const chatMediaReferenceMaximum = 4096;
 export const chatMediaReferenceTtlMs = 10 * 60 * 1000;
 
 export interface ChatMediaReference {
@@ -73,24 +76,31 @@ function uuidV4FromHash(hash: Uint8Array): string {
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-const localHistoryMediaSessionFingerprintBytes = 6;
+const mediaSessionFingerprintBytes = 6;
 
 function localHistoryMediaSessionFingerprint(sessionKey: string): Uint8Array {
     return lengthPrefixedHash([
         "mira-chat-local-history-media-session-v1",
         boundedIdentity(sessionKey, 512),
-    ]).subarray(0, localHistoryMediaSessionFingerprintBytes);
+    ]).subarray(0, mediaSessionFingerprintBytes);
+}
+
+function managedMediaSessionFingerprint(sessionKey: string): Uint8Array {
+    return lengthPrefixedHash([
+        "mira-chat-gateway-managed-media-session-v1",
+        boundedIdentity(sessionKey, 512),
+    ]).subarray(0, mediaSessionFingerprintBytes);
 }
 
 /**
- * Identifies the candidate session encoded into a local-history attachment id.
+ * Identifies the candidate session encoded into a projected attachment id.
  * This is a routing hint only; the raw handler still reauthorizes the exact
- * transcript association before any descriptor-backed file access.
- * @param attachmentId Opaque UUID-shaped local-history attachment identifier.
+ * transcript association before any managed or local byte access.
+ * @param attachmentId Opaque UUID-shaped managed or local attachment identifier.
  * @param sessionKey Candidate canonical Gateway session key.
  * @returns Whether the identifier carries the candidate session fingerprint.
  */
-export function chatLocalHistoryMediaAttachmentMatchesSession(
+export function chatMediaAttachmentMatchesSession(
     attachmentId: string,
     sessionKey: string
 ): boolean {
@@ -99,10 +109,13 @@ export function chatLocalHistoryMediaAttachmentMatchesSession(
     });
     if (!parsed.success) return false;
     try {
-        const prefix = Buffer.from(
-            localHistoryMediaSessionFingerprint(sessionKey)
-        ).toString("hex");
-        return parsed.output.replaceAll("-", "").startsWith(prefix);
+        const identifier = parsed.output.replaceAll("-", "");
+        return [
+            localHistoryMediaSessionFingerprint(sessionKey),
+            managedMediaSessionFingerprint(sessionKey),
+        ].some((fingerprint) =>
+            identifier.startsWith(Buffer.from(fingerprint).toString("hex"))
+        );
     } catch {
         return false;
     }
@@ -293,14 +306,40 @@ class InMemoryChatMediaReferencesImplementation implements InMemoryChatMediaRefe
             messageId: string;
             sessionKey: string;
         }>
-    ): void {
+    ): PersistentGatewayRegisteredManagedMedia {
+        const upstreamAttachmentId = v.parse(
+            chatAttachmentIdSchema,
+            reference.attachmentId
+        );
+        const sessionKey = boundedIdentity(reference.sessionKey, 512);
+        const messageId = boundedIdentity(reference.messageId, 256);
+        const identifierHash = lengthPrefixedHash([
+            "mira-chat-gateway-managed-media-v1",
+            sessionKey,
+            messageId,
+            upstreamAttachmentId,
+        ]);
+        identifierHash.set(managedMediaSessionFingerprint(sessionKey), 0);
+        const attachmentId = uuidV4FromHash(identifierHash);
         this.#register({
-            ...reference,
+            attachmentId: upstreamAttachmentId,
+            messageId,
+            sessionKey,
             source: {
                 kind: "gateway-managed",
-                upstreamAttachmentId: reference.attachmentId,
+                upstreamAttachmentId,
             },
         });
+        this.#register({
+            attachmentId,
+            messageId,
+            sessionKey,
+            source: {
+                kind: "gateway-managed",
+                upstreamAttachmentId,
+            },
+        });
+        return Object.freeze({ attachmentId });
     }
 
     registerLocal(
