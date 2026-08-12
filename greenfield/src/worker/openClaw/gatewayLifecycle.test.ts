@@ -1,12 +1,13 @@
 import { describe, expect, spyOn, test } from "bun:test";
+import { userInfo } from "node:os";
 
 import { createFixedOpenClawGatewayLifecycle } from "./gatewayLifecycle.ts";
 
 describe("fixed OpenClaw Gateway lifecycle", () => {
-    test("executes only the reviewed argv with a secret-free environment", async () => {
+    test("uses the runtime account executable and configured OpenClaw state root", async () => {
         const calls: unknown[] = [];
         const lifecycle = createFixedOpenClawGatewayLifecycle({
-            openClawRoot: "/home/dashboard/.openclaw",
+            openClawRoot: "/srv/openclaw",
             process: {
                 run(argv, environment, signal) {
                     calls.push({ argv, environment, signal });
@@ -20,16 +21,18 @@ describe("fixed OpenClaw Gateway lifecycle", () => {
         if (typeof process.getuid !== "function") {
             throw new TypeError("Gateway lifecycle test requires a POSIX runtime");
         }
+        const homeDirectory = userInfo().homedir;
         const runtimeDirectory = `/run/user/${process.getuid()}`;
         expect(calls).toEqual([
             {
-                argv: ["/home/dashboard/.local/bin/openclaw", "gateway", "restart"],
+                argv: [`${homeDirectory}/.local/bin/openclaw`, "gateway", "restart"],
                 environment: {
                     DBUS_SESSION_BUS_ADDRESS: `unix:path=${runtimeDirectory}/bus`,
-                    HOME: "/home/dashboard",
+                    HOME: homeDirectory,
                     LANG: "C",
                     LC_ALL: "C",
                     OPENCLAW_NO_RESPAWN: "1",
+                    OPENCLAW_STATE_DIR: "/srv/openclaw",
                     PATH: "/usr/local/bin:/usr/bin:/bin",
                     XDG_RUNTIME_DIR: runtimeDirectory,
                 },

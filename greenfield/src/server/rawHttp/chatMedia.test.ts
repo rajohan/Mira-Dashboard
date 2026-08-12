@@ -712,10 +712,20 @@ describe("chat raw HTTP media boundary", () => {
         references.dispose();
     });
 
-    test("admits cache-miss refreshes before work and cools down repeated misses", async () => {
+    test("does not reserve media capacity for cache-miss refreshes and cools repeated misses", async () => {
         const store = createInMemoryChatAttachmentStore();
         const references = createInMemoryChatMediaReferences();
+        references.register({
+            attachmentId: unknownMessageAttachmentId,
+            messageId: "message-local",
+            sessionKey: "agent:main:main",
+            source: {
+                kind: "openclaw-local-history",
+                segments: ["history", "private.png"],
+            },
+        });
         let refreshCount = 0;
+        let localFetchCount = 0;
         let releaseRefresh!: () => void;
         const refreshReleased = new Promise<void>((resolve) => {
             releaseRefresh = resolve;
@@ -726,7 +736,11 @@ describe("chat raw HTTP media boundary", () => {
             authorizeMedia: () => true,
             browserOrigin: origin,
             mediaFetcher: {
-                fetch: () => Promise.resolve(new Response(png)),
+                fetch: (request) => {
+                    expect(request.source.kind).toBe("openclaw-local-history");
+                    localFetchCount += 1;
+                    return Promise.resolve(new Response(png));
+                },
             },
             mediaReferences: references,
             refreshMediaReferences: async () => {
@@ -746,17 +760,26 @@ describe("chat raw HTTP media boundary", () => {
             await handlerStatus(
                 handler,
                 authenticatedRequest(
-                    `/api/chat/media/${crossSessionAttachmentId}?disposition=download`
+                    `/api/chat/media/${unknownMessageAttachmentId}?disposition=download`
                 )
             )
-        ).toBe(429);
+        ).toBe(200);
+        expect(localFetchCount).toBe(1);
+        const sharedMiss = handlerStatus(
+            handler,
+            authenticatedRequest(
+                `/api/chat/media/${crossSessionAttachmentId}?disposition=download`
+            )
+        );
+        await Promise.resolve();
+        expect(refreshCount).toBe(1);
         releaseRefresh();
-        expect(await first).toBe(404);
+        expect(await Promise.all([first, sharedMiss])).toEqual([404, 404]);
         expect(
             await handlerStatus(
                 handler,
                 authenticatedRequest(
-                    `/api/chat/media/${unknownMessageAttachmentId}?disposition=download`
+                    `/api/chat/media/${mismatchedAttachmentId}?disposition=download`
                 )
             )
         ).toBe(404);

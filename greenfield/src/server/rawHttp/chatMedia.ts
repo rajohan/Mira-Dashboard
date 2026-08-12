@@ -839,50 +839,44 @@ export function createChatRawHttpHandler(
         if (!hasCapability(authentication.principal, "chat:read")) {
             return noStoreResponse("Forbidden", 403);
         }
+        let reference = options.mediaReferences.resolve(media![1]!);
+        if (reference === undefined) {
+            try {
+                await refreshMediaReferences();
+            } catch {
+                // A refresh failure is intentionally indistinguishable from absence.
+            }
+            reference = options.mediaReferences.resolve(media![1]!);
+        }
+        if (reference === undefined) return noStoreResponse("Not found", 404);
+        let authorized: boolean;
+        try {
+            authorized = await options.authorizeMedia(
+                {
+                    attachmentId: reference.attachmentId,
+                    messageId: reference.messageId,
+                    principal: authentication.principal,
+                    sessionKey: reference.sessionKey,
+                },
+                request.signal
+            );
+        } catch {
+            authorized = false;
+        }
+        if (!authorized) return noStoreResponse("Not found", 404);
         const downloadLease = downloadAdmission.tryAcquire(
             request.method === "GET" ? chatOutgoingMediaMaximumBytes : 1
         );
         if (downloadLease === undefined) {
             return noStoreResponse("Media capacity exceeded", 429);
         }
-        let proxyOwnsDownloadLease = false;
-        try {
-            let reference = options.mediaReferences.resolve(media![1]!);
-            if (reference === undefined) {
-                try {
-                    await refreshMediaReferences();
-                } catch {
-                    // A refresh failure is intentionally indistinguishable from absence.
-                }
-                reference = options.mediaReferences.resolve(media![1]!);
-            }
-            if (reference === undefined) return noStoreResponse("Not found", 404);
-            let authorized: boolean;
-            try {
-                authorized = await options.authorizeMedia(
-                    {
-                        attachmentId: reference.attachmentId,
-                        messageId: reference.messageId,
-                        principal: authentication.principal,
-                        sessionKey: reference.sessionKey,
-                    },
-                    request.signal
-                );
-            } catch {
-                authorized = false;
-            }
-            if (!authorized) return noStoreResponse("Not found", 404);
-            proxyOwnsDownloadLease = true;
-            return proxyMedia(
-                request,
-                reference,
-                disposition as ChatMediaDisposition,
-                options,
-                downloadLease
-            );
-        } finally {
-            if (!proxyOwnsDownloadLease) downloadLease.release();
-        }
+        return proxyMedia(
+            request,
+            reference,
+            disposition as ChatMediaDisposition,
+            options,
+            downloadLease
+        );
     };
 }
 

@@ -1,3 +1,4 @@
+import { userInfo } from "node:os";
 import path from "node:path";
 
 import type { OpenClawGatewayLifecycleExecutionPort } from "../../shared/openClawGatewayLifecycle.ts";
@@ -38,17 +39,39 @@ function requiredTimeout(value: number | undefined): number {
     return timeoutMs;
 }
 
-function fixedEnvironment(homeDirectory: string): Readonly<Record<string, string>> {
+function runtimeIdentity(): Readonly<{ homeDirectory: string; userId: number }> {
     if (typeof process.getuid !== "function") {
         throw new TypeError("OpenClaw Gateway lifecycle requires a POSIX runtime");
     }
-    const runtimeDirectory = `/run/user/${process.getuid()}`;
+    const identity = userInfo();
+    if (
+        identity.uid !== process.getuid() ||
+        !path.isAbsolute(identity.homedir) ||
+        identity.homedir === path.parse(identity.homedir).root ||
+        path.resolve(identity.homedir) !== identity.homedir ||
+        identity.homedir.includes("\0")
+    ) {
+        throw new TypeError("OpenClaw Gateway lifecycle home is invalid");
+    }
+    return Object.freeze({
+        homeDirectory: identity.homedir,
+        userId: identity.uid,
+    });
+}
+
+function fixedEnvironment(
+    homeDirectory: string,
+    openClawRoot: string,
+    userId: number
+): Readonly<Record<string, string>> {
+    const runtimeDirectory = `/run/user/${userId}`;
     return Object.freeze({
         DBUS_SESSION_BUS_ADDRESS: `unix:path=${runtimeDirectory}/bus`,
         HOME: homeDirectory,
         LANG: "C",
         LC_ALL: "C",
         OPENCLAW_NO_RESPAWN: "1",
+        OPENCLAW_STATE_DIR: openClawRoot,
         PATH: "/usr/local/bin:/usr/bin:/bin",
         XDG_RUNTIME_DIR: runtimeDirectory,
     });
@@ -81,14 +104,14 @@ export function createFixedOpenClawGatewayLifecycle(
     options: FixedOpenClawGatewayLifecycleOptions
 ): OpenClawGatewayLifecycleExecutionPort {
     const openClawRoot = requiredOpenClawRoot(options.openClawRoot);
-    const homeDirectory = path.dirname(openClawRoot);
+    const { homeDirectory, userId } = runtimeIdentity();
     const executable = path.join(homeDirectory, ".local", "bin", "openclaw");
     const argv: readonly [string, "gateway", "restart"] = Object.freeze([
         executable,
         "gateway",
         "restart",
     ]);
-    const environment = fixedEnvironment(homeDirectory);
+    const environment = fixedEnvironment(homeDirectory, openClawRoot, userId);
     const restartProcess = options.process ?? defaultProcess;
     const timeoutMs = requiredTimeout(options.timeoutMs);
 

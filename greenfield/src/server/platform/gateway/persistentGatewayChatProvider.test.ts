@@ -1196,6 +1196,42 @@ describe("persistent Gateway chat provider", () => {
         ).toEqual(["images/preferred.png", "images/resolved-url.png"]);
     });
 
+    test("ignores file URLs with decoded backslashes without degrading history", async () => {
+        const harness = createHarness({
+            "chat.history": {
+                messages: [
+                    {
+                        __openclaw: {
+                            media: [
+                                {
+                                    url: "file:///srv/openclaw/media/images%5Cescaped.png",
+                                },
+                            ],
+                        },
+                        content: "Malformed local media",
+                        id: "message-malformed-local-media",
+                        role: "assistant",
+                    },
+                ],
+                offset: 0,
+                sessionKey,
+            },
+        });
+
+        const history = await harness.provider.history({
+            limit: 1,
+            maxChars: 64 * 1024,
+            offset: 0,
+            sessionKey,
+        });
+
+        expect(history.messages[0]?.content).toEqual({
+            kind: "complete",
+            parts: [{ id: "1", kind: "text", text: "Malformed local media" }],
+        });
+        expect(harness.references).toEqual([]);
+    });
+
     test("supports retired media and exact legacy plural and singular fallback slots", async () => {
         const harness = createHarness({
             "chat.history": {

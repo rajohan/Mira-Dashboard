@@ -87,7 +87,8 @@ function normalizedFileUrlPath(candidate: string): string | undefined {
         ) {
             return undefined;
         }
-        return decodeURIComponent(url.pathname);
+        const decodedPath = decodeURIComponent(url.pathname);
+        return decodedPath.includes("\\") ? undefined : decodedPath;
     } catch {
         return undefined;
     }

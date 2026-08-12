@@ -107,6 +107,7 @@ describe("in-memory chat media references", () => {
             "/srv/openclaw/openclaw.json",
             "file://remotehost/srv/openclaw/media/file.png",
             "file:///srv/openclaw/media/../openclaw.json",
+            "file:///srv/openclaw/media/images%5Cescaped.png",
         ];
 
         for (const candidate of candidates) {
