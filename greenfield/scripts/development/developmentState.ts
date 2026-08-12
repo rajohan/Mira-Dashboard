@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { constants } from "node:fs";
 import {
     type FileHandle,
@@ -14,9 +14,9 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 
-import { migrationManifest } from "../../src/shared/databaseMigrationManifest.ts";
 import { prepareProtectedProductionStatePath } from "../delivery/productionStateFilesystem.ts";
 import { prepareDevelopmentFileRoots } from "./developmentFileRoots.ts";
+import { readDevelopmentMigrationIdentity } from "./developmentMigrationIdentity.ts";
 import { readDevelopmentPrivateFile } from "./developmentPrivateFile.ts";
 import type { DevelopmentStackConfig } from "./developmentStackConfig.ts";
 import {
@@ -56,6 +56,8 @@ export interface PreparedDevelopmentState {
 }
 
 export interface PreparedDevelopmentStateSession {
+    readonly migrationFingerprint: string;
+    refresh(): Promise<PreparedDevelopmentState>;
     readonly state: PreparedDevelopmentState;
     release(): Promise<void>;
 }
@@ -177,26 +179,13 @@ async function claimState(config: DevelopmentStackConfig): Promise<void> {
     );
 }
 
-function currentMigrationFingerprint(): string {
-    const fingerprint = createHash("sha256");
-    fingerprint.update("mira-dashboard-development-migrations:v1\0");
-    for (const migration of migrationManifest) {
-        fingerprint.update(migration.id);
-        fingerprint.update("\0");
-        fingerprint.update(migration.migrationSha256);
-        fingerprint.update("\0");
-        fingerprint.update(migration.snapshotSha256);
-        fingerprint.update("\0");
-    }
-    return fingerprint.digest("hex");
-}
-
 function expectedDatabaseMarker(
-    config: DevelopmentStackConfig
+    config: DevelopmentStackConfig,
+    migrationFingerprint: string
 ): DevelopmentDatabaseMarker {
     return {
         formatVersion: 1,
-        migrationFingerprint: currentMigrationFingerprint(),
+        migrationFingerprint,
         owner: config.stateOwner,
     };
 }
@@ -311,28 +300,34 @@ async function removeDevelopmentDatabaseFiles(
     return removed;
 }
 
-async function writeDatabaseMarker(config: DevelopmentStackConfig): Promise<void> {
+async function writeDatabaseMarker(
+    config: DevelopmentStackConfig,
+    migrationFingerprint: string
+): Promise<void> {
     const markerPath = path.join(config.stateRoot, databaseMarkerFileName);
     if (await pathExists(markerPath)) await readDatabaseMarker(config);
     await replacePrivateFile(
         markerPath,
-        `${JSON.stringify(expectedDatabaseMarker(config), undefined, 2)}\n`
+        `${JSON.stringify(expectedDatabaseMarker(config, migrationFingerprint), undefined, 2)}\n`
     );
 }
 
 async function reconcileDevelopmentDatabase(
-    config: DevelopmentStackConfig
+    config: DevelopmentStackConfig,
+    migrationFingerprint: string
 ): Promise<boolean> {
     const markerPath = path.join(config.stateRoot, databaseMarkerFileName);
     const marker = (await pathExists(markerPath))
         ? await readDatabaseMarker(config)
         : undefined;
-    const expected = expectedDatabaseMarker(config);
+    const expected = expectedDatabaseMarker(config, migrationFingerprint);
     const needsReset =
         marker === undefined ||
         marker.migrationFingerprint !== expected.migrationFingerprint;
     const removed = needsReset ? await removeDevelopmentDatabaseFiles(config) : false;
-    if (marker === undefined || needsReset) await writeDatabaseMarker(config);
+    if (marker === undefined || needsReset) {
+        await writeDatabaseMarker(config, migrationFingerprint);
+    }
     return removed;
 }
 
@@ -396,13 +391,17 @@ async function developmentKeyring(config: DevelopmentStackConfig): Promise<strin
 }
 
 async function prepareClaimedDevelopmentState(
-    config: DevelopmentStackConfig
+    config: DevelopmentStackConfig,
+    migrationFingerprint: string
 ): Promise<PreparedDevelopmentState> {
     const prepared = await prepareProtectedProductionStatePath(config.stateRoot);
     if (prepared.stateDirectory !== expectedDatabaseDirectory(config)) {
         throw new Error("Development database path is invalid");
     }
-    const didResetDatabase = await reconcileDevelopmentDatabase(config);
+    const didResetDatabase = await reconcileDevelopmentDatabase(
+        config,
+        migrationFingerprint
+    );
     let database: PreparedDevelopmentState["database"];
     if (didResetDatabase) {
         database = "schema-reset";
@@ -447,17 +446,38 @@ export async function prepareDevelopmentRuntimeState(
 ): Promise<PreparedDevelopmentStateSession> {
     await claimState(config);
     const lease = await acquireDevelopmentStateLease(config);
+    let migrationFingerprint: string;
     let state: PreparedDevelopmentState;
     try {
-        state = await prepareClaimedDevelopmentState(config);
+        migrationFingerprint = await readDevelopmentMigrationIdentity(
+            config.repositoryRoot
+        );
+        state = await prepareClaimedDevelopmentState(config, migrationFingerprint);
     } catch (error) {
         return releaseAfterFailure(lease, error);
     }
     return Object.freeze({
+        get migrationFingerprint(): string {
+            return migrationFingerprint;
+        },
+        async refresh(): Promise<PreparedDevelopmentState> {
+            const nextMigrationFingerprint = await readDevelopmentMigrationIdentity(
+                config.repositoryRoot
+            );
+            const nextState = await prepareClaimedDevelopmentState(
+                config,
+                nextMigrationFingerprint
+            );
+            migrationFingerprint = nextMigrationFingerprint;
+            state = nextState;
+            return nextState;
+        },
         async release(): Promise<void> {
             await lease.release();
         },
-        state,
+        get state(): PreparedDevelopmentState {
+            return state;
+        },
     });
 }
 
@@ -494,7 +514,10 @@ export async function resetDevelopmentDatabase(
             throw new Error("Development database path is invalid");
         }
         const removed = await removeDevelopmentDatabaseFiles(config);
-        await writeDatabaseMarker(config);
+        await writeDatabaseMarker(
+            config,
+            await readDevelopmentMigrationIdentity(config.repositoryRoot)
+        );
         return removed;
     } finally {
         await lease.release();

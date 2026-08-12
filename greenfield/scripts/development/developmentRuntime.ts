@@ -4,6 +4,12 @@ import {
     developmentFrontendEnvironment,
     developmentProcessEnvironments,
 } from "./developmentEnvironment.ts";
+import {
+    isDevelopmentMigrationIdentityFailure,
+    observeDevelopmentMigrationIdentity,
+    readDevelopmentMigrationIdentity,
+    type ObserveDevelopmentMigrationIdentity,
+} from "./developmentMigrationIdentity.ts";
 import { guardedDevelopmentChildCommand } from "./developmentProcessGuard.ts";
 import type { DevelopmentStackConfig } from "./developmentStackConfig.ts";
 import {
@@ -22,6 +28,8 @@ export interface DevelopmentChildProcess {
 
 export interface DevelopmentRuntimeDependencies {
     readonly environment?: Readonly<Record<string, string | undefined>>;
+    readonly observeMigrationIdentity?: ObserveDevelopmentMigrationIdentity;
+    readonly readMigrationIdentity?: typeof readDevelopmentMigrationIdentity;
     readonly resolveSourceCommit: (repositoryRoot: string) => Promise<string>;
     readonly spawn: (
         command: readonly string[],
@@ -33,14 +41,17 @@ export interface DevelopmentRuntimeDependencies {
 }
 
 interface DevelopmentStopController {
-    readonly children: DevelopmentChildProcess[];
+    children: DevelopmentChildProcess[];
     forceRequested: boolean;
     readonly requestStop: () => void;
     settling?: Promise<void>;
     stopRequested: boolean;
+    readonly stopped: Promise<void>;
 }
 
 const defaultDependencies: DevelopmentRuntimeDependencies = Object.freeze({
+    observeMigrationIdentity: observeDevelopmentMigrationIdentity,
+    readMigrationIdentity: readDevelopmentMigrationIdentity,
     resolveSourceCommit: readSourceCommit,
     spawn(
         command: readonly string[],
@@ -120,8 +131,16 @@ async function settleChildren(
 function childExit(
     child: DevelopmentChildProcess,
     processName: DevelopmentProcessName
-): Promise<Readonly<{ code: number; processName: DevelopmentProcessName }>> {
-    return child.exited.then((code) => Object.freeze({ code, processName }));
+): Promise<
+    Readonly<{
+        code: number;
+        processName: DevelopmentProcessName;
+        status: "child-exited";
+    }>
+> {
+    return child.exited.then((code) =>
+        Object.freeze({ code, processName, status: "child-exited" })
+    );
 }
 
 async function startDevelopmentChildren(
@@ -161,6 +180,10 @@ async function startDevelopmentChildren(
 }
 
 function createStopController(): DevelopmentStopController {
+    let resolveStopped!: () => void;
+    const stopped = new Promise<void>((resolve) => {
+        resolveStopped = resolve;
+    });
     const controller: DevelopmentStopController = {
         children: [],
         forceRequested: false,
@@ -171,9 +194,11 @@ function createStopController(): DevelopmentStopController {
                 return;
             }
             controller.stopRequested = true;
+            resolveStopped();
             controller.settling = settleChildren(controller.children, false);
         },
         stopRequested: false,
+        stopped,
     };
     return controller;
 }
@@ -187,8 +212,16 @@ async function coordinateDevelopmentChildren(
         DevelopmentChildProcess,
         DevelopmentChildProcess,
     ],
-    stopController: DevelopmentStopController
-): Promise<number> {
+    stopController: DevelopmentStopController,
+    migrationIdentityChanged?: Promise<string>
+): Promise<
+    | Readonly<{
+          fingerprint: string;
+          status: "migration-identity-changed";
+      }>
+    | Awaited<ReturnType<typeof childExit>>
+    | Readonly<{ status: "stopped" }>
+> {
     const [frontend, web, worker] = children;
     process.stdout.write(
         `${JSON.stringify({
@@ -203,20 +236,25 @@ async function coordinateDevelopmentChildren(
         })}\n`
     );
 
+    const migrationChange = migrationIdentityChanged?.then((fingerprint) =>
+        Object.freeze({
+            fingerprint,
+            status: "migration-identity-changed" as const,
+        })
+    );
     const exited = await Promise.race([
         childExit(frontend, "frontend"),
         childExit(web, "web"),
         childExit(worker, "worker"),
+        ...(migrationChange === undefined ? [] : [migrationChange]),
     ]);
     stopController.settling ??= settleChildren(children, false);
     await stopController.settling;
     if (stopController.forceRequested) await settleChildren(children, true);
-    if (stopController.stopRequested) return 0;
-    const reportedExitCode = exited.code || 1;
-    process.stderr.write(
-        `Development ${exited.processName} process exited with code ${reportedExitCode}\n`
-    );
-    return reportedExitCode;
+    if (stopController.stopRequested) {
+        return Object.freeze({ status: "stopped" });
+    }
+    return exited;
 }
 
 async function runPreparedDevelopmentStack(
@@ -224,8 +262,9 @@ async function runPreparedDevelopmentStack(
     state: PreparedDevelopmentState,
     sourceCommit: string,
     dependencies: DevelopmentRuntimeDependencies,
-    stopController: DevelopmentStopController
-): Promise<number> {
+    stopController: DevelopmentStopController,
+    migrationIdentityChanged?: Promise<string>
+): Promise<Awaited<ReturnType<typeof coordinateDevelopmentChildren>>> {
     const children = await startDevelopmentChildren(
         config,
         state,
@@ -233,14 +272,154 @@ async function runPreparedDevelopmentStack(
         dependencies,
         stopController
     );
-    if (children === undefined) return 0;
+    if (children === undefined) {
+        return Object.freeze({ status: "stopped" });
+    }
     return coordinateDevelopmentChildren(
         config,
         state,
         sourceCommit,
         children,
-        stopController
+        stopController,
+        migrationIdentityChanged
     );
+}
+
+async function waitForReadableMigrationIdentity(
+    repositoryRoot: string,
+    dependencies: DevelopmentRuntimeDependencies,
+    stopController: DevelopmentStopController
+): Promise<string | undefined> {
+    const readIdentity =
+        dependencies.readMigrationIdentity ?? readDevelopmentMigrationIdentity;
+    while (!stopController.stopRequested) {
+        try {
+            return await readIdentity(repositoryRoot);
+        } catch {
+            const outcome = await Promise.race([
+                Bun.sleep(100).then(() => "retry" as const),
+                stopController.stopped.then(() => "stopped" as const),
+            ]);
+            if (outcome === "stopped") return;
+        }
+    }
+    return;
+}
+
+async function refreshDevelopmentState(
+    config: DevelopmentStackConfig,
+    stateSession: PreparedDevelopmentStateSession,
+    dependencies: DevelopmentRuntimeDependencies,
+    stopController: DevelopmentStopController
+): Promise<PreparedDevelopmentState | undefined> {
+    while (!stopController.stopRequested) {
+        try {
+            const previousFingerprint = stateSession.migrationFingerprint;
+            const state = await stateSession.refresh();
+            if (
+                state.database === "reused" &&
+                stateSession.migrationFingerprint !== previousFingerprint
+            ) {
+                throw new Error(
+                    "Development migration identity changed without safe SQLite state"
+                );
+            }
+            const currentFingerprint = await waitForReadableMigrationIdentity(
+                config.repositoryRoot,
+                dependencies,
+                stopController
+            );
+            if (currentFingerprint === undefined) return;
+            if (currentFingerprint !== stateSession.migrationFingerprint) continue;
+            return state;
+        } catch (error) {
+            if (!isDevelopmentMigrationIdentityFailure(error)) throw error;
+            const currentFingerprint = await waitForReadableMigrationIdentity(
+                config.repositoryRoot,
+                dependencies,
+                stopController
+            );
+            if (currentFingerprint === undefined) return;
+        }
+    }
+    return;
+}
+
+async function runPreparedDevelopmentLifecycle(
+    config: DevelopmentStackConfig,
+    stateSession: PreparedDevelopmentStateSession,
+    sourceCommit: string,
+    dependencies: DevelopmentRuntimeDependencies,
+    stopController: DevelopmentStopController
+): Promise<number> {
+    let state = stateSession.state;
+    while (!stopController.stopRequested) {
+        const observation = (
+            dependencies.observeMigrationIdentity ?? observeDevelopmentMigrationIdentity
+        )(config.repositoryRoot, stateSession.migrationFingerprint);
+        const initialIdentityChange = await Promise.race([
+            observation.ready,
+            stopController.stopped.then(() => "stopped" as const),
+        ]);
+        if (initialIdentityChange === "stopped") {
+            observation.close();
+            return 0;
+        }
+        if (initialIdentityChange !== undefined) {
+            observation.close();
+            const refreshed = await refreshDevelopmentState(
+                config,
+                stateSession,
+                dependencies,
+                stopController
+            );
+            if (refreshed === undefined) return 0;
+            state = refreshed;
+            continue;
+        }
+
+        let outcome: Awaited<ReturnType<typeof runPreparedDevelopmentStack>>;
+        try {
+            outcome = await runPreparedDevelopmentStack(
+                config,
+                state,
+                sourceCommit,
+                dependencies,
+                stopController,
+                observation.changed
+            );
+        } finally {
+            observation.close();
+        }
+        if (outcome.status === "stopped") return 0;
+
+        stopController.children = [];
+        stopController.settling = undefined;
+        if (outcome.status === "child-exited") {
+            const currentFingerprint = await waitForReadableMigrationIdentity(
+                config.repositoryRoot,
+                dependencies,
+                stopController
+            );
+            if (currentFingerprint === undefined) return 0;
+            if (currentFingerprint === stateSession.migrationFingerprint) {
+                const reportedExitCode = outcome.code || 1;
+                process.stderr.write(
+                    `Development ${outcome.processName} process exited with code ${reportedExitCode}\n`
+                );
+                return reportedExitCode;
+            }
+        }
+        const refreshed = await refreshDevelopmentState(
+            config,
+            stateSession,
+            dependencies,
+            stopController
+        );
+        if (refreshed === undefined) return 0;
+        state = refreshed;
+    }
+    return 0;
 }
 
 async function settleRemainingChildren(
@@ -275,9 +454,9 @@ export async function runDevelopmentStackWithPreparedState(
             config.repositoryRoot
         );
         if (stopController.stopRequested) return 0;
-        return await runPreparedDevelopmentStack(
+        return await runPreparedDevelopmentLifecycle(
             config,
-            stateSession.state,
+            stateSession,
             sourceCommit,
             dependencies,
             stopController
@@ -311,9 +490,9 @@ export async function runDevelopmentStack(
         );
         if (stopController.stopRequested) return 0;
         stateSession = await prepareDevelopmentRuntimeState(config);
-        return await runPreparedDevelopmentStack(
+        return await runPreparedDevelopmentLifecycle(
             config,
-            stateSession.state,
+            stateSession,
             sourceCommit,
             dependencies,
             stopController
