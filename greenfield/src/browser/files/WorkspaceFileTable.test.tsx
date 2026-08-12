@@ -41,4 +41,42 @@ describe("WorkspaceFileTable", () => {
         await user.click(primaryAction);
         expect(onOpenDirectory).toHaveBeenCalledWith(directory);
     });
+
+    test("opens bounded prefixes for preview and never offers replacement", async () => {
+        const prefix: WorkspaceFileEntry = {
+            kind: "file",
+            mimeType: "text/plain",
+            name: "agentmail.ts",
+            previewKind: "download-only",
+            resourceId: "44444444-4444-4444-8444-444444444444",
+            revision: "b".repeat(64),
+            sizeBytes: 2 * 1024 * 1024 + 1,
+            truncated: true,
+            writable: true,
+        };
+        const onPreview = jest.fn();
+        const user = userEvent.setup();
+        render(
+            <WorkspaceFileTable
+                entries={[prefix]}
+                onDownload={jest.fn()}
+                onOpenDirectory={jest.fn()}
+                onPreview={onPreview}
+                onReplace={jest.fn()}
+            />
+        );
+
+        expect(screen.queryByRole("button", { name: "Replace agentmail.ts" })).toBeNull();
+        await user.click(
+            screen.getAllByRole("button", {
+                name: "Preview prefix of agentmail.ts",
+            })[0]!
+        );
+        expect(onPreview).toHaveBeenCalledWith(prefix);
+        expect(
+            screen.getByRole("button", {
+                name: "Download prefix of agentmail.ts",
+            })
+        ).toBeTruthy();
+    });
 });

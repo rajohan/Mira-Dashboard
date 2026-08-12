@@ -100,6 +100,48 @@ describe("workspace file transfers", () => {
         expect(fetcher).not.toHaveBeenCalled();
     });
 
+    test("materializes only a validated oversized-source prefix", async () => {
+        const sourceSizeBytes = workspaceFileLimits.maximumManifestFileBytes + 1;
+        const prefixEntry: WorkspaceFileEntry = {
+            ...entry,
+            previewKind: "download-only",
+            sizeBytes: sourceSizeBytes,
+            truncated: true,
+            writable: false,
+        };
+        const prefixTicket: WorkspaceFileContentTicket = {
+            ...contentTicket(),
+            sizeBytes: 5,
+            sourceSizeBytes,
+            truncated: true,
+        };
+        const fetcher = jest.fn(() => Promise.resolve(new Response("hello")));
+
+        const result = await prepareWorkspaceFilePreview(
+            client({ query: () => Promise.resolve(prefixTicket) }),
+            prefixEntry,
+            new AbortController().signal,
+            fetcher
+        );
+        expect(result).toEqual({ content: "hello", ticket: prefixTicket });
+        expect(fetcher).toHaveBeenCalledTimes(1);
+
+        const rejected = await prepareWorkspaceFilePreview(
+            client({
+                query: () =>
+                    Promise.resolve({
+                        ...prefixTicket,
+                        sourceSizeBytes: sourceSizeBytes + 1,
+                    }),
+            }),
+            prefixEntry,
+            new AbortController().signal,
+            fetcher
+        ).catch((error: unknown) => error);
+        expect(rejected).toMatchObject({ category: "protocol" });
+        expect(fetcher).toHaveBeenCalledTimes(1);
+    });
+
     test("forwards an oversized reveal authority without materializing raw config", async () => {
         const oversizedTextBytes = workspaceFileLimits.maximumTextPreviewBytes + 1;
         const uploadTicketId = "44444444-4444-4444-8444-444444444444";

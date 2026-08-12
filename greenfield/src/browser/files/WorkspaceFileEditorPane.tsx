@@ -210,14 +210,16 @@ export function WorkspaceFileEditorPane({
 }: WorkspaceFileEditorPaneProps) {
     const { entry } = selection;
     const initialContent = preview.prepared?.content ?? "";
-    const renderable = renderableKind(entry) !== undefined;
+    const prefixOnly =
+        entry.truncated === true || preview.prepared?.ticket.truncated === true;
+    const renderable = !prefixOnly && renderableKind(entry) !== undefined;
     const language = workspaceFileLanguage(entry);
     const [baseline, setBaseline] = useState(initialContent);
     const [draft, setDraft] = useState(initialContent);
     const [mode, setMode] = useState<TextMode>(renderable ? "rendered" : "raw");
     const [saveError, setSaveError] = useState<string>();
     const [saving, setSaving] = useState(false);
-    const renderableType = renderableKind(entry);
+    const renderableType = prefixOnly ? undefined : renderableKind(entry);
     const json =
         renderableType === "json" || renderableType === "json5"
             ? jsonPresentation(draft, renderableType)
@@ -225,12 +227,14 @@ export function WorkspaceFileEditorPane({
     const changed = draft !== baseline;
     const canEdit =
         entry.kind === "file" &&
+        !prefixOnly &&
         entry.previewKind === "text" &&
         entry.writable &&
         (entry.requiresSecretReveal !== true ||
             preview.prepared?.secretsRevealed === true) &&
         preview.prepared?.content !== undefined;
     const canReplace =
+        !prefixOnly &&
         entry.writable &&
         (entry.requiresSecretReveal !== true ||
             preview.prepared?.secretsRevealed === true);
@@ -267,6 +271,7 @@ export function WorkspaceFileEditorPane({
                         {entry.sizeBytes !== undefined && (
                             <Badge>{formatByteCount(entry.sizeBytes)}</Badge>
                         )}
+                        {prefixOnly && <Badge variant="warning">Prefix only</Badge>}
                         <Badge variant={entry.writable ? "success" : "default"}>
                             {entry.writable ? "Writable" : "Read only"}
                         </Badge>
@@ -348,16 +353,18 @@ export function WorkspaceFileEditorPane({
                                     Reveal secrets
                                 </Button>
                             )}
-                        <Button
-                            busy={downloading}
-                            busyLabel="Preparing download…"
-                            onClick={() => void onDownload()}
-                            size="sm"
-                            variant="secondary"
-                        >
-                            <Icon icon={Download} size="sm" tone="inherit" />
-                            Download
-                        </Button>
+                        {!(prefixOnly && entry.requiresSecretReveal === true) && (
+                            <Button
+                                busy={downloading}
+                                busyLabel="Preparing download…"
+                                onClick={() => void onDownload()}
+                                size="sm"
+                                variant="secondary"
+                            >
+                                <Icon icon={Download} size="sm" tone="inherit" />
+                                {prefixOnly ? "Download prefix" : "Download"}
+                            </Button>
+                        )}
                         {canReplace && (
                             <Button onClick={onReplace} size="sm" variant="secondary">
                                 <Icon icon={Upload} size="sm" tone="inherit" />
@@ -386,6 +393,13 @@ export function WorkspaceFileEditorPane({
                         variant="info"
                     />
                 )}
+            {prefixOnly && (
+                <Alert
+                    focusOnError={false}
+                    message="This source exceeds the reviewed full-file limit. Only its bounded first 1 MiB prefix is available here, and replacement is disabled."
+                    variant="info"
+                />
+            )}
             <Alert message={preview.error} />
             <Alert message={preview.revealError} />
             <Alert message={saveError} onDismiss={() => setSaveError(undefined)} />

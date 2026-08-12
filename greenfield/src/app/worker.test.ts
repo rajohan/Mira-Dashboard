@@ -121,6 +121,9 @@ function processFixture(
         availablePolicies: () => Promise.resolve(["docker-managed" as const]),
         run: () => Promise.resolve(undefined),
     });
+    const openClawGateway = Object.freeze({
+        restart: () => Promise.resolve(),
+    });
     const runtime: DashboardWorkerRuntime = Object.freeze({
         completion,
         dispose(forceSignal?: AbortSignal) {
@@ -183,11 +186,16 @@ function processFixture(
             events.push("log-maintenance-create");
             return logMaintenance;
         },
+        createOpenClawGatewayLifecycle(observedOpenClawRoot) {
+            expect(observedOpenClawRoot).toBe(openClawRoot);
+            return openClawGateway;
+        },
         createRuntime(
             observedLayout,
             observedRelease,
             logger,
             observedGatewayTransport,
+            observedOpenClawGateway,
             observedWorkspaceRoot,
             observedOpenClawRoot,
             observedLogMaintenance
@@ -196,6 +204,7 @@ function processFixture(
             expect(observedRelease).toBe(release);
             expect(logger).toBeDefined();
             expect(observedGatewayTransport).toBe(gatewayTransport);
+            expect(observedOpenClawGateway).toBe(openClawGateway);
             expect(observedWorkspaceRoot).toEqual({
                 id: "workspace",
                 path: workspaceRoot,

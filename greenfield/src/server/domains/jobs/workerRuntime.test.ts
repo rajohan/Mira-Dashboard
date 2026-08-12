@@ -33,6 +33,9 @@ const baseRuntimeOptions = {
         run: () => Promise.resolve(undefined),
     }),
     moltbook: testMoltbookCollector,
+    openClawGateway: Object.freeze({
+        restart: () => Promise.resolve(),
+    }),
     pid: 123,
     releaseId: "a".repeat(40),
     sideEffects: {

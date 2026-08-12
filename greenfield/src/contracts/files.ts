@@ -199,6 +199,7 @@ export const workspaceFileEntrySchema = v.strictObject({
     resourceId: workspaceFileResourceIdSchema,
     revision: workspaceFileRevisionSchema,
     sizeBytes: v.optional(workspaceFileMetadataSizeSchema),
+    truncated: v.optional(v.literal(true, "Workspace file truncation state is invalid")),
     writable: v.boolean("Workspace file write policy is invalid"),
 });
 
@@ -225,26 +226,41 @@ export const prepareWorkspaceFileRevealInputSchema = v.strictObject({
     resourceId: workspaceFileResourceIdSchema,
 });
 
-export const workspaceFileContentTicketSchema = v.strictObject({
-    disposition: workspaceFileDispositionSchema,
-    expiresAtMs: timestampMillisecondsSchema(
-        "Workspace file content ticket expiry is invalid"
-    ),
-    fileName: workspaceFileNameSchema,
-    mimeType: workspaceFileMimeTypeSchema,
-    previewKind: workspaceFilePreviewKindSchema,
-    revision: workspaceFileRevisionSchema,
-    sizeBytes: workspaceFileDownloadSizeSchema,
-    ticketId: workspaceFileTicketIdSchema,
-    url: v.pipe(
-        v.string("Workspace file content URL is invalid"),
-        v.maxLength(96, "Workspace file content URL is invalid"),
-        v.regex(
-            /^\/api\/files\/content\/[0-9a-f-]{36}$/u,
-            "Workspace file content URL is invalid"
-        )
-    ),
-});
+export const workspaceFileContentTicketSchema = v.pipe(
+    v.strictObject({
+        disposition: workspaceFileDispositionSchema,
+        expiresAtMs: timestampMillisecondsSchema(
+            "Workspace file content ticket expiry is invalid"
+        ),
+        fileName: workspaceFileNameSchema,
+        mimeType: workspaceFileMimeTypeSchema,
+        previewKind: workspaceFilePreviewKindSchema,
+        revision: workspaceFileRevisionSchema,
+        sizeBytes: workspaceFileDownloadSizeSchema,
+        sourceSizeBytes: v.optional(workspaceFileMetadataSizeSchema),
+        ticketId: workspaceFileTicketIdSchema,
+        truncated: v.optional(
+            v.literal(true, "Workspace file truncation state is invalid")
+        ),
+        url: v.pipe(
+            v.string("Workspace file content URL is invalid"),
+            v.maxLength(96, "Workspace file content URL is invalid"),
+            v.regex(
+                /^\/api\/files\/content\/[0-9a-f-]{36}$/u,
+                "Workspace file content URL is invalid"
+            )
+        ),
+    }),
+    v.check(
+        (ticket) =>
+            ticket.truncated === true
+                ? ticket.sourceSizeBytes !== undefined &&
+                  ticket.sourceSizeBytes > ticket.sizeBytes &&
+                  ticket.sizeBytes <= workspaceFileLimits.maximumTextPreviewBytes
+                : ticket.sourceSizeBytes === undefined,
+        "Workspace file content truncation metadata is invalid"
+    )
+);
 
 /** Existing-file replacement reservation with mandatory compare-and-swap revision. */
 export const prepareWorkspaceFileWriteInputSchema = v.strictObject({
@@ -421,7 +437,8 @@ export const workspaceFileProcedureContracts = [
         name: "files.prepareContent",
         output: workspaceFileContentTicketSchema,
         outputSchemaId: "files.prepareContent.output",
-        summary: "Issues a short-lived actor-bound raw preview or download URL.",
+        summary:
+            "Issues a short-lived actor-bound full representation or bounded-prefix URL.",
         transport: queryTransport,
     },
     {
@@ -467,7 +484,7 @@ export const workspaceFileProcedureContracts = [
         output: workspaceFileContentTicketSchema,
         outputSchemaId: "files.prepareReveal.output",
         summary:
-            "Issues one uncached actor-bound raw config view after recent authentication.",
+            "Issues one uncached actor-bound raw config view or bounded prefix after recent authentication.",
         transport: mutationTransport,
     },
     {
@@ -539,7 +556,7 @@ export const workspaceFileRawHttpContracts = [
             transfer: "buffered",
         },
         statusCodes: [200, 206, 400, 401, 403, 404, 405, 409, 410, 416, 429, 500, 503],
-        summary: `${method === "HEAD" ? "Inspects" : "Reads"} one ticket-bound workspace file revision.`,
+        summary: `${method === "HEAD" ? "Inspects" : "Reads"} one ticket-bound workspace file revision or bounded source prefix.`,
     })),
     {
         access: fileWriteAccess,

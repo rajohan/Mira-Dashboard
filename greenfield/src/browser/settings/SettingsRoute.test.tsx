@@ -438,7 +438,12 @@ describe("Dashboard Settings route", () => {
             expect(screen.getByRole("heading", { name: section })).toBeTruthy();
         }
         expect(screen.queryByRole("textbox", { name: /json/iu })).toBeNull();
-        expect(screen.queryByRole("button", { name: /backup|restart/iu })).toBeNull();
+        expect(
+            screen.getByRole("button", { name: "Download configuration backup" })
+        ).toBeEnabled();
+        expect(
+            screen.getByRole("button", { name: "Restart OpenClaw Gateway" })
+        ).toBeEnabled();
         expect(
             screen.getByRole("button", { name: "Session visibility" })
         ).toHaveTextContent("Current agent");
@@ -635,6 +640,92 @@ describe("Dashboard Settings route", () => {
         renderSettings(absentTransport);
 
         expect(await screen.findByText("Not reported")).toBeTruthy();
+    });
+
+    test("starts a one-shot backup download without placing secret bytes in browser state", async () => {
+        const transport = new SettingsTransport();
+        const ticketId = "019fe633-9133-4ba0-8b80-809dd80dfb40";
+        transport.mutationHandler = (path) => {
+            if (path !== "openClawSettings.createConfigurationBackup") {
+                return Promise.reject(new TypeError(`Unexpected mutation: ${path}`));
+            }
+            return Promise.resolve({
+                downloadUrl: `/api/openclaw-settings/configuration-backups/${ticketId}`,
+                expiresAtMs: timestampMs + 60_000,
+                ticketId,
+            });
+        };
+        const anchorClick = spyOn(
+            HTMLAnchorElement.prototype,
+            "click"
+        ).mockImplementation(() => {});
+        try {
+            const { queryClient } = renderSettings(transport);
+            const user = userEvent.setup();
+            await screen.findByRole("textbox", { name: "Primary model" });
+            await user.click(
+                screen.getByRole("button", {
+                    name: "Download configuration backup",
+                })
+            );
+
+            expect(
+                await screen.findByText("OpenClaw configuration backup download started.")
+            ).toBeTruthy();
+            expect(anchorClick).toHaveBeenCalledTimes(1);
+            expect(transport.calls.filter(({ kind }) => kind === "mutation")).toEqual([
+                expect.objectContaining({
+                    input: { confirmation: "export-openclaw-configuration" },
+                    path: "openClawSettings.createConfigurationBackup",
+                }),
+            ]);
+            expect(JSON.stringify(queryClient.getQueryCache().getAll())).not.toContain(
+                ticketId
+            );
+        } finally {
+            anchorClick.mockRestore();
+        }
+    });
+
+    test("reuses one restart idempotency key after an unknown outcome", async () => {
+        const transport = new SettingsTransport();
+        transport.mutationHandler = (path) =>
+            path === "openClawSettings.restartGateway"
+                ? Promise.reject(unknownOutcomeError())
+                : Promise.reject(new TypeError(`Unexpected mutation: ${path}`));
+        const confirmRestart = spyOn(globalThis, "confirm").mockReturnValue(true);
+        try {
+            renderSettings(transport);
+            const user = userEvent.setup();
+            const button = await screen.findByRole("button", {
+                name: "Restart OpenClaw Gateway",
+            });
+            await user.click(button);
+            await screen.findByText(
+                /could not confirm whether OpenClaw applied the change/iu
+            );
+            await user.click(button);
+            await waitFor(() =>
+                expect(
+                    transport.calls.filter(
+                        ({ kind, path }) =>
+                            kind === "mutation" &&
+                            path === "openClawSettings.restartGateway"
+                    )
+                ).toHaveLength(2)
+            );
+            const calls = transport.calls.filter(
+                ({ kind, path }) =>
+                    kind === "mutation" && path === "openClawSettings.restartGateway"
+            );
+            expect(calls[0]?.input).toMatchObject({
+                confirmation: "restart-openclaw-gateway",
+            });
+            expect(calls[1]?.input).toEqual(calls[0]?.input);
+            expect(confirmRestart).toHaveBeenCalledTimes(2);
+        } finally {
+            confirmRestart.mockRestore();
+        }
     });
 
     test("submits one exact agent tool override intent without browser policy arrays", async () => {

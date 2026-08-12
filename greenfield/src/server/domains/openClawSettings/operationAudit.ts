@@ -6,6 +6,8 @@ import { createSecurityAuditEvent, type SecurityAuditActor } from "../security/a
 import { DrizzleSecurityAuditStore } from "../security/securityAuditStore.ts";
 
 export const openClawSettingsAuditOperations = [
+    "create-configuration-backup",
+    "restart-gateway",
     "set-skill-enabled",
     "update-configuration",
 ] as const;

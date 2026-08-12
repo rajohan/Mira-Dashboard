@@ -9,7 +9,12 @@ import {
     nonnegativeSafeIntegerSchema,
     positiveSafeIntegerSchema,
 } from "../shared/validation.ts";
-import type { ProcedureContract } from "./registry.ts";
+import {
+    jobIdempotencyKeySchema,
+    jobRunIdSchema,
+    jobTimestampSchema,
+} from "./jobModel.ts";
+import type { ProcedureContract, RawHttpContract } from "./registry.ts";
 
 /** Maximum authenticated raw Gateway response accepted for config.get. */
 export const openClawConfigurationUpstreamMaximumBytes = 2 * 1024 * 1024;
@@ -20,6 +25,11 @@ export const openClawSkillMaximum = 512;
 export const openClawModelFallbackMaximum = 16;
 export const openClawChannelMaximum = 64;
 export const openClawAgentAccessMaximum = 32;
+/** Envelope allowance above the exact bounded config.get response. */
+export const openClawConfigurationBackupMaximumBytes =
+    openClawConfigurationUpstreamMaximumBytes + 4096;
+/** Short-lived one-shot export ticket lifetime. */
+export const openClawConfigurationBackupTicketTtlMs = 60_000;
 
 export const openClawConfigHashSchema = lowercaseSha256Schema(
     "OpenClaw configuration hash is invalid"
@@ -510,6 +520,55 @@ export const setOpenClawSkillEnabledResultSchema = v.strictObject({
     skillKey: openClawSkillKeySchema,
 });
 
+export const openClawConfigurationBackupTicketIdSchema = v.pipe(
+    v.string("OpenClaw configuration backup ticket id is invalid"),
+    v.length(36, "OpenClaw configuration backup ticket id is invalid"),
+    v.uuid("OpenClaw configuration backup ticket id is invalid"),
+    v.regex(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+        "OpenClaw configuration backup ticket id is invalid"
+    )
+);
+
+export const createOpenClawConfigurationBackupInputSchema = v.strictObject({
+    confirmation: v.literal(
+        "export-openclaw-configuration",
+        "OpenClaw configuration backup confirmation is invalid"
+    ),
+});
+
+export const createOpenClawConfigurationBackupResultSchema = v.pipe(
+    v.strictObject({
+        downloadUrl: v.pipe(
+            v.string("OpenClaw configuration backup URL is invalid"),
+            v.regex(
+                /^\/api\/openclaw-settings\/configuration-backups\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+                "OpenClaw configuration backup URL is invalid"
+            )
+        ),
+        expiresAtMs: jobTimestampSchema,
+        ticketId: openClawConfigurationBackupTicketIdSchema,
+    }),
+    v.check(
+        ({ downloadUrl, ticketId }) => downloadUrl.endsWith(`/${ticketId}`),
+        "OpenClaw configuration backup ticket is inconsistent"
+    )
+);
+
+export const restartOpenClawGatewayInputSchema = v.strictObject({
+    confirmation: v.literal(
+        "restart-openclaw-gateway",
+        "OpenClaw Gateway restart confirmation is invalid"
+    ),
+    idempotencyKey: jobIdempotencyKeySchema,
+});
+
+export const restartOpenClawGatewayResultSchema = v.strictObject({
+    completedAtMs: jobTimestampSchema,
+    jobRunId: jobRunIdSchema,
+    status: v.literal("restarted", "OpenClaw Gateway restart result is invalid"),
+});
+
 export type OpenClawConfigurationSnapshot = v.InferOutput<
     typeof openClawConfigurationSnapshotSchema
 >;
@@ -530,6 +589,18 @@ export type SetOpenClawSkillEnabledInput = v.InferOutput<
 >;
 export type SetOpenClawSkillEnabledResult = v.InferOutput<
     typeof setOpenClawSkillEnabledResultSchema
+>;
+export type CreateOpenClawConfigurationBackupInput = v.InferOutput<
+    typeof createOpenClawConfigurationBackupInputSchema
+>;
+export type CreateOpenClawConfigurationBackupResult = v.InferOutput<
+    typeof createOpenClawConfigurationBackupResultSchema
+>;
+export type RestartOpenClawGatewayInput = v.InferOutput<
+    typeof restartOpenClawGatewayInputSchema
+>;
+export type RestartOpenClawGatewayResult = v.InferOutput<
+    typeof restartOpenClawGatewayResultSchema
 >;
 
 const readAccess = {
@@ -634,4 +705,53 @@ export const openClawSettingsProcedureContracts = [
             "Updates one freshly verified skill leaf on the latest OpenClaw configuration after recent MFA.",
         transport: mutationTransport,
     },
+    {
+        access: controlAccess,
+        domain: "openclaw-settings",
+        errorReasons: ["mfa_enrollment_required", "step_up_required"],
+        errors: ["FORBIDDEN", "SERVICE_UNAVAILABLE", "TOO_MANY_REQUESTS", "UNAUTHORIZED"],
+        input: createOpenClawConfigurationBackupInputSchema,
+        inputSchemaId: "openClawSettings.createConfigurationBackup.input",
+        kind: "mutation",
+        name: "openClawSettings.createConfigurationBackup",
+        output: createOpenClawConfigurationBackupResultSchema,
+        outputSchemaId: "openClawSettings.createConfigurationBackup.output",
+        summary:
+            "Creates one short-lived actor-bound no-store ticket for a secret-bearing OpenClaw configuration export after recent MFA.",
+        transport: mutationTransport,
+    },
+    {
+        access: controlAccess,
+        domain: "openclaw-settings",
+        errorReasons: controlErrorReasons,
+        errors: controlErrors,
+        input: restartOpenClawGatewayInputSchema,
+        inputSchemaId: "openClawSettings.restartGateway.input",
+        kind: "mutation",
+        name: "openClawSettings.restartGateway",
+        output: restartOpenClawGatewayResultSchema,
+        outputSchemaId: "openClawSettings.restartGateway.output",
+        summary:
+            "Enqueues one fixed exclusive worker-owned OpenClaw Gateway restart and confirms its durable terminal result after recent MFA.",
+        transport: mutationTransport,
+    },
 ] as const satisfies readonly ProcedureContract[];
+
+/** One-shot, same-origin secret-bearing configuration export. */
+export const openClawSettingsRawHttpContracts = (["GET", "HEAD"] as const).map(
+    (method): RawHttpContract => ({
+        access: controlAccess,
+        method,
+        path: "/api/openclaw-settings/configuration-backups/:ticketId",
+        rangeRequests: "none",
+        requestBody: { kind: "none" },
+        response: {
+            contentTypes: ["application/json"],
+            kind: "binary",
+            maximumBytes: openClawConfigurationBackupMaximumBytes,
+            transfer: "buffered",
+        },
+        statusCodes: [200, 400, 401, 403, 404, 405, 410, 429, 500, 503],
+        summary: `${method === "HEAD" ? "Inspects" : "Consumes"} one actor-bound no-store OpenClaw configuration export ticket.`,
+    })
+);

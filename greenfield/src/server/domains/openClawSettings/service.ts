@@ -1,19 +1,32 @@
 import * as v from "valibot";
 
 import {
+    type CreateOpenClawConfigurationBackupInput,
+    type CreateOpenClawConfigurationBackupResult,
     type ListOpenClawSkillsResult,
     type OpenClawConfigurationSnapshot,
+    type RestartOpenClawGatewayInput,
+    type RestartOpenClawGatewayResult,
     type SetOpenClawSkillEnabledInput,
     type SetOpenClawSkillEnabledResult,
     type UpdateOpenClawConfigurationInput,
     type UpdateOpenClawConfigurationResult,
+    createOpenClawConfigurationBackupInputSchema,
+    createOpenClawConfigurationBackupResultSchema,
     listOpenClawSkillsResultSchema,
     openClawConfigurationSnapshotSchema,
+    restartOpenClawGatewayInputSchema,
+    restartOpenClawGatewayResultSchema,
     setOpenClawSkillEnabledInputSchema,
     setOpenClawSkillEnabledResultSchema,
     updateOpenClawConfigurationInputSchema,
     updateOpenClawConfigurationResultSchema,
 } from "../../../contracts/openClawSettings.ts";
+import {
+    OpenClawConfigurationBackupError,
+    type OpenClawConfigurationBackupSource,
+    type OpenClawConfigurationBackupTicketStore,
+} from "./configurationBackup.ts";
 import {
     type OpenClawSettingsAuditContext,
     type OpenClawSettingsAuditOperation,
@@ -25,9 +38,14 @@ import {
     OpenClawSettingsProviderError,
     type OpenClawSettingsProvider,
 } from "./provider.ts";
+import {
+    OpenClawGatewayRestartQueueError,
+    type OpenClawGatewayRestartQueue,
+} from "./restartQueue.ts";
 
 export type OpenClawSettingsServiceErrorReason =
     | "audit-unavailable"
+    | "capacity"
     | "conflict"
     | "not-found"
     | "provider-data-invalid"
@@ -48,16 +66,34 @@ export class OpenClawSettingsServiceError extends Error {
     }
 }
 
-export interface OpenClawSettingsControlContext extends OpenClawSettingsAuditContext {
+export interface OpenClawSettingsControlContext extends Omit<
+    OpenClawSettingsAuditContext,
+    "actor"
+> {
+    readonly actor: {
+        readonly authenticatorId: string;
+        readonly id: string;
+        readonly kind: "user";
+    };
     /** Re-checks current session/MFA state at the provider's dispatch boundary. */
     readonly reauthorize: () => void;
 }
 
 export interface OpenClawSettingsService {
+    readonly createConfigurationBackup: (
+        input: CreateOpenClawConfigurationBackupInput,
+        context: OpenClawSettingsControlContext,
+        signal?: AbortSignal
+    ) => Promise<CreateOpenClawConfigurationBackupResult>;
     readonly getConfiguration: (
         signal?: AbortSignal
     ) => Promise<OpenClawConfigurationSnapshot>;
     readonly listSkills: (signal?: AbortSignal) => Promise<ListOpenClawSkillsResult>;
+    readonly restartGateway: (
+        input: RestartOpenClawGatewayInput,
+        context: OpenClawSettingsControlContext,
+        signal?: AbortSignal
+    ) => Promise<RestartOpenClawGatewayResult>;
     readonly setSkillEnabled: (
         input: SetOpenClawSkillEnabledInput,
         context: OpenClawSettingsControlContext,
@@ -74,6 +110,8 @@ export interface OpenClawSettingsServiceOptions {
     /** Test-only opt-out; production controls fail closed without durable audit. */
     readonly auditRequired?: boolean;
     readonly auditWriter?: OpenClawSettingsOperationAuditWriter;
+    readonly backupSource?: OpenClawConfigurationBackupSource;
+    readonly backupTickets?: OpenClawConfigurationBackupTicketStore;
     readonly onAuditSettlementFailure?: (
         failure: OpenClawSettingsAuditSettlementFailure
     ) => void;
@@ -83,6 +121,7 @@ export interface OpenClawSettingsServiceOptions {
         readonly waitMs: number;
     }) => void;
     readonly provider: OpenClawSettingsProvider;
+    readonly restartQueue?: OpenClawGatewayRestartQueue;
 }
 
 function serviceError(error: unknown): OpenClawSettingsServiceError {
@@ -122,6 +161,40 @@ function signalAbortError(signal: AbortSignal): Error {
         if (error instanceof Error) return error;
     }
     return new DOMException("The operation was aborted", "AbortError");
+}
+
+function backupServiceError(
+    error: OpenClawConfigurationBackupError
+): OpenClawSettingsServiceError {
+    switch (error.reason) {
+        case "capacity": {
+            return new OpenClawSettingsServiceError("capacity");
+        }
+        case "invalid-source": {
+            return new OpenClawSettingsServiceError("provider-data-invalid");
+        }
+        case "expired":
+        case "not-found":
+        case "unavailable": {
+            return new OpenClawSettingsServiceError("provider-unavailable");
+        }
+    }
+}
+
+function restartServiceError(
+    error: OpenClawGatewayRestartQueueError
+): OpenClawSettingsServiceError {
+    switch (error.reason) {
+        case "conflict": {
+            return new OpenClawSettingsServiceError("conflict");
+        }
+        case "unavailable": {
+            return new OpenClawSettingsServiceError("provider-unavailable");
+        }
+        case "unknown-outcome": {
+            return new OpenClawSettingsServiceError("unknown-outcome");
+        }
+    }
 }
 
 /**
@@ -382,6 +455,110 @@ export function createOpenClawSettingsService(
         }
     }
 
+    async function createConfigurationBackup(
+        input: CreateOpenClawConfigurationBackupInput,
+        context: OpenClawSettingsControlContext,
+        signal?: AbortSignal
+    ): Promise<CreateOpenClawConfigurationBackupResult> {
+        v.parse(createOpenClawConfigurationBackupInputSchema, input);
+        return await withMutationLock(signal, () =>
+            withControlAudit(
+                "create-configuration-backup",
+                "configuration:export",
+                context,
+                signal,
+                async () => {
+                    const source = options.backupSource;
+                    const tickets = options.backupTickets;
+                    if (source === undefined || tickets === undefined) {
+                        throw new OpenClawSettingsServiceError("provider-unavailable");
+                    }
+                    await Promise.resolve();
+                    signal?.throwIfAborted();
+                    context.reauthorize();
+                    signal?.throwIfAborted();
+                    try {
+                        const bytes = await source.read(signal);
+                        signal?.throwIfAborted();
+                        return v.parse(
+                            createOpenClawConfigurationBackupResultSchema,
+                            tickets.issue(context.actor, bytes)
+                        );
+                    } catch (error) {
+                        if (signal?.aborted) throw error;
+                        if (error instanceof OpenClawConfigurationBackupError) {
+                            throw backupServiceError(error);
+                        }
+                        if (error instanceof v.ValiError) {
+                            throw new OpenClawSettingsServiceError(
+                                "provider-data-invalid"
+                            );
+                        }
+                        throw new OpenClawSettingsServiceError("provider-unavailable");
+                    }
+                }
+            )
+        );
+    }
+
+    async function restartGateway(
+        input: RestartOpenClawGatewayInput,
+        context: OpenClawSettingsControlContext,
+        signal?: AbortSignal
+    ): Promise<RestartOpenClawGatewayResult> {
+        const parsed = v.parse(restartOpenClawGatewayInputSchema, input);
+        return await withMutationLock(signal, () =>
+            withControlAudit(
+                "restart-gateway",
+                "gateway:lifecycle",
+                context,
+                signal,
+                async () => {
+                    const queue = options.restartQueue;
+                    if (queue === undefined) {
+                        throw new OpenClawSettingsServiceError("provider-unavailable");
+                    }
+                    let authorizationFailed = false;
+                    let authorizationFailure: unknown;
+                    try {
+                        const result = await queue.restart({
+                            actor: context.actor,
+                            authorizeDispatch: async () => {
+                                await Promise.resolve();
+                                try {
+                                    signal?.throwIfAborted();
+                                    context.reauthorize();
+                                    signal?.throwIfAborted();
+                                } catch (error) {
+                                    authorizationFailed = true;
+                                    authorizationFailure = error;
+                                    throw error;
+                                }
+                            },
+                            idempotencyKey: parsed.idempotencyKey,
+                            requestId: context.requestId,
+                            ...signalOptions(signal),
+                        });
+                        if (authorizationFailed) throw authorizationFailure;
+                        return v.parse(restartOpenClawGatewayResultSchema, result);
+                    } catch (error) {
+                        if (authorizationFailed && error === authorizationFailure) {
+                            throw error;
+                        }
+                        if (error instanceof OpenClawGatewayRestartQueueError) {
+                            throw restartServiceError(error);
+                        }
+                        if (signal?.aborted) throw error;
+                        if (error instanceof v.ValiError) {
+                            throw new OpenClawSettingsServiceError("unknown-outcome");
+                        }
+                        throw new OpenClawSettingsServiceError("provider-unavailable");
+                    }
+                }
+            )
+        );
+    }
+
     async function updateConfiguration(
         input: UpdateOpenClawConfigurationInput,
         context: OpenClawSettingsControlContext,
@@ -438,8 +615,10 @@ export function createOpenClawSettingsService(
     }
 
     return Object.freeze({
+        createConfigurationBackup,
         getConfiguration,
         listSkills,
+        restartGateway,
         setSkillEnabled,
         updateConfiguration,
     });

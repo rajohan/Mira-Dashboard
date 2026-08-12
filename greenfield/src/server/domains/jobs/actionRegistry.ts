@@ -16,6 +16,7 @@ import {
     jobResourceClassSchema,
     jobResourceKeysSchema,
     jobRunEventProgressSchema,
+    jobTimestampSchema,
     jobTimeoutSchema,
     scheduleConfigurationSchema,
     scheduleIdSchema,
@@ -41,6 +42,14 @@ export const moltbookDashboardCacheJobScheduleId = "cache.moltbook-dashboard";
 export const workspaceFileWriteJobActionKey = "workspace-files.apply-write";
 /** Retry-safe worker action backed by a durable replace intent and atomic exchange. */
 export const workspaceFileReplaceJobActionKey = "workspace-files.apply-replacement";
+/** Fixed non-retryable worker action for one operator-requested Gateway restart. */
+export const openClawGatewayRestartJobActionKey = "openclaw.gateway.restart";
+
+/** Secret-free terminal payload persisted by the fixed Gateway restart executor. */
+export const openClawGatewayRestartJobResultSchema = v.strictObject({
+    completedAtMs: jobTimestampSchema,
+    status: v.literal("restarted", "OpenClaw Gateway restart result is invalid"),
+});
 
 export type JobCacheAttemptCommit =
     | {
@@ -371,6 +380,23 @@ export const workspaceFileReplaceJobActionDefinition =
         resourceKeys: Object.freeze(["workspace.files"]),
         retrySafe: true,
         timeoutMs: 2 * 60_000,
+    });
+
+/** Exclusive non-cancellable action that must never be replayed after an uncertain claim. */
+export const openClawGatewayRestartJobActionDefinition =
+    validateJobUnscheduledActionDefinition({
+        actionKey: openClawGatewayRestartJobActionKey,
+        attemptLimit: 1,
+        cancellationPolicy: "never",
+        description:
+            "Restarts the OpenClaw Gateway through one fixed worker-owned command.",
+        displayName: "Restart OpenClaw Gateway",
+        manualExposure: "none",
+        priority: 20,
+        resourceClass: "exclusive",
+        resourceKeys: Object.freeze(["openclaw.gateway"]),
+        retrySafe: false,
+        timeoutMs: 60_000,
     });
 
 /** Complete reviewed pure-definition registry for this slice. */

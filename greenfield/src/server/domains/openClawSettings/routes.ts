@@ -1,10 +1,14 @@
 import { TRPCError } from "@trpc/server";
 
 import {
+    createOpenClawConfigurationBackupInputSchema,
+    createOpenClawConfigurationBackupResultSchema,
     getOpenClawConfigurationInputSchema,
     listOpenClawSkillsInputSchema,
     listOpenClawSkillsResultSchema,
     openClawConfigurationSnapshotSchema,
+    restartOpenClawGatewayInputSchema,
+    restartOpenClawGatewayResultSchema,
     setOpenClawSkillEnabledInputSchema,
     setOpenClawSkillEnabledResultSchema,
     updateOpenClawConfigurationInputSchema,
@@ -86,6 +90,13 @@ function controlContext(
 function throwServiceFailure(error: unknown): never {
     if (!(error instanceof OpenClawSettingsServiceError)) throw error;
     switch (error.reason) {
+        case "capacity": {
+            throw new TRPCError({
+                cause: error,
+                code: "TOO_MANY_REQUESTS",
+                message: "OpenClaw configuration export capacity is exhausted",
+            });
+        }
         case "conflict": {
             throw new TRPCError({
                 cause: error,
@@ -122,6 +133,21 @@ const controlProcedure = sessionCapabilityProcedure("openclaw-settings:write");
 
 /** Session-only secret-free settings reads and recent-MFA exact controls. */
 export const openClawSettingsRoutes = {
+    createConfigurationBackup: controlProcedure
+        .input(createOpenClawConfigurationBackupInputSchema)
+        .output(createOpenClawConfigurationBackupResultSchema)
+        .mutation(async ({ ctx, input, signal }) => {
+            authorizeMutation(ctx);
+            try {
+                return await service(ctx).createConfigurationBackup(
+                    input,
+                    controlContext(ctx),
+                    signal
+                );
+            } catch (error) {
+                return throwServiceFailure(error);
+            }
+        }),
     getConfiguration: readProcedure
         .input(getOpenClawConfigurationInputSchema)
         .output(openClawConfigurationSnapshotSchema)
@@ -138,6 +164,21 @@ export const openClawSettingsRoutes = {
         .query(async ({ ctx, signal }) => {
             try {
                 return await service(ctx).listSkills(signal);
+            } catch (error) {
+                return throwServiceFailure(error);
+            }
+        }),
+    restartGateway: controlProcedure
+        .input(restartOpenClawGatewayInputSchema)
+        .output(restartOpenClawGatewayResultSchema)
+        .mutation(async ({ ctx, input, signal }) => {
+            authorizeMutation(ctx);
+            try {
+                return await service(ctx).restartGateway(
+                    input,
+                    controlContext(ctx),
+                    signal
+                );
             } catch (error) {
                 return throwServiceFailure(error);
             }

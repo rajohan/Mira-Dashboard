@@ -160,8 +160,10 @@ export function createTestOpenClawCronService(): OpenClawCronService {
  */
 export function createTestOpenClawSettingsService(): OpenClawSettingsService {
     return Object.freeze({
+        createConfigurationBackup: unavailableOpenClawSettingsCall,
         getConfiguration: unavailableOpenClawSettingsCall,
         listSkills: unavailableOpenClawSettingsCall,
+        restartGateway: unavailableOpenClawSettingsCall,
         setSkillEnabled: unavailableOpenClawSettingsCall,
         updateConfiguration: unavailableOpenClawSettingsCall,
     });

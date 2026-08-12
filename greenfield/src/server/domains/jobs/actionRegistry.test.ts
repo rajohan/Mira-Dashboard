@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import {
     findJobActionDefinition,
     isRegisteredJobSchedule,
+    openClawGatewayRestartJobActionDefinition,
     parseJobActionOutputMessage,
     parseJobActionProgress,
     validateJobActionRegistration,
@@ -125,5 +126,20 @@ describe("durable job action registry", () => {
             attemptLimit: 3,
             retrySafe: true,
         });
+    });
+
+    test("publishes the fixed restart as exclusive and never retryable", () => {
+        expect(openClawGatewayRestartJobActionDefinition).toMatchObject({
+            actionKey: "openclaw.gateway.restart",
+            attemptLimit: 1,
+            cancellationPolicy: "never",
+            manualExposure: "none",
+            resourceClass: "exclusive",
+            resourceKeys: ["openclaw.gateway"],
+            retrySafe: false,
+        });
+        expect(openClawGatewayRestartJobActionDefinition).not.toHaveProperty(
+            "scheduleId"
+        );
     });
 });

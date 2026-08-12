@@ -6,6 +6,7 @@ import {
     listWorkspaceFilesInputSchema,
     listWorkspaceFilesOutputSchema,
     prepareWorkspaceFileUploadInputSchema,
+    workspaceFileContentTicketSchema,
     workspaceFileEntrySchema,
     workspaceFileLimits,
     workspaceFileNameSchema,
@@ -28,6 +29,34 @@ describe("workspace files contracts", () => {
                 writable: false,
             }).success
         ).toBe(true);
+    });
+
+    test("accepts only internally consistent bounded-prefix content tickets", () => {
+        const ticket = {
+            disposition: "preview",
+            expiresAtMs: 1_900_000_000_000,
+            fileName: "agentmail.ts",
+            mimeType: "text/plain",
+            previewKind: "text",
+            revision,
+            sizeBytes: workspaceFileLimits.maximumTextPreviewBytes,
+            sourceSizeBytes: workspaceFileLimits.maximumManifestFileBytes + 1,
+            ticketId: "33333333-3333-4333-8333-333333333333",
+            truncated: true,
+            url: "/api/files/content/33333333-3333-4333-8333-333333333333",
+        } as const;
+
+        expect(v.parse(workspaceFileContentTicketSchema, ticket)).toEqual(ticket);
+        for (const invalid of [
+            { ...ticket, sourceSizeBytes: ticket.sizeBytes },
+            {
+                ...ticket,
+                sizeBytes: workspaceFileLimits.maximumTextPreviewBytes + 1,
+            },
+            { ...ticket, truncated: undefined },
+        ]) {
+            expect(() => v.parse(workspaceFileContentTicketSchema, invalid)).toThrow();
+        }
     });
     test("publishes bounded session reads and recent-MFA worker writes", () => {
         expect(

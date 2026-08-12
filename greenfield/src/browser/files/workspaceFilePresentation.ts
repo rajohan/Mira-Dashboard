@@ -171,6 +171,7 @@ export function workspaceFileFailureMessage(error: unknown): string {
  */
 export function workspaceFileKindLabel(entry: WorkspaceFileEntry): string {
     if (entry.kind === "directory") return "Folder";
+    if (entry.truncated === true) return "Prefix";
     switch (entry.previewKind) {
         case "audio": {
             return "Audio";

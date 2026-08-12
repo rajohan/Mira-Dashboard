@@ -1,5 +1,6 @@
 import { Cause, Effect, Exit, Fiber, ManagedRuntime } from "effect";
 
+import type { OpenClawGatewayLifecycleExecutionPort } from "../../../shared/openClawGatewayLifecycle.ts";
 import type {
     TaskNotificationChatSender,
     TaskNotificationQueue,
@@ -38,6 +39,7 @@ export interface DashboardWorkerRuntimeOptions {
     readonly database: DatabaseRuntimeLayerOptions;
     readonly logMaintenance: LogMaintenanceExecutionPort;
     readonly moltbook: MoltbookDashboardCollector;
+    readonly openClawGateway: OpenClawGatewayLifecycleExecutionPort;
     readonly workspaceFiles?: WorkspaceFileWriteExecutionPort & {
         readonly dispose: () => Promise<void> | void;
     };
@@ -400,6 +402,7 @@ export function createDashboardWorkerRuntime(
             const findAction = createJobWorkerActionResolver({
                 logMaintenance: options.logMaintenance,
                 moltbook: options.moltbook,
+                openClawGateway: options.openClawGateway,
                 ...(options.workspaceFiles === undefined
                     ? {}
                     : { workspaceFiles: options.workspaceFiles }),

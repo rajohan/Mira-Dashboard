@@ -58,6 +58,8 @@ export interface WorkspaceFileContentMetadata {
     readonly previewKind: WorkspaceFileContentTicket["previewKind"];
     readonly revision: string;
     readonly sizeBytes: number;
+    readonly sourceSizeBytes?: number;
+    readonly truncated?: true;
 }
 
 export interface WorkspaceFileUploadMetadata {
@@ -252,7 +254,12 @@ function completeFileNode(node: WorkspaceFileNode): asserts node is WorkspaceFil
         node.kind !== "file" ||
         node.mimeType === undefined ||
         node.previewKind === undefined ||
-        node.sizeBytes === undefined
+        node.sizeBytes === undefined ||
+        (node.truncated === true &&
+            (node.sourceSizeBytes === undefined ||
+                node.sourceSizeBytes <= node.sizeBytes ||
+                node.sizeBytes > workspaceFileLimits.maximumTextPreviewBytes)) ||
+        (node.truncated !== true && node.sourceSizeBytes !== undefined)
     ) {
         throw new WorkspaceFileError("not-file");
     }
@@ -268,7 +275,9 @@ function sameContentMetadata(
         node.mimeType === ticket.mimeType &&
         node.previewKind === ticket.previewKind &&
         node.revision === ticket.revision &&
-        node.sizeBytes === ticket.sizeBytes
+        node.sizeBytes === ticket.sizeBytes &&
+        node.sourceSizeBytes === ticket.sourceSizeBytes &&
+        node.truncated === ticket.truncated
     );
 }
 
@@ -288,6 +297,7 @@ function entryOutput(
         resourceId,
         revision: node.revision,
         ...(node.sizeBytes === undefined ? {} : { sizeBytes: node.sizeBytes }),
+        ...(node.truncated === true ? { truncated: true as const } : {}),
         writable: node.writable,
     };
 }
@@ -742,6 +752,10 @@ export function createWorkspaceFilesService(
             previewKind: record.ticket.previewKind,
             revision: record.ticket.revision,
             sizeBytes: record.ticket.sizeBytes,
+            ...(record.ticket.sourceSizeBytes === undefined
+                ? {}
+                : { sourceSizeBytes: record.ticket.sourceSizeBytes }),
+            ...(record.ticket.truncated === true ? { truncated: true as const } : {}),
         };
     }
 
@@ -781,7 +795,11 @@ export function createWorkspaceFilesService(
             previewKind: node.previewKind,
             revision: node.revision,
             sizeBytes: node.sizeBytes,
+            ...(node.sourceSizeBytes === undefined
+                ? {}
+                : { sourceSizeBytes: node.sourceSizeBytes }),
             ticketId,
+            ...(node.truncated === true ? { truncated: true as const } : {}),
             url: `/api/files/content/${ticketId}`,
         });
         contentTickets.set(ticketId, {
@@ -1320,7 +1338,9 @@ export function createWorkspaceFilesService(
                 result.mimeType !== record.ticket.mimeType ||
                 result.previewKind !== record.ticket.previewKind ||
                 result.revision !== record.ticket.revision ||
-                result.sizeBytes !== record.ticket.sizeBytes
+                result.sizeBytes !== record.ticket.sizeBytes ||
+                result.sourceSizeBytes !== record.ticket.sourceSizeBytes ||
+                result.truncated !== record.ticket.truncated
             ) {
                 throw new WorkspaceFileError("conflict");
             }
@@ -1332,6 +1352,10 @@ export function createWorkspaceFilesService(
                 previewKind: result.previewKind,
                 revision: result.revision,
                 sizeBytes: result.sizeBytes,
+                ...(result.sourceSizeBytes === undefined
+                    ? {}
+                    : { sourceSizeBytes: result.sourceSizeBytes }),
+                ...(result.truncated === true ? { truncated: true as const } : {}),
             };
         },
     });

@@ -169,6 +169,52 @@ export function OpenClawSettingsPanel() {
             </div>
 
             <div className="mt-8 grid gap-8">
+                <section
+                    aria-labelledby="openclaw-operations-title"
+                    className="rounded-lg border border-slate-700 p-5"
+                >
+                    <h2
+                        className="text-lg font-semibold text-slate-100"
+                        id="openclaw-operations-title"
+                    >
+                        Configuration backup and Gateway restart
+                    </h2>
+                    <p className="mt-2 max-w-3xl text-sm text-slate-300">
+                        Download a one-time recoverable copy of the exact OpenClaw
+                        configuration, or enqueue the fixed worker-owned Gateway restart.
+                        Both actions require recent multi-factor authentication and are
+                        audited.
+                    </p>
+                    <div className="mt-4 flex flex-wrap gap-3">
+                        <Button
+                            busy={mutations.backup.isPending}
+                            busyLabel="Preparing backup…"
+                            disabled={mutations.isBusy && !mutations.backup.isPending}
+                            onClick={() => void mutations.backup.mutateAsync().catch(() => {})}
+                            variant="secondary"
+                        >
+                            Download configuration backup
+                        </Button>
+                        <Button
+                            busy={mutations.restart.isPending}
+                            busyLabel="Restarting Gateway…"
+                            disabled={mutations.isBusy && !mutations.restart.isPending}
+                            onClick={() => {
+                                if (
+                                    globalThis.confirm(
+                                        "Restart the OpenClaw Gateway now? Active Gateway requests may be interrupted."
+                                    )
+                                ) {
+                                    void mutations.restart.mutateAsync().catch(() => {});
+                                }
+                            }}
+                            variant="danger"
+                        >
+                            Restart OpenClaw Gateway
+                        </Button>
+                    </div>
+                </section>
+
                 <section aria-label="OpenClaw configuration">
                     {configurationQuery.isPending && (
                         <LoadingState label="Loading OpenClaw configuration…" />

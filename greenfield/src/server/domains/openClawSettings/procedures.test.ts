@@ -52,6 +52,13 @@ function testService(
     contexts: OpenClawSettingsControlContext[] = []
 ): OpenClawSettingsService {
     return {
+        createConfigurationBackup: () =>
+            Promise.resolve({
+                downloadUrl:
+                    "/api/openclaw-settings/configuration-backups/00000000-0000-4000-8000-000000000001",
+                expiresAtMs: 1,
+                ticketId: "00000000-0000-4000-8000-000000000001",
+            }),
         getConfiguration: () => {
             calls.push("get-configuration");
             return Promise.resolve(configuration);
@@ -60,6 +67,12 @@ function testService(
             calls.push("list-skills");
             return Promise.resolve(skills);
         },
+        restartGateway: () =>
+            Promise.resolve({
+                completedAtMs: 1,
+                jobRunId: "019ff1c6-1a9b-7770-8f1b-d5b863b0e7b4",
+                status: "restarted",
+            }),
         setSkillEnabled: (input, context) => {
             context.reauthorize();
             contexts.push(context);

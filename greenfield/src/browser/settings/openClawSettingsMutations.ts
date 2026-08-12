@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import type {
     DashboardProcedureInput,
@@ -59,6 +59,7 @@ export function useOpenClawSettingsMutations() {
     const [reconciliationRequired, setReconciliationRequired] = useState(false);
     const [reconciliationBusy, setReconciliationBusy] = useState(false);
     const [snapshotGeneration, setSnapshotGeneration] = useState(0);
+    const restartIdempotencyKey = useRef<string | undefined>(undefined);
 
     async function refreshCurrentState(successMessage?: string): Promise<boolean> {
         if (!boundary.completionIsCurrent()) return false;
@@ -175,16 +176,96 @@ export function useOpenClawSettingsMutations() {
         retry: false,
     });
 
+    const backup = useMutation<
+        DashboardProcedureOutput<"openClawSettings.createConfigurationBackup">,
+        Error,
+        void
+    >({
+        mutationFn: () =>
+            boundary.run((signal) =>
+                client.mutation(
+                    "openClawSettings.createConfigurationBackup",
+                    { confirmation: "export-openclaw-configuration" },
+                    { signal }
+                )
+            ),
+        mutationKey: [...openClawSettingsMutationKey, "configuration-backup"],
+        onError: (mutationError) => {
+            if (!boundary.completionIsCurrent()) return;
+            setError(dashboardBrowserFailureMessage(mutationError));
+        },
+        onMutate: () => {
+            setError(undefined);
+            setNotice(undefined);
+        },
+        onSuccess: (result) => {
+            if (!boundary.completionIsCurrent()) return;
+            const anchor = document.createElement("a");
+            anchor.download = "";
+            anchor.href = result.downloadUrl;
+            anchor.rel = "noopener";
+            document.body.append(anchor);
+            anchor.click();
+            anchor.remove();
+            setNotice("OpenClaw configuration backup download started.");
+        },
+        retry: false,
+    });
+
+    const restart = useMutation<
+        DashboardProcedureOutput<"openClawSettings.restartGateway">,
+        Error,
+        void
+    >({
+        mutationFn: () => {
+            const idempotencyKey =
+                restartIdempotencyKey.current ?? crypto.randomUUID();
+            restartIdempotencyKey.current = idempotencyKey;
+            return boundary.run((signal) =>
+                client.mutation(
+                    "openClawSettings.restartGateway",
+                    {
+                        confirmation: "restart-openclaw-gateway",
+                        idempotencyKey,
+                    },
+                    { signal }
+                )
+            );
+        },
+        mutationKey: [...openClawSettingsMutationKey, "gateway-restart"],
+        onError: (mutationError) => {
+            if (!boundary.completionIsCurrent()) return;
+            setError(mutationFailureMessage(mutationError));
+        },
+        onMutate: () => {
+            setError(undefined);
+            setNotice(undefined);
+        },
+        onSuccess: () => {
+            if (!boundary.completionIsCurrent()) return;
+            restartIdempotencyKey.current = undefined;
+            setNotice("OpenClaw Gateway restart completed.");
+        },
+        retry: false,
+    });
+
     return {
+        backup,
         clearError: () => setError(undefined),
         clearNotice: () => setNotice(undefined),
         configuration,
         error,
-        isBusy: configuration.isPending || skill.isPending || reconciliationBusy,
+        isBusy:
+            backup.isPending ||
+            configuration.isPending ||
+            restart.isPending ||
+            skill.isPending ||
+            reconciliationBusy,
         notice,
         reconcile: () => refreshCurrentState(),
         reconciliationBusy,
         reconciliationRequired,
+        restart,
         skill,
         snapshotGeneration,
     };

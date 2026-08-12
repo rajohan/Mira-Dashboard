@@ -289,12 +289,7 @@ function manifestNodeIsSafe(
     const key = locatorKey(segments);
     if (root.manifest.directories.has(key)) return stat.isDirectory();
     const entry = root.manifest.files.get(key);
-    return (
-        entry !== undefined &&
-        stat.isFile() &&
-        stat.nlink === 1n &&
-        stat.size <= BigInt(entry.maximumSizeBytes)
-    );
+    return entry !== undefined && stat.isFile() && stat.nlink === 1n;
 }
 
 function rootNodeIsSafe(root: OpenRoot, stat: Fs.BigIntStats): boolean {
@@ -556,6 +551,34 @@ function readExact(fd: number, sizeBytes: number, signal?: AbortSignal): Uint8Ar
     return bytes;
 }
 
+function stablePrefixBytes(
+    locator: WorkspaceFileLocator,
+    root: OpenRoot,
+    fd: number,
+    stat: Fs.BigIntStats,
+    sizeBytes: number,
+    signal?: AbortSignal
+): Uint8Array {
+    const revision = workspaceFileRevisionForStat(root.id, locator.segments, stat);
+    const bytes = readExact(fd, sizeBytes, signal);
+    const after = Fs.fstatSync(fd, { bigint: true });
+    if (
+        !manifestNodeIsSafe(root, locator.segments, after) ||
+        workspaceFileRevisionForStat(root.id, locator.segments, after) !== revision
+    ) {
+        throw new WorkspaceFileError("conflict");
+    }
+    return bytes;
+}
+
+function utf8SafePrefix(bytes: Uint8Array): Uint8Array {
+    for (let removed = 0; removed <= Math.min(3, bytes.byteLength); removed += 1) {
+        const candidate = bytes.subarray(0, bytes.byteLength - removed);
+        if (isUtf8Text(candidate)) return candidate;
+    }
+    return bytes;
+}
+
 function redactManifestJson(bytes: Uint8Array): Uint8Array {
     let content: string;
     try {
@@ -609,6 +632,8 @@ function nodeFromStat(
         readonly mimeType?: string;
         readonly previewKind?: WorkspaceFilePreviewKind;
         readonly sizeBytes?: number;
+        readonly sourceSizeBytes?: number;
+        readonly truncated?: true;
     } = {}
 ): WorkspaceFileNode {
     if (stat.isDirectory()) {
@@ -620,8 +645,12 @@ function nodeFromStat(
             writable: root.writable,
         };
     }
-    const sizeBytes = presentation.sizeBytes ?? numberSize(stat);
+    const sourceSizeBytes = numberSize(stat);
     const entry = manifestEntry(root, locator.segments);
+    const truncated =
+        presentation.truncated === true ||
+        (entry !== undefined && sourceSizeBytes > entry.maximumSizeBytes);
+    const sizeBytes = presentation.sizeBytes ?? sourceSizeBytes;
     return {
         kind: "file",
         locator,
@@ -638,11 +667,15 @@ function nodeFromStat(
             : {}),
         revision: workspaceFileRevisionForStat(root.id, locator.segments, stat),
         sizeBytes,
+        ...(presentation.sourceSizeBytes === undefined
+            ? {}
+            : { sourceSizeBytes: presentation.sourceSizeBytes }),
+        ...(truncated ? { truncated: true as const } : {}),
         ...(entry?.uploadContentPolicy === undefined
             ? {}
             : { uploadContentPolicy: entry.uploadContentPolicy }),
         ...(entry === undefined ? {} : { writeMaximumSizeBytes: entry.maximumSizeBytes }),
-        writable: entry?.writable ?? root.writable,
+        writable: (entry?.writable ?? root.writable) && !truncated,
     };
 }
 
@@ -657,11 +690,36 @@ function openedFilePresentation(
     readonly mimeType: string;
     readonly previewKind: WorkspaceFilePreviewKind;
     readonly sizeBytes?: number;
+    readonly sourceSizeBytes?: number;
+    readonly truncated?: true;
 } {
     const fileName = locator.segments.at(-1);
     if (fileName === undefined) throw new WorkspaceFileError("not-file");
     const redacted = stableManifestBytes(locator, root, fd, stat, signal, contentAccess);
     const sourceSizeBytes = numberSize(stat);
+    const entry = manifestEntry(root, locator.segments);
+    if (
+        redacted === undefined &&
+        entry !== undefined &&
+        sourceSizeBytes > entry.maximumSizeBytes
+    ) {
+        const prefix = utf8SafePrefix(
+            stablePrefixBytes(
+                locator,
+                root,
+                fd,
+                stat,
+                workspaceFileLimits.maximumTextPreviewBytes,
+                signal
+            )
+        );
+        return {
+            ...contentPresentation(fileName, prefix, prefix.byteLength),
+            sizeBytes: prefix.byteLength,
+            sourceSizeBytes,
+            truncated: true,
+        };
+    }
     const bytes = redacted ?? readPrefix(fd, sourceSizeBytes);
     const presentationSizeBytes = Math.max(
         sourceSizeBytes,
@@ -709,7 +767,7 @@ async function inspectChild(
             } catch (error) {
                 if (
                     !(error instanceof WorkspaceFileError) ||
-                    error.reason !== "unavailable"
+                    (error.reason !== "too-large" && error.reason !== "unavailable")
                 ) {
                     throw error;
                 }
@@ -970,8 +1028,28 @@ export function createDescriptorWorkspaceFileReader(
                     contentAccess
                 );
                 const sourceSizeBytes = numberSize(opened.stat);
-                const sizeBytes = redactedBytes?.byteLength ?? sourceSizeBytes;
-                const presentationSizeBytes = Math.max(sourceSizeBytes, sizeBytes);
+                const entry = manifestEntry(opened.root, locator.segments);
+                const truncated =
+                    redactedBytes === undefined &&
+                    entry !== undefined &&
+                    sourceSizeBytes > entry.maximumSizeBytes;
+                const prefixBytes = truncated
+                    ? utf8SafePrefix(
+                          stablePrefixBytes(
+                              locator,
+                              opened.root,
+                              opened.fd,
+                              opened.stat,
+                              workspaceFileLimits.maximumTextPreviewBytes,
+                              signal
+                          )
+                      )
+                    : undefined;
+                const materializedBytes = redactedBytes ?? prefixBytes;
+                const sizeBytes = materializedBytes?.byteLength ?? sourceSizeBytes;
+                const presentationSizeBytes = truncated
+                    ? sizeBytes
+                    : Math.max(sourceSizeBytes, sizeBytes);
                 if (sizeBytes > workspaceFileLimits.maximumDownloadBytes) {
                     throw new WorkspaceFileError("too-large");
                 }
@@ -991,7 +1069,7 @@ export function createDescriptorWorkspaceFileReader(
                 const length = endExclusive - start;
                 let bytes: Uint8Array;
                 let offset: number;
-                if (redactedBytes === undefined) {
+                if (materializedBytes === undefined) {
                     bytes = Buffer.alloc(length);
                     offset = 0;
                     while (offset < length) {
@@ -1007,7 +1085,7 @@ export function createDescriptorWorkspaceFileReader(
                         offset += count;
                     }
                 } else {
-                    bytes = redactedBytes.slice(start, endExclusive);
+                    bytes = materializedBytes.slice(start, endExclusive);
                     offset = bytes.byteLength;
                 }
                 const after = Fs.fstatSync(opened.fd, { bigint: true });
@@ -1024,7 +1102,9 @@ export function createDescriptorWorkspaceFileReader(
                 const fileName = locator.segments.at(-1);
                 if (fileName === undefined) throw new WorkspaceFileError("not-file");
                 let prefix: Uint8Array;
-                if (start === 0) {
+                if (prefixBytes !== undefined) {
+                    prefix = prefixBytes;
+                } else if (start === 0) {
                     prefix = bytes.subarray(0, Math.min(bytes.length, contentSniffBytes));
                 } else if (redactedBytes === undefined) {
                     prefix = readPrefix(opened.fd, sizeBytes);
@@ -1045,6 +1125,7 @@ export function createDescriptorWorkspaceFileReader(
                     ...presentation,
                     revision,
                     sizeBytes,
+                    ...(truncated ? { sourceSizeBytes, truncated: true as const } : {}),
                 };
             } finally {
                 await opened.close();

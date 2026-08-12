@@ -60,9 +60,17 @@ function entryIcon(entry: WorkspaceFileEntry) {
 
 function primaryActionLabel(entry: WorkspaceFileEntry): string {
     if (entry.kind === "directory") return `Open folder ${entry.name}`;
+    if (entry.truncated === true) return `Preview prefix of ${entry.name}`;
     return entry.previewKind === undefined || entry.previewKind === "download-only"
         ? `Download ${entry.name}`
         : `Preview ${entry.name}`;
+}
+
+function previewAvailable(entry: WorkspaceFileEntry): boolean {
+    return (
+        entry.truncated === true ||
+        (entry.previewKind !== undefined && entry.previewKind !== "download-only")
+    );
 }
 
 const workspaceFileColumns = workspaceFileColumnHelper.columns([
@@ -76,13 +84,10 @@ const workspaceFileColumns = workspaceFileColumnHelper.columns([
                     onClick={() => {
                         if (entry.kind === "directory") {
                             row.original.onOpenDirectory(entry);
-                        } else if (
-                            entry.previewKind === undefined ||
-                            entry.previewKind === "download-only"
-                        ) {
-                            row.original.onDownload(entry);
-                        } else {
+                        } else if (previewAvailable(entry)) {
                             row.original.onPreview(entry);
+                        } else {
+                            row.original.onDownload(entry);
                         }
                     }}
                     size="sm"
@@ -140,25 +145,36 @@ const workspaceFileColumns = workspaceFileColumnHelper.columns([
         cell: ({ row }) => {
             const { entry } = row.original;
             if (entry.kind === "directory") return null;
-            const previewAvailable =
-                entry.previewKind !== undefined && entry.previewKind !== "download-only";
+            const canPreview = previewAvailable(entry);
             return (
                 <div className="flex flex-wrap gap-1">
-                    {previewAvailable && (
+                    {canPreview && (
                         <IconOnlyButton
                             icon={Eye}
-                            label={`Preview ${entry.name}`}
+                            label={
+                                entry.truncated === true
+                                    ? `Preview prefix of ${entry.name}`
+                                    : `Preview ${entry.name}`
+                            }
                             onClick={() => row.original.onPreview(entry)}
                             variant="ghost"
                         />
                     )}
-                    <IconOnlyButton
-                        icon={Download}
-                        label={`Download ${entry.name}`}
-                        onClick={() => row.original.onDownload(entry)}
-                        variant="ghost"
-                    />
-                    {entry.writable && (
+                    {!(
+                        entry.truncated === true && entry.requiresSecretReveal === true
+                    ) && (
+                        <IconOnlyButton
+                            icon={Download}
+                            label={
+                                entry.truncated === true
+                                    ? `Download prefix of ${entry.name}`
+                                    : `Download ${entry.name}`
+                            }
+                            onClick={() => row.original.onDownload(entry)}
+                            variant="ghost"
+                        />
+                    )}
+                    {entry.writable && entry.truncated !== true && (
                         <IconOnlyButton
                             icon={Pencil}
                             label={`Replace ${entry.name}`}

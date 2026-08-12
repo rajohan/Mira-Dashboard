@@ -27,7 +27,7 @@ export type WorkspaceFileUploadContentPolicy = "reject-redaction-sentinel";
 /** One exact regular file made visible beneath an otherwise opaque root. */
 export interface WorkspaceFileManifestEntry {
     readonly contentPolicy: WorkspaceFileManifestContentPolicy;
-    /** Source/list/replacement ceiling; presentation retains its separate preview limit. */
+    /** Full-redaction/replacement ceiling; larger exact sources are prefix-readable only. */
     readonly maximumSizeBytes: number;
     readonly segments: readonly string[];
     readonly uploadContentPolicy: WorkspaceFileUploadContentPolicy;
@@ -51,6 +51,9 @@ export interface WorkspaceFileNode {
     readonly requiresSecretReveal?: boolean;
     readonly revision: string;
     readonly sizeBytes?: number;
+    /** Full descriptor source size when `sizeBytes` is a bounded transfer prefix. */
+    readonly sourceSizeBytes?: number;
+    readonly truncated?: true;
     readonly uploadContentPolicy?: WorkspaceFileUploadContentPolicy;
     readonly writeMaximumSizeBytes?: number;
     readonly writable: boolean;
@@ -76,6 +79,8 @@ export interface WorkspaceFileReadResult {
     readonly previewKind: WorkspaceFilePreviewKind;
     readonly revision: string;
     readonly sizeBytes: number;
+    readonly sourceSizeBytes?: number;
+    readonly truncated?: true;
 }
 
 /** Web-safe descriptor-rooted read port. It has no workspace mutation method. */
