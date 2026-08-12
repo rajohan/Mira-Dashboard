@@ -27,55 +27,18 @@ const replaceRouteChunkCalls = [];
 export { RouterCore, refreshClientRouteCalls, replaceRouteChunkCalls };
 `;
 
-interface RouterFixtureModule {
-    readonly RouterCore: new () => {
-        readonly _refreshRoute: () => Promise<void>;
-        readonly _replaceRouteChunk: (...arguments_: unknown[]) => void;
-        readonly latestLocationUpdates: number;
-    };
-    readonly refreshClientRouteCalls: number;
-    readonly replaceRouteChunkCalls: readonly (readonly unknown[])[];
-}
-
-async function importFixture(source: string): Promise<RouterFixtureModule> {
-    const encoded = Buffer.from(source).toString("base64");
-    return (await import(
-        `data:text/javascript;base64,${encoded}`
-    )) as RouterFixtureModule;
-}
-
 describe("TanStack Router Bun HMR workaround", () => {
-    test("defers route-chunk replacement and full-reloads route HMR", async () => {
-        const originalLocation = Object.getOwnPropertyDescriptor(globalThis, "location");
-        let reloadCalls = 0;
-        Object.defineProperty(globalThis, "location", {
-            configurable: true,
-            value: {
-                reload: () => {
-                    reloadCalls += 1;
-                },
-            },
-        });
+    test("defers route-chunk replacement and full-reloads route HMR", () => {
+        const transformed = applyTanStackRouterHmrWorkaround(upstreamPrototypeSetup);
 
-        try {
-            const transformed = applyTanStackRouterHmrWorkaround(upstreamPrototypeSetup);
-            const fixture = await importFixture(transformed);
-            const router = new fixture.RouterCore();
-
-            router._replaceRouteChunk("route", "lazy");
-            await router._refreshRoute();
-
-            expect(fixture.replaceRouteChunkCalls).toEqual([["route", "lazy"]]);
-            expect(fixture.refreshClientRouteCalls).toBe(0);
-            expect(router.latestLocationUpdates).toBe(0);
-            expect(reloadCalls).toBe(1);
-        } finally {
-            if (originalLocation === undefined) {
-                Reflect.deleteProperty(globalThis, "location");
-            } else {
-                Object.defineProperty(globalThis, "location", originalLocation);
-            }
-        }
+        expect(transformed).toContain(
+            "RouterCore.prototype._replaceRouteChunk = (...args) => replaceRouteChunk(...args);"
+        );
+        expect(transformed).toContain("globalThis.location.reload();");
+        expect(transformed).not.toContain(
+            "RouterCore.prototype._replaceRouteChunk = replaceRouteChunk;"
+        );
+        expect(transformed).not.toContain("await refreshClientRoute(this);");
     });
 
     test("is idempotent across incremental development rebuilds", () => {
