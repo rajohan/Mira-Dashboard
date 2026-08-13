@@ -6,7 +6,7 @@ export type ConfigurationBrowserExposure = "none" | "presence-only" | "value";
 
 /** Shared parser/documentation limits for immutable application configuration. */
 export const applicationConfigurationLimits = Object.freeze({
-    databaseObservabilityUrlMaximumLength: 4096,
+    databaseObservabilityPasswordMaximumLength: 4096,
     elevenLabsApiKeyMaximumLength: 4096,
     gatewayTokenMaximumLength: 4096,
     gatewayUrlMaximumLength: 2048,
@@ -32,7 +32,7 @@ export const applicationConfigurationLimits = Object.freeze({
 
 /** Stable field names used by typed server configuration. */
 export type ApplicationConfigurationField =
-    | "databaseObservabilityUrl"
+    | "databaseObservabilityPassword"
     | "elevenLabsApiKey"
     | "gatewayToken"
     | "gatewayUrl"
@@ -63,7 +63,7 @@ export const applicationConfigurationEnvironmentNames = [
     "MIRA_DASHBOARD_PUBLIC_ORIGIN",
     "MIRA_DASHBOARD_TRUSTED_PROXY_IPS",
     "ELEVENLABS_API_KEY",
-    "MIRA_DASHBOARD_DATABASE_OBSERVABILITY_URL",
+    "MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD",
     "MOLTBOOK_API_KEY",
     "MOLTBOOK_AGENT_NAME",
     "OPENCLAW_GATEWAY_TOKEN",
@@ -110,7 +110,6 @@ export interface ApplicationConfigurationMetadata {
         | "json-secret"
         | "log-level"
         | "opaque-secret"
-        | "postgresql-url"
         | "relying-party-name"
         | "tcp-port"
         | "websocket-url";
@@ -269,17 +268,17 @@ export const applicationConfigurationRegistry: readonly ApplicationConfiguration
             browserExposure: "none",
             defaultValue: null,
             description:
-                "Optional worker-only dedicated monitoring credential for direct PostgreSQL and PgBouncer observations.",
-            environmentName: "MIRA_DASHBOARD_DATABASE_OBSERVABILITY_URL",
-            field: "databaseObservabilityUrl",
+                "Optional worker-only password for the dedicated database-observability principal.",
+            environmentName: "MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD",
+            field: "databaseObservabilityPassword",
             operationalEffect:
-                "Enables the hourly bounded external database snapshot; absent credentials report the source as unavailable.",
+                "Authenticates the hourly bounded database snapshot after the worker discovers the loopback PgBouncer endpoint from Docker and connects through the fixed code-owned mira_dashboard_observability control capability.",
             required: false,
             restartRequired: true,
             roles: Object.freeze(["worker"]),
             secret: true,
-            validationConstraints: `Canonical postgresql URL for exact 127.0.0.1:6432/postgres with explicit user and password, no query or fragment, at most ${applicationConfigurationLimits.databaseObservabilityUrlMaximumLength} code units; never persisted, logged, or browser-exposed.`,
-            valueType: "postgresql-url",
+            validationConstraints: `When present, a trimmed nonblank opaque credential at most ${applicationConfigurationLimits.databaseObservabilityPasswordMaximumLength} code units; no database, container, service, project, image, host, or port value is accepted, and the credential is never persisted, logged, or browser-exposed.`,
+            valueType: "opaque-secret",
         }),
         metadata({
             allowedValues: null,

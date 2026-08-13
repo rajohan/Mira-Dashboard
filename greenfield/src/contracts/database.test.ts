@@ -2,19 +2,25 @@ import { describe, expect, test } from "bun:test";
 
 import * as v from "valibot";
 
-import { databaseObservabilityMetricDatabases } from "../shared/databaseObservabilityPolicy.ts";
 import {
     databaseObservabilityCachePayloadMaximumBytes,
     databaseObservabilityCachePayloadSchema,
+    databaseObservabilityDatabaseMaximum,
     databaseOverviewSchema,
     sqliteMigrationStateSchema,
+    sqliteReusableSpaceRequiresVacuumReview,
 } from "./database.ts";
 
+const observedDatabases = ["alpha", "bitmagnet", "comet"] as const;
+
 const externalPayload = {
-    databases: databaseObservabilityMetricDatabases.map((name) => ({
+    databases: observedDatabases.map((name) => ({
+        blocksHit: 199,
+        blocksRead: 1,
         cacheHitRatio: 99.5,
         committedTransactions: name === "bitmagnet" ? 120 : 0,
         connections: name === "bitmagnet" ? 3 : 0,
+        detailsState: "available" as const,
         name,
         rolledBackTransactions: name === "bitmagnet" ? 1 : 0,
         sizeBytes: name === "bitmagnet" ? 4096 : 0,
@@ -57,6 +63,7 @@ const externalPayload = {
         pgStatStatementsEnabled: true,
         totalConnections: 3,
         totalDatabaseSizeBytes: 4096,
+        unavailableDatabaseCount: 0,
     },
     tableHealth: [
         {
@@ -232,11 +239,112 @@ describe("database overview contract", () => {
         }
     });
 
+    test("weights the global cache-hit ratio by observed block traffic", () => {
+        const databases = externalPayload.databases.map((database, index) => {
+            const [blocksHit, blocksRead] = (
+                [
+                    [0, 0],
+                    [900, 100],
+                    [1, 0],
+                ] as const
+            )[index]!;
+            return {
+                ...database,
+                blocksHit,
+                blocksRead,
+                cacheHitRatio:
+                    blocksHit + blocksRead === 0
+                        ? 100
+                        : (blocksHit / (blocksHit + blocksRead)) * 100,
+            };
+        });
+        const weightedRatio = (901 / 1001) * 100;
+        expect(
+            v.safeParse(databaseObservabilityCachePayloadSchema, {
+                ...externalPayload,
+                databases,
+                summary: {
+                    ...externalPayload.summary,
+                    averageCacheHitRatio: weightedRatio,
+                },
+            }).success
+        ).toBe(true);
+        expect(
+            v.safeParse(databaseObservabilityCachePayloadSchema, {
+                ...externalPayload,
+                databases,
+                summary: {
+                    ...externalPayload.summary,
+                    averageCacheHitRatio:
+                        databases.reduce(
+                            (total, database) => total + database.cacheHitRatio,
+                            0
+                        ) / databases.length,
+                },
+            }).success
+        ).toBe(false);
+        expect(
+            v.safeParse(databaseObservabilityCachePayloadSchema, {
+                ...externalPayload,
+                databases: externalPayload.databases.map((database) => ({
+                    ...database,
+                    blocksHit: 0,
+                    blocksRead: 0,
+                    cacheHitRatio: 100,
+                })),
+                summary: {
+                    ...externalPayload.summary,
+                    averageCacheHitRatio: 100,
+                },
+            }).success
+        ).toBe(true);
+    });
+
+    test("matches PostgreSQL's 63-byte identifier boundary", () => {
+        const renameFirstDatabase = (name: string) => ({
+            ...externalPayload,
+            databases: externalPayload.databases
+                .map((database, index) =>
+                    index === 0 ? { ...database, name } : database
+                )
+                .toSorted((left, right) => {
+                    if (left.name < right.name) return -1;
+                    if (left.name > right.name) return 1;
+                    return 0;
+                }),
+        });
+
+        expect(
+            v.safeParse(
+                databaseObservabilityCachePayloadSchema,
+                renameFirstDatabase("a".repeat(63))
+            ).success
+        ).toBe(true);
+        expect(
+            v.safeParse(
+                databaseObservabilityCachePayloadSchema,
+                renameFirstDatabase("€".repeat(21))
+            ).success
+        ).toBe(true);
+        expect(
+            v.safeParse(
+                databaseObservabilityCachePayloadSchema,
+                renameFirstDatabase("a".repeat(64))
+            ).success
+        ).toBe(false);
+        expect(
+            v.safeParse(
+                databaseObservabilityCachePayloadSchema,
+                renameFirstDatabase("€".repeat(22))
+            ).success
+        ).toBe(false);
+    });
+
     test("rejects noncanonical, oversized, identity-bearing external data", () => {
         for (const payload of [
             {
                 ...externalPayload,
-                databases: externalPayload.databases.slice(1),
+                databases: [],
             },
             {
                 ...externalPayload,
@@ -244,6 +352,10 @@ describe("database overview contract", () => {
                     { ...externalPayload.databases[0], name: "zeta" },
                     { ...externalPayload.databases[0], name: "alpha" },
                 ],
+            },
+            {
+                ...externalPayload,
+                databases: [externalPayload.databases[0], externalPayload.databases[0]],
             },
             {
                 ...externalPayload,
@@ -280,6 +392,66 @@ describe("database overview contract", () => {
                 v.safeParse(databaseObservabilityCachePayloadSchema, payload).success
             ).toBe(false);
         }
+
+        const lowerReclaimability = {
+            ...externalPayload.tableHealth[0],
+            estimatedReclaimableBytes: 1024,
+            table: "lower-reclaimability",
+        };
+        const higherReclaimability = {
+            ...externalPayload.tableHealth[0],
+            estimatedReclaimableBytes: 2048,
+            table: "higher-reclaimability",
+        };
+        const reclaimabilityPayload = {
+            ...externalPayload,
+            summary: {
+                ...externalPayload.summary,
+                maintenance: {
+                    ...externalPayload.summary.maintenance,
+                    assessedPhysicalBytes: 8192,
+                    estimatedReclaimableBytes: 3072,
+                    estimatedReclaimablePercent: 37.5,
+                },
+            },
+        };
+        expect(
+            v.safeParse(databaseObservabilityCachePayloadSchema, {
+                ...reclaimabilityPayload,
+                tableHealth: [higherReclaimability, lowerReclaimability],
+            }).success
+        ).toBe(true);
+        expect(
+            v.safeParse(databaseObservabilityCachePayloadSchema, {
+                ...reclaimabilityPayload,
+                tableHealth: [lowerReclaimability, higherReclaimability],
+            }).success
+        ).toBe(false);
+
+        const oversizedDatabaseInventory = [
+            ...externalPayload.databases,
+            ...Array.from(
+                {
+                    length:
+                        databaseObservabilityDatabaseMaximum -
+                        externalPayload.databases.length +
+                        1,
+                },
+                (_, index) => ({
+                    ...externalPayload.databases[0],
+                    name: `dynamic_${String(index).padStart(2, "0")}`,
+                })
+            ),
+        ].toSorted((left, right) => left.name.localeCompare(right.name));
+        expect(oversizedDatabaseInventory).toHaveLength(
+            databaseObservabilityDatabaseMaximum + 1
+        );
+        expect(
+            v.safeParse(databaseObservabilityCachePayloadSchema, {
+                ...externalPayload,
+                databases: oversizedDatabaseInventory,
+            }).success
+        ).toBe(false);
 
         expect(
             v.safeParse(databaseObservabilityCachePayloadSchema, {
@@ -336,6 +508,37 @@ describe("database overview contract", () => {
     });
 
     test("rejects impossible maintenance and nested observation timestamps", () => {
+        const statementAssessmentUnavailable = {
+            ...externalPayload,
+            statements: [],
+            summary: {
+                ...externalPayload.summary,
+                maintenance: {
+                    ...externalPayload.summary.maintenance,
+                    status: "not-assessed" as const,
+                },
+                pgStatStatementsEnabled: false,
+            },
+        };
+        expect(
+            v.safeParse(
+                databaseObservabilityCachePayloadSchema,
+                statementAssessmentUnavailable
+            ).success
+        ).toBe(true);
+        expect(
+            v.safeParse(databaseObservabilityCachePayloadSchema, {
+                ...statementAssessmentUnavailable,
+                summary: {
+                    ...statementAssessmentUnavailable.summary,
+                    maintenance: {
+                        ...statementAssessmentUnavailable.summary.maintenance,
+                        status: "healthy",
+                    },
+                },
+            }).success
+        ).toBe(false);
+
         for (const maintenance of [
             { ...externalPayload.summary.maintenance, assessmentComplete: false },
             { ...externalPayload.summary.maintenance, estimatedReclaimableBytes: 1 },
@@ -503,6 +706,18 @@ describe("database overview contract", () => {
                 sqlite: { ...overview.sqlite, storage: vacuumReviewStorage },
             }).success
         ).toBe(true);
+    });
+
+    test("combines absolute and relative SQLite VACUUM review thresholds", () => {
+        const mebibyte = 1024 * 1024;
+        expect(sqliteReusableSpaceRequiresVacuumReview(1024 * mebibyte, 1)).toBe(true);
+        expect(sqliteReusableSpaceRequiresVacuumReview(256 * mebibyte, 50)).toBe(true);
+        expect(sqliteReusableSpaceRequiresVacuumReview(256 * mebibyte - 1, 100)).toBe(
+            false
+        );
+        expect(sqliteReusableSpaceRequiresVacuumReview(256 * mebibyte, 49.99)).toBe(
+            false
+        );
     });
 
     test("requires migration current status to match the bounded counts", () => {

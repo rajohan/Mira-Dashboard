@@ -72,6 +72,13 @@ export const Success: Story = {
     },
 };
 
+export const Warning: Story = {
+    args: {
+        message: "Database maintenance review is required.",
+        variant: "warning",
+    },
+};
+
 export const ErrorWithoutFocus: Story = {
     args: {
         focusOnError: false,

@@ -1603,7 +1603,7 @@ full-browser parity, production rehearsal, cutover, and legacy deletion remain o
   backup/restore parity, or the
   aggregate Phase 5 exit gate.
 
-### 2026-08-12 — Database observability parity closed
+### 2026-08-12 — Database observability vertical implemented; production credential cutover open
 
 - Legacy evidence identifies one read-only `GET /api/database/overview` consumer and the stable
   session route `/database`. The reviewed replacement is `database.overview`: live bounded
@@ -1614,11 +1614,81 @@ full-browser parity, production rehearsal, cutover, and legacy deletion remain o
   authority. Credentials, connection strings, host/container paths, provider output, raw errors,
   and query literals do not cross the contract. The six Kopia/WAL-G status/control rows and later
   database backup/restore remain separate planned privileged work.
-- Delivery must provision a dedicated statistics-only PostgreSQL/PgBouncer principal and exact
-  one-row `mira_dashboard_observability.torrent_count` views in Comet and Bitmagnet. The principal
-  receives no direct torrent-table access. Legacy raw query text/copy is a reviewed security
-  narrowing; ranked aggregate statement metrics remain available without literals or reversible
-  query identity.
+- The slice now carries a permanent dynamic-topology invariant for this database work and the
+  future Docker slice. Database names are discovered from the live bounded PostgreSQL catalog;
+  Docker containers and Compose identity will be discovered from Docker Engine inventory and
+  inspect metadata. Endpoint credentials and approved roots constrain authority but never become
+  operator-maintained topology lists. Additions, removals, and renames must reconcile without a
+  Dashboard release or manual source/configuration/manifest edits.
+- The future Docker updater will reuse the deployed `mira.updater.*` Compose labels. Inventory does
+  not depend on those labels; they are an explicit mutation-policy capability. Greenfield will
+  require valid opt-in for updates and may migrate the label shape in `/opt/docker` during that
+  slice instead of copying service names into Dashboard code.
+- Docker delivery ownership is also fixed for the later slice: `/opt/docker/compose.yaml` is the
+  canonical root/include graph and `/opt/docker/bin/docker-compose-doppler` is the sole Compose
+  mutation executor. Root and app-local `.env` files stay opaque; no secret-bearing environment or
+  resolved Compose output may enter Dashboard state, logs, audit records, or browser payloads.
+- Per-container update labels and image ownership remain in each included app Compose file. The
+  later updater must derive that exact file/field through the root include graph, compare-and-swap
+  only the image scalar, validate the whole root project, and fail closed on concurrent or
+  ambiguous ownership rather than maintaining or guessing a filename map.
+- Delivery provisions a dedicated PostgreSQL/PgBouncer observer with zero role memberships and an
+  isolated `NOLOGIN` capability owner with exactly direct `pg_read_all_stats` membership plus
+  direct per-database `SELECT` on `pg_catalog.pg_statistic`. The observer receives only direct
+  `CONNECT`, capability-schema `USAGE`, and `EXECUTE` on exact no-input, bounded
+  `connection_metrics()`, identity-free `statement_metrics()`, `table_health()`, and
+  `maintenance_metrics()` functions. Raw `pg_stat_statements` source views and extension routines
+  are revoked from `PUBLIC` and the observer; statement output contains no query text, `queryid`,
+  database identity, or user identity. Full convergence is part of a separate privileged
+  collection-lease port invoked only by the existing hourly
+  `cache.refresh.database-observability` job and only when the provider is configured. The
+  observer is `NOLOGIN`, expired, and has zero PostgreSQL sessions between attempts. Each attempt
+  closes leftovers; prepares a one-use token only after exact approval/identity verification and
+  full reconcile; rechecks the exact catalog digest and atomically consumes that token while
+  enabling `LOGIN` with a short `VALID UNTIL`; collects once; and runs
+  a shielded mandatory close that restores and proves the exact closed state. Only after that proof
+  can the port return a payload to the generic cache executor for commit. The observer and
+  collector never receive mutation authority. Explicit activation alone creates or refreshes an
+  approval marker bound to the PostgreSQL `system_identifier` and the exact current and previous
+  immutable-release policy digests; the policy version alone is not authorization, and lease
+  operations cannot mutate the approval. Every approved open performs and verifies the complete
+  bounded, idempotent ACL-and-capability reconcile before one-use enable; no persisted
+  fingerprint, verification-age state, or reduced path is used. A newly created database is
+  reconciled before the next approved collection. Any open, collection, or close failure retains last-known-good, prevents a fresh
+  cache commit, and settles as a retryable redacted failure. PostgreSQL close cannot prove the
+  absence of already-authenticated PgBouncer waiting clients; no exclusive admission is added,
+  interference fails the attempt, and the closed role prevents a new backend. No second action,
+  schedule, polling loop, sidecar, systemd unit, or PostgreSQL login is added. Generic
+  verification also rejects unrelated direct/inherited observer routine grants and effective
+  user-schema `SECURITY DEFINER` execution without rejecting ordinary `PUBLIC` invoker routines.
+  The optional, count-only Comet/Bitmagnet torrent views and cards are the sole named
+  application exception; they never define the general database set, and their absence makes only
+  the matching card unavailable. Legacy raw query text/copy is a reviewed security narrowing;
+  ranked aggregate statement metrics remain available without literals or reversible query
+  identity.
+- Production enablement remains intentionally open until the Docker source of truth carries the
+  single `mira.dashboard.database-observability=pgbouncer-v1` capability label, its code-owned
+  `mira_dashboard_observability` control alias, the existing hourly job's privileged
+  collection-lease port, and the migrated credential
+  boundary. Approved provisioning creates a dedicated same-named physical database from
+  `template0`, and PgBouncer's existing wildcard route reaches it without an explicit mapping,
+  stack database environment lookup, database-name label, or Dashboard setting. The fixed control
+  database remains code-owned while application inventory remains catalog-derived. The worker
+  must receive a distinct
+  `MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD` from Doppler, never the existing
+  `DATABASE_USERNAME`/`DATABASE_PASSWORD` pair or legacy `postgres/postgres` fallback. The current
+  private Docker repository still tracks `apps/pgbouncer/userlist.txt`; its SCRAM verifier is not
+  cleartext but remains credential material. Before the rewrite is declared complete, replace it
+  with a runtime-generated or equivalently secret-mounted, non-versioned auth input, restrict its
+  readability, rotate the affected credential so Git history is obsolete, and pass rollback-safe
+  PgBouncer/Dashboard smoke checks without printing resolved Compose or secret values. No current
+  production credential is changed by this implementation slice.
+- The approval-gated provisioning runner is release-self-contained. It pins the local Docker
+  socket and root Compose project, resolves the one healthy PostgreSQL dependency, and uses
+  container-local psql through a fixed `env -i` launcher over the local Unix socket. Each bounded
+  stdin pass verifies the probed superuser role OID and PostgreSQL system identity. The documented
+  entrypoint selects exact current-release and production-Bun pointers; host psql and ambient
+  `PG*` endpoint configuration are outside the authority boundary.
 - Bookkeeping is now **113 implemented, 41 planned, and three reviewed removals**; browser routes
   are **13 implemented and three planned**. `database.overview` and `/database` are implemented
   because the contract, worker provider, database-runtime read port, production composition,
@@ -1632,5 +1702,23 @@ full-browser parity, production rehearsal, cutover, and legacy deletion remain o
   work. Scheduled retention is capped at fourteen. Every committed/recovered/same-candidate
   activation enforces cutover retention at five snapshots and two days of unreferenced age while
   preserving current, previous, and active-journal transition IDs. Both namespaces atomically
-  rename selected artifacts to `.retire-*`, fsync the parent, and resume descriptor-pinned exact-
-  file reaping after interruption; published immutable snapshots are never mutated in place.
+  rename selected artifacts to `.retire-*`, fsync the parent, and resume descriptor-anchored
+  reaping with final inode revalidation after interruption; published immutable snapshots are
+  never mutated in place.
+- Production activation now applies the same bounded-lifecycle invariant to the code and runtime
+  roots. It preserves only the authoritative current/rollback release-runtime pairs and the
+  candidate during admission, verifies the complete bounded inventory before mutation, and then
+  atomically retires and reaps every unreferenced manifest-verified release and revision-probed Bun
+  runtime. Crash-left stage/retire trees reconcile on the next pass; unknown entries, pointer drift,
+  invalid trees, or path replacement fail closed before authoritative artifacts are removed.
+  Admission now recovers any active journal and completes that verified pruning before measuring
+  conservatively rounded destination allocation blocks, directory metadata, and inode demand while
+  preserving a 64 MiB byte reserve and 64 free inodes. Copied files and directories are fsynced
+  bottom-up, and the parent of each immutable stage rename is fsynced before publication returns.
+  Failed install/publication attempts repeat the pass under the same lease, while a later attempt
+  reaps crash-left candidates before admitting another copy.
+  Linux has no inode-conditional unlink, so physical reclamation relies on the exact deployment
+  lease serializing every authorized mutation by the trusted application UID. The race checks cover
+  accidental/stale drift, not a malicious concurrent same-UID process that can already rewrite the
+  application-owned namespace; the planned root-owned immutable handoff and different-principal GC
+  are required to change that threat boundary.

@@ -1,4 +1,4 @@
-import { CircleAlert, CircleCheck, Info, X } from "lucide-react";
+import { CircleAlert, CircleCheck, Info, TriangleAlert, X } from "lucide-react";
 import { useEffect, useRef } from "react";
 
 import { cn } from "../lib/classNames.ts";
@@ -17,6 +17,10 @@ const alertStyle = Object.freeze({
     success: {
         container: "border-emerald-900/70 bg-emerald-950/40 text-emerald-200",
         icon: CircleCheck,
+    },
+    warning: {
+        container: "border-amber-700/70 bg-amber-950/40 text-amber-100",
+        icon: TriangleAlert,
     },
 });
 

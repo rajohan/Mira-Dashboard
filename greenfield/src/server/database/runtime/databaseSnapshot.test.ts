@@ -234,6 +234,149 @@ describe("verified database snapshots", () => {
         ).toEqual({ backups: [], totalBytes: 0 });
     });
 
+    test("preflights simultaneous snapshot and restore-copy capacity", async () => {
+        const { state } = await fixture();
+        await initializeDatabase(state.stateDirectory);
+        const source = await stat(path.join(state.stateDirectory, "mira-dashboard.db"), {
+            bigint: true,
+        });
+        const phases: string[] = [];
+        const failure = await rejectionError(
+            Effect.runPromise(
+                createVerifiedSqliteMaintenanceSnapshot(
+                    {
+                        migrationsDirectory,
+                        releaseId,
+                        stateDirectory: state.stateDirectory,
+                        transitionId: Bun.randomUUIDv7(),
+                    },
+                    {
+                        availableBytesForCapacityCheck: (phase) => {
+                            phases.push(phase);
+                            return source.size + BigInt(64 * 1024 * 1024);
+                        },
+                    }
+                )
+            )
+        );
+
+        expect(failure).toBeInstanceOf(DatabaseSnapshotError);
+        expect(phases).toEqual(["snapshot"]);
+        expect(
+            await readdir(path.join(state.backupsDirectory, "sqlite-maintenance"))
+        ).toEqual([]);
+    });
+
+    test("budgets logical WAL-held bytes before creating a maintenance snapshot", async () => {
+        const { state } = await fixture();
+        await initializeDatabase(state.stateDirectory);
+        const databaseFile = path.join(state.stateDirectory, "mira-dashboard.db");
+        const reader = new Database(databaseFile, { readonly: true, strict: true });
+        const writer = new Database(databaseFile, {
+            create: false,
+            readwrite: true,
+            strict: true,
+        });
+        try {
+            writer.run("PRAGMA wal_autocheckpoint = 0");
+            reader.run("BEGIN");
+            reader.query("SELECT COUNT(*) AS count FROM sqlite_schema").get();
+            const insert = writer.prepare(`
+                INSERT INTO reports (
+                    body_markdown,
+                    id,
+                    kind,
+                    metadata_json,
+                    occurred_at,
+                    source,
+                    status,
+                    title
+                ) VALUES (?, ?, 'wal-capacity-probe', '{}', 1, 'test', 'ok', 'test')
+            `);
+            try {
+                writer.transaction(() => {
+                    const payload = "x".repeat(1024);
+                    for (let index = 0; index < 4096; index += 1) {
+                        insert.run(payload, `wal-capacity-probe-${index}`);
+                    }
+                })();
+            } finally {
+                insert.finalize();
+            }
+
+            const source = await stat(databaseFile, { bigint: true });
+            const wal = await stat(`${databaseFile}-wal`, { bigint: true });
+            const pageCount = writer
+                .query<{ page_count: number }, []>("PRAGMA page_count")
+                .get()?.page_count;
+            const pageSize = writer
+                .query<{ page_size: number }, []>("PRAGMA page_size")
+                .get()?.page_size;
+            if (pageCount === undefined || pageSize === undefined) {
+                throw new Error("missing logical size");
+            }
+            const logicalBytes = BigInt(pageCount) * BigInt(pageSize);
+            expect(wal.size).toBeGreaterThan(source.size);
+            expect(logicalBytes).toBeGreaterThan(source.size);
+
+            const phases: string[] = [];
+            const failure = await rejectionError(
+                Effect.runPromise(
+                    createVerifiedSqliteMaintenanceSnapshot(
+                        {
+                            migrationsDirectory,
+                            releaseId,
+                            stateDirectory: state.stateDirectory,
+                            transitionId: Bun.randomUUIDv7(),
+                        },
+                        {
+                            availableBytesForCapacityCheck: (phase) => {
+                                phases.push(phase);
+                                return source.size * 2n + BigInt(64 * 1024 * 1024);
+                            },
+                        }
+                    )
+                )
+            );
+
+            expect(failure).toBeInstanceOf(DatabaseSnapshotError);
+            expect(phases).toEqual(["snapshot"]);
+            expect(
+                await readdir(path.join(state.backupsDirectory, "sqlite-maintenance"))
+            ).toEqual([]);
+
+            const cutoverPhases: string[] = [];
+            const cutoverFailure = await rejectionError(
+                withDeploymentLease(state.stateDirectory, async () =>
+                    Effect.runPromise(
+                        createVerifiedDatabaseSnapshot(
+                            {
+                                expectedState: "present",
+                                migrationsDirectory,
+                                releaseId,
+                                stateDirectory: state.stateDirectory,
+                                transitionId: Bun.randomUUIDv7(),
+                            },
+                            {
+                                availableBytesForCapacityCheck: (phase) => {
+                                    cutoverPhases.push(phase);
+                                    return source.size + BigInt(64 * 1024 * 1024);
+                                },
+                            }
+                        )
+                    )
+                )
+            );
+            expect(cutoverFailure).toBeInstanceOf(DatabaseSnapshotError);
+            expect(cutoverPhases).toEqual(["snapshot"]);
+            expect(await readdir(state.backupsDirectory)).toEqual(["sqlite-maintenance"]);
+        } finally {
+            reader.run("ROLLBACK");
+            reader.close(true);
+            writer.close(true);
+        }
+    });
+
     test("recovers bounded crash remnants before retention without deleting cutover snapshots", async () => {
         const { state } = await fixture();
         await initializeDatabase(state.stateDirectory);

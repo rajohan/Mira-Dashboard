@@ -7,7 +7,10 @@ import {
     databaseObservabilityCacheSchemaId,
     databaseObservabilityCacheSource,
     databaseObservabilityExternalLastKnownGoodMs,
+    databaseObservabilityLegacyCacheSchemaId,
+    databaseObservabilityLegacyV1CachePayloadSchema,
     databaseOverviewSchema,
+    migrateDatabaseObservabilityLegacyV1CachePayload,
     type SqliteLifecycleObservation,
     sqliteReusableSpaceRequiresVacuumReview,
 } from "../../../contracts/database.ts";
@@ -111,7 +114,8 @@ function projectExternalSnapshot(
     if (
         record === undefined ||
         record.key !== databaseObservabilityCacheKey ||
-        record.schemaId !== databaseObservabilityCacheSchemaId ||
+        (record.schemaId !== databaseObservabilityCacheSchemaId &&
+            record.schemaId !== databaseObservabilityLegacyCacheSchemaId) ||
         record.source !== databaseObservabilityCacheSource ||
         record.expiresAtMs === null ||
         record.lastSuccessAtMs === null ||
@@ -133,12 +137,27 @@ function projectExternalSnapshot(
     ) {
         return { state: "unavailable" };
     }
-    const parsed = v.safeParse(
-        databaseObservabilityCachePayloadSchema,
+    const payload =
         typeof record.payload === "string"
             ? parseJsonText(record.payload)
-            : record.payload
-    );
+            : record.payload;
+    const parsed =
+        record.schemaId === databaseObservabilityCacheSchemaId
+            ? v.safeParse(databaseObservabilityCachePayloadSchema, payload)
+            : (() => {
+                  const legacy = v.safeParse(
+                      databaseObservabilityLegacyV1CachePayloadSchema,
+                      payload
+                  );
+                  return legacy.success
+                      ? {
+                            output: migrateDatabaseObservabilityLegacyV1CachePayload(
+                                legacy.output
+                            ),
+                            success: true as const,
+                        }
+                      : legacy;
+              })();
     if (!parsed.success) return { state: "unavailable" };
     if (
         parsed.output.tableHealth.some(
@@ -157,6 +176,7 @@ function projectExternalSnapshot(
         return { state: "unavailable" };
     }
     const fresh =
+        record.schemaId === databaseObservabilityCacheSchemaId &&
         record.lastAttemptStatus === "succeeded" &&
         record.lastAttemptAtMs === record.lastSuccessAtMs &&
         record.expiresAtMs > checkedAtMs;
@@ -167,13 +187,16 @@ function projectExternalSnapshot(
             state: "fresh",
         };
     }
+    let staleSinceMs = record.expiresAtMs;
+    if (record.lastAttemptStatus === "failed") {
+        staleSinceMs = record.lastAttemptAtMs;
+    } else if (record.schemaId === databaseObservabilityLegacyCacheSchemaId) {
+        staleSinceMs = record.lastSuccessAtMs;
+    }
     return {
         ...parsed.output,
         observedAtMs: record.lastSuccessAtMs,
-        staleSinceMs:
-            record.lastAttemptStatus === "failed"
-                ? record.lastAttemptAtMs
-                : record.expiresAtMs,
+        staleSinceMs,
         state: "last-known-good",
     };
 }

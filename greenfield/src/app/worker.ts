@@ -41,10 +41,13 @@ import {
     createProcessTerminationController,
     type ProcessTerminationController,
 } from "../server/platform/runtime/processSignals.ts";
+import type { DatabaseObservabilityReconciliationPort } from "../shared/databaseObservabilityReconciliation.ts";
 import type { LinuxBootIdentity } from "../shared/linuxBootIdentity.ts";
 import type { OpenClawGatewayLifecycleExecutionPort } from "../shared/openClawGatewayLifecycle.ts";
 import type { OpenClawServiceActionsExecutionPort } from "../shared/openClawServiceActions.ts";
 import { createBunSqlDatabaseObservabilityCollector } from "../worker/database/bunSqlDatabaseObservabilityCollector.ts";
+import { createDockerDatabaseObservabilityConnectionResolver } from "../worker/database/dockerDatabaseObservabilityEndpointResolver.ts";
+import { createFixedDatabaseObservabilityReconciler } from "../worker/database/fixedDatabaseObservabilityReconciler.ts";
 import { createFixedSqliteLifecycleMaintenance } from "../worker/database/fixedSqliteLifecycleMaintenance.ts";
 import {
     createDescriptorWorkspaceFileStructuralWriter,
@@ -95,6 +98,8 @@ export interface DashboardWorkerProcessDependencies {
     readonly createGatewayTransport: (
         options: PersistentGatewayTransportOptions
     ) => PersistentGatewayTaskNotificationTransport;
+    readonly createDatabaseObservabilityConnectionResolver: typeof createDockerDatabaseObservabilityConnectionResolver;
+    readonly createDatabaseObservabilityReconciler: typeof createFixedDatabaseObservabilityReconciler;
     readonly createLogDestination: (
         logsDirectory: string,
         processRole: "worker"
@@ -121,6 +126,9 @@ export interface DashboardWorkerProcessDependencies {
         logMaintenance: LogMaintenanceExecutor,
         moltbook: MoltbookDashboardCollector,
         databaseObservability: DatabaseObservabilityCollector,
+        databaseObservabilityReconciler:
+            | DatabaseObservabilityReconciliationPort
+            | undefined,
         hostOperations: FixedHostOperationsExecutionPort | undefined,
         bootIdentity: LinuxBootIdentity
     ) => DashboardWorkerRuntime;
@@ -191,6 +199,9 @@ export function createWorkerLogMaintenanceExecutor(
 }
 
 const defaultDependencies = Object.freeze({
+    createDatabaseObservabilityConnectionResolver:
+        createDockerDatabaseObservabilityConnectionResolver,
+    createDatabaseObservabilityReconciler: createFixedDatabaseObservabilityReconciler,
     createGatewayTransport: createPersistentGatewayTaskNotificationTransport,
     createLogDestination: (logsDirectory, processRole) =>
         createProjectFileLogDestination(logsDirectory, processRole),
@@ -210,6 +221,7 @@ const defaultDependencies = Object.freeze({
         logMaintenance,
         moltbook,
         databaseObservability,
+        databaseObservabilityReconciler,
         hostOperations,
         bootIdentity
     ) => {
@@ -226,6 +238,9 @@ const defaultDependencies = Object.freeze({
                 stateDirectory: layout.production.state.root,
             },
             databaseObservability,
+            ...(databaseObservabilityReconciler === undefined
+                ? {}
+                : { databaseObservabilityReconciler }),
             logMaintenance,
             moltbook,
             ...(openClawGateway === undefined ? {} : { openClawGateway }),
@@ -354,9 +369,29 @@ export async function runDashboardWorkerProcess(
             agentName: configuration.moltbookAgentName,
             apiKey: configuration.moltbookApiKey,
         });
+        const databaseObservabilityConnectionResolver =
+            configuration.databaseObservabilityPassword === undefined
+                ? undefined
+                : dependencies.createDatabaseObservabilityConnectionResolver({
+                      credentials: {
+                          password: configuration.databaseObservabilityPassword,
+                      },
+                  });
         const databaseObservability = createBunSqlDatabaseObservabilityCollector({
-            connectionUrl: configuration.databaseObservabilityUrl,
+            connectionResolver: databaseObservabilityConnectionResolver,
         });
+        const databaseObservabilityReconciler =
+            databaseObservabilityConnectionResolver === undefined
+                ? undefined
+                : dependencies.createDatabaseObservabilityReconciler({
+                      bunExecutable: path.join(
+                          layout.production.runtimes,
+                          "bun",
+                          release.manifest.runtime.revision,
+                          "bun"
+                      ),
+                      releaseRoot: release.releaseRoot,
+                  });
         runtime = dependencies.createRuntime(
             layout,
             release,
@@ -369,6 +404,7 @@ export async function runDashboardWorkerProcess(
             logMaintenance,
             moltbook,
             databaseObservability,
+            databaseObservabilityReconciler,
             hostOperations,
             bootIdentity
         );

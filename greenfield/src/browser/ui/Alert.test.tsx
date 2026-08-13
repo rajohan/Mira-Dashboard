@@ -31,4 +31,13 @@ describe("Alert", () => {
 
         expect(onDismiss).toHaveBeenCalledTimes(1);
     });
+
+    test("renders operator attention as a non-focusing warning status", () => {
+        render(<Alert message="Maintenance review is required." variant="warning" />);
+
+        expect(screen.getByRole("status")).toHaveTextContent(
+            "Maintenance review is required."
+        );
+        expect(screen.queryByRole("alert")).toBeNull();
+    });
 });

@@ -18,24 +18,24 @@ import {
 } from "../../contracts/database.ts";
 import type { DatabaseObservabilityCollector } from "../../contracts/databaseObservabilityCollector.ts";
 import {
-    databaseObservabilityControlDatabase,
-    databaseObservabilityMetricDatabases,
+    databaseObservabilityCapabilityOwnerRole,
+    databaseObservabilityCapabilitySchema,
+    databaseObservabilityHostnameIsLoopback,
+    databaseObservabilityObserverConnectionLimit,
     databaseObservabilityObserverRole,
     databaseObservabilityPgBouncerVirtualDatabase,
-    databaseObservabilityReviewedPostgreSqlDatabases,
     databaseObservabilityTorrentCountDatabases,
     databaseObservabilityViewOwnerRole,
-    type DatabaseObservabilityReviewedPostgreSqlDatabase,
+    type DatabaseObservabilityTorrentCountDatabase,
 } from "../../shared/databaseObservabilityPolicy.ts";
 import { utf8ByteLength } from "../../shared/encoding.ts";
-import { compareStrings } from "../../shared/validation.ts";
+import { compareStrings, hasNoUnicodeControlOrFormat } from "../../shared/validation.ts";
 
 /** Maximum raw PgBouncer rows admitted before aggregate projection. */
 export const databaseObservabilityPgBouncerInputMaximum = 512;
 export const databaseObservabilityConnectTimeoutSeconds = 5;
 export const databaseObservabilityDeadlineMs = 60_000;
 
-const catalogTupleEstimateTolerancePercent = 10;
 type SqlQuery<T> = Promise<T> & {
     cancel(): unknown;
     simple(): SqlQuery<T>;
@@ -48,7 +48,7 @@ export type DatabaseObservabilitySqlClient = {
 
 export interface DatabaseObservabilitySqlClientFactory {
     create(
-        baseUrl: Redacted.Redacted<string>,
+        connection: DatabaseObservabilityConnection,
         database: string
     ): DatabaseObservabilitySqlClient;
 }
@@ -79,20 +79,25 @@ interface ObserverPolicyRow {
     canCreateSchema: unknown;
     canCreateTemporaryTables: unknown;
     canReplicate: unknown;
-    connectableDatabases: unknown;
     connectionLimit: unknown;
     currentDatabase: unknown;
+    databaseRoleConfiguration: unknown;
     directMemberships: unknown;
     hasBaseTableAuthority: unknown;
-    hasMembershipAdministration: unknown;
+    hasDefaultAclAuthority: unknown;
+    hasInboundMemberships: unknown;
+    hasInvalidMembershipOptions: unknown;
+    hasRoutineGrantAuthority: unknown;
+    hasSecurityDefinerRoutineAuthority: unknown;
     hasSequenceAuthority: unknown;
     hasUnexpectedRelationAuthority: unknown;
     inheritsPrivileges: unknown;
+    capabilityInterfacesValid: unknown;
+    isCapabilityOwner: unknown;
     isPgMonitor: unknown;
+    isPgReadAllStats: unknown;
     isSuperuser: unknown;
     isViewOwner: unknown;
-    pgStatStatementsExtensionInstalled: unknown;
-    pgStatStatementsRelationValid: unknown;
     roleName: unknown;
     roleConfiguration: unknown;
 }
@@ -138,15 +143,23 @@ interface TorrentCountRow {
 interface PgBouncerPoolRow {
     database: unknown;
     cl_active: unknown;
+    cl_active_cancel_req: unknown;
     cl_waiting: unknown;
+    cl_waiting_cancel_req: unknown;
     maxwait: unknown;
     sv_active: unknown;
+    sv_active_cancel: unknown;
+    sv_being_canceled: unknown;
     sv_idle: unknown;
+    sv_login: unknown;
+    sv_tested: unknown;
     sv_used: unknown;
 }
 
 interface PgBouncerStatsRow {
+    avg_query_count: unknown;
     avg_query_time: unknown;
+    avg_xact_count: unknown;
     avg_xact_time: unknown;
     database: unknown;
     total_query_count: unknown;
@@ -154,39 +167,51 @@ interface PgBouncerStatsRow {
 
 class ObserverPolicyViolationError extends Error {}
 
-function derivedConnectionUrl(
-    baseUrl: Redacted.Redacted<string>,
-    database: string
-): string {
-    const source = new URL(Redacted.value(baseUrl));
+function validatedConnection(
+    connection: DatabaseObservabilityConnection
+): DatabaseObservabilityConnection {
+    const password = Redacted.value(connection.password);
     if (
-        !["postgres:", "postgresql:"].includes(source.protocol) ||
-        source.hostname !== "127.0.0.1" ||
-        source.port !== "6432" ||
-        source.pathname !== "/postgres" ||
-        source.search !== "" ||
-        source.hash !== ""
+        !databaseObservabilityHostnameIsLoopback(connection.hostname) ||
+        !Number.isSafeInteger(connection.port) ||
+        connection.port < 1 ||
+        connection.port > 65_535 ||
+        connection.controlDatabase.length === 0 ||
+        utf8ByteLength(connection.controlDatabase) > 63 ||
+        /[\p{Cc}\p{Cf}]/u.test(connection.controlDatabase) ||
+        password.length === 0 ||
+        password.length > 4096 ||
+        password !== password.trim() ||
+        /[\p{Cc}\p{Cf}]/u.test(password)
     ) {
         throw new TypeError("Database observability endpoint is invalid");
     }
-    source.pathname = `/${encodeURIComponent(name(database))}`;
-    return source.href;
+    return Object.freeze({
+        controlDatabase: connection.controlDatabase,
+        hostname: connection.hostname,
+        password: connection.password,
+        port: connection.port,
+    });
 }
 
 function defaultSqlClientFactory(): DatabaseObservabilitySqlClientFactory {
     return Object.freeze({
         create(
-            baseUrl: Redacted.Redacted<string>,
+            connection: DatabaseObservabilityConnection,
             database: string
         ): DatabaseObservabilitySqlClient {
             return new Bun.SQL({
                 adapter: "postgres",
                 connectionTimeout: databaseObservabilityConnectTimeoutSeconds,
+                database: name(database),
+                hostname: connection.hostname,
                 idleTimeout: databaseObservabilityConnectTimeoutSeconds,
                 max: 1,
+                password: Redacted.value(connection.password),
+                port: connection.port,
                 prepare: false,
                 tls: false,
-                url: derivedConnectionUrl(baseUrl, database),
+                username: databaseObservabilityObserverRole,
             }) as DatabaseObservabilitySqlClient;
         },
     });
@@ -216,12 +241,53 @@ function nonnegativeNumber(value: unknown): number {
     return number;
 }
 
+function addCounts(total: number, value: unknown): number {
+    const result = total + count(value);
+    if (!Number.isSafeInteger(result)) {
+        throw new TypeError("Database observability count aggregate is invalid");
+    }
+    return result;
+}
+
+function addNonnegativeNumbers(total: number, value: unknown): number {
+    const result = total + nonnegativeNumber(value);
+    if (!Number.isFinite(result) || result > Number.MAX_SAFE_INTEGER) {
+        throw new TypeError("Database observability metric aggregate is invalid");
+    }
+    return result;
+}
+
+function averageDurationMs(totalMicroseconds: number, totalCount: number): number {
+    if (totalCount === 0) {
+        if (totalMicroseconds !== 0) {
+            throw new TypeError("Database observability duration aggregate is invalid");
+        }
+        return 0;
+    }
+    return totalMicroseconds / totalCount / 1000;
+}
+
+function addWeightedDuration(
+    totalMicroseconds: number,
+    durationMicroseconds: unknown,
+    rawWeight: unknown
+): number {
+    const weightedDuration = nonnegativeNumber(durationMicroseconds) * count(rawWeight);
+    if (
+        !Number.isFinite(weightedDuration) ||
+        weightedDuration > Number.MAX_SAFE_INTEGER
+    ) {
+        throw new TypeError("Database observability duration aggregate is invalid");
+    }
+    return addNonnegativeNumbers(totalMicroseconds, weightedDuration);
+}
+
 function name(value: unknown): string {
     if (
         typeof value !== "string" ||
-        value.length === 0 ||
-        value.length > 128 ||
-        /[\p{Cc}\p{Cf}]/u.test(value)
+        !/\S/u.test(value) ||
+        utf8ByteLength(value) > 63 ||
+        !hasNoUnicodeControlOrFormat(value)
     ) {
         throw new TypeError("Database observability name row is invalid");
     }
@@ -293,13 +359,13 @@ async function executeQuery<T>(
 
 async function withClient<T>(
     factory: DatabaseObservabilitySqlClientFactory,
-    baseUrl: Redacted.Redacted<string>,
+    connection: DatabaseObservabilityConnection,
     database: string,
     signal: AbortSignal,
     operation: (client: DatabaseObservabilitySqlClient) => Promise<T>
 ): Promise<T> {
     if (signal.aborted) throw signalFailure();
-    const client = factory.create(baseUrl, database);
+    const client = factory.create(connection, database);
     const closeOnAbort = () => {
         void client.close({ timeout: 0 }).catch(() => {});
     };
@@ -340,7 +406,7 @@ async function withReadOnlySnapshot<T>(
 
 function databaseRowsQuery(client: DatabaseObservabilitySqlClient) {
     return client<DatabaseRow[]>`
-        WITH reviewed_databases AS (
+        WITH observed_databases AS (
           SELECT stats.datname,
                  pg_database_size(stats.datname)::bigint AS size_bytes,
                  stats.numbackends::bigint,
@@ -352,12 +418,10 @@ function databaseRowsQuery(client: DatabaseObservabilitySqlClient) {
           JOIN pg_stat_database AS stats ON stats.datid = databases.oid
           WHERE databases.datistemplate = false
             AND databases.datallowconn = true
-            AND stats.datname = ANY(${databaseObservabilityMetricDatabases}::text[])
-            AND has_database_privilege(current_user, stats.datname, 'CONNECT')
         )
-        SELECT reviewed_databases.*,
+        SELECT observed_databases.*,
                COUNT(*) OVER ()::bigint AS database_count
-        FROM reviewed_databases
+        FROM observed_databases
         ORDER BY datname
         LIMIT ${databaseObservabilityDatabaseMaximum}
     `;
@@ -365,147 +429,472 @@ function databaseRowsQuery(client: DatabaseObservabilitySqlClient) {
 
 function connectionRowsQuery(client: DatabaseObservabilitySqlClient) {
     return client<ConnectionRow[]>`
-        SELECT
-          COUNT(*) FILTER (WHERE state = 'active')::bigint AS active_connections,
-          COUNT(*) FILTER (WHERE state = 'idle')::bigint AS idle_connections,
-          COUNT(*)::bigint AS total_connections
-        FROM pg_stat_activity
-        WHERE datname = ANY(${databaseObservabilityMetricDatabases}::text[])
+        SELECT active_connections::bigint,
+               idle_connections::bigint,
+               total_connections::bigint
+        FROM mira_dashboard_observability_capabilities.connection_metrics()
     `;
 }
 
-function observerPolicyRowsQuery(client: DatabaseObservabilitySqlClient) {
+function observerPolicyRowsQuery(
+    client: DatabaseObservabilitySqlClient,
+    controlDatabase: string
+) {
     return client<ObserverPolicyRow[]>`
-        WITH pg_stat_statements_extension AS (
-          SELECT extensions.oid AS extension_oid,
-                 extensions.extowner AS extension_owner_oid,
-                 extensions.extversion AS extension_version,
-                 namespaces.nspname AS extension_schema,
-                 extension_owners.rolname AS extension_owner_name,
-                 extension_owners.rolsuper AS extension_owner_superuser
-          FROM (VALUES (true)) AS anchor(present)
-          LEFT JOIN pg_catalog.pg_extension AS extensions
-            ON extensions.extname = 'pg_stat_statements'
+        WITH role_oids AS (
+          SELECT observer.oid AS observer_oid,
+                 capability_owner.oid AS capability_owner_oid,
+                 view_owner.oid AS view_owner_oid,
+                 read_all_stats.oid AS read_all_stats_oid
+          FROM pg_catalog.pg_roles AS observer
+          JOIN pg_catalog.pg_roles AS capability_owner
+            ON capability_owner.rolname =
+              ${databaseObservabilityCapabilityOwnerRole}
+          JOIN pg_catalog.pg_roles AS view_owner
+            ON view_owner.rolname = ${databaseObservabilityViewOwnerRole}
+          JOIN pg_catalog.pg_roles AS read_all_stats
+            ON read_all_stats.rolname = 'pg_read_all_stats'
+          WHERE observer.rolname = ${databaseObservabilityObserverRole}
+        ), expected_capability_routines AS (
+          SELECT expected.*
+          FROM (
+            VALUES
+              (
+                'table_health'::text,
+                'sql'::name,
+                'v'::"char",
+                'u'::"char",
+                ARRAY[
+                  'schema_name', 'table_name', 'physical_bytes', 'live_tuples',
+                  'dead_tuples', 'last_autovacuum_at_ms',
+                  'last_autoanalyze_at_ms', 'dead_tuple_percent', 'assessed',
+                  'estimated_reclaimable_bytes'
+                ]::text[],
+                ARRAY[
+                  'pg_catalog.name'::pg_catalog.regtype,
+                  'pg_catalog.name'::pg_catalog.regtype,
+                  'pg_catalog.int8'::pg_catalog.regtype,
+                  'pg_catalog.int8'::pg_catalog.regtype,
+                  'pg_catalog.int8'::pg_catalog.regtype,
+                  'pg_catalog.int8'::pg_catalog.regtype,
+                  'pg_catalog.int8'::pg_catalog.regtype,
+                  'pg_catalog.numeric'::pg_catalog.regtype,
+                  'pg_catalog.bool'::pg_catalog.regtype,
+                  'pg_catalog.int8'::pg_catalog.regtype
+                ]::oid[],
+                ARRAY[
+                  't','t','t','t','t','t','t','t','t','t'
+                ]::"char"[],
+                ARRAY[
+                  'search_path=pg_catalog, pg_temp',
+                  'statement_timeout=5s'
+                ]::text[],
+                25::real,
+                '391b9e5325dd42c9f4a319b44dd8ddae0fb88a0cd5276540ab5d65d53ace5606'::text
+              ),
+              (
+                'maintenance_metrics'::text,
+                'sql'::name,
+                'v'::"char",
+                'u'::"char",
+                ARRAY[
+                  'assessed_physical_bytes', 'estimated_reclaimable_bytes',
+                  'high_dead_tuple_table_count', 'unassessed_physical_bytes',
+                  'unassessed_table_count'
+                ]::text[],
+                ARRAY[
+                  'pg_catalog.int8'::pg_catalog.regtype,
+                  'pg_catalog.int8'::pg_catalog.regtype,
+                  'pg_catalog.int8'::pg_catalog.regtype,
+                  'pg_catalog.int8'::pg_catalog.regtype,
+                  'pg_catalog.int8'::pg_catalog.regtype
+                ]::oid[],
+                ARRAY['t','t','t','t','t']::"char"[],
+                ARRAY[
+                  'search_path=pg_catalog, pg_temp',
+                  'statement_timeout=5s'
+                ]::text[],
+                1::real,
+                '617ddca7f3f255858cf01b3ec1c07cf2fa37a5d5ba4e21fc52e2ce451f473c0a'::text
+              ),
+              (
+                'connection_metrics'::text,
+                'sql'::name,
+                'v'::"char",
+                'u'::"char",
+                ARRAY[
+                  'active_connections', 'idle_connections', 'total_connections'
+                ]::text[],
+                ARRAY[
+                  'pg_catalog.int8'::pg_catalog.regtype,
+                  'pg_catalog.int8'::pg_catalog.regtype,
+                  'pg_catalog.int8'::pg_catalog.regtype
+                ]::oid[],
+                ARRAY['t','t','t']::"char"[],
+                ARRAY[
+                  'search_path=pg_catalog, pg_temp',
+                  'statement_timeout=5s'
+                ]::text[],
+                1::real,
+                'e7dd5805171b451837fda6aefad1f8f71e3ada90424d296fc4aed746005ab638'::text
+              ),
+              (
+                'statement_metrics'::text,
+                'sql'::name,
+                'v'::"char",
+                'u'::"char",
+                ARRAY[
+                  'calls', 'total_execution_ms', 'mean_execution_ms', 'rows',
+                  'shared_blocks_hit', 'shared_blocks_read'
+                ]::text[],
+                ARRAY[
+                  'pg_catalog.int8'::pg_catalog.regtype,
+                  'pg_catalog.float8'::pg_catalog.regtype,
+                  'pg_catalog.float8'::pg_catalog.regtype,
+                  'pg_catalog.int8'::pg_catalog.regtype,
+                  'pg_catalog.int8'::pg_catalog.regtype,
+                  'pg_catalog.int8'::pg_catalog.regtype
+                ]::oid[],
+                ARRAY['t','t','t','t','t','t']::"char"[],
+                ARRAY[
+                  'search_path=pg_catalog, pg_temp',
+                  'statement_timeout=5s'
+                ]::text[],
+                20::real,
+                'e96e15f965236535b5d8901c5fea3422c663f6c7858517b840dab82d66910e9e'::text
+              )
+          ) AS expected(
+            routine_name,
+            language_name,
+            volatility,
+            parallel_safety,
+            output_names,
+            output_types,
+            output_modes,
+            routine_configuration,
+            row_estimate,
+            source_hash
+          )
+          WHERE expected.routine_name IN ('table_health', 'maintenance_metrics')
+             OR pg_catalog.current_database() = ${controlDatabase}
+        ), capability_routines AS (
+          SELECT routines.*,
+                 languages.lanname,
+                 expected.language_name,
+                 expected.volatility,
+                 expected.parallel_safety,
+                 expected.output_names,
+                 expected.output_types,
+                 expected.output_modes,
+                 expected.routine_configuration,
+                 expected.row_estimate,
+                 expected.source_hash
+          FROM expected_capability_routines AS expected
           LEFT JOIN pg_catalog.pg_namespace AS namespaces
-            ON namespaces.oid = extensions.extnamespace
-          LEFT JOIN pg_catalog.pg_roles AS extension_owners
-            ON extension_owners.oid = extensions.extowner
-        ), pg_stat_statements_relations AS (
-          SELECT extension.extension_oid,
-                 extension.extension_owner_oid,
-                 extension.extension_version,
-                 extension.extension_schema,
-                 extension.extension_owner_name,
-                 extension.extension_owner_superuser,
-                 relations.oid AS relation_oid,
-                 relations.relname AS relation_name,
-                 relations.relkind AS relation_kind,
-                 relations.relowner AS relation_owner_oid,
-                 EXISTS (
-                   SELECT 1
-                   FROM pg_catalog.pg_depend AS dependencies
-                   WHERE dependencies.classid =
-                       'pg_catalog.pg_class'::pg_catalog.regclass
-                     AND dependencies.objid = relations.oid
-                     AND dependencies.objsubid = 0
-                     AND dependencies.refclassid =
-                       'pg_catalog.pg_extension'::pg_catalog.regclass
-                     AND dependencies.refobjid = extension.extension_oid
-                     AND dependencies.deptype = 'e'
-                 ) AS extension_owned,
-                 pg_catalog.has_table_privilege(
-                   current_user,
-                   relations.oid,
-                   'SELECT'
-                 ) AS can_select,
-                 pg_catalog.has_table_privilege(
-                   current_user,
-                   relations.oid,
-                   'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER,MAINTAIN'
-                 )
-                   OR pg_catalog.has_any_column_privilege(
-                     current_user,
-                     relations.oid,
-                     'INSERT,UPDATE,REFERENCES'
-                   ) AS can_mutate
-          FROM pg_stat_statements_extension AS extension
-          LEFT JOIN pg_catalog.pg_class AS relations
-            ON relations.relnamespace = (
-              SELECT oid
-              FROM pg_catalog.pg_namespace
-              WHERE nspname = 'public'
+            ON namespaces.nspname = ${databaseObservabilityCapabilitySchema}
+          LEFT JOIN pg_catalog.pg_proc AS routines
+            ON routines.pronamespace = namespaces.oid
+           AND routines.proname = expected.routine_name
+           AND routines.pronargs = 0
+          LEFT JOIN pg_catalog.pg_language AS languages
+            ON languages.oid = routines.prolang
+        ), capability_interfaces AS (
+          SELECT
+            EXISTS (
+              SELECT 1
+              FROM pg_catalog.pg_roles AS capability_owner
+              CROSS JOIN role_oids
+              WHERE capability_owner.oid = role_oids.capability_owner_oid
+                AND NOT capability_owner.rolcanlogin
+                AND capability_owner.rolinherit
+                AND NOT capability_owner.rolsuper
+                AND NOT capability_owner.rolcreatedb
+                AND NOT capability_owner.rolcreaterole
+                AND NOT capability_owner.rolreplication
+                AND NOT capability_owner.rolbypassrls
+                AND capability_owner.rolconfig IS NULL
+                AND COALESCE(
+                  (
+                    SELECT pg_catalog.array_agg(
+                      member_roles.rolname ORDER BY member_roles.rolname
+                    )
+                    FROM pg_catalog.pg_auth_members AS memberships
+                    JOIN pg_catalog.pg_roles AS member_roles
+                      ON member_roles.oid = memberships.roleid
+                    WHERE memberships.member = capability_owner.oid
+                  ),
+                  ARRAY[]::name[]
+                ) = ARRAY['pg_read_all_stats'::name]
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM pg_catalog.pg_auth_members AS memberships
+                  WHERE memberships.member = capability_owner.oid
+                    AND (
+                      memberships.admin_option
+                      OR NOT memberships.inherit_option
+                      OR memberships.set_option
+                    )
+                )
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM pg_catalog.pg_auth_members AS memberships
+                  WHERE memberships.roleid = capability_owner.oid
+                )
             )
-           AND relations.relname IN (
-             'pg_stat_statements',
-             'pg_stat_statements_info'
-           )
-        ), pg_stat_statements_policy AS (
-          SELECT extension.extension_oid IS NOT NULL AS extension_installed,
-                 CASE WHEN
-                   pg_catalog.current_database() = ${databaseObservabilityControlDatabase}
-                   AND extension.extension_oid IS NOT NULL
-                   AND extension.extension_version = '1.12'
-                   AND extension.extension_schema = 'public'
-                   AND extension.extension_owner_superuser
-                   AND extension.extension_owner_name <> current_user
-                   AND (
-                     SELECT pg_catalog.count(*)
-                     FROM pg_stat_statements_relations AS relations
-                     WHERE relations.relation_oid IS NOT NULL
-                       AND relations.relation_name IN (
-                         'pg_stat_statements',
-                         'pg_stat_statements_info'
-                       )
-                       AND relations.relation_kind = 'v'
-                       AND relations.relation_owner_oid =
-                         relations.extension_owner_oid
-                       AND relations.extension_owned
-                       AND relations.can_select
-                       AND NOT relations.can_mutate
-                   ) = 2
-                   AND (
-                     SELECT pg_catalog.count(*)
-                     FROM pg_catalog.pg_attribute AS attributes
-                     WHERE attributes.attrelid = (
-                         SELECT relations.relation_oid
-                         FROM pg_stat_statements_relations AS relations
-                         WHERE relations.relation_name = 'pg_stat_statements'
-                       )
-                       AND attributes.attnum > 0
-                       AND NOT attributes.attisdropped
-                       AND (
-                         attributes.attname IN ('dbid', 'userid')
-                           AND attributes.atttypid =
-                             'pg_catalog.oid'::pg_catalog.regtype
-                         OR attributes.attname IN (
-                           'calls',
-                           'queryid',
-                           'rows',
-                           'shared_blks_hit',
-                           'shared_blks_read'
-                         )
-                           AND attributes.atttypid =
-                             'pg_catalog.int8'::pg_catalog.regtype
-                         OR attributes.attname IN (
-                           'mean_exec_time',
-                           'total_exec_time'
-                         )
-                           AND attributes.atttypid =
-                             'pg_catalog.float8'::pg_catalog.regtype
-                       )
-                   ) = 9
-                 THEN ARRAY(
-                   SELECT relations.relation_oid
-                   FROM pg_stat_statements_relations AS relations
-                   WHERE relations.relation_name IN (
-                     'pg_stat_statements',
-                     'pg_stat_statements_info'
-                   )
-                   ORDER BY relations.relation_name
+            AND EXISTS (
+              SELECT 1
+              FROM pg_catalog.pg_roles AS view_owner
+              CROSS JOIN role_oids
+              WHERE view_owner.oid = role_oids.view_owner_oid
+                AND NOT view_owner.rolcanlogin
+                AND NOT view_owner.rolinherit
+                AND NOT view_owner.rolsuper
+                AND NOT view_owner.rolcreatedb
+                AND NOT view_owner.rolcreaterole
+                AND NOT view_owner.rolreplication
+                AND NOT view_owner.rolbypassrls
+                AND view_owner.rolconfig IS NULL
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM pg_catalog.pg_auth_members AS memberships
+                  WHERE memberships.member = view_owner.oid
+                     OR memberships.roleid = view_owner.oid
+                )
+            )
+            AND EXISTS (
+              SELECT 1
+              FROM pg_catalog.pg_namespace AS namespaces
+              CROSS JOIN role_oids
+              WHERE namespaces.nspname = ${databaseObservabilityCapabilitySchema}
+                AND namespaces.nspowner = role_oids.view_owner_oid
+                AND pg_catalog.has_schema_privilege(
+                  role_oids.observer_oid,
+                  namespaces.oid,
+                  'USAGE'
+                )
+                AND NOT pg_catalog.has_schema_privilege(
+                  role_oids.observer_oid,
+                  namespaces.oid,
+                  'CREATE'
+                )
+                AND (
+                  SELECT pg_catalog.count(*)
+                  FROM pg_catalog.aclexplode(namespaces.nspacl) AS grants
+                ) = 4
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM pg_catalog.aclexplode(namespaces.nspacl) AS grants
+                  WHERE grants.grantor <> role_oids.view_owner_oid
+                     OR grants.is_grantable
+                     OR NOT (
+                       grants.grantee = role_oids.view_owner_oid
+                         AND grants.privilege_type IN ('CREATE', 'USAGE')
+                       OR grants.grantee = role_oids.capability_owner_oid
+                         AND grants.privilege_type = 'USAGE'
+                       OR grants.grantee = role_oids.observer_oid
+                         AND grants.privilege_type = 'USAGE'
+                     )
+                )
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM pg_catalog.pg_class AS classes
+                  WHERE classes.relnamespace = namespaces.oid
+                )
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM pg_catalog.pg_type AS types
+                  WHERE types.typnamespace = namespaces.oid
+                )
+                AND (
+                  SELECT pg_catalog.count(*)
+                  FROM pg_catalog.pg_proc AS routines
+                  WHERE routines.pronamespace = namespaces.oid
+                ) = (
+                  SELECT pg_catalog.count(*)
+                  FROM expected_capability_routines
+                )
+            )
+            AND NOT EXISTS (
+              SELECT 1
+              FROM capability_routines AS routines
+              CROSS JOIN role_oids
+              WHERE routines.oid IS NULL
+                 OR routines.proowner <> role_oids.capability_owner_oid
+                 OR routines.prokind <> 'f'
+                 OR routines.prorettype <>
+                   'pg_catalog.record'::pg_catalog.regtype
+                 OR routines.pronargdefaults <> 0
+                 OR routines.provolatile <> routines.volatility
+                 OR routines.proparallel <> routines.parallel_safety
+                 OR NOT routines.prosecdef
+                 OR routines.proleakproof
+                 OR routines.proisstrict
+                 OR routines.lanname <> routines.language_name
+                 OR routines.proargnames IS DISTINCT FROM routines.output_names
+                 OR routines.proallargtypes IS DISTINCT FROM routines.output_types
+                 OR routines.proargmodes IS DISTINCT FROM routines.output_modes
+                 OR routines.proconfig IS DISTINCT FROM
+                   routines.routine_configuration
+                 OR routines.prorows IS DISTINCT FROM routines.row_estimate
+                 OR pg_catalog.encode(
+                   pg_catalog.sha256(
+                     pg_catalog.convert_to(
+                       pg_catalog.pg_get_function_sqlbody(routines.oid),
+                       'UTF8'
+                     )
+                   ),
+                   'hex'
+                 ) IS DISTINCT FROM routines.source_hash
+                 OR NOT pg_catalog.has_function_privilege(
+                   role_oids.observer_oid,
+                   routines.oid,
+                   'EXECUTE'
                  )
-                 ELSE ARRAY[]::oid[]
-                 END AS admitted_relation_oids
-          FROM pg_stat_statements_extension AS extension
+                 OR (
+                   SELECT pg_catalog.count(*)
+                   FROM pg_catalog.aclexplode(routines.proacl) AS grants
+                 ) <> 2
+                 OR EXISTS (
+                   SELECT 1
+                   FROM pg_catalog.aclexplode(routines.proacl) AS grants
+                   WHERE grants.grantor <> role_oids.capability_owner_oid
+                      OR grants.is_grantable
+                      OR grants.privilege_type <> 'EXECUTE'
+                      OR grants.grantee NOT IN (
+                        role_oids.capability_owner_oid,
+                        role_oids.observer_oid
+                      )
+                 )
+            )
+            AND CASE
+              WHEN pg_catalog.current_database() <> ${controlDatabase}
+              THEN NOT EXISTS (
+                SELECT 1
+                FROM pg_catalog.pg_extension AS extensions
+                WHERE extensions.extname = 'pg_stat_statements'
+              )
+              ELSE EXISTS (
+                SELECT 1
+                FROM pg_catalog.pg_extension AS extensions
+                WHERE extensions.extname = 'pg_stat_statements'
+              )
+                AND (
+                  SELECT pg_catalog.count(*)
+                  FROM pg_catalog.pg_class AS sources
+                  JOIN pg_catalog.pg_extension AS extensions
+                    ON extensions.extname = 'pg_stat_statements'
+                   AND extensions.extnamespace = sources.relnamespace
+                  JOIN pg_catalog.pg_depend AS dependencies
+                    ON dependencies.classid =
+                      'pg_catalog.pg_class'::pg_catalog.regclass
+                   AND dependencies.objid = sources.oid
+                   AND dependencies.objsubid = 0
+                   AND dependencies.refclassid =
+                     'pg_catalog.pg_extension'::pg_catalog.regclass
+                   AND dependencies.refobjid = extensions.oid
+                   AND dependencies.deptype = 'e'
+                  WHERE sources.relname IN (
+                    'pg_stat_statements',
+                    'pg_stat_statements_info'
+                  )
+                    AND sources.relkind = 'v'
+                ) = 2
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM pg_catalog.pg_class AS sources
+                  JOIN pg_catalog.pg_extension AS extensions
+                    ON extensions.extname = 'pg_stat_statements'
+                   AND extensions.extnamespace = sources.relnamespace
+                  JOIN role_oids ON true
+                  CROSS JOIN LATERAL
+                    pg_catalog.aclexplode(
+                      COALESCE(
+                        sources.relacl,
+                        pg_catalog.acldefault('r', sources.relowner)
+                      )
+                    ) AS grants
+                  WHERE sources.relname IN (
+                    'pg_stat_statements',
+                    'pg_stat_statements_info'
+                  )
+                    AND grants.grantee IN (
+                      0,
+                      role_oids.observer_oid,
+                      role_oids.capability_owner_oid,
+                      role_oids.view_owner_oid,
+                      role_oids.read_all_stats_oid
+                    )
+                )
+                AND (
+                  SELECT pg_catalog.count(*)
+                  FROM pg_catalog.pg_proc AS routines
+                  JOIN pg_catalog.pg_extension AS extensions
+                    ON extensions.extname = 'pg_stat_statements'
+                  JOIN pg_catalog.pg_depend AS dependencies
+                    ON dependencies.classid =
+                      'pg_catalog.pg_proc'::pg_catalog.regclass
+                   AND dependencies.objid = routines.oid
+                   AND dependencies.objsubid = 0
+                   AND dependencies.refclassid =
+                     'pg_catalog.pg_extension'::pg_catalog.regclass
+                   AND dependencies.refobjid = extensions.oid
+                   AND dependencies.deptype = 'e'
+                  CROSS JOIN role_oids
+                  WHERE routines.proname = 'pg_stat_statements'
+                    AND routines.pronargs = 1
+                    AND routines.proargtypes =
+                      ARRAY['pg_catalog.bool'::pg_catalog.regtype]::oidvector
+                    AND pg_catalog.has_function_privilege(
+                      role_oids.capability_owner_oid,
+                      routines.oid,
+                      'EXECUTE'
+                    )
+                ) = 1
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM pg_catalog.pg_proc AS routines
+                  JOIN pg_catalog.pg_extension AS extensions
+                    ON extensions.extname = 'pg_stat_statements'
+                  JOIN pg_catalog.pg_depend AS dependencies
+                    ON dependencies.classid =
+                      'pg_catalog.pg_proc'::pg_catalog.regclass
+                   AND dependencies.objid = routines.oid
+                   AND dependencies.objsubid = 0
+                   AND dependencies.refclassid =
+                     'pg_catalog.pg_extension'::pg_catalog.regclass
+                   AND dependencies.refobjid = extensions.oid
+                   AND dependencies.deptype = 'e'
+                  CROSS JOIN role_oids
+                  CROSS JOIN LATERAL
+                    pg_catalog.aclexplode(
+                      COALESCE(
+                        routines.proacl,
+                        pg_catalog.acldefault('f', routines.proowner)
+                      )
+                    ) AS grants
+                  WHERE grants.grantee IN (
+                    0,
+                    role_oids.observer_oid,
+                    role_oids.view_owner_oid,
+                    role_oids.read_all_stats_oid
+                  )
+                     OR grants.grantee = role_oids.capability_owner_oid
+                       AND NOT (
+                         routines.proname = 'pg_stat_statements'
+                         AND routines.pronargs = 1
+                         AND routines.proargtypes = ARRAY[
+                           'pg_catalog.bool'::pg_catalog.regtype
+                         ]::oidvector
+                         AND grants.privilege_type = 'EXECUTE'
+                         AND NOT grants.is_grantable
+                       )
+                )
+            END AS valid
+        ), admitted_routines AS (
+          SELECT routines.oid
+          FROM capability_routines AS routines
+          CROSS JOIN capability_interfaces
+          WHERE capability_interfaces.valid
         )
         SELECT roles.rolname AS "roleName",
                roles.rolcanlogin AS "canLogin",
@@ -516,7 +905,7 @@ function observerPolicyRowsQuery(client: DatabaseObservabilitySqlClient) {
                roles.rolreplication AS "canReplicate",
                roles.rolbypassrls AS "bypassRowLevelSecurity",
                roles.rolconnlimit::bigint AS "connectionLimit",
-               pg_catalog.coalesce(
+               COALESCE(
                  ARRAY(
                    SELECT setting
                    FROM pg_catalog.unnest(roles.rolconfig) AS setting
@@ -524,7 +913,20 @@ function observerPolicyRowsQuery(client: DatabaseObservabilitySqlClient) {
                  ),
                  ARRAY[]::text[]
                ) AS "roleConfiguration",
-               pg_catalog.coalesce(
+               COALESCE(
+                 (
+                   SELECT settings.setconfig
+                   FROM pg_catalog.pg_db_role_setting AS settings
+                   WHERE settings.setrole = roles.oid
+                     AND settings.setdatabase = (
+                       SELECT databases.oid
+                       FROM pg_catalog.pg_database AS databases
+                       WHERE databases.datname = pg_catalog.current_database()
+                     )
+                 ),
+                 ARRAY[]::text[]
+               ) AS "databaseRoleConfiguration",
+               COALESCE(
                  (
                    SELECT pg_catalog.array_agg(member_roles.rolname ORDER BY member_roles.rolname)
                    FROM pg_catalog.pg_auth_members AS memberships
@@ -538,21 +940,17 @@ function observerPolicyRowsQuery(client: DatabaseObservabilitySqlClient) {
                  SELECT 1
                  FROM pg_catalog.pg_auth_members AS memberships
                  WHERE memberships.member = roles.oid
-                   AND memberships.admin_option
-               ) AS "hasMembershipAdministration",
-               pg_catalog.coalesce(
-                 (
-                   SELECT pg_catalog.array_agg(databases.datname ORDER BY databases.datname)
-                   FROM pg_catalog.pg_database AS databases
-                   WHERE databases.datallowconn
-                     AND pg_catalog.has_database_privilege(
-                       current_user,
-                       databases.oid,
-                       'CONNECT'
-                     )
-                 ),
-                 ARRAY[]::text[]
-               ) AS "connectableDatabases",
+                   AND (
+                     memberships.admin_option
+                     OR NOT memberships.inherit_option
+                     OR NOT memberships.set_option
+                   )
+               ) AS "hasInvalidMembershipOptions",
+               EXISTS (
+                 SELECT 1
+                 FROM pg_catalog.pg_auth_members AS memberships
+                 WHERE memberships.roleid = roles.oid
+               ) AS "hasInboundMemberships",
                pg_catalog.current_database() AS "currentDatabase",
                pg_catalog.has_database_privilege(
                  current_user,
@@ -614,7 +1012,6 @@ function observerPolicyRowsQuery(client: DatabaseObservabilitySqlClient) {
                          AND namespaces.nspname = 'mira_dashboard_observability'
                          AND classes.relname = 'torrent_count'
                          AND classes.relkind = 'v'
-                         OR classes.oid = ANY(policy.admitted_relation_oids)
                        )
                        AND pg_catalog.has_table_privilege(
                          current_user,
@@ -650,6 +1047,69 @@ function observerPolicyRowsQuery(client: DatabaseObservabilitySqlClient) {
                      'USAGE,SELECT,UPDATE'
                    )
                ) AS "hasSequenceAuthority",
+               EXISTS (
+                 SELECT 1
+                 FROM pg_catalog.pg_default_acl AS default_acls
+                 LEFT JOIN LATERAL
+                   pg_catalog.aclexplode(default_acls.defaclacl) AS grants
+                   ON true
+                 WHERE default_acls.defaclrole = roles.oid
+                    OR grants.grantee = roles.oid
+                    OR (
+                      grants.grantee <> 0
+                      AND pg_catalog.pg_has_role(
+                        roles.oid,
+                        grants.grantee,
+                        'USAGE'
+                      )
+                    )
+               ) AS "hasDefaultAclAuthority",
+               EXISTS (
+                 SELECT 1
+                 FROM pg_catalog.pg_proc AS routines
+                 JOIN pg_catalog.pg_namespace AS namespaces
+                   ON namespaces.oid = routines.pronamespace
+                 WHERE namespaces.nspname NOT IN ('information_schema', 'pg_catalog')
+                   AND namespaces.nspname NOT LIKE 'pg_toast%'
+                   AND namespaces.nspname NOT LIKE 'pg_temp_%'
+                   AND routines.oid NOT IN (SELECT oid FROM admitted_routines)
+                   AND (
+                     pg_catalog.pg_has_role(
+                       roles.oid,
+                       routines.proowner,
+                       'USAGE'
+                     )
+                     OR EXISTS (
+                       SELECT 1
+                       FROM pg_catalog.aclexplode(routines.proacl) AS grants
+                       WHERE grants.grantee = roles.oid
+                          OR (
+                            grants.grantee <> 0
+                            AND pg_catalog.pg_has_role(
+                              roles.oid,
+                              grants.grantee,
+                              'USAGE'
+                            )
+                          )
+                       )
+                   )
+               ) AS "hasRoutineGrantAuthority",
+               EXISTS (
+                 SELECT 1
+                 FROM pg_catalog.pg_proc AS routines
+                 JOIN pg_catalog.pg_namespace AS namespaces
+                   ON namespaces.oid = routines.pronamespace
+                 WHERE namespaces.nspname NOT IN ('information_schema', 'pg_catalog')
+                   AND namespaces.nspname NOT LIKE 'pg_toast%'
+                   AND namespaces.nspname NOT LIKE 'pg_temp_%'
+                   AND routines.prosecdef
+                   AND routines.oid NOT IN (SELECT oid FROM admitted_routines)
+                   AND pg_catalog.has_function_privilege(
+                     roles.oid,
+                     routines.oid,
+                     'EXECUTE'
+                   )
+               ) AS "hasSecurityDefinerRoutineAuthority",
                pg_catalog.pg_has_role(
                  current_user,
                  'pg_monitor',
@@ -657,31 +1117,35 @@ function observerPolicyRowsQuery(client: DatabaseObservabilitySqlClient) {
                ) AS "isPgMonitor",
                pg_catalog.pg_has_role(
                  current_user,
+                 'pg_read_all_stats',
+                 'member'
+               ) AS "isPgReadAllStats",
+               pg_catalog.pg_has_role(
+                 current_user,
+                 ${databaseObservabilityCapabilityOwnerRole},
+                 'member'
+               ) AS "isCapabilityOwner",
+               pg_catalog.pg_has_role(
+                 current_user,
                  ${databaseObservabilityViewOwnerRole},
                  'member'
                ) AS "isViewOwner",
-               policy.extension_installed AS
-                 "pgStatStatementsExtensionInstalled",
-               pg_catalog.cardinality(policy.admitted_relation_oids) = 2 AS
-                 "pgStatStatementsRelationValid"
+               COALESCE(
+                 (SELECT valid FROM capability_interfaces),
+                 false
+               ) AS "capabilityInterfacesValid"
         FROM pg_catalog.pg_roles AS roles
-        CROSS JOIN pg_stat_statements_policy AS policy
         WHERE roles.rolname = current_user
     `;
 }
 
 function assertObserverPolicy(
     rows: readonly ObserverPolicyRow[],
-    expectedDatabase: DatabaseObservabilityReviewedPostgreSqlDatabase
+    expectedDatabase: string
 ): void {
     const row = rows.length === 1 ? rows[0] : undefined;
     let satisfiesPolicy: boolean;
     try {
-        const extensionInstalled = booleanValue(row?.pgStatStatementsExtensionInstalled);
-        const relationValid = booleanValue(row?.pgStatStatementsRelationValid);
-        const pgStatStatementsPolicyValid = extensionInstalled
-            ? expectedDatabase === databaseObservabilityControlDatabase && relationValid
-            : !relationValid;
         satisfiesPolicy =
             row !== undefined &&
             name(row.roleName) === databaseObservabilityObserverRole &&
@@ -692,17 +1156,17 @@ function assertObserverPolicy(
             !booleanValue(row.canCreateRole) &&
             !booleanValue(row.canReplicate) &&
             !booleanValue(row.bypassRowLevelSecurity) &&
-            count(row.connectionLimit) === 1 &&
+            count(row.connectionLimit) === databaseObservabilityObserverConnectionLimit &&
             exactNames(row.roleConfiguration, [
                 "default_transaction_read_only=on",
+                "idle_in_transaction_session_timeout=60s",
+                "idle_session_timeout=60s",
                 "statement_timeout=5s",
             ]) &&
-            exactNames(row.directMemberships, ["pg_monitor", "pg_read_all_stats"]) &&
-            !booleanValue(row.hasMembershipAdministration) &&
-            exactNames(
-                row.connectableDatabases,
-                databaseObservabilityReviewedPostgreSqlDatabases
-            ) &&
+            exactNames(row.databaseRoleConfiguration, []) &&
+            exactNames(row.directMemberships, []) &&
+            !booleanValue(row.hasInvalidMembershipOptions) &&
+            !booleanValue(row.hasInboundMemberships) &&
             name(row.currentDatabase) === expectedDatabase &&
             !booleanValue(row.canCreateCurrentDatabase) &&
             !booleanValue(row.canCreateTemporaryTables) &&
@@ -710,8 +1174,13 @@ function assertObserverPolicy(
             !booleanValue(row.hasBaseTableAuthority) &&
             !booleanValue(row.hasUnexpectedRelationAuthority) &&
             !booleanValue(row.hasSequenceAuthority) &&
-            pgStatStatementsPolicyValid &&
-            booleanValue(row.isPgMonitor) &&
+            !booleanValue(row.hasDefaultAclAuthority) &&
+            !booleanValue(row.hasRoutineGrantAuthority) &&
+            !booleanValue(row.hasSecurityDefinerRoutineAuthority) &&
+            booleanValue(row.capabilityInterfacesValid) &&
+            !booleanValue(row.isPgMonitor) &&
+            !booleanValue(row.isPgReadAllStats) &&
+            !booleanValue(row.isCapabilityOwner) &&
             !booleanValue(row.isViewOwner);
     } catch {
         satisfiesPolicy = false;
@@ -721,233 +1190,44 @@ function assertObserverPolicy(
 
 async function assertClientObserverPolicy(
     client: DatabaseObservabilitySqlClient,
-    expectedDatabase: DatabaseObservabilityReviewedPostgreSqlDatabase,
+    expectedDatabase: string,
+    controlDatabase: string,
     signal: AbortSignal
 ): Promise<void> {
     assertObserverPolicy(
         assertRows<ObserverPolicyRow>(
-            await executeQuery(observerPolicyRowsQuery(client), signal),
+            await executeQuery(observerPolicyRowsQuery(client, controlDatabase), signal),
             1
         ),
         expectedDatabase
     );
 }
 
-function tableHealthRowsQuery(client: DatabaseObservabilitySqlClient, maximum: number) {
+function tableHealthRowsQuery(client: DatabaseObservabilitySqlClient) {
     return client<TableHealthRow[]>`
-        WITH average_row_widths AS (
-          SELECT schemaname, tablename, SUM(avg_width)::numeric AS row_width
-          FROM pg_stats
-          GROUP BY schemaname, tablename
-        ), table_estimates AS (
-          SELECT tables.schemaname,
-                 tables.relname,
-                 tables.relid,
-                 tables.n_live_tup,
-                 tables.n_dead_tup,
-                 tables.last_autovacuum,
-                 tables.last_autoanalyze,
-                 GREATEST(
-                   tables.n_live_tup::numeric,
-                   classes.reltuples::numeric
-                 ) AS estimated_live_tuples,
-                 CASE
-                   WHEN classes.reltuples > 0
-                    AND tables.n_live_tup < classes.reltuples
-                    AND ABS(
-                      tables.n_live_tup::numeric + tables.n_dead_tup::numeric -
-                      classes.reltuples::numeric
-                    ) / classes.reltuples::numeric * 100 <=
-                      ${catalogTupleEstimateTolerancePercent}
-                   THEN tables.n_live_tup::numeric
-                   ELSE GREATEST(
-                     tables.n_live_tup::numeric,
-                     classes.reltuples::numeric
-                   )
-                 END AS dead_tuple_live_estimate,
-                 (
-                   tables.n_live_tup < classes.reltuples
-                   AND tables.n_dead_tup >= ${databaseObservabilityHighDeadTupleMinimum}
-                   AND (
-                     tables.n_dead_tup::numeric /
-                       NULLIF(classes.reltuples::numeric, 0) * 100 >=
-                         ${databaseObservabilityHighDeadTuplePercent}
-                     OR pg_relation_size(tables.relid)::numeric *
-                       tables.n_dead_tup::numeric /
-                       NULLIF(classes.reltuples::numeric, 0) >=
-                         ${databaseObservabilityBloatReviewBytes}
-                   )
-                 ) AS catalog_estimate_may_be_stale
-          FROM pg_stat_user_tables AS tables
-          JOIN pg_class AS classes ON classes.oid = tables.relid
-        )
-        SELECT estimates.schemaname AS schema_name,
-               estimates.relname AS table_name,
-               pg_relation_size(estimates.relid)::bigint AS physical_bytes,
-               estimates.n_live_tup::bigint AS live_tuples,
-               estimates.n_dead_tup::bigint AS dead_tuples,
-               (EXTRACT(EPOCH FROM estimates.last_autovacuum) * 1000)::bigint
-                 AS last_autovacuum_at_ms,
-               (EXTRACT(EPOCH FROM estimates.last_autoanalyze) * 1000)::bigint
-                 AS last_autoanalyze_at_ms,
-               LEAST(
-                 100,
-                 ROUND(
-                   CASE WHEN estimates.dead_tuple_live_estimate <= 0 THEN 0
-                        ELSE estimates.n_dead_tup::numeric /
-                          NULLIF(estimates.dead_tuple_live_estimate, 0) * 100
-                   END,
-                   2
-                 )
-               ) AS dead_tuple_percent,
-               (
-                 widths.row_width IS NOT NULL
-                 AND estimates.estimated_live_tuples > 0
-                 AND NOT estimates.catalog_estimate_may_be_stale
-               ) AS assessed,
-               CASE
-                 WHEN widths.row_width IS NULL
-                   OR estimates.estimated_live_tuples <= 0
-                   OR estimates.catalog_estimate_may_be_stale
-                 THEN NULL
-                 ELSE GREATEST(
-                   pg_relation_size(estimates.relid) - CEIL(
-                     estimates.estimated_live_tuples *
-                     (widths.row_width + 32) * 1.2
-                   ),
-                   0
-                 )::bigint
-               END AS estimated_reclaimable_bytes
-        FROM table_estimates AS estimates
-        LEFT JOIN average_row_widths AS widths
-          ON widths.schemaname = estimates.schemaname
-         AND widths.tablename = estimates.relname
-        WHERE pg_relation_size(estimates.relid) > 0
-        ORDER BY (
-                   pg_relation_size(estimates.relid) >=
-                     ${databaseObservabilityHighDeadTupleMinimumBytes}
-                   AND LEAST(
-                     100,
-                     ROUND(
-                       CASE WHEN estimates.dead_tuple_live_estimate <= 0 THEN 0
-                            ELSE estimates.n_dead_tup::numeric /
-                              NULLIF(estimates.dead_tuple_live_estimate, 0) * 100
-                       END,
-                       2
-                     )
-                   ) >= ${databaseObservabilityHighDeadTuplePercent}
-                   AND estimates.n_dead_tup >=
-                     ${databaseObservabilityHighDeadTupleMinimum}
-                 ) DESC,
-                 estimates.n_dead_tup DESC,
-                 estimates.schemaname,
-                 estimates.relname
-        LIMIT ${maximum}
+        SELECT schema_name,
+               table_name,
+               physical_bytes::bigint,
+               live_tuples::bigint,
+               dead_tuples::bigint,
+               last_autovacuum_at_ms::bigint,
+               last_autoanalyze_at_ms::bigint,
+               dead_tuple_percent,
+               assessed,
+               estimated_reclaimable_bytes::bigint
+        FROM mira_dashboard_observability_capabilities.table_health()
+        LIMIT ${databaseObservabilityTableHealthMaximum}
     `;
 }
 
 function maintenanceRowsQuery(client: DatabaseObservabilitySqlClient) {
     return client<MaintenanceRow[]>`
-        WITH average_row_widths AS (
-          SELECT schemaname, tablename, SUM(avg_width)::numeric AS row_width
-          FROM pg_stats
-          GROUP BY schemaname, tablename
-        ), table_estimates AS (
-          SELECT tables.schemaname,
-                 tables.relname,
-                 tables.relid,
-                 tables.n_live_tup,
-                 tables.n_dead_tup,
-                 GREATEST(
-                   tables.n_live_tup::numeric,
-                   classes.reltuples::numeric
-                 ) AS estimated_live_tuples,
-                 CASE
-                   WHEN classes.reltuples > 0
-                    AND tables.n_live_tup < classes.reltuples
-                    AND ABS(
-                      tables.n_live_tup::numeric + tables.n_dead_tup::numeric -
-                      classes.reltuples::numeric
-                    ) / classes.reltuples::numeric * 100 <=
-                      ${catalogTupleEstimateTolerancePercent}
-                   THEN tables.n_live_tup::numeric
-                   ELSE GREATEST(
-                     tables.n_live_tup::numeric,
-                     classes.reltuples::numeric
-                   )
-                 END AS dead_tuple_live_estimate,
-                 (
-                   tables.n_live_tup < classes.reltuples
-                   AND tables.n_dead_tup >= ${databaseObservabilityHighDeadTupleMinimum}
-                   AND (
-                     tables.n_dead_tup::numeric /
-                       NULLIF(classes.reltuples::numeric, 0) * 100 >=
-                         ${databaseObservabilityHighDeadTuplePercent}
-                     OR pg_relation_size(tables.relid)::numeric *
-                       tables.n_dead_tup::numeric /
-                       NULLIF(classes.reltuples::numeric, 0) >=
-                         ${databaseObservabilityBloatReviewBytes}
-                   )
-                 ) AS catalog_estimate_may_be_stale
-          FROM pg_stat_user_tables AS tables
-          JOIN pg_class AS classes ON classes.oid = tables.relid
-        ), projections AS (
-          SELECT pg_relation_size(estimates.relid)::bigint AS physical_bytes,
-                 estimates.n_dead_tup::bigint AS dead_tuples,
-                 LEAST(
-                   100,
-                   ROUND(
-                     CASE WHEN estimates.dead_tuple_live_estimate <= 0 THEN 0
-                          ELSE estimates.n_dead_tup::numeric /
-                            NULLIF(estimates.dead_tuple_live_estimate, 0) * 100
-                     END,
-                     2
-                   )
-                 ) AS dead_tuple_percent,
-                 (
-                   widths.row_width IS NOT NULL
-                   AND estimates.estimated_live_tuples > 0
-                   AND NOT estimates.catalog_estimate_may_be_stale
-                 ) AS assessed,
-                 CASE
-                   WHEN widths.row_width IS NULL
-                     OR estimates.estimated_live_tuples <= 0
-                     OR estimates.catalog_estimate_may_be_stale
-                   THEN 0
-                   ELSE GREATEST(
-                     pg_relation_size(estimates.relid) - CEIL(
-                       estimates.estimated_live_tuples *
-                       (widths.row_width + 32) * 1.2
-                     ),
-                     0
-                   )::bigint
-                 END AS estimated_reclaimable_bytes
-          FROM table_estimates AS estimates
-          LEFT JOIN average_row_widths AS widths
-            ON widths.schemaname = estimates.schemaname
-           AND widths.tablename = estimates.relname
-          WHERE pg_relation_size(estimates.relid) > 0
-        )
-        SELECT COALESCE(
-                 SUM(physical_bytes) FILTER (WHERE assessed),
-                 0
-               )::bigint AS assessed_physical_bytes,
-               COALESCE(
-                 SUM(estimated_reclaimable_bytes) FILTER (WHERE assessed),
-                 0
-               )::bigint AS estimated_reclaimable_bytes,
-               COUNT(*) FILTER (
-                 WHERE physical_bytes >= ${databaseObservabilityHighDeadTupleMinimumBytes}
-                   AND dead_tuple_percent >= ${databaseObservabilityHighDeadTuplePercent}
-                   AND dead_tuples >= ${databaseObservabilityHighDeadTupleMinimum}
-               )::bigint AS high_dead_tuple_table_count,
-               COALESCE(
-                 SUM(physical_bytes) FILTER (WHERE NOT assessed),
-                 0
-               )::bigint AS unassessed_physical_bytes,
-               COUNT(*) FILTER (WHERE NOT assessed)::bigint
-                 AS unassessed_table_count
-        FROM projections
+        SELECT assessed_physical_bytes::bigint,
+               estimated_reclaimable_bytes::bigint,
+               high_dead_tuple_table_count::bigint,
+               unassessed_physical_bytes::bigint,
+               unassessed_table_count::bigint
+        FROM mira_dashboard_observability_capabilities.maintenance_metrics()
     `;
 }
 
@@ -964,21 +1244,17 @@ function extensionRowsQuery(client: DatabaseObservabilitySqlClient) {
 function statementRowsQuery(client: DatabaseObservabilitySqlClient) {
     return client<StatementRow[]>`
         SELECT calls::bigint,
-               total_exec_time::double precision AS total_execution_ms,
-               mean_exec_time::double precision AS mean_execution_ms,
+               total_execution_ms::double precision,
+               mean_execution_ms::double precision,
                rows::bigint,
-               shared_blks_hit::bigint AS shared_blocks_hit,
-               shared_blks_read::bigint AS shared_blocks_read
-        FROM public.pg_stat_statements AS statements
-        JOIN pg_catalog.pg_database AS databases
-          ON databases.oid = statements.dbid
-         AND databases.datname = ANY(${databaseObservabilityMetricDatabases}::text[])
-        ORDER BY statements.total_exec_time DESC,
-                 statements.calls DESC,
-                 statements.rows DESC,
-                 statements.dbid,
-                 statements.userid,
-                 statements.queryid
+               shared_blocks_hit::bigint,
+               shared_blocks_read::bigint
+        FROM mira_dashboard_observability_capabilities.statement_metrics()
+        ORDER BY total_execution_ms DESC,
+                 calls DESC,
+                 rows DESC,
+                 shared_blocks_read DESC,
+                 shared_blocks_hit DESC
         LIMIT ${databaseObservabilityStatementMaximum}
     `;
 }
@@ -1033,6 +1309,7 @@ function compareTableHealthRows(
     return (
         Number(tableHealthRowIsHighRisk(right)) -
             Number(tableHealthRowIsHighRisk(left)) ||
+        (right.estimatedReclaimableBytes ?? 0) - (left.estimatedReclaimableBytes ?? 0) ||
         right.deadTuples - left.deadTuples ||
         compareStrings(left.database, right.database) ||
         compareStrings(left.schema, right.schema) ||
@@ -1069,14 +1346,20 @@ function addMaintenanceRow(aggregate: MaintenanceAggregate, row: MaintenanceRow)
 
 async function collectTorrentCount(
     factory: DatabaseObservabilitySqlClientFactory,
-    baseUrl: Redacted.Redacted<string>,
-    database: (typeof databaseObservabilityTorrentCountDatabases)[number],
+    connection: DatabaseObservabilityConnection,
+    database: DatabaseObservabilityTorrentCountDatabase,
+    controlDatabase: string,
     signal: AbortSignal
 ): Promise<DatabaseObservabilityCachePayload["torrentCounts"][typeof database]> {
     try {
-        return await withClient(factory, baseUrl, database, signal, async (client) => {
+        return await withClient(factory, connection, database, signal, async (client) => {
             const rows = await withReadOnlySnapshot(client, signal, async () => {
-                await assertClientObserverPolicy(client, database, signal);
+                await assertClientObserverPolicy(
+                    client,
+                    database,
+                    controlDatabase,
+                    signal
+                );
                 return assertRows<TorrentCountRow>(
                     await executeQuery(torrentCountRowsQuery(client), signal),
                     1
@@ -1094,15 +1377,42 @@ async function collectTorrentCount(
         ) {
             throw signalFailure();
         }
-        if (error instanceof ObserverPolicyViolationError) throw error;
         return { state: "unavailable" };
     }
 }
 
 export interface BunSqlDatabaseObservabilityCollectorOptions {
-    readonly connectionUrl?: Redacted.Redacted<string>;
+    readonly connectionResolver?: DatabaseObservabilityConnectionResolver | undefined;
     readonly deadlineMs?: number;
     readonly sqlClientFactory?: DatabaseObservabilitySqlClientFactory;
+}
+
+/** Worker-private source identity retained only for diagnostics and reconciliation. */
+export interface DatabaseObservabilityConnectionSource {
+    readonly containerId: string;
+    readonly composeProject?: string;
+    readonly composeService?: string;
+}
+
+/** Validated worker-private connection fields; no topology value is application configuration. */
+export interface DatabaseObservabilityConnection {
+    readonly controlDatabase: string;
+    readonly hostname: string;
+    readonly password: Redacted.Redacted<string>;
+    readonly port: number;
+}
+
+/** One dynamically resolved connection whose source identity never enters cache payloads. */
+export interface DatabaseObservabilityResolvedConnection {
+    readonly connection: DatabaseObservabilityConnection;
+    readonly source: DatabaseObservabilityConnectionSource;
+}
+
+/** Re-resolves the current database endpoint for every external snapshot attempt. */
+export interface DatabaseObservabilityConnectionResolver {
+    readonly resolve: (
+        signal?: AbortSignal
+    ) => Promise<DatabaseObservabilityResolvedConnection>;
 }
 
 /**
@@ -1113,13 +1423,15 @@ export interface BunSqlDatabaseObservabilityCollectorOptions {
 export function createBunSqlDatabaseObservabilityCollector(
     options: BunSqlDatabaseObservabilityCollectorOptions
 ): DatabaseObservabilityCollector {
-    if (options.connectionUrl === undefined) return unavailableCollector();
+    const connectionResolver = options.connectionResolver;
+    if (connectionResolver === undefined) {
+        return unavailableCollector();
+    }
     const deadlineMs = options.deadlineMs ?? databaseObservabilityDeadlineMs;
     if (!Number.isSafeInteger(deadlineMs) || deadlineMs < 1 || deadlineMs > 60_000) {
         throw new RangeError("Database observability deadline is invalid");
     }
     const sqlClientFactory = options.sqlClientFactory ?? defaultSqlClientFactory();
-
     return Object.freeze({
         async collect(parentSignal?: AbortSignal) {
             const controller = new AbortController();
@@ -1128,10 +1440,15 @@ export function createBunSqlDatabaseObservabilityCollector(
             else parentSignal?.addEventListener("abort", relayAbort, { once: true });
             const deadline = setTimeout(relayAbort, deadlineMs);
             try {
+                const resolvedConnection = await connectionResolver.resolve(
+                    controller.signal
+                );
+                const connection = validatedConnection(resolvedConnection.connection);
+                const { controlDatabase } = connection;
                 const catalog = await withClient(
                     sqlClientFactory,
-                    options.connectionUrl as Redacted.Redacted<string>,
-                    databaseObservabilityControlDatabase,
+                    connection,
+                    controlDatabase,
                     controller.signal,
                     async (client) => {
                         return withReadOnlySnapshot(
@@ -1140,9 +1457,46 @@ export function createBunSqlDatabaseObservabilityCollector(
                             async () => {
                                 await assertClientObserverPolicy(
                                     client,
-                                    databaseObservabilityControlDatabase,
+                                    controlDatabase,
+                                    controlDatabase,
                                     controller.signal
                                 );
+                                const databaseRows = assertRows<DatabaseRow>(
+                                    await executeQuery(
+                                        databaseRowsQuery(client),
+                                        controller.signal
+                                    ),
+                                    databaseObservabilityDatabaseMaximum
+                                );
+                                const clusterDatabaseCount =
+                                    databaseRows.length === 0
+                                        ? 0
+                                        : count(databaseRows[0]!.database_count);
+                                if (
+                                    clusterDatabaseCount !== databaseRows.length ||
+                                    databaseRows.some(
+                                        (row) =>
+                                            count(row.database_count) !==
+                                            clusterDatabaseCount
+                                    )
+                                ) {
+                                    throw new RangeError(
+                                        "Database observability database budget was exceeded"
+                                    );
+                                }
+                                const databaseNames = databaseRows
+                                    .map((row) => name(row.datname))
+                                    .toSorted(compareStrings);
+                                if (
+                                    databaseNames.length === 0 ||
+                                    new Set(databaseNames).size !==
+                                        databaseNames.length ||
+                                    !databaseNames.includes(controlDatabase)
+                                ) {
+                                    throw new TypeError(
+                                        "Database observability catalog inventory is invalid"
+                                    );
+                                }
                                 const extensionRows = assertRows<ExtensionRow>(
                                     await executeQuery(
                                         extensionRowsQuery(client),
@@ -1167,13 +1521,6 @@ export function createBunSqlDatabaseObservabilityCollector(
                                           databaseObservabilityStatementMaximum
                                       )
                                     : [];
-                                const databaseRows = assertRows<DatabaseRow>(
-                                    await executeQuery(
-                                        databaseRowsQuery(client),
-                                        controller.signal
-                                    ),
-                                    databaseObservabilityDatabaseMaximum
-                                );
                                 const connectionRows = assertRows<ConnectionRow>(
                                     await executeQuery(
                                         connectionRowsQuery(client),
@@ -1183,6 +1530,7 @@ export function createBunSqlDatabaseObservabilityCollector(
                                 );
                                 return {
                                     connectionRows,
+                                    databaseNames,
                                     databaseRows,
                                     pgStatStatementsEnabled,
                                     statementRows,
@@ -1196,6 +1544,8 @@ export function createBunSqlDatabaseObservabilityCollector(
                         const blocksHit = count(row.blks_hit);
                         const blocksRead = count(row.blks_read);
                         return {
+                            blocksHit,
+                            blocksRead,
                             cacheHitRatio:
                                 blocksHit + blocksRead === 0
                                     ? 100
@@ -1208,46 +1558,27 @@ export function createBunSqlDatabaseObservabilityCollector(
                         };
                     })
                     .toSorted((left, right) => compareStrings(left.name, right.name));
-                const clusterDatabaseCount =
-                    catalog.databaseRows.length === 0
-                        ? 0
-                        : count(catalog.databaseRows[0]!.database_count);
-                if (
-                    clusterDatabaseCount !== catalog.databaseRows.length ||
-                    catalog.databaseRows.some(
-                        (row) => count(row.database_count) !== clusterDatabaseCount
-                    )
-                ) {
-                    throw new RangeError(
-                        "Database observability database budget was exceeded"
-                    );
-                }
-                if (
-                    databases.length !== databaseObservabilityMetricDatabases.length ||
-                    databases.some(
-                        ({ name: database }, index) =>
-                            database !== databaseObservabilityMetricDatabases[index]
-                    )
-                ) {
-                    throw new TypeError(
-                        "Database observability rows are outside the reviewed inventory"
-                    );
-                }
                 const connections = catalog.connectionRows[0];
                 if (connections === undefined) {
                     throw new TypeError("Database connection summary is absent");
                 }
                 let totalDatabaseSizeBytes = 0;
-                let totalCacheHitRatio = 0;
+                let totalBlocksHit = 0;
+                let totalBlocksRead = 0;
+                for (const row of catalog.databaseRows) {
+                    totalBlocksHit = addCount(totalBlocksHit, count(row.blks_hit));
+                    totalBlocksRead = addCount(totalBlocksRead, count(row.blks_read));
+                }
                 for (const database of databases) {
                     totalDatabaseSizeBytes = addCount(
                         totalDatabaseSizeBytes,
                         database.sizeBytes
                     );
-                    totalCacheHitRatio += database.cacheHitRatio;
                 }
                 const averageCacheHitRatio =
-                    totalCacheHitRatio / databaseObservabilityMetricDatabases.length;
+                    totalBlocksHit + totalBlocksRead === 0
+                        ? 100
+                        : (totalBlocksHit / (totalBlocksHit + totalBlocksRead)) * 100;
 
                 const tableHealthCandidates: DatabaseObservabilityCachePayload["tableHealth"][number][] =
                     [];
@@ -1258,45 +1589,51 @@ export function createBunSqlDatabaseObservabilityCollector(
                     unassessedPhysicalBytes: 0,
                     unassessedTableCount: 0,
                 };
+                const availableDatabaseNames = new Set<string>();
                 for (const database of databases) {
-                    await withClient(
-                        sqlClientFactory,
-                        options.connectionUrl as Redacted.Redacted<string>,
-                        database.name as DatabaseObservabilityReviewedPostgreSqlDatabase,
-                        controller.signal,
-                        async (client) => {
-                            const { maintenanceRows, rows } = await withReadOnlySnapshot(
-                                client,
-                                controller.signal,
-                                async () => {
-                                    await assertClientObserverPolicy(
+                    try {
+                        const observation = await withClient(
+                            sqlClientFactory,
+                            connection,
+                            database.name,
+                            controller.signal,
+                            async (client) => {
+                                const { maintenanceRows, rows } =
+                                    await withReadOnlySnapshot(
                                         client,
-                                        database.name as DatabaseObservabilityReviewedPostgreSqlDatabase,
-                                        controller.signal
-                                    );
-                                    return {
-                                        maintenanceRows: assertRows<MaintenanceRow>(
-                                            await executeQuery(
-                                                maintenanceRowsQuery(client),
+                                        controller.signal,
+                                        async () => {
+                                            await assertClientObserverPolicy(
+                                                client,
+                                                database.name,
+                                                controlDatabase,
                                                 controller.signal
-                                            ),
-                                            1
-                                        ),
-                                        rows: assertRows<TableHealthRow>(
-                                            await executeQuery(
-                                                tableHealthRowsQuery(
-                                                    client,
+                                            );
+                                            return {
+                                                maintenanceRows:
+                                                    assertRows<MaintenanceRow>(
+                                                        await executeQuery(
+                                                            maintenanceRowsQuery(client),
+                                                            controller.signal
+                                                        ),
+                                                        1
+                                                    ),
+                                                rows: assertRows<TableHealthRow>(
+                                                    await executeQuery(
+                                                        tableHealthRowsQuery(client),
+                                                        controller.signal
+                                                    ),
                                                     databaseObservabilityTableHealthMaximum
                                                 ),
-                                                controller.signal
-                                            ),
-                                            databaseObservabilityTableHealthMaximum
-                                        ),
-                                    };
+                                            };
+                                        }
+                                    );
+                                if (maintenanceRows.length !== 1) {
+                                    throw new TypeError(
+                                        "Database maintenance summary row is absent"
+                                    );
                                 }
-                            );
-                            tableHealthCandidates.push(
-                                ...rows.map((row) => {
+                                const projectedRows = rows.map((row) => {
                                     const assessed = booleanValue(row.assessed);
                                     if (
                                         assessed ===
@@ -1343,16 +1680,54 @@ export function createBunSqlDatabaseObservabilityCollector(
                                         schema: name(row.schema_name),
                                         table: name(row.table_name),
                                     };
-                                })
-                            );
-                            if (maintenanceRows.length !== 1) {
-                                throw new TypeError(
-                                    "Database maintenance summary row is absent"
+                                });
+                                const projectedMaintenance: MaintenanceAggregate = {
+                                    assessedPhysicalBytes: 0,
+                                    estimatedReclaimableBytes: 0,
+                                    highDeadTupleTableCount: 0,
+                                    unassessedPhysicalBytes: 0,
+                                    unassessedTableCount: 0,
+                                };
+                                addMaintenanceRow(
+                                    projectedMaintenance,
+                                    maintenanceRows[0]!
                                 );
+                                return {
+                                    maintenance: projectedMaintenance,
+                                    rows: projectedRows,
+                                };
                             }
-                            addMaintenanceRow(maintenance, maintenanceRows[0]!);
+                        );
+                        tableHealthCandidates.push(...observation.rows);
+                        maintenance.assessedPhysicalBytes = addCount(
+                            maintenance.assessedPhysicalBytes,
+                            observation.maintenance.assessedPhysicalBytes
+                        );
+                        maintenance.estimatedReclaimableBytes = addCount(
+                            maintenance.estimatedReclaimableBytes,
+                            observation.maintenance.estimatedReclaimableBytes
+                        );
+                        maintenance.highDeadTupleTableCount = addCount(
+                            maintenance.highDeadTupleTableCount,
+                            observation.maintenance.highDeadTupleTableCount
+                        );
+                        maintenance.unassessedPhysicalBytes = addCount(
+                            maintenance.unassessedPhysicalBytes,
+                            observation.maintenance.unassessedPhysicalBytes
+                        );
+                        maintenance.unassessedTableCount = addCount(
+                            maintenance.unassessedTableCount,
+                            observation.maintenance.unassessedTableCount
+                        );
+                        availableDatabaseNames.add(database.name);
+                    } catch (error) {
+                        if (
+                            controller.signal.aborted ||
+                            (error instanceof DOMException && error.name === "AbortError")
+                        ) {
+                            throw signalFailure();
                         }
-                    );
+                    }
                 }
                 tableHealthCandidates.sort(compareTableHealthRows);
                 if (
@@ -1378,24 +1753,35 @@ export function createBunSqlDatabaseObservabilityCollector(
                     totalExecutionMs: nonnegativeNumber(row.total_execution_ms),
                 }));
 
+                const discoveredDatabaseNames = new Set(catalog.databaseNames);
                 const torrentCounts = {
-                    bitmagnet: await collectTorrentCount(
-                        sqlClientFactory,
-                        options.connectionUrl as Redacted.Redacted<string>,
-                        databaseObservabilityTorrentCountDatabases[0],
-                        controller.signal
-                    ),
-                    comet: await collectTorrentCount(
-                        sqlClientFactory,
-                        options.connectionUrl as Redacted.Redacted<string>,
-                        databaseObservabilityTorrentCountDatabases[1],
-                        controller.signal
-                    ),
+                    bitmagnet: discoveredDatabaseNames.has(
+                        databaseObservabilityTorrentCountDatabases[0]
+                    )
+                        ? await collectTorrentCount(
+                              sqlClientFactory,
+                              connection,
+                              databaseObservabilityTorrentCountDatabases[0],
+                              controlDatabase,
+                              controller.signal
+                          )
+                        : { state: "unavailable" as const },
+                    comet: discoveredDatabaseNames.has(
+                        databaseObservabilityTorrentCountDatabases[1]
+                    )
+                        ? await collectTorrentCount(
+                              sqlClientFactory,
+                              connection,
+                              databaseObservabilityTorrentCountDatabases[1],
+                              controlDatabase,
+                              controller.signal
+                          )
+                        : { state: "unavailable" as const },
                 };
 
                 const pgBouncer = await withClient(
                     sqlClientFactory,
-                    options.connectionUrl as Redacted.Redacted<string>,
+                    connection,
                     databaseObservabilityPgBouncerVirtualDatabase,
                     controller.signal,
                     async (client) => {
@@ -1413,35 +1799,12 @@ export function createBunSqlDatabaseObservabilityCollector(
                             ),
                             databaseObservabilityPgBouncerInputMaximum - poolRows.length
                         );
-                        const reviewedDatabaseSet = new Set<string>(
-                            databaseObservabilityMetricDatabases
+                        const observedPoolRows = poolRows.filter((row) =>
+                            discoveredDatabaseNames.has(name(row.database))
                         );
-                        const reviewedPoolRows = poolRows.filter((row) =>
-                            reviewedDatabaseSet.has(name(row.database))
+                        const observedStatsRows = statsRows.filter((row) =>
+                            discoveredDatabaseNames.has(name(row.database))
                         );
-                        const reviewedStatsRows = statsRows.filter((row) =>
-                            reviewedDatabaseSet.has(name(row.database))
-                        );
-                        const averageQueryMs =
-                            reviewedStatsRows.length === 0
-                                ? 0
-                                : reviewedStatsRows.reduce(
-                                      (sum, row) =>
-                                          sum + nonnegativeNumber(row.avg_query_time),
-                                      0
-                                  ) /
-                                  reviewedStatsRows.length /
-                                  1000;
-                        const averageTransactionMs =
-                            reviewedStatsRows.length === 0
-                                ? 0
-                                : reviewedStatsRows.reduce(
-                                      (sum, row) =>
-                                          sum + nonnegativeNumber(row.avg_xact_time),
-                                      0
-                                  ) /
-                                  reviewedStatsRows.length /
-                                  1000;
                         const poolsByDatabase = new Map<
                             string,
                             {
@@ -1452,7 +1815,7 @@ export function createBunSqlDatabaseObservabilityCollector(
                                 waitingClients: number;
                             }
                         >();
-                        for (const row of reviewedPoolRows) {
+                        for (const row of observedPoolRows) {
                             const database = name(row.database);
                             const aggregate = poolsByDatabase.get(database) ?? {
                                 activeClients: 0,
@@ -1461,76 +1824,198 @@ export function createBunSqlDatabaseObservabilityCollector(
                                 usedServers: 0,
                                 waitingClients: 0,
                             };
-                            aggregate.activeClients += count(row.cl_active);
-                            aggregate.activeServers += count(row.sv_active);
-                            aggregate.idleServers += count(row.sv_idle);
-                            aggregate.usedServers += count(row.sv_used);
-                            aggregate.waitingClients += count(row.cl_waiting);
+                            aggregate.activeClients = addCounts(
+                                addCounts(aggregate.activeClients, row.cl_active),
+                                row.cl_active_cancel_req
+                            );
+                            aggregate.activeServers = addCounts(
+                                addCounts(
+                                    addCounts(aggregate.activeServers, row.sv_active),
+                                    row.sv_active_cancel
+                                ),
+                                row.sv_being_canceled
+                            );
+                            aggregate.idleServers = addCounts(
+                                aggregate.idleServers,
+                                row.sv_idle
+                            );
+                            aggregate.usedServers = addCounts(
+                                aggregate.usedServers,
+                                row.sv_used
+                            );
+                            aggregate.waitingClients = addCounts(
+                                addCounts(aggregate.waitingClients, row.cl_waiting),
+                                row.cl_waiting_cancel_req
+                            );
                             poolsByDatabase.set(database, aggregate);
                         }
                         const statsByDatabase = new Map<
                             string,
                             {
-                                averageQueryMs: number;
-                                averageTransactionMs: number;
+                                averageQueryCount: number;
+                                averageTransactionCount: number;
                                 totalQueries: number;
+                                weightedQueryTimeMicroseconds: number;
+                                weightedTransactionTimeMicroseconds: number;
                             }
                         >();
-                        for (const row of reviewedStatsRows) {
-                            statsByDatabase.set(name(row.database), {
-                                averageQueryMs:
-                                    nonnegativeNumber(row.avg_query_time) / 1000,
-                                averageTransactionMs:
-                                    nonnegativeNumber(row.avg_xact_time) / 1000,
-                                totalQueries: count(row.total_query_count),
-                            });
+                        for (const row of observedStatsRows) {
+                            const database = name(row.database);
+                            const aggregate = statsByDatabase.get(database) ?? {
+                                averageQueryCount: 0,
+                                averageTransactionCount: 0,
+                                totalQueries: 0,
+                                weightedQueryTimeMicroseconds: 0,
+                                weightedTransactionTimeMicroseconds: 0,
+                            };
+                            aggregate.averageQueryCount = addCounts(
+                                aggregate.averageQueryCount,
+                                row.avg_query_count
+                            );
+                            aggregate.averageTransactionCount = addCounts(
+                                aggregate.averageTransactionCount,
+                                row.avg_xact_count
+                            );
+                            aggregate.totalQueries = addCounts(
+                                aggregate.totalQueries,
+                                row.total_query_count
+                            );
+                            aggregate.weightedQueryTimeMicroseconds = addWeightedDuration(
+                                aggregate.weightedQueryTimeMicroseconds,
+                                row.avg_query_time,
+                                row.avg_query_count
+                            );
+                            aggregate.weightedTransactionTimeMicroseconds =
+                                addWeightedDuration(
+                                    aggregate.weightedTransactionTimeMicroseconds,
+                                    row.avg_xact_time,
+                                    row.avg_xact_count
+                                );
+                            statsByDatabase.set(database, aggregate);
+                        }
+                        let averageQueryCount = 0;
+                        let averageTransactionCount = 0;
+                        let weightedQueryTimeMicroseconds = 0;
+                        let weightedTransactionTimeMicroseconds = 0;
+                        for (const aggregate of statsByDatabase.values()) {
+                            averageQueryCount = addCounts(
+                                averageQueryCount,
+                                aggregate.averageQueryCount
+                            );
+                            averageTransactionCount = addCounts(
+                                averageTransactionCount,
+                                aggregate.averageTransactionCount
+                            );
+                            weightedQueryTimeMicroseconds = addNonnegativeNumbers(
+                                weightedQueryTimeMicroseconds,
+                                aggregate.weightedQueryTimeMicroseconds
+                            );
+                            weightedTransactionTimeMicroseconds = addNonnegativeNumbers(
+                                weightedTransactionTimeMicroseconds,
+                                aggregate.weightedTransactionTimeMicroseconds
+                            );
                         }
                         let maxWaitSeconds = 0;
-                        for (const row of reviewedPoolRows) {
+                        let clientConnections = 0;
+                        let serverConnections = 0;
+                        let waitingClients = 0;
+                        for (const row of observedPoolRows) {
                             maxWaitSeconds = Math.max(
                                 maxWaitSeconds,
                                 nonnegativeNumber(row.maxwait)
                             );
+                            const activeClients = addCounts(
+                                addCounts(0, row.cl_active),
+                                row.cl_active_cancel_req
+                            );
+                            const waitingClientsForRow = addCounts(
+                                addCounts(0, row.cl_waiting),
+                                row.cl_waiting_cancel_req
+                            );
+                            clientConnections = addCounts(
+                                clientConnections,
+                                activeClients
+                            );
+                            clientConnections = addCounts(
+                                clientConnections,
+                                waitingClientsForRow
+                            );
+                            waitingClients = addCounts(
+                                waitingClients,
+                                waitingClientsForRow
+                            );
+                            for (const serverState of [
+                                row.sv_active,
+                                row.sv_active_cancel,
+                                row.sv_being_canceled,
+                                row.sv_idle,
+                                row.sv_used,
+                                row.sv_tested,
+                                row.sv_login,
+                            ]) {
+                                serverConnections = addCounts(
+                                    serverConnections,
+                                    serverState
+                                );
+                            }
                         }
                         return {
-                            averageQueryMs,
-                            averageTransactionMs,
-                            clientConnections: reviewedPoolRows.reduce(
-                                (sum, row) =>
-                                    sum + count(row.cl_active) + count(row.cl_waiting),
-                                0
+                            averageQueryMs: averageDurationMs(
+                                weightedQueryTimeMicroseconds,
+                                averageQueryCount
                             ),
+                            averageTransactionMs: averageDurationMs(
+                                weightedTransactionTimeMicroseconds,
+                                averageTransactionCount
+                            ),
+                            clientConnections,
                             maxWaitSeconds,
-                            serverConnections: reviewedPoolRows.reduce(
-                                (sum, row) =>
-                                    sum +
-                                    count(row.sv_active) +
-                                    count(row.sv_idle) +
-                                    count(row.sv_used),
-                                0
-                            ),
-                            waitingClients: reviewedPoolRows.reduce(
-                                (sum, row) => sum + count(row.cl_waiting),
-                                0
-                            ),
+                            serverConnections,
+                            waitingClients,
                             perDatabase: new Map(
-                                [...poolsByDatabase.entries()].map(([database, pool]) => [
-                                    database,
-                                    {
-                                        ...pool,
-                                        ...(statsByDatabase.get(database) ?? {
-                                            averageQueryMs: 0,
-                                            averageTransactionMs: 0,
-                                            totalQueries: 0,
-                                        }),
-                                    },
-                                ])
+                                [
+                                    ...new Set([
+                                        ...poolsByDatabase.keys(),
+                                        ...statsByDatabase.keys(),
+                                    ]),
+                                ]
+                                    .toSorted((left, right) => left.localeCompare(right))
+                                    .map((database) => {
+                                        const pool = poolsByDatabase.get(database) ?? {
+                                            activeClients: 0,
+                                            activeServers: 0,
+                                            idleServers: 0,
+                                            usedServers: 0,
+                                            waitingClients: 0,
+                                        };
+                                        const stats = statsByDatabase.get(database);
+                                        return [
+                                            database,
+                                            {
+                                                ...pool,
+                                                averageQueryMs: averageDurationMs(
+                                                    stats?.weightedQueryTimeMicroseconds ??
+                                                        0,
+                                                    stats?.averageQueryCount ?? 0
+                                                ),
+                                                averageTransactionMs: averageDurationMs(
+                                                    stats?.weightedTransactionTimeMicroseconds ??
+                                                        0,
+                                                    stats?.averageTransactionCount ?? 0
+                                                ),
+                                                totalQueries: stats?.totalQueries ?? 0,
+                                            },
+                                        ] as const;
+                                    })
                             ),
                         };
                     }
                 );
                 const databasesWithPools = databases.map((database) => ({
                     ...database,
+                    detailsState: availableDatabaseNames.has(database.name)
+                        ? ("available" as const)
+                        : ("unavailable" as const),
                     ...(pgBouncer.perDatabase.get(database.name) === undefined
                         ? {}
                         : { pool: pgBouncer.perDatabase.get(database.name)! }),
@@ -1553,13 +2038,19 @@ export function createBunSqlDatabaseObservabilityCollector(
                         databaseObservabilityBloatReviewMinimumBytes &&
                         estimatedReclaimablePercent >=
                             databaseObservabilityBloatReviewPercent);
-                const assessmentComplete = maintenance.unassessedTableCount === 0;
+                const unavailableDatabaseCount =
+                    databases.length - availableDatabaseNames.size;
+                const assessmentComplete =
+                    maintenance.unassessedTableCount === 0 &&
+                    unavailableDatabaseCount === 0;
                 const requiresMaintenanceReview =
                     requiresBloatReview ||
                     maintenance.highDeadTupleTableCount > 0 ||
                     slowStatementCount > 0;
                 let maintenanceStatus: "healthy" | "not-assessed" | "review" =
-                    assessmentComplete ? "healthy" : "not-assessed";
+                    assessmentComplete && catalog.pgStatStatementsEnabled
+                        ? "healthy"
+                        : "not-assessed";
                 if (requiresMaintenanceReview) maintenanceStatus = "review";
                 const payload = v.parse(databaseObservabilityCachePayloadSchema, {
                     databases: databasesWithPools,
@@ -1585,6 +2076,7 @@ export function createBunSqlDatabaseObservabilityCollector(
                         pgStatStatementsEnabled: catalog.pgStatStatementsEnabled,
                         totalConnections: count(connections.total_connections),
                         totalDatabaseSizeBytes,
+                        unavailableDatabaseCount,
                     },
                     tableHealth,
                     torrentCounts,

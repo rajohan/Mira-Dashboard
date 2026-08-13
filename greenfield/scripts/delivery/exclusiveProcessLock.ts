@@ -1,16 +1,20 @@
 import { constants, type BigIntStats } from "node:fs";
-import { lstat, open, unlink, type FileHandle } from "node:fs/promises";
+import { lstat, open, readFile, unlink, type FileHandle } from "node:fs/promises";
 import path from "node:path";
 
 import * as v from "valibot";
 
 const maximumProcessLockBytes = 512;
+const maximumProcessStatBytes = 4096;
 const processLockInitializationGraceMs = 5000;
+const linuxBootIdPath = "/proc/sys/kernel/random/boot_id";
 const lockOpenFlags =
     constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW | constants.O_RDWR;
 const lockReadFlags = constants.O_NOFOLLOW | constants.O_RDONLY;
 const processLockOwnerSchema = v.strictObject({
+    bootId: v.pipe(v.string(), v.uuid()),
     pid: v.pipe(v.number(), v.integer(), v.minValue(1)),
+    processStartTicks: v.pipe(v.string(), v.regex(/^(?:0|[1-9]\d*)$/u), v.maxLength(32)),
     token: v.pipe(v.string(), v.uuid()),
 });
 
@@ -31,6 +35,11 @@ interface ProcessLockSnapshot {
 
 interface OwnedProcessLock {
     readonly path: string;
+    readonly snapshot: ProcessLockSnapshot;
+}
+
+interface ObservedProcessLock {
+    readonly owner?: v.InferOutput<typeof processLockOwnerSchema>;
     readonly snapshot: ProcessLockSnapshot;
 }
 
@@ -61,7 +70,11 @@ function validateOptions(options: ExclusiveProcessLockOptions): void {
     }
 }
 
-function snapshot(status: BigIntStats, failureMessage: string): ProcessLockSnapshot {
+function snapshot(
+    status: BigIntStats,
+    failureMessage: string,
+    allowIncomplete = false
+): ProcessLockSnapshot {
     if (
         typeof process.getuid !== "function" ||
         !status.isFile() ||
@@ -69,7 +82,7 @@ function snapshot(status: BigIntStats, failureMessage: string): ProcessLockSnaps
         status.nlink !== 1n ||
         status.uid !== BigInt(process.getuid()) ||
         (status.mode & 0o022n) !== 0n ||
-        status.size <= 0n ||
+        status.size < (allowIncomplete ? 0n : 1n) ||
         status.size > BigInt(maximumProcessLockBytes)
     ) {
         throw processLockFailure(failureMessage);
@@ -94,42 +107,75 @@ function sameSnapshot(
     );
 }
 
-async function processLockMayStillBeInitializing(
-    lockPath: string,
-    failureMessage: string,
-    contents: string | undefined,
-    observedMutation: boolean
-): Promise<boolean> {
-    // O_EXCL publishes the pathname before the owner can finish its bounded record.
-    // A newline terminates every complete record, so completed malformed data must
-    // fail immediately while only a secure incomplete publication receives grace.
-    if (!observedMutation && contents?.endsWith("\n")) return false;
-    let status: BigIntStats;
+async function readLinuxBootId(failureMessage: string): Promise<string> {
     try {
-        status = await lstat(lockPath, { bigint: true });
-    } catch (error) {
-        if (errorCode(error) === "ENOENT") return true;
+        const contents = await readFile(linuxBootIdPath, "utf8");
+        if (Buffer.byteLength(contents) > 64) throw processLockFailure(failureMessage);
+        return v.parse(v.pipe(v.string(), v.uuid()), contents.trim());
+    } catch {
         throw processLockFailure(failureMessage);
     }
-    if (
-        typeof process.getuid !== "function" ||
-        !status.isFile() ||
-        status.isSymbolicLink() ||
-        status.nlink !== 1n ||
-        status.uid !== BigInt(process.getuid()) ||
-        (status.mode & 0o022n) !== 0n ||
-        status.size < 0n ||
-        status.size > BigInt(maximumProcessLockBytes)
-    ) {
-        return false;
+}
+
+async function readProcessStartTicks(
+    pid: number,
+    failureMessage: string
+): Promise<string | undefined> {
+    try {
+        const contents = await readFile(`/proc/${pid}/stat`, "utf8");
+        if (
+            Buffer.byteLength(contents) === 0 ||
+            Buffer.byteLength(contents) > maximumProcessStatBytes
+        ) {
+            throw processLockFailure(failureMessage);
+        }
+        // The command name is parenthesized and may contain spaces or `)` characters,
+        // so field 22 (starttime) is located relative to the final closing parenthesis.
+        const closingParenthesis = contents.lastIndexOf(")");
+        if (
+            !contents.startsWith(`${pid} (`) ||
+            closingParenthesis <= String(pid).length + 1
+        ) {
+            throw processLockFailure(failureMessage);
+        }
+        const fields = contents
+            .slice(closingParenthesis + 1)
+            .trim()
+            .split(/\s+/u);
+        const processStartTicks = fields[19];
+        if (
+            fields.length < 20 ||
+            processStartTicks === undefined ||
+            !/^(?:0|[1-9]\d*)$/u.test(processStartTicks) ||
+            processStartTicks.length > 32
+        ) {
+            throw processLockFailure(failureMessage);
+        }
+        return processStartTicks;
+    } catch (error) {
+        if (errorCode(error) === "ENOENT" || errorCode(error) === "ESRCH") {
+            return undefined;
+        }
+        throw processLockFailure(failureMessage);
     }
-    const ageMs = Date.now() - Number(status.ctimeMs);
-    return ageMs >= 0 && ageMs <= processLockInitializationGraceMs;
+}
+
+async function currentProcessIdentity(failureMessage: string): Promise<{
+    bootId: string;
+    processStartTicks: string;
+}> {
+    const [bootId, processStartTicks] = await Promise.all([
+        readLinuxBootId(failureMessage),
+        readProcessStartTicks(process.pid, failureMessage),
+    ] as const);
+    if (processStartTicks === undefined) throw processLockFailure(failureMessage);
+    return Object.freeze({ bootId, processStartTicks });
 }
 
 async function createProcessLock(
     options: ExclusiveProcessLockOptions
 ): Promise<OwnedProcessLock | undefined> {
+    const identity = await currentProcessIdentity(options.failureMessage);
     let handle: FileHandle;
     try {
         handle = await open(options.lockPath, lockOpenFlags, 0o600);
@@ -139,7 +185,12 @@ async function createProcessLock(
     }
     try {
         await handle.writeFile(
-            `${JSON.stringify({ pid: process.pid, token: Bun.randomUUIDv7() })}\n`,
+            `${JSON.stringify({
+                bootId: identity.bootId,
+                pid: process.pid,
+                processStartTicks: identity.processStartTicks,
+                token: Bun.randomUUIDv7(),
+            })}\n`,
             "utf8"
         );
         await handle.sync();
@@ -159,16 +210,10 @@ async function createProcessLock(
     }
 }
 
-async function readProcessLock(options: ExclusiveProcessLockOptions): Promise<
-    | {
-          owner: v.InferOutput<typeof processLockOwnerSchema>;
-          snapshot: ProcessLockSnapshot;
-      }
-    | undefined
-> {
+async function readProcessLock(
+    options: ExclusiveProcessLockOptions
+): Promise<ObservedProcessLock | undefined> {
     let handle: FileHandle;
-    let contents: string | undefined;
-    let observedMutation = false;
     try {
         handle = await open(options.lockPath, lockReadFlags);
     } catch (error) {
@@ -178,20 +223,18 @@ async function readProcessLock(options: ExclusiveProcessLockOptions): Promise<
     try {
         const beforeStatus = await handle.stat({ bigint: true });
         if (beforeStatus.nlink === 0n) return undefined;
-        const before = snapshot(beforeStatus, options.failureMessage);
-        contents = await handle.readFile("utf8");
-        const afterStatus = await handle.stat({ bigint: true });
-        if (afterStatus.nlink === 0n) return undefined;
-        const after = snapshot(afterStatus, options.failureMessage);
-        if (!sameSnapshot(before, after)) {
-            observedMutation = true;
+        const before = snapshot(beforeStatus, options.failureMessage, true);
+        const buffer = Buffer.alloc(maximumProcessLockBytes + 1);
+        const { bytesRead } = await handle.read(buffer, 0, buffer.byteLength, 0);
+        if (bytesRead > maximumProcessLockBytes) {
             throw processLockFailure(options.failureMessage);
         }
-        if (
-            !contents.endsWith("\n") ||
-            Buffer.byteLength(contents) > maximumProcessLockBytes
-        ) {
-            throw processLockFailure(options.failureMessage);
+        const contents = buffer.subarray(0, bytesRead).toString("utf8");
+        const afterStatus = await handle.stat({ bigint: true });
+        if (afterStatus.nlink === 0n) return undefined;
+        const after = snapshot(afterStatus, options.failureMessage, true);
+        if (!sameSnapshot(before, after)) {
+            return undefined;
         }
         let pathStatus: BigIntStats;
         try {
@@ -200,8 +243,11 @@ async function readProcessLock(options: ExclusiveProcessLockOptions): Promise<
             if (errorCode(error) === "ENOENT") return undefined;
             throw processLockFailure(options.failureMessage);
         }
-        if (!sameSnapshot(after, snapshot(pathStatus, options.failureMessage))) {
+        if (!sameSnapshot(after, snapshot(pathStatus, options.failureMessage, true))) {
             return undefined;
+        }
+        if (!contents.endsWith("\n")) {
+            return Object.freeze({ snapshot: after });
         }
         const parsed: unknown = JSON.parse(contents);
         return Object.freeze({
@@ -209,41 +255,42 @@ async function readProcessLock(options: ExclusiveProcessLockOptions): Promise<
             snapshot: after,
         });
     } catch {
-        if (
-            await processLockMayStillBeInitializing(
-                options.lockPath,
-                options.failureMessage,
-                contents,
-                observedMutation
-            )
-        ) {
-            return undefined;
-        }
         throw processLockFailure(options.failureMessage);
     } finally {
         await handle.close();
     }
 }
 
-function isProcessAlive(pid: number, failureMessage: string): boolean {
-    try {
-        process.kill(pid, 0);
-        return true;
-    } catch (error) {
-        if (errorCode(error) === "ESRCH") return false;
-        if (errorCode(error) === "EPERM") return true;
-        throw processLockFailure(failureMessage);
-    }
+async function ownerIdentityIsAlive(
+    owner: v.InferOutput<typeof processLockOwnerSchema>,
+    failureMessage: string
+): Promise<boolean> {
+    const bootId = await readLinuxBootId(failureMessage);
+    if (bootId !== owner.bootId) return false;
+    const processStartTicks = await readProcessStartTicks(owner.pid, failureMessage);
+    return processStartTicks === owner.processStartTicks;
 }
 
 async function recoverStaleProcessLock(
     options: ExclusiveProcessLockOptions
 ): Promise<void> {
     const observed = await readProcessLock(options);
-    if (
-        observed === undefined ||
-        isProcessAlive(observed.owner.pid, options.failureMessage)
-    ) {
+    if (observed === undefined) return;
+    if (observed.owner === undefined) {
+        let currentStatus: BigIntStats;
+        try {
+            currentStatus = await lstat(options.lockPath, { bigint: true });
+        } catch (error) {
+            if (errorCode(error) === "ENOENT") return;
+            throw processLockFailure(options.failureMessage);
+        }
+        const current = snapshot(currentStatus, options.failureMessage, true);
+        if (!sameSnapshot(observed.snapshot, current)) return;
+        const ageMs = Date.now() - Number(currentStatus.ctimeMs);
+        if (!Number.isFinite(ageMs) || ageMs < processLockInitializationGraceMs) {
+            return;
+        }
+    } else if (await ownerIdentityIsAlive(observed.owner, options.failureMessage)) {
         return;
     }
     let currentStatus: BigIntStats;
@@ -253,9 +300,13 @@ async function recoverStaleProcessLock(
         if (errorCode(error) === "ENOENT") return;
         throw processLockFailure(options.failureMessage);
     }
-    const current = snapshot(currentStatus, options.failureMessage);
+    const current = snapshot(
+        currentStatus,
+        options.failureMessage,
+        observed.owner === undefined
+    );
     if (!sameSnapshot(observed.snapshot, current)) {
-        throw processLockFailure(options.failureMessage);
+        return;
     }
     try {
         await unlink(options.lockPath);

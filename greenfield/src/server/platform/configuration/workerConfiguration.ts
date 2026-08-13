@@ -2,7 +2,7 @@ import { Redacted } from "effect";
 import * as v from "valibot";
 
 import { configurationEnvironmentNamesForRole } from "../../../shared/configuration/applicationConfigurationRegistry.ts";
-import { configurationDatabaseObservabilityUrl } from "./databaseObservabilityConfiguration.ts";
+import { configurationDatabaseObservabilityPassword } from "./databaseObservabilityConfiguration.ts";
 import {
     configurationGatewayToken,
     configurationGatewayUrl,
@@ -23,7 +23,7 @@ import {
 
 /** Immutable, validated configuration consumed by the greenfield worker process. */
 export interface WorkerConfiguration {
-    readonly databaseObservabilityUrl?: Redacted.Redacted<string>;
+    readonly databaseObservabilityPassword?: Redacted.Redacted<string>;
     readonly gatewayToken: Redacted.Redacted<string>;
     readonly gatewayUrl: string;
     readonly logLevel: ApplicationLogLevel;
@@ -39,7 +39,7 @@ const optionalEnvironmentValueSchema = v.optional(v.unknown());
 
 /** Valibot projection for the complete accepted worker-process environment surface. */
 export const workerConfigurationEnvironmentSchema = v.object({
-    MIRA_DASHBOARD_DATABASE_OBSERVABILITY_URL: optionalEnvironmentValueSchema,
+    MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD: optionalEnvironmentValueSchema,
     MIRA_DASHBOARD_LOG_LEVEL: optionalEnvironmentValueSchema,
     MIRA_DASHBOARD_OPENCLAW_ROOT: optionalEnvironmentValueSchema,
     MIRA_DASHBOARD_PROJECT_ROOT: optionalEnvironmentValueSchema,
@@ -69,12 +69,13 @@ export function parseWorkerConfiguration(
         source,
         (projection) => v.parse(workerConfigurationEnvironmentSchema, projection)
     );
-    const databaseObservabilityUrl = configurationDatabaseObservabilityUrl(input);
+    const databaseObservabilityPassword =
+        configurationDatabaseObservabilityPassword(input);
     return Object.freeze({
-        ...(databaseObservabilityUrl === undefined
+        ...(databaseObservabilityPassword === undefined
             ? {}
             : {
-                  databaseObservabilityUrl,
+                  databaseObservabilityPassword,
               }),
         gatewayToken: configurationGatewayToken(input),
         gatewayUrl: configurationGatewayUrl(input),

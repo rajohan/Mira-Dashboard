@@ -81,7 +81,9 @@ async function validateStateDirectory(
 }
 
 /**
- * Serializes one complete production release/database transition below private state.
+ * Serializes every authorized production delivery mutation by the trusted application UID.
+ * This is an application authority boundary, not a sandbox against another malicious process
+ * running as that same UID; closing that boundary requires a different-principal host handoff.
  * @param stateDirectory Canonical current-user-owned `0700` production state directory.
  * @param operation Complete transition; callers must keep services stopped until it settles.
  * @returns Operation result after the lease and state identity are revalidated.

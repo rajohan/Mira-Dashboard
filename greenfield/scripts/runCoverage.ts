@@ -12,7 +12,12 @@ import { runTestSuite } from "./runTestSuite.ts";
 
 const projectRoot = path.resolve(import.meta.dir, "..");
 const coverageDirectory = path.join(projectRoot, "coverage");
-const coveredSourceRoots = Object.freeze(["scripts", "src"]);
+const coveredSourceRoots = Object.freeze([
+    "scripts",
+    "src",
+    "drizzle.config.ts",
+    "tailwind.config.ts",
+]);
 const bunTestParallelProcesses = 3;
 const browserTestTimingsFile = ".bun-browser-test-timings.json";
 const bunTestTimingsFile = ".bun-test-timings.json";

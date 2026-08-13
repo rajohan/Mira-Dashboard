@@ -15,6 +15,8 @@ coverage:
                 paths:
                     - greenfield/scripts/
                     - greenfield/src/
+                    - greenfield/drizzle.config.ts
+                    - greenfield/tailwind.config.ts
             backend:
                 target: 85%
                 threshold: 0%
@@ -45,6 +47,8 @@ coverage:
                 paths:
                     - greenfield/scripts/
                     - greenfield/src/
+                    - greenfield/drizzle.config.ts
+                    - greenfield/tailwind.config.ts
             backend:
                 target: 85%
                 threshold: 0%
@@ -74,6 +78,8 @@ flags:
         paths:
             - greenfield/scripts/
             - greenfield/src/
+            - greenfield/drizzle.config.ts
+            - greenfield/tailwind.config.ts
     frontend:
         paths:
             - frontend/src/

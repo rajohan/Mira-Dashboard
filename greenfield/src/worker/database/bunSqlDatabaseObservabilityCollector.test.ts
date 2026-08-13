@@ -3,27 +3,48 @@ import { describe, expect, test } from "bun:test";
 import { Redacted } from "effect";
 
 import {
-    databaseObservabilityControlDatabase,
-    databaseObservabilityMetricDatabases,
+    databaseObservabilityDatabaseMaximum,
+    databaseObservabilityObserverConnectionLimit,
     databaseObservabilityPgBouncerVirtualDatabase,
-    databaseObservabilityReviewedPostgreSqlDatabases,
     databaseObservabilityTorrentCountDatabases,
 } from "../../shared/databaseObservabilityPolicy.ts";
 import {
     createBunSqlDatabaseObservabilityCollector,
+    type DatabaseObservabilityConnection,
     type DatabaseObservabilitySqlClient,
     type DatabaseObservabilitySqlClientFactory,
 } from "./bunSqlDatabaseObservabilityCollector.ts";
 
-const connectionUrl = Object.freeze(
-    Redacted.make(
-        "postgresql://mira_dashboard_observer:private-password@127.0.0.1:6432/postgres",
-        {
-            label: "database-observability-url",
-        }
-    )
-);
-const metricDatabases = databaseObservabilityMetricDatabases;
+const connection = Object.freeze({
+    controlDatabase: "postgres",
+    hostname: "127.0.0.1",
+    password: Object.freeze(
+        Redacted.make("private-password", {
+            label: "database-observability-password",
+        })
+    ),
+    port: 6432,
+});
+const connectionResolver = Object.freeze({
+    resolve: () =>
+        Promise.resolve({
+            connection,
+            source: { containerId: "a".repeat(64) },
+        }),
+});
+const controlDatabase = "postgres";
+const metricDatabases = [
+    "app_a",
+    "app_b",
+    "app_c",
+    "app_d",
+    "bitmagnet",
+    "comet",
+    "db_a",
+    "db_b",
+    "postgres",
+    "service_a",
+] as const;
 
 type Row = Record<string, unknown>;
 
@@ -77,7 +98,7 @@ function fixtureFactory(
 ): DatabaseObservabilitySqlClientFactory & { readonly events: string[] } {
     const events = options.events ?? [];
     return Object.freeze({
-        create(_baseUrl: Redacted.Redacted<string>, database: string) {
+        create(_connection: DatabaseObservabilityConnection, database: string) {
             events.push(`create:${database}`);
             const client = (<T>(strings: TemplateStringsArray, ...values: unknown[]) => {
                 const sql = queryText(strings);
@@ -127,25 +148,30 @@ function fixtureRows(database: string, sql: string): readonly Row[] {
                 canCreateTemporaryTables: false,
                 canReplicate: false,
                 canLogin: true,
-                connectableDatabases: databaseObservabilityReviewedPostgreSqlDatabases,
-                connectionLimit: 1,
+                connectionLimit: databaseObservabilityObserverConnectionLimit,
                 currentDatabase: database,
-                directMemberships: ["pg_monitor", "pg_read_all_stats"],
+                databaseRoleConfiguration: [],
+                directMemberships: [],
                 hasBaseTableAuthority: false,
-                hasMembershipAdministration: false,
+                hasDefaultAclAuthority: false,
+                hasInboundMemberships: false,
+                hasInvalidMembershipOptions: false,
+                hasRoutineGrantAuthority: false,
+                hasSecurityDefinerRoutineAuthority: false,
                 hasSequenceAuthority: false,
                 hasUnexpectedRelationAuthority: false,
                 inheritsPrivileges: true,
-                isPgMonitor: true,
+                capabilityInterfacesValid: true,
+                isCapabilityOwner: false,
+                isPgMonitor: false,
+                isPgReadAllStats: false,
                 isSuperuser: false,
                 isViewOwner: false,
-                pgStatStatementsExtensionInstalled:
-                    database === databaseObservabilityControlDatabase,
-                pgStatStatementsRelationValid:
-                    database === databaseObservabilityControlDatabase,
                 roleName: "mira_dashboard_observer",
                 roleConfiguration: [
                     "default_transaction_read_only=on",
+                    "idle_in_transaction_session_timeout=60s",
+                    "idle_session_timeout=60s",
                     "statement_timeout=5s",
                 ],
             },
@@ -157,20 +183,20 @@ function fixtureRows(database: string, sql: string): readonly Row[] {
             let sizeBytes = 0;
             let committedTransactions = 0;
             let rolledBackTransactions = 0;
-            if (database === "aiomanager") {
+            if (database === "app_a") {
                 numbackends = 2;
                 sizeBytes = 100 * 1024 * 1024;
                 committedTransactions = 10;
                 rolledBackTransactions = 1;
-            } else if (database === "aiometadata") {
+            } else if (database === "app_b") {
                 numbackends = 1;
                 sizeBytes = 50 * 1024 * 1024;
                 committedTransactions = 20;
                 rolledBackTransactions = 2;
             }
             return {
-                blks_hit: database === "aiomanager" ? 75 : 0,
-                blks_read: database === "aiomanager" ? 25 : 0,
+                blks_hit: database === "app_a" ? 75 : 0,
+                blks_read: database === "app_a" ? 25 : 0,
                 database_count: metricDatabases.length,
                 datname: database,
                 numbackends,
@@ -180,7 +206,11 @@ function fixtureRows(database: string, sql: string): readonly Row[] {
             };
         });
     }
-    if (sql.includes("FROM pg_stat_activity")) {
+    if (
+        sql.includes(
+            "FROM mira_dashboard_observability_capabilities.connection_metrics()"
+        )
+    ) {
         return [
             {
                 active_connections: 1,
@@ -190,41 +220,43 @@ function fixtureRows(database: string, sql: string): readonly Row[] {
         ];
     }
     if (
-        sql.includes("FROM pg_stat_user_tables") &&
-        sql.includes("AS assessed_physical_bytes")
+        sql.includes(
+            "FROM mira_dashboard_observability_capabilities.maintenance_metrics()"
+        )
     ) {
         return [
             {
-                assessed_physical_bytes: database === "aiomanager" ? 64 * 1024 * 1024 : 0,
-                estimated_reclaimable_bytes:
-                    database === "aiomanager" ? 10 * 1024 * 1024 : 0,
-                high_dead_tuple_table_count: database === "aiomanager" ? 1 : 0,
-                unassessed_physical_bytes: database === "aiometadata" ? 10 : 0,
-                unassessed_table_count: database === "aiometadata" ? 1 : 0,
+                assessed_physical_bytes: database === "app_a" ? 64 * 1024 * 1024 : 0,
+                estimated_reclaimable_bytes: database === "app_a" ? 10 * 1024 * 1024 : 0,
+                high_dead_tuple_table_count: database === "app_a" ? 1 : 0,
+                unassessed_physical_bytes: database === "app_b" ? 10 : 0,
+                unassessed_table_count: database === "app_b" ? 1 : 0,
             },
         ];
     }
-    if (sql.includes("FROM pg_stat_user_tables")) {
-        if (!["aiomanager", "aiometadata"].includes(database)) return [];
+    if (sql.includes("FROM mira_dashboard_observability_capabilities.table_health()")) {
+        if (!["app_a", "app_b"].includes(database)) return [];
         return [
             tableRow(database, {
-                assessed: database === "aiomanager",
-                dead_tuple_percent: database === "aiomanager" ? 20 : 1,
-                dead_tuples: database === "aiomanager" ? 2000 : 1,
+                assessed: database === "app_a",
+                dead_tuple_percent: database === "app_a" ? 20 : 1,
+                dead_tuples: database === "app_a" ? 2000 : 1,
                 estimated_reclaimable_bytes:
-                    database === "aiomanager" ? 10 * 1024 * 1024 : null,
+                    database === "app_a" ? 10 * 1024 * 1024 : null,
                 last_autoanalyze_at_ms: null,
                 last_autovacuum_at_ms: null,
                 live_tuples: 10_000,
-                physical_bytes: database === "aiomanager" ? 64 * 1024 * 1024 : 10,
+                physical_bytes: database === "app_a" ? 64 * 1024 * 1024 : 10,
             }),
         ];
     }
     if (sql.includes("FROM pg_catalog.pg_extension")) {
-        return [{ enabled: database === databaseObservabilityControlDatabase }];
+        return [{ enabled: database === controlDatabase }];
     }
-    if (sql.includes("FROM public.pg_stat_statements")) {
-        if (database !== databaseObservabilityControlDatabase) {
+    if (
+        sql.includes("FROM mira_dashboard_observability_capabilities.statement_metrics()")
+    ) {
+        if (database !== controlDatabase) {
             throw new Error("Statement metrics must use the control database");
         }
         return [
@@ -245,11 +277,17 @@ function fixtureRows(database: string, sql: string): readonly Row[] {
         return [
             {
                 cl_active: 2,
+                cl_active_cancel_req: 0,
                 cl_waiting: 1,
-                database: "aiomanager",
+                cl_waiting_cancel_req: 0,
+                database: "app_a",
                 maxwait: 3,
                 sv_active: 1,
+                sv_active_cancel: 0,
+                sv_being_canceled: 0,
                 sv_idle: 1,
+                sv_login: 0,
+                sv_tested: 0,
                 sv_used: 0,
             },
         ];
@@ -257,9 +295,11 @@ function fixtureRows(database: string, sql: string): readonly Row[] {
     if (sql === "SHOW STATS") {
         return [
             {
+                avg_query_count: 12,
                 avg_query_time: 2000,
+                avg_xact_count: 6,
                 avg_xact_time: 4000,
-                database: "aiomanager",
+                database: "app_a",
                 total_query_count: 12,
             },
         ];
@@ -271,7 +311,7 @@ describe("Bun SQL database observability collector", () => {
     test("uses sequential per-database and PgBouncer clients and projects no identities", async () => {
         const factory = fixtureFactory();
         const collector = createBunSqlDatabaseObservabilityCollector({
-            connectionUrl,
+            connectionResolver,
             sqlClientFactory: factory,
         });
 
@@ -297,6 +337,7 @@ describe("Bun SQL database observability collector", () => {
                     unassessedTableCount: 1,
                 },
                 totalDatabaseSizeBytes: 150 * 1024 * 1024,
+                unavailableDatabaseCount: 0,
             },
             torrentCounts: {
                 bitmagnet: { count: 42, state: "available" },
@@ -305,9 +346,14 @@ describe("Bun SQL database observability collector", () => {
         });
         expect(payload.databases).toHaveLength(metricDatabases.length);
         expect(payload.databases.map(({ name }) => name)).toEqual(metricDatabases);
+        expect(
+            payload.databases.every(({ detailsState }) => detailsState === "available")
+        ).toBe(true);
         expect(payload.databases[0]).toMatchObject({
+            blocksHit: 75,
+            blocksRead: 25,
             cacheHitRatio: 75,
-            name: "aiomanager",
+            name: "app_a",
             pool: {
                 activeClients: 2,
                 averageQueryMs: 2,
@@ -316,15 +362,18 @@ describe("Bun SQL database observability collector", () => {
             },
         });
         expect(payload.databases[1]).toMatchObject({
+            blocksHit: 0,
+            blocksRead: 0,
             cacheHitRatio: 100,
-            name: "aiometadata",
+            name: "app_b",
         });
+        expect(payload.summary.averageCacheHitRatio).toBe(75);
         expect(payload.tableHealth.map(({ database }) => database)).toEqual([
-            "aiomanager",
-            "aiometadata",
+            "app_a",
+            "app_b",
         ]);
         const postgresqlConnections = [
-            databaseObservabilityControlDatabase,
+            controlDatabase,
             ...metricDatabases,
             ...databaseObservabilityTorrentCountDatabases,
         ];
@@ -354,9 +403,7 @@ describe("Bun SQL database observability collector", () => {
                 `query:${database}:BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`,
                 `query:${database}:SET LOCAL statement_timeout = '5s'`,
                 `query:${database}:SET LOCAL search_path = pg_catalog`,
-                expect.stringContaining(
-                    `query:${database}:WITH pg_stat_statements_extension AS`
-                ),
+                expect.stringContaining(`query:${database}:WITH role_oids AS`),
             ]);
         }
         expect(
@@ -365,7 +412,7 @@ describe("Bun SQL database observability collector", () => {
         expect(factory.events.find((event) => event.startsWith("query:pgbouncer:"))).toBe(
             "query:pgbouncer:SHOW POOLS"
         );
-        for (const database of ["aiomanager", "aiometadata"]) {
+        for (const database of ["app_a", "app_b"]) {
             const queries = factory.events.filter((event) =>
                 event.startsWith(`query:${database}:`)
             );
@@ -379,17 +426,17 @@ describe("Bun SQL database observability collector", () => {
                 `query:${database}:SET LOCAL search_path = pg_catalog`
             );
             expect(
-                queries.some(
-                    (query) =>
-                        query.includes("FROM pg_stat_user_tables") &&
-                        query.includes("AS assessed_physical_bytes")
+                queries.some((query) =>
+                    query.includes(
+                        "FROM mira_dashboard_observability_capabilities.maintenance_metrics()"
+                    )
                 )
             ).toBe(true);
             expect(
-                queries.some(
-                    (query) =>
-                        query.includes("FROM pg_stat_user_tables") &&
-                        !query.includes("AS assessed_physical_bytes")
+                queries.some((query) =>
+                    query.includes(
+                        "FROM mira_dashboard_observability_capabilities.table_health()"
+                    )
                 )
             ).toBe(true);
             expect(queries.at(-1)).toBe(`query:${database}:COMMIT`);
@@ -402,27 +449,51 @@ describe("Bun SQL database observability collector", () => {
             )
         ).toHaveLength(1);
         expect(
-            factory.events.filter((event) =>
-                event.includes("FROM pg_catalog.pg_extension")
+            factory.events.filter(
+                (event) =>
+                    event.startsWith("query:postgres:SELECT EXISTS") &&
+                    event.includes("FROM pg_catalog.pg_extension")
             )
         ).toEqual([expect.stringContaining("query:postgres:")]);
         expect(
             factory.events.filter((event) =>
-                event.includes("FROM public.pg_stat_statements")
+                event.includes(
+                    "FROM mira_dashboard_observability_capabilities.statement_metrics()"
+                )
             )
         ).toEqual([expect.stringContaining("query:postgres:")]);
-        expect(factory.events).toContain(
-            `values:postgres:[["aiomanager","aiometadata","aiostreams","authelia","bitmagnet","comet","crowdsec","metabase","speedtest_tracker"],16]`
+        const observerPolicyQuery = factory.events.find(
+            (event) =>
+                event.startsWith("query:postgres:WITH role_oids AS") &&
+                event.includes('AS "directMemberships"')
         );
+        expect(observerPolicyQuery).toContain("NOT memberships.inherit_option");
+        expect(observerPolicyQuery).toContain("NOT memberships.set_option");
+        expect(observerPolicyQuery).toContain("memberships.roleid = roles.oid");
+        expect(observerPolicyQuery).toContain('AS "databaseRoleConfiguration"');
+        expect(observerPolicyQuery).toContain('AS "hasDefaultAclAuthority"');
+        expect(observerPolicyQuery).toContain('AS "hasRoutineGrantAuthority"');
+        expect(observerPolicyQuery).toContain('AS "hasSecurityDefinerRoutineAuthority"');
+        expect(observerPolicyQuery).toContain("expected_capability_routines AS");
+        expect(observerPolicyQuery).toContain("capability_interfaces AS");
+        expect(observerPolicyQuery).toContain("'table_health'::text");
+        expect(observerPolicyQuery).toContain("'maintenance_metrics'::text");
+        expect(observerPolicyQuery).toContain("'connection_metrics'::text");
+        expect(observerPolicyQuery).toContain("'statement_metrics'::text");
+        expect(observerPolicyQuery).toContain("pg_catalog.pg_get_function_sqlbody");
+        expect(observerPolicyQuery).toContain("pg_catalog.sha256(");
+        expect(observerPolicyQuery).toContain("pg_catalog.aclexplode(routines.proacl)");
+        expect(observerPolicyQuery).toContain("grants.grantee = roles.oid");
+        expect(observerPolicyQuery).toContain("grants.grantee <> 0");
+        expect(observerPolicyQuery).toContain("routines.proowner");
+        expect(observerPolicyQuery).toContain("routines.prosecdef");
+        expect(observerPolicyQuery).toContain("pg_catalog.has_function_privilege(");
+        expect(observerPolicyQuery).toContain("routines.oid, 'EXECUTE'");
         expect(factory.events).toContain(
-            `values:aiomanager:[10,1000,20,${5 * 1024 ** 3},${64 * 1024 ** 2},20,1000,25]`
+            `values:postgres:[${databaseObservabilityDatabaseMaximum}]`
         );
-        expect(factory.events).toContain(
-            `values:aiomanager:[10,1000,20,${5 * 1024 ** 3},${64 * 1024 ** 2},20,1000]`
-        );
-        expect(factory.events).toContain(
-            `values:postgres:[["aiomanager","aiometadata","aiostreams","authelia","bitmagnet","comet","crowdsec","metabase","speedtest_tracker"],20]`
-        );
+        expect(factory.events).toContain(`values:app_a:[25]`);
+        expect(factory.events).toContain(`values:postgres:[20]`);
     });
 
     test("contains a count-only view failure to its exact torrent source", async () => {
@@ -439,7 +510,7 @@ describe("Bun SQL database observability collector", () => {
         });
 
         const payload = await createBunSqlDatabaseObservabilityCollector({
-            connectionUrl,
+            connectionResolver,
             sqlClientFactory: factory,
         }).collect();
 
@@ -468,22 +539,13 @@ describe("Bun SQL database observability collector", () => {
             { canCreateRole: true },
             { canReplicate: true },
             { bypassRowLevelSecurity: true },
-            { connectionLimit: 2 },
+            { connectionLimit: databaseObservabilityObserverConnectionLimit + 1 },
             { roleConfiguration: ["statement_timeout=5s"] },
-            {
-                directMemberships: [
-                    "application_role",
-                    "pg_monitor",
-                    "pg_read_all_stats",
-                ],
-            },
-            { hasMembershipAdministration: true },
-            {
-                connectableDatabases: [
-                    ...databaseObservabilityReviewedPostgreSqlDatabases,
-                    "template1",
-                ],
-            },
+            { databaseRoleConfiguration: ["statement_timeout=60s"] },
+            { directMemberships: ["pg_monitor"] },
+            { directMemberships: ["pg_read_all_stats"] },
+            { hasInvalidMembershipOptions: true },
+            { hasInboundMemberships: true },
             { currentDatabase: "template1" },
             { canCreateCurrentDatabase: true },
             { canCreateTemporaryTables: true },
@@ -491,12 +553,12 @@ describe("Bun SQL database observability collector", () => {
             { hasBaseTableAuthority: true },
             { hasUnexpectedRelationAuthority: true },
             { hasSequenceAuthority: true },
-            { pgStatStatementsRelationValid: false },
-            {
-                pgStatStatementsExtensionInstalled: false,
-                pgStatStatementsRelationValid: true,
-            },
-            { isPgMonitor: false },
+            { hasRoutineGrantAuthority: true },
+            { hasSecurityDefinerRoutineAuthority: true },
+            { capabilityInterfacesValid: false },
+            { isPgMonitor: true },
+            { isPgReadAllStats: true },
+            { isCapabilityOwner: true },
             { isViewOwner: true },
         ]) {
             const factory = fixtureFactory({
@@ -510,7 +572,7 @@ describe("Bun SQL database observability collector", () => {
 
             expect(
                 createBunSqlDatabaseObservabilityCollector({
-                    connectionUrl,
+                    connectionResolver,
                     sqlClientFactory: factory,
                 }).collect()
             ).rejects.toThrow("Database observability collection failed");
@@ -524,66 +586,144 @@ describe("Bun SQL database observability collector", () => {
         }
     });
 
-    test("revalidates the monitoring principal before each metric database read", () => {
+    test("fails before metrics for observer-owned default ACL drift", () => {
         const factory = fixtureFactory({
             rows(database, sql) {
                 const rows = fixtureRows(database, sql);
-                return database === "aiomanager" && sql.includes("pg_roles AS roles")
-                    ? [{ ...rows[0], isSuperuser: true }]
+                return sql.includes("pg_roles AS roles")
+                    ? [{ ...rows[0], hasDefaultAclAuthority: true }]
                     : rows;
             },
         });
 
         expect(
             createBunSqlDatabaseObservabilityCollector({
-                connectionUrl,
+                connectionResolver,
                 sqlClientFactory: factory,
             }).collect()
         ).rejects.toThrow("Database observability collection failed");
-        expect(factory.events).toContain("query:aiomanager:ROLLBACK");
-        expect(
-            factory.events.some(
-                (event) =>
-                    event.startsWith("query:aiomanager:") &&
-                    event.includes("FROM pg_stat_user_tables")
-            )
-        ).toBe(false);
-        expect(factory.events).not.toContain("create:aiometadata");
+        const policyQuery = factory.events.find(
+            (event) =>
+                event.startsWith("query:postgres:WITH role_oids AS") &&
+                event.includes('AS "hasDefaultAclAuthority"')
+        );
+        expect(policyQuery).toContain("LEFT JOIN LATERAL");
+        expect(policyQuery).toContain("default_acls.defaclrole = roles.oid");
+        expect(factory.events).toContain("query:postgres:ROLLBACK");
+        expect(factory.events.some((event) => event.includes("FROM pg_database"))).toBe(
+            false
+        );
     });
 
-    test("rejects pg_stat_statements outside the fixed control database", () => {
+    test("isolates per-database policy drift without hiding the dynamic inventory", async () => {
         const factory = fixtureFactory({
             rows(database, sql) {
                 const rows = fixtureRows(database, sql);
-                return database === "aiomanager" && sql.includes("pg_roles AS roles")
+                return database === "app_a" && sql.includes("pg_roles AS roles")
+                    ? [{ ...rows[0], isSuperuser: true }]
+                    : rows;
+            },
+        });
+
+        const payload = await createBunSqlDatabaseObservabilityCollector({
+            connectionResolver,
+            sqlClientFactory: factory,
+        }).collect();
+        expect(payload.databases.find(({ name }) => name === "app_a")?.detailsState).toBe(
+            "unavailable"
+        );
+        expect(payload.databases.find(({ name }) => name === "app_b")?.detailsState).toBe(
+            "available"
+        );
+        expect(payload.summary.unavailableDatabaseCount).toBe(1);
+        expect(payload.summary.maintenance.assessmentComplete).toBe(false);
+        expect(factory.events).toContain("query:app_a:ROLLBACK");
+        expect(
+            factory.events.some(
+                (event) =>
+                    event.startsWith("query:app_a:") &&
+                    event.includes(
+                        "FROM mira_dashboard_observability_capabilities.table_health()"
+                    )
+            )
+        ).toBe(false);
+        expect(factory.events).toContain("create:app_b");
+    });
+
+    test("isolates routine authority drift to the affected database", async () => {
+        for (const policyOverride of [
+            { hasRoutineGrantAuthority: true },
+            { hasSecurityDefinerRoutineAuthority: true },
+        ]) {
+            const factory = fixtureFactory({
+                rows(database, sql) {
+                    const rows = fixtureRows(database, sql);
+                    return database === "app_a" && sql.includes("pg_roles AS roles")
+                        ? [{ ...rows[0], ...policyOverride }]
+                        : rows;
+                },
+            });
+
+            const payload = await createBunSqlDatabaseObservabilityCollector({
+                connectionResolver,
+                sqlClientFactory: factory,
+            }).collect();
+
+            expect(
+                payload.databases.find(({ name }) => name === "app_a")?.detailsState
+            ).toBe("unavailable");
+            expect(
+                payload.databases.find(({ name }) => name === "app_b")?.detailsState
+            ).toBe("available");
+            expect(payload.summary.unavailableDatabaseCount).toBe(1);
+            expect(factory.events).toContain("query:app_a:ROLLBACK");
+            expect(
+                factory.events.some(
+                    (event) =>
+                        event.startsWith("query:app_a:") &&
+                        event.includes(
+                            "FROM mira_dashboard_observability_capabilities.table_health()"
+                        )
+                )
+            ).toBe(false);
+        }
+    });
+
+    test("isolates a missing sanitized capability in one database", async () => {
+        const factory = fixtureFactory({
+            rows(database, sql) {
+                const rows = fixtureRows(database, sql);
+                return database === "app_a" && sql.includes("pg_roles AS roles")
                     ? [
                           {
                               ...rows[0],
-                              pgStatStatementsExtensionInstalled: true,
-                              pgStatStatementsRelationValid: true,
+                              capabilityInterfacesValid: false,
                           },
                       ]
                     : rows;
             },
         });
 
-        expect(
-            createBunSqlDatabaseObservabilityCollector({
-                connectionUrl,
-                sqlClientFactory: factory,
-            }).collect()
-        ).rejects.toThrow("Database observability collection failed");
-        expect(factory.events).toContain("query:aiomanager:ROLLBACK");
+        const payload = await createBunSqlDatabaseObservabilityCollector({
+            connectionResolver,
+            sqlClientFactory: factory,
+        }).collect();
+        expect(payload.databases.find(({ name }) => name === "app_a")?.detailsState).toBe(
+            "unavailable"
+        );
+        expect(factory.events).toContain("query:app_a:ROLLBACK");
         expect(
             factory.events.some(
                 (event) =>
-                    event.startsWith("query:aiomanager:") &&
-                    event.includes("FROM pg_stat_user_tables")
+                    event.startsWith("query:app_a:") &&
+                    event.includes(
+                        "FROM mira_dashboard_observability_capabilities.table_health()"
+                    )
             )
         ).toBe(false);
     });
 
-    test("revalidates the monitoring principal before each torrent-count read", () => {
+    test("contains torrent-count policy drift to the optional named capability", async () => {
         let bitmagnetPolicyChecks = 0;
         const factory = fixtureFactory({
             rows(database, sql) {
@@ -599,12 +739,11 @@ describe("Bun SQL database observability collector", () => {
             },
         });
 
-        expect(
-            createBunSqlDatabaseObservabilityCollector({
-                connectionUrl,
-                sqlClientFactory: factory,
-            }).collect()
-        ).rejects.toThrow("Database observability collection failed");
+        const payload = await createBunSqlDatabaseObservabilityCollector({
+            connectionResolver,
+            sqlClientFactory: factory,
+        }).collect();
+        expect(payload.torrentCounts.bitmagnet).toEqual({ state: "unavailable" });
         expect(bitmagnetPolicyChecks).toBe(2);
         expect(
             factory.events.some(
@@ -613,11 +752,11 @@ describe("Bun SQL database observability collector", () => {
                     event.includes("FROM mira_dashboard_observability.torrent_count")
             )
         ).toBe(false);
-        expect(factory.events).not.toContain("create:pgbouncer");
+        expect(factory.events).toContain("create:pgbouncer");
     });
 
-    test("fails closed when the connectable reviewed inventory is incomplete", () => {
-        const missingDatabase = "aiostreams";
+    test("reconciles a removed database without a source or configuration edit", async () => {
+        const missingDatabase = "app_c";
         const factory = fixtureFactory({
             rows(database, sql) {
                 const rows = fixtureRows(database, sql);
@@ -634,30 +773,167 @@ describe("Bun SQL database observability collector", () => {
             },
         });
 
-        expect(
-            createBunSqlDatabaseObservabilityCollector({
-                connectionUrl,
-                sqlClientFactory: factory,
-            }).collect()
-        ).rejects.toThrow("Database observability collection failed");
-        expect(factory.events.filter((event) => event.startsWith("create:"))).toEqual([
-            "create:postgres",
-        ]);
+        const payload = await createBunSqlDatabaseObservabilityCollector({
+            connectionResolver,
+            sqlClientFactory: factory,
+        }).collect();
+        expect(payload.databases.map(({ name }) => name)).toEqual(
+            metricDatabases.filter((name) => name !== missingDatabase)
+        );
+        expect(factory.events).not.toContain(`create:${missingDatabase}`);
         const inventoryQuery = factory.events.find(
             (event) =>
                 event.startsWith("query:postgres:") && event.includes("FROM pg_database")
         );
         expect(inventoryQuery).toContain("databases.datallowconn = true");
-        expect(inventoryQuery).toContain(
-            "has_database_privilege(current_user, stats.datname, 'CONNECT')"
+        expect(inventoryQuery).not.toContain("has_database_privilege");
+    });
+
+    test("keeps optional torrent capabilities unavailable when their databases are absent", async () => {
+        const torrentDatabases = new Set<string>(
+            databaseObservabilityTorrentCountDatabases
         );
+        const factory = fixtureFactory({
+            rows(database, sql) {
+                const rows = fixtureRows(database, sql);
+                if (database !== controlDatabase || !sql.includes("FROM pg_database")) {
+                    return rows;
+                }
+                const discoveredRows = rows.filter(
+                    (row) => !torrentDatabases.has(String(row.datname))
+                );
+                return discoveredRows.map((row) => ({
+                    ...row,
+                    database_count: discoveredRows.length,
+                }));
+            },
+        });
+
+        const payload = await createBunSqlDatabaseObservabilityCollector({
+            connectionResolver,
+            sqlClientFactory: factory,
+        }).collect();
+
+        expect(payload.torrentCounts).toEqual({
+            bitmagnet: { state: "unavailable" },
+            comet: { state: "unavailable" },
+        });
+        for (const database of databaseObservabilityTorrentCountDatabases) {
+            expect(factory.events).not.toContain(`create:${database}`);
+        }
+    });
+
+    test("discovers additions and renames and canonicalizes catalog order", async () => {
+        const expectedDatabases = [
+            ...metricDatabases.filter((database) => database !== "app_c"),
+            "renamed_database",
+            "zeta_dynamic",
+        ].toSorted();
+        const factory = fixtureFactory({
+            rows(database, sql) {
+                const rows = fixtureRows(database, sql);
+                if (database !== controlDatabase || !sql.includes("FROM pg_database")) {
+                    return rows;
+                }
+                const changedRows = [
+                    ...rows.map((row) =>
+                        row.datname === "app_c"
+                            ? { ...row, datname: "renamed_database" }
+                            : row
+                    ),
+                    {
+                        blks_hit: 0,
+                        blks_read: 0,
+                        database_count: rows.length + 1,
+                        datname: "zeta_dynamic",
+                        numbackends: 0,
+                        size_bytes: 0,
+                        xact_commit: 0,
+                        xact_rollback: 0,
+                    },
+                ];
+                return changedRows
+                    .map((row) => ({
+                        ...row,
+                        database_count: changedRows.length,
+                    }))
+                    .toReversed();
+            },
+        });
+
+        const payload = await createBunSqlDatabaseObservabilityCollector({
+            connectionResolver,
+            sqlClientFactory: factory,
+        }).collect();
+
+        expect(payload.databases.map(({ name }) => name)).toEqual(expectedDatabases);
+        expect(
+            payload.databases.every(({ detailsState }) => detailsState === "available")
+        ).toBe(true);
+        expect(factory.events).toContain("create:renamed_database");
+        expect(factory.events).toContain("create:zeta_dynamic");
+        expect(factory.events).not.toContain("create:app_c");
+        expect(factory.events).toContain(`values:${controlDatabase}:[20]`);
+    });
+
+    test("keeps a new default-ACL database unavailable until access reconciliation converges", async () => {
+        const dynamicDatabase = "new_default_acl_database";
+        let reconciled = false;
+        const factory = fixtureFactory({
+            rows(database, sql) {
+                const rows = fixtureRows(database, sql);
+                if (database === dynamicDatabase && sql.includes("pg_roles AS roles")) {
+                    return [{ ...rows[0], canCreateTemporaryTables: !reconciled }];
+                }
+                if (database !== controlDatabase || !sql.includes("FROM pg_database")) {
+                    return rows;
+                }
+                const discoveredRows = [
+                    ...rows,
+                    {
+                        blks_hit: 0,
+                        blks_read: 0,
+                        database_count: rows.length + 1,
+                        datname: dynamicDatabase,
+                        numbackends: 0,
+                        size_bytes: 0,
+                        xact_commit: 0,
+                        xact_rollback: 0,
+                    },
+                ];
+                return discoveredRows.map((row) => ({
+                    ...row,
+                    database_count: discoveredRows.length,
+                }));
+            },
+        });
+        const collector = createBunSqlDatabaseObservabilityCollector({
+            connectionResolver,
+            sqlClientFactory: factory,
+        });
+
+        const beforeReconcile = await collector.collect();
+        expect(
+            beforeReconcile.databases.find(({ name }) => name === dynamicDatabase)
+                ?.detailsState
+        ).toBe("unavailable");
+        expect(
+            beforeReconcile.databases.find(({ name }) => name === "app_a")?.detailsState
+        ).toBe("available");
+
+        reconciled = true;
+        const afterReconcile = await collector.collect();
+        expect(
+            afterReconcile.databases.find(({ name }) => name === dynamicDatabase)
+                ?.detailsState
+        ).toBe("available");
     });
 
     test("reads statement metrics once from the control database", async () => {
         const factory = fixtureFactory();
 
         const payload = await createBunSqlDatabaseObservabilityCollector({
-            connectionUrl,
+            connectionResolver,
             sqlClientFactory: factory,
         }).collect();
 
@@ -666,52 +942,123 @@ describe("Bun SQL database observability collector", () => {
             expect.objectContaining({ calls: 4, rank: 1, totalExecutionMs: 480 }),
         ]);
         expect(
-            factory.events.filter((event) =>
-                event.includes("FROM pg_catalog.pg_extension")
+            factory.events.filter(
+                (event) =>
+                    event.startsWith("query:postgres:SELECT EXISTS") &&
+                    event.includes("FROM pg_catalog.pg_extension")
             )
         ).toEqual([expect.stringContaining("query:postgres:")]);
         expect(
             factory.events.filter((event) =>
-                event.includes("FROM public.pg_stat_statements")
+                event.includes(
+                    "FROM mira_dashboard_observability_capabilities.statement_metrics()"
+                )
             )
         ).toEqual([expect.stringContaining("query:postgres:")]);
         const statementQuery = factory.events.find((event) =>
-            event.includes("FROM public.pg_stat_statements")
+            event.includes(
+                "FROM mira_dashboard_observability_capabilities.statement_metrics()"
+            )
         );
-        expect(statementQuery).toContain("JOIN pg_catalog.pg_database AS databases");
-        expect(statementQuery).toContain("databases.datname = ANY(?::text[])");
+        expect(statementQuery).not.toContain("JOIN pg_catalog.pg_database");
+        expect(statementQuery).not.toMatch(/\b(dbid|userid|queryid)\b/u);
+        expect(statementQuery).not.toContain(" query,");
+        expect(statementQuery).not.toContain("public.pg_stat_statements");
         const policyQuery = factory.events.find(
             (event) =>
                 event.startsWith("query:postgres:") &&
-                event.includes("pg_stat_statements_extension")
+                event.includes("capability_interfaces")
         );
-        expect(policyQuery).toContain("extensions.extnamespace");
-        expect(policyQuery).toContain("extension.extension_version = '1.12'");
-        expect(policyQuery).toContain("extension.extension_schema = 'public'");
-        expect(policyQuery).toContain("FROM pg_catalog.pg_depend AS dependencies");
-        expect(policyQuery).toContain("dependencies.deptype = 'e'");
-        expect(policyQuery).toContain("extension.extension_owner_superuser");
+        expect(policyQuery).toContain("'statement_metrics'::text");
+        expect(policyQuery).toContain("'connection_metrics'::text");
+        expect(policyQuery).toContain("namespaces.nspowner = role_oids.view_owner_oid");
+        expect(policyQuery).toContain("pg_catalog.aclexplode(namespaces.nspacl)");
+        expect(policyQuery).toContain("pg_catalog.aclexplode(routines.proacl)");
+        expect(policyQuery).toContain("pg_catalog.pg_get_function_sqlbody");
+        expect(policyQuery).toContain("pg_catalog.sha256(");
+        expect(policyQuery).toContain("sources.relname IN");
         expect(policyQuery).toContain("'pg_stat_statements_info'");
-        expect(
-            policyQuery?.match(
-                /'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER,MAINTAIN'/gu
-            )
-        ).toHaveLength(2);
-        expect(
-            policyQuery?.match(
-                /'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER,MAINTAIN'/gu
-            )
-        ).toHaveLength(2);
-        expect(policyQuery).not.toMatch(
-            /'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'/u
-        );
-        expect(policyQuery).toContain("attributes.attrelid = (");
-        expect(factory.events).toContain(
-            `values:postgres:[["aiomanager","aiometadata","aiostreams","authelia","bitmagnet","comet","crowdsec","metabase","speedtest_tracker"],20]`
-        );
+        expect(policyQuery).toContain("dependencies.deptype = 'e'");
+        expect(policyQuery).toContain("'pg_read_all_stats'");
+        expect(factory.events).toContain(`values:postgres:[20]`);
     });
 
-    test("excludes unreviewed PgBouncer rows from every projection", async () => {
+    test("derives a legal dot-named control database from the resolved endpoint", async () => {
+        const alternateControlDatabase = ".";
+        const alternateConnection = Object.freeze({
+            ...connection,
+            controlDatabase: alternateControlDatabase,
+            hostname: "localhost",
+            port: 7444,
+        });
+        const factory = fixtureFactory({
+            rows(database, sql) {
+                if (
+                    sql.includes(
+                        "FROM mira_dashboard_observability_capabilities.statement_metrics()"
+                    )
+                ) {
+                    expect(database).toBe(alternateControlDatabase);
+                    return [
+                        {
+                            calls: 4,
+                            mean_execution_ms: 120,
+                            rows: 8,
+                            shared_blocks_hit: 9,
+                            shared_blocks_read: 1,
+                            total_execution_ms: 480,
+                        },
+                    ];
+                }
+                const rows = fixtureRows(database, sql);
+                if (sql.includes("FROM pg_database")) {
+                    return rows.map((row) =>
+                        row.datname === controlDatabase
+                            ? { ...row, datname: alternateControlDatabase }
+                            : row
+                    );
+                }
+                if (sql.includes("pg_roles AS roles")) {
+                    return [
+                        {
+                            ...rows[0],
+                            capabilityInterfacesValid: true,
+                        },
+                    ];
+                }
+                if (sql.includes("FROM pg_catalog.pg_extension")) {
+                    return [{ enabled: database === alternateControlDatabase }];
+                }
+                return rows;
+            },
+        });
+
+        const payload = await createBunSqlDatabaseObservabilityCollector({
+            connectionResolver: {
+                resolve: () =>
+                    Promise.resolve({
+                        connection: alternateConnection,
+                        source: { containerId: "b".repeat(64) },
+                    }),
+            },
+            sqlClientFactory: factory,
+        }).collect();
+
+        expect(payload.databases.map(({ name }) => name)).toContain(
+            alternateControlDatabase
+        );
+        expect(factory.events[0]).toBe(`create:${alternateControlDatabase}`);
+        expect(factory.events).not.toContain(`create:${controlDatabase}`);
+        expect(
+            factory.events.filter((event) =>
+                event.includes(
+                    "FROM mira_dashboard_observability_capabilities.statement_metrics()"
+                )
+            )
+        ).toEqual([expect.stringContaining(`query:${alternateControlDatabase}:`)]);
+    });
+
+    test("excludes non-discovered PgBouncer rows from every projection", async () => {
         const factory = fixtureFactory({
             rows(database, sql) {
                 if (database === "pgbouncer" && sql === "SHOW POOLS") {
@@ -719,12 +1066,18 @@ describe("Bun SQL database observability collector", () => {
                         ...fixtureRows(database, sql),
                         {
                             cl_active: 900,
+                            cl_active_cancel_req: 600,
                             cl_waiting: 800,
+                            cl_waiting_cancel_req: 500,
                             database: "unreviewed_service",
                             maxwait: 700,
-                            sv_active: 600,
+                            sv_active: 400,
+                            sv_active_cancel: 300,
+                            sv_being_canceled: 200,
                             sv_idle: 500,
-                            sv_used: 400,
+                            sv_login: 100,
+                            sv_tested: 90,
+                            sv_used: 80,
                         },
                     ];
                 }
@@ -732,7 +1085,9 @@ describe("Bun SQL database observability collector", () => {
                     return [
                         ...fixtureRows(database, sql),
                         {
+                            avg_query_count: 700,
                             avg_query_time: 900_000,
+                            avg_xact_count: 600,
                             avg_xact_time: 800_000,
                             database: "unreviewed_service",
                             total_query_count: 700,
@@ -744,7 +1099,7 @@ describe("Bun SQL database observability collector", () => {
         });
 
         const payload = await createBunSqlDatabaseObservabilityCollector({
-            connectionUrl,
+            connectionResolver,
             sqlClientFactory: factory,
         }).collect();
 
@@ -759,40 +1114,205 @@ describe("Bun SQL database observability collector", () => {
         expect(JSON.stringify(payload)).not.toContain("unreviewed_service");
     });
 
+    test("traffic-weights durations and counts every PgBouncer connection state", async () => {
+        const factory = fixtureFactory({
+            rows(database, sql) {
+                if (database === "pgbouncer" && sql === "SHOW POOLS") {
+                    return [
+                        {
+                            cl_active: 2,
+                            cl_active_cancel_req: 3,
+                            cl_waiting: 1,
+                            cl_waiting_cancel_req: 4,
+                            database: "app_a",
+                            maxwait: 5,
+                            sv_active: 1,
+                            sv_active_cancel: 2,
+                            sv_being_canceled: 3,
+                            sv_idle: 4,
+                            sv_login: 7,
+                            sv_tested: 6,
+                            sv_used: 5,
+                        },
+                        {
+                            cl_active: 1,
+                            cl_active_cancel_req: 0,
+                            cl_waiting: 0,
+                            cl_waiting_cancel_req: 0,
+                            database: "app_b",
+                            maxwait: 0,
+                            sv_active: 1,
+                            sv_active_cancel: 0,
+                            sv_being_canceled: 0,
+                            sv_idle: 0,
+                            sv_login: 0,
+                            sv_tested: 0,
+                            sv_used: 0,
+                        },
+                    ];
+                }
+                if (database === "pgbouncer" && sql === "SHOW STATS") {
+                    return [
+                        {
+                            avg_query_count: 1,
+                            avg_query_time: 1000,
+                            avg_xact_count: 1,
+                            avg_xact_time: 2000,
+                            database: "app_a",
+                            total_query_count: 1,
+                        },
+                        {
+                            avg_query_count: 9,
+                            avg_query_time: 10_000,
+                            avg_xact_count: 3,
+                            avg_xact_time: 6000,
+                            database: "app_b",
+                            total_query_count: 9,
+                        },
+                    ];
+                }
+                return fixtureRows(database, sql);
+            },
+        });
+
+        const payload = await createBunSqlDatabaseObservabilityCollector({
+            connectionResolver,
+            sqlClientFactory: factory,
+        }).collect();
+
+        expect(payload.pgbouncer).toEqual({
+            averageQueryMs: 9.1,
+            averageTransactionMs: 5,
+            clientConnections: 11,
+            maxWaitSeconds: 5,
+            serverConnections: 29,
+            waitingClients: 5,
+        });
+        expect(payload.databases[0]?.pool).toEqual({
+            activeClients: 5,
+            activeServers: 6,
+            averageQueryMs: 1,
+            averageTransactionMs: 2,
+            idleServers: 4,
+            totalQueries: 1,
+            usedServers: 5,
+            waitingClients: 5,
+        });
+        expect(payload.databases[1]?.pool).toEqual({
+            activeClients: 1,
+            activeServers: 1,
+            averageQueryMs: 10,
+            averageTransactionMs: 6,
+            idleServers: 0,
+            totalQueries: 9,
+            usedServers: 0,
+            waitingClients: 0,
+        });
+    });
+
+    test("projects PgBouncer stats-only and pool-only databases independently", async () => {
+        const factory = fixtureFactory({
+            rows(database, sql) {
+                if (database === "pgbouncer" && sql === "SHOW POOLS") {
+                    return [
+                        {
+                            cl_active: 2,
+                            cl_active_cancel_req: 0,
+                            cl_waiting: 1,
+                            cl_waiting_cancel_req: 0,
+                            database: "app_b",
+                            maxwait: 3,
+                            sv_active: 1,
+                            sv_active_cancel: 0,
+                            sv_being_canceled: 0,
+                            sv_idle: 4,
+                            sv_login: 0,
+                            sv_tested: 0,
+                            sv_used: 2,
+                        },
+                    ];
+                }
+                if (database === "pgbouncer" && sql === "SHOW STATS") {
+                    return [
+                        {
+                            avg_query_count: 4,
+                            avg_query_time: 12_000,
+                            avg_xact_count: 2,
+                            avg_xact_time: 10_000,
+                            database: "app_a",
+                            total_query_count: 40,
+                        },
+                    ];
+                }
+                return fixtureRows(database, sql);
+            },
+        });
+
+        const payload = await createBunSqlDatabaseObservabilityCollector({
+            connectionResolver,
+            sqlClientFactory: factory,
+        }).collect();
+
+        expect(payload.databases.find(({ name }) => name === "app_a")?.pool).toEqual({
+            activeClients: 0,
+            activeServers: 0,
+            averageQueryMs: 12,
+            averageTransactionMs: 10,
+            idleServers: 0,
+            totalQueries: 40,
+            usedServers: 0,
+            waitingClients: 0,
+        });
+        expect(payload.databases.find(({ name }) => name === "app_b")?.pool).toEqual({
+            activeClients: 2,
+            activeServers: 1,
+            averageQueryMs: 0,
+            averageTransactionMs: 0,
+            idleServers: 4,
+            totalQueries: 0,
+            usedServers: 2,
+            waitingClients: 1,
+        });
+    });
+
     test("ranks bounded candidates globally and aggregates maintenance across databases", async () => {
         const factory = fixtureFactory({
             rows(database, sql) {
                 if (
-                    sql.includes("FROM pg_stat_user_tables") &&
-                    sql.includes("AS assessed_physical_bytes")
+                    sql.includes(
+                        "FROM mira_dashboard_observability_capabilities.maintenance_metrics()"
+                    )
                 ) {
                     let assessedPhysicalBytes = 0;
-                    if (database === "aiomanager") assessedPhysicalBytes = 25;
-                    else if (database === "aiometadata") {
+                    if (database === "app_a") assessedPhysicalBytes = 25;
+                    else if (database === "app_b") {
                         assessedPhysicalBytes = 64 * 1024 * 1024;
                     }
                     return [
                         {
                             assessed_physical_bytes: assessedPhysicalBytes,
                             estimated_reclaimable_bytes: 0,
-                            high_dead_tuple_table_count:
-                                database === "aiometadata" ? 1 : 0,
+                            high_dead_tuple_table_count: database === "app_b" ? 1 : 0,
                             unassessed_physical_bytes: 0,
                             unassessed_table_count: 0,
                         },
                     ];
                 }
-                if (sql.includes("FROM pg_stat_user_tables")) {
-                    if (database === "aiomanager") {
+                if (
+                    sql.includes(
+                        "FROM mira_dashboard_observability_capabilities.table_health()"
+                    )
+                ) {
+                    if (database === "app_a") {
                         return Array.from({ length: 25 }, (_, index) =>
                             tableRow(database, {
                                 dead_tuple_percent: 100,
                                 dead_tuples: 25 - index,
-                                table_name: `aiomanager_${String(index).padStart(2, "0")}`,
+                                table_name: `app_a_${String(index).padStart(2, "0")}`,
                             })
                         );
                     }
-                    return database === "aiometadata"
+                    return database === "app_b"
                         ? [
                               tableRow(database, {
                                   dead_tuple_percent: 20,
@@ -808,17 +1328,17 @@ describe("Bun SQL database observability collector", () => {
         });
 
         const payload = await createBunSqlDatabaseObservabilityCollector({
-            connectionUrl,
+            connectionResolver,
             sqlClientFactory: factory,
         }).collect();
 
         expect(payload.tableHealth).toHaveLength(25);
         expect(payload.tableHealth[0]).toMatchObject({
-            database: "aiometadata",
+            database: "app_b",
             table: "material_risk",
         });
         expect(
-            payload.tableHealth.filter(({ database }) => database === "aiomanager")
+            payload.tableHealth.filter(({ database }) => database === "app_a")
         ).toHaveLength(24);
         expect(payload.summary.maintenance).toMatchObject({
             assessmentComplete: true,
@@ -839,22 +1359,27 @@ describe("Bun SQL database observability collector", () => {
                     }));
                 }
                 if (
-                    sql.includes("FROM pg_stat_user_tables") &&
-                    sql.includes("AS assessed_physical_bytes")
+                    sql.includes(
+                        "FROM mira_dashboard_observability_capabilities.maintenance_metrics()"
+                    )
                 ) {
                     return [
                         {
                             assessed_physical_bytes:
-                                database === "aiomanager" ? 6 * 1024 ** 3 : 0,
+                                database === "app_a" ? 6 * 1024 ** 3 : 0,
                             estimated_reclaimable_bytes:
-                                database === "aiomanager" ? 5 * 1024 ** 3 : 0,
+                                database === "app_a" ? 5 * 1024 ** 3 : 0,
                             high_dead_tuple_table_count: 0,
                             unassessed_physical_bytes: 0,
                             unassessed_table_count: 0,
                         },
                     ];
                 }
-                if (sql.includes("FROM pg_stat_user_tables")) {
+                if (
+                    sql.includes(
+                        "FROM mira_dashboard_observability_capabilities.table_health()"
+                    )
+                ) {
                     return [tableRow(database)];
                 }
                 return fixtureRows(database, sql);
@@ -862,7 +1387,7 @@ describe("Bun SQL database observability collector", () => {
         });
 
         const payload = await createBunSqlDatabaseObservabilityCollector({
-            connectionUrl,
+            connectionResolver,
             sqlClientFactory: factory,
         }).collect();
 
@@ -878,24 +1403,66 @@ describe("Bun SQL database observability collector", () => {
         );
     });
 
-    test("fails closed before per-database work when the catalog exceeds sixteen", () => {
+    test("orders equal-risk table health by reclaimable bytes before dead tuples", async () => {
         const factory = fixtureFactory({
             rows(database, sql) {
                 if (
-                    database === "postgres" &&
+                    sql.includes(
+                        "FROM mira_dashboard_observability_capabilities.table_health()"
+                    )
+                ) {
+                    if (database !== "app_a") return [];
+                    return [
+                        tableRow(database, {
+                            dead_tuples: 200,
+                            estimated_reclaimable_bytes: 1,
+                            physical_bytes: 2,
+                            table_name: "more_dead",
+                        }),
+                        tableRow(database, {
+                            dead_tuples: 100,
+                            estimated_reclaimable_bytes: 2,
+                            physical_bytes: 2,
+                            table_name: "more_reclaimable",
+                        }),
+                    ];
+                }
+                return fixtureRows(database, sql);
+            },
+        });
+
+        const payload = await createBunSqlDatabaseObservabilityCollector({
+            connectionResolver,
+            sqlClientFactory: factory,
+        }).collect();
+
+        expect(payload.tableHealth.slice(0, 2).map(({ table }) => table)).toEqual([
+            "more_reclaimable",
+            "more_dead",
+        ]);
+    });
+
+    test("fails closed before per-database work when the catalog exceeds its bound", () => {
+        const factory = fixtureFactory({
+            rows(database, sql) {
+                if (
+                    database === controlDatabase &&
                     sql.includes("FROM pg_database") &&
                     !sql.includes("AS total_database_size_bytes")
                 ) {
-                    return Array.from({ length: 16 }, (_, index) => ({
-                        blks_hit: 1,
-                        blks_read: 0,
-                        database_count: 17,
-                        datname: `database_${String(index).padStart(2, "0")}`,
-                        numbackends: 0,
-                        size_bytes: 1,
-                        xact_commit: 0,
-                        xact_rollback: 0,
-                    }));
+                    return Array.from(
+                        { length: databaseObservabilityDatabaseMaximum },
+                        (_, index) => ({
+                            blks_hit: 1,
+                            blks_read: 0,
+                            database_count: databaseObservabilityDatabaseMaximum + 1,
+                            datname: `database_${String(index).padStart(2, "0")}`,
+                            numbackends: 0,
+                            size_bytes: 1,
+                            xact_commit: 0,
+                            xact_rollback: 0,
+                        })
+                    );
                 }
                 return fixtureRows(database, sql);
             },
@@ -903,22 +1470,62 @@ describe("Bun SQL database observability collector", () => {
 
         expect(
             createBunSqlDatabaseObservabilityCollector({
-                connectionUrl,
+                connectionResolver,
                 sqlClientFactory: factory,
             }).collect()
         ).rejects.toThrow("Database observability collection failed");
         expect(factory.events.filter((event) => event.startsWith("create:"))).toEqual([
-            "create:postgres",
+            `create:${controlDatabase}`,
         ]);
     });
 
-    test("rolls back and closes when a snapshot query fails", () => {
+    test("rejects catalog identifiers outside the operator-safe projection boundary", () => {
         const factory = fixtureFactory({
             rows(database, sql) {
                 if (
-                    database === "aiomanager" &&
-                    sql.includes("FROM pg_stat_user_tables") &&
-                    !sql.includes("AS assessed_physical_bytes")
+                    database === controlDatabase &&
+                    sql.includes("FROM pg_database") &&
+                    !sql.includes("AS total_database_size_bytes")
+                ) {
+                    const rows = fixtureRows(database, sql);
+                    const databaseCount = rows.length + 1;
+                    return [
+                        ...rows.map((row) => ({ ...row, database_count: databaseCount })),
+                        {
+                            blks_hit: 1,
+                            blks_read: 0,
+                            database_count: databaseCount,
+                            datname: " \u2028 ",
+                            numbackends: 0,
+                            size_bytes: 1,
+                            xact_commit: 0,
+                            xact_rollback: 0,
+                        },
+                    ];
+                }
+                return fixtureRows(database, sql);
+            },
+        });
+
+        expect(
+            createBunSqlDatabaseObservabilityCollector({
+                connectionResolver,
+                sqlClientFactory: factory,
+            }).collect()
+        ).rejects.toThrow("Database observability collection failed");
+        expect(factory.events.filter((event) => event.startsWith("create:"))).toEqual([
+            `create:${controlDatabase}`,
+        ]);
+    });
+
+    test("rolls back, closes, and isolates one failed database detail query", async () => {
+        const factory = fixtureFactory({
+            rows(database, sql) {
+                if (
+                    database === "app_a" &&
+                    sql.includes(
+                        "FROM mira_dashboard_observability_capabilities.table_health()"
+                    )
                 ) {
                     throw new Error("private query failure");
                 }
@@ -926,15 +1533,16 @@ describe("Bun SQL database observability collector", () => {
             },
         });
 
-        expect(
-            createBunSqlDatabaseObservabilityCollector({
-                connectionUrl,
-                sqlClientFactory: factory,
-            }).collect()
-        ).rejects.toThrow("Database observability collection failed");
-        expect(factory.events).toContain("query:aiomanager:ROLLBACK");
-        expect(factory.events).toContain("close:aiomanager");
-        expect(factory.events).not.toContain("create:aiometadata");
+        const payload = await createBunSqlDatabaseObservabilityCollector({
+            connectionResolver,
+            sqlClientFactory: factory,
+        }).collect();
+        expect(payload.databases.find(({ name }) => name === "app_a")?.detailsState).toBe(
+            "unavailable"
+        );
+        expect(factory.events).toContain("query:app_a:ROLLBACK");
+        expect(factory.events).toContain("close:app_a");
+        expect(factory.events).toContain("create:app_b");
     });
 
     test("cancels and closes an active query on cooperative abort", async () => {
@@ -942,7 +1550,7 @@ describe("Bun SQL database observability collector", () => {
         const databaseSql = probe.events;
         const firstFactory = fixtureFactory({ events: databaseSql });
         const collector = createBunSqlDatabaseObservabilityCollector({
-            connectionUrl,
+            connectionResolver,
             sqlClientFactory: firstFactory,
         });
         const abort = new AbortController();
@@ -955,7 +1563,7 @@ describe("Bun SQL database observability collector", () => {
 
         const factory = fixtureFactory({ hangAt: target });
         const pending = createBunSqlDatabaseObservabilityCollector({
-            connectionUrl,
+            connectionResolver,
             sqlClientFactory: factory,
         }).collect(abort.signal);
         await Promise.resolve();
@@ -992,7 +1600,7 @@ describe("Bun SQL database observability collector", () => {
             },
         });
         const collector = createBunSqlDatabaseObservabilityCollector({
-            connectionUrl,
+            connectionResolver,
             sqlClientFactory: factory,
         });
         expect(collector.collect()).rejects.toThrow(

@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 
 import { Effect } from "effect";
 
-import { databaseObservabilityMetricDatabases } from "../../../shared/databaseObservabilityPolicy.ts";
+import { databaseObservabilityCacheSchemaId } from "../../../contracts/database.ts";
+import { DatabaseObservabilityCollectionLeaseError } from "../../../shared/databaseObservabilityReconciliation.ts";
 import { OpenClawServiceActionsExecutionError } from "../../../shared/openClawServiceActions.ts";
 import {
     testMoltbookCollector,
@@ -694,10 +695,13 @@ describe("worker-only job executor registry", () => {
 
     test("commits one exact domain-only database snapshot and redacts failures", async () => {
         const payload = {
-            databases: databaseObservabilityMetricDatabases.map((name) => ({
+            databases: ["alpha", "bitmagnet", "comet", "postgres"].map((name) => ({
+                blocksHit: 0,
+                blocksRead: 0,
                 cacheHitRatio: 100,
                 committedTransactions: 0,
                 connections: 0,
+                detailsState: "available" as const,
                 name,
                 rolledBackTransactions: 0,
                 sizeBytes: 0,
@@ -723,13 +727,14 @@ describe("worker-only job executor registry", () => {
                     highDeadTupleTableCount: 0,
                     requiresBloatReview: false,
                     slowStatementCount: 0,
-                    status: "healthy" as const,
+                    status: "not-assessed" as const,
                     unassessedPhysicalBytes: 0,
                     unassessedTableCount: 0,
                 },
                 pgStatStatementsEnabled: false,
                 totalConnections: 0,
                 totalDatabaseSizeBytes: 0,
+                unavailableDatabaseCount: 0,
             },
             tableHealth: [],
             torrentCounts: {
@@ -738,20 +743,57 @@ describe("worker-only job executor registry", () => {
             },
         };
         const attempts: JobCacheAttemptCommit[] = [];
+        const executionOrder: string[] = [];
+        const reconciliationProgress: unknown[] = [];
         const executor = createDatabaseObservabilityExecutor({
-            collector: { collect: () => Promise.resolve(payload) },
+            collector: {
+                collect: () => {
+                    executionOrder.push("collect");
+                    return Promise.resolve(payload);
+                },
+            },
             monotonicNowMs: (() => {
                 const values = [10, 15];
                 return () => values.shift() ?? 15;
             })(),
+            reconciler: {
+                async withApprovedCollection(operation, signal) {
+                    executionOrder.push("open");
+                    try {
+                        const value = await operation(
+                            "unchanged",
+                            signal ?? new AbortController().signal
+                        );
+                        return { reconciliationStatus: "unchanged", value };
+                    } finally {
+                        executionOrder.push("close");
+                    }
+                },
+            },
         });
+        const context = {
+            ...executionContext(attempts),
+            commitCacheAttempt(attempt: JobCacheAttemptCommit) {
+                executionOrder.push("commit");
+                attempts.push(attempt);
+                return Promise.resolve("committed" as const);
+            },
+            reportProgress(progress: Record<string, unknown>) {
+                reconciliationProgress.push(progress);
+                return Effect.succeed("appended" as const);
+            },
+        };
         expect(
             await Effect.runPromise(
-                executor(executionContext(attempts), {
+                executor(context, {
                     key: "database.observability",
                 })
             )
         ).toEqual({ cacheKeys: ["database.observability"], completedAtMs: 5000 });
+        expect(executionOrder).toEqual(["open", "collect", "close", "commit"]);
+        expect(reconciliationProgress).toEqual([
+            { databaseObservabilityReconciliation: "unchanged" },
+        ]);
         expect(attempts).toEqual([
             {
                 durationMs: 5,
@@ -760,7 +802,7 @@ describe("worker-only job executor registry", () => {
                         key: "database.observability",
                         metadata: { kind: "database-observability" },
                         payload,
-                        schemaId: "database.observability.v1",
+                        schemaId: databaseObservabilityCacheSchemaId,
                         source: "postgresql.pgbouncer",
                         ttlMs: 5_400_000,
                     },
@@ -768,6 +810,269 @@ describe("worker-only job executor registry", () => {
                 kind: "succeeded",
             },
         ]);
+
+        const openFailureAttempts: JobCacheAttemptCommit[] = [];
+        const openFailureOrder: string[] = [];
+        const reconciliationSecret = "postgresql://admin:secret@database/private";
+        let collectedAfterOpenFailure = false;
+        const openFailure = await Effect.runPromise(
+            createDatabaseObservabilityExecutor({
+                collector: {
+                    collect: () => {
+                        openFailureOrder.push("collect");
+                        collectedAfterOpenFailure = true;
+                        return Promise.resolve(payload);
+                    },
+                },
+                reconciler: {
+                    withApprovedCollection() {
+                        openFailureOrder.push("open");
+                        try {
+                            throw new Error(reconciliationSecret);
+                        } finally {
+                            openFailureOrder.push("close");
+                        }
+                    },
+                },
+            })(
+                {
+                    ...executionContext(openFailureAttempts),
+                    commitCacheAttempt(attempt) {
+                        openFailureOrder.push("commit-failed");
+                        openFailureAttempts.push(attempt);
+                        return Promise.resolve("committed");
+                    },
+                },
+                { key: "database.observability" }
+            )
+        ).catch((error: unknown) => error);
+        expect(openFailure).toBeInstanceOf(JobActionRetryableError);
+        expect(collectedAfterOpenFailure).toBeFalse();
+        expect(openFailureOrder).toEqual(["open", "close", "commit-failed"]);
+        expect(openFailureAttempts).toEqual([
+            expect.objectContaining({ kind: "failed" }),
+        ]);
+        expect(JSON.stringify(openFailureAttempts)).not.toContain(reconciliationSecret);
+
+        const closeFailureAttempts: JobCacheAttemptCommit[] = [];
+        const closeFailureOrder: string[] = [];
+        const closeFailure = await Effect.runPromise(
+            createDatabaseObservabilityExecutor({
+                collector: {
+                    collect: () => {
+                        closeFailureOrder.push("collect");
+                        return Promise.resolve(payload);
+                    },
+                },
+                reconciler: {
+                    async withApprovedCollection(operation, signal) {
+                        closeFailureOrder.push("open");
+                        await operation(
+                            "reconciled",
+                            signal ?? new AbortController().signal
+                        );
+                        closeFailureOrder.push("close");
+                        throw new DatabaseObservabilityCollectionLeaseError();
+                    },
+                },
+            })(
+                {
+                    ...executionContext(closeFailureAttempts),
+                    commitCacheAttempt(attempt) {
+                        closeFailureOrder.push(
+                            attempt.kind === "failed" ? "commit-failed" : "commit-fresh"
+                        );
+                        closeFailureAttempts.push(attempt);
+                        return Promise.resolve("committed");
+                    },
+                },
+                { key: "database.observability" }
+            )
+        ).catch((error: unknown) => error);
+        expect(closeFailure).toBeInstanceOf(JobActionRetryableError);
+        expect(closeFailureOrder).toEqual(["open", "collect", "close", "commit-failed"]);
+        expect(closeFailureAttempts).toEqual([
+            expect.objectContaining({ kind: "failed" }),
+        ]);
+
+        const unavailableAttempts: JobCacheAttemptCommit[] = [];
+        const unavailableProgress: unknown[] = [];
+        const unavailableFailure = await Effect.runPromise(
+            createDatabaseObservabilityExecutor({
+                collector: { collect: () => Promise.resolve(payload) },
+                reconciler: {
+                    async withApprovedCollection(operation, signal) {
+                        const value = await operation(
+                            "unavailable",
+                            signal ?? new AbortController().signal
+                        );
+                        return { reconciliationStatus: "unavailable", value };
+                    },
+                },
+            })(
+                {
+                    ...executionContext(unavailableAttempts),
+                    reportProgress(progress: Record<string, unknown>) {
+                        unavailableProgress.push(progress);
+                        return Effect.succeed("appended" as const);
+                    },
+                },
+                { key: "database.observability" }
+            )
+        ).catch((error: unknown) => error);
+        expect(unavailableFailure).toBeInstanceOf(JobActionRetryableError);
+        expect(unavailableProgress).toEqual([
+            { databaseObservabilityReconciliation: "unavailable" },
+        ]);
+        expect(unavailableAttempts).toEqual([
+            expect.objectContaining({ kind: "failed" }),
+        ]);
+
+        const abortOrder: string[] = [];
+        const collectorStarted = Promise.withResolvers<void>();
+        const closeStarted = Promise.withResolvers<void>();
+        const allowClose = Promise.withResolvers<void>();
+        const cancellation = new AbortController();
+        const abortedExecution = Effect.runPromise(
+            createDatabaseObservabilityExecutor({
+                collector: {
+                    collect(signal) {
+                        abortOrder.push("collect");
+                        collectorStarted.resolve();
+                        if (signal === undefined) {
+                            throw new Error("Missing collection cancellation signal");
+                        }
+                        return new Promise((_resolve, reject) => {
+                            signal.addEventListener(
+                                "abort",
+                                () => {
+                                    abortOrder.push("collector-aborted");
+                                    reject(new DOMException("cancelled", "AbortError"));
+                                },
+                                { once: true }
+                            );
+                        });
+                    },
+                },
+                reconciler: {
+                    async withApprovedCollection(operation, signal) {
+                        abortOrder.push("open");
+                        try {
+                            const value = await operation(
+                                "unchanged",
+                                signal ?? new AbortController().signal
+                            );
+                            return { reconciliationStatus: "unchanged", value };
+                        } finally {
+                            abortOrder.push("close-start");
+                            closeStarted.resolve();
+                            await allowClose.promise;
+                            abortOrder.push("close-end");
+                        }
+                    },
+                },
+            })(executionContext([]), { key: "database.observability" }),
+            { signal: cancellation.signal }
+        ).catch((error: unknown) => error);
+        await collectorStarted.promise;
+        cancellation.abort(new DOMException("cancelled", "AbortError"));
+        await closeStarted.promise;
+        expect(
+            await Promise.race([
+                abortedExecution.then(() => "settled" as const),
+                Bun.sleep(10).then(() => "waiting" as const),
+            ])
+        ).toBe("waiting");
+        allowClose.resolve();
+        await abortedExecution;
+        expect(abortOrder).toEqual([
+            "open",
+            "collect",
+            "collector-aborted",
+            "close-start",
+            "close-end",
+        ]);
+
+        const claimLoss = new Error("claim lost before cache settlement");
+        const claimLossOrder: string[] = [];
+        const claimLossFailure = await Effect.runPromise(
+            createDatabaseObservabilityExecutor({
+                collector: {
+                    collect: () => {
+                        claimLossOrder.push("collect");
+                        return Promise.resolve(payload);
+                    },
+                },
+                reconciler: {
+                    async withApprovedCollection(operation, signal) {
+                        claimLossOrder.push("open");
+                        const value = await operation(
+                            "unchanged",
+                            signal ?? new AbortController().signal
+                        );
+                        claimLossOrder.push("close");
+                        return { reconciliationStatus: "unchanged", value };
+                    },
+                },
+            })(
+                {
+                    ...executionContext([]),
+                    commitCacheAttempt: () => {
+                        claimLossOrder.push("commit");
+                        return Promise.reject(claimLoss);
+                    },
+                },
+                { key: "database.observability" }
+            )
+        ).catch((error: unknown) => error);
+        expect((claimLossFailure as { cause?: unknown }).cause).toBe(claimLoss);
+        expect(claimLossOrder).toEqual(["open", "collect", "close", "commit"]);
+
+        const skippedProgress: unknown[] = [];
+        await Effect.runPromise(
+            createDatabaseObservabilityExecutor({
+                collector: { collect: () => Promise.resolve(payload) },
+            })(
+                {
+                    ...executionContext([]),
+                    reportProgress(progress: Record<string, unknown>) {
+                        skippedProgress.push(progress);
+                        return Effect.succeed("appended" as const);
+                    },
+                },
+                { key: "database.observability" }
+            )
+        );
+        expect(skippedProgress).toEqual([]);
+
+        let collectedAfterProgressFailure = false;
+        await Effect.runPromise(
+            createDatabaseObservabilityExecutor({
+                collector: {
+                    collect: () => {
+                        collectedAfterProgressFailure = true;
+                        return Promise.resolve(payload);
+                    },
+                },
+                reconciler: {
+                    async withApprovedCollection(operation, signal) {
+                        const value = await operation(
+                            "reconciled",
+                            signal ?? new AbortController().signal
+                        );
+                        return { reconciliationStatus: "reconciled", value };
+                    },
+                },
+            })(
+                {
+                    ...executionContext([]),
+                    reportProgress: () =>
+                        Effect.fail(new Error("progress persistence unavailable")),
+                },
+                { key: "database.observability" }
+            )
+        );
+        expect(collectedAfterProgressFailure).toBeTrue();
 
         const failedAttempts: JobCacheAttemptCommit[] = [];
         const secret = "postgresql://monitor:secret@127.0.0.1:6432/postgres";

@@ -95,6 +95,7 @@ import {
 } from "../../src/contracts/chatSpeech.ts";
 import {
     databaseObservabilityCachePayloadIsConsistent,
+    databaseObservabilityNameFitsPostgresqlByteLimit,
     databaseOverviewIsConsistent,
     sqlitePageSizeIsPowerOfTwo,
     sqliteStorageObservationIsConsistent,
@@ -287,6 +288,10 @@ const controlSafeTextJsonSchemaPattern = `^(?![\\s\\S]*(?:${controlSafeTextExclu
 const noNulJsonSchemaPattern = String.raw`^[^\u0000]*$`;
 
 const runtimeCheckComments = new Map<unknown, string>([
+    [
+        databaseObservabilityNameFitsPostgresqlByteLimit,
+        "Live Valibot validation additionally limits PostgreSQL identifiers to 63 UTF-8 bytes.",
+    ],
     [
         databaseObservabilityCachePayloadIsConsistent,
         "Live Valibot validation additionally enforces the PostgreSQL 128 KiB UTF-8 payload budget; deterministic unique database, table-health, and statement rows; exact aggregate sizes and connection bounds; and maintenance thresholds consistent with the visible observations.",

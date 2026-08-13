@@ -16,6 +16,7 @@ import { chatHistoryOutputSchema, type ChatHistoryOutput } from "../contracts/ch
 import { chatHistoryRetainedPageMaximum } from "../contracts/chatModel.ts";
 import {
     type DatabaseObservabilityCachePayload,
+    databaseObservabilityCacheSchemaId,
     databaseOverviewSchema,
 } from "../contracts/database.ts";
 import {
@@ -72,7 +73,6 @@ import {
     createTestApplicationRuntime,
     createTestStructuredLogger,
 } from "../server/test/support/requestContext.ts";
-import { databaseObservabilityMetricDatabases } from "../shared/databaseObservabilityPolicy.ts";
 import { createDashboardLogsService } from "./dashboardLogs.ts";
 import {
     createDashboardChatMediaReferenceRefreshClass,
@@ -87,11 +87,15 @@ import {
 import { createDashboardTerminalComposition } from "./dashboardTerminal.ts";
 
 const mediaRefreshObservedAtMs = 1_800_000_000_000;
+const dashboardServerTestPostgresqlDatabases = ["alpha", "comet", "postgres"] as const;
 const dashboardServerTestPostgresqlSnapshot = Object.freeze({
-    databases: databaseObservabilityMetricDatabases.map((name) => ({
+    databases: dashboardServerTestPostgresqlDatabases.map((name) => ({
+        blocksHit: 99,
+        blocksRead: 1,
         cacheHitRatio: 99,
         committedTransactions: name === "comet" ? 100 : 0,
         connections: name === "comet" ? 2 : 0,
+        detailsState: "available" as const,
         name,
         rolledBackTransactions: name === "comet" ? 1 : 0,
         sizeBytes: name === "comet" ? 4096 : 0,
@@ -117,13 +121,14 @@ const dashboardServerTestPostgresqlSnapshot = Object.freeze({
             highDeadTupleTableCount: 0,
             requiresBloatReview: false,
             slowStatementCount: 0,
-            status: "healthy",
+            status: "not-assessed",
             unassessedPhysicalBytes: 0,
             unassessedTableCount: 0,
         },
         pgStatStatementsEnabled: false,
         totalConnections: 2,
         totalDatabaseSizeBytes: 4096,
+        unavailableDatabaseCount: 0,
     },
     tableHealth: [],
     torrentCounts: {
@@ -1639,7 +1644,7 @@ describe("Dashboard security composition", () => {
                     lastSuccessAt: authenticationTestNow,
                     metadataJson: "{}",
                     payloadJson: JSON.stringify(dashboardServerTestPostgresqlSnapshot),
-                    schemaId: "database.observability.v1",
+                    schemaId: databaseObservabilityCacheSchemaId,
                     source: "postgresql.pgbouncer",
                     updatedAt: authenticationTestNow,
                 })

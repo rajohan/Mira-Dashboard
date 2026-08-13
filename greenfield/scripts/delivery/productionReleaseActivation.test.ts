@@ -8,7 +8,16 @@ import {
     setDefaultTimeout,
     test,
 } from "bun:test";
-import { cp, lstat, mkdir, mkdtemp, readdir, unlink, writeFile } from "node:fs/promises";
+import {
+    cp,
+    lstat,
+    mkdir,
+    mkdtemp,
+    readdir,
+    readlink,
+    unlink,
+    writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -45,6 +54,7 @@ import {
     commitProductionActivationState,
     loadProductionActivationState,
 } from "./productionActivationState.ts";
+import type { ProductionArtifactReference } from "./productionArtifactRetention.ts";
 import { prepareProductionDeliveryDirectories } from "./productionDeliveryFilesystem.ts";
 import {
     activatePublishedProductionRelease,
@@ -52,6 +62,7 @@ import {
     type ProductionReleaseActivationTestHooks,
 } from "./productionReleaseActivation.ts";
 import { type PublishedProductionRelease } from "./productionReleasePublication.ts";
+import { pointProductionProcessesAtRelease } from "./productionRuntimePointers.ts";
 import { prepareProtectedProductionStatePath } from "./productionStateFilesystem.ts";
 import type { ReleaseRuntimeIdentity } from "./releaseIdentity.ts";
 
@@ -185,7 +196,12 @@ function initialActivationFixture() {
 
 class TestServiceController implements ProductionServiceController {
     readonly events: string[] = [];
-    onStart: ((release: PublishedProductionRelease) => Promise<void> | void) | undefined;
+    onStart:
+        | ((
+              release: PublishedProductionRelease,
+              runtime: Parameters<ProductionServiceController["start"]>[1]
+          ) => Promise<void> | void)
+        | undefined;
     rejectReadyReleaseId: string | undefined;
     rejectStartReleaseId: string | undefined;
 
@@ -194,10 +210,13 @@ class TestServiceController implements ProductionServiceController {
         return Promise.resolve();
     }
 
-    async start(release: PublishedProductionRelease): Promise<void> {
+    async start(
+        release: PublishedProductionRelease,
+        runtime: Parameters<ProductionServiceController["start"]>[1]
+    ): Promise<void> {
         const releaseId = release.manifest.source.commitSha;
         this.events.push(`start:${releaseId}`);
-        await this.onStart?.(release);
+        await this.onStart?.(release, runtime);
         if (releaseId === this.rejectStartReleaseId) {
             throw new Error("candidate partially started");
         }
@@ -220,9 +239,19 @@ class TestServiceController implements ProductionServiceController {
 function activationDependencies(
     services: TestServiceController,
     probeRuntime: () => Promise<ReleaseRuntimeIdentity>,
-    testHooks?: ProductionReleaseActivationTestHooks
+    testHooks?: ProductionReleaseActivationTestHooks,
+    observeRetention?: (
+        references: readonly ProductionArtifactReference[]
+    ) => Promise<void> | void
 ) {
     return Object.freeze({
+        artifactRetention: async (
+            _lease: unknown,
+            _paths: unknown,
+            references: readonly ProductionArtifactReference[]
+        ) => {
+            await observeRetention?.(references);
+        },
         maintenance: {
             execute: executeDatabaseMaintenanceFixture,
             runtimeVerification: { probeRuntime },
@@ -283,6 +312,7 @@ describe("production release activation", () => {
             const paths = await prepareProductionDeliveryDirectories(state);
             const fixtures = clonedPublishedFixtures(paths);
             const services = new TestServiceController();
+            const retentionReferences: ProductionArtifactReference[][] = [];
             const authoritativeAtStart: string[] = [];
             services.onStart = async (release) => {
                 const observed = await loadProductionActivationState(lease, paths);
@@ -290,7 +320,14 @@ describe("production release activation", () => {
                 expect(observed.record?.current.releaseId).toBe(releaseId);
                 authoritativeAtStart.push(releaseId);
             };
-            const dependencies = activationDependencies(services, fixtures.probeRuntime);
+            const dependencies = activationDependencies(
+                services,
+                fixtures.probeRuntime,
+                undefined,
+                (references) => {
+                    retentionReferences.push([...references]);
+                }
+            );
             const initial = await Effect.runPromise(
                 activatePublishedProductionRelease(
                     lease,
@@ -336,6 +373,40 @@ describe("production release activation", () => {
                 `ready:${secondReleaseId}`,
             ]);
             expect(authoritativeAtStart).toEqual([firstReleaseId, secondReleaseId]);
+            expect(retentionReferences).toEqual([
+                [
+                    {
+                        releaseId: firstReleaseId,
+                        runtimeRevision: runtimeIdentity.revision,
+                    },
+                ],
+                [
+                    {
+                        releaseId: firstReleaseId,
+                        runtimeRevision: runtimeIdentity.revision,
+                    },
+                ],
+                [
+                    {
+                        releaseId: firstReleaseId,
+                        runtimeRevision: runtimeIdentity.revision,
+                    },
+                    {
+                        releaseId: secondReleaseId,
+                        runtimeRevision: runtimeIdentity.revision,
+                    },
+                ],
+                [
+                    {
+                        releaseId: secondReleaseId,
+                        runtimeRevision: runtimeIdentity.revision,
+                    },
+                    {
+                        releaseId: firstReleaseId,
+                        runtimeRevision: runtimeIdentity.revision,
+                    },
+                ],
+            ]);
             const activation = await loadProductionActivationState(lease, paths);
             const stateEntries = await readdir(paths.stateDirectory);
             expect(activation.record).toEqual(upgraded);
@@ -344,6 +415,79 @@ describe("production release activation", () => {
                 stateEntries.filter((entry) => entry.startsWith(".database-transition-"))
             ).toEqual([]);
         });
+    });
+
+    test("clears first-activation pointers after start or readiness failure", async () => {
+        for (const failureBoundary of ["start", "readiness"] as const) {
+            const projectRoot = await createProjectFixture(false);
+            const state = await prepareProtectedProductionStatePath(projectRoot);
+            await withDeploymentLease(state.stateDirectory, async (lease) => {
+                const paths = await prepareProductionDeliveryDirectories(state);
+                const fixtures = clonedPublishedFixtures(paths);
+                const services = new TestServiceController();
+                services.onStart = (release, runtime) =>
+                    pointProductionProcessesAtRelease(lease, paths, release, runtime);
+                if (failureBoundary === "start") {
+                    services.rejectStartReleaseId = firstReleaseId;
+                } else {
+                    services.rejectReadyReleaseId = firstReleaseId;
+                }
+
+                const failure = await rejectionError(
+                    Effect.runPromise(
+                        activatePublishedProductionRelease(
+                            lease,
+                            paths,
+                            fixtures.first,
+                            fixtures.runtime,
+                            activationDependencies(services, fixtures.probeRuntime)
+                        )
+                    )
+                );
+
+                expect(failure.message).toBe("Production release activation failed");
+                const rolledBack = await loadProductionActivationState(lease, paths);
+                expect(rolledBack.record).toBeUndefined();
+                expect(await readdir(paths.releasesDirectory)).not.toContain("current");
+                expect(
+                    await readdir(path.join(paths.runtimesDirectory, "bun"))
+                ).not.toContain("current");
+
+                services.rejectStartReleaseId = undefined;
+                services.rejectReadyReleaseId = undefined;
+                const activated = await Effect.runPromise(
+                    activatePublishedProductionRelease(
+                        lease,
+                        paths,
+                        fixtures.second,
+                        fixtures.runtime,
+                        {
+                            maintenance: {
+                                execute: executeDatabaseMaintenanceFixture,
+                                runtimeVerification: {
+                                    probeRuntime: fixtures.probeRuntime,
+                                },
+                            },
+                            runtimeVerification: {
+                                probeRuntime: fixtures.probeRuntime,
+                            },
+                            services,
+                        }
+                    )
+                );
+
+                expect(activated.current.releaseId).toBe(secondReleaseId);
+                expect(
+                    await readlink(path.join(paths.releasesDirectory, "current"))
+                ).toBe(secondReleaseId);
+                expect(
+                    await readlink(path.join(paths.runtimesDirectory, "bun", "current"))
+                ).toBe(runtimeIdentity.revision);
+                expect(await readdir(paths.releasesDirectory)).not.toContain(
+                    firstReleaseId
+                );
+            });
+        }
     });
 
     test("restores the previous release and database when candidate readiness fails", async () => {

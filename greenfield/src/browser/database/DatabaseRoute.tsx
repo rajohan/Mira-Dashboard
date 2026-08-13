@@ -308,7 +308,7 @@ function sqliteLifecycleAttention(
             sqliteBackupAttentionAgeMs
         ) {
             alerts.push(
-                "The latest verified SQLite maintenance backup is older than expected."
+                "The latest verified SQLite maintenance backup is older than the 48-hour policy."
             );
         }
     }
@@ -384,16 +384,23 @@ function DatabaseOverviewContent({
                 {storage.requiresVacuumReview ? (
                     <Alert
                         focusOnError={false}
-                        message={`SQLite has ${formatByteCount(storage.freeBytes)} (${formatPercent(storage.freePercent)}) reusable space. Review a planned VACUUM before reclaiming it.`}
-                        variant="info"
+                        message={`SQLite has ${formatByteCount(storage.freeBytes)} (${formatPercent(storage.freePercent)}) reusable pages. Review a planned VACUUM to compact the database file and return that space to the host.`}
+                        variant="warning"
                     />
                 ) : null}
+                {storage.permissions.secure ? null : (
+                    <Alert
+                        focusOnError={false}
+                        message="SQLite database, WAL, shared-memory, or state-directory permissions are outside the private storage policy. Review ownership and file modes."
+                        variant="warning"
+                    />
+                )}
                 {lifecycleAlerts.map((message) => (
                     <Alert
                         focusOnError={false}
                         key={message}
                         message={message}
-                        variant="info"
+                        variant="warning"
                     />
                 ))}
                 <div className="flex flex-wrap items-center gap-3">

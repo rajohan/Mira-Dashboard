@@ -19,7 +19,7 @@ describe("application configuration registry", () => {
             "MIRA_DASHBOARD_PUBLIC_ORIGIN",
             "MIRA_DASHBOARD_TRUSTED_PROXY_IPS",
             "ELEVENLABS_API_KEY",
-            "MIRA_DASHBOARD_DATABASE_OBSERVABILITY_URL",
+            "MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD",
             "MOLTBOOK_API_KEY",
             "MOLTBOOK_AGENT_NAME",
             "OPENCLAW_GATEWAY_TOKEN",
@@ -77,7 +77,7 @@ describe("application configuration registry", () => {
                 .map((entry) => entry.environmentName)
         ).toEqual([
             "ELEVENLABS_API_KEY",
-            "MIRA_DASHBOARD_DATABASE_OBSERVABILITY_URL",
+            "MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD",
             "MOLTBOOK_API_KEY",
             "OPENCLAW_GATEWAY_TOKEN",
             "MIRA_DASHBOARD_TOTP_KEYRING",
@@ -94,7 +94,8 @@ describe("application configuration registry", () => {
             )
         ).toEqual({
             ELEVENLABS_API_KEY: "elevenLabsApiKey",
-            MIRA_DASHBOARD_DATABASE_OBSERVABILITY_URL: "databaseObservabilityUrl",
+            MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD:
+                "databaseObservabilityPassword",
             MIRA_DASHBOARD_LOG_LEVEL: "logLevel",
             MOLTBOOK_AGENT_NAME: "moltbookAgentName",
             MOLTBOOK_API_KEY: "moltbookApiKey",
@@ -141,7 +142,7 @@ describe("application configuration registry", () => {
             "MIRA_DASHBOARD_PROJECT_ROOT",
             "MIRA_DASHBOARD_OPENCLAW_ROOT",
             "MIRA_DASHBOARD_WORKSPACE_ROOT",
-            "MIRA_DASHBOARD_DATABASE_OBSERVABILITY_URL",
+            "MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD",
             "MOLTBOOK_API_KEY",
             "MOLTBOOK_AGENT_NAME",
             "OPENCLAW_GATEWAY_URL",
@@ -150,7 +151,7 @@ describe("application configuration registry", () => {
         ]);
         expect(workerEnvironment).toHaveProperty("OPENCLAW_GATEWAY_TOKEN");
         expect(workerEnvironment).toHaveProperty(
-            "MIRA_DASHBOARD_DATABASE_OBSERVABILITY_URL"
+            "MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD"
         );
         expect(workerEnvironment).toHaveProperty("MOLTBOOK_API_KEY");
         expect(workerEnvironment).not.toHaveProperty("MIRA_DASHBOARD_TOTP_KEYRING");

@@ -10,19 +10,37 @@ BEGIN
 END
 $guard$;
 
-DO $schema_absent$
+DO $schema_boundary$
+DECLARE
+  owner_oid oid;
+  schema_oid oid;
 BEGIN
-  IF EXISTS (
-    SELECT 1
-    FROM pg_catalog.pg_namespace
-    WHERE nspname = 'mira_dashboard_observability'
-  ) THEN
-    RAISE EXCEPTION 'Database observability schema must be absent before apply';
+  SELECT oid INTO owner_oid FROM pg_catalog.pg_roles
+  WHERE rolname = 'mira_dashboard_observability_owner';
+  SELECT oid INTO schema_oid FROM pg_catalog.pg_namespace
+  WHERE nspname = 'mira_dashboard_observability';
+  IF schema_oid IS NOT NULL
+    AND (
+      (SELECT nspowner FROM pg_catalog.pg_namespace WHERE oid = schema_oid)
+        IS DISTINCT FROM owner_oid
+      OR EXISTS (
+        SELECT 1 FROM pg_catalog.pg_class
+        WHERE relnamespace = schema_oid
+          AND relname NOT IN ('statement_metrics', 'torrent_count')
+      )
+      OR EXISTS (
+        SELECT 1 FROM pg_catalog.pg_class
+        WHERE relnamespace = schema_oid
+          AND relname = 'torrent_count'
+      )
+    )
+  THEN
+    RAISE EXCEPTION 'Database observability schema boundary is invalid';
   END IF;
 END
-$schema_absent$;
+$schema_boundary$;
 
-CREATE SCHEMA mira_dashboard_observability
+CREATE SCHEMA IF NOT EXISTS mira_dashboard_observability
   AUTHORIZATION mira_dashboard_observability_owner;
 REVOKE ALL PRIVILEGES ON SCHEMA mira_dashboard_observability FROM PUBLIC;
 REVOKE ALL PRIVILEGES ON SCHEMA mira_dashboard_observability

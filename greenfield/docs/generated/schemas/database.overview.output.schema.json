@@ -29,6 +29,16 @@
               "items": {
                 "type": "object",
                 "properties": {
+                  "blocksHit": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "blocksRead": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
                   "cacheHitRatio": {
                     "type": "number",
                     "minimum": 0,
@@ -44,9 +54,16 @@
                     "minimum": 0,
                     "maximum": 9007199254740991
                   },
+                  "detailsState": {
+                    "enum": [
+                      "available",
+                      "unavailable"
+                    ],
+                    "type": "string"
+                  },
                   "name": {
                     "type": "string",
-                    "maxLength": 128,
+                    "maxLength": 63,
                     "minLength": 1,
                     "pattern": "\\S",
                     "allOf": [
@@ -56,7 +73,8 @@
                       {
                         "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
                       }
-                    ]
+                    ],
+                    "$comment": "Live Valibot validation additionally limits PostgreSQL identifiers to 63 UTF-8 bytes."
                   },
                   "pool": {
                     "type": "object",
@@ -126,16 +144,20 @@
                   }
                 },
                 "required": [
+                  "blocksHit",
+                  "blocksRead",
                   "cacheHitRatio",
                   "committedTransactions",
                   "connections",
+                  "detailsState",
                   "name",
                   "rolledBackTransactions",
                   "sizeBytes"
                 ],
                 "additionalProperties": false
               },
-              "maxItems": 16
+              "minItems": 1,
+              "maxItems": 64
             },
             "pgbouncer": {
               "type": "object",
@@ -332,6 +354,11 @@
                   "type": "integer",
                   "minimum": 0,
                   "maximum": 9007199254740991
+                },
+                "unavailableDatabaseCount": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
                 }
               },
               "required": [
@@ -341,7 +368,8 @@
                 "maintenance",
                 "pgStatStatementsEnabled",
                 "totalConnections",
-                "totalDatabaseSizeBytes"
+                "totalDatabaseSizeBytes",
+                "unavailableDatabaseCount"
               ],
               "additionalProperties": false
             },
@@ -359,7 +387,7 @@
                   },
                   "database": {
                     "type": "string",
-                    "maxLength": 128,
+                    "maxLength": 63,
                     "minLength": 1,
                     "pattern": "\\S",
                     "allOf": [
@@ -369,7 +397,8 @@
                       {
                         "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
                       }
-                    ]
+                    ],
+                    "$comment": "Live Valibot validation additionally limits PostgreSQL identifiers to 63 UTF-8 bytes."
                   },
                   "deadTuplePercent": {
                     "type": "number",
@@ -408,7 +437,7 @@
                   },
                   "schema": {
                     "type": "string",
-                    "maxLength": 128,
+                    "maxLength": 63,
                     "minLength": 1,
                     "pattern": "\\S",
                     "allOf": [
@@ -418,11 +447,12 @@
                       {
                         "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
                       }
-                    ]
+                    ],
+                    "$comment": "Live Valibot validation additionally limits PostgreSQL identifiers to 63 UTF-8 bytes."
                   },
                   "table": {
                     "type": "string",
-                    "maxLength": 128,
+                    "maxLength": 63,
                     "minLength": 1,
                     "pattern": "\\S",
                     "allOf": [
@@ -432,7 +462,8 @@
                       {
                         "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
                       }
-                    ]
+                    ],
+                    "$comment": "Live Valibot validation additionally limits PostgreSQL identifiers to 63 UTF-8 bytes."
                   }
                 },
                 "required": [
@@ -556,6 +587,16 @@
               "items": {
                 "type": "object",
                 "properties": {
+                  "blocksHit": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "blocksRead": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
                   "cacheHitRatio": {
                     "type": "number",
                     "minimum": 0,
@@ -571,9 +612,16 @@
                     "minimum": 0,
                     "maximum": 9007199254740991
                   },
+                  "detailsState": {
+                    "enum": [
+                      "available",
+                      "unavailable"
+                    ],
+                    "type": "string"
+                  },
                   "name": {
                     "type": "string",
-                    "maxLength": 128,
+                    "maxLength": 63,
                     "minLength": 1,
                     "pattern": "\\S",
                     "allOf": [
@@ -583,7 +631,8 @@
                       {
                         "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
                       }
-                    ]
+                    ],
+                    "$comment": "Live Valibot validation additionally limits PostgreSQL identifiers to 63 UTF-8 bytes."
                   },
                   "pool": {
                     "type": "object",
@@ -653,16 +702,20 @@
                   }
                 },
                 "required": [
+                  "blocksHit",
+                  "blocksRead",
                   "cacheHitRatio",
                   "committedTransactions",
                   "connections",
+                  "detailsState",
                   "name",
                   "rolledBackTransactions",
                   "sizeBytes"
                 ],
                 "additionalProperties": false
               },
-              "maxItems": 16
+              "minItems": 1,
+              "maxItems": 64
             },
             "pgbouncer": {
               "type": "object",
@@ -859,6 +912,11 @@
                   "type": "integer",
                   "minimum": 0,
                   "maximum": 9007199254740991
+                },
+                "unavailableDatabaseCount": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
                 }
               },
               "required": [
@@ -868,7 +926,8 @@
                 "maintenance",
                 "pgStatStatementsEnabled",
                 "totalConnections",
-                "totalDatabaseSizeBytes"
+                "totalDatabaseSizeBytes",
+                "unavailableDatabaseCount"
               ],
               "additionalProperties": false
             },
@@ -886,7 +945,7 @@
                   },
                   "database": {
                     "type": "string",
-                    "maxLength": 128,
+                    "maxLength": 63,
                     "minLength": 1,
                     "pattern": "\\S",
                     "allOf": [
@@ -896,7 +955,8 @@
                       {
                         "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
                       }
-                    ]
+                    ],
+                    "$comment": "Live Valibot validation additionally limits PostgreSQL identifiers to 63 UTF-8 bytes."
                   },
                   "deadTuplePercent": {
                     "type": "number",
@@ -935,7 +995,7 @@
                   },
                   "schema": {
                     "type": "string",
-                    "maxLength": 128,
+                    "maxLength": 63,
                     "minLength": 1,
                     "pattern": "\\S",
                     "allOf": [
@@ -945,11 +1005,12 @@
                       {
                         "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
                       }
-                    ]
+                    ],
+                    "$comment": "Live Valibot validation additionally limits PostgreSQL identifiers to 63 UTF-8 bytes."
                   },
                   "table": {
                     "type": "string",
-                    "maxLength": 128,
+                    "maxLength": 63,
                     "minLength": 1,
                     "pattern": "\\S",
                     "allOf": [
@@ -959,7 +1020,8 @@
                       {
                         "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
                       }
-                    ]
+                    ],
+                    "$comment": "Live Valibot validation additionally limits PostgreSQL identifiers to 63 UTF-8 bytes."
                   }
                 },
                 "required": [

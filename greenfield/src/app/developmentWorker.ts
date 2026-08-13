@@ -54,6 +54,7 @@ export async function runDevelopmentWorkerProcess(
             logMaintenance,
             moltbook,
             _databaseObservability,
+            _databaseObservabilityReconciler,
             hostOperations,
             bootIdentity
         ) => {

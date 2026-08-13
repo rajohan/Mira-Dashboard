@@ -102,7 +102,7 @@ describe("coverage runner", () => {
         expect(checks[0]).toEqual([
             "/tmp/coverage/lcov.info",
             "85",
-            "scripts,src",
+            "scripts,src,drizzle.config.ts,tailwind.config.ts",
             "/tmp/project",
         ]);
         expect(logs).toEqual(["Coverage 90.00% meets required 85.00% (18/20 lines)"]);

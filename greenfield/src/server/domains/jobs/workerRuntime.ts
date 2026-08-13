@@ -2,6 +2,7 @@ import { Cause, Effect, Exit, Fiber, ManagedRuntime } from "effect";
 
 import type { SqliteMaintenanceExecutionPort } from "../../../contracts/database.ts";
 import type { DatabaseObservabilityCollector } from "../../../contracts/databaseObservabilityCollector.ts";
+import type { DatabaseObservabilityReconciliationPort } from "../../../shared/databaseObservabilityReconciliation.ts";
 import type { LinuxBootIdentity } from "../../../shared/linuxBootIdentity.ts";
 import type { OpenClawGatewayLifecycleExecutionPort } from "../../../shared/openClawGatewayLifecycle.ts";
 import type { OpenClawServiceActionsExecutionPort } from "../../../shared/openClawServiceActions.ts";
@@ -55,6 +56,7 @@ export interface DashboardWorkerRuntimeOptions {
     readonly bootIdentity: LinuxBootIdentity;
     readonly database: DatabaseRuntimeLayerOptions;
     readonly databaseObservability: DatabaseObservabilityCollector;
+    readonly databaseObservabilityReconciler?: DatabaseObservabilityReconciliationPort;
     readonly logMaintenance: LogMaintenanceExecutionPort;
     readonly hostOperations?: FixedHostOperationsExecutionPort;
     readonly moltbook: MoltbookDashboardCollector;
@@ -463,6 +465,12 @@ export function createDashboardWorkerRuntime(
             const findAction = createJobWorkerActionResolver({
                 actionDefinitions,
                 databaseObservability: options.databaseObservability,
+                ...(options.databaseObservabilityReconciler === undefined
+                    ? {}
+                    : {
+                          databaseObservabilityReconciler:
+                              options.databaseObservabilityReconciler,
+                      }),
                 ...(availableHostOperations.length === 0 ||
                 options.hostOperations === undefined
                     ? {}

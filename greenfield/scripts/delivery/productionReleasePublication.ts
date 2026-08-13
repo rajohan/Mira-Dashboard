@@ -1,13 +1,14 @@
-import type { BigIntStats, Dirent } from "node:fs";
+import { constants, type BigIntStats, type Dirent } from "node:fs";
 import {
     chmod,
     lstat,
     mkdir,
+    open,
     readdir,
     realpath,
     rename,
     rm,
-    writeFile,
+    type FileHandle,
 } from "node:fs/promises";
 import path from "node:path";
 
@@ -15,6 +16,10 @@ import type { ReleaseManifest } from "../../src/shared/releaseManifest.ts";
 import { parseReleaseManifest } from "../../src/shared/releaseManifest.ts";
 import { readBoundedRegularFile } from "../files/boundedFile.ts";
 import type { DashboardDeploymentLease } from "./deploymentLease.ts";
+import {
+    assertProductionArtifactCopyCapacity,
+    type ProductionArtifactCapacityDependencies,
+} from "./productionArtifactCapacity.ts";
 import type { PreparedProductionDeliveryPaths } from "./productionDeliveryFilesystem.ts";
 import {
     inventoryReleaseArtifactTree,
@@ -32,6 +37,13 @@ const commitShaPattern = /^[a-f\d]{40}$/u;
 const maximumCleanupEntries = 4608;
 const maximumCleanupDepth = 20;
 const maximumPublishedManifestBytes = 4 * 1024 * 1024;
+const directoryFlags =
+    constants.O_RDONLY |
+    constants.O_DIRECTORY |
+    constants.O_NOFOLLOW |
+    constants.O_NONBLOCK;
+const destinationFileFlags =
+    constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW | constants.O_RDWR;
 
 /** Immutable production release materialized below the project-local release root. */
 export interface PublishedProductionRelease {
@@ -41,8 +53,65 @@ export interface PublishedProductionRelease {
 
 /** Deterministic publication mutation boundaries exposed only to adversarial tests. */
 export interface ProductionReleasePublicationTestHooks {
+    readonly availableCapacity?: ProductionArtifactCapacityDependencies["availableCapacity"];
+    readonly beforeCopy?: (sourceRoot: string) => Promise<void> | void;
     readonly afterCopy?: (stagingRoot: string) => Promise<void> | void;
     readonly afterFreeze?: (stagingRoot: string) => Promise<void> | void;
+}
+
+async function closeHandle(handle: FileHandle | undefined): Promise<boolean> {
+    if (!handle) return true;
+    try {
+        await handle.close();
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+async function syncDirectory(directory: string): Promise<void> {
+    let handle: FileHandle | undefined;
+    let failed = false;
+    try {
+        handle = await open(directory, directoryFlags);
+        await handle.sync();
+    } catch {
+        failed = true;
+    }
+    if (!(await closeHandle(handle)) || failed) throw productionReleaseFailure();
+}
+
+async function writeSyncedPrivateFile(
+    filePath: string,
+    contents: Uint8Array
+): Promise<void> {
+    let handle: FileHandle | undefined;
+    let failed = false;
+    try {
+        handle = await open(filePath, destinationFileFlags, privateFileMode);
+        await handle.writeFile(contents);
+        await handle.sync();
+    } catch {
+        failed = true;
+    }
+    if (!(await closeHandle(handle)) || failed) throw productionReleaseFailure();
+}
+
+function releaseDirectories(
+    releaseRoot: string,
+    records: readonly ReleaseArtifactInventoryRecord[]
+): readonly string[] {
+    const directories = new Set<string>([releaseRoot]);
+    for (const record of records) {
+        let directory = path.dirname(path.join(releaseRoot, record.path));
+        while (directory !== releaseRoot) {
+            directories.add(directory);
+            directory = path.dirname(directory);
+        }
+    }
+    return Object.freeze(
+        [...directories].toSorted((left, right) => right.length - left.length)
+    );
 }
 
 interface ExpectedTreeEntry {
@@ -283,9 +352,24 @@ async function pathExists(candidate: string): Promise<boolean> {
 
 async function copyReleaseTree(
     sourceRoot: string,
-    destinationRoot: string
+    destinationRoot: string,
+    expectedSource: readonly ReleaseArtifactInventoryRecord[],
+    availableCapacity?: ProductionReleasePublicationTestHooks["availableCapacity"]
 ): Promise<readonly ReleaseArtifactInventoryRecord[]> {
     const sourceBefore = await inventoryReleaseArtifactTree(sourceRoot);
+    if (!sameArtifactRecords(expectedSource, sourceBefore)) {
+        throw productionReleaseFailure();
+    }
+    await assertProductionArtifactCopyCapacity(
+        path.dirname(destinationRoot),
+        Object.freeze({
+            fileBytes: Object.freeze(sourceBefore.map((record) => BigInt(record.bytes))),
+            newDirectoryCount: BigInt(
+                releaseDirectories(destinationRoot, sourceBefore).length
+            ),
+        }),
+        { availableCapacity }
+    );
     await mkdir(destinationRoot, { mode: privateDirectoryMode });
     for (const record of sourceBefore) {
         const contents = await readBoundedRegularFile(
@@ -306,10 +390,10 @@ async function copyReleaseTree(
             mode: privateDirectoryMode,
             recursive: true,
         });
-        await writeFile(destination, contents, {
-            flag: "wx",
-            mode: privateFileMode,
-        });
+        await writeSyncedPrivateFile(destination, contents);
+    }
+    for (const directory of releaseDirectories(destinationRoot, sourceBefore)) {
+        await syncDirectory(directory);
     }
     const [sourceAfter, destination] = await Promise.all([
         inventoryReleaseArtifactTree(sourceRoot),
@@ -329,14 +413,33 @@ async function freezeReleaseTree(
     releaseRoot: string,
     records: readonly ReleaseArtifactInventoryRecord[]
 ): Promise<void> {
-    const directories = [...expectedTreeEntries(records).keys()]
-        .map((relative) => (relative ? path.join(releaseRoot, relative) : releaseRoot))
-        .toSorted((left, right) => right.length - left.length);
     for (const record of records) {
-        await chmod(path.join(releaseRoot, record.path), immutableFileMode);
+        const filePath = path.join(releaseRoot, record.path);
+        await chmod(filePath, immutableFileMode);
+        let handle: FileHandle | undefined;
+        let failed = false;
+        try {
+            handle = await open(
+                filePath,
+                constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
+            );
+            await handle.sync();
+        } catch {
+            failed = true;
+        }
+        if (!(await closeHandle(handle)) || failed) throw productionReleaseFailure();
     }
-    for (const directory of directories) {
-        await chmod(directory, immutableDirectoryMode);
+    for (const directory of releaseDirectories(releaseRoot, records)) {
+        let handle: FileHandle | undefined;
+        let failed = false;
+        try {
+            handle = await open(directory, directoryFlags);
+            await handle.chmod(immutableDirectoryMode);
+            await handle.sync();
+        } catch {
+            failed = true;
+        }
+        if (!(await closeHandle(handle)) || failed) throw productionReleaseFailure();
     }
     const after = await inventoryReleaseArtifactTree(releaseRoot);
     if (!sameArtifactRecords(records, after)) throw productionReleaseFailure();
@@ -393,6 +496,7 @@ async function restoreOwnedCandidate(
     };
     await restore(candidateRoot, 0);
     await rm(candidateRoot, { force: false, recursive: true });
+    await syncDirectory(releasesDirectory);
 }
 
 /**
@@ -440,7 +544,13 @@ export async function publishProductionRelease(
         const stagingRoot = path.join(paths.releasesDirectory, stageName);
         ownedRoot = stagingRoot;
         ownedName = stageName;
-        const stagedRecords = await copyReleaseTree(sourceReleaseRoot, stagingRoot);
+        await testHooks.beforeCopy?.(sourceReleaseRoot);
+        const stagedRecords = await copyReleaseTree(
+            sourceReleaseRoot,
+            stagingRoot,
+            sourceRecords,
+            testHooks.availableCapacity
+        );
         await testHooks.afterCopy?.(stagingRoot);
         const stagedManifest = await verifyReleaseIdentity(stagingRoot, runtimeIdentity);
         if (!sameManifest(sourceManifest, stagedManifest)) {
@@ -456,6 +566,7 @@ export async function publishProductionRelease(
         await rename(stagingRoot, finalRoot);
         ownedRoot = finalRoot;
         ownedName = commitSha;
+        await syncDirectory(paths.releasesDirectory);
         if ((await realpath(finalRoot)) !== finalRoot) throw productionReleaseFailure();
         const published = await verifyReleaseIdentity(finalRoot, runtimeIdentity);
         const publishedRecords = await inventoryReleaseArtifactTree(finalRoot);
@@ -494,13 +605,26 @@ export async function loadPublishedProductionRelease(
     releaseId: string,
     runtimeRevision: string
 ): Promise<PublishedProductionRelease> {
+    if (!commitShaPattern.test(runtimeRevision)) throw productionReleaseFailure();
+    const release = await loadPublishedProductionReleaseById(paths, releaseId);
+    if (release.manifest.runtime.revision !== runtimeRevision) {
+        throw productionReleaseFailure();
+    }
+    return release;
+}
+
+/**
+ * Reloads and fully verifies one immutable production release using its own manifest identity.
+ * @param paths Exact project-local production delivery paths.
+ * @param releaseId Full commit identity naming the immutable release directory.
+ * @returns Verified immutable production release and manifest.
+ */
+export async function loadPublishedProductionReleaseById(
+    paths: PreparedProductionDeliveryPaths,
+    releaseId: string
+): Promise<PublishedProductionRelease> {
     try {
-        if (
-            !commitShaPattern.test(releaseId) ||
-            !commitShaPattern.test(runtimeRevision)
-        ) {
-            throw productionReleaseFailure();
-        }
+        if (!commitShaPattern.test(releaseId)) throw productionReleaseFailure();
         await assertPrivateReleasesDirectory(paths.releasesDirectory);
         const releaseRoot = path.join(paths.releasesDirectory, releaseId);
         const manifestBytes = await readBoundedRegularFile(
@@ -514,10 +638,7 @@ export async function loadPublishedProductionRelease(
         );
         const manifestValue: unknown = JSON.parse(manifestText);
         const preliminary = parseReleaseManifest(manifestValue);
-        if (
-            preliminary.source.commitSha !== releaseId ||
-            preliminary.runtime.revision !== runtimeRevision
-        ) {
+        if (preliminary.source.commitSha !== releaseId) {
             throw productionReleaseFailure();
         }
         const manifest = await verifyReleaseIdentity(releaseRoot, preliminary.runtime);

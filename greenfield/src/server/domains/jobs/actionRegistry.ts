@@ -28,7 +28,7 @@ import { logMaintenanceJobActionKey } from "../../../shared/logMaintenanceUnits.
 import { boundedControlSafeTextSchema } from "../../../shared/validation.ts";
 
 export type JobInitialDuePolicy = "immediate" | "next-occurrence";
-export type JobManualExposure = "cache-write" | "jobs-write" | "none";
+export type JobManualExposure = "cache-internal" | "cache-write" | "jobs-write" | "none";
 export type JobActionEventWriteResult = "appended" | "dropped" | "truncated";
 export type JobCacheAttemptWriteResult = "committed" | "lost-claim";
 
@@ -152,7 +152,7 @@ export type JobCacheAttemptCommit =
       };
 
 const jobManualExposureSchema = v.picklist(
-    ["cache-write", "jobs-write", "none"],
+    ["cache-internal", "cache-write", "jobs-write", "none"],
     "Job manual exposure is invalid"
 );
 const jobInitialDuePolicySchema = v.picklist(
@@ -429,15 +429,22 @@ const databaseObservabilityCacheDefinition = validateJobActionDefinition({
         "Projects a bounded read-only PostgreSQL and PgBouncer observability snapshot.",
     displayName: "Database observability cache",
     initialDue: "immediate",
-    manualExposure: "none",
+    // Persists claim-fenced cache attempts without exposing this domain-only
+    // payload through the generic cache read or manual-refresh procedures.
+    manualExposure: "cache-internal",
     priority: 0,
-    resourceClass: "light",
-    resourceKeys: Object.freeze(["network.database-observability"]),
+    resourceClass: "host-heavy",
+    resourceKeys: Object.freeze([
+        "database.postgresql",
+        "docker.engine",
+        "network.database-observability",
+    ]),
     retrySafe: true,
     scheduleId: databaseObservabilityCacheJobScheduleId,
-    // The collector owns the 60-second protocol deadline. This outer margin
-    // preserves enough time for its claim-fenced failure commit to settle.
-    timeoutMs: 65_000,
+    // Open/reconcile owns 300 seconds, collection owns 60 seconds, and
+    // mandatory fail-closed cleanup owns 30 seconds. The remaining 30-second
+    // margin preserves claim-fenced cache and job settlement time.
+    timeoutMs: 7 * 60_000,
 });
 
 /** Daily online SQLite snapshot, restore verification, retention, and fixed upkeep. */

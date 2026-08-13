@@ -73,45 +73,38 @@ describe("worker application configuration", () => {
         expect(Object.isFrozen(configuration)).toBe(true);
         expect(Object.isFrozen(configuration.gatewayToken)).toBe(true);
         expect(Object.isFrozen(configuration.moltbookApiKey)).toBe(true);
-        expect(configuration.databaseObservabilityUrl).toBeUndefined();
+        expect(configuration.databaseObservabilityPassword).toBeUndefined();
     });
 
-    test("accepts only the optional exact loopback monitoring URL and redacts it", () => {
+    test("accepts only the database password without topology and redacts it", () => {
         const environment = validEnvironment();
-        environment.MIRA_DASHBOARD_DATABASE_OBSERVABILITY_URL =
-            "postgresql://mira_dashboard_observer:private-password@127.0.0.1:6432/postgres";
-        const configuredUrl =
-            environment.MIRA_DASHBOARD_DATABASE_OBSERVABILITY_URL as string;
+        environment.MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD = "private-password";
         const configuration = parseWorkerConfiguration(environment);
 
-        expect(Redacted.value(configuration.databaseObservabilityUrl!)).toBe(
-            configuredUrl
+        expect(Redacted.value(configuration.databaseObservabilityPassword!)).toBe(
+            "private-password"
         );
         expect(JSON.stringify(configuration)).not.toContain("private-password");
         expect(inspect(configuration)).not.toContain("private-password");
-        expect(Object.isFrozen(configuration.databaseObservabilityUrl)).toBe(true);
-        expect(JSON.stringify(configuration.databaseObservabilityUrl)).toBe(
-            '"<redacted:database-observability-url>"'
+        expect(JSON.stringify(configuration.databaseObservabilityPassword)).toBe(
+            '"<redacted:database-observability-password>"'
         );
 
-        for (const invalid of [
-            "postgresql://monitor:password@localhost:6432/postgres",
-            "postgresql://monitor:password@127.0.0.1:5432/postgres",
-            "postgresql://monitor:password@127.0.0.1:6432/other",
-            "postgresql://monitor:password@127.0.0.1:6432/postgres?sslmode=disable",
-            "postgresql://monitor@127.0.0.1:6432/postgres",
-            "postgres://monitor:password@127.0.0.1:6432/postgres",
-            "POSTGRESQL://monitor:password@127.0.0.1:6432/postgres",
-            "postgresql://monitor%40role:password@127.0.0.1:6432/postgres",
-            "postgresql://monitor:pass%2Fword@127.0.0.1:6432/postgres",
-            "postgresql://monitor:%20password@127.0.0.1:6432/postgres",
-            "postgresql://monitor:password@127.0.0.1:6432/postgres/",
-            `postgresql://monitor:${"x".repeat(4096)}@127.0.0.1:6432/postgres`,
-        ]) {
+        for (const accepted of ["pass/word", "pass%2Fword", "pass@word"]) {
             const candidate = validEnvironment();
-            candidate.MIRA_DASHBOARD_DATABASE_OBSERVABILITY_URL = invalid;
+            candidate.MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD = accepted;
+            expect(
+                Redacted.value(
+                    parseWorkerConfiguration(candidate).databaseObservabilityPassword!
+                )
+            ).toBe(accepted);
+        }
+
+        for (const invalid of [" private-password", "private-password "]) {
+            const candidate = validEnvironment();
+            candidate.MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD = invalid;
             expect(configurationFailure(candidate)).toMatchObject({
-                field: "MIRA_DASHBOARD_DATABASE_OBSERVABILITY_URL",
+                field: "MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD",
                 reason: "invalid",
             });
         }
@@ -161,11 +154,7 @@ describe("worker application configuration", () => {
         for (const [field, value, reason] of [
             ["OPENCLAW_GATEWAY_TOKEN", ` ${secret}`, "invalid"],
             ["MOLTBOOK_API_KEY", ` ${secret}`, "invalid"],
-            [
-                "MIRA_DASHBOARD_DATABASE_OBSERVABILITY_URL",
-                `postgresql://monitor:${secret}@127.0.0.1:6432/other`,
-                "invalid",
-            ],
+            ["MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD", ` ${secret}`, "invalid"],
             ["OPENCLAW_GATEWAY_URL", `ws://${secret}.example`, "invalid"],
         ] as const) {
             const environment = validEnvironment();

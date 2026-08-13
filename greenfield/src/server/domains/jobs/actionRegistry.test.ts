@@ -42,9 +42,15 @@ describe("durable job action registry", () => {
             actionPayload: { key: "database.observability" },
             defaultEnabled: true,
             defaultSchedule: { intervalMs: 3_600_000, kind: "interval" },
-            manualExposure: "none",
+            manualExposure: "cache-internal",
+            resourceClass: "host-heavy",
+            resourceKeys: [
+                "database.postgresql",
+                "docker.engine",
+                "network.database-observability",
+            ],
             scheduleId: "cache.database-observability",
-            timeoutMs: 65_000,
+            timeoutMs: 420_000,
         });
         expect(findJobActionDefinition("database.sqlite-maintenance")).toMatchObject({
             actionPayload: {},

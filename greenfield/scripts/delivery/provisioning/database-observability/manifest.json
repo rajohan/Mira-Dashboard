@@ -1,35 +1,124 @@
 {
-    "formatVersion": 2,
+    "formatVersion": 8,
     "observerRole": "mira_dashboard_observer",
     "viewOwnerRole": "mira_dashboard_observability_owner",
+    "capabilityOwnerRole": "mira_dashboard_observability_capability_owner",
     "postgresql": {
-        "builtinRoles": ["pg_monitor", "pg_read_all_stats"],
-        "reviewedDatabases": [
-            "aiomanager",
-            "aiometadata",
-            "aiostreams",
-            "authelia",
-            "bitmagnet",
-            "comet",
-            "crowdsec",
-            "metabase",
-            "postgres",
-            "speedtest_tracker"
-        ],
+        "observerRoleMemberships": [],
+        "capabilityOwnerAuthority": {
+            "directRoleMemberships": ["pg_read_all_stats"],
+            "directRelationPrivilegesPerDatabase": ["SELECT ON pg_catalog.pg_statistic"],
+            "login": false
+        },
+        "catalogDiscovery": {
+            "maximumDatabases": 64,
+            "order": "name-ascending",
+            "predicate": "datistemplate=false and datallowconn=true"
+        },
+        "controlPoint": {
+            "pgBouncerAlias": "mira_dashboard_observability",
+            "physicalDatabase": "mira_dashboard_observability",
+            "routing": "pgbouncer-wildcard-same-name",
+            "source": "code-owned-single-endpoint-capability"
+        },
+        "privilegedCollectionLease": {
+            "actionKey": "cache.refresh.database-observability",
+            "scheduleId": "cache.database-observability",
+            "scheduleIntervalSeconds": 3600,
+            "providerGate": "configured-only",
+            "port": "separate worker-only privileged collection-lease port",
+            "commands": {
+                "open": "runProvisioning.ts open-approved-collection --approved",
+                "enable": "runProvisioning.ts enable-approved-collection --approved --collection-lease-token <uuid> --catalog-digest <sha256>",
+                "close": "runProvisioning.ts close-approved-collection --approved"
+            },
+            "runner": "exact immutable release Bun runtime",
+            "processSupervision": "Linux parent-death signal plus isolated process-group TERM/KILL reap before settlement",
+            "approval": {
+                "artifact": "mira_dashboard_observability_control.reconciliation_approval",
+                "createdOrUpdatedBy": "explicit activate-current-catalog only",
+                "binding": [
+                    "pg_control_system.system_identifier",
+                    "exact current immutable-release policy digest",
+                    "exact previous immutable-release policy digest"
+                ],
+                "policyVersion": "sanitized-capabilities-v1 is descriptive and never sufficient authorization",
+                "leaseMutation": "forbidden"
+            },
+            "closedStateBetweenRuns": {
+                "login": false,
+                "validUntil": "expired",
+                "postgresqlSessions": 0,
+                "collectionLeaseComment": null
+            },
+            "phases": [
+                "privileged close leftovers: set NOLOGIN, expire VALID UNTIL, terminate observer sessions, and recheck closed state",
+                "open-approved-collection: verify exact approval and identity, perform the full bounded idempotent ACL-and-capability reconcile, keep NOLOGIN, and prepare one use collection token bound to the exact catalog digest",
+                "enable-approved-collection: recheck approval, policy, PostgreSQL/Docker identity, and exact catalog digest, then atomically consume the token and set LOGIN with a short VALID UNTIL",
+                "collect once through the least-privilege observer",
+                "shielded mandatory close: atomically invalidate every prepared token, set NOLOGIN, expire VALID UNTIL, terminate observer sessions, and recheck closed state",
+                "return the fresh payload to the generic cache executor only after exact close proof"
+            ],
+            "reconciliation": {
+                "frequency": "every approved prepared open before one-use enable",
+                "operations": [
+                    "reconcile exact database ACLs through the pinned administrative boundary",
+                    "strictly apply and verify cluster and control capabilities; isolate application-database apply or policy drift for collector-level unavailable details",
+                    "reject catalog, approval, policy-digest, PostgreSQL identity, or Docker identity races"
+                ],
+                "reducedPath": false,
+                "persistedFingerprintOrAgeState": false
+            },
+            "failureSemantics": "cluster, control, approval, identity, catalog-race, enable, collection, or close failure prevents a fresh payload and cache commit; isolated application-database drift remains visible with unavailable details while other databases collect",
+            "pgBouncerWaitingClientLimitation": "closed PostgreSQL role and zero-session proof cannot prove that PgBouncer has no already-authenticated waiting client; no exclusive admission is added, and interference fails the attempt while NOLOGIN and expired VALID UNTIL prevent a new backend",
+            "additionalRuntimeSurfaces": {
+                "jobAction": false,
+                "schedule": false,
+                "systemdUnit": false,
+                "postgresqlLogin": false,
+                "exclusiveAdmission": false
+            }
+        },
+        "sanitizedCapabilities": {
+            "schema": "mira_dashboard_observability_capabilities",
+            "observerPrivileges": ["USAGE ON SCHEMA", "EXECUTE ON EXACT FUNCTIONS"],
+            "functions": [
+                "connection_metrics()@mira_dashboard_observability",
+                "statement_metrics()@mira_dashboard_observability",
+                "table_health()@each-observed-database",
+                "maintenance_metrics()@each-observed-database"
+            ],
+            "rawStatementAccess": "revoked from PUBLIC and observer",
+            "statementOutput": "bounded metrics without database, user, queryid, or query text"
+        },
+        "provisioningExecution": {
+            "composeFile": "/opt/docker/compose.yaml",
+            "composeProjectDirectory": "/opt/docker",
+            "containerPsql": "/usr/local/bin/psql over /var/run/postgresql",
+            "dockerHost": "unix:///var/run/docker.sock",
+            "identityGuard": "superuser-role-oid, postgresql-system-identifier, activation approval, and exact current/previous policy digests",
+            "target": "single healthy PostgreSQL service_healthy dependency of the opted-in PgBouncer capability"
+        },
+        "observerConnectionLimit": 64,
         "sessionDefaults": {
             "default_transaction_read_only": "on",
             "statement_timeout": "5s"
         },
         "statementStatistics": {
-            "database": "postgres",
+            "database": "mira_dashboard_observability",
             "extension": "pg_stat_statements",
-            "relations": ["public.pg_stat_statements", "public.pg_stat_statements_info"],
-            "schema": "public",
-            "version": "1.12"
+            "source": "catalog-resolved pg_stat_statements(false) behind a NOLOGIN capability owner",
+            "target": "mira_dashboard_observability_capabilities.statement_metrics()"
         }
     },
     "pgBouncer": {
         "adminUserForbidden": "mira_dashboard_observer",
+        "observerUserPolicy": {
+            "max_user_client_connections": 2,
+            "max_user_connections": 64,
+            "pool_size": 1,
+            "reserve_pool_size": 0
+        },
         "statsUserRequired": "mira_dashboard_observer",
         "virtualDatabase": "pgbouncer"
     },
@@ -47,38 +136,46 @@
     ],
     "applyOrder": [
         "apply-cluster.sql",
+        "apply-control-database-capability.sql@approved-administrative-database",
         "interactive-observer-password",
-        "apply-torrent-view.sql@bitmagnet",
-        "apply-torrent-view.sql@comet",
-        "manual-pgbouncer-stats-user"
-    ],
-    "verifyOrder": [
-        "verify-cluster.sql",
-        "verify-database.sql@aiomanager",
-        "verify-database.sql@aiometadata",
-        "verify-database.sql@aiostreams",
-        "verify-database.sql@authelia",
-        "verify-database.sql@bitmagnet",
-        "verify-database.sql@comet",
-        "verify-database.sql@crowdsec",
-        "verify-database.sql@metabase",
-        "verify-database.sql@postgres",
-        "verify-database.sql@speedtest_tracker",
-        "verify-torrent-view.sql@bitmagnet",
-        "verify-torrent-view.sql@comet",
-        "manual-pgbouncer-config-check"
+        "apply-database-capabilities.sql@each-discovered-database",
+        "apply-control-database.sql@mira_dashboard_observability",
+        "optional-apply-torrent-view.sql@bitmagnet",
+        "optional-apply-torrent-view.sql@comet",
+        "configure-pgbouncer-observer-policy-and-single-capability-label",
+        "compose-separate-privileged-preflight-port-into-existing-hourly-cache-job"
     ],
     "activationOrder": [
-        "activate-observer.sql",
+        "runProvisioning.ts activate-current-catalog --approved",
+        "first runner operation after manual prerequisites on initial installation",
+        "activation-creates-or-refreshes-system-and-policy-bound-approval-marker",
         "manual-observer-pgbouncer-command-check",
-        "enable-worker-credential"
+        "enable-worker-provider-configuration"
+    ],
+    "verifyOrder": [
+        "runProvisioning.ts verify-current-catalog --approved after initial activation",
+        "verify-database-capabilities.sql@each-discovered-database",
+        "optional-verify-torrent-view.sql@bitmagnet",
+        "optional-verify-torrent-view.sql@comet",
+        "verify-reconciliation-approval.sql@mira_dashboard_observability-after-activation",
+        "manual-pgbouncer-and-preflight-port-config-check"
+    ],
+    "subsequentReleaseOrder": [
+        "runProvisioning.ts verify-current-catalog --approved may precede activation only when the retained current or previous digest approves the release",
+        "otherwise runProvisioning.ts activate-current-catalog --approved first",
+        "manual-observer-pgbouncer-command-check after approval and verification",
+        "enable-worker-provider-configuration after the approved smoke check"
     ],
     "rollbackOrder": [
-        "disable-worker-credential",
+        "disable-worker-provider-configuration",
         "disable-observer.sql",
-        "rollback-torrent-view.sql@comet",
-        "rollback-torrent-view.sql@bitmagnet",
+        "rollback-reconciliation-approval.sql@mira_dashboard_observability",
+        "optional-rollback-torrent-view.sql@comet",
+        "optional-rollback-torrent-view.sql@bitmagnet",
+        "rollback-control-database.sql@mira_dashboard_observability",
+        "rollback-database-capabilities.sql@each-discovered-database",
         "manual-pgbouncer-stats-user-removal",
-        "rollback-cluster.sql"
+        "rollback-cluster.sql",
+        "rollback-control-database-capability.sql@mira_dashboard_observability-retain"
     ]
 }

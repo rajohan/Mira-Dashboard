@@ -122,6 +122,15 @@ Moltbook remain external systems. Dashboard persists only configuration, bounded
 audit/history, job state, or recovery state that it owns. It does not mirror entire external
 databases.
 
+Membership in an external topology is always source-derived. PostgreSQL catalogs and Docker
+Engine inventory are the membership sources; configured endpoints, trust roots, credentials,
+Compose files, labels, and policy limits constrain access or enrich records but are not manual
+allowlists. Each refresh is bounded and deterministically reconciles additions, removals, and
+renames. A source-wide failure retains last-known-good state, while a safe per-item failure leaves
+that discovered item visible with unavailable details. Neither case may be projected as a fresh
+empty inventory. The sole named application-data exception is the optional Comet/Bitmagnet
+count-only view capability; it cannot filter or fail generic database discovery.
+
 Database observability follows that rule. The web process may read Dashboard SQLite only through
 the retained runtime's narrow read port; it does not open another native handle or accept SQL from
 the browser. External PostgreSQL/PgBouncer collection is worker-owned and uses fixed reviewed
@@ -140,21 +149,90 @@ recovered, and same-candidate activation success: no more than five snapshots an
 snapshot older than two days, while current/previous activation and active journal references are
 protected. Both namespaces use an atomic parent-descriptor `.retire-*` handoff followed by a
 bounded resumable reaper; published immutable directories are never chmoded or unlinked in place.
+The reapers reject untrusted shapes and observed path/inode drift, while the exact deployment lease
+serializes all authorized mutation by the trusted application UID. Because Linux unlink remains
+pathname based and that UID can already rewrite the application-owned namespace, malicious
+concurrent same-UID mutation is outside this boundary. The planned root-owned immutable handoff and
+different-principal garbage collector are required before treating that principal as hostile.
+Snapshot capacity is admitted from SQLite's bounded logical page count, not only the lagging main
+file. Scheduled maintenance reserves two logical copies plus the free-space floor before creating
+its snapshot; cutover reserves possible WAL-checkpoint growth plus one logical snapshot before the
+checkpoint. The restore-copy phase is checked again against the immutable snapshot size. A large
+WAL held by a reader therefore cannot make a small main-file stat understate peak disk demand.
 Production collection requires a dedicated login monitoring principal rather than an application
-or superuser credential. PostgreSQL grants are limited to `pg_monitor`/`pg_read_all_stats`,
-`CONNECT` on the reviewed databases, read-only transactions, and a fixed statement timeout;
-PgBouncer grants only `stats_users`, never `admin_users`. The `comet` and `bitmagnet` count cards
+or superuser credential. The login has no built-in monitoring membership: broad
+`pg_monitor`/`pg_read_all_stats` access would reveal raw activity and statement text even when
+source views were revoked. One isolated `NOLOGIN` capability owner has exactly direct
+`pg_read_all_stats` membership plus direct `SELECT` on `pg_catalog.pg_statistic` in each
+provisioned database. The observer has zero role memberships and receives only direct database
+`CONNECT`, `USAGE` on the private capability schema, and `EXECUTE` on four exact, no-input,
+bounded, sanitized `SECURITY DEFINER` functions: `connection_metrics()`, identity-free
+`statement_metrics()`, `table_health()`, and `maintenance_metrics()`. `PUBLIC` and the observer
+receive no raw `pg_stat_statements` source-view or extension-routine access. The statement
+capability calls `pg_stat_statements(false)` internally and returns no query text, `queryid`,
+database identity, or user identity. Exact source, dependency, shape, owner, ACL, and output-column
+verification fails closed on drift. The observer also retains read-only transactions and a fixed
+statement timeout;
+PgBouncer grants only `stats_users`, never `admin_users`. Direct/inherited observer routine grants
+and effective access to user-schema `SECURITY DEFINER` routines are forbidden; ordinary `PUBLIC`
+invoker routines remain compatible. The code-owned PgBouncer alias and dedicated physical control
+database are both named `mira_dashboard_observability`; the existing wildcard route preserves that
+name without a second label, mapping, or stack database environment value. Dynamic application
+inventory remains catalog-derived. The existing hourly
+`cache.refresh.database-observability` job calls a separate worker-only privileged
+collection-lease port only while the provider is configured. The observer is `NOLOGIN`, expired,
+and has zero PostgreSQL sessions between attempts. A fixed attempt first closes leftovers. Its
+`open-approved-collection` mode verifies the exact approval and identities, performs the full
+bounded idempotent ACL-and-capability reconcile, keeps `NOLOGIN`, and prepares a one-use token
+bound to the exact catalog digest. `enable-approved-collection` rechecks approval, identity,
+policy, and digest before it atomically consumes that token and sets `LOGIN` plus a short
+`VALID UNTIL`. The collector
+runs once with observer authority, then a shielded mandatory close restores `NOLOGIN`, expires the
+role, terminates sessions, and proves zero sessions again. Only after that proof can the lease
+return a payload to the generic cache executor for commit. The observer and collector receive no
+administrative credential or mutation authority.
+
+Explicit activation is the sole writer of the approval binding to
+`pg_control_system().system_identifier` and the exact current and previous immutable-release policy
+digests. The version `sanitized-capabilities-v1` is not sufficient authorization; lease operations
+may read but never create or update that marker. Every approved open performs and verifies the
+complete bounded, idempotent ACL-and-capability reconcile; no persisted catalog fingerprint,
+verification-age state, or reduced path authorizes access. Reconciliation removes all
+`PUBLIC` database privileges, so database owners retain their implicit authority while every
+non-owner application role needs explicit reviewed `CONNECT`/`TEMP` grants. A newly discovered database
+is reconciled before the next approved collection can expose its details. If an application
+database still drifts, observer `CONNECT` is revoked for that database and only its details are
+unavailable; cluster or control drift still fails the attempt. The `comet` and
+`bitmagnet` count cards
 read one exact row from `mira_dashboard_observability.torrent_count`. Each database uses a
 non-login view owner; `PUBLIC` receives no schema, view, or base-table authority, while the
 monitoring principal receives only `USAGE` on that schema and `SELECT` on that view. It receives
 no direct `SELECT` on the torrent base tables. Until these grants and views are provisioned and
 verified, the affected source or count card remains explicitly unavailable.
 
+The privileged port adds no job action, schedule, systemd unit, sidecar, polling loop, PostgreSQL
+login, reusable executor credential, or exclusive admission. Any open, collection, or close
+failure preserves last-known-good, blocks a fresh cache commit, and settles the hourly attempt as a
+retryable failure containing only a generic redacted reason. PostgreSQL's closed-state proof does
+not prove that PgBouncer has no already-authenticated waiting client because the two admission
+boundaries are not transactional. Such interference fails the attempt; once the role is
+`NOLOGIN` and expired and its PostgreSQL sessions are terminated, a waiting client cannot obtain a
+new backend. Administrative output, database names, and provider details never cross that
+settlement boundary.
+
 Legacy query text and its browser copy action are a reviewed security narrowing. Even
 `pg_stat_statements` text can retain identifiers, comments, or utility-statement data that should
 not cross the browser, audit, logging, or durable-cache boundaries. The replacement preserves
 ranked calls, rows, execution time, and block metrics for performance triage, but exposes no query
 literal or stable reversible query identity.
+Maintenance parity is not weakened by that boundary. PostgreSQL retains bounded dead/live tuple,
+last autovacuum/autoanalyze, physical-size, conservative reclaimability, and slow aggregate
+signals. The browser presents explicit reasons when bloat, dead tuples, slow aggregates, missing
+capabilities, or incomplete database/table assessment need review. SQLite independently reports
+material reusable pages, backup age, maintenance schedule/run health, and unavailable lifecycle
+facts. Absolute and relative thresholds avoid noisy warnings on small databases while still
+surfacing material issues; standard PostgreSQL `VACUUM` is described as internal reuse, and host
+disk reclamation as a separately planned compaction/rebuild operation.
 The session-only `database.overview` query grants no backup, restore, compaction, vacuum, or
 maintenance authority. The six Kopia/WAL-G status/control inventory rows and later database
 backup/restore workflows remain separate capability, worker, audit, and recovery boundaries.
@@ -567,6 +645,14 @@ proxy mode names exact proxies and requires them to overwrite forwarded identity
 ### Secrets and dangerous boundaries
 
 - Doppler or systemd credentials remain the source for infrastructure secrets.
+- PostgreSQL/PgBouncer observability uses a distinct Doppler-provided observer password. Existing
+  stack-wide `DATABASE_USERNAME`/`DATABASE_PASSWORD` values are never a runtime fallback, and the
+  worker never receives an application role, PgBouncer admin role, or PostgreSQL superuser. A
+  PgBouncer SCRAM verifier is credential material even when stored in a private repository: the
+  current tracked `/opt/docker/apps/pgbouncer/userlist.txt` must be replaced by a non-versioned,
+  runtime-provisioned auth input with least-readable permissions, followed by credential rotation
+  and a redaction-safe authentication smoke test before cutover. No auth-file content, resolved
+  Compose secret, or credential value may enter Dashboard state, logs, artifacts, or browser data.
 - A secret that must be editable through Dashboard is stored in `secret_envelopes` using a
   versioned AES-GCM envelope whose master key never enters SQLite.
 - Configuration APIs return presence/status metadata, never recoverable secret values.

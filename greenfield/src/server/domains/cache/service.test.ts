@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { Effect } from "effect";
 
+import { databaseObservabilityCacheSchemaId } from "../../../contracts/database.ts";
 import type { AuthenticatedPrincipal } from "../../../contracts/security.ts";
 import { testImmediateDatabaseWriteAdmission } from "../../test/support/databaseWriteAdmission.ts";
 import { openFreshMigratedDatabase } from "../../test/support/freshDatabase.ts";
@@ -59,7 +60,7 @@ describe("cache service", () => {
         const databaseRecord: CacheEntryRecord = {
             ...record,
             key: "database.observability",
-            schemaId: "database.observability.v1",
+            schemaId: databaseObservabilityCacheSchemaId,
             source: "postgresql.pgbouncer",
         };
         const cacheRepository = readOnlyCacheRepository(databaseRecord);

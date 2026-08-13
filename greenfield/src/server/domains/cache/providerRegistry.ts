@@ -48,7 +48,9 @@ function validateCacheProviderDefinition(
         action === undefined ||
         action.scheduleId !== definition.scheduleId ||
         action.manualExposure !==
-            (definition.payloadExposure === "cache-read" ? "cache-write" : "none") ||
+            (definition.payloadExposure === "cache-read"
+                ? "cache-write"
+                : "cache-internal") ||
         action.actionPayload.key !== definition.key
     ) {
         throw new Error("Cache provider does not match its exact job action definition");

@@ -2,8 +2,12 @@ import { afterEach, describe, expect, jest, test } from "bun:test";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act } from "react";
+import * as v from "valibot";
 
-import type { DatabaseOverview } from "../../contracts/database.ts";
+import {
+    databaseOverviewSchema,
+    type DatabaseOverview,
+} from "../../contracts/database.ts";
 import type { DashboardTrpcClient } from "../api/trpcClient.ts";
 import { DashboardTrpcProvider } from "../api/trpcContext.tsx";
 import {
@@ -73,9 +77,12 @@ const freshPostgresqlOverview = {
     postgresql: {
         databases: [
             {
+                blocksHit: 984,
+                blocksRead: 16,
                 cacheHitRatio: 98.4,
                 committedTransactions: 1234,
                 connections: 7,
+                detailsState: "available",
                 name: "mira_app",
                 pool: {
                     activeClients: 5,
@@ -88,15 +95,18 @@ const freshPostgresqlOverview = {
                     waitingClients: 1,
                 },
                 rolledBackTransactions: 12,
-                sizeBytes: 1_610_612_736,
+                sizeBytes: 6 * 1024 * 1024 * 1024,
             },
             {
+                blocksHit: 961,
+                blocksRead: 39,
                 cacheHitRatio: 96.1,
                 committedTransactions: 800,
                 connections: 3,
+                detailsState: "available",
                 name: "search_index",
                 rolledBackTransactions: 2,
-                sizeBytes: 536_870_912,
+                sizeBytes: 2 * 1024 * 1024 * 1024,
             },
         ],
         observedAtMs: 3500,
@@ -112,7 +122,7 @@ const freshPostgresqlOverview = {
         statements: [
             {
                 calls: 640,
-                meanExecutionMs: 8.25,
+                meanExecutionMs: 508.25,
                 rank: 1,
                 rows: 1280,
                 sharedBlocksHit: 9100,
@@ -122,35 +132,36 @@ const freshPostgresqlOverview = {
         ],
         summary: {
             activeConnections: 4,
-            averageCacheHitRatio: 97.8,
+            averageCacheHitRatio: 97.25,
             idleConnections: 6,
             maintenance: {
-                assessedPhysicalBytes: 536_870_912,
+                assessedPhysicalBytes: 6 * 1024 * 1024 * 1024,
                 assessmentComplete: true,
-                estimatedReclaimableBytes: 134_217_728,
-                estimatedReclaimablePercent: 25,
+                estimatedReclaimableBytes: 5 * 1024 * 1024 * 1024,
+                estimatedReclaimablePercent: (5 / 6) * 100,
                 highDeadTupleTableCount: 1,
                 requiresBloatReview: true,
-                slowStatementCount: 2,
+                slowStatementCount: 1,
                 status: "review",
                 unassessedPhysicalBytes: 0,
                 unassessedTableCount: 0,
             },
             pgStatStatementsEnabled: true,
             totalConnections: 10,
-            totalDatabaseSizeBytes: 2_147_483_648,
+            totalDatabaseSizeBytes: 8 * 1024 * 1024 * 1024,
+            unavailableDatabaseCount: 0,
         },
         tableHealth: [
             {
                 assessment: "assessed",
                 database: "mira_app",
-                deadTuplePercent: 7.5,
-                deadTuples: 75,
-                estimatedReclaimableBytes: 134_217_728,
+                deadTuplePercent: 25,
+                deadTuples: 2000,
+                estimatedReclaimableBytes: 5 * 1024 * 1024 * 1024,
                 lastAutoanalyzeAtMs: 3200,
                 lastAutovacuumAtMs: 3000,
-                liveTuples: 925,
-                physicalBytes: 536_870_912,
+                liveTuples: 8000,
+                physicalBytes: 6 * 1024 * 1024 * 1024,
                 schema: "public",
                 table: "events",
             },
@@ -238,6 +249,13 @@ function renderRoute(
 }
 
 describe("DatabaseRoute", () => {
+    test("uses contract-valid source fixtures", () => {
+        expect(v.safeParse(databaseOverviewSchema, freshOverview).success).toBe(true);
+        expect(v.safeParse(databaseOverviewSchema, freshPostgresqlOverview).success).toBe(
+            true
+        );
+    });
+
     test("refreshes mounted observations only in the foreground", () => {
         const client = {
             mutation: () => Promise.reject(new Error("Unexpected mutation")),
@@ -432,7 +450,7 @@ describe("DatabaseRoute", () => {
             },
             {
                 message:
-                    "The latest verified SQLite maintenance backup is older than expected.",
+                    "The latest verified SQLite maintenance backup is older than the 48-hour policy.",
                 overview: {
                     ...lifecycleOverview,
                     sqlite: {
@@ -556,7 +574,37 @@ describe("DatabaseRoute", () => {
         const { queryClient, view } = renderRoute(Promise.resolve(overview));
         try {
             expect(
-                await screen.findByText(/review a planned vacuum before reclaiming it/iu)
+                await screen.findByText(
+                    /review a planned vacuum to compact the database/iu
+                )
+            ).toBeVisible();
+        } finally {
+            view.unmount();
+            queryClient.clear();
+        }
+    });
+
+    test("surfaces insecure SQLite storage modes as operator attention", async () => {
+        const overview = {
+            ...freshOverview,
+            sqlite: {
+                ...freshOverview.sqlite,
+                storage: {
+                    ...freshOverview.sqlite.storage,
+                    permissions: {
+                        ...freshOverview.sqlite.storage.permissions,
+                        database: "0640" as const,
+                        secure: false,
+                    },
+                },
+            },
+        } as const satisfies DatabaseOverview;
+        const { queryClient, view } = renderRoute(Promise.resolve(overview));
+        try {
+            expect(
+                await screen.findByText(
+                    /permissions are outside the private storage policy/iu
+                )
             ).toBeVisible();
         } finally {
             view.unmount();
@@ -617,11 +665,27 @@ describe("DatabaseRoute", () => {
         );
         try {
             expect(await screen.findByText("Database storage")).toBeVisible();
-            expect(screen.getByText("2.0 GiB")).toBeVisible();
-            expect(screen.getByText("97.8%")).toBeVisible();
+            expect(screen.getByText("8.0 GiB")).toBeVisible();
+            expect(screen.getByText("97.3%")).toBeVisible();
             expect(screen.getAllByText("Review")).toHaveLength(2);
-            expect(screen.getByText("128 MiB · 25%")).toBeVisible();
+            expect(screen.getByText("5.0 GiB · 83.3%")).toBeVisible();
             expect(screen.getByText("Required")).toBeVisible();
+            expect(
+                screen.getByText(
+                    /estimated 5\.0 GiB \(83\.3%\) reclaimable table space/iu
+                )
+            ).toBeVisible();
+            expect(
+                screen.getByText(/standard VACUUM makes space reusable internally/iu)
+            ).toBeVisible();
+            expect(
+                screen.getByText(/1 PostgreSQL table exceeds the dead-tuple/iu)
+            ).toBeVisible();
+            expect(
+                screen.getByText(
+                    /1 identity-free PostgreSQL statement aggregate exceeds/iu
+                )
+            ).toBeVisible();
             expect(screen.getByText("Unassessed physical size")).toBeVisible();
             expect(
                 screen.getByRole("heading", { name: "Comet torrents" }).closest("section")
@@ -650,15 +714,15 @@ describe("DatabaseRoute", () => {
             });
             expect(within(health).getByText("public")).toBeVisible();
             expect(within(health).getByText("events")).toBeVisible();
-            expect(within(health).getByText("7.5%")).toBeVisible();
+            expect(within(health).getByText("25%")).toBeVisible();
             expect(within(health).getByText("Assessed")).toBeVisible();
-            expect(within(health).getByText("128 MiB")).toBeVisible();
+            expect(within(health).getByText("5.0 GiB")).toBeVisible();
 
             const statements = screen.getByRole("region", {
                 name: "PostgreSQL statement metrics",
             });
             expect(within(statements).getByText("5,280 ms")).toBeVisible();
-            expect(within(statements).getByText("8.25 ms")).toBeVisible();
+            expect(within(statements).getByText("508.25 ms")).toBeVisible();
             expect(
                 within(statements).getByRole("columnheader", { name: "Rank" })
             ).toBeVisible();
@@ -668,6 +732,60 @@ describe("DatabaseRoute", () => {
                 })
             ).toBeNull();
             expect(within(statements).queryByText(/select\s/iu)).toBeNull();
+        } finally {
+            view.unmount();
+            queryClient.clear();
+        }
+    });
+
+    test("renders an unavailable dynamic database and incomplete assessment explicitly", async () => {
+        const partiallyUnavailable = {
+            ...freshPostgresqlOverview,
+            postgresql: {
+                ...freshPostgresqlOverview.postgresql,
+                databases: freshPostgresqlOverview.postgresql.databases.map((database) =>
+                    database.name === "search_index"
+                        ? { ...database, detailsState: "unavailable" as const }
+                        : database
+                ),
+                summary: {
+                    ...freshPostgresqlOverview.postgresql.summary,
+                    maintenance: {
+                        ...freshPostgresqlOverview.postgresql.summary.maintenance,
+                        assessmentComplete: false,
+                        status: "review" as const,
+                    },
+                    unavailableDatabaseCount: 1,
+                },
+            },
+        } satisfies DatabaseOverview;
+        const { queryClient, view } = renderRoute(
+            Promise.resolve(partiallyUnavailable),
+            undefined,
+            "postgresql"
+        );
+        try {
+            const databases = await screen.findByRole("region", {
+                name: "PostgreSQL databases",
+            });
+            expect(within(databases).getByText("search_index")).toBeVisible();
+            expect(within(databases).getByText("Unavailable")).toBeVisible();
+
+            const maintenance = screen.getByRole("region", {
+                name: "Maintenance assessment",
+            });
+            expect(within(maintenance).getByText("Review")).toBeVisible();
+            expect(
+                screen.getByText(/1 PostgreSQL database could not be fully assessed/iu)
+            ).toBeVisible();
+            expect(
+                within(maintenance)
+                    .getByText("Unavailable database details")
+                    .closest("div")
+            ).toHaveTextContent("1");
+            expect(
+                within(maintenance).getByText("Bloat assessment").closest("div")
+            ).toHaveTextContent("Incomplete");
         } finally {
             view.unmount();
             queryClient.clear();
@@ -694,7 +812,7 @@ describe("DatabaseRoute", () => {
             expect(
                 screen.getByText(/latest PostgreSQL\/PgBouncer collection failed/iu)
             ).toBeVisible();
-            expect(screen.getByText("2.0 GiB")).toBeVisible();
+            expect(screen.getByText("8.0 GiB")).toBeVisible();
         } finally {
             view.unmount();
             queryClient.clear();
@@ -753,6 +871,12 @@ describe("DatabaseRoute", () => {
             });
             expect(within(maintenance).getByText("Incomplete")).toBeVisible();
             expect(within(maintenance).getByText("512 MiB")).toBeVisible();
+            expect(
+                screen.getByText(/1 PostgreSQL table \(512 MiB\) could not be assessed/iu)
+            ).toBeVisible();
+            expect(
+                screen.getByText(/statement maintenance assessment is unavailable/iu)
+            ).toBeVisible();
             const health = screen.getByRole("region", {
                 name: "PostgreSQL table health",
             });

@@ -15,6 +15,11 @@ import {
     type LogMaintenanceExecutionSummary,
     logMaintenancePolicyIdSchema,
 } from "../../../contracts/logs.ts";
+import {
+    DatabaseObservabilityCollectionLeaseError,
+    databaseObservabilityReconciliationStatuses,
+    type DatabaseObservabilityReconciliationPort,
+} from "../../../shared/databaseObservabilityReconciliation.ts";
 import type { HostOperationId } from "../../../shared/hostOperations.ts";
 import type { JsonObject } from "../../../shared/json.ts";
 import type { OpenClawGatewayLifecycleExecutionPort } from "../../../shared/openClawGatewayLifecycle.ts";
@@ -26,6 +31,7 @@ import { collectSystemHostPayload } from "../cache/systemHostProvider.ts";
 import { parseWorkspaceFileJobPayload } from "../files/jobPayload.ts";
 import type { MoltbookDashboardCollector } from "../moltbook/provider.ts";
 import {
+    type JobActionExecutionContext,
     type JobActionExecutor,
     type JobExecutableActionDefinition,
     type JobActionRegistration,
@@ -173,7 +179,10 @@ export interface SystemHostExecutorDependencies {
 }
 
 interface CacheRefreshExecutorSpec<TPayload extends JsonObject> {
-    readonly collect: (signal: AbortSignal) => Promise<TPayload>;
+    readonly collect: (
+        signal: AbortSignal,
+        context: JobActionExecutionContext
+    ) => Promise<TPayload>;
     readonly failureCode: string;
     readonly failureMessage: string;
     readonly key: string;
@@ -183,6 +192,31 @@ interface CacheRefreshExecutorSpec<TPayload extends JsonObject> {
     readonly source: string;
     readonly ttlMs: number;
     readonly validatePayload: (payload: JsonObject) => void;
+    readonly waitForCancellationSettlement?: boolean;
+}
+
+function cleanupSafePromiseEffect<T, E>(options: {
+    readonly catch: (error: unknown) => E;
+    readonly try: (signal: AbortSignal) => Promise<T>;
+}): Effect.Effect<T, E> {
+    return Effect.callback<T, E>((resume) => {
+        const controller = new AbortController();
+        const settlement = Promise.resolve()
+            .then(() => options.try(controller.signal))
+            .then(
+                (value) => resume(Effect.succeed(value)),
+                (error: unknown) => resume(Effect.fail(options.catch(error)))
+            );
+        return Effect.sync(() => {
+            controller.abort(
+                new DOMException("Job action was interrupted", "AbortError")
+            );
+        }).pipe(
+            // The caller cannot settle cancellation until the promise's
+            // mandatory cleanup has completed.
+            Effect.andThen(Effect.promise(() => settlement))
+        );
+    });
 }
 
 function createCacheRefreshExecutor<TPayload extends JsonObject>(
@@ -194,10 +228,15 @@ function createCacheRefreshExecutor<TPayload extends JsonObject>(
             const startedAt = spec.monotonicNowMs();
             const durationMs = (): number =>
                 Math.max(0, Math.floor(spec.monotonicNowMs() - startedAt));
-            const collected = Effect.tryPromise({
-                catch: (error) => new JobActionRetryableError(error),
-                try: (signal) => spec.collect(signal),
-            }).pipe(
+            const collect = {
+                catch: (error: unknown) => new JobActionRetryableError(error),
+                try: (signal: AbortSignal) => spec.collect(signal, context),
+            };
+            const collected = (
+                spec.waitForCancellationSettlement
+                    ? cleanupSafePromiseEffect(collect)
+                    : Effect.tryPromise(collect)
+            ).pipe(
                 Effect.catch((error) =>
                     Effect.tryPromise(() =>
                         context.commitCacheAttempt({
@@ -272,7 +311,13 @@ export interface MoltbookDashboardExecutorDependencies {
 export interface DatabaseObservabilityExecutorDependencies {
     readonly collector: DatabaseObservabilityCollector;
     readonly monotonicNowMs?: () => number;
+    readonly reconciler?: DatabaseObservabilityReconciliationPort;
 }
+
+const databaseObservabilityReconciliationStatusSchema = v.picklist(
+    databaseObservabilityReconciliationStatuses,
+    "Database observability reconciliation status is invalid"
+);
 
 /**
  * Adapts the fixed worker-only SQLite maintenance process to one durable action.
@@ -304,7 +349,37 @@ export function createDatabaseObservabilityExecutor(
 ): JobActionExecutor {
     const monotonicNowMs = dependencies.monotonicNowMs ?? (() => performance.now());
     return createCacheRefreshExecutor({
-        collect: (signal) => dependencies.collector.collect(signal),
+        collect: async (signal, context) => {
+            const reconciler = dependencies.reconciler;
+            if (reconciler === undefined) {
+                return dependencies.collector.collect(signal);
+            }
+            const approved = await reconciler.withApprovedCollection(
+                async (reconciliationStatus, collectionSignal) => {
+                    const parsedStatus = v.safeParse(
+                        databaseObservabilityReconciliationStatusSchema,
+                        reconciliationStatus
+                    );
+                    const safeStatus = parsedStatus.success
+                        ? parsedStatus.output
+                        : "unavailable";
+                    await Effect.runPromise(
+                        // Progress is fixed and redacted. Event persistence is
+                        // observational and cannot suppress mandatory cleanup.
+                        context.reportProgress({
+                            databaseObservabilityReconciliation: safeStatus,
+                        }),
+                        { signal: collectionSignal }
+                    ).catch(() => {});
+                    return dependencies.collector.collect(collectionSignal);
+                },
+                signal
+            );
+            if (approved.reconciliationStatus === "unavailable") {
+                throw new DatabaseObservabilityCollectionLeaseError();
+            }
+            return approved.value;
+        },
         failureCode: "provider/database-observability-unavailable",
         failureMessage: "Database observability projection could not be collected.",
         key: databaseObservabilityCacheKey,
@@ -316,6 +391,7 @@ export function createDatabaseObservabilityExecutor(
         validatePayload: (payload) => {
             v.parse(databaseObservabilityActionPayloadSchema, payload);
         },
+        waitForCancellationSettlement: true,
     });
 }
 
@@ -567,6 +643,7 @@ export function createJobWorkerActionRegistry(
 export interface JobWorkerActionResolverDependencies {
     readonly actionDefinitions?: readonly JobExecutableActionDefinition[];
     readonly databaseObservability?: DatabaseObservabilityCollector;
+    readonly databaseObservabilityReconciler?: DatabaseObservabilityReconciliationPort;
     readonly logMaintenance: LogMaintenanceExecutionPort;
     readonly hostOperations?: FixedHostOperationsExecutionPort;
     readonly moltbook: MoltbookDashboardCollector;
@@ -643,6 +720,7 @@ export function createJobWorkerActionResolver(
             actionKey: databaseObservabilityCacheJobActionKey,
             execute: createDatabaseObservabilityExecutor({
                 collector: databaseObservability,
+                reconciler: dependencies.databaseObservabilityReconciler,
             }),
         }),
         Object.freeze({

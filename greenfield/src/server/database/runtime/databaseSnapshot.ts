@@ -107,6 +107,18 @@ const passiveCheckpointRowSchema = v.strictObject({
     checkpointed: v.pipe(v.number(), v.safeInteger(), v.minValue(0)),
     log: v.pipe(v.number(), v.safeInteger(), v.minValue(0)),
 });
+const pageCountRowSchema = v.strictObject({
+    page_count: v.pipe(v.number(), v.safeInteger(), v.minValue(1)),
+});
+const pageSizeRowSchema = v.strictObject({
+    page_size: v.pipe(
+        v.number(),
+        v.safeInteger(),
+        v.minValue(512),
+        v.maxValue(65_536),
+        v.check((value) => Number.isInteger(Math.log2(value)))
+    ),
+});
 
 export type DatabaseSnapshotOptions = Readonly<
     v.InferOutput<typeof snapshotOptionsSchema>
@@ -152,6 +164,9 @@ export interface DatabaseSnapshotSourceIdentity {
 
 /** Deterministic mutation boundaries exposed only to adversarial tests. */
 export interface DatabaseSnapshotTestHooks {
+    readonly availableBytesForCapacityCheck?: (
+        phase: "restore-copy" | "snapshot"
+    ) => bigint | Promise<bigint>;
     readonly afterSnapshotCreated?: (snapshotFile: string) => Promise<void> | void;
     readonly afterSnapshotFileOpen?: (snapshotFile: string) => Promise<void> | void;
     readonly afterSnapshotFrozen?: (snapshotDirectory: string) => Promise<void> | void;
@@ -165,6 +180,9 @@ export interface SqliteMaintenanceSnapshotTestHooks {
         fileName: string
     ) => Promise<void> | void;
     readonly afterRestoreCopyCreated?: (restoreCopyFile: string) => Promise<void> | void;
+    readonly availableBytesForCapacityCheck?: (
+        phase: "restore-copy" | "snapshot"
+    ) => bigint | Promise<bigint>;
     readonly beforeOwnedSnapshotRetired?: (ownedName: string) => Promise<void> | void;
 }
 
@@ -332,24 +350,53 @@ async function requireSidecarsAbsent(databaseFile: string): Promise<void> {
 
 async function requireSnapshotCapacity(
     sourceFile: string,
-    backupsDirectory: string
+    backupsDirectory: string,
+    requiredBytes: bigint | undefined,
+    phase: "restore-copy" | "snapshot",
+    availableBytesForCapacityCheck?: (
+        phase: "restore-copy" | "snapshot"
+    ) => bigint | Promise<bigint>
 ): Promise<void> {
-    const [source, filesystem] = await Promise.all([
+    const [source, available] = await Promise.all([
         lstat(sourceFile, { bigint: true }),
-        statfs(backupsDirectory, { bigint: true }),
+        availableBytesForCapacityCheck === undefined
+            ? statfs(backupsDirectory, { bigint: true }).then(
+                  (filesystem) => filesystem.bavail * filesystem.bsize
+              )
+            : availableBytesForCapacityCheck(phase),
     ]);
     const maximum = BigInt(maximumSnapshotBytes);
     const reserve = BigInt(freeSpaceReserveBytes);
-    const available = filesystem.bavail * filesystem.bsize;
+    const required = requiredBytes ?? source.size;
     if (
+        typeof available !== "bigint" ||
         !source.isFile() ||
         source.isSymbolicLink() ||
         source.size <= 0n ||
         source.size > maximum ||
-        available < source.size + reserve
+        required <= 0n ||
+        required > maximum * 2n ||
+        available < required + reserve
     ) {
         throw snapshotFailure();
     }
+}
+
+function logicalDatabaseBytes(database: Database): bigint {
+    const pageCount = v.safeParse(
+        pageCountRowSchema,
+        database.query("PRAGMA page_count").get(),
+        { abortEarly: true }
+    );
+    const pageSize = v.safeParse(
+        pageSizeRowSchema,
+        database.query("PRAGMA page_size").get(),
+        { abortEarly: true }
+    );
+    if (!pageCount.success || !pageSize.success) throw snapshotFailure();
+    const bytes = BigInt(pageCount.output.page_count) * BigInt(pageSize.output.page_size);
+    if (bytes <= 0n || bytes > BigInt(maximumSnapshotBytes)) throw snapshotFailure();
+    return bytes;
 }
 
 function configureSnapshotValidationConnection(database: Database): void {
@@ -1026,7 +1073,6 @@ async function snapshotPresentDatabase(
     let failure = false;
     try {
         backups = await openStableDirectory(backupsPath, 0o700n, state.identity.dev);
-        await requireSnapshotCapacity(prepared.filePath, backupsPath);
         const migrations = await loadVerifiedMigrations({
             directory: options.migrationsDirectory,
         });
@@ -1035,14 +1081,6 @@ async function snapshotPresentDatabase(
         const backupsDescriptor = `/proc/self/fd/${backups.handle.fd}`;
         await requireMissing(path.join(backupsDescriptor, finalName));
         await requireMissing(path.join(backupsDescriptor, stageName));
-        await mkdir(path.join(backupsDescriptor, stageName), {
-            mode: privateDirectoryMode,
-        });
-        ownedName = stageName;
-        const stagePath = path.join(backupsPath, stageName);
-        stage = await openStableDirectory(stagePath, 0o700n, backups.identity.dev);
-        const snapshotFile = path.join(stagePath, snapshotDatabaseFileName);
-
         database = new Database(prepared.filePath, {
             create: false,
             readwrite: true,
@@ -1051,6 +1089,26 @@ async function snapshotPresentDatabase(
         if (database.filename !== prepared.filePath) throw snapshotFailure();
         configureDatabaseConnection(database);
         validateVerifiedMigrations(database, migrations);
+        const sourceBeforeCheckpoint = await lstat(prepared.filePath, { bigint: true });
+        const logicalBytes = logicalDatabaseBytes(database);
+        const checkpointGrowthBytes =
+            logicalBytes > sourceBeforeCheckpoint.size
+                ? logicalBytes - sourceBeforeCheckpoint.size
+                : 0n;
+        await requireSnapshotCapacity(
+            prepared.filePath,
+            backupsPath,
+            checkpointGrowthBytes + logicalBytes,
+            "snapshot",
+            hooks.availableBytesForCapacityCheck
+        );
+        await mkdir(path.join(backupsDescriptor, stageName), {
+            mode: privateDirectoryMode,
+        });
+        ownedName = stageName;
+        const stagePath = path.join(backupsPath, stageName);
+        stage = await openStableDirectory(stagePath, 0o700n, backups.identity.dev);
+        const snapshotFile = path.join(stagePath, snapshotDatabaseFileName);
         checkpointSourceDatabase(database);
         await assertDatabasePathStillValid(prepared);
         vacuumInto(database, snapshotFile);
@@ -1676,7 +1734,6 @@ async function createOnlineMaintenanceSnapshot(
         );
         maintenance = await openOrCreateMaintenanceDirectory(backups);
         await reconcileStaleMaintenanceTransients(maintenance, hooks);
-        await requireSnapshotCapacity(prepared.filePath, maintenance.path);
         const migrations = await loadVerifiedMigrations({
             directory: options.migrationsDirectory,
         });
@@ -1685,14 +1742,6 @@ async function createOnlineMaintenanceSnapshot(
         const maintenanceDescriptor = `/proc/self/fd/${maintenance.handle.fd}`;
         await requireMissing(path.join(maintenanceDescriptor, finalName));
         await requireMissing(path.join(maintenanceDescriptor, stageName));
-        await mkdir(path.join(maintenanceDescriptor, stageName), {
-            mode: privateDirectoryMode,
-        });
-        ownedName = stageName;
-        const stagePath = path.join(maintenance.path, stageName);
-        stage = await openStableDirectory(stagePath, 0o700n, maintenance.identity.dev);
-        const snapshotFile = path.join(stagePath, snapshotDatabaseFileName);
-
         database = new Database(prepared.filePath, {
             create: false,
             readwrite: true,
@@ -1701,6 +1750,21 @@ async function createOnlineMaintenanceSnapshot(
         if (database.filename !== prepared.filePath) throw snapshotFailure();
         configureDatabaseConnection(database);
         validateVerifiedMigrations(database, migrations);
+        const logicalBytes = logicalDatabaseBytes(database);
+        await requireSnapshotCapacity(
+            prepared.filePath,
+            maintenance.path,
+            logicalBytes * 2n,
+            "snapshot",
+            hooks.availableBytesForCapacityCheck
+        );
+        await mkdir(path.join(maintenanceDescriptor, stageName), {
+            mode: privateDirectoryMode,
+        });
+        ownedName = stageName;
+        const stagePath = path.join(maintenance.path, stageName);
+        stage = await openStableDirectory(stagePath, 0o700n, maintenance.identity.dev);
+        const snapshotFile = path.join(stagePath, snapshotDatabaseFileName);
         await assertDatabasePathStillValid(prepared);
         vacuumInto(database, snapshotFile);
         await makeSnapshotFilePrivate(stage, snapshotFile);
@@ -1718,6 +1782,13 @@ async function createOnlineMaintenanceSnapshot(
         const fileIdentity = await hashAndFreezeSnapshotFile(
             snapshotFile,
             maintenance.identity.dev
+        );
+        await requireSnapshotCapacity(
+            snapshotFile,
+            maintenance.path,
+            undefined,
+            "restore-copy",
+            hooks.availableBytesForCapacityCheck
         );
         const restoreVerifiedAtMs = await verifySnapshotRestoreCopy(
             maintenance,

@@ -11,8 +11,21 @@ END
 $guard$;
 
 DROP VIEW IF EXISTS mira_dashboard_observability.torrent_count;
-DROP SCHEMA IF EXISTS mira_dashboard_observability RESTRICT;
 REVOKE SELECT ON TABLE public.torrents
   FROM mira_dashboard_observability_owner;
+
+DO $drop_empty_schema$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_class AS classes
+    JOIN pg_catalog.pg_namespace AS namespaces
+      ON namespaces.oid = classes.relnamespace
+    WHERE namespaces.nspname = 'mira_dashboard_observability'
+  ) THEN
+    DROP SCHEMA IF EXISTS mira_dashboard_observability RESTRICT;
+  END IF;
+END
+$drop_empty_schema$;
 
 COMMIT;

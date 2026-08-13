@@ -4,20 +4,22 @@
 -- already-authenticated sessions. Each statement autocommits independently so
 -- a later termination failure cannot restore LOGIN.
 ALTER ROLE mira_dashboard_observer NOLOGIN;
+ALTER ROLE mira_dashboard_observer
+  VALID UNTIL '1970-01-01 00:00:00+00';
 ALTER ROLE mira_dashboard_observer PASSWORD NULL;
 
-DO $terminate_observer_sessions$
+DO $terminate_observability_sessions$
 DECLARE
-  observer_session record;
+  observability_session record;
 BEGIN
-  FOR observer_session IN
+  FOR observability_session IN
     SELECT activity.pid
     FROM pg_catalog.pg_stat_activity AS activity
     WHERE activity.usename = 'mira_dashboard_observer'
       AND activity.pid <> pg_catalog.pg_backend_pid()
   LOOP
-    IF NOT pg_catalog.pg_terminate_backend(observer_session.pid, 5000) THEN
-      RAISE EXCEPTION 'Database observability observer session could not be terminated';
+    IF NOT pg_catalog.pg_terminate_backend(observability_session.pid, 5000) THEN
+      RAISE EXCEPTION 'Database observability session could not be terminated';
     END IF;
   END LOOP;
 
@@ -29,7 +31,7 @@ BEGIN
     WHERE activity.usename = 'mira_dashboard_observer'
       AND activity.pid <> pg_catalog.pg_backend_pid()
   ) THEN
-    RAISE EXCEPTION 'Database observability observer session remains active';
+    RAISE EXCEPTION 'Database observability session remains active';
   END IF;
 END
-$terminate_observer_sessions$;
+$terminate_observability_sessions$;

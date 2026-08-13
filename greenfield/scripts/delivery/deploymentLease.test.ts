@@ -4,6 +4,7 @@ import {
     mkdir,
     mkdtemp,
     open,
+    readFile,
     rename,
     rm,
     symlink,
@@ -31,6 +32,23 @@ async function stateFixture(): Promise<string> {
     const state = path.join(root, "state");
     await mkdir(state, { mode: 0o700 });
     return state;
+}
+
+async function currentLockOwner() {
+    const processStat = await readFile(`/proc/${process.pid}/stat`, "utf8");
+    const processFields = processStat
+        .slice(processStat.lastIndexOf(")") + 1)
+        .trim()
+        .split(/\s+/u);
+    const bootId = await readFile("/proc/sys/kernel/random/boot_id", "utf8");
+    const processStartTicks = processFields[19];
+    if (processStartTicks === undefined) throw new Error("Missing process identity");
+    return Object.freeze({
+        bootId: bootId.trim(),
+        pid: process.pid,
+        processStartTicks,
+        token: Bun.randomUUIDv7(),
+    });
 }
 
 describe("Dashboard deployment lease", () => {
@@ -64,7 +82,7 @@ describe("Dashboard deployment lease", () => {
         const lockPath = path.join(state, ".deployment.lock");
         const initializingLock = await open(lockPath, "wx", 0o600);
         await initializingLock.writeFile(
-            JSON.stringify({ pid: process.pid, token: Bun.randomUUIDv7() }),
+            JSON.stringify(await currentLockOwner()),
             "utf8"
         );
         let entered = false;
@@ -86,6 +104,23 @@ describe("Dashboard deployment lease", () => {
         await transition;
         expect(entered).toBe(true);
     });
+
+    test("recovers a crash-left empty lock publication after bounded grace", async () => {
+        const state = await stateFixture();
+        const lockPath = path.join(state, ".deployment.lock");
+        const incompleteLock = await open(lockPath, "wx", 0o600);
+        await incompleteLock.close();
+        const startedAt = Date.now();
+
+        let entered = false;
+        await withDeploymentLease(state, () => {
+            entered = true;
+            return Promise.resolve();
+        });
+
+        expect(entered).toBe(true);
+        expect(Date.now() - startedAt).toBeGreaterThanOrEqual(4900);
+    }, 10_000);
 
     test("rejects permissive, replaced and linked state directories", async () => {
         const permissive = await stateFixture();

@@ -1,10 +1,20 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
+import {
+    chmod,
+    mkdir,
+    mkdtemp,
+    readdir,
+    rename,
+    rm,
+    stat,
+    writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { rejectionError } from "../testSupport/rejection.ts";
 import { withDeploymentLease } from "./deploymentLease.ts";
+import { productionArtifactCapacityReserveBytes } from "./productionArtifactCapacity.ts";
 import { prepareProductionDeliveryDirectories } from "./productionDeliveryFilesystem.ts";
 import { installProductionRuntime } from "./productionRuntime.ts";
 import { prepareProtectedProductionStatePath } from "./productionStateFilesystem.ts";
@@ -15,6 +25,14 @@ const runtimeIdentity: ReleaseRuntimeIdentity = Object.freeze({
     revision: "a".repeat(40),
     version: "1.4.0",
 });
+
+function filesystemCapacity(availableBytes: bigint) {
+    return Object.freeze({
+        availableBytes,
+        availableInodes: 1_000_000n,
+        blockSize: 4096n,
+    });
+}
 
 async function restoreOwnerWrite(directory: string): Promise<void> {
     const status = await stat(directory).catch(() => null);
@@ -114,6 +132,47 @@ describe("production Bun runtime", () => {
         expect(result.failure.message).toBe("Production Bun runtime installation failed");
         const bunRoot = path.join(result.paths.runtimesDirectory, "bun");
         expect(await readdir(bunRoot)).toEqual([]);
+    });
+
+    test("re-admits a replacement source size after probing and before copying", async () => {
+        const { projectRoot, sourceExecutable } = await fixture();
+        const originalBytes = BigInt("test-bun-runtime-bytes".length);
+        const movedSource = `${sourceExecutable}.admitted`;
+        const state = await prepareProtectedProductionStatePath(projectRoot);
+        const result = await withDeploymentLease(state.stateDirectory, async (lease) => {
+            const paths = await prepareProductionDeliveryDirectories(state);
+            let capacityChecks = 0;
+            const failure = await rejectionError(
+                installProductionRuntime(lease, paths, runtimeIdentity, {
+                    availableCapacity: () => {
+                        capacityChecks += 1;
+                        return Promise.resolve(
+                            filesystemCapacity(
+                                productionArtifactCapacityReserveBytes + originalBytes
+                            )
+                        );
+                    },
+                    beforeCopy: async () => {
+                        await rename(sourceExecutable, movedSource);
+                        await writeFile(
+                            sourceExecutable,
+                            Buffer.alloc(Number(originalBytes + 1n), 1),
+                            { mode: 0o500 }
+                        );
+                        await chmod(sourceExecutable, 0o500);
+                    },
+                    probeRuntime: () => Promise.resolve(runtimeIdentity),
+                    sourceExecutable,
+                })
+            );
+            return { capacityChecks, failure, paths };
+        });
+
+        expect(result.failure.message).toBe("Production Bun runtime installation failed");
+        expect(result.capacityChecks).toBe(1);
+        expect(await readdir(path.join(result.paths.runtimesDirectory, "bun"))).toEqual(
+            []
+        );
     });
 
     test("never replaces a pre-existing runtime revision directory", async () => {

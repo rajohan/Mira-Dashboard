@@ -74,6 +74,51 @@ function maintenanceStatusLabel(
     }
 }
 
+function postgresqlMaintenanceAttention(
+    observation: AvailablePostgresqlObservation
+): ReadonlyArray<{ readonly message: string; readonly warning: boolean }> {
+    const maintenance = observation.summary.maintenance;
+    const messages: Array<{ readonly message: string; readonly warning: boolean }> = [];
+    if (maintenance.requiresBloatReview) {
+        messages.push({
+            message: `PostgreSQL has an estimated ${formatByteCount(maintenance.estimatedReclaimableBytes)} (${formatPercent(maintenance.estimatedReclaimablePercent)}) reclaimable table space. Review the affected tables; standard VACUUM makes space reusable internally, while returning disk to the host requires planned compaction or a table rebuild.`,
+            warning: true,
+        });
+    }
+    if (maintenance.highDeadTupleTableCount > 0) {
+        messages.push({
+            message: `${formatCount(maintenance.highDeadTupleTableCount)} PostgreSQL table${maintenance.highDeadTupleTableCount === 1 ? " exceeds" : "s exceed"} the dead-tuple maintenance threshold. Review autovacuum behavior and plan VACUUM where needed; refresh planner statistics with ANALYZE separately when stale.`,
+            warning: true,
+        });
+    }
+    if (maintenance.slowStatementCount > 0) {
+        messages.push({
+            message: `${formatCount(maintenance.slowStatementCount)} identity-free PostgreSQL statement aggregate${maintenance.slowStatementCount === 1 ? " exceeds" : "s exceed"} the slow-statement threshold. Review query plans and indexes through an authorized database tool.`,
+            warning: true,
+        });
+    }
+    if (observation.summary.unavailableDatabaseCount > 0) {
+        messages.push({
+            message: `${formatCount(observation.summary.unavailableDatabaseCount)} PostgreSQL database${observation.summary.unavailableDatabaseCount === 1 ? "" : "s"} could not be fully assessed. Restore database observability before treating maintenance as healthy.`,
+            warning: false,
+        });
+    }
+    if (maintenance.unassessedTableCount > 0) {
+        messages.push({
+            message: `${formatCount(maintenance.unassessedTableCount)} PostgreSQL table${maintenance.unassessedTableCount === 1 ? "" : "s"} (${formatByteCount(maintenance.unassessedPhysicalBytes)}) could not be assessed for reclaimable space.`,
+            warning: false,
+        });
+    }
+    if (!observation.summary.pgStatStatementsEnabled) {
+        messages.push({
+            message:
+                "PostgreSQL statement maintenance assessment is unavailable until the sanitized pg_stat_statements capability is restored.",
+            warning: false,
+        });
+    }
+    return messages;
+}
+
 function MaintenanceSummary({
     observation,
 }: {
@@ -90,6 +135,10 @@ function MaintenanceSummary({
         ["Bloat review", maintenance.requiresBloatReview ? "Required" : "Not required"],
         ["High-dead-tuple tables", formatCount(maintenance.highDeadTupleTableCount)],
         ["Slow statement aggregates", formatCount(maintenance.slowStatementCount)],
+        [
+            "Unavailable database details",
+            formatCount(observation.summary.unavailableDatabaseCount),
+        ],
         ["Unassessed tables", formatCount(maintenance.unassessedTableCount)],
         [
             "Unassessed physical size",
@@ -178,6 +227,7 @@ export function PostgresqlDatabaseOverview({
     }
 
     const retained = observation.state === "last-known-good";
+    const maintenanceAttention = postgresqlMaintenanceAttention(observation);
     let observationBadgeLabel = "Fresh observation";
     if (retained) observationBadgeLabel = "Last-known-good";
     else if (browserCacheRetained) observationBadgeLabel = "Browser cache retained";
@@ -191,6 +241,14 @@ export function PostgresqlDatabaseOverview({
                         variant="info"
                     />
                 ) : null}
+                {maintenanceAttention.map(({ message, warning }) => (
+                    <Alert
+                        focusOnError={false}
+                        key={message}
+                        message={message}
+                        variant={warning ? "warning" : "info"}
+                    />
+                ))}
                 <div className="flex flex-wrap items-center gap-3">
                     <Badge
                         variant={retained || browserCacheRetained ? "warning" : "success"}

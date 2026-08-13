@@ -31,7 +31,7 @@ afterEach(async () => {
     await Promise.all(
         temporaryDirectories
             .splice(0)
-            .map((directory) => rm(directory, { force: true, recursive: true }))
+            .map((directory) => rm(directory, { force: true, recursive: true })),
     );
 });
 
@@ -71,7 +71,7 @@ async function releaseFixture(): Promise<{
             version: "0.0.0",
         },
         null,
-        2
+        2,
     )}\n`;
     const lockfile = `{
         "packages": {
@@ -90,46 +90,49 @@ async function releaseFixture(): Promise<{
         writeFile(path.join(releaseRoot, "browser/assets/app-a1b2c3d4.js"), "app"),
         writeFile(
             path.join(releaseRoot, "server/databaseMaintenance.js"),
-            "database-maintenance"
+            "database-maintenance",
         ),
         writeFile(path.join(releaseRoot, "server/web.js"), "web"),
         writeFile(path.join(releaseRoot, "server/worker.js"), "worker"),
         writeFile(
             path.join(releaseRoot, "systemd/mira-dashboard-web.service"),
-            "[Service]\nExecStart=/web\n"
+            "[Service]\nExecStart=/web\n",
         ),
         writeFile(
             path.join(releaseRoot, "systemd/mira-dashboard-worker.service"),
-            "[Service]\nExecStart=/worker\n"
+            "[Service]\nExecStart=/worker\n",
         ),
     ]);
     await Promise.all([
         copyDirectory(
             path.join(sourceProjectRoot, "docs/generated"),
-            path.join(repositoryRoot, "docs/generated")
+            path.join(repositoryRoot, "docs/generated"),
         ),
         copyDirectory(
             path.join(sourceProjectRoot, "docs/generated"),
-            path.join(releaseRoot, "docs/generated")
+            path.join(releaseRoot, "docs/generated"),
         ),
         copyDirectory(
             path.join(sourceProjectRoot, "migrations"),
-            path.join(releaseRoot, "migrations")
+            path.join(releaseRoot, "migrations"),
         ),
         copyDirectory(
             path.join(sourceProjectRoot, "scripts/delivery/provisioning/host-operations"),
-            path.join(releaseRoot, "scripts/delivery/provisioning/host-operations")
+            path.join(releaseRoot, "scripts/delivery/provisioning/host-operations"),
         ),
         copyDirectory(
             path.join(sourceProjectRoot, "scripts/delivery/provisioning/log-maintenance"),
-            path.join(releaseRoot, "scripts/delivery/provisioning/log-maintenance")
+            path.join(releaseRoot, "scripts/delivery/provisioning/log-maintenance"),
         ),
         copyDirectory(
             path.join(
                 sourceProjectRoot,
-                "scripts/delivery/provisioning/database-observability"
+                "scripts/delivery/provisioning/database-observability",
             ),
-            path.join(releaseRoot, "scripts/delivery/provisioning/database-observability")
+            path.join(
+                releaseRoot,
+                "scripts/delivery/provisioning/database-observability",
+            ),
         ),
     ]);
     return { releaseRoot, repositoryRoot };
@@ -152,7 +155,7 @@ describe("release identity", () => {
         const declared = await verifyReleaseArtifactIdentity(fixture.releaseRoot);
         const verified = await verifyReleaseIdentity(
             fixture.releaseRoot,
-            runtimeIdentity
+            runtimeIdentity,
         );
 
         expect(persisted).toEqual(created);
@@ -166,13 +169,13 @@ describe("release identity", () => {
         ]);
         expect(
             created.artifacts.some(
-                ({ path: artifactPath }) => artifactPath === "server/worker.js"
-            )
+                ({ path: artifactPath }) => artifactPath === "server/worker.js",
+            ),
         ).toBe(true);
         expect(
             created.artifacts
                 .filter(({ path: artifactPath }) => artifactPath.startsWith("systemd/"))
-                .map(({ path: artifactPath }) => artifactPath)
+                .map(({ path: artifactPath }) => artifactPath),
         ).toEqual([
             "systemd/mira-dashboard-web.service",
             "systemd/mira-dashboard-worker.service",
@@ -180,18 +183,37 @@ describe("release identity", () => {
         expect(
             created.artifacts
                 .filter(({ path: artifactPath }) => artifactPath.startsWith("scripts/"))
-                .map(({ path: artifactPath }) => artifactPath)
+                .map(({ path: artifactPath }) => artifactPath),
         ).toEqual([
             "scripts/delivery/provisioning/database-observability/README.md",
             "scripts/delivery/provisioning/database-observability/activate-observer.sql",
             "scripts/delivery/provisioning/database-observability/apply-cluster.sql",
+            "scripts/delivery/provisioning/database-observability/apply-control-database-capability.sql",
+            "scripts/delivery/provisioning/database-observability/apply-control-database.sql",
+            "scripts/delivery/provisioning/database-observability/apply-database-access-reconciler.sql",
+            "scripts/delivery/provisioning/database-observability/apply-database-capabilities.sql",
+            "scripts/delivery/provisioning/database-observability/apply-reconciliation-approval.sql",
             "scripts/delivery/provisioning/database-observability/apply-torrent-view.sql",
             "scripts/delivery/provisioning/database-observability/disable-observer.sql",
+            "scripts/delivery/provisioning/database-observability/enable-approved-collection.sql",
             "scripts/delivery/provisioning/database-observability/manifest.json",
+            "scripts/delivery/provisioning/database-observability/prepare-approved-collection.sql",
+            "scripts/delivery/provisioning/database-observability/reconcile-database-access.sql",
             "scripts/delivery/provisioning/database-observability/rollback-cluster.sql",
+            "scripts/delivery/provisioning/database-observability/rollback-control-database-capability.sql",
+            "scripts/delivery/provisioning/database-observability/rollback-control-database.sql",
+            "scripts/delivery/provisioning/database-observability/rollback-database-access-reconciler.sql",
+            "scripts/delivery/provisioning/database-observability/rollback-database-capabilities.sql",
+            "scripts/delivery/provisioning/database-observability/rollback-reconciliation-approval.sql",
             "scripts/delivery/provisioning/database-observability/rollback-torrent-view.sql",
+            "scripts/delivery/provisioning/database-observability/runProvisioning.ts",
             "scripts/delivery/provisioning/database-observability/verify-cluster.sql",
+            "scripts/delivery/provisioning/database-observability/verify-control-database-capability.sql",
+            "scripts/delivery/provisioning/database-observability/verify-control-database.sql",
+            "scripts/delivery/provisioning/database-observability/verify-database-access-reconciler.sql",
+            "scripts/delivery/provisioning/database-observability/verify-database-capabilities.sql",
             "scripts/delivery/provisioning/database-observability/verify-database.sql",
+            "scripts/delivery/provisioning/database-observability/verify-reconciliation-approval.sql",
             "scripts/delivery/provisioning/database-observability/verify-torrent-view.sql",
             "scripts/delivery/provisioning/host-operations/60-mira-dashboard-host-operations.rules",
             "scripts/delivery/provisioning/host-operations/README.md",
@@ -214,7 +236,7 @@ describe("release identity", () => {
         ]);
         const manifestText = await readFile(
             path.join(fixture.releaseRoot, "release-manifest.json"),
-            "utf8"
+            "utf8",
         );
         const manifestValue: unknown = JSON.parse(manifestText);
         expect(manifestValue).toEqual(created);
@@ -226,13 +248,13 @@ describe("release identity", () => {
         const persisted = await writeReleaseIdentity(creationOptions(fixture));
 
         expect(await verifyReleaseArtifactIdentity(fixture.releaseRoot)).toEqual(
-            persisted
+            persisted,
         );
         const runtimeFailure = await rejectionError(
             verifyReleaseIdentity(fixture.releaseRoot, {
                 revision: "f".repeat(40),
                 version: runtimeIdentity.version,
-            })
+            }),
         );
         expect(runtimeFailure.message).toBe("Release identity is invalid");
     });
@@ -251,7 +273,7 @@ describe("release identity", () => {
         ]);
         const completeInventory = await inventoryReleaseArtifactTree(fixture.releaseRoot);
         const artifacts = completeInventory.filter(
-            ({ path: artifactPath }) => artifactPath !== "release-manifest.json"
+            ({ path: artifactPath }) => artifactPath !== "release-manifest.json",
         );
         const releaseOwnedMigration = Object.freeze({
             id: migrationId,
@@ -266,7 +288,7 @@ describe("release identity", () => {
                 ...persisted,
                 artifacts,
                 migrations: [...persisted.migrations, releaseOwnedMigration],
-            })
+            }),
         );
 
         const reconstructed = await verifyReleaseArtifactIdentity(fixture.releaseRoot);
@@ -283,28 +305,28 @@ describe("release identity", () => {
             createReleaseIdentity({
                 ...creationOptions(dirtyFixture),
                 sourceIdentity: { commitSha, state: "dirty" },
-            })
+            }),
         );
         expect(dirtyFailure.message).toBe("Release identity is invalid");
 
         const metadataFixture = await releaseFixture();
         await writeFile(
             path.join(metadataFixture.releaseRoot, "metadata/.bun-version"),
-            "stable\n"
+            "stable\n",
         );
         const metadataFailure = await rejectionError(
-            createReleaseIdentity(creationOptions(metadataFixture))
+            createReleaseIdentity(creationOptions(metadataFixture)),
         );
         expect(metadataFailure.message).toBe("Release identity is invalid");
 
         const migrationFixture = await releaseFixture();
         const migrationPath = path.join(
             migrationFixture.releaseRoot,
-            "migrations/20260804022252_dashboard-foundation/migration.sql"
+            "migrations/20260804022252_dashboard-foundation/migration.sql",
         );
         await writeFile(migrationPath, `${await readFile(migrationPath, "utf8")}\n`);
         const migrationFailure = await rejectionError(
-            createReleaseIdentity(creationOptions(migrationFixture))
+            createReleaseIdentity(creationOptions(migrationFixture)),
         );
         expect(migrationFailure.message).toBe("Release identity is invalid");
     });
@@ -318,7 +340,7 @@ describe("release identity", () => {
         expect(overwriteFailure.message).toBe("Release identity is invalid");
         await writeFile(path.join(fixture.releaseRoot, "server/web.js"), "tampered");
         const tamperFailure = await rejectionError(
-            verifyReleaseIdentity(fixture.releaseRoot, runtimeIdentity)
+            verifyReleaseIdentity(fixture.releaseRoot, runtimeIdentity),
         );
         expect(tamperFailure.message).toBe("Release identity is invalid");
     });

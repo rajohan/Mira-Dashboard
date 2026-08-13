@@ -988,9 +988,58 @@ The scheduled namespace retains at most fourteen published snapshots. Activation
 retention under the deployment lease: at most five snapshots and two days of unreferenced age,
 while current, previous, and in-flight journal transition identities are always preserved.
 Deletion first atomically renames the selected immutable directory to an owned `.retire-*` name,
-fsyncs the parent, and then uses descriptor-pinned, resumable exact-file reaping.
+fsyncs the parent, and then uses descriptor-anchored, resumable reaping with final inode
+revalidation. The deployment lease serializes that pathname unlink against other authorized writes
+by the trusted application UID; a hostile process with that UID requires the planned root-owned
+handoff instead.
 
-The external provider uses a dedicated statistics-only PostgreSQL/PgBouncer principal and two
-fixed count-only views for the Comet and Bitmagnet cards. The page preserves query-performance
-triage as snapshot-local ranked aggregates; legacy raw query text and copy are deliberately not
-carried forward because identifiers, comments, or utility text can disclose database contents.
+The external provider uses a dedicated PostgreSQL/PgBouncer observer with zero role memberships.
+It receives only direct database `CONNECT`, capability-schema `USAGE`, and `EXECUTE` on four exact
+no-input sanitized functions. An isolated `NOLOGIN` capability owner holds exactly
+`pg_read_all_stats` plus direct per-database `SELECT` on `pg_catalog.pg_statistic`; that authority
+is exposed only through bounded `connection_metrics()`, identity-free `statement_metrics()`,
+`table_health()`, and `maintenance_metrics()` interfaces. Raw `pg_stat_statements` views and
+routines are unavailable to `PUBLIC` and the observer. The provider derives
+the bounded, sorted database inventory from the live PostgreSQL catalog on every refresh and uses
+that same discovered set for database metrics, connection totals, statement aggregation,
+PgBouncer projection, and admitted per-database detail. No application database, container, or
+Compose service name is part of the generic inventory contract. Additions, removals, and renames
+therefore reconcile without a Dashboard release or manual inventory edit. The sole named
+application exception is the optional Comet/Bitmagnet torrent-count capability: each card may read
+one fixed, count-only `mira_dashboard_observability.torrent_count` view when its database is
+present, but its absence or failure cannot filter or fail the remaining observation.
+The worker also re-discovers the database endpoint for every snapshot through bounded Docker
+inventory plus one batched fixed-template inspect that excludes environment, mounts, and unrelated
+labels. Exactly one healthy, running container must opt in with
+`mira.dashboard.database-observability=pgbouncer-v1` and expose exactly one TCP port on an IPv4 or
+IPv6 loopback binding. That single capability owns the fixed
+`mira_dashboard_observability` PgBouncer control alias and dedicated same-named physical database.
+Approved provisioning creates that database from `template0`; PgBouncer's existing wildcard route
+preserves the client database name without a mapping or stack database environment lookup.
+Standard Compose project/service labels are retained only as observed identity; container,
+service, project, image, host-port, and application database membership names are not allowlists.
+The observer password is the only Dashboard credential, and no database-name label or
+configuration exists.
+The existing hourly `cache.refresh.database-observability` action composes a separate privileged
+collection-lease port only when this provider is configured. Between attempts the observer is
+`NOLOGIN`, has an expired `VALID UNTIL`, and has zero PostgreSQL sessions. Each attempt first
+closes leftovers, then `open-approved-collection` verifies the PostgreSQL identity and an
+activation-owned approval bound to the exact current and previous immutable-release policy
+digests. The policy version alone is not authorization. Every open performs the full bounded,
+idempotent ACL-and-capability reconcile, keeps the role closed, and prepares a one-use token bound
+to the exact catalog digest. A separate `enable-approved-collection` rechecks the approval,
+identity, policy, and digest, then atomically consumes the token while setting `LOGIN` and a short
+`VALID UNTIL`. The observer collects once, after
+which a shielded mandatory close restores `NOLOGIN`, expires the role, terminates sessions, and
+rechecks the exact closed state. Only then does the port return the payload to the generic cache
+executor for commit. Any open, collection, or close failure preserves last-known-good and settles
+as a retryable redacted failure without a fresh commit. No additional action, schedule, polling
+loop, sidecar, systemd unit, PostgreSQL login, or exclusive admission is introduced. PostgreSQL's
+closed-state proof cannot establish that PgBouncer has no already-authenticated waiting client;
+such interference fails the attempt, while the closed role cannot grant that client a new backend.
+A drifting application database is quarantined by revoking observer `CONNECT`, so its catalog row
+remains visible with unavailable details while other databases collect. A new database is
+reconciled by the next approved open before that attempt can collect it.
+Query-performance triage remains snapshot-local ranked aggregates; legacy raw query text,
+database/user identity, `queryid`, and copy are deliberately omitted because identifiers,
+comments, or utility text can disclose database contents.

@@ -86,6 +86,11 @@ const databaseColumns = databaseColumnHelper.columns([
         ),
         header: "Database",
     }),
+    databaseColumnHelper.accessor("detailsState", {
+        cell: ({ getValue }) =>
+            getValue() === "available" ? "Available" : "Unavailable",
+        header: "Details",
+    }),
     databaseColumnHelper.accessor("sizeBytes", {
         cell: ({ getValue }) => formatByteCount(getValue()),
         header: "Size",

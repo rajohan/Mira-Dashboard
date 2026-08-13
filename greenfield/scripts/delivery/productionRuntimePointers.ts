@@ -2,6 +2,7 @@ import { constants, type BigIntStats } from "node:fs";
 import {
     lstat,
     open,
+    readdir,
     readlink,
     realpath,
     rename,
@@ -17,6 +18,10 @@ import type { PublishedProductionRelease } from "./productionReleasePublication.
 import type { InstalledProductionRuntime } from "./productionRuntime.ts";
 
 const runtimePointerFailureMessage = "Production runtime pointer update failed";
+const artifactIdentityPattern = /^[a-f\d]{40}$/u;
+const pointerStageNamePattern =
+    /^\.current-[a-f\d]{8}-[a-f\d]{4}-7[a-f\d]{3}-[89ab][a-f\d]{3}-[a-f\d]{12}$/u;
+const maximumPointerRootEntries = 128;
 const directoryFlags =
     constants.O_RDONLY |
     constants.O_DIRECTORY |
@@ -28,6 +33,12 @@ interface OpenedDirectory {
     readonly handle: FileHandle;
     readonly inode: bigint;
     readonly path: string;
+}
+
+interface ExistingPointer {
+    readonly device: bigint;
+    readonly inode: bigint;
+    readonly target: string;
 }
 
 function pointerFailure(): Error {
@@ -110,23 +121,100 @@ async function revalidateDirectory(directory: OpenedDirectory): Promise<void> {
     }
 }
 
-async function validateExistingPointer(
-    descriptorRoot: string,
+function validOwnedSymlink(status: BigIntStats, device: bigint): boolean {
+    return (
+        typeof process.getuid === "function" &&
+        status.isSymbolicLink() &&
+        status.nlink === 1n &&
+        status.uid === BigInt(process.getuid()) &&
+        status.dev === device
+    );
+}
+
+async function inspectExistingPointer(
+    directory: OpenedDirectory,
     pointerName: string
-): Promise<void> {
+): Promise<ExistingPointer | undefined> {
+    const descriptorRoot = `/proc/self/fd/${directory.handle.fd}`;
     const pointerPath = path.join(descriptorRoot, pointerName);
     try {
-        const status = await lstat(pointerPath, { bigint: true });
+        const before = await lstat(pointerPath, { bigint: true });
+        if (!validOwnedSymlink(before, directory.device)) {
+            throw pointerFailure();
+        }
+        const target = await readlink(pointerPath);
+        const after = await lstat(pointerPath, { bigint: true });
         if (
-            typeof process.getuid !== "function" ||
-            !status.isSymbolicLink() ||
-            status.uid !== BigInt(process.getuid())
+            !artifactIdentityPattern.test(target) ||
+            !validOwnedSymlink(after, directory.device) ||
+            after.dev !== before.dev ||
+            after.ino !== before.ino
         ) {
             throw pointerFailure();
         }
+        return Object.freeze({
+            device: before.dev,
+            inode: before.ino,
+            target,
+        });
     } catch (error) {
         if (errorCode(error) !== "ENOENT") throw pointerFailure();
+        return undefined;
     }
+}
+
+async function removeCrashLeftPointerStages(directory: OpenedDirectory): Promise<void> {
+    await revalidateDirectory(directory);
+    const descriptorRoot = `/proc/self/fd/${directory.handle.fd}`;
+    const entries = await readdir(descriptorRoot, { withFileTypes: true });
+    if (entries.length > maximumPointerRootEntries) throw pointerFailure();
+    const stages: (ExistingPointer & { readonly name: string })[] = [];
+    for (const entry of entries) {
+        if (!entry.name.startsWith(".current-")) continue;
+        if (!pointerStageNamePattern.test(entry.name) || !entry.isSymbolicLink()) {
+            throw pointerFailure();
+        }
+        const stage = await inspectExistingPointer(directory, entry.name);
+        if (!stage) throw pointerFailure();
+        stages.push(Object.freeze({ ...stage, name: entry.name }));
+    }
+    for (const stage of stages) {
+        const observed = await inspectExistingPointer(directory, stage.name);
+        if (
+            !observed ||
+            observed.device !== stage.device ||
+            observed.inode !== stage.inode ||
+            observed.target !== stage.target
+        ) {
+            throw pointerFailure();
+        }
+        await unlink(path.join(descriptorRoot, stage.name));
+    }
+    if (stages.length > 0) await directory.handle.sync();
+    await revalidateDirectory(directory);
+}
+
+async function clearExistingPointer(
+    directory: OpenedDirectory,
+    pointerName: string,
+    expected: ExistingPointer | undefined
+): Promise<void> {
+    if (!expected) return;
+    const observed = await inspectExistingPointer(directory, pointerName);
+    if (
+        !observed ||
+        observed.device !== expected.device ||
+        observed.inode !== expected.inode ||
+        observed.target !== expected.target
+    ) {
+        throw pointerFailure();
+    }
+    await unlink(path.join(`/proc/self/fd/${directory.handle.fd}`, pointerName));
+    await directory.handle.sync();
+    if ((await inspectExistingPointer(directory, pointerName)) !== undefined) {
+        throw pointerFailure();
+    }
+    await revalidateDirectory(directory);
 }
 
 async function replaceRelativePointer(
@@ -140,21 +228,15 @@ async function replaceRelativePointer(
     const stagePath = path.join(descriptorRoot, stageName);
     let stageOwned = false;
     try {
-        if (
-            targetName.length !== 40 ||
-            targetName !== targetName.toLowerCase() ||
-            /[^0-9a-f]/u.test(targetName)
-        ) {
+        if (!artifactIdentityPattern.test(targetName)) {
             throw pointerFailure();
         }
-        await validateExistingPointer(descriptorRoot, pointerName);
+        await inspectExistingPointer(directory, pointerName);
         await symlink(targetName, stagePath, "dir");
         stageOwned = true;
         const stageStatus = await lstat(stagePath, { bigint: true });
         if (
-            typeof process.getuid !== "function" ||
-            !stageStatus.isSymbolicLink() ||
-            stageStatus.uid !== BigInt(process.getuid()) ||
+            !validOwnedSymlink(stageStatus, directory.device) ||
             (await readlink(stagePath)) !== targetName
         ) {
             throw pointerFailure();
@@ -162,11 +244,9 @@ async function replaceRelativePointer(
         await rename(stagePath, pointerPath);
         stageOwned = false;
         await directory.handle.sync();
-        const pointerStatus = await lstat(pointerPath, { bigint: true });
+        const pointer = await inspectExistingPointer(directory, pointerName);
         if (
-            !pointerStatus.isSymbolicLink() ||
-            pointerStatus.uid !== BigInt(process.getuid()) ||
-            (await readlink(pointerPath)) !== targetName ||
+            pointer?.target !== targetName ||
             (await realpath(pointerPath)) !== path.join(directory.path, targetName)
         ) {
             throw pointerFailure();
@@ -209,8 +289,53 @@ export async function pointProductionProcessesAtRelease(
     let failed = false;
     try {
         runtimes = await openPrivateDirectory(bunRoot);
+        await removeCrashLeftPointerStages(releases);
+        await removeCrashLeftPointerStages(runtimes);
+        await inspectExistingPointer(releases, "current");
+        await inspectExistingPointer(runtimes, "current");
         await replaceRelativePointer(releases, releaseId);
         await replaceRelativePointer(runtimes, runtimeRevision);
+        await revalidateDirectory(releases);
+        await revalidateDirectory(runtimes);
+    } catch {
+        failed = true;
+    }
+    const [releasesClosed, runtimesClosed] = await Promise.all([
+        closeHandle(releases.handle),
+        closeHandle(runtimes?.handle),
+    ]);
+    if (failed || !releasesClosed || !runtimesClosed) throw pointerFailure();
+}
+
+/**
+ * Clears stopped-service release/runtime pointers when no activation remains authoritative.
+ * A retained rollback journal makes a crash between the two durable unlinks retryable.
+ * @param lease Active wider deployment lease.
+ * @param paths Exact project-local delivery paths.
+ */
+export async function clearProductionProcessPointers(
+    lease: DashboardDeploymentLease,
+    paths: PreparedProductionDeliveryPaths
+): Promise<void> {
+    const bunRoot = path.join(paths.runtimesDirectory, "bun");
+    if (
+        lease.stateDirectory !== paths.stateDirectory ||
+        paths.releasesDirectory !== path.join(paths.productionDirectory, "releases") ||
+        paths.runtimesDirectory !== path.join(paths.productionDirectory, "runtimes")
+    ) {
+        throw pointerFailure();
+    }
+    const releases = await openPrivateDirectory(paths.releasesDirectory);
+    let runtimes: OpenedDirectory | undefined;
+    let failed = false;
+    try {
+        runtimes = await openPrivateDirectory(bunRoot);
+        await removeCrashLeftPointerStages(releases);
+        await removeCrashLeftPointerStages(runtimes);
+        const releasePointer = await inspectExistingPointer(releases, "current");
+        const runtimePointer = await inspectExistingPointer(runtimes, "current");
+        await clearExistingPointer(releases, "current", releasePointer);
+        await clearExistingPointer(runtimes, "current", runtimePointer);
         await revalidateDirectory(releases);
         await revalidateDirectory(runtimes);
     } catch {

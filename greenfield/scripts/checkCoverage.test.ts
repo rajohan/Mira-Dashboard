@@ -75,6 +75,44 @@ describe("coverage threshold", () => {
         }
     });
 
+    test("includes exact executable root configurations without treating them as directories", async () => {
+        const projectRoot = await temporaryProject();
+        try {
+            await Promise.all([
+                writeFile(
+                    path.join(projectRoot, "drizzle.config.ts"),
+                    "export default { dialect: 'sqlite' };"
+                ),
+                writeFile(
+                    path.join(projectRoot, "tailwind.config.ts"),
+                    "export default { plugins: [] };"
+                ),
+            ]);
+
+            expect(
+                await discoverExecutableCoverageSources(projectRoot, [
+                    "scripts",
+                    "src",
+                    "drizzle.config.ts",
+                    "tailwind.config.ts",
+                ])
+            ).toEqual(["drizzle.config.ts", "tailwind.config.ts"]);
+            expect(
+                summarizeLineCoverage(
+                    [
+                        record("drizzle.config.ts", 2, 1),
+                        record("drizzle.config.ts/injected.ts", 100, 100),
+                        record("tailwind.config.ts", 2, 1),
+                        record("tailwind.config.ts/injected.ts", 100, 100),
+                    ].join("\n"),
+                    ["drizzle.config.ts", "tailwind.config.ts"]
+                )
+            ).toEqual({ foundLines: 4, hitLines: 2, percent: 50 });
+        } finally {
+            await rm(projectRoot, { force: true, recursive: true });
+        }
+    });
+
     test("excludes script test support without hiding similarly named production files", async () => {
         const projectRoot = await temporaryProject();
         try {

@@ -730,7 +730,9 @@ async function executeClaim(options: ExecuteClaimOptions): Promise<void> {
                 },
                 commitCacheAttempt: async (outcome: JobCacheAttemptCommit) => {
                     if (
-                        registration.manualExposure !== "cache-write" ||
+                        !["cache-internal", "cache-write"].includes(
+                            registration.manualExposure
+                        ) ||
                         options.commitCacheAttempt === undefined
                     ) {
                         throw new Error("Cache attempt persistence is unavailable");

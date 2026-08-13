@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
-import type { DatabaseObservabilityCachePayload } from "../../../contracts/database.ts";
-import { databaseObservabilityMetricDatabases } from "../../../shared/databaseObservabilityPolicy.ts";
+import {
+    type DatabaseObservabilityCachePayload,
+    databaseObservabilityCacheSchemaId,
+    databaseObservabilityLegacyCacheSchemaId,
+} from "../../../contracts/database.ts";
 import type { DatabaseRuntimeObservation } from "../../database/runtime/databaseService.ts";
 import {
     createDatabaseObservabilityService,
@@ -42,11 +45,16 @@ const diagnostics = {
     startupMode: "validate-only",
 } as const satisfies DatabaseRuntimeObservation;
 
+const observedDatabases = ["alpha", "comet", "postgres"] as const;
+const legacyV1Databases = ["alpha", "zeta"] as const;
 const externalPayload = {
-    databases: databaseObservabilityMetricDatabases.map((name) => ({
+    databases: observedDatabases.map((name) => ({
+        blocksHit: 99,
+        blocksRead: 1,
         cacheHitRatio: 99,
         committedTransactions: name === "comet" ? 100 : 0,
         connections: name === "comet" ? 2 : 0,
+        detailsState: "available" as const,
         name,
         rolledBackTransactions: name === "comet" ? 1 : 0,
         sizeBytes: name === "comet" ? 4096 : 0,
@@ -79,6 +87,7 @@ const externalPayload = {
         pgStatStatementsEnabled: false,
         totalConnections: 2,
         totalDatabaseSizeBytes: 4096,
+        unavailableDatabaseCount: 0,
     },
     tableHealth: [
         {
@@ -99,6 +108,51 @@ const externalPayload = {
     },
 } as const satisfies DatabaseObservabilityCachePayload;
 
+const legacyV1Payload = {
+    databases: legacyV1Databases.map((name) => ({
+        cacheHitRatio: 99,
+        committedTransactions: 0,
+        connections: 0,
+        name,
+        rolledBackTransactions: 0,
+        sizeBytes: 0,
+    })),
+    pgbouncer: {
+        averageQueryMs: 0,
+        averageTransactionMs: 0,
+        clientConnections: 0,
+        maxWaitSeconds: 0,
+        serverConnections: 0,
+        waitingClients: 0,
+    },
+    statements: [],
+    summary: {
+        activeConnections: 0,
+        averageCacheHitRatio: 99,
+        idleConnections: 0,
+        maintenance: {
+            assessedPhysicalBytes: 0,
+            assessmentComplete: true,
+            estimatedReclaimableBytes: 0,
+            estimatedReclaimablePercent: 0,
+            highDeadTupleTableCount: 0,
+            requiresBloatReview: false,
+            slowStatementCount: 0,
+            status: "healthy",
+            unassessedPhysicalBytes: 0,
+            unassessedTableCount: 0,
+        },
+        pgStatStatementsEnabled: false,
+        totalConnections: 0,
+        totalDatabaseSizeBytes: 0,
+    },
+    tableHealth: [],
+    torrentCounts: {
+        bitmagnet: { state: "unavailable" },
+        comet: { state: "unavailable" },
+    },
+} as const;
+
 function snapshot(
     overrides: Partial<DatabaseObservabilitySnapshotRecord> = {}
 ): DatabaseObservabilitySnapshotRecord {
@@ -109,7 +163,7 @@ function snapshot(
         lastAttemptStatus: "succeeded",
         lastSuccessAtMs: 1000,
         payload: externalPayload,
-        schemaId: "database.observability.v1",
+        schemaId: databaseObservabilityCacheSchemaId,
         source: "postgresql.pgbouncer",
         ...overrides,
     };
@@ -334,16 +388,125 @@ describe("database observability service", () => {
         expect(expired.postgresql).toEqual({ state: "unavailable" });
     });
 
+    test("migrates a pre-upgrade v1 snapshot after the first v2 refresh fails", async () => {
+        const service = createDatabaseObservabilityService({
+            nowMs: () => 2000,
+            readDiagnostics: () => Promise.resolve(diagnostics),
+            snapshotRepository: {
+                read: () =>
+                    snapshot({
+                        expiresAtMs: 1500,
+                        lastAttemptAtMs: 1800,
+                        lastAttemptStatus: "failed",
+                        payload: legacyV1Payload,
+                        schemaId: databaseObservabilityLegacyCacheSchemaId,
+                    }),
+            },
+        });
+
+        const result = await service.read();
+        expect(result.postgresql).toMatchObject({
+            observedAtMs: 1000,
+            staleSinceMs: 1800,
+            state: "last-known-good",
+            summary: {
+                maintenance: {
+                    assessmentComplete: true,
+                    status: "not-assessed",
+                },
+                unavailableDatabaseCount: 0,
+            },
+        });
+        if (result.postgresql.state === "unavailable") {
+            throw new Error("Legacy PostgreSQL snapshot was not migrated");
+        }
+        expect(
+            result.postgresql.databases.every(
+                ({ detailsState }) => detailsState === "available"
+            )
+        ).toBe(true);
+        expect(result.postgresql.databases.map(({ name }) => name)).toEqual([
+            ...legacyV1Databases,
+        ]);
+    });
+
+    test("never presents a successful unexpired v1 snapshot as fresh v2 inventory", async () => {
+        let nowMs = 2000;
+        const service = createDatabaseObservabilityService({
+            nowMs: () => nowMs,
+            readDiagnostics: () => Promise.resolve(diagnostics),
+            snapshotRepository: {
+                read: () =>
+                    snapshot({
+                        payload: legacyV1Payload,
+                        schemaId: databaseObservabilityLegacyCacheSchemaId,
+                    }),
+            },
+        });
+
+        const first = await service.read();
+        expect(first.postgresql).toMatchObject({
+            observedAtMs: 1000,
+            staleSinceMs: 1000,
+            state: "last-known-good",
+        });
+        nowMs = 3000;
+        const second = await service.read();
+        expect(second.postgresql).toMatchObject({
+            observedAtMs: 1000,
+            staleSinceMs: 1000,
+            state: "last-known-good",
+        });
+    });
+
     test("fails malformed or mismatched external cache data closed without hiding SQLite", async () => {
         for (const record of [
             snapshot({ key: "system.host" }),
-            snapshot({ schemaId: "database.observability.v2" }),
+            snapshot({ schemaId: "database.observability.v3" }),
             snapshot({ source: "private-host" }),
+            snapshot({
+                payload: {
+                    ...legacyV1Payload,
+                    databases: legacyV1Payload.databases.toReversed(),
+                },
+                schemaId: databaseObservabilityLegacyCacheSchemaId,
+            }),
+            snapshot({
+                payload: {
+                    ...legacyV1Payload,
+                    summary: {
+                        ...legacyV1Payload.summary,
+                        maintenance: {
+                            ...legacyV1Payload.summary.maintenance,
+                            assessmentComplete: false,
+                            status: "not-assessed" as const,
+                            unassessedPhysicalBytes: 4096,
+                            unassessedTableCount: 1,
+                        },
+                    },
+                    tableHealth: [
+                        {
+                            assessment: "unavailable" as const,
+                            database: "orphan",
+                            deadTuplePercent: 0,
+                            deadTuples: 0,
+                            liveTuples: 0,
+                            physicalBytes: 4096,
+                            schema: "public",
+                            table: "items",
+                        },
+                    ],
+                },
+                schemaId: databaseObservabilityLegacyCacheSchemaId,
+            }),
             snapshot({ payload: { ...externalPayload, password: "secret" } }),
             snapshot({
                 payload: {
                     ...externalPayload,
-                    databases: externalPayload.databases.slice(1),
+                    databases: [
+                        externalPayload.databases[0]!,
+                        externalPayload.databases[0]!,
+                    ],
                 },
             }),
             snapshot({

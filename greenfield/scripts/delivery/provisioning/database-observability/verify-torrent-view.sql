@@ -56,7 +56,12 @@ BEGIN
   FROM pg_catalog.pg_class AS classes
   WHERE classes.relnamespace = schema_oid;
 
-  IF schema_relations IS DISTINCT FROM ARRAY['torrent_count:v']::text[] THEN
+  IF schema_relations IS DISTINCT FROM ARRAY['torrent_count:v']::text[]
+    AND schema_relations IS DISTINCT FROM ARRAY[
+      'statement_metrics:v',
+      'torrent_count:v'
+    ]::text[]
+  THEN
     RAISE EXCEPTION 'Database observability schema contains unexpected relations';
   END IF;
 

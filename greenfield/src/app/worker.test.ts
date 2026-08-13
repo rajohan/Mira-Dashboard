@@ -178,6 +178,42 @@ function processFixture(
         rejectAvailabilityCompletion = reject;
     });
     const dependencies = Object.freeze({
+        createDatabaseObservabilityConnectionResolver(options) {
+            events.push("database-observability-discovery-create");
+            expect(Object.keys(options.credentials)).toEqual(["password"]);
+            expect(Redacted.value(options.credentials.password)).toBe(
+                "database-observer-password"
+            );
+            return Object.freeze({
+                resolve: () =>
+                    Promise.reject(
+                        new Error("Database discovery is not used by this fixture")
+                    ),
+            });
+        },
+        createDatabaseObservabilityReconciler(options) {
+            events.push("database-observability-reconciler-create");
+            expect(options).toEqual({
+                bunExecutable: path.join(
+                    layout.production.runtimes,
+                    "bun",
+                    revision,
+                    "bun"
+                ),
+                releaseRoot: release.releaseRoot,
+            });
+            return Object.freeze({
+                async withApprovedCollection<T>(
+                    operation: (status: "unchanged", signal: AbortSignal) => Promise<T>
+                ) {
+                    const value = await operation(
+                        "unchanged",
+                        new AbortController().signal
+                    );
+                    return { reconciliationStatus: "unchanged" as const, value };
+                },
+            });
+        },
         createGatewayTransport(options) {
             events.push("gateway-create");
             expect(options.clientVersion).toBe(releaseId);
@@ -214,6 +250,7 @@ function processFixture(
             observedLogMaintenance,
             _observedMoltbook,
             observedDatabaseObservability,
+            observedDatabaseObservabilityReconciler,
             observedHostOperations,
             observedBootIdentity
         ) {
@@ -247,6 +284,11 @@ function processFixture(
             });
             expect(observedLogMaintenance).toBe(logMaintenance);
             expect(observedDatabaseObservability.collect).toBeFunction();
+            if (observedDatabaseObservabilityReconciler !== undefined) {
+                expect(
+                    observedDatabaseObservabilityReconciler.withApprovedCollection
+                ).toBeFunction();
+            }
             expect(observedHostOperations).toBeUndefined();
             expect(observedBootIdentity).toBe(bootIdentity);
             expect(Object.keys(observedGatewayTransport).toSorted()).toEqual([
@@ -474,6 +516,25 @@ describe("Dashboard worker process", () => {
         expect(fixture.logLines.join("\n")).not.toContain(
             "worker-gateway-token-test-value"
         );
+    });
+
+    test("composes dynamic database discovery from the observer password only", async () => {
+        const fixture = processFixture();
+
+        await runDashboardWorkerProcess(
+            {
+                ...processOptions,
+                configurationSource: {
+                    ...processOptions.configurationSource,
+                    MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD:
+                        "database-observer-password",
+                },
+            },
+            fixture.dependencies
+        );
+
+        expect(fixture.events).toContain("database-observability-discovery-create");
+        expect(fixture.events).toContain("database-observability-reconciler-create");
     });
 
     test("disposes partial ownership and reports a redacted startup failure", () => {
