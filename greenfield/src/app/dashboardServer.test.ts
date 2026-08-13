@@ -1891,9 +1891,11 @@ describe("Dashboard security composition", () => {
             );
             expect(schedules.schedules.map(({ id }) => id)).toEqual([
                 "cache.database-observability",
+                "cache.docker-overview",
                 "cache.moltbook-dashboard",
                 "cache.system-host",
                 "database.sqlite-maintenance",
+                "docker.updater",
                 "maintenance.rotate-managed-logs",
                 "system.worker-smoke",
             ]);
@@ -1903,26 +1905,36 @@ describe("Dashboard security composition", () => {
                 id: "cache.database-observability",
             });
             expect(schedules.schedules[1]).toMatchObject({
+                actionKey: "cache.refresh.docker-overview",
+                enabled: true,
+                id: "cache.docker-overview",
+            });
+            expect(schedules.schedules[2]).toMatchObject({
                 actionKey: "cache.refresh.moltbook-dashboard",
                 enabled: true,
                 id: "cache.moltbook-dashboard",
             });
-            expect(schedules.schedules[2]).toMatchObject({
+            expect(schedules.schedules[3]).toMatchObject({
                 actionKey: "cache.refresh.system-host",
                 enabled: true,
                 id: "cache.system-host",
             });
-            expect(schedules.schedules[3]).toMatchObject({
+            expect(schedules.schedules[4]).toMatchObject({
                 actionKey: "database.sqlite-maintenance",
                 enabled: true,
                 id: "database.sqlite-maintenance",
             });
-            expect(schedules.schedules[4]).toMatchObject({
+            expect(schedules.schedules[5]).toMatchObject({
+                actionKey: "docker.updater",
+                enabled: true,
+                id: "docker.updater",
+            });
+            expect(schedules.schedules[6]).toMatchObject({
                 actionKey: "maintenance.rotate-logs",
                 enabled: true,
                 id: "maintenance.rotate-managed-logs",
             });
-            expect(schedules.schedules[5]).toMatchObject({
+            expect(schedules.schedules[7]).toMatchObject({
                 actionKey: "system.worker-smoke",
                 enabled: false,
                 id: "system.worker-smoke",
@@ -1990,6 +2002,11 @@ describe("Dashboard security composition", () => {
                 },
                 {
                     defaultEnabled: true,
+                    id: "cache.docker-overview",
+                    state: "present",
+                },
+                {
+                    defaultEnabled: true,
                     id: "cache.moltbook-dashboard",
                     state: "present",
                 },
@@ -2001,6 +2018,11 @@ describe("Dashboard security composition", () => {
                 {
                     defaultEnabled: true,
                     id: "database.sqlite-maintenance",
+                    state: "present",
+                },
+                {
+                    defaultEnabled: true,
+                    id: "docker.updater",
                     state: "present",
                 },
                 {

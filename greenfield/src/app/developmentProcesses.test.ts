@@ -3,6 +3,11 @@ import { describe, expect, test } from "bun:test";
 import { Redacted } from "effect";
 
 import { rejectionError } from "../../scripts/testSupport/rejection.ts";
+import {
+    dockerFreeJobActionDefinitions,
+    dockerOverviewCacheJobActionKey,
+    dockerUpdaterJobActionKey,
+} from "../server/domains/jobs/actionRegistry.ts";
 import { deriveDashboardProjectLayout } from "../server/platform/filesystem/projectLayout.ts";
 import type {
     PersistentGatewayTransport,
@@ -15,10 +20,21 @@ import type {
 } from "../server/platform/runtime/applicationRuntime.ts";
 import { createTestStructuredLogger } from "../server/test/support/requestContext.ts";
 import {
+    type DashboardServerOptions,
+    type DashboardWebProcessDependencies,
+    createDefaultDashboardWebProcessDependencies,
+} from "./dashboardServer.ts";
+import {
     createDevelopmentWebRuntime,
     runDevelopmentWebProcess,
+    withoutDevelopmentDockerScheduleDefinitions,
 } from "./developmentWeb.ts";
-import { runDevelopmentWorkerProcess } from "./developmentWorker.ts";
+import {
+    runDevelopmentWorkerProcess,
+    withoutDevelopmentDockerCapabilities,
+} from "./developmentWorker.ts";
+import type { ApplicationServer } from "./server.ts";
+import { createDefaultDashboardWorkerProcessDependencies } from "./worker.ts";
 
 describe("development process entrypoints", () => {
     test("composes the web runtime from isolated source-backed state", () => {
@@ -82,6 +98,46 @@ describe("development process entrypoints", () => {
 
         expect(failure.message).toBe(
             "Development worker requires one exact source commit"
+        );
+    });
+
+    test("does not expose production Docker capabilities to development", () => {
+        const dependencies = withoutDevelopmentDockerCapabilities(
+            createDefaultDashboardWorkerProcessDependencies()
+        );
+
+        expect("createDocker" in dependencies).toBe(false);
+        expect("startDockerBroker" in dependencies).toBe(false);
+    });
+
+    test("injects the Docker-free schedule registry only into development web", async () => {
+        let observedDefinitions: DashboardServerOptions["jobActionDefinitions"];
+        const applicationServer = Object.freeze({
+            port: 0,
+            stop: () => Promise.resolve(),
+            url: new URL("http://127.0.0.1:3100/"),
+        } satisfies ApplicationServer);
+        const productionDependencies = Object.freeze({
+            ...createDefaultDashboardWebProcessDependencies(),
+            createServer(options) {
+                observedDefinitions = options.jobActionDefinitions;
+                return Promise.resolve(applicationServer);
+            },
+        } satisfies DashboardWebProcessDependencies);
+        const developmentDependencies =
+            withoutDevelopmentDockerScheduleDefinitions(productionDependencies);
+        const serverOptions = Object.freeze({}) as DashboardServerOptions;
+
+        await productionDependencies.createServer(serverOptions);
+        expect(observedDefinitions).toBeUndefined();
+
+        await developmentDependencies.createServer(serverOptions);
+        expect(observedDefinitions).toBe(dockerFreeJobActionDefinitions);
+        expect(observedDefinitions?.map(({ actionKey }) => actionKey)).not.toContain(
+            dockerOverviewCacheJobActionKey
+        );
+        expect(observedDefinitions?.map(({ actionKey }) => actionKey)).not.toContain(
+            dockerUpdaterJobActionKey
         );
     });
 });

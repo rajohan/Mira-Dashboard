@@ -1,6 +1,7 @@
 import { realpath } from "node:fs/promises";
 import path from "node:path";
 
+import { dockerFreeJobActionDefinitions } from "../server/domains/jobs/actionRegistry.ts";
 import { createPersistentGatewayTransport } from "../server/platform/gateway/persistentGatewayTransport.ts";
 import { createDevelopmentRuntimeRelease } from "../server/platform/release/developmentRuntimeRelease.ts";
 import { createDashboardApplicationRuntime } from "../server/platform/runtime/applicationRuntime.ts";
@@ -10,6 +11,7 @@ import {
     parseDevelopmentSourceCommit,
 } from "../shared/developmentProcessSupport.ts";
 import {
+    type DashboardServerOptions,
     type DashboardWebProcessDependencies,
     createDefaultDashboardWebProcessDependencies,
     runDashboardWebProcess,
@@ -32,6 +34,25 @@ const developmentWebRuntimeFactories = Object.freeze({
     createApplicationRuntime: createDashboardApplicationRuntime,
     createGatewayTransport: createPersistentGatewayTransport,
 } satisfies DevelopmentWebRuntimeFactories);
+
+/**
+ * Removes Docker schedule authority from the source-watched web composition.
+ * The development worker shares the same isolated database and exact registry.
+ * @param dependencies Production web composition boundaries.
+ * @returns The same boundaries with a Docker-free schedule registry injection.
+ */
+export function withoutDevelopmentDockerScheduleDefinitions(
+    dependencies: DashboardWebProcessDependencies
+): DashboardWebProcessDependencies {
+    return Object.freeze({
+        ...dependencies,
+        createServer: (options: DashboardServerOptions) =>
+            dependencies.createServer({
+                ...options,
+                jobActionDefinitions: dockerFreeJobActionDefinitions,
+            }),
+    });
+}
 
 /**
  * Composes the development-only runtime overrides behind injectable factory boundaries.
@@ -73,7 +94,9 @@ export async function runDevelopmentWebProcess(
         repositoryRoot,
         parseDevelopmentSourceCommit(arguments_, "web")
     );
-    const defaults = createDefaultDashboardWebProcessDependencies();
+    const defaults = withoutDevelopmentDockerScheduleDefinitions(
+        createDefaultDashboardWebProcessDependencies()
+    );
     const dependencies = Object.freeze({
         ...defaults,
         createFrontendAssets: () => Promise.resolve(noFrontendAssets),

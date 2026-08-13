@@ -89,23 +89,29 @@ including restart during streaming.
 
 - implement files/logs, Docker, database, Moltbook, settings, terminal/exec,
   GitHub/PR/release/deploy/rollback, backup, and OpenClaw operations through worker adapters.
+- the Docker parity vertical is implemented in the greenfield tree. Fifteen legacy behaviors map
+  to four strict Docker procedures, while the three actively consumed Docker-console routes map
+  to an exact-container, fixed-shell handoff into the existing bounded interactive Terminal
+  lifecycle. No second generic exec/job/output API is introduced. Production deployment remains a separate activation step; this implementation
+  does not mutate or restart the live `/opt/docker` stack.
 - keep `/opt/docker` as the separate Docker-stack project and source of truth. Dashboard is its
   control plane: reviewed worker adapters may inspect or queue bounded operations, but compose
   files, application data, and deployment ownership do not move into Dashboard state.
 - treat external topology as runtime data, never as a source-code or configuration allowlist.
   PostgreSQL inventory must be re-enumerated from the server catalog on every observation and
-  Docker inventory must later be re-enumerated from the Docker Engine with batched inspect data.
+  Docker inventory is re-enumerated from the Docker Engine with batched inspect data on every
+  refresh.
   Both projections are bounded, deterministically sorted, and reconcile additions, removals, and
   renames without a Dashboard release or an operator-maintained name list. Approved Compose roots
   and resource ceilings define authority boundaries; they
   must not become inventories. Standard Compose labels may enrich observed Docker identity but may
   not gate discovery. Reuse the existing `mira.updater.enabled`, `mira.updater.autoUpdate`,
   `mira.updater.track`, `mira.updater.tagPattern`, and
-  `mira.updater.tagPatternIsRegex` Compose labels as update-policy input. Greenfield may migrate or
-  tighten those labels in `/opt/docker` when needed, but mutation must require explicit valid
-  opt-in; missing or invalid policy leaves a discovered service inventory-only. A transient source
-  or per-item failure remains explicit and preserves the last known good projection instead of
-  fabricating an empty topology.
+  `mira.updater.tagPatternIsRegex` Compose labels as update-policy input. The implementation
+  normalizes the supported list/map forms and requires explicit valid opt-in for mutation; missing
+  or invalid policy leaves a discovered service inventory-only. A transient source or per-item
+  failure remains explicit and preserves the last known good projection instead of fabricating an
+  empty topology.
 - database observability already applies that Engine rule narrowly for endpoint discovery: every
   snapshot uses bounded ID-only `docker ps -a` plus one fixed-template batched inspect, accepts one
   healthy `mira.dashboard.database-observability=pgbouncer-v1` capability, resolves its loopback
@@ -114,9 +120,9 @@ including restart during streaming.
   provisioning creates a dedicated same-named physical database from `template0`; PgBouncer's
   existing wildcard route preserves that name without an explicit mapping or environment lookup.
   No second database-name label or setting exists. The inspect template
-  excludes container environment, mounts, unrelated labels, and resolved Compose output. The later
-  Docker slice expands this same source-derived pattern to the full inventory and updater without
-  copying endpoint identities into code or configuration.
+  excludes container environment, mounts, unrelated labels, and resolved Compose output. The full
+  Docker slice now applies the same source-derived pattern to Engine inventory and Compose updater
+  discovery without copying endpoint identities into code or configuration.
 - preserve `/opt/docker/compose.yaml` as the canonical whole-stack Compose root and resolve its
   bounded include graph beneath `/opt/docker` for update targeting. All Compose start/stop/apply
   mutations must execute the fixed `/opt/docker/bin/docker-compose-doppler` wrapper with
@@ -125,11 +131,37 @@ including restart during streaming.
   Compose/Doppler inputs: validate containment, ownership, and mode where required, but never read
   them into contracts, logs, audit payloads, or browser state and never edit them from this slice.
   Resolve each update target to the one canonical included app Compose file that owns both the
-  service `image` field and its `mira.updater.*` labels. Apply a compare-and-swap image edit to that
-  file only, preserve unrelated formatting/content, validate the full root Compose project, and
-  invoke the root wrapper for the resolved service. A missing, duplicated, moved, or concurrently
-  changed image definition fails closed and is rediscovered; never patch the root include list or
-  infer an app filename from a container name.
+  service `image` field and its `mira.updater.*` labels. Apply a compare-and-swap replacement to the
+  exact image-scalar byte range in that file only, preserving indentation, spacing, comments,
+  quoting, line endings, and every byte outside the scalar. Validate the full root Compose project
+  and invoke the root wrapper for the resolved service. Bind rollback to the exact pre-update
+  running image ID; restore a mutable prior tag locally with pulling disabled and accept recovery
+  only after both Compose source and runtime identity match. A missing, duplicated, moved, or
+  concurrently changed image definition fails closed and is rediscovered; never patch the root
+  include list or infer an app filename from a container name.
+- keep the existing worker process as the only Docker authority. Its protected local Unix broker
+  exposes only bounded redacted container logs and prune preview to the web process; it adds no
+  systemd unit, timer, generic command, Compose argument, or container-exec surface. Recent-MFA,
+  audit-first, source-revision-fenced durable jobs own fixed container/stack operations, exact
+  unused image/volume deletion, prune execution, registry scans, and updater runs.
+- refresh `docker.overview` through the existing Job/Worker/Schedule system and preserve a bounded
+  last-known-good projection on source failure. The daily updater retains bounded source-derived
+  event history in that cache, publishes material update-available/run/failure transitions through
+  the existing notification catalog, replays that window through exact-ID upsert after every
+  successful projection, and synchronizes only the exact changed app Compose paths by verified Git
+  commit and push. Require worker-only Docker Hub/GitHub registry credentials for authenticated
+  update lookup and the GitHub pair for an authenticated read plus dry-run-push probe before any
+  Compose mutation; never depend on a machine-global Git credential store. Pending or unknown Git settlement stays explicit and is never reported as a
+  completed sync. Queue admission remains solely the durable Jobs run plus queued event; do not add
+  a second Docker queued-event or notification stream.
+- expose `/docker` as the complete operator surface for freshness, summary, live stats, stack and
+  container controls, bounded redacted logs, updater policy/status/history, manual scans and runs,
+  exact service updates, images, volumes, deletion, and actor-bound prune previews. All mutations
+  link to their durable Jobs run and reject duplicate/stale source intent. Interactive console
+  work passes only the validated full container ID into the existing authenticated Terminal,
+  which sends one fixed `/usr/bin/docker exec --interactive --tty <id> /bin/sh` handoff after
+  recent-MFA admission; Docker automation never accepts a caller command, argv, environment,
+  executable, or Compose path.
 - use Dashboard's worker-owned rotation engine for an exact manifest of reviewed Dashboard,
   OpenClaw, and application/container regular-file logs, including the selected files beneath
   `/opt/docker/data`. Use Ubuntu's system logrotate only through a fixed broker for the exact
@@ -230,8 +262,8 @@ including restart during streaming.
   the verifier retained in Git history is no longer current. Verify the cutover through the
   Doppler Compose wrapper without printing resolved configuration, auth-file contents, or secret
   values. This remediation, the single PgBouncer capability label, its fixed control alias, and the
-  existing hourly job's separate privileged collection-lease port is mandatory cutover work,
-  even if their final Compose implementation lands with the Docker slice.
+  existing hourly job's separate privileged collection-lease port remain mandatory production
+  cutover work independently of the implemented Docker parity slice.
   Compose only canonical scheduled and activation/cutover SQLite snapshots. Treat one immutable
   activation snapshot as the reviewed secure consolidation of the legacy pre-deploy and
   pre-migration recovery purposes; never synthesize unsupported provenance. Retain at most

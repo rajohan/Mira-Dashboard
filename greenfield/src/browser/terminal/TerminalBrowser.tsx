@@ -45,6 +45,15 @@ type TerminalSocketConnectionFactory = (
 interface TerminalBrowserProps {
     readonly createEmulator?: TerminalEmulatorFactory;
     readonly createSocketConnection?: TerminalSocketConnectionFactory;
+    readonly dockerContainerId?: string;
+}
+
+const terminalInputEncoder = new TextEncoder();
+
+function dockerConsoleInput(containerId: string): Uint8Array {
+    return terminalInputEncoder.encode(
+        `/usr/bin/docker exec --interactive --tty ${containerId} /bin/sh\r`
+    );
 }
 
 function waitForReconnectDelay(milliseconds: number, signal: AbortSignal): Promise<void> {
@@ -120,6 +129,7 @@ function socketErrorMessage(
 export function TerminalBrowser({
     createEmulator,
     createSocketConnection = createTerminalSocketConnection,
+    dockerContainerId,
 }: TerminalBrowserProps) {
     const client: TerminalClient = createTerminalClient(useDashboardTrpcClient());
     const boundary = useAuthenticatedMutationBoundary();
@@ -149,10 +159,15 @@ export function TerminalBrowser({
     const [terminalReady, setTerminalReady] = useState(false);
     const emulator = useRef<TerminalEmulator | undefined>(undefined);
     const disconnectedCursorBySession = useRef(new Map<string, number>());
+    const pendingDockerConsole = useRef(dockerContainerId);
     const pendingOutputBytes = useRef(0);
     const reconnectAbort = useRef<AbortController | undefined>(undefined);
     const socket = useRef<TerminalSocketConnection | undefined>(undefined);
     const socketGeneration = useRef(0);
+
+    useEffect(() => {
+        pendingDockerConsole.current = dockerContainerId;
+    }, [dockerContainerId]);
 
     useEffect(
         () => () => {
@@ -242,6 +257,19 @@ export function TerminalBrowser({
                 );
                 emulator.current?.setInputEnabled(true);
                 emulator.current?.focus();
+                const containerId = pendingDockerConsole.current;
+                if (containerId !== undefined && !message.resumed) {
+                    if (socket.current?.sendInput(dockerConsoleInput(containerId))) {
+                        pendingDockerConsole.current = undefined;
+                        setAnnouncement(
+                            `Opening an interactive shell in Docker container ${containerId.slice(0, 12)}.`
+                        );
+                    } else {
+                        setActionError(
+                            "The Docker console handoff could not be sent. The host terminal remains available."
+                        );
+                    }
+                }
                 return;
             }
             case "error": {

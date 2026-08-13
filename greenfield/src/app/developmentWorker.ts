@@ -23,6 +23,23 @@ import {
 } from "./worker.ts";
 
 /**
+ * Removes host Docker discovery and mutation authority from the source-watched worker.
+ * Development state may be isolated while the host Docker daemon is still production.
+ * @param dependencies Production worker composition boundaries.
+ * @returns The same boundaries without either Docker composition or its broker.
+ */
+export function withoutDevelopmentDockerCapabilities(
+    dependencies: DashboardWorkerProcessDependencies
+): DashboardWorkerProcessDependencies {
+    const {
+        createDocker: _createDocker,
+        startDockerBroker: _startDockerBroker,
+        ...safeDependencies
+    } = dependencies;
+    return Object.freeze(safeDependencies);
+}
+
+/**
  * Runs the source-watched worker composition against isolated development state.
  * @param arguments_ Command-line arguments containing the exact source commit.
  * @returns Completion when the development worker process stops.
@@ -35,7 +52,9 @@ export async function runDevelopmentWorkerProcess(
         repositoryRoot,
         parseDevelopmentSourceCommit(arguments_, "worker")
     );
-    const defaults = createDefaultDashboardWorkerProcessDependencies();
+    const defaults = withoutDevelopmentDockerCapabilities(
+        createDefaultDashboardWorkerProcessDependencies()
+    );
     const dependencies = Object.freeze({
         ...defaults,
         createHostOperations: () => void 0,

@@ -99,6 +99,8 @@ export const applicationCapabilities = [
     "chat:read",
     "chat:write",
     "database:read",
+    "docker:read",
+    "docker:write",
     "files:read",
     "files:write",
     "gateway-sessions:read",

@@ -82,6 +82,8 @@
                   "chat:read",
                   "chat:write",
                   "database:read",
+                  "docker:read",
+                  "docker:write",
                   "files:read",
                   "files:write",
                   "gateway-sessions:read",
@@ -108,7 +110,7 @@
                 ],
                 "type": "string"
               },
-              "maxItems": 30,
+              "maxItems": 32,
               "uniqueItems": true
             },
             "createdAtMs": {
@@ -179,6 +181,8 @@
                   "chat:read",
                   "chat:write",
                   "database:read",
+                  "docker:read",
+                  "docker:write",
                   "files:read",
                   "files:write",
                   "gateway-sessions:read",
@@ -205,7 +209,7 @@
                 ],
                 "type": "string"
               },
-              "maxItems": 30,
+              "maxItems": 32,
               "uniqueItems": true
             },
             "createdAtMs": {

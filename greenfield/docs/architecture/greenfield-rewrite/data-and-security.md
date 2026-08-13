@@ -114,7 +114,6 @@ tag.
 | Scheduling/work      | `scheduled_jobs`, `job_disable_intents`, `job_runs`, `job_run_events`, `worker_instances`, `resource_leases`, `job_worker_control`                                                                                                                                             |
 | Chat                 | `chat_runs`, `chat_run_events`, `chat_runtime_snapshots`                                                                                                                                                                                                                       |
 | Delivery             | `deployments`, `deployment_events`, `release_records`                                                                                                                                                                                                                          |
-| Docker               | `managed_docker_services`, `docker_update_events`                                                                                                                                                                                                                              |
 | External projections | `cache_entries`                                                                                                                                                                                                                                                                |
 
 PostgreSQL, PgBouncer, OpenClaw sessions, Gateway history, host logs, files, GitHub, Docker, and
@@ -130,6 +129,18 @@ renames. A source-wide failure retains last-known-good state, while a safe per-i
 that discovered item visible with unavailable details. Neither case may be projected as a fresh
 empty inventory. The sole named application-data exception is the optional Comet/Bitmagnet
 count-only view capability; it cannot filter or fail generic database discovery.
+
+Docker intentionally adds no domain-specific SQLite tables. Its complete bounded Engine/Compose
+overview, updater-service projection, and newest updater events occupy the validated
+`docker.overview` row in `cache_entries`; refresh failure retains that last-known-good payload under
+the shared cache lifecycle. Durable Docker requests and execution history use `job_runs` and
+`job_run_events`, their security record uses `audit_events`, and material updater transitions are
+published idempotently through the existing `notifications` table. The bounded cached event window
+is replayed after every successful projection, making an interrupted or partial notification batch
+retryable through exact-ID upsert. Durable Jobs state and its `queued` event are the sole queue
+authority; Docker does not duplicate queue admission into updater history or notifications. Compose files, Git history,
+Engine state, registry responses, container output, and secrets remain external and are never
+mirrored into Docker-specific service or event tables.
 
 Database observability follows that rule. The web process may read Dashboard SQLite only through
 the retained runtime's narrow read port; it does not open another native handle or accept SQL from
@@ -324,7 +335,6 @@ queryable lifecycle.
 | Realtime catch-up              | `realtime_events(topic, id)`                                                              |
 | Chat replay                    | unique `chat_run_events(chat_run_id, sequence)`                                           |
 | Deployment history             | `deployments(state, updated_at_ms DESC)`                                                  |
-| Docker history                 | `docker_update_events(managed_service_id, created_at_ms DESC)`                            |
 | Cache refresh/expiry           | `cache_entries(last_attempt_status, expires_at_ms, key)`                                  |
 | Audit cursor                   | `audit_events(occurred_at_ms DESC, id DESC)` plus request/target indexes                  |
 
@@ -400,6 +410,36 @@ The web process may perform bounded reads and lightweight Gateway interaction. I
 deploys, builds, Git mutations, Docker mutations, backups, restores, systemd changes, OpenClaw
 restarts, or unbounded shell commands. Those operations become durable `job_runs` consumed by
 the worker.
+
+Docker follows that split without another daemon or systemd unit. The worker owns Engine and
+Compose discovery, the exact mutation and updater adapters, and one protected local Unix broker
+inside the existing worker lifecycle. The web side of that broker can request only a bounded,
+redacted log tail or a source-fenced prune preview; the frame schemas contain no command, shell,
+path, environment, free-form Docker/Compose argument, or mutation operation. The broker validates
+its canonical `0700` directory and `0600` socket, enforces connection/frame/deadline bounds, and
+returns only classified `conflict`, `not-found`, or `unavailable` failures. The production web
+unit additionally makes `/run/docker.sock`, `/var/run/docker.sock`, and `/opt/docker` inaccessible;
+membership in the host Docker group therefore does not give the web process a parallel direct path.
+
+Every Docker mutation is a recent-MFA, audit-first, actor/idempotency-bound durable job tied to the
+current cache source revision. The worker accepts only the fixed operation union: exact container
+start/stop/restart, canonical root-stack start/stop/restart, exact unused image/volume deletion,
+ticket-bound prune execution, updater scan/run, or one exact updater-service identity. It executes
+Docker through fixed `/usr/bin/docker` argv and Compose only through the fixed Doppler wrapper;
+there is no Docker-specific generic exec API. Interactive operator work reuses the separately
+bounded Terminal lifecycle. The updater may write only a discovered canonical per-app Compose file
+beneath `/opt/docker`, replaces only its verified image-scalar byte range, validates the root
+project, and gives the Git adapter only the exact changed paths and hashes. Uncertain Compose, Git
+commit, or push settlement remains explicit and cannot authorize replay.
+Before applying an image change, the updater binds rollback material to the exact running image ID,
+not merely the prior mutable tag. Rollback rebinds that tag locally, recreates with pulling disabled,
+and verifies both Compose source and runtime identity before reporting recovery; otherwise the
+outcome remains unknown.
+The Git adapter accepts only the configured `github.com` HTTPS upstream, disables system/global
+Git configuration, credential helpers, prompts, SSH, hooks, and ambient home credentials, and
+requires an authenticated remote read plus dry-run push before Compose mutation. The worker-only
+GitHub credential is injected only as a scoped Git process-environment HTTP header; it is never an
+argument, payload, log field, cache value, or browser value.
 
 Service Actions are a separate fixed-intent boundary, not a generic exec facade. The contract
 contains exactly `openclaw-cleanup`, `openclaw-restart`, `openclaw-update`, `system-cleanup`,

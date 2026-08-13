@@ -97,7 +97,7 @@
             "searchNormalizer": null,
             "sourceRouteName": "docker",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "path": "/docker",
                 "phase": "phase-5"
             }

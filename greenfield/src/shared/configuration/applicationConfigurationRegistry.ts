@@ -7,6 +7,8 @@ export type ConfigurationBrowserExposure = "none" | "presence-only" | "value";
 /** Shared parser/documentation limits for immutable application configuration. */
 export const applicationConfigurationLimits = Object.freeze({
     databaseObservabilityPasswordMaximumLength: 4096,
+    dockerRegistryTokenMaximumLength: 4096,
+    dockerRegistryUsernameMaximumLength: 256,
     elevenLabsApiKeyMaximumLength: 4096,
     gatewayTokenMaximumLength: 4096,
     gatewayUrlMaximumLength: 2048,
@@ -33,9 +35,13 @@ export const applicationConfigurationLimits = Object.freeze({
 /** Stable field names used by typed server configuration. */
 export type ApplicationConfigurationField =
     | "databaseObservabilityPassword"
+    | "dockerRegistryCredentials.dockerHub.token"
+    | "dockerRegistryCredentials.dockerHub.username"
     | "elevenLabsApiKey"
     | "gatewayToken"
     | "gatewayUrl"
+    | "dockerRegistryCredentials.github.token"
+    | "dockerRegistryCredentials.github.username"
     | "logLevel"
     | "moltbookAgentName"
     | "moltbookApiKey"
@@ -64,6 +70,10 @@ export const applicationConfigurationEnvironmentNames = [
     "MIRA_DASHBOARD_TRUSTED_PROXY_IPS",
     "ELEVENLABS_API_KEY",
     "MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD",
+    "DOCKER_LOGIN",
+    "DOCKER_TOKEN",
+    "MIRA_GITHUB_USERNAME",
+    "MIRA_GITHUB_TOKEN",
     "MOLTBOOK_API_KEY",
     "MOLTBOOK_AGENT_NAME",
     "OPENCLAW_GATEWAY_TOKEN",
@@ -278,6 +288,74 @@ export const applicationConfigurationRegistry: readonly ApplicationConfiguration
             roles: Object.freeze(["worker"]),
             secret: true,
             validationConstraints: `When present, a trimmed nonblank opaque credential at most ${applicationConfigurationLimits.databaseObservabilityPasswordMaximumLength} code units; no database, container, service, project, image, host, or port value is accepted, and the credential is never persisted, logged, or browser-exposed.`,
+            valueType: "opaque-secret",
+        }),
+        metadata({
+            allowedValues: null,
+            browserExposure: "none",
+            defaultValue: null,
+            description:
+                "Optional worker-only Docker Hub login paired with DOCKER_TOKEN for registry reads.",
+            environmentName: "DOCKER_LOGIN",
+            field: "dockerRegistryCredentials.dockerHub.username",
+            operationalEffect:
+                "Authenticates Docker Hub token exchange for docker.io updater lookups only; it does not select inventory or topology.",
+            required: false,
+            restartRequired: true,
+            roles: Object.freeze(["worker"]),
+            secret: true,
+            validationConstraints: `Absent together with DOCKER_TOKEN, or a trimmed nonblank control-safe credential at most ${applicationConfigurationLimits.dockerRegistryUsernameMaximumLength} code units; never persisted, logged, or browser-exposed.`,
+            valueType: "opaque-secret",
+        }),
+        metadata({
+            allowedValues: null,
+            browserExposure: "none",
+            defaultValue: null,
+            description:
+                "Optional worker-only Docker Hub token paired with DOCKER_LOGIN for registry reads.",
+            environmentName: "DOCKER_TOKEN",
+            field: "dockerRegistryCredentials.dockerHub.token",
+            operationalEffect:
+                "Authenticates Docker Hub token exchange for docker.io updater lookups only; it is never passed to Docker, Compose, Git, or a child process.",
+            required: false,
+            restartRequired: true,
+            roles: Object.freeze(["worker"]),
+            secret: true,
+            validationConstraints: `Absent together with DOCKER_LOGIN, or a trimmed nonblank control-safe token at most ${applicationConfigurationLimits.dockerRegistryTokenMaximumLength} code units; never persisted, logged, or browser-exposed.`,
+            valueType: "opaque-secret",
+        }),
+        metadata({
+            allowedValues: null,
+            browserExposure: "none",
+            defaultValue: null,
+            description:
+                "Optional worker-only GitHub username paired with MIRA_GITHUB_TOKEN for registry reads and exact-path Git synchronization.",
+            environmentName: "MIRA_GITHUB_USERNAME",
+            field: "dockerRegistryCredentials.github.username",
+            operationalEffect:
+                "Authenticates GHCR and LSCR updater lookups and the fixed github.com Git transport; it does not select inventory or topology.",
+            required: false,
+            restartRequired: true,
+            roles: Object.freeze(["worker"]),
+            secret: true,
+            validationConstraints: `Absent together with MIRA_GITHUB_TOKEN, or a trimmed nonblank control-safe credential at most ${applicationConfigurationLimits.dockerRegistryUsernameMaximumLength} code units; never persisted, logged, or browser-exposed.`,
+            valueType: "opaque-secret",
+        }),
+        metadata({
+            allowedValues: null,
+            browserExposure: "none",
+            defaultValue: null,
+            description:
+                "Optional worker-only GitHub token paired with MIRA_GITHUB_USERNAME for GHCR/LSCR reads and exact-path Git push.",
+            environmentName: "MIRA_GITHUB_TOKEN",
+            field: "dockerRegistryCredentials.github.token",
+            operationalEffect:
+                "Authenticates GHCR and LSCR updater lookups plus fixed github.com ls-remote and push operations; Git receives it only as a process-environment HTTP header, never in argv, output, Docker, or Compose.",
+            required: false,
+            restartRequired: true,
+            roles: Object.freeze(["worker"]),
+            secret: true,
+            validationConstraints: `Absent together with MIRA_GITHUB_USERNAME, or a trimmed nonblank control-safe token at most ${applicationConfigurationLimits.dockerRegistryTokenMaximumLength} code units; never persisted, logged, or browser-exposed.`,
             valueType: "opaque-secret",
         }),
         metadata({

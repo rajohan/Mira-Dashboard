@@ -17,6 +17,7 @@ export interface DashboardProjectLayout {
         readonly state: {
             readonly backups: string;
             readonly database: string;
+            readonly dockerBrokerSocket: string;
             readonly jobOutput: string;
             readonly logMaintenance: string;
             readonly logs: string;
@@ -107,6 +108,7 @@ export function deriveDashboardProjectLayout(
     const state = Object.freeze({
         backups: path.join(stateRoot, "backups"),
         database: path.join(stateRoot, "mira-dashboard.db"),
+        dockerBrokerSocket: path.join(stateRoot, "terminal-broker", "docker.sock"),
         jobOutput: path.join(stateRoot, "job-output"),
         logMaintenance: path.join(stateRoot, "log-maintenance"),
         logs: path.join(stateRoot, "logs"),

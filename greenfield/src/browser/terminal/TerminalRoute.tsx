@@ -1,9 +1,12 @@
+import { useSearch } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
 import { dashboardPageContainerClassName } from "../layout/dashboardShellLayout.ts";
 import { cn } from "../lib/classNames.ts";
+import { Alert } from "../ui/Alert.tsx";
 import { PageHeader } from "../ui/PageHeader.tsx";
 import { TerminalBrowser } from "./TerminalBrowser.tsx";
+import { parseTerminalRouteSearch } from "./terminalRouteSearch.ts";
 
 interface TerminalPageLayoutProps {
     readonly children: ReactNode;
@@ -35,9 +38,29 @@ export function TerminalPageLayout({ children }: TerminalPageLayoutProps) {
 
 /** @returns A recent-MFA-gated, worker-owned interactive PTY canvas. */
 export function TerminalRoute() {
+    const { dockerContainerId } = parseTerminalRouteSearch(
+        useSearch({ from: "/terminal" }) as unknown
+    );
     return (
         <TerminalPageLayout>
-            <TerminalBrowser />
+            {dockerContainerId !== undefined && (
+                <Alert
+                    focusOnError={false}
+                    message={`Docker console handoff selected container ${dockerContainerId.slice(0, 12)}. Starting a new terminal opens an interactive /bin/sh inside that exact container.`}
+                    variant="warning"
+                />
+            )}
+            <div
+                className={
+                    dockerContainerId === undefined
+                        ? undefined
+                        : "mt-4 flex min-h-0 flex-1 flex-col"
+                }
+            >
+                <TerminalBrowser
+                    {...(dockerContainerId === undefined ? {} : { dockerContainerId })}
+                />
+            </div>
         </TerminalPageLayout>
     );
 }

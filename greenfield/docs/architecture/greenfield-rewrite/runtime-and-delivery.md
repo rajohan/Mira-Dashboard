@@ -536,14 +536,14 @@ repository or state tree. Dashboard is the control plane: browser requests selec
 operations, durable jobs and audit records preserve intent/outcome, and worker-only adapters touch
 the Docker project within explicit policy and resource bounds.
 
-The Docker slice must discover its topology at runtime rather than ship a service catalog. A
-worker-owned, read-only adapter enumerates Docker Engine containers and collects batched inspect
-data; standard Compose project/service labels are observed metadata, not required names. The
-configured Compose roots constrain where later mutation policy may resolve files, but they do not
-decide which running containers are visible. Bounded reconciliation must add, remove, and rename
-containers, services, projects, images, networks, and volumes without manual Dashboard handling.
-Ambiguous or disappearing items fail closed individually, while a source-wide Engine failure keeps
-the last known good inventory with an explicit freshness state.
+The implemented Docker slice discovers topology at runtime rather than shipping a service catalog.
+A worker-owned, read-only adapter enumerates Docker Engine containers and collects batched
+projected inspect data; standard Compose project/service labels are observed metadata, not required
+names. The canonical Compose trust root constrains where mutation policy may resolve files, but it
+does not decide which running containers are visible. Bounded reconciliation adds, removes, and
+renames containers, services, projects, images, and volumes without manual Dashboard handling.
+Ambiguous or disappearing items fail closed individually, while a source-wide Engine/Compose
+failure keeps the last known good inventory with an explicit freshness state.
 
 Update discovery reuses the Compose policy already deployed under `/opt/docker`:
 `mira.updater.enabled`, `mira.updater.autoUpdate`, `mira.updater.track`,
@@ -551,9 +551,8 @@ Update discovery reuses the Compose policy already deployed under `/opt/docker`:
 normalized, tag regexes are safety-checked, and Compose project/service identity is joined against
 Engine labels rather than container names. Greenfield tightens the legacy default: inventory is
 automatic, but an update mutation requires an explicit valid `mira.updater.enabled=true`; absent,
-ambiguous, or invalid labels remain visible and non-mutable. Necessary label-schema changes are
-versioned and applied to the Compose source of truth as part of the Docker slice, not maintained as
-a parallel Dashboard service catalog.
+ambiguous, or invalid labels remain visible and non-mutable. The implementation normalizes the
+supported list/map label forms and does not maintain a parallel Dashboard service catalog.
 
 `/opt/docker/compose.yaml` is the canonical whole-stack project entrypoint. The worker resolves its
 bounded recursive include graph with canonical regular-file containment beneath `/opt/docker`, so
@@ -569,11 +568,64 @@ from contracts and logs.
 Each managed container's update labels and editable `services.<service>.image` source live in its
 included app Compose file. Discovery joins Engine project/config/service labels to the canonical
 root include graph and records the exact defining file/field under the Docker trust root. An update
-re-resolves that ownership under the worker lease, verifies the expected old scalar, atomically
-edits only that image field while preserving unrelated YAML, and validates the complete root
-project before calling the Doppler wrapper for the resolved service. If includes, labels, image
-ownership, or source text changed concurrently, the attempt does not guess: it aborts, restores the
-pre-edit file when necessary, refreshes discovery, and requires a new intent.
+re-resolves that ownership under the worker lease, verifies the expected old scalar and whole-file
+hash, and atomically replaces only the exact image-scalar byte range. Indentation, spacing,
+comments, quoting, line endings, and every byte outside that scalar remain unchanged. The worker
+validates the complete root project before calling the Doppler wrapper for the resolved service.
+If includes, labels, image ownership, or source text changed concurrently, the attempt does not
+guess: it aborts, restores the pre-edit file when necessary, refreshes discovery, and requires a
+new intent.
+
+The existing Job/Worker/Schedule runtime owns Docker refresh and mutation. The
+`cache.refresh.docker-overview` action re-discovers and publishes the bounded `docker.overview`
+projection every minute with a five-minute TTL; a failed attempt retains the validated prior
+payload for at most 24 hours as explicit last-known-good. `/docker` can enqueue that same
+idempotent cache action immediately and receives only its durable Job summary, never the
+domain-only cache payload. The `docker.updater` action runs daily at
+04:10 Europe/Oslo and the same action also executes manual source-revision-fenced scans, automatic
+runs, and one exact-service update. Updater services and the newest 100 updater events remain in
+that cache row, while durable attempts and outcomes remain ordinary Jobs history.
+
+Fixed Docker operations are recent-MFA, audit-first, idempotent durable jobs. The admitted union is
+container start/stop/restart, canonical whole-stack start/stop/restart, exact unused image or
+volume deletion, actor-bound preview/ticket prune execution, updater scan/run, and one exact
+service update. All requests carry the current source revision and fail closed if topology changed.
+The worker uses fixed `/usr/bin/docker` argv and the one Compose wrapper above; it never accepts a
+container command, shell, cwd, environment, arbitrary flag, or generic Docker exec request. The
+three actively consumed legacy Docker-console routes instead map to the already bounded Terminal
+prepare/status/terminate lifecycle. The Docker page carries only the exact validated container ID;
+the Terminal starts one fixed interactive `/bin/sh` handoff for that container and then retains its
+normal ephemeral PTY input. No Docker-specific persisted exec surface is retained.
+
+Two live read operations cannot be served from the cache: bounded redacted container logs and a
+current prune preview. The existing worker process exposes only those two strict messages over a
+`0600` Unix socket in its validated `0700` state directory. The web process is a bounded client;
+the worker remains the Docker authority. The broker starts and stops with the existing worker, has
+bounded connections, frames, output, and deadlines, and requires no additional service, systemd
+unit, timer, or schedule.
+
+The updater records the exact pre-update running image ID before applying a service. If the
+pre-commit path must roll back, it rebinds a mutable old tag to that ID and recreates the service
+with `--pull never --force-recreate`; recovery is accepted only after both Compose bytes and the
+running image ID are revalidated. After a successful image edit/apply, the updater's worker-only Git adapter stages only the exact
+changed per-app Compose paths, proves the expected repository HEAD and before/after blobs, creates
+one fixed-author commit, and pushes the configured `github.com` upstream. Before any Compose
+mutation, authenticated `ls-remote` and dry-run-push probes must pass with the worker-only GitHub
+credential. Global/system Git configuration, ambient credential stores, prompts, hooks, and SSH
+are disabled. Existing unrelated staged or pending
+work blocks the attempt. Remote readback distinguishes pushed, committed-push-pending,
+unavailable, and unknown outcomes; uncertainty is not replayed or called success. The canonical
+Git source is resolved per operation rather than during worker composition, so a missing
+`/opt/docker` source degrades only Docker and can recover later without process restart. Bounded updater
+history remains authoritative in `docker.overview`, and material discovery, availability, success,
+failure, source-sync-pending, and unknown-outcome transitions are idempotently projected
+into the existing global notification catalog. Each successful projection retries its complete
+bounded event window by stable notification ID, including after a partial earlier batch. Queue
+admission is not an updater event: the durable Jobs run and its queued event are authoritative, and
+the response links directly to that run. `/docker` shows the inventory, freshness/LKG,
+stats, logs, fixed controls, updater policy/status/history, registry checks, exact updates, images,
+volumes, deletion, prune previews, links to durable Jobs history, and a direct path to the existing
+interactive Terminal for operator Docker CLI work.
 
 The future repository root ships new `systemd/` web and worker units as part of the immutable
 release. The legacy units were deliberately not copied: they change into a `backend` working

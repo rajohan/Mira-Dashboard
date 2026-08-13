@@ -4,6 +4,10 @@ import * as v from "valibot";
 import { configurationEnvironmentNamesForRole } from "../../../shared/configuration/applicationConfigurationRegistry.ts";
 import { configurationDatabaseObservabilityPassword } from "./databaseObservabilityConfiguration.ts";
 import {
+    configurationDockerRegistryCredentials,
+    type DockerRegistryCredentialsConfiguration,
+} from "./dockerRegistryConfiguration.ts";
+import {
     configurationGatewayToken,
     configurationGatewayUrl,
 } from "./gatewayConfiguration.ts";
@@ -24,6 +28,7 @@ import {
 /** Immutable, validated configuration consumed by the greenfield worker process. */
 export interface WorkerConfiguration {
     readonly databaseObservabilityPassword?: Redacted.Redacted<string>;
+    readonly dockerRegistryCredentials?: DockerRegistryCredentialsConfiguration;
     readonly gatewayToken: Redacted.Redacted<string>;
     readonly gatewayUrl: string;
     readonly logLevel: ApplicationLogLevel;
@@ -39,7 +44,11 @@ const optionalEnvironmentValueSchema = v.optional(v.unknown());
 
 /** Valibot projection for the complete accepted worker-process environment surface. */
 export const workerConfigurationEnvironmentSchema = v.object({
+    DOCKER_LOGIN: optionalEnvironmentValueSchema,
+    DOCKER_TOKEN: optionalEnvironmentValueSchema,
     MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD: optionalEnvironmentValueSchema,
+    MIRA_GITHUB_TOKEN: optionalEnvironmentValueSchema,
+    MIRA_GITHUB_USERNAME: optionalEnvironmentValueSchema,
     MIRA_DASHBOARD_LOG_LEVEL: optionalEnvironmentValueSchema,
     MIRA_DASHBOARD_OPENCLAW_ROOT: optionalEnvironmentValueSchema,
     MIRA_DASHBOARD_PROJECT_ROOT: optionalEnvironmentValueSchema,
@@ -71,12 +80,14 @@ export function parseWorkerConfiguration(
     );
     const databaseObservabilityPassword =
         configurationDatabaseObservabilityPassword(input);
+    const dockerRegistryCredentials = configurationDockerRegistryCredentials(input);
     return Object.freeze({
         ...(databaseObservabilityPassword === undefined
             ? {}
             : {
                   databaseObservabilityPassword,
               }),
+        ...(dockerRegistryCredentials === undefined ? {} : { dockerRegistryCredentials }),
         gatewayToken: configurationGatewayToken(input),
         gatewayUrl: configurationGatewayUrl(input),
         logLevel: configurationChoice(input, "MIRA_DASHBOARD_LOG_LEVEL", [

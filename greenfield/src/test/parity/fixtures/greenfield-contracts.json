@@ -235,6 +235,22 @@
             "name": "database.overview"
         },
         {
+            "kind": "query",
+            "name": "docker.getContainerLogs"
+        },
+        {
+            "kind": "query",
+            "name": "docker.overview"
+        },
+        {
+            "kind": "query",
+            "name": "docker.preparePrune"
+        },
+        {
+            "kind": "mutation",
+            "name": "docker.requestOperation"
+        },
+        {
             "kind": "subscription",
             "name": "events.stream"
         },

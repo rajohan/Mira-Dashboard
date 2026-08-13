@@ -274,6 +274,28 @@ export const procedureExpectedErrorPolicy = freezeProcedureExpectedErrorPolicy({
         "UNAUTHORIZED",
     ],
     "database.overview": ["FORBIDDEN", "UNAUTHORIZED"],
+    "docker.getContainerLogs": [
+        "CONFLICT",
+        "FORBIDDEN",
+        "NOT_FOUND",
+        "SERVICE_UNAVAILABLE",
+        "UNAUTHORIZED",
+    ],
+    "docker.overview": ["FORBIDDEN", "UNAUTHORIZED"],
+    "docker.preparePrune": [
+        "CONFLICT",
+        "FORBIDDEN",
+        "SERVICE_UNAVAILABLE",
+        "UNAUTHORIZED",
+    ],
+    "docker.requestOperation": [
+        "CONFLICT",
+        "FORBIDDEN",
+        "NOT_FOUND",
+        "SERVICE_UNAVAILABLE",
+        "TOO_MANY_REQUESTS",
+        "UNAUTHORIZED",
+    ],
     "files.getWriteStatus": [
         "FORBIDDEN",
         "NOT_FOUND",

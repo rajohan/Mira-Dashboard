@@ -8,6 +8,11 @@ import type { RuntimeOwnedDatabase } from "../../database/runtime/databaseServic
 import type { PersistentGatewayTaskNotificationTransport } from "../../platform/gateway/persistentGatewayTransport.ts";
 import { testMoltbookCollector } from "../../test/support/moltbook.ts";
 import type { CacheRepository } from "../cache/repository.ts";
+import {
+    dockerOperationJobActionKey,
+    dockerOverviewCacheJobActionKey,
+    dockerUpdaterJobActionKey,
+} from "./actionRegistry.ts";
 import type { JobWorkerCoordinator } from "./coordinator.ts";
 import type { JobRepository } from "./repository.ts";
 import {
@@ -192,7 +197,11 @@ function runtimeFixture(initializationFailure?: Error) {
                 initialize() {
                     events.push("database-initialize");
                     return Promise.resolve({
-                        database: Object.freeze({}) as RuntimeOwnedDatabase,
+                        database: Object.freeze({
+                            transaction: () => {
+                                throw new Error("Database transaction is unused");
+                            },
+                        }) as unknown as RuntimeOwnedDatabase,
                         writeAdmission: Object.freeze({
                             run() {
                                 return Promise.reject(
@@ -318,6 +327,70 @@ describe("Dashboard worker runtime", () => {
         ]);
         expect(fixture.forceSignals).toEqual([force.signal]);
         expect(await runtime.completion).toBeUndefined();
+    });
+
+    test("omits Docker schedules and executors without Docker authority", async () => {
+        const fixture = runtimeFixture();
+        const dependencies: DashboardWorkerRuntimeDependencies = {
+            ...fixture.dependencies,
+            createCoordinator(options) {
+                const actionKeys = options.actionDefinitions?.map(
+                    ({ actionKey }) => actionKey
+                );
+                expect(actionKeys).not.toContain(dockerOverviewCacheJobActionKey);
+                expect(actionKeys).not.toContain(dockerUpdaterJobActionKey);
+                expect(actionKeys).not.toContain(dockerOperationJobActionKey);
+                expect(
+                    options.findAction?.(dockerOverviewCacheJobActionKey)
+                ).toBeUndefined();
+                expect(options.findAction?.(dockerUpdaterJobActionKey)).toBeUndefined();
+                expect(options.findAction?.(dockerOperationJobActionKey)).toBeUndefined();
+                return fixture.dependencies.createCoordinator(options);
+            },
+        };
+        const runtime = createDashboardWorkerRuntime(fixture.options, dependencies);
+
+        await runtime.initialize();
+        await runtime.dispose();
+    });
+
+    test("keeps Docker schedules and executors when Docker authority is present", async () => {
+        const fixture = runtimeFixture();
+        const options: DashboardWorkerRuntimeOptions = {
+            ...fixture.options,
+            docker: Object.freeze({
+                execute: () => Promise.reject(new Error("Unused Docker operation")),
+                readPrevious: () => {},
+                refresh: () => Promise.reject(new Error("Unused Docker refresh")),
+                runUpdater: () => Promise.reject(new Error("Unused Docker updater")),
+                scan: () => Promise.reject(new Error("Unused Docker scan")),
+            }),
+        };
+        const dependencies: DashboardWorkerRuntimeDependencies = {
+            ...fixture.dependencies,
+            createCoordinator(coordinatorOptions) {
+                const actionKeys = coordinatorOptions.actionDefinitions?.map(
+                    ({ actionKey }) => actionKey
+                );
+                expect(actionKeys).toContain(dockerOverviewCacheJobActionKey);
+                expect(actionKeys).toContain(dockerUpdaterJobActionKey);
+                expect(actionKeys).toContain(dockerOperationJobActionKey);
+                expect(
+                    coordinatorOptions.findAction?.(dockerOverviewCacheJobActionKey)
+                ).toBeDefined();
+                expect(
+                    coordinatorOptions.findAction?.(dockerUpdaterJobActionKey)
+                ).toBeDefined();
+                expect(
+                    coordinatorOptions.findAction?.(dockerOperationJobActionKey)
+                ).toBeDefined();
+                return fixture.dependencies.createCoordinator(coordinatorOptions);
+            },
+        };
+        const runtime = createDashboardWorkerRuntime(options, dependencies);
+
+        await runtime.initialize();
+        await runtime.dispose();
     });
 
     test("registers and disposes the worker-only workspace writer", async () => {

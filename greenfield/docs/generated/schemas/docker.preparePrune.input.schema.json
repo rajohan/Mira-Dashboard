@@ -1,0 +1,23 @@
+{
+  "$id": "urn:mira-dashboard:docker.preparePrune.input",
+  "type": "object",
+  "properties": {
+    "sourceRevision": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "target": {
+      "enum": [
+        "images",
+        "volumes"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "sourceRevision",
+    "target"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

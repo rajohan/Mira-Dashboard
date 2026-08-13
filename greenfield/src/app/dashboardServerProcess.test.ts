@@ -140,6 +140,7 @@ function processFixture(totpFailure?: Error) {
                 "elevenlabs-api-key-test-value"
             );
             expect(options.frontendAssets).toBeFunction();
+            expect(options.jobActionDefinitions).toBeUndefined();
             expect(options.port).toBe(3100);
             expect(options.verifiedReleaseId).toBe(releaseId);
             expect(options.openClawFileRoot).toEqual({

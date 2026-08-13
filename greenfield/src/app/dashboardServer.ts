@@ -24,6 +24,10 @@ import { createChatTranscriptLifecycleCoordinator } from "../server/domains/chat
 import { createDatabaseObservabilityService } from "../server/domains/database/service.ts";
 import { createDatabaseObservabilitySnapshotRepository } from "../server/domains/database/snapshotRepository.ts";
 import { createSqliteLifecycleReader } from "../server/domains/database/sqliteLifecycle.ts";
+import { createSqliteDockerOperationAuditWriter } from "../server/domains/docker/operationAudit.ts";
+import { createDockerOperationQueue } from "../server/domains/docker/operationQueue.ts";
+import { createDockerService } from "../server/domains/docker/service.ts";
+import { createDockerOverviewSnapshotRepository } from "../server/domains/docker/snapshotRepository.ts";
 import { createWorkspaceFileJobScheduler } from "../server/domains/files/jobScheduler.ts";
 import type { WorkspaceFileRootConfiguration } from "../server/domains/files/ports.ts";
 import {
@@ -49,9 +53,11 @@ import {
     type GatewaySessionsService,
 } from "../server/domains/gatewaySessions/service.ts";
 import {
+    type JobActionDefinition,
     hostSystemCleanupJobActionDefinition,
     hostSystemRestartJobActionDefinition,
     hostSystemUpdateJobActionDefinition,
+    jobActionDefinitions,
     openClawGatewayRestartJobActionDefinition,
     openClawInstallationUpdateJobActionDefinition,
     openClawSessionsCleanupJobActionDefinition,
@@ -143,6 +149,7 @@ import {
     type WebConfiguration,
     parseWebConfiguration,
 } from "../server/platform/configuration/webConfiguration.ts";
+import { createDockerBrokerClient } from "../server/platform/docker/dockerBrokerClient.ts";
 import { createDescriptorWorkspaceFileReader } from "../server/platform/files/descriptorWorkspaceFileReader.ts";
 import { createDescriptorWorkspaceFileUploadSpool } from "../server/platform/files/descriptorWorkspaceFileUploadSpool.ts";
 import {
@@ -225,6 +232,7 @@ export interface DashboardServerOptions extends Omit<
     | "chatRawHttpHandler"
     | "chatService"
     | "databaseObservabilityService"
+    | "dockerService"
     | "workspaceFileRawHttpHandler"
     | "workspaceFilesService"
     | "disposeBeforeRuntime"
@@ -258,6 +266,9 @@ export interface DashboardServerOptions extends Omit<
     readonly dashboardLogsRoot?: string;
     /** Private production state root used only by the fixed SQLite lifecycle reader. */
     readonly databaseStateDirectory?: string;
+    /** Optional only for isolated composition tests; production supplies both. */
+    readonly dockerBrokerDirectory?: string;
+    readonly dockerBrokerSocket?: string;
     /** Optional server-only speech credential; absence keeps both voice controls hidden. */
     readonly elevenLabsApiKey?: Redacted.Redacted<string>;
     /** Direct-loopback endpoint shared by bootstrap verification and persistent Gateway traffic. */
@@ -265,6 +276,8 @@ export interface DashboardServerOptions extends Omit<
     /** Server-only Gateway credential used by the outgoing-media proxy. */
     readonly gatewayToken?: Redacted.Redacted<string>;
     readonly gatewayVerificationTimeoutMs?: number;
+    /** Optional capability-scoped schedule registry; production uses the complete registry. */
+    readonly jobActionDefinitions?: readonly JobActionDefinition[];
     /** Shared composition clock for deterministic lifecycle and request-auth behavior. */
     readonly now?: () => Date;
     /** Exact read-only OpenClaw configuration manifest; never passed to a writer. */
@@ -670,6 +683,8 @@ export async function createDashboardServer(
         const database = await databaseRuntime.orm();
         const cacheRepository = createCacheRepository(database, databaseRuntime);
         const jobRepository = createJobRepository(database, databaseRuntime);
+        const scheduleActionDefinitions =
+            options.jobActionDefinitions ?? jobActionDefinitions;
         const observabilityNow = options.now;
         const databaseObservabilityService = createDatabaseObservabilityService({
             ...(observabilityNow === undefined
@@ -774,6 +789,57 @@ export async function createDashboardServer(
                 throw error;
             }
         };
+        const dockerBrokerConfigured =
+            options.dockerBrokerDirectory !== undefined ||
+            options.dockerBrokerSocket !== undefined;
+        if (
+            dockerBrokerConfigured &&
+            (options.dockerBrokerDirectory === undefined ||
+                options.dockerBrokerSocket === undefined)
+        ) {
+            throw new TypeError("Docker broker paths must be configured together");
+        }
+        const dockerService =
+            options.dockerBrokerDirectory === undefined ||
+            options.dockerBrokerSocket === undefined
+                ? undefined
+                : createDockerService({
+                      auditWriter: createSqliteDockerOperationAuditWriter({
+                          ...(domainNow === undefined ? {} : { clock: domainNow }),
+                          database,
+                          writeAdmission: databaseRuntime,
+                      }),
+                      ...(domainNow === undefined
+                          ? {}
+                          : { nowMs: () => domainNow().getTime() }),
+                      onAuditSettlementFailure: ({ operation, settlement }) =>
+                          options.applicationRuntime.logger.error({
+                              component: "docker-audit",
+                              event: "docker.audit_settlement.failed",
+                              failure: new Error(
+                                  `Docker ${operation} audit ${settlement} settlement failed`
+                              ),
+                              outcome: "server-error",
+                          }),
+                      operationQueue: createDockerOperationQueue({
+                          ...(domainNow === undefined
+                              ? {}
+                              : { nowMs: () => domainNow().getTime() }),
+                          repository: jobRepository,
+                          ...(options.verifiedReleaseId === undefined
+                              ? {}
+                              : {
+                                    requiredWorkerReleaseId: options.verifiedReleaseId,
+                                }),
+                          wakeEventPump,
+                      }),
+                      snapshotRepository:
+                          createDockerOverviewSnapshotRepository(cacheRepository),
+                      workerReadPort: createDockerBrokerClient({
+                          directory: options.dockerBrokerDirectory,
+                          socketPath: options.dockerBrokerSocket,
+                      }),
+                  });
         const taskRepository = createTaskRepository(database, databaseRuntime);
         const taskService = createTaskService({
             ...(domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }),
@@ -781,6 +847,7 @@ export async function createDashboardServer(
             wakeEventPump,
         });
         await reconcileJobSchedules({
+            actionDefinitions: scheduleActionDefinitions,
             ...(domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }),
             repository: jobRepository,
             wakeEventPump,
@@ -1380,7 +1447,11 @@ export async function createDashboardServer(
             readGatewayConnection: gatewayConnectionService.get,
             readGatewaySessionsProjection: gatewaySessionsService.readHeartbeatProjection,
             readHeartbeatDashboardJobs: (generatedAtMs) =>
-                readCacheHeartbeatDashboardJobs(jobRepository, generatedAtMs),
+                readCacheHeartbeatDashboardJobs(
+                    jobRepository,
+                    generatedAtMs,
+                    scheduleActionDefinitions
+                ),
             readHeartbeatTasks: () =>
                 readCacheHeartbeatTasksWithCronRefresh(
                     () =>
@@ -1434,6 +1505,7 @@ export async function createDashboardServer(
             ...(chatRawHttpHandler === undefined ? {} : { chatRawHttpHandler }),
             ...(chatService === undefined ? {} : { chatService }),
             databaseObservabilityService,
+            ...(dockerService === undefined ? {} : { dockerService }),
             ...(workspaceFileRawHttpHandler === undefined
                 ? {}
                 : { workspaceFileRawHttpHandler }),
@@ -1660,6 +1732,8 @@ export async function runDashboardWebProcess(
             dashboardLogMaintenanceRoot: layout.production.state.logMaintenance,
             dashboardLogsRoot: layout.production.state.logs,
             databaseStateDirectory: layout.production.state.root,
+            dockerBrokerDirectory: layout.production.state.terminalBroker,
+            dockerBrokerSocket: layout.production.state.dockerBrokerSocket,
             ...(configuration.elevenLabsApiKey === undefined
                 ? {}
                 : { elevenLabsApiKey: configuration.elevenLabsApiKey }),

@@ -63,6 +63,14 @@ export const dashboardRouteDocumentation = Object.freeze([
     },
     {
         access: "session",
+        featureOwner: "docker",
+        navigationLabel: "Docker",
+        path: "/docker",
+        summary:
+            "Observes dynamic Docker Engine and Compose state and queues source-fenced fixed operations and updates.",
+    },
+    {
+        access: "session",
         featureOwner: "monitoring",
         navigationLabel: null,
         path: "/incidents",

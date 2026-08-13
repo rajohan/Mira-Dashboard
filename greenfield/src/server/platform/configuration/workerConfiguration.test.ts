@@ -74,6 +74,7 @@ describe("worker application configuration", () => {
         expect(Object.isFrozen(configuration.gatewayToken)).toBe(true);
         expect(Object.isFrozen(configuration.moltbookApiKey)).toBe(true);
         expect(configuration.databaseObservabilityPassword).toBeUndefined();
+        expect(configuration.dockerRegistryCredentials).toBeUndefined();
     });
 
     test("accepts only the database password without topology and redacts it", () => {
@@ -107,6 +108,93 @@ describe("worker application configuration", () => {
                 field: "MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD",
                 reason: "invalid",
             });
+        }
+    });
+
+    test("accepts complete registry pairs as frozen worker-only redacted values", () => {
+        const environment = validEnvironment();
+        environment.DOCKER_LOGIN = "docker-user-sentinel";
+        environment.DOCKER_TOKEN = "docker-token-sentinel";
+        environment.MIRA_GITHUB_USERNAME = "github-user-sentinel";
+        environment.MIRA_GITHUB_TOKEN = "github-token-sentinel";
+
+        const configuration = parseWorkerConfiguration(environment);
+        const credentials = configuration.dockerRegistryCredentials!;
+
+        expect(Redacted.value(credentials.dockerHub!.username)).toBe(
+            "docker-user-sentinel"
+        );
+        expect(Redacted.value(credentials.dockerHub!.token)).toBe(
+            "docker-token-sentinel"
+        );
+        expect(Redacted.value(credentials.github!.username)).toBe("github-user-sentinel");
+        expect(Redacted.value(credentials.github!.token)).toBe("github-token-sentinel");
+        for (const secret of [
+            "docker-user-sentinel",
+            "docker-token-sentinel",
+            "github-user-sentinel",
+            "github-token-sentinel",
+        ]) {
+            expect(JSON.stringify(configuration)).not.toContain(secret);
+            expect(inspect(configuration)).not.toContain(secret);
+        }
+        expect(Object.isFrozen(credentials)).toBe(true);
+        expect(Object.isFrozen(credentials.dockerHub)).toBe(true);
+        expect(Object.isFrozen(credentials.github)).toBe(true);
+        expect(Object.isFrozen(credentials.dockerHub!.username)).toBe(true);
+        expect(Object.isFrozen(credentials.dockerHub!.token)).toBe(true);
+        expect(Object.isFrozen(credentials.github!.username)).toBe(true);
+        expect(Object.isFrozen(credentials.github!.token)).toBe(true);
+    });
+
+    test("requires each optional registry username and token as one complete pair", () => {
+        for (const [configuredField, missingField] of [
+            ["DOCKER_LOGIN", "DOCKER_TOKEN"],
+            ["DOCKER_TOKEN", "DOCKER_LOGIN"],
+            ["MIRA_GITHUB_USERNAME", "MIRA_GITHUB_TOKEN"],
+            ["MIRA_GITHUB_TOKEN", "MIRA_GITHUB_USERNAME"],
+        ] as const) {
+            const environment = validEnvironment();
+            environment[configuredField] = `${configuredField}-private-sentinel`;
+            const failure = configurationFailure(environment);
+
+            expect(failure).toBeInstanceOf(ApplicationConfigurationError);
+            expect(failure).toMatchObject({ field: missingField, reason: "missing" });
+            expect(String(failure)).not.toContain("private-sentinel");
+            expect(inspect(failure)).not.toContain("private-sentinel");
+            expect(JSON.stringify(failure)).not.toContain("private-sentinel");
+        }
+    });
+
+    test("rejects invalid registry credentials without retaining them", () => {
+        for (const [field, value, pairField, pairValue] of [
+            ["DOCKER_LOGIN", " docker-user-sentinel", "DOCKER_TOKEN", "token"],
+            ["DOCKER_TOKEN", "docker-token-sentinel\n", "DOCKER_LOGIN", "user"],
+            [
+                "MIRA_GITHUB_USERNAME",
+                "github-user-sentinel ",
+                "MIRA_GITHUB_TOKEN",
+                "token",
+            ],
+            [
+                "MIRA_GITHUB_TOKEN",
+                `${"github-token-sentinel".repeat(200)}x`,
+                "MIRA_GITHUB_USERNAME",
+                "user",
+            ],
+        ] as const) {
+            const environment = validEnvironment();
+            environment[field] = value;
+            environment[pairField] = pairValue;
+            const failure = configurationFailure(environment);
+
+            expect(failure).toBeInstanceOf(ApplicationConfigurationError);
+            expect(failure).toMatchObject({ field, reason: "invalid" });
+            expect(String(failure)).not.toContain("sentinel");
+            expect((failure as Error).stack ?? "").not.toContain("sentinel");
+            expect(inspect(failure)).not.toContain("sentinel");
+            expect(JSON.stringify(failure)).not.toContain("sentinel");
+            expect("cause" in (failure as object)).toBe(false);
         }
     });
 

@@ -13,6 +13,11 @@ import {
     authenticationTestUserId,
     openAuthenticationTestDatabase,
 } from "../security/testSupport/authentication.ts";
+import {
+    dockerFreeJobActionDefinitions,
+    dockerOverviewCacheJobScheduleId,
+    dockerUpdaterJobScheduleId,
+} from "./actionRegistry.ts";
 import { JobConflictError, JobValidationError } from "./errors.ts";
 import type {
     JobRunEventRecord,
@@ -83,6 +88,53 @@ function scheduledRun(schedule: ScheduledJobRecord, at: Date, id: string): JobRu
 }
 
 describe("durable jobs service", () => {
+    test("converges on Docker-free schedules in either development startup order", async () => {
+        const actionDefinitionsByProcess = Object.freeze({
+            web: dockerFreeJobActionDefinitions,
+            worker: dockerFreeJobActionDefinitions,
+        });
+        const startupOrders = [
+            ["web", "worker"],
+            ["worker", "web"],
+        ] as const;
+
+        for (const startupOrder of startupOrders) {
+            const fixture = await openAuthenticationTestDatabase(authenticationTestNow);
+            const repository = createJobRepository(
+                fixture.database.orm,
+                testImmediateDatabaseWriteAdmission
+            );
+            const generateId = createIdGenerator();
+
+            try {
+                for (const processRole of startupOrder) {
+                    await reconcileJobSchedules({
+                        actionDefinitions: actionDefinitionsByProcess[processRole],
+                        generateId,
+                        nowMs: serviceNowMs,
+                        repository,
+                    });
+                }
+
+                expect(
+                    repository.findSchedule(dockerOverviewCacheJobScheduleId)
+                ).toBeUndefined();
+                expect(
+                    repository.findSchedule(dockerUpdaterJobScheduleId)
+                ).toBeUndefined();
+                expect(
+                    dockerFreeJobActionDefinitions.every(
+                        ({ actionKey, scheduleId }) =>
+                            repository.findSchedule(scheduleId)?.schedule.actionKey ===
+                            actionKey
+                    )
+                ).toBe(true);
+            } finally {
+                fixture.database.sqlite.close(true);
+            }
+        }
+    });
+
     test("accepts a full-form cadence edit while an enabled schedule stays enabled", async () => {
         const fixture = await openAuthenticationTestDatabase(authenticationTestNow);
         const repository = createJobRepository(
