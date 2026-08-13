@@ -65,6 +65,7 @@ interface SubscribeToJobRunsInput extends JobRunRealtimeObserver {
 /** Deterministic transport and filesystem seams used only by focused smoke tests. */
 export interface ProductionDeliverySmokeTestHooks {
     readonly afterDocumentationOpen?: () => Promise<void> | void;
+    readonly authoritySmoke?: typeof runProductionAuthoritySmoke;
     readonly fetch?: ProductionDeliverySmokeFetch;
     readonly subscribeToJobRuns?: (
         input: SubscribeToJobRunsInput
@@ -388,7 +389,7 @@ export async function runProductionDeliveryTargetSmoke(
         ) {
             throw failure();
         }
-        await runProductionAuthoritySmoke();
+        await (testHooks.authoritySmoke ?? runProductionAuthoritySmoke)();
 
         const frontend = await fetcher(baseUrl, {
             headers,

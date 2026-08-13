@@ -51,7 +51,7 @@ describe("generated contract documentation", () => {
             "| `MIRA_DASHBOARD_TOTP_KEYRING` | `totpKeyring` | `json-secret`; values withheld | Version 1 JSON with one to eight unique AES-256 keys and one active key, at most 4096 code units. | Required; value withheld | `web` | Yes | Presence only |"
         );
         expect(configurationDocumentation).toContain(
-            "| `ELEVENLABS_API_KEY` | `elevenLabsApiKey` | `opaque-secret`; values withheld | When present, a trimmed nonblank control-safe secret at most 4096 code units; never persisted, logged, or browser-exposed. | Optional; no default | `web` | Yes | None |"
+            "| `ELEVENLABS_API_KEY` | `elevenLabsApiKey` | `opaque-secret`; values withheld | When present, a trimmed nonblank control-safe secret at most 4096 code units; never persisted, logged, or browser-exposed. | Optional; no default | `web`, `worker` | Yes | None |"
         );
         expect(configurationDocumentation).toContain(
             "| `MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD` | `databaseObservabilityPassword` | `opaque-secret`; values withheld | When present, a trimmed nonblank opaque credential at most 4096 code units; no database, container, service, project, image, host, or port value is accepted, and the credential is never persisted, logged, or browser-exposed. | Optional; no default | `worker` | Yes | None |"

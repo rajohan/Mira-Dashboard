@@ -19,6 +19,8 @@ describe("application configuration registry", () => {
             "MIRA_DASHBOARD_PUBLIC_ORIGIN",
             "MIRA_DASHBOARD_TRUSTED_PROXY_IPS",
             "ELEVENLABS_API_KEY",
+            "OPENROUTER_API_KEY",
+            "SYNTHETIC_API_KEY",
             "MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD",
             "DOCKER_LOGIN",
             "DOCKER_TOKEN",
@@ -37,7 +39,7 @@ describe("application configuration registry", () => {
             "MIRA_DASHBOARD_TOTP_KEYRING",
             "MIRA_DASHBOARD_LOG_LEVEL",
         ]);
-        expect(applicationConfigurationRegistry).toHaveLength(25);
+        expect(applicationConfigurationRegistry).toHaveLength(27);
         expect(
             applicationConfigurationRegistry
                 .map((entry) => entry.environmentName)
@@ -82,6 +84,8 @@ describe("application configuration registry", () => {
                 .map((entry) => entry.environmentName)
         ).toEqual([
             "ELEVENLABS_API_KEY",
+            "OPENROUTER_API_KEY",
+            "SYNTHETIC_API_KEY",
             "MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD",
             "DOCKER_LOGIN",
             "DOCKER_TOKEN",
@@ -127,8 +131,10 @@ describe("application configuration registry", () => {
             NODE_ENV: "nodeEnvironment",
             OPENCLAW_GATEWAY_TOKEN: "gatewayToken",
             OPENCLAW_GATEWAY_URL: "gatewayUrl",
+            OPENROUTER_API_KEY: "quotaCredentials.openRouter",
             PORT: "port",
             RAJOHAN_GITHUB_TOKEN: "githubCredentials.reviewerToken",
+            SYNTHETIC_API_KEY: "quotaCredentials.synthetic",
         });
     });
 
@@ -158,6 +164,9 @@ describe("application configuration registry", () => {
             "MIRA_DASHBOARD_OPENCLAW_ROOT",
             "MIRA_DASHBOARD_WORKSPACE_ROOT",
             "PORT",
+            "ELEVENLABS_API_KEY",
+            "OPENROUTER_API_KEY",
+            "SYNTHETIC_API_KEY",
             "MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD",
             "DOCKER_LOGIN",
             "DOCKER_TOKEN",
@@ -174,6 +183,9 @@ describe("application configuration registry", () => {
         expect(workerEnvironment).toHaveProperty(
             "MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD"
         );
+        expect(workerEnvironment).toHaveProperty("ELEVENLABS_API_KEY");
+        expect(workerEnvironment).toHaveProperty("OPENROUTER_API_KEY");
+        expect(workerEnvironment).toHaveProperty("SYNTHETIC_API_KEY");
         expect(workerEnvironment).toHaveProperty("DOCKER_LOGIN");
         expect(workerEnvironment).toHaveProperty("DOCKER_TOKEN");
         expect(workerEnvironment).toHaveProperty("MIRA_GITHUB_USERNAME");
@@ -181,7 +193,6 @@ describe("application configuration registry", () => {
         expect(workerEnvironment).toHaveProperty("RAJOHAN_GITHUB_TOKEN");
         expect(workerEnvironment).toHaveProperty("MOLTBOOK_API_KEY");
         expect(workerEnvironment).not.toHaveProperty("MIRA_DASHBOARD_TOTP_KEYRING");
-        expect(workerEnvironment).not.toHaveProperty("ELEVENLABS_API_KEY");
 
         for (const environmentName of [
             "DOCKER_LOGIN",
