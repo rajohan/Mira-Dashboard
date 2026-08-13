@@ -36,6 +36,10 @@ const developmentStateMarkerFileName = ".mira-dashboard-development-state.json";
 const simulatorOwner = "mira-dashboard-source-development-v1";
 const simulatorDirectoryName = "development-authority-simulator";
 const gatewayJournalFileName = "gateway-mutations.ndjson";
+const simulatedCronInventoryMaximum = 1000;
+const simulatedCronInventoryMaximumBytes = 32 * 1024 * 1024;
+const simulatedCronSnapshotMaximum = 4;
+const simulatedCronUpstreamPageMaximum = 100;
 
 const developmentStateMarkerSchema = v.strictObject({
     formatVersion: v.literal(1),
@@ -75,8 +79,24 @@ interface CompanionExchange {
     readonly ts: number;
 }
 
+interface SimulatedCronListSnapshot {
+    readonly jobs: readonly unknown[];
+    readonly upstreamRevision: string;
+}
+
+interface SimulatedCronListPage {
+    readonly hasMore: boolean;
+    readonly jobs: readonly unknown[];
+    readonly limit: number;
+    readonly nextOffset: number | null;
+    readonly offset: number;
+    readonly snapshotRevision: string;
+    readonly total: number;
+}
+
 interface SimulatorState {
     readonly companionExchanges: Map<string, readonly CompanionExchange[]>;
+    readonly cronListSnapshots: Map<string, Promise<SimulatedCronListSnapshot>>;
     readonly observedResponses: Map<string, unknown>;
     readonly removedCronJobIds: Set<string>;
     readonly simulatedResponses: Map<string, unknown>;
@@ -161,41 +181,239 @@ function simulatedCronSnapshotRevision(
         .digest("base64url")}`;
 }
 
-function projectCronListAfterRemovals(response: unknown, state: SimulatorState): unknown {
-    if (state.removedCronJobIds.size === 0) return response;
+function cronListSnapshotKey(parameters: Readonly<Record<string, unknown>>): string {
+    const { limit: _limit, offset: _offset, ...filters } = parameters;
+    return JSON.stringify(filters);
+}
+
+function cronListPageInteger(
+    parameters: Readonly<Record<string, unknown>>,
+    key: "limit" | "offset",
+    minimum: number,
+    maximum: number
+): number {
+    const value = parameters[key];
+    if (
+        typeof value !== "number" ||
+        !Number.isSafeInteger(value) ||
+        value < minimum ||
+        value > maximum
+    ) {
+        throw new TypeError("Development cron list parameters are invalid");
+    }
+    return value;
+}
+
+function assertCronUpstreamPage(
+    response: unknown,
+    expectedOffset: number,
+    admittedBytes: number,
+    ids: Set<string>,
+    expectedRevision?: string
+): Readonly<{
+    jobs: readonly unknown[];
+    nextOffset: number | null;
+    snapshotRevision: string;
+    total: number;
+}> {
     const page = asRecord(response);
-    if (page === undefined || !Array.isArray(page.jobs)) return response;
-    const jobs = page.jobs.filter((job) => {
+    if (page === undefined) {
+        throw new TypeError("Development cron inventory is invalid");
+    }
+    const rawJobs = page.jobs;
+    if (!Array.isArray(rawJobs)) {
+        throw new TypeError("Development cron inventory is invalid");
+    }
+    const jobs: readonly unknown[] = rawJobs;
+    const { hasMore, limit, nextOffset, offset, snapshotRevision, total } = page;
+    const consumed = expectedOffset + jobs.length;
+    if (
+        typeof hasMore !== "boolean" ||
+        limit !== simulatedCronUpstreamPageMaximum ||
+        offset !== expectedOffset ||
+        typeof total !== "number" ||
+        !Number.isSafeInteger(total) ||
+        total < consumed ||
+        total > simulatedCronInventoryMaximum ||
+        jobs.length > simulatedCronUpstreamPageMaximum ||
+        (hasMore && jobs.length === 0) ||
+        hasMore !== consumed < total ||
+        nextOffset !== (hasMore ? consumed : null) ||
+        typeof snapshotRevision !== "string" ||
+        (expectedRevision !== undefined && snapshotRevision !== expectedRevision) ||
+        admittedBytes > simulatedCronInventoryMaximumBytes
+    ) {
+        throw new TypeError("Development cron inventory is invalid");
+    }
+    for (const job of jobs) {
+        const id = asRecord(job)?.id;
+        if (typeof id !== "string" || ids.has(id)) {
+            throw new TypeError("Development cron inventory is invalid");
+        }
+        ids.add(id);
+    }
+    return Object.freeze({
+        jobs: Object.freeze([...jobs]),
+        nextOffset: typeof nextOffset === "number" ? nextOffset : null,
+        snapshotRevision,
+        total,
+    });
+}
+
+async function materializeCronListSnapshot(
+    parameters: Readonly<Record<string, unknown>>,
+    requestOptions: PersistentGatewayRequestOptions,
+    read: (
+        parameters: Readonly<Record<string, unknown>>,
+        requestOptions: PersistentGatewayRequestOptions
+    ) => Promise<unknown>
+): Promise<SimulatedCronListSnapshot> {
+    const { limit: _limit, offset: _offset, ...filters } = parameters;
+    const timeoutMs = requestOptions.timeoutMs;
+    if (timeoutMs !== undefined && (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1)) {
+        throw new TypeError("Development cron list timeout is invalid");
+    }
+    let signal = requestOptions.signal;
+    if (timeoutMs !== undefined) {
+        const deadlineSignal = AbortSignal.timeout(timeoutMs);
+        signal =
+            signal === undefined
+                ? deadlineSignal
+                : AbortSignal.any([signal, deadlineSignal]);
+    }
+    const upstreamOptions: PersistentGatewayRequestOptions =
+        signal === undefined ? {} : { signal };
+    const jobs: unknown[] = [];
+    const ids = new Set<string>();
+    let admittedBytes = 0;
+    let expectedRevision: string | undefined;
+    let expectedTotal: number | undefined;
+    let offset = 0;
+    while (true) {
+        signal?.throwIfAborted();
+        const response = await read(
+            {
+                ...filters,
+                limit: simulatedCronUpstreamPageMaximum,
+                offset,
+            },
+            upstreamOptions
+        );
+        admittedBytes += responseByteLength(response);
+        const page = assertCronUpstreamPage(
+            response,
+            offset,
+            admittedBytes,
+            ids,
+            expectedRevision
+        );
+        expectedRevision = page.snapshotRevision;
+        expectedTotal ??= page.total;
+        if (page.total !== expectedTotal) {
+            throw new TypeError("Development cron inventory is invalid");
+        }
+        jobs.push(...page.jobs);
+        if (page.nextOffset === null) break;
+        offset = page.nextOffset;
+    }
+    signal?.throwIfAborted();
+    if (jobs.length !== expectedTotal || expectedRevision === undefined) {
+        throw new TypeError("Development cron inventory is invalid");
+    }
+    return Object.freeze({
+        jobs: Object.freeze(jobs),
+        upstreamRevision: expectedRevision,
+    });
+}
+
+function projectCronListSnapshot(
+    snapshot: SimulatedCronListSnapshot,
+    parameters: Readonly<Record<string, unknown>>,
+    state: SimulatorState
+): Readonly<SimulatedCronListPage> {
+    const limit = cronListPageInteger(parameters, "limit", 1, 100);
+    const offset = cronListPageInteger(
+        parameters,
+        "offset",
+        0,
+        simulatedCronInventoryMaximum
+    );
+    const filteredJobs = snapshot.jobs.filter((job) => {
         const id = asRecord(job)?.id;
         return typeof id !== "string" || !state.removedCronJobIds.has(id);
     });
-    const removedCount = page.jobs.length - jobs.length;
-    const offset = page.offset;
-    const total = page.total;
-    if (
-        typeof offset !== "number" ||
-        !Number.isSafeInteger(offset) ||
-        offset < 0 ||
-        typeof total !== "number" ||
-        !Number.isSafeInteger(total) ||
-        total < 0
-    ) {
-        return Object.freeze({ ...page, jobs: Object.freeze(jobs) });
-    }
+    const jobs = filteredJobs.slice(offset, offset + limit);
     const consumed = offset + jobs.length;
-    const projectedTotal = Math.max(consumed, total - removedCount);
-    const hasMore = consumed < projectedTotal;
+    const total = filteredJobs.length;
+    const hasMore = consumed < total;
     return Object.freeze({
-        ...page,
         hasMore,
         jobs: Object.freeze(jobs),
+        limit,
         nextOffset: hasMore ? consumed : null,
+        offset,
         snapshotRevision: simulatedCronSnapshotRevision(
-            page.snapshotRevision,
+            snapshot.upstreamRevision,
             state.removedCronJobIds
         ),
-        total: projectedTotal,
+        total,
     });
+}
+
+function storeCronListSnapshot(
+    state: SimulatorState,
+    key: string,
+    pendingSnapshot: Promise<SimulatedCronListSnapshot>
+): void {
+    state.cronListSnapshots.delete(key);
+    while (state.cronListSnapshots.size >= simulatedCronSnapshotMaximum) {
+        const oldestKey = state.cronListSnapshots.keys().next().value;
+        if (typeof oldestKey !== "string") break;
+        state.cronListSnapshots.delete(oldestKey);
+    }
+    state.cronListSnapshots.set(key, pendingSnapshot);
+}
+
+async function simulatedCronListRead(
+    state: SimulatorState,
+    parameters: Readonly<Record<string, unknown>>,
+    requestOptions: PersistentGatewayRequestOptions,
+    read: (
+        parameters: Readonly<Record<string, unknown>>,
+        requestOptions: PersistentGatewayRequestOptions
+    ) => Promise<unknown>
+): Promise<unknown> {
+    cronListPageInteger(parameters, "limit", 1, 100);
+    const offset = cronListPageInteger(
+        parameters,
+        "offset",
+        0,
+        simulatedCronInventoryMaximum
+    );
+    const key = cronListSnapshotKey(parameters);
+    let pendingSnapshot = state.cronListSnapshots.get(key);
+    if (offset === 0 || pendingSnapshot === undefined) {
+        pendingSnapshot = materializeCronListSnapshot(parameters, requestOptions, read);
+        storeCronListSnapshot(state, key, pendingSnapshot);
+    }
+    try {
+        const response = projectCronListSnapshot(
+            await pendingSnapshot,
+            parameters,
+            state
+        );
+        requestOptions.signal?.throwIfAborted();
+        requestOptions.onResponseBytes?.(responseByteLength(response));
+        if (!response.hasMore && state.cronListSnapshots.get(key) === pendingSnapshot) {
+            state.cronListSnapshots.delete(key);
+        }
+        return response;
+    } catch (error) {
+        if (state.cronListSnapshots.get(key) === pendingSnapshot) {
+            state.cronListSnapshots.delete(key);
+        }
+        throw error;
+    }
 }
 
 function deepMerge(
@@ -535,9 +753,7 @@ function observedGatewayRead(
         }
     }
     const key = readKey(method, parameters);
-    return observedRead(state, key, read).then((response) =>
-        method === "cron.list" ? projectCronListAfterRemovals(response, state) : response
-    );
+    return observedRead(state, key, read);
 }
 
 /**
@@ -560,6 +776,7 @@ export function createSourceDevelopmentGatewayTransport(
     const nowMs = options.nowMs ?? Date.now;
     const state: SimulatorState = {
         companionExchanges: new Map(),
+        cronListSnapshots: new Map(),
         observedResponses: new Map(),
         removedCronJobIds: new Set(),
         simulatedResponses: new Map(),
@@ -585,6 +802,19 @@ export function createSourceDevelopmentGatewayTransport(
             return options.readTransport.snapshot;
         },
         request(method, parameters, requestOptions) {
+            if (method === "cron.list") {
+                return simulatedCronListRead(
+                    state,
+                    parameters,
+                    requestOptions ?? {},
+                    (upstreamParameters, upstreamOptions) =>
+                        options.readTransport.request(
+                            method,
+                            upstreamParameters,
+                            upstreamOptions
+                        )
+                );
+            }
             return observedGatewayRead(state, method, parameters, () =>
                 options.readTransport.request(method, parameters, requestOptions)
             );

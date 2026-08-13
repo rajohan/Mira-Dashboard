@@ -12,7 +12,10 @@ import {
     persistentGatewayOpenClawSettingsWriteMethods,
     persistentGatewayTaskWriteMethods,
 } from "./persistentGatewayProtocol.ts";
-import type { PersistentGatewayTransport } from "./persistentGatewayTransport.ts";
+import type {
+    PersistentGatewayRequestOptions,
+    PersistentGatewayTransport,
+} from "./persistentGatewayTransport.ts";
 import { createPersistentOpenClawCronProvider } from "./persistentOpenClawCronProvider.ts";
 import { createSourceDevelopmentGatewayTransport } from "./sourceDevelopmentGatewayTransport.ts";
 
@@ -119,13 +122,13 @@ function readTransport(calls: string[]): PersistentGatewayTransport {
     return Object.freeze(transport);
 }
 
-function upstreamCronJob(): Readonly<Record<string, unknown>> {
+function upstreamCronJob(id = "cron-1"): Readonly<Record<string, unknown>> {
     return Object.freeze({
         configRevision: "revision-1",
         createdAtMs: 1_800_000_000_000,
         enabled: true,
-        id: "cron-1",
-        name: "Development cron",
+        id,
+        name: `Development cron ${id}`,
         payload: Object.freeze({
             kind: "agentTurn",
             message: "Exercise development parity.",
@@ -142,9 +145,13 @@ function upstreamCronJob(): Readonly<Record<string, unknown>> {
     });
 }
 
-function cronReadTransport(calls: string[]): PersistentGatewayTransport {
+function cronReadTransport(
+    calls: string[],
+    jobs: readonly Readonly<Record<string, unknown>>[] = [upstreamCronJob()],
+    listRequests: Array<Readonly<{ limit: number; offset: number }>> = [],
+    listRequestOptions: PersistentGatewayRequestOptions[] = []
+): PersistentGatewayTransport {
     const base = readTransport(calls);
-    const job = upstreamCronJob();
     const request: PersistentGatewayTransport["request"] = (
         method,
         parameters,
@@ -155,16 +162,25 @@ function cronReadTransport(calls: string[]): PersistentGatewayTransport {
         if (method === "system.info") {
             response = Object.freeze({ processInstanceId: "live-process" });
         } else if (method === "cron.get") {
-            response = job;
+            response =
+                jobs.find((job) => asTestRecord(job).id === parameters.id) ??
+                Object.freeze({});
         } else if (method === "cron.list") {
+            const limit = Number(parameters.limit);
+            const offset = Number(parameters.offset);
+            listRequests.push(Object.freeze({ limit, offset }));
+            listRequestOptions.push(options ?? {});
+            const pageJobs = jobs.slice(offset, offset + limit);
+            const consumed = offset + pageJobs.length;
+            const hasMore = consumed < jobs.length;
             response = Object.freeze({
-                hasMore: false,
-                jobs: Object.freeze([job]),
-                limit: parameters.limit,
-                nextOffset: null,
-                offset: parameters.offset,
-                snapshotRevision: `sha256:${"a".repeat(43)}`,
-                total: 1,
+                hasMore,
+                jobs: Object.freeze(pageJobs),
+                limit,
+                nextOffset: hasMore ? consumed : null,
+                offset,
+                snapshotRevision: `sha256:${"a".repeat(40)}${String(jobs.length).padStart(3, "0")}`,
+                total: jobs.length,
             });
         }
         options?.onResponseBytes?.(Buffer.byteLength(JSON.stringify(response), "utf8"));
@@ -174,6 +190,11 @@ function cronReadTransport(calls: string[]): PersistentGatewayTransport {
         ...base,
         request,
     });
+}
+
+function asTestRecord(value: unknown): Readonly<Record<string, unknown>> {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) return {};
+    return value as Readonly<Record<string, unknown>>;
 }
 
 describe("source-development Gateway transport", () => {
@@ -227,6 +248,153 @@ describe("source-development Gateway transport", () => {
         });
         expect(calls).toEqual(["read:system.info", "read:cron.get", "read:cron.list"]);
         expect(calls.some((call) => call.startsWith("REAL-WRITE:"))).toBeFalse();
+    });
+
+    test("materializes filtered cron pagination without duplicating the item after a tombstone", async () => {
+        const stateRoot = await developmentStateRoot();
+        const calls: string[] = [];
+        const listRequests: Array<Readonly<{ limit: number; offset: number }>> = [];
+        const jobs = Array.from({ length: 101 }, (_, index) =>
+            upstreamCronJob(`cron-${String(index).padStart(3, "0")}`)
+        );
+        const transport = createSourceDevelopmentGatewayTransport({
+            readTransport: cronReadTransport(calls, jobs, listRequests),
+            stateRoot,
+        });
+        const provider = createPersistentOpenClawCronProvider(transport);
+        await transport.requestAdmin("cron.remove", { id: "cron-000" });
+        const input = {
+            compact: false,
+            enabled: "all",
+            includeDeliveryPreviews: false,
+            lastRunStatus: "all",
+            limit: 100,
+            scheduleKind: "all",
+            sortBy: "nextRunAtMs",
+            sortDir: "asc",
+        } as const;
+
+        const first = await provider.list({ ...input, offset: 0 });
+        const second = await provider.list({ ...input, offset: 100 });
+        const firstIds = first.jobs.map(({ id }) => id);
+        const secondIds = second.jobs.map(({ id }) => id);
+
+        expect(firstIds).toEqual(
+            jobs.slice(1).map((job) => String(asTestRecord(job).id))
+        );
+        expect(secondIds).toEqual([]);
+        expect(new Set([...firstIds, ...secondIds]).size).toBe(100);
+        expect(first).toMatchObject({
+            hasMore: false,
+            limit: 100,
+            nextOffset: null,
+            offset: 0,
+            total: 100,
+        });
+        expect(second).toMatchObject({
+            hasMore: false,
+            limit: 100,
+            nextOffset: null,
+            offset: 100,
+            total: 100,
+        });
+        expect(first.snapshotRevision).toBe(second.snapshotRevision);
+        expect(first.snapshotRevision).not.toBe(`sha256:${"a".repeat(43)}`);
+        expect(listRequests).toEqual([
+            { limit: 100, offset: 0 },
+            { limit: 100, offset: 100 },
+            { limit: 100, offset: 0 },
+            { limit: 100, offset: 100 },
+        ]);
+        expect(calls).toEqual([
+            "read:cron.list",
+            "read:cron.list",
+            "read:cron.list",
+            "read:cron.list",
+        ]);
+        expect(calls.some((call) => call.startsWith("REAL-WRITE:"))).toBeFalse();
+    });
+
+    test("retains one continuation snapshot but refreshes every offset-zero inventory", async () => {
+        const stateRoot = await developmentStateRoot();
+        const calls: string[] = [];
+        const listRequests: Array<Readonly<{ limit: number; offset: number }>> = [];
+        const listRequestOptions: PersistentGatewayRequestOptions[] = [];
+        const liveJobs = Array.from({ length: 101 }, (_, index) =>
+            upstreamCronJob(`cron-${String(index).padStart(3, "0")}`)
+        );
+        const transport = createSourceDevelopmentGatewayTransport({
+            readTransport: cronReadTransport(
+                calls,
+                liveJobs,
+                listRequests,
+                listRequestOptions
+            ),
+            stateRoot,
+        });
+        const provider = createPersistentOpenClawCronProvider(transport);
+        const input = {
+            compact: false,
+            enabled: "all",
+            includeDeliveryPreviews: false,
+            lastRunStatus: "all",
+            limit: 100,
+            scheduleKind: "all",
+            sortBy: "nextRunAtMs",
+            sortDir: "asc",
+        } as const;
+
+        const first = await provider.list({ ...input, offset: 0 });
+        liveJobs.push(upstreamCronJob("cron-101"));
+        const continuation = await provider.list({ ...input, offset: 100 });
+        const refreshed = await provider.list({ ...input, offset: 0 });
+
+        expect(first).toMatchObject({
+            hasMore: true,
+            nextOffset: 100,
+            offset: 0,
+            total: 101,
+        });
+        expect(continuation).toMatchObject({
+            hasMore: false,
+            nextOffset: null,
+            offset: 100,
+            total: 101,
+        });
+        expect(continuation.jobs.map(({ id }) => id)).toEqual(["cron-100"]);
+        expect(first.snapshotRevision).toBe(continuation.snapshotRevision);
+        expect(refreshed).toMatchObject({
+            hasMore: true,
+            nextOffset: 100,
+            offset: 0,
+            total: 102,
+        });
+        expect(refreshed.snapshotRevision).not.toBe(first.snapshotRevision);
+        expect(
+            new Set([
+                ...first.jobs.map(({ id }) => id),
+                ...continuation.jobs.map(({ id }) => id),
+            ]).size
+        ).toBe(101);
+        expect(listRequests).toEqual([
+            { limit: 100, offset: 0 },
+            { limit: 100, offset: 100 },
+            { limit: 100, offset: 0 },
+            { limit: 100, offset: 100 },
+        ]);
+        expect(listRequestOptions).toHaveLength(4);
+        expect(
+            listRequestOptions.every(({ timeoutMs }) => timeoutMs === undefined)
+        ).toBeTrue();
+        expect(listRequestOptions[0]?.signal).toBe(listRequestOptions[1]?.signal);
+        expect(listRequestOptions[2]?.signal).toBe(listRequestOptions[3]?.signal);
+        expect(listRequestOptions[0]?.signal).not.toBe(listRequestOptions[2]?.signal);
+        expect(calls).toEqual([
+            "read:cron.list",
+            "read:cron.list",
+            "read:cron.list",
+            "read:cron.list",
+        ]);
     });
 
     test("delegates reads but simulates every write method under marked development state", async () => {
