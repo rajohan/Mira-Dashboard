@@ -43,7 +43,7 @@ import {
 
 const provisioningRoot = path.join(
     import.meta.dir,
-    "provisioning/database-observability",
+    "provisioning/database-observability"
 );
 
 interface ProvisioningManifest {
@@ -71,7 +71,7 @@ async function readProvisioningFile(fileName: string): Promise<string> {
 
 function catalogJson(
     names: readonly string[],
-    options: { readonly templateNames?: ReadonlySet<string> } = {},
+    options: { readonly templateNames?: ReadonlySet<string> } = {}
 ): string {
     return JSON.stringify(
         names.map((name, index) => [
@@ -80,7 +80,7 @@ function catalogJson(
             "1",
             options.templateNames?.has(name) ?? false,
             true,
-        ]),
+        ])
     );
 }
 
@@ -99,7 +99,7 @@ function catalogDigest(catalog: string): string {
             name,
             oid,
             ownerOid,
-        }),
+        })
     );
     return createHash("sha256")
         .update("mira-dashboard-database-catalog-v1\0", "utf8")
@@ -127,7 +127,7 @@ function provisioningContainerId(index: number): string {
 
 function provisioningDockerRow(
     index: number,
-    overrides: Partial<ProvisioningDockerFixtureRow> = {},
+    overrides: Partial<ProvisioningDockerFixtureRow> = {}
 ): ProvisioningDockerFixtureRow {
     return Object.freeze({
         capability: null,
@@ -217,7 +217,7 @@ function provisioningProcessFixture(options: {
             ]);
             if (request.argv[2] === "ps") {
                 return successfulProvisioningProcessResult(
-                    snapshot.map(({ id }) => JSON.stringify(id)).join("\n"),
+                    snapshot.map(({ id }) => JSON.stringify(id)).join("\n")
                 );
             }
             if (request.argv[2] !== "inspect") {
@@ -225,7 +225,7 @@ function provisioningProcessFixture(options: {
             }
             snapshotIndex += 1;
             return successfulProvisioningProcessResult(
-                snapshot.map((row) => projectedProvisioningInspectLine(row)).join("\n"),
+                snapshot.map((row) => projectedProvisioningInspectLine(row)).join("\n")
             );
         }
         if (request.stdin?.includes("server_version_num") === true) {
@@ -248,7 +248,7 @@ function provisioningProcessFixture(options: {
                         sequenceIndex(options.systemIdentifiers)
                     ] ?? "7600974291849326629",
                     "180004",
-                ])}\n`,
+                ])}\n`
             );
         }
         if (request.stdin?.includes("pg_catalog.json_agg(discovered.entry") === true) {
@@ -271,8 +271,8 @@ describe("database observability provisioning", () => {
         expect(databaseObservabilityProvisioningReleaseArtifactPaths).toEqual(
             entries.map(
                 (fileName) =>
-                    `scripts/delivery/provisioning/database-observability/${fileName}`,
-            ),
+                    `scripts/delivery/provisioning/database-observability/${fileName}`
+            )
         );
         for (const entry of entries) {
             const status = await lstat(path.join(provisioningRoot, entry), {
@@ -289,7 +289,7 @@ describe("database observability provisioning", () => {
 
     test("declares bounded catalog discovery and topology-independent ceilings", async () => {
         const manifest = JSON.parse(
-            await readProvisioningFile("manifest.json"),
+            await readProvisioningFile("manifest.json")
         ) as ProvisioningManifest;
         expect(provisioningDatabaseMaximum).toBe(databaseObservabilityDatabaseMaximum);
         expect(manifest.formatVersion).toBe(8);
@@ -379,7 +379,7 @@ describe("database observability provisioning", () => {
             target: "single healthy PostgreSQL service_healthy dependency of the opted-in PgBouncer capability",
         });
         expect(manifest.postgresql.observerConnectionLimit).toBe(
-            databaseObservabilityObserverConnectionLimit,
+            databaseObservabilityObserverConnectionLimit
         );
         expect(manifest.postgresql.statementStatistics).toEqual({
             database: "mira_dashboard_observability",
@@ -400,19 +400,19 @@ describe("database observability provisioning", () => {
             virtualDatabase: databaseObservabilityPgBouncerVirtualDatabase,
         });
         expect(manifest.torrentViews.map(({ database }) => database)).toEqual(
-            databaseObservabilityTorrentCountDatabases,
+            databaseObservabilityTorrentCountDatabases
         );
         expect(JSON.stringify(manifest)).not.toMatch(
-            /aiomanager|aiometadata|aiostreams|authelia|crowdsec|metabase|speedtest_tracker/u,
+            /aiomanager|aiometadata|aiostreams|authelia|crowdsec|metabase|speedtest_tracker/u
         );
         expect(manifest.verifyOrder).toContain(
-            "runProvisioning.ts verify-current-catalog --approved after initial activation",
+            "runProvisioning.ts verify-current-catalog --approved after initial activation"
         );
         expect(manifest.activationOrder[0]).toBe(
-            "runProvisioning.ts activate-current-catalog --approved",
+            "runProvisioning.ts activate-current-catalog --approved"
         );
         expect(JSON.stringify(manifest)).not.toContain(
-            "mira_dashboard_database_access_reconciler",
+            "mira_dashboard_database_access_reconciler"
         );
         expect(JSON.stringify(manifest)).not.toMatch(/15-second|reconciliation-loop/u);
     });
@@ -420,11 +420,11 @@ describe("database observability provisioning", () => {
     test("keeps names dynamic across all provisioning artifacts except torrent views", async () => {
         const entries = await readdir(provisioningRoot);
         const fileContents = await Promise.all(
-            entries.map((entry) => readProvisioningFile(entry)),
+            entries.map((entry) => readProvisioningFile(entry))
         );
         const contents = fileContents.join("\n");
         expect(contents).not.toMatch(
-            /aiomanager|aiometadata|aiostreams|authelia|crowdsec|metabase|speedtest_tracker/u,
+            /aiomanager|aiometadata|aiostreams|authelia|crowdsec|metabase|speedtest_tracker/u
         );
         expect(contents).not.toContain(String.raw`\connect`);
         expect(contents).not.toContain("127.0.0.1");
@@ -437,15 +437,15 @@ describe("database observability provisioning", () => {
     test("quarantines exact roles and refuses role-GUC, membership, and default-ACL drift", async () => {
         const apply = await readProvisioningFile("apply-cluster.sql");
         const accessApply = await readProvisioningFile(
-            "apply-database-access-reconciler.sql",
+            "apply-database-access-reconciler.sql"
         );
         const accessVerify = await readProvisioningFile(
-            "verify-database-access-reconciler.sql",
+            "verify-database-access-reconciler.sql"
         );
         const cluster = await readProvisioningFile("verify-cluster.sql");
         const database = await readProvisioningFile("verify-database.sql");
         expect(apply).toContain(
-            `NOREPLICATION NOBYPASSRLS CONNECTION LIMIT ${String(databaseObservabilityObserverConnectionLimit)}`,
+            `NOREPLICATION NOBYPASSRLS CONNECTION LIMIT ${String(databaseObservabilityObserverConnectionLimit)}`
         );
         expect(apply).toContain("ALTER ROLE mira_dashboard_observer RESET ALL;");
         expect(apply).toContain("SET default_transaction_read_only = on;");
@@ -458,14 +458,14 @@ describe("database observability provisioning", () => {
         expect(database).toContain("defaults.defaclrole = observer_oid");
         expect(database).toContain("grants.grantee <> 0");
         expect(database).toContain(
-            "pg_catalog.pg_has_role(observer_oid, grants.grantee, 'USAGE')",
+            "pg_catalog.pg_has_role(observer_oid, grants.grantee, 'USAGE')"
         );
         expect(database).toContain("routines.prosecdef");
         expect(database).toContain("pg_catalog.has_function_privilege(");
         expect(database).toContain("Database observability routine grants are invalid");
         expect(accessApply).toContain("REVOKE ALL PRIVILEGES ON DATABASE %I FROM PUBLIC");
         expect(accessApply).toContain(
-            "GRANT CONNECT ON DATABASE %I TO mira_dashboard_observer",
+            "GRANT CONNECT ON DATABASE %I TO mira_dashboard_observer"
         );
         expect(accessVerify).toContain("grants.grantee = 0");
         expect(accessVerify).toContain("databases.datistemplate");
@@ -476,7 +476,7 @@ describe("database observability provisioning", () => {
     test("installs one exact bounded database-owned access reconciler", async () => {
         const apply = await readProvisioningFile("apply-database-access-reconciler.sql");
         const verify = await readProvisioningFile(
-            "verify-database-access-reconciler.sql",
+            "verify-database-access-reconciler.sql"
         );
         const activation = await readProvisioningFile("activate-observer.sql");
         const body = apply.match(/AS \$reconcile\$(?<body>[\s\S]*?)\$reconcile\$/u)
@@ -487,14 +487,14 @@ describe("database observability provisioning", () => {
 
         expect(verify).toContain(digest);
         expect(apply.indexOf("$administrator_boundary$")).toBeLessThan(
-            apply.indexOf("CREATE SCHEMA IF NOT EXISTS"),
+            apply.indexOf("CREATE SCHEMA IF NOT EXISTS")
         );
         expect(apply).not.toContain("mira_dashboard_database_access_reconciler LOGIN");
         expect(
-            body.indexOf("observed_database_count > maximum_observed_databases"),
+            body.indexOf("observed_database_count > maximum_observed_databases")
         ).toBeLessThan(body.indexOf("FOR database_record IN"));
         expect(body).toContain(
-            "pg_catalog.pg_advisory_xact_lock(1296646465, 1128351300)",
+            "pg_catalog.pg_advisory_xact_lock(1296646465, 1128351300)"
         );
         expect(body).toContain("pg_catalog.format(");
         expect(body).toContain("DATABASE %I");
@@ -503,17 +503,17 @@ describe("database observability provisioning", () => {
         expect(apply).toContain("SET search_path TO pg_catalog");
         expect(verify).toContain("routine.proconfig IS DISTINCT FROM");
         expect(verify).toContain(
-            "pg_catalog.count(*) FROM pg_catalog.pg_proc AS routines",
+            "pg_catalog.count(*) FROM pg_catalog.pg_proc AS routines"
         );
         expect(activation).not.toContain(
-            "ALTER ROLE mira_dashboard_database_access_reconciler LOGIN;",
+            "ALTER ROLE mira_dashboard_database_access_reconciler LOGIN;"
         );
         expect(
-            activation.match(/\\ir verify-control-database-capability\.sql/gu),
+            activation.match(/\\ir verify-control-database-capability\.sql/gu)
         ).toHaveLength(1);
         expect(activation.match(/\\ir verify-control-database\.sql/gu)).toHaveLength(1);
         expect(activation).toContain(
-            "ALTER ROLE mira_dashboard_observer NOLOGIN\n  VALID UNTIL '1970-01-01 00:00:00+00';",
+            "ALTER ROLE mira_dashboard_observer NOLOGIN\n  VALID UNTIL '1970-01-01 00:00:00+00';"
         );
         expect(activation).toContain("observer.rolpassword NOT LIKE 'SCRAM-SHA-256$%'");
     });
@@ -525,7 +525,7 @@ describe("database observability provisioning", () => {
         expect(apply).toContain("classes.relnamespace = extensions.extnamespace");
         expect(apply).toContain("pg_catalog.format(");
         expect(apply).toContain(
-            "CREATE FUNCTION mira_dashboard_observability_capabilities.statement_metrics()",
+            "CREATE FUNCTION mira_dashboard_observability_capabilities.statement_metrics()"
         );
         expect(apply).toContain("SECURITY DEFINER");
         expect(apply).toContain("public.pg_stat_statements(false)");
@@ -544,48 +544,48 @@ describe("database observability provisioning", () => {
 
     test("creates and safely retains one exact physical control database capability", async () => {
         const applyCapability = await readProvisioningFile(
-            "apply-control-database-capability.sql",
+            "apply-control-database-capability.sql"
         );
         const applyControl = await readProvisioningFile("apply-control-database.sql");
         const verifyCapability = await readProvisioningFile(
-            "verify-control-database-capability.sql",
+            "verify-control-database-capability.sql"
         );
         const rollbackCapability = await readProvisioningFile(
-            "rollback-control-database-capability.sql",
+            "rollback-control-database-capability.sql"
         );
 
         expect(provisioningControlDatabase).toBe("mira_dashboard_observability");
         expect(applyCapability).toContain(
-            "CREATE DATABASE mira_dashboard_observability OWNER %I TEMPLATE template0 CONNECTION LIMIT 4 STRATEGY WAL_LOG",
+            "CREATE DATABASE mira_dashboard_observability OWNER %I TEMPLATE template0 CONNECTION LIMIT 4 STRATEGY WAL_LOG"
         );
         expect(applyCapability).toContain(String.raw`\gexec`);
         expect(applyCapability).toContain("TO :'apply_control_database_capability';");
         expect(applyCapability).toContain(
-            "pg_catalog.current_setting(\n      'mira_dashboard.apply_control_database_capability'",
+            "pg_catalog.current_setting(\n      'mira_dashboard.apply_control_database_capability'"
         );
         expect(applyControl).toContain("TO :'apply_statement_capability';");
         expect(
-            applyCapability.slice(applyCapability.indexOf("DO $approval_and_preflight$")),
+            applyCapability.slice(applyCapability.indexOf("DO $approval_and_preflight$"))
         ).not.toContain(":'apply_control_database_capability'");
         expect(
-            applyControl.slice(applyControl.indexOf("DO $approval_guard$")),
+            applyControl.slice(applyControl.indexOf("DO $approval_guard$"))
         ).not.toContain(":'apply_statement_capability'");
         expect(applyCapability.indexOf("$approval_and_preflight$")).toBeLessThan(
-            applyCapability.indexOf("CREATE DATABASE mira_dashboard_observability"),
+            applyCapability.indexOf("CREATE DATABASE mira_dashboard_observability")
         );
         expect(applyCapability).toContain("catalog_database_count > 80");
         expect(applyCapability).toContain("observed_database_count > 64");
         expect(applyControl.match(/CREATE EXTENSION/gu)).toHaveLength(1);
         expect(applyControl).toContain(
-            "CREATE EXTENSION IF NOT EXISTS pg_stat_statements WITH SCHEMA public;",
+            "CREATE EXTENSION IF NOT EXISTS pg_stat_statements WITH SCHEMA public;"
         );
         expect(verifyCapability).toContain("'pg_stat_statements:public'");
         expect(verifyCapability).toContain("'plpgsql:pg_catalog'");
         expect(verifyCapability).toContain(
-            "extensions.extowner IS DISTINCT FROM database_owner_oid",
+            "extensions.extowner IS DISTINCT FROM database_owner_oid"
         );
         expect(rollbackCapability).toContain(
-            "physical capability database is deliberately retained",
+            "physical capability database is deliberately retained"
         );
         expect(rollbackCapability).not.toMatch(/^\s*DROP\s+DATABASE/imu);
     });
@@ -595,12 +595,12 @@ describe("database observability provisioning", () => {
             ["template1", "app-b", provisioningControlDatabase, "app-a"],
             {
                 templateNames: new Set(["template1"]),
-            },
+            }
         );
         const run = provisioningProcessFixture({ catalogs: [catalog, catalog] });
         const result = await runDatabaseObservabilityProvisioning(
             "activate-current-catalog",
-            { run },
+            { run }
         );
         expect(result).toEqual({
             databaseCount: 3,
@@ -609,10 +609,10 @@ describe("database observability provisioning", () => {
         });
         const composeRequests = run.requests.filter(
             ({ executable, stdin }) =>
-                executable === "/opt/docker/bin/docker-compose-doppler" && stdin !== null,
+                executable === "/opt/docker/bin/docker-compose-doppler" && stdin !== null
         );
         const psqlRequests = composeRequests.filter(
-            ({ stdin }) => !stdin?.includes("server_version_num"),
+            ({ stdin }) => !stdin?.includes("server_version_num")
         );
         const requestSql = psqlRequests.map(({ stdin }) => stdin ?? "");
         const acceptedLaunchers = new Set([
@@ -644,8 +644,8 @@ describe("database observability provisioning", () => {
                             "-ceu",
                         ]) &&
                     acceptedLaunchers.has(argv[15] ?? "") &&
-                    argv[16] === "mira-dashboard-psql",
-            ),
+                    argv[16] === "mira-dashboard-psql"
+            )
         ).toBe(true);
         expect(
             composeRequests.every(
@@ -653,8 +653,8 @@ describe("database observability provisioning", () => {
                     argv[0] === "--file" &&
                     argv[1] === "/opt/docker/compose.yaml" &&
                     argv[2] === "--project-directory" &&
-                    argv[3] === "/opt/docker",
-            ),
+                    argv[3] === "/opt/docker"
+            )
         ).toBe(true);
         expect(psqlRequests.every(({ argv }) => !argv.includes("--command"))).toBe(true);
         expect(
@@ -662,32 +662,32 @@ describe("database observability provisioning", () => {
                 ({ stdin }) =>
                     stdin?.includes("controls.system_identifier::text") &&
                     stdin.includes("roles.oid = '10'::pg_catalog.oid") &&
-                    stdin.includes("CURRENT_USER IS DISTINCT FROM SESSION_USER"),
-            ),
+                    stdin.includes("CURRENT_USER IS DISTINCT FROM SESSION_USER")
+            )
         ).toBe(true);
         expect(requestSql.some((sql) => sql.includes("$approval_and_preflight$"))).toBe(
-            true,
+            true
         );
         expect(requestSql.some((sql) => sql.includes("CREATE EXTENSION"))).toBe(true);
         expect(requestSql.every((sql) => !/^[ \t]*\\ir[ \t]/mu.test(sql))).toBe(true);
         const reconcileIndex = requestSql.findIndex((sql) =>
-            sql.includes("mira_dashboard_database_access.reconcile()"),
+            sql.includes("mira_dashboard_database_access.reconcile()")
         );
         const clusterVerifyIndex = requestSql.findIndex((sql) =>
-            sql.includes("Database observability view owner is invalid"),
+            sql.includes("Database observability view owner is invalid")
         );
         expect(reconcileIndex).toBeGreaterThan(-1);
         expect(reconcileIndex).toBeLessThan(clusterVerifyIndex);
         const capabilityApplyIndex = requestSql.findIndex((sql) =>
-            sql.includes("$approval_and_preflight$"),
+            sql.includes("$approval_and_preflight$")
         );
         const initialCatalogIndex = requestSql.findIndex((sql) =>
-            sql.includes("pg_catalog.json_agg(discovered.entry"),
+            sql.includes("pg_catalog.json_agg(discovered.entry")
         );
         expect(capabilityApplyIndex).toBeGreaterThan(-1);
         expect(capabilityApplyIndex).toBeLessThan(initialCatalogIndex);
         expect(
-            requestSql.some((sql) => sql.includes("$verify_database_access_reconciler$")),
+            requestSql.some((sql) => sql.includes("$verify_database_access_reconciler$"))
         ).toBe(true);
         expect(
             requestSql.some(
@@ -695,11 +695,11 @@ describe("database observability provisioning", () => {
                     sql.includes("ALTER ROLE mira_dashboard_observer LOGIN") &&
                     sql.includes("ALTER ROLE mira_dashboard_observer NOLOGIN") &&
                     sql.includes("VALID UNTIL '1970-01-01 00:00:00+00'") &&
-                    sql.includes("$verify_reconciliation_approval$"),
-            ),
+                    sql.includes("$verify_reconciliation_approval$")
+            )
         ).toBe(true);
         expect(
-            run.requests.filter(({ executable }) => executable === "/usr/bin/docker"),
+            run.requests.filter(({ executable }) => executable === "/usr/bin/docker")
         ).toHaveLength(6);
     });
 
@@ -711,7 +711,7 @@ describe("database observability provisioning", () => {
             await runDatabaseObservabilityProvisioning("open-approved-collection", {
                 collectionLeaseTokenFactory: () => collectionLeaseToken,
                 run: openRun,
-            }),
+            })
         ).toEqual({
             catalogDigest: catalogDigest(catalog),
             collectionLeaseToken,
@@ -723,30 +723,30 @@ describe("database observability provisioning", () => {
             .filter(({ stdin }) => stdin !== null)
             .map(({ stdin }) => stdin ?? "");
         const firstMutationIndex = openSql.findIndex((sql) =>
-            sql.includes("$administrator_boundary$"),
+            sql.includes("$administrator_boundary$")
         );
         const firstApprovalIndex = openSql.findIndex((sql) =>
-            sql.includes("$verify_reconciliation_approval$"),
+            sql.includes("$verify_reconciliation_approval$")
         );
         const finalPrepareIndex = openSql.findIndex((sql) =>
-            sql.includes("$prepare_approved_collection$"),
+            sql.includes("$prepare_approved_collection$")
         );
         expect(firstApprovalIndex).toBeGreaterThan(-1);
         expect(firstApprovalIndex).toBeLessThan(firstMutationIndex);
         expect(finalPrepareIndex).toBeGreaterThan(firstMutationIndex);
         expect(finalPrepareIndex).toBe(openSql.length - 1);
         expect(openSql[finalPrepareIndex]).toContain(
-            "LOCK TABLE mira_dashboard_observability_control.reconciliation_approval\n  IN SHARE MODE",
+            "LOCK TABLE mira_dashboard_observability_control.reconciliation_approval\n  IN SHARE MODE"
         );
         expect(openSql[finalPrepareIndex]).toContain("$verify_reconciliation_approval$");
         expect(openSql[finalPrepareIndex]).toContain(
-            "'mira-dashboard-collection-lease:' ||",
+            "'mira-dashboard-collection-lease:' ||"
         );
         expect(openRun.requests.at(-1)?.argv).toContain(
-            `--set=collection_lease_token=${collectionLeaseToken}`,
+            `--set=collection_lease_token=${collectionLeaseToken}`
         );
         expect(openSql[finalPrepareIndex]).not.toContain(
-            "ALTER ROLE mira_dashboard_observer LOGIN",
+            "ALTER ROLE mira_dashboard_observer LOGIN"
         );
 
         const enableRun = provisioningProcessFixture({ catalogs: [catalog] });
@@ -755,7 +755,7 @@ describe("database observability provisioning", () => {
                 catalogDigest: catalogDigest(catalog),
                 collectionLeaseToken,
                 run: enableRun,
-            }),
+            })
         ).toEqual({
             databaseCount: 2,
             mode: "enable-approved-collection",
@@ -765,34 +765,34 @@ describe("database observability provisioning", () => {
             .filter(({ stdin }) => stdin !== null)
             .map(({ stdin }) => stdin ?? "");
         const finalOpenIndex = enableSql.findIndex((sql) =>
-            sql.includes("$open_approved_collection$"),
+            sql.includes("$open_approved_collection$")
         );
         expect(finalOpenIndex).toBe(enableSql.length - 1);
         expect(enableSql[finalOpenIndex]).toContain("$verify_reconciliation_approval$");
         expect(enableSql[finalOpenIndex]).toContain(
-            "SELECT pg_catalog.pg_advisory_xact_lock(1835623521, 1668048243)",
+            "SELECT pg_catalog.pg_advisory_xact_lock(1835623521, 1668048243)"
         );
         expect(enableSql[finalOpenIndex]).toContain(
-            "ALTER ROLE mira_dashboard_observer LOGIN VALID UNTIL %L",
+            "ALTER ROLE mira_dashboard_observer LOGIN VALID UNTIL %L"
         );
         expect(enableSql[finalOpenIndex]).toContain("IS DISTINCT FROM expected_comment");
         expect(enableRun.requests.at(-1)?.argv).toContain(
-            `--set=collection_lease_token=${collectionLeaseToken}`,
+            `--set=collection_lease_token=${collectionLeaseToken}`
         );
         expect(
-            enableSql[finalOpenIndex]!.indexOf("$verify_reconciliation_approval$"),
+            enableSql[finalOpenIndex]!.indexOf("$verify_reconciliation_approval$")
         ).toBeLessThan(enableSql[finalOpenIndex]!.indexOf("$open_approved_collection$"));
         expect(
             enableSql
                 .slice(finalOpenIndex + 1)
-                .some((sql) => sql.includes("$administrator_boundary$")),
+                .some((sql) => sql.includes("$administrator_boundary$"))
         ).toBeFalse();
 
         const closeRun = provisioningProcessFixture({ catalogs: [] });
         expect(
             await runDatabaseObservabilityProvisioning("close-approved-collection", {
                 run: closeRun,
-            }),
+            })
         ).toEqual({
             databaseCount: 0,
             mode: "close-approved-collection",
@@ -802,16 +802,16 @@ describe("database observability provisioning", () => {
             .filter(({ stdin }) => stdin !== null)
             .map(({ stdin }) => stdin ?? "");
         expect(closeSql.some((sql) => sql.includes("$close_approved_collection$"))).toBe(
-            true,
+            true
         );
         expect(
             closeSql.some((sql) =>
-                sql.includes("COMMENT ON ROLE mira_dashboard_observer IS NULL"),
-            ),
+                sql.includes("COMMENT ON ROLE mira_dashboard_observer IS NULL")
+            )
         ).toBe(true);
         expect(closeSql.some((sql) => sql.includes("pg_advisory_xact_lock"))).toBe(true);
         expect(closeSql.every((sql) => !sql.includes("reconciliation_approval"))).toBe(
-            true,
+            true
         );
         expect(closeSql.every((sql) => !sql.includes("PASSWORD"))).toBe(true);
     });
@@ -825,7 +825,7 @@ describe("database observability provisioning", () => {
             if (
                 request.argv.includes("postgresql:///%61%70%70") &&
                 request.stdin?.includes(
-                    "Database observability routine grants are invalid",
+                    "Database observability routine grants are invalid"
                 ) === true
             ) {
                 return Promise.resolve({ exitCode: 1, stderr: "", stdout: "" });
@@ -837,7 +837,7 @@ describe("database observability provisioning", () => {
             {
                 collectionLeaseTokenFactory: () => "12345678-1234-4123-8123-123456789abc",
                 run: applicationDrift,
-            },
+            }
         );
         expect(prepared.status).toBe("RECONCILED");
         const quarantineSql = applicationBase.requests
@@ -849,31 +849,31 @@ describe("database observability provisioning", () => {
                 (sql) =>
                     sql.includes("databases.oid = '11'::pg_catalog.oid") &&
                     sql.includes(
-                        "REVOKE ALL PRIVILEGES ON DATABASE %I FROM mira_dashboard_observer",
+                        "REVOKE ALL PRIVILEGES ON DATABASE %I FROM mira_dashboard_observer"
                     ) &&
-                    !sql.includes("databases.oid = '12'::pg_catalog.oid"),
-            ),
+                    !sql.includes("databases.oid = '12'::pg_catalog.oid")
+            )
         ).toBe(true);
         expect(
             applicationBase.requests.some(
                 ({ argv, stdin }) =>
                     argv.includes("postgresql:///%68%65%61%6C%74%68%79") &&
                     stdin?.includes(
-                        "Database observability routine grants are invalid",
-                    ) === true,
-            ),
+                        "Database observability routine grants are invalid"
+                    ) === true
+            )
         ).toBe(true);
         expect(
             applicationBase.requests.some(({ stdin }) =>
-                stdin?.includes("$prepare_approved_collection$"),
-            ),
+                stdin?.includes("$prepare_approved_collection$")
+            )
         ).toBe(true);
 
         const controlBase = provisioningProcessFixture({ catalogs: [catalog] });
         const controlDrift: DatabaseObservabilityProvisioningProcess = (request) => {
             if (
                 request.stdin?.includes(
-                    "Database observability control capability is invalid",
+                    "Database observability control capability is invalid"
                 ) === true
             ) {
                 return Promise.resolve({ exitCode: 1, stderr: "", stdout: "" });
@@ -884,12 +884,12 @@ describe("database observability provisioning", () => {
             runDatabaseObservabilityProvisioning("open-approved-collection", {
                 collectionLeaseTokenFactory: () => "12345678-1234-4123-8123-123456789abc",
                 run: controlDrift,
-            }),
+            })
         ).rejects.toThrow("Database observability provisioning failed");
         expect(
             controlBase.requests.some(({ stdin }) =>
-                stdin?.includes("$prepare_approved_collection$"),
-            ),
+                stdin?.includes("$prepare_approved_collection$")
+            )
         ).toBe(false);
     });
 
@@ -910,7 +910,7 @@ describe("database observability provisioning", () => {
             announceEnable = resolve;
         });
         const statefulProcess: DatabaseObservabilityProvisioningProcess = async (
-            request,
+            request
         ) => {
             if (request.stdin?.includes("$open_approved_collection$") === true) {
                 announceEnable();
@@ -941,7 +941,7 @@ describe("database observability provisioning", () => {
             {
                 collectionLeaseTokenFactory: () => collectionLeaseToken,
                 run: statefulProcess,
-            },
+            }
         );
         const delayedEnable = runDatabaseObservabilityProvisioning(
             "enable-approved-collection",
@@ -949,7 +949,7 @@ describe("database observability provisioning", () => {
                 catalogDigest: prepared.catalogDigest,
                 collectionLeaseToken,
                 run: statefulProcess,
-            },
+            }
         );
         await enableReached;
         await runDatabaseObservabilityProvisioning("close-approved-collection", {
@@ -959,7 +959,7 @@ describe("database observability provisioning", () => {
         expect(observerCanLogin).toBe(false);
         releaseEnable();
         expect(delayedEnable).rejects.toThrow(
-            "Database observability provisioning failed",
+            "Database observability provisioning failed"
         );
         expect(observerCanLogin).toBe(false);
     });
@@ -967,7 +967,7 @@ describe("database observability provisioning", () => {
     test("runner rejects over-limit, duplicate, malformed, and changed inventories", () => {
         const maximumNames = Array.from(
             { length: provisioningDatabaseMaximum + 1 },
-            (_, index) => `db-${String(index).padStart(2, "0")}`,
+            (_, index) => `db-${String(index).padStart(2, "0")}`
         );
         for (const catalog of [
             catalogJson(maximumNames),
@@ -991,7 +991,7 @@ describe("database observability provisioning", () => {
             expect(
                 runDatabaseObservabilityProvisioning("verify-current-catalog", {
                     run,
-                }),
+                })
             ).rejects.toThrow("Database observability provisioning failed");
         }
 
@@ -1003,7 +1003,7 @@ describe("database observability provisioning", () => {
         expect(
             runDatabaseObservabilityProvisioning("activate-current-catalog", {
                 run,
-            }),
+            })
         ).rejects.toThrow("Database observability provisioning failed");
     });
 
@@ -1022,23 +1022,23 @@ describe("database observability provisioning", () => {
 
         const databaseArguments = run.requests.flatMap(({ argv }) =>
             argv.flatMap((argument, index) =>
-                argument === "--dbname" ? [argv[index + 1] ?? ""] : [],
-            ),
+                argument === "--dbname" ? [argv[index + 1] ?? ""] : []
+            )
         );
         expect(databaseArguments).toContain("postgresql:///%2E%2E");
         expect(databaseArguments).toContain(
-            "postgresql:///%71%75%6F%74%65%2F%73%6C%61%73%68",
+            "postgresql:///%71%75%6F%74%65%2F%73%6C%61%73%68"
         );
         expect(databaseArguments).toContain(
-            "postgresql:///%68%6F%73%74%3D%61%74%74%61%63%6B%65%72%20%64%62%6E%61%6D%65%3D%78",
+            "postgresql:///%68%6F%73%74%3D%61%74%74%61%63%6B%65%72%20%64%62%6E%61%6D%65%3D%78"
         );
         expect(databaseArguments).toContain(
-            "postgresql:///%70%6F%73%74%67%72%65%73%71%6C%3A%2F%2F%65%76%69%6C%2F%78",
+            "postgresql:///%70%6F%73%74%67%72%65%73%71%6C%3A%2F%2F%65%76%69%6C%2F%78"
         );
         expect(
             databaseArguments.every(
-                (argument) => !rawNames.some((name) => argument.includes(name)),
-            ),
+                (argument) => !rawNames.some((name) => argument.includes(name))
+            )
         ).toBe(true);
     });
 
@@ -1048,10 +1048,10 @@ describe("database observability provisioning", () => {
         expect(provisioningSqlIncludeCountMaximum).toBe(32);
         expect(provisioningSqlInputMaximumBytes).toBe(512 * 1024);
         expect(provisioningDockerInspectFormat).toContain(
-            "com.docker.compose.depends_on",
+            "com.docker.compose.depends_on"
         );
         expect(provisioningDockerInspectFormat).toContain(
-            "com.docker.compose.container-number",
+            "com.docker.compose.container-number"
         );
         expect(provisioningDockerInspectFormat).toContain("com.docker.compose.oneoff");
         expect(provisioningDockerInspectFormat).not.toContain(".Config.Env");
@@ -1090,7 +1090,7 @@ describe("database observability provisioning", () => {
 
         const result = await runDatabaseObservabilityProvisioning(
             "verify-current-catalog",
-            { run },
+            { run }
         );
         expect(result).toEqual({
             databaseCount: 1,
@@ -1100,8 +1100,8 @@ describe("database observability provisioning", () => {
         expect(
             run.requests.some(
                 ({ argv }) =>
-                    argv.includes("Docker.Project") && argv.includes("Postgres_Primary"),
-            ),
+                    argv.includes("Docker.Project") && argv.includes("Postgres_Primary")
+            )
         ).toBe(true);
     });
 
@@ -1126,14 +1126,12 @@ describe("database observability provisioning", () => {
             await rejectionText(
                 runDatabaseObservabilityProvisioning("verify-current-catalog", {
                     run: ambiguousRun,
-                }),
-            ),
+                })
+            )
         ).toBe("Error: Database observability provisioning failed");
 
         const changedRows = validProvisioningDockerRows().map((row) =>
-            row.service === "postgres"
-                ? { ...row, id: provisioningContainerId(20) }
-                : row,
+            row.service === "postgres" ? { ...row, id: provisioningContainerId(20) } : row
         );
         const driftRun = provisioningProcessFixture({
             catalogs: [catalog, catalog],
@@ -1143,13 +1141,13 @@ describe("database observability provisioning", () => {
             await rejectionText(
                 runDatabaseObservabilityProvisioning("activate-current-catalog", {
                     run: driftRun,
-                }),
-            ),
+                })
+            )
         ).toBe("Error: Database observability provisioning failed");
         expect(
             driftRun.requests.some(({ stdin }) =>
-                stdin?.includes("ALTER ROLE mira_dashboard_observer LOGIN;"),
-            ),
+                stdin?.includes("ALTER ROLE mira_dashboard_observer LOGIN;")
+            )
         ).toBe(false);
 
         const roleDriftRun = provisioningProcessFixture({
@@ -1160,13 +1158,13 @@ describe("database observability provisioning", () => {
             await rejectionText(
                 runDatabaseObservabilityProvisioning("activate-current-catalog", {
                     run: roleDriftRun,
-                }),
-            ),
+                })
+            )
         ).toBe("Error: Database observability provisioning failed");
         expect(
             roleDriftRun.requests.some(({ stdin }) =>
-                stdin?.includes("ALTER ROLE mira_dashboard_observer LOGIN;"),
-            ),
+                stdin?.includes("ALTER ROLE mira_dashboard_observer LOGIN;")
+            )
         ).toBe(false);
     });
 
@@ -1174,7 +1172,7 @@ describe("database observability provisioning", () => {
         const catalog = catalogJson([provisioningControlDatabase]);
         const overflowRows = Array.from(
             { length: provisioningDockerContainerMaximum + 1 },
-            (_, index) => provisioningDockerRow(index + 1),
+            (_, index) => provisioningDockerRow(index + 1)
         );
         const overflowRun = provisioningProcessFixture({
             catalogs: [catalog],
@@ -1184,8 +1182,8 @@ describe("database observability provisioning", () => {
             await rejectionText(
                 runDatabaseObservabilityProvisioning("verify-current-catalog", {
                     run: overflowRun,
-                }),
-            ),
+                })
+            )
         ).toBe("Error: Database observability provisioning failed");
 
         const secret = "must-not-cross-provisioning-boundary";
@@ -1220,19 +1218,19 @@ describe("database observability provisioning", () => {
                 ({ environment, stdin }) =>
                     environment === provisioningProcessEnvironment &&
                     (stdin === null ||
-                        Buffer.byteLength(stdin) <= provisioningSqlInputMaximumBytes),
-            ),
+                        Buffer.byteLength(stdin) <= provisioningSqlInputMaximumBytes)
+            )
         ).toBe(true);
     });
 
     test("pins provisioning artifacts to one bounded regular-file descriptor", async () => {
         const catalog = catalogJson([provisioningControlDatabase]);
         const privateParent = await mkdtemp(
-            "/tmp/mira-dashboard-provisioning-descriptor-test-",
+            "/tmp/mira-dashboard-provisioning-descriptor-test-"
         );
         const privateProvisioningRoot = path.join(
             privateParent,
-            "database-observability",
+            "database-observability"
         );
         await cp(provisioningRoot, privateProvisioningRoot, {
             preserveTimestamps: true,
@@ -1246,7 +1244,7 @@ describe("database observability provisioning", () => {
 
         const runMutation = async (
             mutate: () => Promise<void>,
-            restore: () => Promise<void>,
+            restore: () => Promise<void>
         ) => {
             let mutated = false;
             try {
@@ -1264,8 +1262,8 @@ describe("database observability provisioning", () => {
                             run: provisioningProcessFixture({
                                 catalogs: [catalog, catalog],
                             }),
-                        }),
-                    ),
+                        })
+                    )
                 ).toBe("Error: Database observability provisioning failed");
             } finally {
                 if (mutated) await restore();
@@ -1281,7 +1279,7 @@ describe("database observability provisioning", () => {
                 async () => {
                     await unlink(artifact);
                     await rename(displaced, artifact);
-                },
+                }
             );
             await runMutation(
                 async () => {
@@ -1291,7 +1289,7 @@ describe("database observability provisioning", () => {
                 async () => {
                     await unlink(artifact);
                     await rename(displaced, artifact);
-                },
+                }
             );
             await runMutation(
                 async () => {
@@ -1305,7 +1303,7 @@ describe("database observability provisioning", () => {
                 async () => {
                     await unlink(artifact);
                     await rename(displaced, artifact);
-                },
+                }
             );
             await runMutation(
                 async () => {
@@ -1314,7 +1312,7 @@ describe("database observability provisioning", () => {
                 async () => {
                     await writeFile(artifact, original);
                     await chmod(artifact, mode);
-                },
+                }
             );
         } finally {
             await rm(privateParent, { force: true, recursive: true });
@@ -1328,7 +1326,7 @@ describe("database observability provisioning", () => {
             expect(sql.startsWith("\\set ON_ERROR_STOP 1\n")).toBe(true);
             expect(sql).not.toContain("\0");
             expect(sql).not.toMatch(
-                /\\!|COPY[\s\S]*PROGRAM|ALTER SYSTEM|dblink|postgres_fdw|docker|sudo|private-password|postgresql:\/\//iu,
+                /\\!|COPY[\s\S]*PROGRAM|ALTER SYSTEM|dblink|postgres_fdw|docker|sudo|private-password|postgresql:\/\//iu
             );
             if (fileName === "apply-control-database.sql") {
                 expect(sql.match(/CREATE EXTENSION/gu)).toHaveLength(1);
@@ -1339,7 +1337,7 @@ describe("database observability provisioning", () => {
         const runner = await readProvisioningFile("runProvisioning.ts");
         expect(runner).toContain('const dockerExecutable = "/usr/bin/docker"');
         expect(runner).toContain(
-            'const composeExecutable = "/opt/docker/bin/docker-compose-doppler"',
+            'const composeExecutable = "/opt/docker/bin/docker-compose-doppler"'
         );
         expect(runner).toContain("/usr/local/bin/psql");
         expect(runner).toContain("provisioningProcessEnvironment");

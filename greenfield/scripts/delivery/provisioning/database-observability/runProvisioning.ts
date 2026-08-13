@@ -102,7 +102,7 @@ const provisioningSqlArtifactNames = Object.freeze([
 type ProvisioningSqlArtifactName = (typeof provisioningSqlArtifactNames)[number];
 const provisioningSqlArtifactNameSet = new Set<string>(provisioningSqlArtifactNames);
 const provisioningPolicyArtifactNames = Object.freeze(
-    [...provisioningSqlArtifactNames, "runProvisioning.ts" as const].toSorted(),
+    [...provisioningSqlArtifactNames, "runProvisioning.ts" as const].toSorted()
 );
 type ProvisioningPolicyArtifactName = (typeof provisioningPolicyArtifactNames)[number];
 
@@ -145,7 +145,7 @@ interface ProvisioningDeadline {
 interface SqlExpansionState {
     readonly activeFiles: Set<ProvisioningSqlArtifactName>;
     readonly afterDescriptorStat?: (
-        fileName: ProvisioningSqlArtifactName,
+        fileName: ProvisioningSqlArtifactName
     ) => Promise<void> | void;
     readonly artifactDevice: bigint;
     readonly artifactMode: bigint;
@@ -167,7 +167,7 @@ const serverIdentitySql = `SELECT pg_catalog.json_build_array(
 
 function containerPsqlPrefix(
     service: string,
-    launcher: typeof containerPsqlLauncher | typeof containerPsqlProbeLauncher,
+    launcher: typeof containerPsqlLauncher | typeof containerPsqlProbeLauncher
 ): readonly string[] {
     return Object.freeze([
         service,
@@ -202,7 +202,7 @@ export interface DatabaseObservabilityProvisioningProcessResult {
 }
 
 export type DatabaseObservabilityProvisioningProcess = (
-    request: DatabaseObservabilityProvisioningProcessRequest,
+    request: DatabaseObservabilityProvisioningProcessRequest
 ) => Promise<DatabaseObservabilityProvisioningProcessResult>;
 
 /** Injectable process boundary for focused, non-production orchestration tests. */
@@ -211,7 +211,7 @@ export interface DatabaseObservabilityProvisioningDependencies {
     readonly artifactRoot?: string;
     /** Deterministic file-mutation boundary used only by adversarial tests. */
     readonly afterSqlArtifactDescriptorStat?: (
-        fileName: ProvisioningSqlArtifactName,
+        fileName: ProvisioningSqlArtifactName
     ) => Promise<void> | void;
     /** Exact catalog digest returned by the immediately preceding prepared open. */
     readonly catalogDigest?: string;
@@ -229,7 +229,12 @@ export interface DatabaseObservabilityProvisioningResult {
     readonly databaseCount: number;
     readonly mode: DatabaseObservabilityProvisioningMode;
     readonly status:
-        "ACTIVATED" | "CLOSED" | "OPENED" | "RECONCILED" | "UNCHANGED" | "VERIFIED";
+        | "ACTIVATED"
+        | "CLOSED"
+        | "OPENED"
+        | "RECONCILED"
+        | "UNCHANGED"
+        | "VERIFIED";
 }
 
 function fail(): never {
@@ -242,7 +247,7 @@ function utf8Bytes(value: string): number {
 
 async function readBounded(
     stream: ReadableStream<Uint8Array>,
-    maximumBytes: number,
+    maximumBytes: number
 ): Promise<Uint8Array> {
     const reader = stream.getReader();
     const chunks: Uint8Array[] = [];
@@ -308,7 +313,7 @@ const defaultProcess: DatabaseObservabilityProvisioningProcess = async (request)
 async function executeProcess(
     run: DatabaseObservabilityProvisioningProcess,
     request: DatabaseObservabilityProvisioningProcessRequest,
-    deadline?: ProvisioningDeadline,
+    deadline?: ProvisioningDeadline
 ): Promise<string> {
     if (
         request.stdin !== null &&
@@ -344,7 +349,7 @@ async function executeProcess(
 
 function dockerRequest(
     argv: readonly string[],
-    stdoutMaximumBytes: number,
+    stdoutMaximumBytes: number
 ): DatabaseObservabilityProvisioningProcessRequest {
     return Object.freeze({
         argv: Object.freeze(["--host", dockerHost, ...argv]),
@@ -368,7 +373,7 @@ function validDatabaseName(name: string): boolean {
 
 function databaseUri(database: string): string {
     const encodedName = Array.from(Buffer.from(database, "utf8"), (byte) =>
-        byte.toString(16).toUpperCase().padStart(2, "0"),
+        byte.toString(16).toUpperCase().padStart(2, "0")
     )
         .map((byte) => `%${byte}`)
         .join("");
@@ -410,7 +415,7 @@ function nullableString(value: unknown): string | null {
 
 function parseInspectRows(
     output: string,
-    containerIds: readonly string[],
+    containerIds: readonly string[]
 ): readonly ProvisioningDockerRow[] {
     if (utf8Bytes(output) > dockerInspectOutputMaximumBytes) fail();
     const trimmed = output.trim();
@@ -518,7 +523,7 @@ function serviceHealthyDependencies(value: string | null): readonly string[] {
 }
 
 function composePsqlProbeRequest(
-    target: ProvisioningComposeTarget,
+    target: ProvisioningComposeTarget
 ): DatabaseObservabilityProvisioningProcessRequest {
     return Object.freeze({
         argv: Object.freeze([
@@ -553,7 +558,7 @@ ${serverIdentitySql}`,
 }
 
 function validServerIdentity(
-    value: unknown,
+    value: unknown
 ): value is readonly [string, string, true, string, "template1", string, string] {
     return (
         Array.isArray(value) &&
@@ -576,31 +581,31 @@ function validServerIdentity(
 
 async function discoverComposeTarget(
     run: DatabaseObservabilityProvisioningProcess,
-    deadline: ProvisioningDeadline,
+    deadline: ProvisioningDeadline
 ): Promise<ProvisioningComposeTarget> {
     const containerIds = parseContainerIds(
         await executeProcess(
             run,
             dockerRequest(
                 ["ps", "-a", "--no-trunc", "--format", "{{json .ID}}"],
-                dockerPsOutputMaximumBytes,
+                dockerPsOutputMaximumBytes
             ),
-            deadline,
-        ),
+            deadline
+        )
     );
     const rows = parseInspectRows(
         await executeProcess(
             run,
             dockerRequest(
                 ["inspect", "--format", provisioningDockerInspectFormat, ...containerIds],
-                dockerInspectOutputMaximumBytes,
+                dockerInspectOutputMaximumBytes
             ),
-            deadline,
+            deadline
         ),
-        containerIds,
+        containerIds
     );
     const candidates = rows.filter(
-        (row) => row.capability === capabilityValue && healthy(row),
+        (row) => row.capability === capabilityValue && healthy(row)
     );
     if (candidates.length !== 1) fail();
     const candidate = candidates[0]!;
@@ -613,7 +618,7 @@ async function discoverComposeTarget(
             (row) =>
                 row.project === candidate.project &&
                 row.service === dependencyService &&
-                healthy(row),
+                healthy(row)
         );
         if (dependencies.length === 0) continue;
         if (dependencies.length !== 1 || !rootedComposeRow(dependencies[0]!)) fail();
@@ -623,7 +628,7 @@ async function discoverComposeTarget(
                 containerId: dependencies[0]!.id,
                 project: candidate.project!,
                 service: dependencyService,
-            }),
+            })
         );
     }
     const psqlTargets: ProvisioningComposeTarget[] = [];
@@ -632,7 +637,7 @@ async function discoverComposeTarget(
             const identityOutput = await executeProcess(
                 run,
                 composePsqlProbeRequest(potentialTarget),
-                deadline,
+                deadline
             );
             let identity: unknown;
             try {
@@ -647,7 +652,7 @@ async function discoverComposeTarget(
                     administrativeDatabase: identity[4],
                     administrativeRoleOid: identity[3],
                     systemIdentifier: identity[5],
-                }),
+                })
             );
         } catch {
             // A non-psql healthy dependency is not the PostgreSQL execution target.
@@ -658,7 +663,7 @@ async function discoverComposeTarget(
 }
 
 function validCatalogTuple(
-    value: unknown,
+    value: unknown
 ): value is readonly [string, string, string, boolean, boolean] {
     return (
         Array.isArray(value) &&
@@ -672,7 +677,7 @@ function validCatalogTuple(
 }
 
 function parseDatabaseCatalog(
-    stdout: string,
+    stdout: string
 ): readonly ProvisioningDatabaseCatalogEntry[] {
     if (stdout.includes("\0") || utf8Bytes(stdout) > catalogOutputMaximumBytes) fail();
     let parsed: unknown;
@@ -685,7 +690,7 @@ function parseDatabaseCatalog(
         fail();
     }
     const catalog = parsed.map(([oid, name, ownerOid, isTemplate, allowsConnections]) =>
-        Object.freeze({ allowsConnections, isTemplate, name, oid, ownerOid }),
+        Object.freeze({ allowsConnections, isTemplate, name, oid, ownerOid })
     );
     const observedNames = catalog
         .filter(({ allowsConnections, isTemplate }) => allowsConnections && !isTemplate)
@@ -701,7 +706,7 @@ function parseDatabaseCatalog(
                 !/^[1-9][0-9]{0,9}$/u.test(oid) ||
                 BigInt(oid) > 4_294_967_295n ||
                 !/^[1-9][0-9]{0,9}$/u.test(ownerOid) ||
-                BigInt(ownerOid) > 4_294_967_295n,
+                BigInt(ownerOid) > 4_294_967_295n
         ) ||
         new Set(catalog.map(({ oid }) => oid)).size !== catalog.length ||
         new Set(catalog.map(({ name }) => name)).size !== catalog.length ||
@@ -788,7 +793,7 @@ function asSqlArtifactName(value: string): ProvisioningSqlArtifactName {
 async function readContainedProvisioningArtifact(
     artifactRoot: string,
     fileName: ProvisioningPolicyArtifactName,
-    state: SqlExpansionState,
+    state: SqlExpansionState
 ): Promise<string> {
     const candidate = path.resolve(artifactRoot, fileName);
     if (
@@ -810,7 +815,7 @@ async function readContainedProvisioningArtifact(
     try {
         file = await open(
             candidate,
-            constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+            constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
         );
         const descriptorPath = await realpath(`/proc/self/fd/${String(file.fd)}`);
         if (
@@ -837,7 +842,7 @@ async function readContainedProvisioningArtifact(
                 buffer,
                 bytesRead,
                 buffer.byteLength - bytesRead,
-                null,
+                null
             );
             if (read.bytesRead === 0) break;
             bytesRead += read.bytesRead;
@@ -875,14 +880,14 @@ async function readContainedProvisioningArtifact(
 async function readContainedSqlArtifact(
     artifactRoot: string,
     fileName: ProvisioningSqlArtifactName,
-    state: SqlExpansionState,
+    state: SqlExpansionState
 ): Promise<string> {
     return readContainedProvisioningArtifact(artifactRoot, fileName, state);
 }
 
 function validProvisioningArtifact(
     status: BigIntStats,
-    state: SqlExpansionState,
+    state: SqlExpansionState
 ): boolean {
     return (
         status.isFile() &&
@@ -896,7 +901,7 @@ function validProvisioningArtifact(
 
 function sameProvisioningArtifactSnapshot(
     before: BigIntStats,
-    after: BigIntStats,
+    after: BigIntStats
 ): boolean {
     return (
         after.dev === before.dev &&
@@ -911,7 +916,7 @@ async function expandSqlArtifactFile(
     artifactRoot: string,
     fileName: ProvisioningSqlArtifactName,
     depth: number,
-    state: SqlExpansionState,
+    state: SqlExpansionState
 ): Promise<string> {
     if (
         depth > provisioningSqlIncludeDepthMaximum ||
@@ -931,7 +936,7 @@ async function expandSqlArtifactFile(
             if (line === "") continue;
             const directive = line.replace(/\r?\n$/u, "");
             const include = /^[ \t]*\\ir[ \t]+([a-z0-9][a-z0-9-]*\.sql)[ \t]*$/u.exec(
-                directive,
+                directive
             );
             if (include !== null) {
                 expanded.push(
@@ -939,8 +944,8 @@ async function expandSqlArtifactFile(
                         artifactRoot,
                         asSqlArtifactName(include[1]!),
                         depth + 1,
-                        state,
-                    ),
+                        state
+                    )
                 );
                 continue;
             }
@@ -961,7 +966,7 @@ async function expandSqlArtifactFile(
 async function expandSqlArtifact(
     fileName: ProvisioningSqlArtifactName,
     afterDescriptorStat?: SqlExpansionState["afterDescriptorStat"],
-    sourceRoot = import.meta.dir,
+    sourceRoot = import.meta.dir
 ): Promise<string> {
     const artifactRoot = await realpath(sourceRoot);
     const [rootStatus, runnerStatus] = await Promise.all([
@@ -998,7 +1003,7 @@ async function expandSqlArtifact(
 }
 
 async function calculateProvisioningPolicyDigest(
-    sourceRoot = import.meta.dir,
+    sourceRoot = import.meta.dir
 ): Promise<string> {
     const artifactRoot = await realpath(sourceRoot);
     const [rootStatus, runnerStatus] = await Promise.all([
@@ -1035,7 +1040,7 @@ async function calculateProvisioningPolicyDigest(
         const source = await readContainedProvisioningArtifact(
             artifactRoot,
             fileName,
-            state,
+            state
         );
         const nameBytes = utf8Bytes(fileName);
         const sourceBytes = utf8Bytes(source);
@@ -1062,7 +1067,7 @@ function composePsqlRequest(
         readonly deadlineMs?: number;
         readonly output?: "catalog" | "scalar";
         readonly variables?: readonly string[];
-    } = {},
+    } = {}
 ): DatabaseObservabilityProvisioningProcessRequest {
     if (
         (database !== null && !validDatabaseName(database)) ||
@@ -1138,12 +1143,12 @@ async function runSql(
         readonly output?: "catalog" | "scalar";
         readonly variables?: readonly string[];
     } = {},
-    deadline?: ProvisioningDeadline,
+    deadline?: ProvisioningDeadline
 ): Promise<string> {
     return executeProcess(
         run,
         composePsqlRequest(target, database, sql, options),
-        deadline,
+        deadline
     );
 }
 
@@ -1155,7 +1160,7 @@ async function runSqlArtifact(
     variables: readonly string[] = [],
     deadline?: ProvisioningDeadline,
     afterDescriptorStat?: SqlExpansionState["afterDescriptorStat"],
-    artifactRoot = import.meta.dir,
+    artifactRoot = import.meta.dir
 ): Promise<void> {
     await runSql(
         run,
@@ -1165,13 +1170,13 @@ async function runSqlArtifact(
         {
             variables,
         },
-        deadline,
+        deadline
     );
 }
 
 function sameComposeTarget(
     left: ProvisioningComposeTarget,
-    right: ProvisioningComposeTarget,
+    right: ProvisioningComposeTarget
 ): boolean {
     return (
         left.capabilityContainerId === right.capabilityContainerId &&
@@ -1185,7 +1190,7 @@ function sameComposeTarget(
 }
 
 function observedDatabaseNames(
-    catalog: readonly ProvisioningDatabaseCatalogEntry[],
+    catalog: readonly ProvisioningDatabaseCatalogEntry[]
 ): readonly string[] {
     const names = catalog
         .filter(({ allowsConnections, isTemplate }) => allowsConnections && !isTemplate)
@@ -1196,7 +1201,7 @@ function observedDatabaseNames(
 }
 
 function databaseCatalogDigest(
-    catalog: readonly ProvisioningDatabaseCatalogEntry[],
+    catalog: readonly ProvisioningDatabaseCatalogEntry[]
 ): string {
     return createHash("sha256")
         .update("mira-dashboard-database-catalog-v1\0", "utf8")
@@ -1208,7 +1213,7 @@ async function quarantineApplicationDatabase(
     run: DatabaseObservabilityProvisioningProcess,
     target: ProvisioningComposeTarget,
     entry: ProvisioningDatabaseCatalogEntry,
-    deadline: ProvisioningDeadline,
+    deadline: ProvisioningDeadline
 ): Promise<void> {
     if (
         entry.name === provisioningControlDatabase ||
@@ -1253,14 +1258,14 @@ END
 $quarantine_drifted_database$;
 `,
         { deadlineMs: 10_000 },
-        deadline,
+        deadline
     );
 }
 
 async function closeApprovedCollection(
     run: DatabaseObservabilityProvisioningProcess,
     target: ProvisioningComposeTarget,
-    deadline: ProvisioningDeadline,
+    deadline: ProvisioningDeadline
 ): Promise<void> {
     if (!target.administrativeDatabase) fail();
     await runSql(
@@ -1269,7 +1274,7 @@ async function closeApprovedCollection(
         target.administrativeDatabase,
         closeApprovedCollectionSql,
         { deadlineMs: 10_000 },
-        deadline,
+        deadline
     );
 }
 
@@ -1279,7 +1284,7 @@ async function verifyReconciliationApproval(
     policyDigest: string,
     deadline: ProvisioningDeadline,
     afterDescriptorStat?: SqlExpansionState["afterDescriptorStat"],
-    artifactRoot = import.meta.dir,
+    artifactRoot = import.meta.dir
 ): Promise<void> {
     if (!/^[0-9a-f]{64}$/u.test(policyDigest)) fail();
     await runSqlArtifact(
@@ -1290,7 +1295,7 @@ async function verifyReconciliationApproval(
         [`approved_policy_digest=${policyDigest}`],
         deadline,
         afterDescriptorStat,
-        artifactRoot,
+        artifactRoot
     );
 }
 
@@ -1301,7 +1306,7 @@ async function enableApprovedCollection(
     collectionLeaseToken: string,
     deadline: ProvisioningDeadline,
     afterDescriptorStat?: SqlExpansionState["afterDescriptorStat"],
-    artifactRoot = import.meta.dir,
+    artifactRoot = import.meta.dir
 ): Promise<void> {
     if (
         !catalogDigestPattern.test(policyDigest) ||
@@ -1312,12 +1317,12 @@ async function enableApprovedCollection(
     const approvalVerification = await expandSqlArtifact(
         "verify-reconciliation-approval.sql",
         afterDescriptorStat,
-        artifactRoot,
+        artifactRoot
     );
     const enableSql = await expandSqlArtifact(
         "enable-approved-collection.sql",
         afterDescriptorStat,
-        artifactRoot,
+        artifactRoot
     );
     await runSql(
         run,
@@ -1337,7 +1342,7 @@ COMMIT;
                 `collection_lease_token=${collectionLeaseToken}`,
             ],
         },
-        deadline,
+        deadline
     );
 }
 
@@ -1348,7 +1353,7 @@ async function prepareApprovedCollection(
     collectionLeaseToken: string,
     deadline: ProvisioningDeadline,
     afterDescriptorStat?: SqlExpansionState["afterDescriptorStat"],
-    artifactRoot = import.meta.dir,
+    artifactRoot = import.meta.dir
 ): Promise<void> {
     if (
         !catalogDigestPattern.test(policyDigest) ||
@@ -1359,12 +1364,12 @@ async function prepareApprovedCollection(
     const approvalVerification = await expandSqlArtifact(
         "verify-reconciliation-approval.sql",
         afterDescriptorStat,
-        artifactRoot,
+        artifactRoot
     );
     const prepareSql = await expandSqlArtifact(
         "prepare-approved-collection.sql",
         afterDescriptorStat,
-        artifactRoot,
+        artifactRoot
     );
     await runSql(
         run,
@@ -1384,7 +1389,7 @@ COMMIT;
                 `collection_lease_token=${collectionLeaseToken}`,
             ],
         },
-        deadline,
+        deadline
     );
 }
 
@@ -1397,7 +1402,7 @@ COMMIT;
  */
 export async function runDatabaseObservabilityProvisioning(
     mode: DatabaseObservabilityProvisioningMode,
-    dependencies: DatabaseObservabilityProvisioningDependencies = {},
+    dependencies: DatabaseObservabilityProvisioningDependencies = {}
 ): Promise<DatabaseObservabilityProvisioningResult> {
     try {
         const run = dependencies.run ?? defaultProcess;
@@ -1437,7 +1442,7 @@ export async function runDatabaseObservabilityProvisioning(
                 policyDigest,
                 deadline,
                 dependencies.afterSqlArtifactDescriptorStat,
-                artifactRoot,
+                artifactRoot
             );
             const catalog = parseDatabaseCatalog(
                 await runSql(
@@ -1446,8 +1451,8 @@ export async function runDatabaseObservabilityProvisioning(
                     provisioningControlDatabase,
                     catalogSql,
                     { output: "catalog" },
-                    deadline,
-                ),
+                    deadline
+                )
             );
             const databaseNames = observedDatabaseNames(catalog);
             if (databaseCatalogDigest(catalog) !== expectedCatalogDigest) fail();
@@ -1463,7 +1468,7 @@ export async function runDatabaseObservabilityProvisioning(
                 collectionLeaseToken,
                 deadline,
                 dependencies.afterSqlArtifactDescriptorStat,
-                artifactRoot,
+                artifactRoot
             );
             return Object.freeze({
                 databaseCount: databaseNames.length,
@@ -1498,7 +1503,7 @@ export async function runDatabaseObservabilityProvisioning(
                 policyDigest,
                 deadline,
                 dependencies.afterSqlArtifactDescriptorStat,
-                artifactRoot,
+                artifactRoot
             );
         }
 
@@ -1511,7 +1516,7 @@ export async function runDatabaseObservabilityProvisioning(
                 ["apply_control_database_capability=approved"],
                 deadline,
                 dependencies.afterSqlArtifactDescriptorStat,
-                artifactRoot,
+                artifactRoot
             );
         }
 
@@ -1524,12 +1529,12 @@ export async function runDatabaseObservabilityProvisioning(
                 {
                     output: "catalog",
                 },
-                deadline,
-            ),
+                deadline
+            )
         );
         const databaseNames = observedDatabaseNames(initialCatalog);
         const catalogByName = new Map(
-            initialCatalog.map((entry) => [entry.name, entry] as const),
+            initialCatalog.map((entry) => [entry.name, entry] as const)
         );
         const quarantinedApplicationDatabases = new Set<string>();
         const quarantineDriftedApplication = async (database: string) => {
@@ -1547,7 +1552,7 @@ export async function runDatabaseObservabilityProvisioning(
                 policyDigest,
                 deadline,
                 dependencies.afterSqlArtifactDescriptorStat,
-                artifactRoot,
+                artifactRoot
             );
             await quarantineApplicationDatabase(run, target, entry, deadline);
             quarantinedApplicationDatabases.add(database);
@@ -1561,7 +1566,7 @@ export async function runDatabaseObservabilityProvisioning(
                     policyDigest,
                     deadline,
                     dependencies.afterSqlArtifactDescriptorStat,
-                    artifactRoot,
+                    artifactRoot
                 );
             }
             await runSqlArtifact(
@@ -1572,7 +1577,7 @@ export async function runDatabaseObservabilityProvisioning(
                 [],
                 deadline,
                 dependencies.afterSqlArtifactDescriptorStat,
-                artifactRoot,
+                artifactRoot
             );
         }
         await runSqlArtifact(
@@ -1583,7 +1588,7 @@ export async function runDatabaseObservabilityProvisioning(
             [],
             deadline,
             dependencies.afterSqlArtifactDescriptorStat,
-            artifactRoot,
+            artifactRoot
         );
         await runSqlArtifact(
             run,
@@ -1593,14 +1598,14 @@ export async function runDatabaseObservabilityProvisioning(
             [],
             deadline,
             dependencies.afterSqlArtifactDescriptorStat,
-            artifactRoot,
+            artifactRoot
         );
         const databaseCapabilitiesSql =
             mode === "activate-current-catalog" || mode === "open-approved-collection"
                 ? await expandSqlArtifact(
                       "apply-database-capabilities.sql",
                       dependencies.afterSqlArtifactDescriptorStat,
-                      artifactRoot,
+                      artifactRoot
                   )
                 : null;
         for (const database of databaseNames) {
@@ -1612,7 +1617,7 @@ export async function runDatabaseObservabilityProvisioning(
                         policyDigest,
                         deadline,
                         dependencies.afterSqlArtifactDescriptorStat,
-                        artifactRoot,
+                        artifactRoot
                     );
                 }
                 try {
@@ -1622,7 +1627,7 @@ export async function runDatabaseObservabilityProvisioning(
                         database,
                         databaseCapabilitiesSql,
                         {},
-                        deadline,
+                        deadline
                     );
                 } catch (error) {
                     if (
@@ -1643,7 +1648,7 @@ export async function runDatabaseObservabilityProvisioning(
                     policyDigest,
                     deadline,
                     dependencies.afterSqlArtifactDescriptorStat,
-                    artifactRoot,
+                    artifactRoot
                 );
             }
             await runSqlArtifact(
@@ -1654,7 +1659,7 @@ export async function runDatabaseObservabilityProvisioning(
                 ["apply_statement_capability=approved"],
                 deadline,
                 dependencies.afterSqlArtifactDescriptorStat,
-                artifactRoot,
+                artifactRoot
             );
         }
         const [verifyControlDatabaseSql, verifyApplicationDatabaseSql] =
@@ -1662,12 +1667,12 @@ export async function runDatabaseObservabilityProvisioning(
                 expandSqlArtifact(
                     "verify-control-database.sql",
                     dependencies.afterSqlArtifactDescriptorStat,
-                    artifactRoot,
+                    artifactRoot
                 ),
                 expandSqlArtifact(
                     "verify-database.sql",
                     dependencies.afterSqlArtifactDescriptorStat,
-                    artifactRoot,
+                    artifactRoot
                 ),
             ]);
         for (const database of databaseNames) {
@@ -1681,7 +1686,7 @@ export async function runDatabaseObservabilityProvisioning(
                         ? verifyControlDatabaseSql
                         : verifyApplicationDatabaseSql,
                     {},
-                    deadline,
+                    deadline
                 );
             } catch (error) {
                 if (
@@ -1701,7 +1706,7 @@ export async function runDatabaseObservabilityProvisioning(
             [],
             deadline,
             dependencies.afterSqlArtifactDescriptorStat,
-            artifactRoot,
+            artifactRoot
         );
 
         const confirmedCatalog = parseDatabaseCatalog(
@@ -1713,8 +1718,8 @@ export async function runDatabaseObservabilityProvisioning(
                 {
                     output: "catalog",
                 },
-                deadline,
-            ),
+                deadline
+            )
         );
         if (JSON.stringify(confirmedCatalog) !== JSON.stringify(initialCatalog)) fail();
 
@@ -1737,7 +1742,7 @@ export async function runDatabaseObservabilityProvisioning(
                 ],
                 deadline,
                 dependencies.afterSqlArtifactDescriptorStat,
-                artifactRoot,
+                artifactRoot
             );
             if (!sameComposeTarget(target, await discoverComposeTarget(run, deadline))) {
                 fail();
@@ -1749,7 +1754,7 @@ export async function runDatabaseObservabilityProvisioning(
                 policyDigest,
                 deadline,
                 dependencies.afterSqlArtifactDescriptorStat,
-                artifactRoot,
+                artifactRoot
             );
             if (!sameComposeTarget(target, await discoverComposeTarget(run, deadline))) {
                 fail();
@@ -1765,7 +1770,7 @@ export async function runDatabaseObservabilityProvisioning(
                 collectionLeaseToken,
                 deadline,
                 dependencies.afterSqlArtifactDescriptorStat,
-                artifactRoot,
+                artifactRoot
             );
             return Object.freeze({
                 catalogDigest: databaseCatalogDigest(confirmedCatalog),

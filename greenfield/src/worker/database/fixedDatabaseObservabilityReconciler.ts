@@ -68,7 +68,7 @@ export interface DatabaseObservabilityReconcilerProcessResult {
 }
 
 export type DatabaseObservabilityReconcilerProcess = (
-    request: DatabaseObservabilityReconcilerProcessRequest,
+    request: DatabaseObservabilityReconcilerProcessRequest
 ) => Promise<DatabaseObservabilityReconcilerProcessResult>;
 
 const databaseCountSchema = v.pipe(
@@ -77,57 +77,57 @@ const databaseCountSchema = v.pipe(
     v.minValue(1, "Database observability collection lease result is invalid"),
     v.maxValue(
         databaseObservabilityDatabaseMaximum,
-        "Database observability collection lease result is invalid",
-    ),
+        "Database observability collection lease result is invalid"
+    )
 );
 const openResultSchema = v.strictObject({
     catalogDigest: v.pipe(
         v.string("Database observability collection lease result is invalid"),
         v.regex(
             /^[0-9a-f]{64}$/u,
-            "Database observability collection lease result is invalid",
-        ),
+            "Database observability collection lease result is invalid"
+        )
     ),
     collectionLeaseToken: v.pipe(
         v.string("Database observability collection lease result is invalid"),
         v.regex(
             /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
-            "Database observability collection lease result is invalid",
-        ),
+            "Database observability collection lease result is invalid"
+        )
     ),
     databaseCount: databaseCountSchema,
     mode: v.literal(
         openMode,
-        "Database observability collection lease result is invalid",
+        "Database observability collection lease result is invalid"
     ),
     status: v.picklist(
         ["RECONCILED", "UNCHANGED"],
-        "Database observability collection lease result is invalid",
+        "Database observability collection lease result is invalid"
     ),
 });
 const enableResultSchema = v.strictObject({
     databaseCount: databaseCountSchema,
     mode: v.literal(
         enableMode,
-        "Database observability collection lease result is invalid",
+        "Database observability collection lease result is invalid"
     ),
     status: v.literal(
         "OPENED",
-        "Database observability collection lease result is invalid",
+        "Database observability collection lease result is invalid"
     ),
 });
 const closeResultSchema = v.strictObject({
     databaseCount: v.literal(
         0,
-        "Database observability collection lease result is invalid",
+        "Database observability collection lease result is invalid"
     ),
     mode: v.literal(
         closeMode,
-        "Database observability collection lease result is invalid",
+        "Database observability collection lease result is invalid"
     ),
     status: v.literal(
         "CLOSED",
-        "Database observability collection lease result is invalid",
+        "Database observability collection lease result is invalid"
     ),
 });
 
@@ -176,7 +176,7 @@ const defaultProcess: DatabaseObservabilityReconcilerProcess = async (request) =
             stderr: "pipe",
             stdin: "ignore",
             stdout: "pipe",
-        },
+        }
     );
     const abort = () => child.kill("SIGTERM");
     request.signal.addEventListener("abort", abort, { once: true });
@@ -213,7 +213,7 @@ function boundedSignal(deadlineMs: number, signal?: AbortSignal): AbortSignal {
 
 function parseExactResult<T>(
     result: DatabaseObservabilityReconcilerProcessResult,
-    schema: v.BaseSchema<unknown, T, v.BaseIssue<unknown>>,
+    schema: v.BaseSchema<unknown, T, v.BaseIssue<unknown>>
 ): T {
     if (
         result.exitCode !== 0 ||
@@ -259,7 +259,7 @@ export function createFixedDatabaseObservabilityReconciler(options: {
     const run = async (
         mode: typeof closeMode | typeof enableMode | typeof openMode,
         signal: AbortSignal,
-        additionalArguments: readonly string[] = [],
+        additionalArguments: readonly string[] = []
     ): Promise<DatabaseObservabilityReconcilerProcessResult> => {
         try {
             return await execute({
@@ -282,9 +282,9 @@ export function createFixedDatabaseObservabilityReconciler(options: {
         async withApprovedCollection<T>(
             operation: (
                 reconciliationStatus: DatabaseObservabilityReconciliationStatus,
-                signal: AbortSignal,
+                signal: AbortSignal
             ) => Promise<T>,
-            signal?: AbortSignal,
+            signal?: AbortSignal
         ): Promise<DatabaseObservabilityApprovedCollectionResult<T>> {
             const collectionSignal = signal ?? new AbortController().signal;
             let reconciliationStatus: DatabaseObservabilityReconciliationStatus =
@@ -294,7 +294,7 @@ export function createFixedDatabaseObservabilityReconciler(options: {
             try {
                 const opened = parseExactResult(
                     await run(openMode, boundedSignal(openDeadlineMs, signal)),
-                    openResultSchema,
+                    openResultSchema
                 );
                 const enabled = parseExactResult(
                     await run(enableMode, boundedSignal(closeDeadlineMs, signal), [
@@ -303,7 +303,7 @@ export function createFixedDatabaseObservabilityReconciler(options: {
                         "--catalog-digest",
                         opened.catalogDigest,
                     ]),
-                    enableResultSchema,
+                    enableResultSchema
                 );
                 if (enabled.databaseCount !== opened.databaseCount) {
                     throw new DatabaseObservabilityCollectionLeaseError();
@@ -315,7 +315,7 @@ export function createFixedDatabaseObservabilityReconciler(options: {
             } finally {
                 parseExactResult(
                     await run(closeMode, boundedSignal(closeDeadlineMs)),
-                    closeResultSchema,
+                    closeResultSchema
                 );
             }
             if (!completed) {

@@ -20,7 +20,7 @@ const collectionLeaseToken = "12345678-1234-4123-8123-123456789abc";
 
 function result(
     value: unknown,
-    overrides: Partial<DatabaseObservabilityReconcilerProcessResult> = {},
+    overrides: Partial<DatabaseObservabilityReconcilerProcessResult> = {}
 ): DatabaseObservabilityReconcilerProcessResult {
     return {
         exitCode: 0,
@@ -178,7 +178,7 @@ describe("fixed database observability collection lease", () => {
                               mode: "open-approved-collection",
                               status: "ACTIVATED",
                           })
-                        : closed(),
+                        : closed()
                 );
             },
             releaseRoot,
@@ -212,7 +212,7 @@ describe("fixed database observability collection lease", () => {
                         databaseCount: 1,
                         mode: "close-approved-collection",
                         status: "CLOSED",
-                    }),
+                    })
                 );
             },
             releaseRoot,
@@ -268,13 +268,13 @@ describe("fixed database observability collection lease", () => {
             createFixedDatabaseObservabilityReconciler({
                 bunExecutable: "bun",
                 releaseRoot,
-            }),
+            })
         ).toThrow("Database observability reconciler paths are invalid");
         expect(() =>
             createFixedDatabaseObservabilityReconciler({
                 bunExecutable,
                 releaseRoot: `${releaseRoot}/../release`,
-            }),
+            })
         ).toThrow("Database observability reconciler paths are invalid");
 
         const secret = "postgresql://admin:secret@database/private";
@@ -300,11 +300,11 @@ describe("fixed database observability collection lease", () => {
 
     test("aborting a real runner reaps a TERM-resistant descendant before close returns", async () => {
         const temporaryRoot = await mkdtemp(
-            "/tmp/mira-dashboard-database-observability-supervisor-",
+            "/tmp/mira-dashboard-database-observability-supervisor-"
         );
         const temporaryRunner = path.join(
             temporaryRoot,
-            "scripts/delivery/provisioning/database-observability/runProvisioning.ts",
+            "scripts/delivery/provisioning/database-observability/runProvisioning.ts"
         );
         const descendantPidPath = path.join(temporaryRoot, "descendant.pid");
         await mkdir(path.dirname(temporaryRunner), { recursive: true });
@@ -321,7 +321,7 @@ if (mode === "open-approved-collection") {
   process.exitCode = 1;
 }
 `,
-            { mode: 0o600 },
+            { mode: 0o600 }
         );
         try {
             const cancellation = new AbortController();
@@ -349,7 +349,7 @@ if (mode === "open-approved-collection") {
             expect(descendantPid).toBeGreaterThan(1);
             cancellation.abort();
             expect(await collection).toBeInstanceOf(
-                DatabaseObservabilityCollectionLeaseError,
+                DatabaseObservabilityCollectionLeaseError
             );
 
             let descendantExists = true;

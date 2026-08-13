@@ -34,7 +34,7 @@ export const databaseObservabilityProvisioningReleaseArtifactPaths = Object.free
     ]
         .map(
             (fileName) =>
-                `scripts/delivery/provisioning/database-observability/${fileName}`,
+                `scripts/delivery/provisioning/database-observability/${fileName}`
         )
-        .toSorted(),
+        .toSorted()
 );
