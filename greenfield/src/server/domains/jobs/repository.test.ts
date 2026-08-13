@@ -156,6 +156,16 @@ describe("durable jobs repository", () => {
                 scheduledJobId: null,
                 scheduledJobVersion: null,
             });
+            const tiedDeliveryRuns = [7, 8].map((index) =>
+                queuedRun(index, {
+                    actionKey: "delivery.production.v1",
+                    availableAt: new Date(5000),
+                    queuedAt: new Date(5000),
+                    scheduledJobId: null,
+                    scheduledJobVersion: null,
+                    updatedAt: new Date(5000),
+                })
+            );
             for (const run of [
                 olderDeliveryRun,
                 queuedRun(5, {
@@ -168,6 +178,7 @@ describe("durable jobs repository", () => {
                     scheduledJobId: null,
                     scheduledJobVersion: null,
                 }),
+                ...tiedDeliveryRuns,
             ]) {
                 await repository.enqueueManualRun({
                     ...noSideEffects,
@@ -192,7 +203,7 @@ describe("durable jobs repository", () => {
                         limit: 10,
                     })
                     .map(({ id }) => id)
-            ).toEqual([uuid(4), uuid(6)]);
+            ).toEqual([uuid(4), uuid(7), uuid(8), uuid(6)]);
             expect(() =>
                 repository.listActionRuns({
                     actionKey: "delivery.production.v1",

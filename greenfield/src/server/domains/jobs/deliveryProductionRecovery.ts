@@ -37,6 +37,9 @@ export interface DeliveryProductionRecoveryPort {
 
 export interface DeliveryProductionRecoveryOptions {
     readonly control: DeliveryProductionRecoveryControlPort;
+    readonly readActive: (
+        signal?: AbortSignal
+    ) => Promise<DeliveryProductionOperationRecord | null>;
     readonly repository: Pick<
         JobRepository,
         | "enqueueManualRun"
@@ -261,6 +264,8 @@ export function createDeliveryProductionRecovery(
 ): DeliveryProductionRecoveryPort {
     return Object.freeze({
         async reconcileBeforeClaims(signal?: AbortSignal) {
+            signal?.throwIfAborted();
+            if ((await options.readActive(signal)) === null) return;
             signal?.throwIfAborted();
             const inspection = await options.control.inspectActive(signal);
             signal?.throwIfAborted();

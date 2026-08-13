@@ -1147,7 +1147,7 @@ class DrizzleJobReader implements JobRepositoryReader {
             .select()
             .from(jobRuns)
             .where(eq(jobRuns.actionKey, actionKey))
-            .orderBy(desc(jobRuns.updatedAt), desc(jobRuns.id))
+            .orderBy(desc(jobRuns.updatedAt), asc(jobRuns.id))
             .limit(input.limit)
             .all()
             .map((row) => parseRun(row));

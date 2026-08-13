@@ -119,7 +119,6 @@ function latestReviewerOpinion(
 }
 
 export function hasReviewerApproval(pullRequest: DeliveryGitHubPullRequest): boolean {
-    if (normalized(pullRequest.reviewDecision) === "APPROVED") return true;
     return normalized(latestReviewerOpinion(pullRequest)?.state) === "APPROVED";
 }
 

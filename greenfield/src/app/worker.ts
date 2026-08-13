@@ -679,6 +679,8 @@ const defaultDependencies = Object.freeze({
             reconcileDeliveryProductionBeforeClaims: (repository, signal) =>
                 createDeliveryProductionRecovery({
                     control: productionControl,
+                    readActive: () =>
+                        readActiveProductionCutoverRecord(layout.production.state.root),
                     repository,
                 }).reconcileBeforeClaims(signal),
             sideEffects: createSystemJobWorkerSideEffects(),

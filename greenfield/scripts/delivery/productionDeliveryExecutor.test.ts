@@ -1,5 +1,6 @@
+import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -27,6 +28,7 @@ import {
     parseProductionDeliveryExecutorArguments,
     prepareProductionDeliveryTargetUnderLease,
     runProductionDeliveryExecutorUnderLease,
+    verifyProductionRunBeforeSnapshot,
 } from "./productionDeliveryExecutor.ts";
 import { prepareProductionDeliveryDirectories } from "./productionDeliveryFilesystem.ts";
 import {
@@ -160,7 +162,153 @@ async function fixture() {
     return { options, paths };
 }
 
+async function createClaimedProductionRunDatabase(
+    paths: Awaited<ReturnType<typeof prepareProductionDeliveryDirectories>>,
+    capsule: DeliveryProductionOperationCapsule
+): Promise<Database> {
+    const databasePath = path.join(paths.stateDirectory, "mira-dashboard.db");
+    const database = new Database(databasePath, { create: true, strict: true });
+    database.run(`
+        CREATE TABLE job_runs (
+            action_key TEXT NOT NULL,
+            enqueue_sha256 TEXT NOT NULL,
+            id TEXT PRIMARY KEY NOT NULL,
+            idempotency_key TEXT NOT NULL,
+            lease_expires_at INTEGER,
+            lease_owner_id TEXT,
+            lease_token TEXT,
+            payload_json TEXT NOT NULL,
+            queued_at INTEGER NOT NULL,
+            requested_by_id TEXT NOT NULL,
+            requested_by_kind TEXT NOT NULL,
+            state TEXT NOT NULL
+        );
+        CREATE TABLE audit_events (
+            action TEXT NOT NULL,
+            actor_id TEXT NOT NULL,
+            actor_kind TEXT NOT NULL,
+            authenticator_id TEXT,
+            id TEXT PRIMARY KEY NOT NULL,
+            occurred_at INTEGER NOT NULL,
+            outcome TEXT NOT NULL,
+            request_id TEXT,
+            target_id TEXT NOT NULL,
+            target_type TEXT NOT NULL
+        );
+    `);
+    database
+        .query<
+            never,
+            [
+                string,
+                string,
+                string,
+                string,
+                number,
+                string,
+                string,
+                string,
+                number,
+                string,
+                string,
+            ]
+        >(`
+            INSERT INTO job_runs (
+                action_key,
+                enqueue_sha256,
+                id,
+                idempotency_key,
+                lease_expires_at,
+                lease_owner_id,
+                lease_token,
+                payload_json,
+                queued_at,
+                requested_by_id,
+                requested_by_kind,
+                state
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'running')
+        `)
+        .run(
+            capsule.enqueue.actionKey,
+            capsule.enqueue.enqueueSha256,
+            capsule.runId,
+            capsule.enqueue.idempotencyKey,
+            20_000,
+            "worker-1",
+            "019fd974-54a2-74dd-a64b-d4186f8d8805",
+            JSON.stringify(capsule.enqueue.payload),
+            capsule.enqueue.queuedAtMs,
+            capsule.enqueue.actor.id,
+            capsule.enqueue.actor.kind
+        );
+    database
+        .query<
+            never,
+            [
+                string,
+                string,
+                string,
+                string,
+                string,
+                number,
+                string,
+                string,
+                string,
+                string,
+            ]
+        >(`
+            INSERT INTO audit_events (
+                action,
+                actor_id,
+                actor_kind,
+                authenticator_id,
+                id,
+                occurred_at,
+                outcome,
+                request_id,
+                target_id,
+                target_type
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+        `)
+        .run(
+            "delivery.operation.enqueue",
+            capsule.enqueue.actor.id,
+            capsule.enqueue.actor.kind,
+            capsule.enqueue.actor.authenticatorId,
+            capsule.enqueue.audit.eventId,
+            capsule.enqueue.queuedAtMs,
+            "accepted",
+            capsule.enqueue.audit.requestId,
+            capsule.runId,
+            "job-run"
+        );
+    await chmod(databasePath, 0o600);
+    return database;
+}
+
 describe("production Delivery executor", () => {
+    test("accepts the exact claimed production run before snapshot", async () => {
+        const { paths } = await fixture();
+        const capsule = operationCapsule();
+        const database = await createClaimedProductionRunDatabase(paths, capsule);
+        database.close(false);
+
+        await verifyProductionRunBeforeSnapshot(paths, capsule);
+
+        const changed = new Database(
+            path.join(paths.stateDirectory, "mira-dashboard.db"),
+            {
+                strict: true,
+            }
+        );
+        changed.run("UPDATE job_runs SET state = 'succeeded'");
+        changed.close(false);
+        const rejected = await rejectionError(
+            verifyProductionRunBeforeSnapshot(paths, capsule)
+        );
+        expect(rejected.message).toBe("Production Delivery executor failed");
+    });
+
     test("rejects extra, non-loopback, and malformed arguments", () => {
         expect(() =>
             parseProductionDeliveryExecutorArguments([
@@ -258,7 +406,7 @@ describe("production Delivery executor", () => {
                         Promise.resolve(artifact(releaseId, runtimeRevision)),
                     nowMs: () => 10_000,
                     verifyPreviewTailscaleOperator: () => Promise.resolve(),
-                    verifyQueuedRunBeforeSnapshot: () => Promise.resolve(),
+                    verifyRunBeforeSnapshot: () => Promise.resolve(),
                 }
             );
 

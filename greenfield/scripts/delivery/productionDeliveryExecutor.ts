@@ -151,7 +151,7 @@ export interface ProductionDeliveryExecutorDependencies {
     readonly nowMs?: () => number;
     readonly publishRelease?: typeof publishProductionRelease;
     readonly resolveSourceIdentity?: typeof resolveBuildSourceIdentity;
-    readonly verifyQueuedRunBeforeSnapshot?: (
+    readonly verifyRunBeforeSnapshot?: (
         paths: PreparedProductionDeliveryPaths,
         capsule: DeliveryProductionOperationCapsule
     ) => Promise<void>;
@@ -163,7 +163,7 @@ function failure(): Error {
     return new Error(executorFailureMessage);
 }
 
-interface QueuedProductionRunRow {
+interface ProductionRunRow {
     readonly actionKey: string;
     readonly enqueueSha256: string;
     readonly idempotencyKey: string;
@@ -193,7 +193,23 @@ function sha256(value: string): string {
     return new Bun.CryptoHasher("sha256").update(value).digest("hex");
 }
 
-async function verifyQueuedRunBeforeSnapshot(
+function hasValidProductionRunState(run: ProductionRunRow): boolean {
+    if (run.state === "queued") {
+        return (
+            run.leaseOwnerId === null &&
+            run.leaseToken === null &&
+            run.leaseExpiresAt === null
+        );
+    }
+    return (
+        run.state === "running" &&
+        run.leaseOwnerId !== null &&
+        run.leaseToken !== null &&
+        run.leaseExpiresAt !== null
+    );
+}
+
+export async function verifyProductionRunBeforeSnapshot(
     paths: PreparedProductionDeliveryPaths,
     capsule: DeliveryProductionOperationCapsule
 ): Promise<void> {
@@ -217,7 +233,7 @@ async function verifyQueuedRunBeforeSnapshot(
         }
         database = new Database(databasePath, { readonly: true, strict: true });
         const run = database
-            .query<QueuedProductionRunRow, [string]>(`
+            .query<ProductionRunRow, [string]>(`
                 SELECT
                     action_key AS actionKey,
                     enqueue_sha256 AS enqueueSha256,
@@ -257,10 +273,7 @@ async function verifyQueuedRunBeforeSnapshot(
             run.length !== 1 ||
             audit.length !== 1 ||
             run[0]?.actionKey !== capsule.enqueue.actionKey ||
-            run[0].state !== "queued" ||
-            run[0].leaseOwnerId !== null ||
-            run[0].leaseToken !== null ||
-            run[0].leaseExpiresAt !== null ||
+            !hasValidProductionRunState(run[0]) ||
             run[0].enqueueSha256 !== capsule.enqueue.enqueueSha256 ||
             run[0].idempotencyKey !== capsule.enqueue.idempotencyKey ||
             run[0].payloadJson !== expectedPayload ||
@@ -761,8 +774,8 @@ export async function runProductionDeliveryExecutorUnderLease(
             record = await advanceTo(lease, paths, record, phase, nowMs);
             if (phase === "services-stopped") {
                 await (
-                    dependencies.verifyQueuedRunBeforeSnapshot ??
-                    verifyQueuedRunBeforeSnapshot
+                    dependencies.verifyRunBeforeSnapshot ??
+                    verifyProductionRunBeforeSnapshot
                 )(paths, record.capsule);
             }
         };

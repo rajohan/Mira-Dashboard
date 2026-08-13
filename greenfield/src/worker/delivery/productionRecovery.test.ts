@@ -171,6 +171,43 @@ describe("Delivery production startup recovery", () => {
         });
     }
 
+    test("skips the immutable executor when no cutover record exists", async () => {
+        const inspection = terminalInspection();
+        let inspected = 0;
+        const baseControl = control(inspection, []);
+        const recovery = createDeliveryProductionRecovery({
+            control: {
+                ...baseControl,
+                inspectActive() {
+                    inspected += 1;
+                    return baseControl.inspectActive();
+                },
+            },
+            readActive: () => Promise.resolve(null),
+            repository: {
+                enqueueManualRun() {
+                    throw new Error("must not enqueue without an active cutover");
+                },
+                findEnqueueAuditProvenance() {
+                    return;
+                },
+                findRun() {
+                    return;
+                },
+                findRunByIdempotency() {
+                    return;
+                },
+                recoverExpiredClaims() {
+                    throw new Error("must not recover without an active cutover");
+                },
+            },
+        });
+
+        await recovery.reconcileBeforeClaims();
+
+        expect(inspected).toBe(0);
+    });
+
     test("rehydrates an exact rollback Job and audit before clearing the terminal fence", async () => {
         const database = await openFreshMigratedDatabase();
         const repository = createJobRepository(
@@ -183,6 +220,7 @@ describe("Delivery production startup recovery", () => {
         try {
             const recovery = createDeliveryProductionRecovery({
                 control: control(inspection, cleared),
+                readActive: () => Promise.resolve(inspection.record),
                 repository,
                 wake() {
                     wakes += 1;
@@ -221,6 +259,7 @@ describe("Delivery production startup recovery", () => {
         try {
             const recovery = createDeliveryProductionRecovery({
                 control: control(inspection, cleared),
+                readActive: () => Promise.resolve(inspection.record),
                 repository,
             });
             await recovery.reconcileBeforeClaims();
@@ -243,6 +282,7 @@ describe("Delivery production startup recovery", () => {
         try {
             await createDeliveryProductionRecovery({
                 control: control(inspection, cleared),
+                readActive: () => Promise.resolve(inspection.record),
                 repository,
             }).reconcileBeforeClaims();
             await repository.registerWorker({
@@ -277,6 +317,7 @@ describe("Delivery production startup recovery", () => {
             await createDeliveryProductionRecovery({
                 control: control(inspection, cleared),
                 now: () => new Date(4000),
+                readActive: () => Promise.resolve(inspection.record),
                 repository,
             }).reconcileBeforeClaims();
 
@@ -295,6 +336,7 @@ describe("Delivery production startup recovery", () => {
         const inspection = terminalInspection();
         const rejected = createDeliveryProductionRecovery({
             control: control(inspection, []),
+            readActive: () => Promise.resolve(inspection.record),
             repository: {
                 enqueueManualRun() {
                     throw new Error("must not enqueue a collision");

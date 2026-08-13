@@ -117,6 +117,41 @@ describe("Delivery pull-request policy", () => {
         expect(hasReviewerApproval(pr)).toBeFalse();
     });
 
+    test("does not substitute GitHub's aggregate approval for Raymond's review", () => {
+        const approvedBySomeoneElse = pullRequest(1, {
+            reviewDecision: "APPROVED",
+            reviews: [
+                {
+                    authorLogin: "another-reviewer",
+                    state: "APPROVED",
+                    submittedAt: "2026-08-13T10:00:00.000Z",
+                },
+            ],
+        });
+        const raymondRequestedChangesLater = pullRequest(2, {
+            reviewDecision: "APPROVED",
+            reviews: [
+                {
+                    authorLogin: "rajohan",
+                    state: "APPROVED",
+                    submittedAt: "2026-08-13T09:00:00.000Z",
+                },
+                {
+                    authorLogin: "rajohan",
+                    state: "CHANGES_REQUESTED",
+                    submittedAt: "2026-08-13T10:00:00.000Z",
+                },
+            ],
+        });
+
+        expect(hasReviewerApproval(approvedBySomeoneElse)).toBeFalse();
+        expect(resolvePullRequestReviewState(approvedBySomeoneElse)).toBe("required");
+        expect(hasReviewerApproval(raymondRequestedChangesLater)).toBeFalse();
+        expect(resolvePullRequestReviewState(raymondRequestedChangesLater)).toBe(
+            "changes-requested"
+        );
+    });
+
     test("does not retain an older changes-requested label after dismissal", () => {
         const pr = pullRequest(1, {
             reviewDecision: undefined,
