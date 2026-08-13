@@ -49,7 +49,7 @@ import {
     type StructuredLogger,
 } from "../server/platform/observability/structuredLogger.ts";
 import {
-    productionCutoverRequiresValidationMode,
+    productionCutoverRequiresReconciliation,
     readActiveProductionCutoverRecord,
 } from "../server/platform/release/deliveryCutoverValidation.ts";
 import {
@@ -696,7 +696,7 @@ const defaultDependencies = Object.freeze({
         });
     },
     createTerminationController: createProcessTerminationController,
-    detectCutoverValidation: productionCutoverRequiresValidationMode,
+    detectCutoverValidation: productionCutoverRequiresReconciliation,
     async reconcileCutoverValidation(layout, _release, port) {
         const inspection = await reconcileDeliveryProductionCutoverBeforeValidation({
             projectRoot: layout.root,
@@ -704,7 +704,10 @@ const defaultDependencies = Object.freeze({
                 readActiveProductionCutoverRecord(layout.production.state.root),
             readinessUrl: `http://127.0.0.1:${String(port)}/api/health/ready`,
         });
-        return inspection.state === "in-progress";
+        return (
+            inspection.state === "in-progress" &&
+            inspection.record.phase !== "normal-runtime-starting"
+        );
     },
     loadRelease: (releasesDirectory, releaseRoot, processRole) =>
         loadRuntimeRelease(releasesDirectory, releaseRoot, processRole),
@@ -819,7 +822,7 @@ export async function runDashboardWorkerProcess(
         const bootIdentity = await dependencies.readBootIdentity();
         let cutoverValidation = await (
             dependencies.detectCutoverValidation ??
-            productionCutoverRequiresValidationMode
+            productionCutoverRequiresReconciliation
         )(layout.production.state.root);
         if (cutoverValidation) {
             cutoverValidation = await (

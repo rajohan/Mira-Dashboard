@@ -30,6 +30,7 @@ export const deliveryProductionOperationPhases = Object.freeze([
     "target-services-started",
     "target-verified",
     "target-smoke-verified",
+    "normal-runtime-starting",
 ] as const);
 
 export type DeliveryProductionOperationPhase =

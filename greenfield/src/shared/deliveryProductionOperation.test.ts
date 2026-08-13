@@ -250,7 +250,7 @@ describe("delivery production operation protocol", () => {
                 updatedAtMs: 2000,
             })
         ).toThrow("Delivery production operation is invalid");
-        expect(deliveryProductionOperationPhases).toHaveLength(8);
+        expect(deliveryProductionOperationPhases).toHaveLength(9);
         expect(
             retainedDeliveryProductionReceiptIds({
                 currentTransitionId: transitionId,

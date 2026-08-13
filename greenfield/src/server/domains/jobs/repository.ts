@@ -21,7 +21,9 @@ import {
 import type { SQLiteBunDatabase } from "drizzle-orm/bun-sqlite";
 import * as v from "valibot";
 
+import { deliveryProductionActionKey } from "../../../contracts/deliveryWorker.ts";
 import {
+    jobAttemptLimitSchema,
     jobActionKeySchema,
     jobPayloadMaximumBytes,
     jobPayloadSchema,
@@ -420,6 +422,17 @@ export interface RecoverExpiredClaimsInput {
     readonly sideEffectsForRun: (run: JobRunRecord) => JobMutationSideEffects;
 }
 
+export interface RecoverDeliveryProductionTerminalRunInput {
+    readonly at: Date;
+    readonly expectedAudit: JobEnqueueAuditProvenance;
+    readonly expectedRun: JobRunRecord;
+    readonly sideEffectsForRun: (run: JobRunRecord) => JobMutationSideEffects;
+}
+
+export type RecoverDeliveryProductionTerminalRunResult =
+    | { readonly kind: "recovered"; readonly run: JobRunRecord }
+    | { readonly kind: "state-changed" };
+
 export interface ExpireDisableIntentsInput {
     readonly at: Date;
     readonly canReenableSchedule: (schedule: ScheduledJobRecord) => boolean;
@@ -636,6 +649,9 @@ export interface JobRepository extends JobRepositoryReader {
     recoverExpiredClaims(
         input: RecoverExpiredClaimsInput
     ): Promise<readonly JobRunRecord[]>;
+    recoverDeliveryProductionTerminalRun(
+        input: RecoverDeliveryProductionTerminalRunInput
+    ): Promise<RecoverDeliveryProductionTerminalRunResult>;
     registerWorker(input: RegisterWorkerInput): Promise<WorkerInstanceRecord>;
     renewClaim(input: RenewClaimInput): Promise<JobClaimMutationResult>;
     setClaimingPaused(
@@ -661,6 +677,11 @@ const terminalRunStateList = [
     "cancelled",
     "failed",
     "succeeded",
+    "timed-out",
+] as const satisfies readonly JobRunState[];
+const recoverableDeliveryProductionTerminalStates = [
+    "cancelled",
+    "failed",
     "timed-out",
 ] as const satisfies readonly JobRunState[];
 const serviceActionJobActionKeyList = [
@@ -851,6 +872,33 @@ function effectiveSettlementOutcome(
         terminalCode: "cancel-requested",
         terminalMessage: "The job action was cancelled.",
     };
+}
+
+function exactJobRunSnapshot(left: JobRunRecord, right: JobRunRecord): boolean {
+    const leftKeys = Object.keys(left) as readonly (keyof JobRunRecord)[];
+    const rightKeys = Object.keys(right);
+    if (leftKeys.length !== rightKeys.length) return false;
+    return leftKeys.every((key) => {
+        const leftValue = left[key];
+        const rightValue = right[key];
+        return leftValue instanceof Date && rightValue instanceof Date
+            ? getTime(leftValue) === getTime(rightValue)
+            : leftValue === rightValue;
+    });
+}
+
+function exactEnqueueAuditProvenance(
+    left: JobEnqueueAuditProvenance | undefined,
+    right: JobEnqueueAuditProvenance
+): boolean {
+    return (
+        left?.actorId === right.actorId &&
+        left.actorKind === right.actorKind &&
+        left.auditEventId === right.auditEventId &&
+        left.authenticatorId === right.authenticatorId &&
+        left.requestId === right.requestId &&
+        getTime(left.occurredAt) === getTime(right.occurredAt)
+    );
 }
 
 class DrizzleJobReader implements JobRepositoryReader {
@@ -1535,6 +1583,77 @@ class DrizzleJobWriter extends DrizzleJobReader {
     public constructor(transaction: JobTransaction) {
         super(transaction);
         this.#transaction = transaction;
+    }
+
+    public recoverDeliveryProductionTerminalRun(
+        input: RecoverDeliveryProductionTerminalRunInput
+    ): RecoverDeliveryProductionTerminalRunResult {
+        const expectedRun = v.parse(jobRunSelectSchema, input.expectedRun);
+        const current = this.findRun(expectedRun.id);
+        const currentAudit = this.findEnqueueAuditProvenance(expectedRun.id);
+        if (
+            current === undefined ||
+            current.actionKey !== deliveryProductionActionKey ||
+            current.requiredWorkerReleaseId !== null ||
+            current.retrySafe !== true ||
+            current.scheduledJobId !== null ||
+            current.scheduledJobVersion !== null ||
+            current.triggerType !== "manual" ||
+            !recoverableDeliveryProductionTerminalStates.includes(
+                current.state as (typeof recoverableDeliveryProductionTerminalStates)[number]
+            ) ||
+            !exactJobRunSnapshot(current, expectedRun) ||
+            !exactEnqueueAuditProvenance(currentAudit, input.expectedAudit)
+        ) {
+            return { kind: "state-changed" };
+        }
+
+        const at = maximumDate(
+            current.updatedAt,
+            new Date(v.parse(jobTimestampSchema, getTime(input.at)))
+        );
+        const attemptLimit = Math.max(current.attemptLimit, current.attemptCount + 1);
+        const parsedAttemptLimit = v.safeParse(jobAttemptLimitSchema, attemptLimit);
+        if (!parsedAttemptLimit.success) return { kind: "state-changed" };
+        const row = this.#transaction
+            .update(jobRuns)
+            .set({
+                attemptLimit: parsedAttemptLimit.output,
+                availableAt: at,
+                cancelRequestedAt: null,
+                cancelRequestedById: null,
+                cancelRequestedByKind: null,
+                finishedAt: null,
+                resultJson: null,
+                state: "queued",
+                stateVersion: current.stateVersion + 1,
+                terminalCode: null,
+                terminalMessage: null,
+                updatedAt: at,
+            })
+            .where(
+                and(
+                    eq(jobRuns.id, current.id),
+                    eq(jobRuns.actionKey, deliveryProductionActionKey),
+                    eq(jobRuns.state, current.state),
+                    eq(jobRuns.stateVersion, current.stateVersion)
+                )
+            )
+            .returning()
+            .get();
+        if (row === undefined) return { kind: "state-changed" };
+        this.#appendEvent(current.id, {
+            attempt: current.attemptCount,
+            kind: "retry-scheduled",
+            occurredAt: at,
+            workerInstanceId: null,
+        });
+        const recovered = requiredRow(
+            this.findRun(current.id),
+            "delivery production terminal recovery refresh"
+        );
+        this.#insertSideEffects(input.sideEffectsForRun(recovered));
+        return { kind: "recovered", run: recovered };
     }
 
     #reconcileHostRestartClaimFence(
@@ -3299,6 +3418,9 @@ export function createJobRepository(
             write((writer) => writer.reconcileSchedules(input)),
         recoverExpiredClaims: (input: RecoverExpiredClaimsInput) =>
             write((writer) => writer.recoverExpiredClaims(input)),
+        recoverDeliveryProductionTerminalRun: (
+            input: RecoverDeliveryProductionTerminalRunInput
+        ) => write((writer) => writer.recoverDeliveryProductionTerminalRun(input)),
         registerWorker: (input: RegisterWorkerInput) =>
             write((writer) => writer.registerWorker(input)),
         renewClaim: (input: RenewClaimInput) =>

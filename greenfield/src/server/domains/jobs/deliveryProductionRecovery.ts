@@ -14,6 +14,7 @@ import {
 } from "./sideEffects.ts";
 
 const recoveryFailureMessage = "Delivery production recovery failed";
+const terminalReceiptPollIntervalMs = 100;
 
 export class DeliveryProductionRecoveryError extends Error {
     override readonly name = "DeliveryProductionRecoveryError";
@@ -46,6 +47,7 @@ export interface DeliveryProductionRecoveryOptions {
         | "findEnqueueAuditProvenance"
         | "findRun"
         | "findRunByIdempotency"
+        | "recoverDeliveryProductionTerminalRun"
         | "recoverExpiredClaims"
     >;
     readonly now?: () => Date;
@@ -54,6 +56,22 @@ export interface DeliveryProductionRecoveryOptions {
 
 function failure(): DeliveryProductionRecoveryError {
     return new DeliveryProductionRecoveryError(recoveryFailureMessage);
+}
+
+async function waitForTerminalReceiptPoll(signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
+    await new Promise<void>((resolve, reject) => {
+        const onAbort = () => {
+            clearTimeout(timeout);
+            reject(signal?.reason instanceof Error ? signal.reason : failure());
+        };
+        const timeout = setTimeout(() => {
+            signal?.removeEventListener("abort", onAbort);
+            resolve();
+        }, terminalReceiptPollIntervalMs);
+        signal?.addEventListener("abort", onAbort, { once: true });
+        if (signal?.aborted === true) onAbort();
+    });
 }
 
 function exactRunMatchesCapsule(
@@ -249,6 +267,38 @@ async function recoverTerminal(
     ) {
         throw failure();
     }
+    if (
+        run.state === "cancelled" ||
+        run.state === "failed" ||
+        run.state === "timed-out"
+    ) {
+        const expectedAudit = options.repository.findEnqueueAuditProvenance(
+            capsule.runId
+        );
+        if (expectedAudit === undefined) throw failure();
+        const now = options.now?.() ?? new Date();
+        const recovered = await options.repository.recoverDeliveryProductionTerminalRun({
+            at: now,
+            expectedAudit,
+            expectedRun: run,
+            sideEffectsForRun: (requeued) =>
+                createJobRealtimeSideEffects({
+                    occurredAt: requeued.updatedAt,
+                    realtime: {
+                        id: requeued.id,
+                        kind: "run",
+                        operation: "updated",
+                    },
+                }),
+        });
+        if (
+            recovered.kind !== "recovered" ||
+            recovered.run.state !== "queued" ||
+            !exactRunMatchesCapsule(recovered.run, capsule)
+        ) {
+            throw failure();
+        }
+    }
     const cleared = await options.control.clear(capsule.transitionId);
     if (JSON.stringify(cleared) !== JSON.stringify(inspection.record)) throw failure();
     await options.wake?.();
@@ -275,7 +325,29 @@ export function createDeliveryProductionRecovery(
                 signal?.throwIfAborted();
                 return;
             }
-            throw failure();
+            if (
+                inspection.state !== "in-progress" ||
+                inspection.record.phase !== "normal-runtime-starting"
+            ) {
+                throw failure();
+            }
+            while (true) {
+                await waitForTerminalReceiptPoll(signal);
+                signal?.throwIfAborted();
+                const nextInspection = await options.control.inspectActive(signal);
+                signal?.throwIfAborted();
+                if (nextInspection.state === "terminal") {
+                    await recoverTerminal(options, nextInspection);
+                    signal?.throwIfAborted();
+                    return;
+                }
+                if (
+                    nextInspection.state !== "in-progress" ||
+                    nextInspection.record.phase !== "normal-runtime-starting"
+                ) {
+                    throw failure();
+                }
+            }
         },
     });
 }

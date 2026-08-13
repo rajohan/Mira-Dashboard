@@ -3,6 +3,10 @@ import { describe, expect, test } from "bun:test";
 import type { DeliveryGitHubPullRequest } from "../../contracts/deliveryGithub.ts";
 import type { DeliveryProductionJobPayload } from "../../contracts/deliveryWorker.ts";
 import type { JobExecutionRunIdentity } from "../../contracts/jobModel.ts";
+import {
+    parseDeliveryProductionOperationCapsule,
+    parseDeliveryProductionOperationRecord,
+} from "../../shared/deliveryProductionOperation.ts";
 import { projectDeliveryOperationAuthority } from "./overviewProjection.ts";
 import { createDeliveryProductionExecutionPort } from "./productionExecution.ts";
 
@@ -144,6 +148,128 @@ function currentAuthority() {
 }
 
 describe("Delivery production execution", () => {
+    test("clears an exact terminal marker before returning its durable result", async () => {
+        const input: DeliveryProductionJobPayload = {
+            activationRevision,
+            checkoutRevision,
+            expectedMainHeadSha: mergedMainHead,
+            operation: "deploy",
+            sourceRevision,
+        };
+        const runIdentity = identity(input);
+        const capsule = parseDeliveryProductionOperationCapsule({
+            cas: {
+                current: {
+                    activationTransitionId: "01917d36-2e64-7c89-9abc-1234567890b0",
+                    releaseId: currentReleaseId,
+                    rollbackSnapshotTransitionId: runId,
+                    runtimeRevision: currentRuntimeRevision,
+                },
+                target: {
+                    databaseSnapshotTransitionId: null,
+                    releaseId: mergedMainHead,
+                    runtimeRevision: currentRuntimeRevision,
+                },
+            },
+            enqueue: {
+                actionKey: runIdentity.actionKey,
+                actor: {
+                    authenticatorId: runIdentity.enqueueAuthenticatorId,
+                    id: runIdentity.requestedById,
+                    kind: "user",
+                },
+                audit: {
+                    eventId: runIdentity.enqueueAuditEventId,
+                    requestId: runIdentity.enqueueRequestId,
+                },
+                enqueueSha256: runIdentity.enqueueSha256,
+                idempotencyKey: runIdentity.idempotencyKey,
+                payload: input,
+                payloadSha256: runIdentity.payloadSha256,
+                queuedAtMs: runIdentity.queuedAtMs,
+            },
+            executor: {
+                releaseId: currentReleaseId,
+                runtimeRevision: currentRuntimeRevision,
+            },
+            protocol: "delivery.production.v1",
+            runId,
+            transitionId: runId,
+        });
+        const record = parseDeliveryProductionOperationRecord({
+            capsule,
+            phase: "terminal",
+            result: {
+                activation: {
+                    current: {
+                        releaseId: mergedMainHead,
+                        runtimeRevision: currentRuntimeRevision,
+                    },
+                    formatVersion: 1,
+                    previous: {
+                        databaseSnapshotTransitionId: runId,
+                        releaseId: currentReleaseId,
+                        runtimeRevision: currentRuntimeRevision,
+                    },
+                    transitionId: runId,
+                },
+                completedAtMs: nowMs + 1000,
+                outcome: "succeeded",
+            },
+            updatedAtMs: nowMs + 1000,
+        });
+        if (record.phase !== "terminal") throw new Error("Expected terminal fixture");
+        const cleared: string[] = [];
+        const port = createDeliveryProductionExecutionPort({
+            authority: {
+                read: () => Promise.reject(new Error("unused")),
+                readExact: () => Promise.reject(new Error("unused")),
+                readForOperation: () => Promise.reject(new Error("unused")),
+            },
+            control: {
+                clear(transitionId) {
+                    cleared.push(transitionId);
+                    return Promise.resolve(record);
+                },
+                inspect: () =>
+                    Promise.resolve({
+                        record,
+                        state: "terminal" as const,
+                        transitionId: runId,
+                    }),
+                inspectActive: () => Promise.reject(new Error("unused")),
+                prepare: () => Promise.reject(new Error("unused")),
+            },
+            executorReleaseId: currentReleaseId,
+            executorRuntimeRevision: currentRuntimeRevision,
+            github: {
+                createNativeStack: () => Promise.reject(new Error("unused")),
+                findNativeStack: () => Promise.reject(new Error("unused")),
+                getPullRequest: () => Promise.reject(new Error("unused")),
+                listOpenPullRequests: () => Promise.reject(new Error("unused")),
+                mergeNativeStack: () => Promise.reject(new Error("unused")),
+                mergePullRequest: () => Promise.reject(new Error("unused")),
+                readMainRef: () => Promise.reject(new Error("unused")),
+                rejectPullRequest: () => Promise.reject(new Error("unused")),
+                supportsNativeStacks: () => Promise.reject(new Error("unused")),
+                updatePullRequestBranch: () => Promise.reject(new Error("unused")),
+            },
+            mainGit: {
+                inspect: () => Promise.reject(new Error("unused")),
+                syncMainToExactRef: () => Promise.reject(new Error("unused")),
+            },
+            projectRoot: "/srv/mira-dashboard",
+            readinessUrl: "http://127.0.0.1/api/health/ready",
+        });
+
+        expect(await port.execute(input, currentAuthority(), runIdentity)).toEqual({
+            operation: "deploy",
+            outcome: "completed",
+            releaseId: mergedMainHead,
+        });
+        expect(cleared).toEqual([runId]);
+    });
+
     test("does not deploy a later unrelated main commit after an exact merge", () => {
         const input = payload();
         let pullRequestReads = 0;

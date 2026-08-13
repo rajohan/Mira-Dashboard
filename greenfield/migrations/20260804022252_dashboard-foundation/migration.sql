@@ -1959,13 +1959,89 @@ BEFORE UPDATE OF
     priority, timeout_ms, attempt_limit, retry_safe, cancellation_policy,
     queued_at, scheduled_for_at
 ON job_runs
+WHEN NOT (
+    OLD.action_key = 'delivery.production.v1'
+    AND OLD.state IN ('cancelled', 'failed', 'timed-out')
+    AND OLD.required_worker_release_id IS NULL
+    AND NEW.required_worker_release_id IS NULL
+    AND OLD.retry_safe = 1
+    AND NEW.retry_safe = 1
+    AND OLD.trigger_type = 'manual'
+    AND NEW.trigger_type = 'manual'
+    AND OLD.scheduled_job_id IS NULL
+    AND NEW.scheduled_job_id IS NULL
+    AND OLD.scheduled_job_version IS NULL
+    AND NEW.scheduled_job_version IS NULL
+    AND NEW.state = 'queued'
+    AND NEW.attempt_count = OLD.attempt_count
+    AND NEW.attempt_limit = CASE
+        WHEN OLD.attempt_count >= OLD.attempt_limit THEN OLD.attempt_count + 1
+        ELSE OLD.attempt_limit
+    END
+    AND NEW.id IS OLD.id
+    AND NEW.action_key IS OLD.action_key
+    AND NEW.display_name IS OLD.display_name
+    AND NEW.requested_by_kind IS OLD.requested_by_kind
+    AND NEW.requested_by_id IS OLD.requested_by_id
+    AND NEW.idempotency_key IS OLD.idempotency_key
+    AND NEW.enqueue_sha256 IS OLD.enqueue_sha256
+    AND NEW.payload_json IS OLD.payload_json
+    AND NEW.resource_class IS OLD.resource_class
+    AND NEW.resource_keys_json IS OLD.resource_keys_json
+    AND NEW.priority IS OLD.priority
+    AND NEW.timeout_ms IS OLD.timeout_ms
+    AND NEW.cancellation_policy IS OLD.cancellation_policy
+    AND NEW.queued_at IS OLD.queued_at
+    AND NEW.scheduled_for_at IS OLD.scheduled_for_at
+)
 BEGIN
 	SELECT RAISE(ABORT, 'job_runs execution snapshot is immutable');
 END;
 --> statement-breakpoint
 CREATE TRIGGER job_runs_validate_lifecycle_update
 BEFORE UPDATE ON job_runs
-WHEN (
+WHEN NOT (
+        OLD.action_key = 'delivery.production.v1'
+        AND OLD.state IN ('cancelled', 'failed', 'timed-out')
+        AND OLD.required_worker_release_id IS NULL
+        AND NEW.required_worker_release_id IS NULL
+        AND OLD.retry_safe = 1
+        AND NEW.retry_safe = 1
+        AND OLD.trigger_type = 'manual'
+        AND NEW.trigger_type = 'manual'
+        AND OLD.scheduled_job_id IS NULL
+        AND NEW.scheduled_job_id IS NULL
+        AND OLD.scheduled_job_version IS NULL
+        AND NEW.scheduled_job_version IS NULL
+        AND NEW.state = 'queued'
+        AND NEW.attempt_count = OLD.attempt_count
+        AND NEW.attempt_limit = CASE
+            WHEN OLD.attempt_count >= OLD.attempt_limit THEN OLD.attempt_count + 1
+            ELSE OLD.attempt_limit
+        END
+        AND NEW.attempt_count < NEW.attempt_limit
+        AND NEW.available_at = NEW.updated_at
+        AND NEW.available_at >= OLD.updated_at
+        AND NEW.cancel_requested_at IS NULL
+        AND NEW.cancel_requested_by_kind IS NULL
+        AND NEW.cancel_requested_by_id IS NULL
+        AND NEW.finished_at IS NULL
+        AND NEW.first_started_at IS OLD.first_started_at
+        AND NEW.heartbeat_at IS NULL
+        AND NEW.last_attempt_started_at IS OLD.last_attempt_started_at
+        AND NEW.lease_expires_at IS NULL
+        AND NEW.lease_owner_id IS NULL
+        AND NEW.lease_token IS NULL
+        AND NEW.result_json IS NULL
+        AND NEW.state_version = OLD.state_version + 1
+        AND NEW.terminal_code IS NULL
+        AND NEW.terminal_message IS NULL
+        AND NEW.event_count = OLD.event_count
+        AND NEW.payload_event_count = OLD.payload_event_count
+        AND NEW.event_bytes = OLD.event_bytes
+    )
+AND (
+    (
         OLD.state IN ('cancelled', 'failed', 'succeeded', 'timed-out')
         AND (
             NEW.state IS NOT OLD.state
@@ -2088,6 +2164,7 @@ WHEN (
         AND NEW.cancel_requested_by_id IS OLD.cancel_requested_by_id
         AND NEW.state_version <> OLD.state_version
     )
+)
 BEGIN
 	SELECT RAISE(ABORT, 'job_runs lifecycle transition is invalid');
 END;

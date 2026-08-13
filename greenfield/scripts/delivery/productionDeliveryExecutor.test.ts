@@ -6,7 +6,11 @@ import path from "node:path";
 
 import { Effect } from "effect";
 
-import { readActiveProductionCutoverRecord } from "../../src/server/platform/release/deliveryCutoverValidation.ts";
+import {
+    productionCutoverRequiresReconciliation,
+    productionCutoverRequiresValidationMode,
+    readActiveProductionCutoverRecord,
+} from "../../src/server/platform/release/deliveryCutoverValidation.ts";
 import {
     deliveryProductionProtocol,
     type DeliveryProductionOperationCapsule,
@@ -329,7 +333,7 @@ describe("production Delivery executor", () => {
         ).toThrow("Usage: bun productionDelivery.js");
     });
 
-    test("mirrors exact phases and stores one receipt after target readiness", async () => {
+    test("stores success only after the normal runtime reaches readiness", async () => {
         const { options, paths } = await fixture();
         const targetActivation = {
             current: {
@@ -399,7 +403,26 @@ describe("production Delivery executor", () => {
                         prepare: () => Promise.resolve(),
                         start: () => Promise.resolve(),
                         stop: () => Promise.resolve(),
-                        verifyReady: () => Promise.resolve(),
+                        verifyReady: async () => {
+                            const active = await inspectDeliveryProductionOperation(
+                                lease,
+                                paths
+                            );
+                            expect(active).toMatchObject({
+                                record: { phase: "normal-runtime-starting" },
+                                state: "in-progress",
+                            });
+                            expect(
+                                await productionCutoverRequiresValidationMode(
+                                    paths.stateDirectory
+                                )
+                            ).toBeFalse();
+                            expect(
+                                await productionCutoverRequiresReconciliation(
+                                    paths.stateDirectory
+                                )
+                            ).toBeTrue();
+                        },
                         verifySmoke: () => Promise.resolve(),
                     }),
                     loadArtifacts: (_paths, releaseId, runtimeRevision) =>
@@ -422,6 +445,88 @@ describe("production Delivery executor", () => {
                 options
             );
             expect(replay).toEqual(receipt);
+        });
+    });
+
+    test("never records success when the normal runtime restart fails", async () => {
+        const { options, paths } = await fixture();
+        await withDeploymentLease(paths.stateDirectory, async (lease) => {
+            const initial = await loadProductionActivationState(lease, paths);
+            await commitProductionActivationState(lease, paths, initial, {
+                current: {
+                    releaseId: currentReleaseId,
+                    runtimeRevision: currentRuntimeRevision,
+                },
+                formatVersion: 1,
+                previous: null,
+                transitionId: currentTransitionId,
+            });
+            await createDeliveryProductionOperation(
+                lease,
+                paths,
+                operationCapsule(),
+                1000
+            );
+            let starts = 0;
+            const rejected = await rejectionError(
+                runProductionDeliveryExecutorUnderLease(lease, paths, options, {
+                    activate: (...arguments_) =>
+                        Effect.tryPromise({
+                            catch: () => new Error("activation failed") as never,
+                            try: async () => {
+                                for (const phase of [
+                                    "services-stopped",
+                                    "current-snapshot-created",
+                                    "target-database-ready",
+                                    "target-services-started",
+                                    "target-verified",
+                                    "target-smoke-verified",
+                                ] as const) {
+                                    await arguments_[5]?.onProgress?.(phase);
+                                }
+                                return {
+                                    current: {
+                                        releaseId: targetReleaseId,
+                                        runtimeRevision: targetRuntimeRevision,
+                                    },
+                                    formatVersion: 1 as const,
+                                    previous: {
+                                        databaseSnapshotTransitionId:
+                                            operationTransitionId,
+                                        releaseId: currentReleaseId,
+                                        runtimeRevision: currentRuntimeRevision,
+                                    },
+                                    transitionId: operationTransitionId,
+                                };
+                            },
+                        }),
+                    createServices: () => ({
+                        prepare: () => Promise.resolve(),
+                        start: () => {
+                            starts += 1;
+                            return Promise.reject(new Error("restart failed"));
+                        },
+                        stop: () => Promise.resolve(),
+                        verifyReady: () => Promise.resolve(),
+                        verifySmoke: () => Promise.resolve(),
+                    }),
+                    loadArtifacts: (_paths, releaseId, runtimeRevision) =>
+                        Promise.resolve(artifact(releaseId, runtimeRevision)),
+                    nowMs: () => 10_000,
+                    verifyPreviewTailscaleOperator: () => Promise.resolve(),
+                    verifyRunBeforeSnapshot: () => Promise.resolve(),
+                })
+            );
+            expect(rejected).toBeInstanceOf(Error);
+            const terminal = await inspectDeliveryProductionOperation(lease, paths);
+            expect(terminal).toMatchObject({
+                record: {
+                    phase: "terminal",
+                    result: { outcome: "failed" },
+                },
+                state: "terminal",
+            });
+            expect(starts).toBe(2);
         });
     });
 

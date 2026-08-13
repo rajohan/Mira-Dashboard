@@ -613,16 +613,14 @@ function loadExecutorArtifacts(
     )(paths, releaseId, runtimeRevision);
 }
 
-async function restartNormalRuntimeAfterReceipt(
-    _paths: PreparedProductionDeliveryPaths,
-    receipt: DeliveryProductionTerminalRecord,
+async function restartNormalRuntime(
+    paths: PreparedProductionDeliveryPaths,
+    activation: ProductionActivationRecord,
     services: ProductionServiceController,
     dependencies: ProductionDeliveryExecutorDependencies
 ): Promise<void> {
-    const activation = receipt.result.activation;
-    if (activation === null) throw failure();
     const active = await loadExecutorArtifacts(
-        _paths,
+        paths,
         activation.current.releaseId,
         activation.current.runtimeRevision,
         dependencies
@@ -632,25 +630,21 @@ async function restartNormalRuntimeAfterReceipt(
     await services.verifyReady(active.release, active.runtime);
 }
 
-async function completeAndRestartNormalRuntime(
+async function completeAfterNormalRuntimeReady(
     lease: DashboardDeploymentLease,
     paths: PreparedProductionDeliveryPaths,
     record: Exclude<DeliveryProductionOperationRecord, { phase: "terminal" }>,
-    result: DeliveryProductionTerminalResult,
+    activation: ProductionActivationRecord,
+    nowMs: () => number,
     services: ProductionServiceController,
     dependencies: ProductionDeliveryExecutorDependencies
 ): Promise<DeliveryProductionTerminalRecord> {
-    const receipt = await completeDeliveryProductionOperation(
-        lease,
-        paths,
-        record,
-        result
-    );
-    // The durable terminal receipt changes the next boot from smoke-only validation
-    // to the normal runtime. Restart only after that fsync boundary, then prove the
-    // exact receipt-owned release reached normal readiness.
-    await restartNormalRuntimeAfterReceipt(paths, receipt, services, dependencies);
-    return receipt;
+    await restartNormalRuntime(paths, activation, services, dependencies);
+    return completeDeliveryProductionOperation(lease, paths, record, {
+        activation,
+        completedAtMs: Math.max(nowMs(), record.updatedAtMs),
+        outcome: "succeeded",
+    });
 }
 
 /**
@@ -708,7 +702,12 @@ export async function runProductionDeliveryExecutorUnderLease(
         const loadedActivation = await loadActivation(lease, paths);
         const observed = loadedActivation.record;
         if (activationMatchesTarget(observed, record)) {
-            if (record.phase !== "target-smoke-verified") throw failure();
+            if (
+                record.phase !== "target-smoke-verified" &&
+                record.phase !== "normal-runtime-starting"
+            ) {
+                throw failure();
+            }
             const activeTarget = await loadExecutorArtifacts(
                 paths,
                 record.capsule.cas.target.releaseId,
@@ -716,15 +715,19 @@ export async function runProductionDeliveryExecutorUnderLease(
                 dependencies
             );
             await services.verifyReady(activeTarget.release, activeTarget.runtime);
-            return completeAndRestartNormalRuntime(
+            record = await advanceTo(
                 lease,
                 paths,
                 record,
-                {
-                    activation: observed!,
-                    completedAtMs: Math.max(nowMs(), record.updatedAtMs),
-                    outcome: "succeeded",
-                },
+                "normal-runtime-starting",
+                nowMs
+            );
+            return await completeAfterNormalRuntimeReady(
+                lease,
+                paths,
+                record,
+                observed!,
+                nowMs,
                 services,
                 dependencies
             );
@@ -790,15 +793,13 @@ export async function runProductionDeliveryExecutorUnderLease(
             )
         );
         if (record.phase !== "target-smoke-verified") throw failure();
-        return completeAndRestartNormalRuntime(
+        record = await advanceTo(lease, paths, record, "normal-runtime-starting", nowMs);
+        return await completeAfterNormalRuntimeReady(
             lease,
             paths,
             record,
-            {
-                activation,
-                completedAtMs: Math.max(nowMs(), record.updatedAtMs),
-                outcome: "succeeded",
-            },
+            activation,
+            nowMs,
             services,
             dependencies
         );
@@ -813,9 +814,9 @@ export async function runProductionDeliveryExecutorUnderLease(
             loadActivation
         );
         if (services !== undefined && receipt.result.activation !== null) {
-            await restartNormalRuntimeAfterReceipt(
+            await restartNormalRuntime(
                 paths,
-                receipt,
+                receipt.result.activation,
                 services,
                 dependencies
             );

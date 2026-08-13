@@ -202,6 +202,19 @@ function terminalResult(
         : partial(preCutoverWarnings, result.activation.current.releaseId);
 }
 
+async function consumeTerminalResult(
+    options: DeliveryProductionExecutionOptions,
+    inspection: Extract<DeliveryProductionOperationInspection, { state: "terminal" }>,
+    payload: DeliveryProductionJobPayload,
+    identity: JobExecutionRunIdentity,
+    signal?: AbortSignal
+): Promise<DeliveryJobOperationResult> {
+    const result = terminalResult(inspection, payload, identity);
+    const cleared = await options.control.clear(identity.runId, signal);
+    if (!sameJson(cleared, inspection.record)) throw failure();
+    return result;
+}
+
 function validateRunIdentity(
     payload: DeliveryProductionJobPayload,
     identity: JobExecutionRunIdentity
@@ -307,7 +320,7 @@ async function awaitReceipt(
         signal?.throwIfAborted();
         const inspection = await options.control.inspect(identity.runId, signal);
         if (inspection.state === "terminal") {
-            return terminalResult(inspection, payload, identity);
+            return consumeTerminalResult(options, inspection, payload, identity, signal);
         }
         if (
             inspection.state !== "in-progress" ||
@@ -349,7 +362,13 @@ export function createDeliveryProductionExecutionPort(
             validateRunIdentity(payload, identity);
             const existing = await options.control.inspect(identity.runId, signal);
             if (existing.state === "terminal") {
-                return terminalResult(existing, payload, identity);
+                return consumeTerminalResult(
+                    options,
+                    existing,
+                    payload,
+                    identity,
+                    signal
+                );
             }
             if (existing.state === "conflict") throw failure();
             if (existing.state === "in-progress") {

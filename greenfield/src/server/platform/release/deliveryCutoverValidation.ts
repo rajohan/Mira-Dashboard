@@ -171,5 +171,23 @@ export async function productionCutoverRequiresValidationMode(
     stateDirectory: string
 ): Promise<boolean> {
     const record = await readActiveProductionCutoverRecord(stateDirectory);
+    return (
+        record !== null &&
+        record.phase !== "terminal" &&
+        record.phase !== "normal-runtime-starting"
+    );
+}
+
+/**
+ * Returns true for every exact protected, nonterminal operation that the worker must reconcile.
+ * Normal runtime may start during the final restart phase, but the immutable executor must still
+ * be recovered after a crash or reboot until it has fsynced the terminal receipt.
+ * @param stateDirectory Canonical production state directory.
+ * @returns Whether the worker must reconcile the immutable cutover executor.
+ */
+export async function productionCutoverRequiresReconciliation(
+    stateDirectory: string
+): Promise<boolean> {
+    const record = await readActiveProductionCutoverRecord(stateDirectory);
     return record !== null && record.phase !== "terminal";
 }
