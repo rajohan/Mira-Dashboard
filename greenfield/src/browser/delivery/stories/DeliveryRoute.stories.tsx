@@ -28,35 +28,105 @@ const previewRevision = "e".repeat(64);
 const checkoutRevision = "f".repeat(64);
 const activationRevision = "1".repeat(64);
 const jobRunId = "019fdf70-0000-7000-8000-000000000040";
+const headGuardUnavailableReason =
+    "GitHub cannot atomically bind this action to the reviewed pull request head or stack heads.";
+
+const nativeStackActions: DeliveryPullRequest["actions"] = [
+    {
+        action: "approve-review",
+        actor: "raymond",
+        available: false,
+        reason: "already-approved",
+        scope: "self",
+    },
+    {
+        action: "merge",
+        actor: "mira",
+        available: false,
+        reason: "head-guard-unavailable",
+        scope: "prefix",
+    },
+    {
+        action: "merge-and-deploy",
+        actor: "mira",
+        available: false,
+        reason: "head-guard-unavailable",
+        scope: "prefix",
+    },
+    {
+        action: "preview-start",
+        actor: "mira",
+        available: true,
+        scope: "prefix",
+    },
+    {
+        action: "reject",
+        actor: "mira",
+        available: false,
+        reason: "head-guard-unavailable",
+        scope: "self",
+    },
+    {
+        action: "update-branch",
+        actor: "mira",
+        available: false,
+        reason: "ambiguous-chain",
+        scope: "self",
+    },
+];
+
+const ordinaryActions: DeliveryPullRequest["actions"] = [
+    {
+        action: "approve-review",
+        actor: "raymond",
+        available: true,
+        scope: "self",
+    },
+    {
+        action: "merge",
+        actor: "mira",
+        available: true,
+        scope: "prefix",
+    },
+    {
+        action: "merge-and-deploy",
+        actor: "mira",
+        available: true,
+        scope: "prefix",
+    },
+    {
+        action: "preview-start",
+        actor: "mira",
+        available: true,
+        scope: "prefix",
+    },
+    {
+        action: "reject",
+        actor: "mira",
+        available: false,
+        reason: "head-guard-unavailable",
+        scope: "self",
+    },
+    {
+        action: "update-branch",
+        actor: "mira",
+        available: true,
+        scope: "self",
+    },
+];
 
 function pullRequest(input: {
+    readonly actions: DeliveryPullRequest["actions"];
     readonly baseRef: string;
     readonly headRef: string;
     readonly headSha: string;
+    readonly mergeState: string;
     readonly number: number;
+    readonly reviewState: DeliveryPullRequest["reviewState"];
     readonly title: string;
 }): DeliveryPullRequest {
     return {
-        actions: [
-            {
-                action: "approve-review",
-                actor: "raymond",
-                available: true,
-                scope: "self",
-            },
-            {
-                action: "merge",
-                actor: "mira",
-                available: true,
-                scope: "prefix",
-            },
-            {
-                action: "preview-start",
-                actor: "mira",
-                available: true,
-                scope: "prefix",
-            },
-        ],
+        actions: input.actions,
         additions: 10,
         author: "mira-2026",
         baseRef: input.baseRef,
@@ -69,10 +139,10 @@ function pullRequest(input: {
         headSha: input.headSha,
         isCrossRepository: false,
         isDraft: false,
-        mergeState: "CLEAN",
+        mergeState: input.mergeState,
         mergeability: "mergeable",
         number: input.number,
-        reviewState: "approved",
+        reviewState: input.reviewState,
         title: input.title,
         updatedAtMs: observedAtMs,
         url: `https://github.com/rajohan/Mira-Dashboard/pull/${input.number}`,
@@ -87,17 +157,23 @@ const pullRequestsResult = {
             kind: "native-stack",
             members: [
                 pullRequest({
+                    actions: nativeStackActions,
                     baseRef: "main",
                     headRef: "mira/stack-base",
                     headSha: "2".repeat(40),
+                    mergeState: "CLEAN",
                     number: 422,
+                    reviewState: "approved",
                     title: "Stack base",
                 }),
                 pullRequest({
+                    actions: nativeStackActions,
                     baseRef: "mira/stack-base",
                     headRef: "mira/stack-top",
                     headSha: "3".repeat(40),
+                    mergeState: "CLEAN",
                     number: 423,
+                    reviewState: "approved",
                     title: "Stack top",
                 }),
             ],
@@ -107,10 +183,13 @@ const pullRequestsResult = {
             kind: "standalone-mira",
             members: [
                 pullRequest({
+                    actions: ordinaryActions,
                     baseRef: "main",
                     headRef: "mira/delivery-parity",
                     headSha,
+                    mergeState: "BEHIND",
                     number: 424,
+                    reviewState: "required",
                     title: "Delivery parity",
                 }),
             ],
@@ -315,6 +394,40 @@ export const Loading: Story = {
 
 export const PullRequests: Story = {
     args: { fixtures: deliveryFixtures(), route: "/delivery" },
+    play: async ({ canvasElement }) => {
+        const canvas = within(canvasElement);
+        for (const action of ["Merge", "Merge + deploy"]) {
+            const buttons = await canvas.findAllByRole("button", { name: action });
+            await expect(buttons).toHaveLength(3);
+            for (const button of buttons.slice(0, 2)) {
+                await expect(button).toBeDisabled();
+                await expect(button).toHaveAccessibleDescription(
+                    headGuardUnavailableReason
+                );
+            }
+            await expect(buttons[2]).toBeEnabled();
+        }
+
+        const rejectButtons = await canvas.findAllByRole("button", { name: "Reject" });
+        await expect(rejectButtons).toHaveLength(3);
+        for (const button of rejectButtons) {
+            await expect(button).toBeDisabled();
+            await expect(button).toHaveAccessibleDescription(headGuardUnavailableReason);
+        }
+
+        for (const action of [
+            "Approve review",
+            "Run / rebuild preview",
+            "Update branch",
+        ]) {
+            const buttons = await canvas.findAllByRole("button", { name: action });
+            const ordinaryButton = buttons.at(-1);
+            if (ordinaryButton === undefined) {
+                throw new TypeError(`Ordinary pull request action is missing: ${action}`);
+            }
+            await expect(ordinaryButton).toBeEnabled();
+        }
+    },
 };
 
 export const Empty: Story = {

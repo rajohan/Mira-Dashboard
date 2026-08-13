@@ -78,6 +78,60 @@ describe("source-development runtime authority", () => {
             "checkout",
             "releases",
         ]);
+        const pullRequestsSection = deliverySections.find(
+            ({ section }) => section === "pull-requests"
+        );
+        if (
+            pullRequestsSection === undefined ||
+            pullRequestsSection.section !== "pull-requests" ||
+            pullRequestsSection.state !== "succeeded"
+        ) {
+            throw new TypeError("Development pull request projection is missing");
+        }
+        const nativeGroup = pullRequestsSection.payload.groups.find(
+            ({ kind }) => kind === "native-stack"
+        );
+        const ordinaryGroup = pullRequestsSection.payload.groups.find(
+            ({ kind }) => kind === "standalone-mira"
+        );
+        if (nativeGroup === undefined || ordinaryGroup === undefined) {
+            throw new TypeError("Development pull request groups are missing");
+        }
+        for (const member of nativeGroup.members) {
+            for (const actionId of ["merge", "merge-and-deploy"] as const) {
+                expect(
+                    member.actions.find(({ action }) => action === actionId)
+                ).toMatchObject({
+                    available: false,
+                    reason: "head-guard-unavailable",
+                });
+            }
+        }
+        for (const member of [...nativeGroup.members, ...ordinaryGroup.members]) {
+            expect(
+                member.actions.find(({ action }) => action === "reject")
+            ).toMatchObject({
+                available: false,
+                reason: "head-guard-unavailable",
+            });
+        }
+        const ordinary = ordinaryGroup.members[0];
+        if (ordinary === undefined) {
+            throw new TypeError("Development ordinary pull request is missing");
+        }
+        for (const actionId of [
+            "approve-review",
+            "merge",
+            "merge-and-deploy",
+            "preview-start",
+            "update-branch",
+        ] as const) {
+            expect(
+                ordinary.actions.find(({ action }) => action === actionId)
+            ).toMatchObject({
+                available: true,
+            });
+        }
 
         const [logs, imagePrune, volumePrune] = await Promise.all([
             authority.dockerOperations.readContainerLogs({

@@ -64,6 +64,7 @@ const currentReleaseId = "f".repeat(40);
 const previousReleaseId = "e".repeat(40);
 const firstPullRequestHead = "a".repeat(40);
 const secondPullRequestHead = "b".repeat(40);
+const ordinaryPullRequestHead = "4".repeat(40);
 const containerId = "a".repeat(64);
 const imageId = `sha256:${"b".repeat(64)}`;
 const unusedImageId = `sha256:${"d".repeat(64)}`;
@@ -461,7 +462,45 @@ function overviewProviders(nowMs: () => number): DevelopmentOverviewProviderColl
 }
 
 function deliveryPullRequestsPayload(now: number) {
-    const actions = [
+    const nativeStackActions = [
+        {
+            action: "approve-review",
+            actor: "raymond",
+            available: false,
+            reason: "already-approved",
+            scope: "self",
+        },
+        {
+            action: "merge",
+            actor: "mira",
+            available: false,
+            reason: "head-guard-unavailable",
+            scope: "prefix",
+        },
+        {
+            action: "merge-and-deploy",
+            actor: "mira",
+            available: false,
+            reason: "head-guard-unavailable",
+            scope: "prefix",
+        },
+        { action: "preview-start", actor: "mira", available: true, scope: "prefix" },
+        {
+            action: "reject",
+            actor: "mira",
+            available: false,
+            reason: "head-guard-unavailable",
+            scope: "self",
+        },
+        {
+            action: "update-branch",
+            actor: "mira",
+            available: false,
+            reason: "ambiguous-chain",
+            scope: "self",
+        },
+    ] as const;
+    const ordinaryActions = [
         { action: "approve-review", actor: "raymond", available: true, scope: "self" },
         { action: "merge", actor: "mira", available: true, scope: "prefix" },
         {
@@ -471,36 +510,45 @@ function deliveryPullRequestsPayload(now: number) {
             scope: "prefix",
         },
         { action: "preview-start", actor: "mira", available: true, scope: "prefix" },
-        { action: "reject", actor: "mira", available: true, scope: "self" },
         {
-            action: "update-branch",
+            action: "reject",
             actor: "mira",
             available: false,
-            reason: "not-behind",
+            reason: "head-guard-unavailable",
             scope: "self",
         },
+        { action: "update-branch", actor: "mira", available: true, scope: "self" },
     ] as const;
-    const member = (number: number, headSha: string, baseRef: string) => ({
-        actions,
-        additions: number === 41 ? 24 : 12,
+    const member = (input: {
+        readonly actions: typeof nativeStackActions | typeof ordinaryActions;
+        readonly baseRef: string;
+        readonly headRef: string;
+        readonly headSha: string;
+        readonly mergeState: string;
+        readonly number: number;
+        readonly reviewState: "approved" | "required";
+        readonly title: string;
+    }) => ({
+        actions: input.actions,
+        additions: input.number === 41 ? 24 : 12,
         author: "mira-2026",
-        baseRef,
+        baseRef: input.baseRef,
         body: "Development-only representative pull request data.",
         changedFiles: 3,
         checksState: "passed" as const,
         createdAtMs: now - 7_200_000,
         deletions: 4,
-        headRef: `development-stack-${number}`,
-        headSha,
+        headRef: input.headRef,
+        headSha: input.headSha,
         isCrossRepository: false,
         isDraft: false,
-        mergeState: "CLEAN",
+        mergeState: input.mergeState,
         mergeability: "mergeable" as const,
-        number,
-        reviewState: "approved" as const,
-        title: `Development stack layer ${number}`,
+        number: input.number,
+        reviewState: input.reviewState,
+        title: input.title,
         updatedAtMs: now - 60_000,
-        url: `https://github.com/rajohan/Mira-Dashboard/pull/${number}`,
+        url: `https://github.com/rajohan/Mira-Dashboard/pull/${input.number}`,
     });
     return v.parse(deliveryPullRequestsCachePayloadSchema, {
         groups: [
@@ -508,8 +556,42 @@ function deliveryPullRequestsPayload(now: number) {
                 id: "c".repeat(64),
                 kind: "native-stack",
                 members: [
-                    member(41, firstPullRequestHead, "main"),
-                    member(42, secondPullRequestHead, "development-stack-41"),
+                    member({
+                        actions: nativeStackActions,
+                        baseRef: "main",
+                        headRef: "development-stack-41",
+                        headSha: firstPullRequestHead,
+                        mergeState: "CLEAN",
+                        number: 41,
+                        reviewState: "approved",
+                        title: "Development stack layer 41",
+                    }),
+                    member({
+                        actions: nativeStackActions,
+                        baseRef: "development-stack-41",
+                        headRef: "development-stack-42",
+                        headSha: secondPullRequestHead,
+                        mergeState: "CLEAN",
+                        number: 42,
+                        reviewState: "approved",
+                        title: "Development stack layer 42",
+                    }),
+                ],
+            },
+            {
+                id: "d".repeat(64),
+                kind: "standalone-mira",
+                members: [
+                    member({
+                        actions: ordinaryActions,
+                        baseRef: "main",
+                        headRef: "development-ordinary-43",
+                        headSha: ordinaryPullRequestHead,
+                        mergeState: "BEHIND",
+                        number: 43,
+                        reviewState: "required",
+                        title: "Development ordinary pull request",
+                    }),
                 ],
             },
         ],
