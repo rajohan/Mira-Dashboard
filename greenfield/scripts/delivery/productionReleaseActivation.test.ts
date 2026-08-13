@@ -234,6 +234,11 @@ class TestServiceController implements ProductionServiceController {
             ? Promise.reject(new Error("candidate not ready"))
             : Promise.resolve();
     }
+
+    verifySmoke(release: PublishedProductionRelease): Promise<void> {
+        this.events.push(`smoke:${release.manifest.source.commitSha}`);
+        return Promise.resolve();
+    }
 }
 
 function activationDependencies(
@@ -313,12 +318,10 @@ describe("production release activation", () => {
             const fixtures = clonedPublishedFixtures(paths);
             const services = new TestServiceController();
             const retentionReferences: ProductionArtifactReference[][] = [];
-            const authoritativeAtStart: string[] = [];
-            services.onStart = async (release) => {
+            const authoritativeAtStart: Array<string | undefined> = [];
+            services.onStart = async () => {
                 const observed = await loadProductionActivationState(lease, paths);
-                const releaseId = release.manifest.source.commitSha;
-                expect(observed.record?.current.releaseId).toBe(releaseId);
-                authoritativeAtStart.push(releaseId);
+                authoritativeAtStart.push(observed.record?.current.releaseId);
             };
             const dependencies = activationDependencies(
                 services,
@@ -366,13 +369,15 @@ describe("production release activation", () => {
                 `prepare:${firstReleaseId}`,
                 `start:${firstReleaseId}`,
                 `ready:${firstReleaseId}`,
+                `smoke:${firstReleaseId}`,
                 `prepare:${firstReleaseId}`,
                 "stop",
                 `prepare:${secondReleaseId}`,
                 `start:${secondReleaseId}`,
                 `ready:${secondReleaseId}`,
+                `smoke:${secondReleaseId}`,
             ]);
-            expect(authoritativeAtStart).toEqual([firstReleaseId, secondReleaseId]);
+            expect(authoritativeAtStart).toEqual([undefined, firstReleaseId]);
             expect(retentionReferences).toEqual([
                 [
                     {
@@ -414,6 +419,78 @@ describe("production release activation", () => {
             expect(
                 stateEntries.filter((entry) => entry.startsWith(".database-transition-"))
             ).toEqual([]);
+        });
+    });
+
+    test("uses caller-owned transitions and pairs rollback snapshots in both directions", async () => {
+        const projectRoot = await createProjectFixture();
+        const state = await prepareProtectedProductionStatePath(projectRoot);
+        await withDeploymentLease(state.stateDirectory, async (lease) => {
+            const paths = await prepareProductionDeliveryDirectories(state);
+            const fixtures = clonedPublishedFixtures(paths);
+            const services = new TestServiceController();
+            const dependencies = activationDependencies(services, fixtures.probeRuntime);
+            const upgradeTransitionId = Bun.randomUUIDv7();
+            const upgraded = await Effect.runPromise(
+                activatePublishedProductionRelease(
+                    lease,
+                    paths,
+                    fixtures.second,
+                    fixtures.runtime,
+                    dependencies,
+                    { transitionId: upgradeTransitionId }
+                )
+            );
+            expect(upgraded.transitionId).toBe(upgradeTransitionId);
+
+            const rollbackTransitionId = Bun.randomUUIDv7();
+            const rolledBack = await Effect.runPromise(
+                activatePublishedProductionRelease(
+                    lease,
+                    paths,
+                    fixtures.first,
+                    fixtures.runtime,
+                    dependencies,
+                    {
+                        targetDatabaseSnapshotTransitionId: upgradeTransitionId,
+                        transitionId: rollbackTransitionId,
+                    }
+                )
+            );
+            expect(rolledBack).toEqual({
+                current: {
+                    releaseId: firstReleaseId,
+                    runtimeRevision: runtimeIdentity.revision,
+                },
+                formatVersion: 1,
+                previous: {
+                    databaseSnapshotTransitionId: rollbackTransitionId,
+                    releaseId: secondReleaseId,
+                    runtimeRevision: runtimeIdentity.revision,
+                },
+                transitionId: rollbackTransitionId,
+            });
+
+            const returnTransitionId = Bun.randomUUIDv7();
+            const returned = await Effect.runPromise(
+                activatePublishedProductionRelease(
+                    lease,
+                    paths,
+                    fixtures.second,
+                    fixtures.runtime,
+                    dependencies,
+                    {
+                        targetDatabaseSnapshotTransitionId: rollbackTransitionId,
+                        transitionId: returnTransitionId,
+                    }
+                )
+            );
+            expect(returned.current.releaseId).toBe(secondReleaseId);
+            expect(returned.previous).toEqual({
+                databaseSnapshotTransitionId: returnTransitionId,
+                releaseId: firstReleaseId,
+                runtimeRevision: runtimeIdentity.revision,
+            });
         });
     });
 
@@ -646,11 +723,13 @@ describe("production release activation", () => {
                 {
                     boundary: "afterActivationCommit" as const,
                     candidate: fixtures.second,
+                    expectedFinalEvent: "ready" as const,
                     expectedReleaseId: secondReleaseId,
                 },
                 {
                     boundary: "afterActivationJournalClear" as const,
                     candidate: fixtures.first,
+                    expectedFinalEvent: "smoke" as const,
                     expectedReleaseId: firstReleaseId,
                 },
             ]) {
@@ -693,7 +772,7 @@ describe("production release activation", () => {
                     )
                 ).toEqual([]);
                 expect(services.events.at(-1)).toBe(
-                    `ready:${scenario.expectedReleaseId}`
+                    `${scenario.expectedFinalEvent}:${scenario.expectedReleaseId}`
                 );
                 expect(
                     await readdir(path.join(paths.stateDirectory, "backups"))

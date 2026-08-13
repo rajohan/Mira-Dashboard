@@ -32,6 +32,7 @@ import { parseWorkspaceFileJobPayload } from "../files/jobPayload.ts";
 import type { MoltbookDashboardCollector } from "../moltbook/provider.ts";
 import {
     type JobActionExecutionContext,
+    type JobActionDefinition,
     type JobActionExecutor,
     type JobExecutableActionDefinition,
     type JobActionRegistration,
@@ -39,8 +40,13 @@ import {
     JobActionOutcomeUnknownError,
     JobActionRetryableError,
     databaseObservabilityCacheJobActionKey,
+    deliveryGitHubJobActionDefinition,
+    deliveryOverviewCacheJobActionKey,
+    deliveryPreviewJobActionDefinition,
+    deliveryProductionJobActionDefinition,
     dockerFreeJobActionDefinitions,
     dockerOperationJobActionDefinition,
+    deliveryOverviewCacheJobActionDefinition,
     dockerOperationJobActionKey,
     dockerOverviewCacheJobActionKey,
     dockerUpdaterJobActionKey,
@@ -71,6 +77,13 @@ import {
     workspaceFileWriteJobActionDefinition,
     workspaceFileWriteJobActionKey,
 } from "./actionRegistry.ts";
+import {
+    createDeliveryGitHubJobExecutor,
+    createDeliveryOverviewJobExecutor,
+    createDeliveryPreviewJobExecutor,
+    createDeliveryProductionJobExecutor,
+    type DeliveryJobExecutionPort,
+} from "./deliveryActionExecutors.ts";
 import {
     createDockerOperationJobExecutor,
     createDockerOverviewJobExecutor,
@@ -655,6 +668,7 @@ export interface JobWorkerActionResolverDependencies {
     readonly actionDefinitions?: readonly JobExecutableActionDefinition[];
     readonly databaseObservability?: DatabaseObservabilityCollector;
     readonly databaseObservabilityReconciler?: DatabaseObservabilityReconciliationPort;
+    readonly delivery?: DeliveryJobExecutionPort;
     readonly docker?: DockerJobExecutionPort;
     readonly logMaintenance: LogMaintenanceExecutionPort;
     readonly hostOperations?: FixedHostOperationsExecutionPort;
@@ -682,12 +696,25 @@ export function createJobWorkerActionResolver(
         Object.freeze({
             run: () => Promise.reject(new Error("SQLite maintenance is unavailable")),
         });
+    let domainDefinitions: readonly JobActionDefinition[];
+    if (dependencies.docker === undefined) {
+        domainDefinitions = [
+            ...dockerFreeJobActionDefinitions,
+            ...(dependencies.delivery === undefined
+                ? []
+                : [deliveryOverviewCacheJobActionDefinition]),
+        ];
+    } else if (dependencies.delivery === undefined) {
+        domainDefinitions = jobActionDefinitions.filter(
+            ({ actionKey }) => actionKey !== deliveryOverviewCacheJobActionKey
+        );
+    } else {
+        domainDefinitions = jobActionDefinitions;
+    }
     const definitions =
         dependencies.actionDefinitions ??
         Object.freeze([
-            ...(dependencies.docker === undefined
-                ? dockerFreeJobActionDefinitions
-                : jobActionDefinitions),
+            ...domainDefinitions,
             ...(dependencies.openClawGateway === undefined
                 ? []
                 : [openClawGatewayRestartJobActionDefinition]),
@@ -713,33 +740,50 @@ export function createJobWorkerActionResolver(
             ...(dependencies.docker === undefined
                 ? []
                 : [dockerOperationJobActionDefinition]),
+            ...(dependencies.delivery === undefined
+                ? []
+                : [
+                      deliveryGitHubJobActionDefinition,
+                      deliveryPreviewJobActionDefinition,
+                      deliveryProductionJobActionDefinition,
+                  ]),
         ]);
     const registeredActionKeys = new Set(definitions.map(({ actionKey }) => actionKey));
     const gatedExecutor = (
         actionKey: string,
-        execute: JobActionExecutor | undefined
+        executor:
+            | JobActionExecutor
+            | Readonly<{
+                  readonly afterSuccessfulSettlement?: JobActionSuccessfulSettlementHandler;
+                  readonly execute: JobActionExecutor;
+              }>
+            | undefined
     ): readonly JobActionExecutorEntry[] =>
-        execute === undefined || !registeredActionKeys.has(actionKey)
+        executor === undefined || !registeredActionKeys.has(actionKey)
             ? []
-            : [Object.freeze({ actionKey, execute })];
+            : [
+                  Object.freeze({
+                      actionKey,
+                      ...(typeof executor === "function"
+                          ? { execute: executor }
+                          : executor),
+                  }),
+              ];
     const executors = [
-        Object.freeze({
-            actionKey: "cache.refresh.system-host",
-            execute: systemHostExecutor,
-        }),
-        Object.freeze({
-            actionKey: "cache.refresh.moltbook-dashboard",
-            execute: createMoltbookDashboardExecutor({
+        ...gatedExecutor("cache.refresh.system-host", systemHostExecutor),
+        ...gatedExecutor(
+            "cache.refresh.moltbook-dashboard",
+            createMoltbookDashboardExecutor({
                 collector: dependencies.moltbook,
-            }),
-        }),
-        Object.freeze({
-            actionKey: databaseObservabilityCacheJobActionKey,
-            execute: createDatabaseObservabilityExecutor({
+            })
+        ),
+        ...gatedExecutor(
+            databaseObservabilityCacheJobActionKey,
+            createDatabaseObservabilityExecutor({
                 collector: databaseObservability,
                 reconciler: dependencies.databaseObservabilityReconciler,
-            }),
-        }),
+            })
+        ),
         ...gatedExecutor(
             dockerOverviewCacheJobActionKey,
             dependencies.docker === undefined
@@ -758,24 +802,44 @@ export function createJobWorkerActionResolver(
                 ? undefined
                 : createDockerOperationJobExecutor(dependencies.docker)
         ),
-        Object.freeze({
-            actionKey: sqliteMaintenanceJobActionKey,
-            execute: createSqliteMaintenanceJobExecutor(sqliteMaintenance),
-        }),
-        Object.freeze({
-            actionKey: logMaintenanceJobActionKey,
-            execute: createLogMaintenanceJobExecutor(dependencies.logMaintenance),
-        }),
-        ...(dependencies.openClawGateway === undefined
-            ? []
-            : [
-                  Object.freeze({
-                      actionKey: openClawGatewayRestartJobActionKey,
-                      execute: createOpenClawGatewayRestartJobExecutor(
-                          dependencies.openClawGateway
-                      ),
-                  }),
-              ]),
+        ...gatedExecutor(
+            deliveryOverviewCacheJobActionKey,
+            dependencies.delivery === undefined
+                ? undefined
+                : createDeliveryOverviewJobExecutor(dependencies.delivery)
+        ),
+        ...gatedExecutor(
+            deliveryGitHubJobActionDefinition.actionKey,
+            dependencies.delivery === undefined
+                ? undefined
+                : createDeliveryGitHubJobExecutor(dependencies.delivery)
+        ),
+        ...gatedExecutor(
+            deliveryPreviewJobActionDefinition.actionKey,
+            dependencies.delivery === undefined
+                ? undefined
+                : createDeliveryPreviewJobExecutor(dependencies.delivery)
+        ),
+        ...gatedExecutor(
+            deliveryProductionJobActionDefinition.actionKey,
+            dependencies.delivery === undefined
+                ? undefined
+                : createDeliveryProductionJobExecutor(dependencies.delivery)
+        ),
+        ...gatedExecutor(
+            sqliteMaintenanceJobActionKey,
+            createSqliteMaintenanceJobExecutor(sqliteMaintenance)
+        ),
+        ...gatedExecutor(
+            logMaintenanceJobActionKey,
+            createLogMaintenanceJobExecutor(dependencies.logMaintenance)
+        ),
+        ...gatedExecutor(
+            openClawGatewayRestartJobActionKey,
+            dependencies.openClawGateway === undefined
+                ? undefined
+                : createOpenClawGatewayRestartJobExecutor(dependencies.openClawGateway)
+        ),
         ...gatedExecutor(
             openClawSessionsCleanupJobActionKey,
             dependencies.openClawServiceActions === undefined
@@ -821,24 +885,23 @@ export function createJobWorkerActionResolver(
                       "system-update"
                   )
         ),
-        Object.freeze({
-            actionKey: "system.worker-smoke",
-            execute: workerSmokeExecutor,
-        }),
-        ...(workspaceFiles === undefined
-            ? []
-            : [
-                  Object.freeze({
-                      actionKey: workspaceFileWriteJobActionKey,
-                      execute: createWorkspaceFileWriteJobExecutor(workspaceFiles),
-                  }),
-                  Object.freeze({
-                      actionKey: workspaceFileReplaceJobActionKey,
+        ...gatedExecutor("system.worker-smoke", workerSmokeExecutor),
+        ...gatedExecutor(
+            workspaceFileWriteJobActionKey,
+            workspaceFiles === undefined
+                ? undefined
+                : createWorkspaceFileWriteJobExecutor(workspaceFiles)
+        ),
+        ...gatedExecutor(
+            workspaceFileReplaceJobActionKey,
+            workspaceFiles === undefined
+                ? undefined
+                : Object.freeze({
                       afterSuccessfulSettlement:
                           createWorkspaceFileReplacementSettlementHandler(workspaceFiles),
                       execute: createWorkspaceFileWriteJobExecutor(workspaceFiles),
-                  }),
-              ]),
+                  })
+        ),
     ];
     const registry = createJobWorkerActionRegistry(definitions, Object.freeze(executors));
     return (actionKey) => registry.get(actionKey);

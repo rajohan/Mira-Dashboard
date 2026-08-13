@@ -57,6 +57,7 @@ describe("reviewed pre-cutover parity inventory", () => {
             "/agents",
             "/chat",
             "/database",
+            "/delivery",
             "/docker",
             "/files",
             "/jobs",
@@ -459,6 +460,50 @@ describe("reviewed pre-cutover parity inventory", () => {
         expect(
             endpoints.find(({ id }) => id === "POST /api/docker/exec/start")?.purpose
         ).toContain("fixed Docker shell");
+    });
+
+    test("closes the reviewed Delivery route and all fourteen Delivery procedures", async () => {
+        const reviewed = await loadReviewedParityInventory();
+        const deliveryRoute = reviewed.frontend.routes.find(
+            ({ path }) => path === "/delivery"
+        );
+        const endpoints = reviewed.legacyEndpoints.endpoints.filter(
+            ({ section }) => section === "Pull Requests And Deployments"
+        );
+
+        expect(deliveryRoute).toMatchObject({
+            access: "session",
+            featureOwner: "delivery",
+            target: {
+                delivery: "implemented",
+                path: "/delivery",
+                phase: "phase-5",
+            },
+        });
+        expect(dashboardRoutePaths).toContain("/delivery");
+        expect(endpoints).toHaveLength(14);
+        expect(
+            endpoints.map(({ target }) =>
+                target.kind === "procedure"
+                    ? [target.delivery, ...target.names]
+                    : [target.kind]
+            )
+        ).toEqual([
+            ["implemented", "delivery.listPullRequests"],
+            ["implemented", "delivery.listDeployments"],
+            ["implemented", "delivery.getPreview"],
+            ["implemented", "delivery.getProductionCheckout"],
+            ["implemented", "delivery.getReleases"],
+            ["implemented", "delivery.approvePullRequest"],
+            ["implemented", "delivery.startPreview"],
+            ["implemented", "delivery.stopPreview"],
+            ["implemented", "delivery.rejectPullRequest"],
+            ["implemented", "delivery.approveReview"],
+            ["implemented", "delivery.updateBranch"],
+            ["implemented", "delivery.deploy"],
+            ["implemented", "delivery.rollbackRelease"],
+            ["implemented", "delivery.createPullRequestStack"],
+        ]);
     });
 
     test("records the bounded OpenClaw settings and operations slice", async () => {

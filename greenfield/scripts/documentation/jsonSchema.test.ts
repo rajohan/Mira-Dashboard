@@ -317,6 +317,8 @@ describe("contract JSON Schema conversion", () => {
                     "chat:read",
                     "chat:write",
                     "database:read",
+                    "delivery:read",
+                    "delivery:write",
                     "docker:read",
                     "docker:write",
                     "files:read",
@@ -344,7 +346,7 @@ describe("contract JSON Schema conversion", () => {
                     "terminal:write",
                 ],
             },
-            maxItems: 32,
+            maxItems: 34,
             type: "array",
             uniqueItems: true,
         });

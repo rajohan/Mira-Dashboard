@@ -955,7 +955,7 @@ the following behavior is covered by automated tests and a manual parity checkli
 | `/jobs`       | Dashboard schedules, OpenClaw cron jobs, the full six-item fixed Service Action inventory even before its first run, exact run-ID detail links, enable/disable intent and expiry, run history, manual run/cancel, worker state, output, and aggregate counts.             |
 | `/reports`    | Daily briefs, summaries, heartbeats, custom reports, filters, pagination/detail linking, Markdown display, cached refresh behavior, and incident links.                                                                                                                   |
 | Notifications | Read/unread behavior, source links, filtering, badges, and exactly-once notification per active incident generation.                                                                                                                                                      |
-| `/delivery`   | PR review queues, trusted PR development, previews, release records, deploy/rollback actions, progress, blocking reasons, and retention.                                                                                                                                  |
+| `/delivery`   | PR review queues, trusted PR development, previews, immutable current/previous release state, deploy/rollback actions, progress, blocking reasons, and retention.                                                                                                         |
 | `/files`      | Safe workspace browsing, edit/save, upload/download/preview, Markdown/code rendering, path policy, and conflict/error handling.                                                                                                                                           |
 | `/docker`     | Dynamic Engine/Compose inventory, live stats/logs, cache/LKG, fixed controls, updater checks/history/notifications, exact updates/deletes/prune, stale/duplicate-intent prevention, and a link to the existing bounded interactive Terminal for operator Docker CLI work. |
 | `/database`   | PostgreSQL/PgBouncer and Dashboard SQLite views, source picker, bounded metrics, maintenance assessment, cached fallback, and balanced layout. Privileged backup, restore, and maintenance actions remain owned by their purpose-built domains.                           |
@@ -1035,6 +1035,39 @@ unknown-outcome transitions use the global notification surface and link back to
 queued mutation returns its exact durable Jobs run link, and Jobs is its authoritative queue
 status. Cached data may remain visible during a
 transient source failure, but every control requires the current fresh source revision.
+
+### Implemented Delivery vertical
+
+Delivery exposes five bounded reads and nine recent-MFA durable operations through the normal
+tRPC, Jobs, audit, and browser boundaries. Pull requests, the one preview slot, production
+checkout, and current/previous release state are four independently refreshed and retained cache
+rows, so one unavailable upstream does not erase or stale the other three. Deployment history is
+an indexed, sanitized projection of `delivery.production.v1` Jobs. There is no Delivery-specific
+queue, deployment-event stream, or release-record table.
+
+The worker verifies two non-interchangeable GitHub actors. `mira-2026` owns every ordinary read,
+stack, merge, update, reject, exact-main synchronization, preview, deploy, and rollback workflow;
+`rajohan` owns review approval only. Missing reviewer authority disables that one operation and
+never falls back to Mira, anonymous GitHub, `GH_TOKEN`, `GITHUB_TOKEN`, `gh`, a credential helper,
+or ambient host configuration. Normal, inferred, and native stacks are server-authoritative and
+bind the complete ordered number/head scope before admission and immediately before external
+effects. Partial and uncertain provider outcomes remain explicit and cannot authorize blind
+replay.
+
+One managed preview slot runs the exact admitted PR/stack heads for at most four hours in a
+transient systemd/Bubblewrap boundary with private networking, read-only source/Git
+administration, isolated state, frozen script-free installation, one fixed Gateway capability,
+and no production, Docker, Doppler, or GitHub credentials. Stop retains the managed checkout and
+state while the PR is open; permanent cleanup requires confirmed close/merge plus descriptor,
+mount, inode, ownership, and exact-worktree validation.
+
+Deploy and paired rollback cross worker generations through one fsynced
+`delivery.production.v1` capsule and terminal receipt. A manifest-bound immutable transient
+executor runs in a separate cgroup with no GitHub or application secrets, so it can stop the
+originating worker, preserve current/previous release-runtime-snapshot pairing, validate the
+target, and survive crash or reboot. The restarted worker reconciles the receipt before ordinary
+claiming and, after an older paired snapshot is restored, rehydrates and settles the exact
+original Job without repeating the external effect.
 
 The implemented Database vertical is one read-only slice rather than an implicit backup or Docker
 control plane. `database.overview` exposes a session-only, bounded projection: live

@@ -4,6 +4,7 @@ import { inspect } from "node:util";
 
 import { Redacted } from "effect";
 
+import type { DeliveryWorkerCompositionFactory } from "../server/domains/jobs/workerRuntime.ts";
 import { deriveDashboardProjectLayout } from "../server/platform/filesystem/projectLayout.ts";
 import type { PersistentGatewayTaskNotificationTransport } from "../server/platform/gateway/persistentGatewayTransport.ts";
 import type { ProjectFileLogDestination } from "../server/platform/observability/projectFileLogSink.ts";
@@ -12,6 +13,7 @@ import type { ProcessTerminationController } from "../server/platform/runtime/pr
 import {
     parseReleaseManifest,
     releaseBuildCommands,
+    releaseDeliveryProtocols,
     releaseProcessRoles,
 } from "../shared/releaseManifest.ts";
 import type { ManagedLogManifest } from "../worker/logs/managedLogManifest.ts";
@@ -21,6 +23,7 @@ import {
     createWorkerDockerComposition,
     createWorkerLogMaintenanceExecutor,
     type DashboardWorkerProcessDependencies,
+    type WorkerDeliveryProcessCompositionOptions,
     type WorkerDockerCompositionOptions,
     runDashboardWorkerProcess,
 } from "./worker.ts";
@@ -37,6 +40,8 @@ const release: RuntimeRelease = Object.freeze({
     manifest: parseReleaseManifest({
         artifacts: [{ bytes: 3, path: "server/worker.js", sha256: checksum }],
         buildCommands: [...releaseBuildCommands],
+        deliveryProtocols: [...releaseDeliveryProtocols],
+        display: { builtAtMs: 1, commitTitle: "Test release", schemaTarget: 1 },
         documentationSha256: checksum,
         formatVersion: 1,
         lockfileSha256: checksum,
@@ -255,7 +260,9 @@ function processFixture(
             observedDatabaseObservability,
             observedDatabaseObservabilityReconciler,
             observedHostOperations,
-            observedBootIdentity
+            observedBootIdentity,
+            _observedDocker,
+            observedCreateDelivery
         ) {
             expect(observedLayout).toBe(layout);
             expect(observedRelease).toBe(release);
@@ -294,6 +301,9 @@ function processFixture(
             }
             expect(observedHostOperations).toBeUndefined();
             expect(observedBootIdentity).toBe(bootIdentity);
+            if (observedCreateDelivery !== undefined) {
+                events.push("delivery-factory-passed");
+            }
             expect(Object.keys(observedGatewayTransport).toSorted()).toEqual([
                 "requestOpenClawServiceAction",
                 "start",
@@ -600,6 +610,53 @@ describe("Dashboard worker process", () => {
             expect(inspect(observedOptions)).not.toContain(secret);
             expect(fixture.logLines.join("\n")).not.toContain(secret);
         }
+    });
+
+    test("passes configured GitHub authority through the late Delivery factory seam", async () => {
+        const fixture = processFixture();
+        const deliveryFactory = (() => {
+            throw new Error(
+                "Late Delivery factory is not invoked by this process fixture"
+            );
+        }) satisfies DeliveryWorkerCompositionFactory;
+        const dependencies = Object.freeze({
+            ...fixture.dependencies,
+            createDelivery(options: WorkerDeliveryProcessCompositionOptions) {
+                expect(options.layout).toBe(layout);
+                expect(options.release).toBe(release);
+                const ordinary = options.githubCredentials.ordinary;
+                if (ordinary === undefined) {
+                    throw new Error("Fixture ordinary GitHub credentials are missing");
+                }
+                expect(Redacted.value(ordinary.username)).toBe("mira-2026");
+                expect(Redacted.value(ordinary.token)).toBe(
+                    "mira-token-long-enough-for-composition"
+                );
+                const reviewerToken = options.githubCredentials.reviewerToken;
+                if (reviewerToken === undefined) {
+                    throw new Error("Fixture reviewer GitHub credential is missing");
+                }
+                expect(Redacted.value(reviewerToken)).toBe(
+                    "raymond-token-long-enough-for-composition"
+                );
+                return deliveryFactory;
+            },
+        }) satisfies DashboardWorkerProcessDependencies;
+
+        await runDashboardWorkerProcess(
+            {
+                ...processOptions,
+                configurationSource: {
+                    ...processOptions.configurationSource,
+                    MIRA_GITHUB_TOKEN: "mira-token-long-enough-for-composition",
+                    MIRA_GITHUB_USERNAME: "mira-2026",
+                    RAJOHAN_GITHUB_TOKEN: "raymond-token-long-enough-for-composition",
+                },
+            },
+            dependencies
+        );
+
+        expect(fixture.events).toContain("delivery-factory-passed");
     });
 
     test("disposes partial ownership and reports a redacted startup failure", () => {

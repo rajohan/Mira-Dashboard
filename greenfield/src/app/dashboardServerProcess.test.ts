@@ -11,6 +11,7 @@ import type { ProcessTerminationController } from "../server/platform/runtime/pr
 import {
     parseReleaseManifest,
     releaseBuildCommands,
+    releaseDeliveryProtocols,
     releaseProcessRoles,
 } from "../shared/releaseManifest.ts";
 import {
@@ -30,6 +31,8 @@ const release = Object.freeze({
     manifest: parseReleaseManifest({
         artifacts: [{ bytes: 3, path: "server/web.js", sha256: checksum }],
         buildCommands: [...releaseBuildCommands],
+        deliveryProtocols: [...releaseDeliveryProtocols],
+        display: { builtAtMs: 1, commitTitle: "Test release", schemaTarget: 1 },
         documentationSha256: checksum,
         formatVersion: 1,
         lockfileSha256: checksum,
@@ -85,7 +88,7 @@ function unhandledFrontendAsset(): Promise<Response | undefined> {
     return Promise.resolve<Response | undefined>(void 0);
 }
 
-function processFixture(totpFailure?: Error) {
+function processFixture(totpFailure?: Error, cutoverValidation = false) {
     const events: string[] = [];
     const logLines: string[] = [];
     const destination = Object.freeze({
@@ -140,7 +143,15 @@ function processFixture(totpFailure?: Error) {
                 "elevenlabs-api-key-test-value"
             );
             expect(options.frontendAssets).toBeFunction();
-            expect(options.jobActionDefinitions).toBeUndefined();
+            if (cutoverValidation) {
+                expect(options.cutoverValidation).toBeTrue();
+                expect(
+                    options.jobActionDefinitions?.map(({ actionKey }) => actionKey)
+                ).toEqual(["system.worker-smoke"]);
+            } else {
+                expect(options.cutoverValidation).toBeUndefined();
+                expect(options.jobActionDefinitions).toBeUndefined();
+            }
             expect(options.port).toBe(3100);
             expect(options.verifiedReleaseId).toBe(releaseId);
             expect(options.openClawFileRoot).toEqual({
@@ -197,6 +208,9 @@ function processFixture(totpFailure?: Error) {
         createTerminationController() {
             events.push("signals-create");
             return termination;
+        },
+        detectCutoverValidation() {
+            return Promise.resolve(cutoverValidation);
         },
         createTotpCipher(serialized) {
             events.push("totp-create");
@@ -304,5 +318,13 @@ describe("Dashboard web process", () => {
         };
         expect(fatal.event).toBe("runtime.start_failed");
         expect(JSON.stringify(fatal)).not.toContain("private totp startup failure");
+    });
+
+    test("keeps the full runtime behind the cutover mutation gate for exact smoke", async () => {
+        const fixture = processFixture(undefined, true);
+
+        await runDashboardWebProcess(processOptions, fixture.dependencies);
+
+        expect(fixture.events).toContain("runtime-create");
     });
 });

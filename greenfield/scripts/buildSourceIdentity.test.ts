@@ -58,7 +58,11 @@ describe("build source identity", () => {
 
         const identity = await resolveBuildSourceIdentity(root);
 
-        expect(identity).toEqual({ commitSha, state: "clean" });
+        expect(identity).toEqual({
+            commitSha,
+            commitTitle: "initial",
+            state: "clean",
+        });
         expect(Object.isFrozen(identity)).toBe(true);
     });
 
@@ -70,18 +74,21 @@ describe("build source identity", () => {
         await writeFile(trackedPath, "changed\n", { encoding: "utf8", mode: 0o600 });
         expect(await resolveBuildSourceIdentity(root)).toEqual({
             commitSha,
+            commitTitle: "initial",
             state: "dirty",
         });
 
         await runGit(root, "add", "tracked.txt");
         expect(await resolveBuildSourceIdentity(root)).toEqual({
             commitSha,
+            commitTitle: "initial",
             state: "dirty",
         });
 
         await writeFile(untrackedPath, "new\n", { encoding: "utf8", mode: 0o600 });
         expect(await resolveBuildSourceIdentity(root)).toEqual({
             commitSha,
+            commitTitle: "initial",
             state: "dirty",
         });
         await unlink(untrackedPath);

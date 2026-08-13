@@ -1,0 +1,287 @@
+{
+  "$id": "urn:mira-dashboard:delivery.getPreview.output",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "checkedAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8640000000000000
+        },
+        "state": {
+          "const": "unavailable"
+        }
+      },
+      "required": [
+        "checkedAtMs",
+        "state"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "actionActive": {
+          "type": "boolean"
+        },
+        "preview": {
+          "type": "object",
+          "properties": {
+            "controlsAvailable": {
+              "type": "boolean"
+            },
+            "headSha": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            },
+            "number": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "reason": {
+              "type": "string",
+              "maxLength": 500,
+              "minLength": 1,
+              "pattern": "\\S",
+              "allOf": [
+                {
+                  "pattern": "^[^\\u0000]*$"
+                },
+                {
+                  "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                }
+              ]
+            },
+            "revision": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "startedAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            },
+            "status": {
+              "enum": [
+                "failed",
+                "running",
+                "starting",
+                "stopped",
+                "stopping",
+                "view-only"
+              ],
+              "type": "string"
+            },
+            "title": {
+              "type": "string",
+              "maxLength": 500,
+              "minLength": 1,
+              "pattern": "\\S",
+              "allOf": [
+                {
+                  "pattern": "^[^\\u0000]*$"
+                },
+                {
+                  "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                }
+              ]
+            },
+            "updatedAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            },
+            "url": {
+              "type": "string",
+              "maxLength": 2048,
+              "minLength": 1,
+              "pattern": "\\S",
+              "allOf": [
+                {
+                  "pattern": "^[^\\u0000]*$"
+                },
+                {
+                  "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                }
+              ],
+              "format": "uri",
+              "$comment": "Live Valibot validation additionally requires every Delivery URL to use HTTPS."
+            }
+          },
+          "required": [
+            "controlsAvailable",
+            "revision",
+            "status",
+            "updatedAtMs"
+          ],
+          "additionalProperties": false,
+          "$comment": "Live Valibot validation additionally binds Delivery preview owner, exact head, URL, lifecycle state, and control availability."
+        },
+        "checkedAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8640000000000000
+        },
+        "observedAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8640000000000000
+        },
+        "sourceRevision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "state": {
+          "const": "fresh"
+        }
+      },
+      "required": [
+        "actionActive",
+        "preview",
+        "checkedAtMs",
+        "observedAtMs",
+        "sourceRevision",
+        "state"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "actionActive": {
+          "type": "boolean"
+        },
+        "preview": {
+          "type": "object",
+          "properties": {
+            "controlsAvailable": {
+              "type": "boolean"
+            },
+            "headSha": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            },
+            "number": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "reason": {
+              "type": "string",
+              "maxLength": 500,
+              "minLength": 1,
+              "pattern": "\\S",
+              "allOf": [
+                {
+                  "pattern": "^[^\\u0000]*$"
+                },
+                {
+                  "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                }
+              ]
+            },
+            "revision": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "startedAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            },
+            "status": {
+              "enum": [
+                "failed",
+                "running",
+                "starting",
+                "stopped",
+                "stopping",
+                "view-only"
+              ],
+              "type": "string"
+            },
+            "title": {
+              "type": "string",
+              "maxLength": 500,
+              "minLength": 1,
+              "pattern": "\\S",
+              "allOf": [
+                {
+                  "pattern": "^[^\\u0000]*$"
+                },
+                {
+                  "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                }
+              ]
+            },
+            "updatedAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            },
+            "url": {
+              "type": "string",
+              "maxLength": 2048,
+              "minLength": 1,
+              "pattern": "\\S",
+              "allOf": [
+                {
+                  "pattern": "^[^\\u0000]*$"
+                },
+                {
+                  "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                }
+              ],
+              "format": "uri",
+              "$comment": "Live Valibot validation additionally requires every Delivery URL to use HTTPS."
+            }
+          },
+          "required": [
+            "controlsAvailable",
+            "revision",
+            "status",
+            "updatedAtMs"
+          ],
+          "additionalProperties": false,
+          "$comment": "Live Valibot validation additionally binds Delivery preview owner, exact head, URL, lifecycle state, and control availability."
+        },
+        "checkedAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8640000000000000
+        },
+        "observedAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8640000000000000
+        },
+        "sourceRevision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "state": {
+          "const": "last-known-good"
+        },
+        "staleSinceMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8640000000000000
+        }
+      },
+      "required": [
+        "actionActive",
+        "preview",
+        "checkedAtMs",
+        "observedAtMs",
+        "sourceRevision",
+        "state",
+        "staleSinceMs"
+      ],
+      "additionalProperties": false
+    }
+  ],
+  "$comment": "Live Valibot validation additionally requires Delivery observation, staleness, and response-check timestamps to be causally ordered.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

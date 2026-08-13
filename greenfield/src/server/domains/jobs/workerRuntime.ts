@@ -3,6 +3,18 @@ import { Cause, Effect, Exit, Fiber, ManagedRuntime } from "effect";
 import type { SqliteMaintenanceExecutionPort } from "../../../contracts/database.ts";
 import type { DatabaseObservabilityCollector } from "../../../contracts/databaseObservabilityCollector.ts";
 import {
+    deliveryOverviewSectionKeys,
+    type DeliveryOverviewSectionId,
+} from "../../../contracts/delivery.ts";
+import {
+    deliveryGitHubActionKey,
+    type DeliveryJobExecutionPort,
+    type DeliveryOperationJobPayload,
+    deliveryPreviewActionKey,
+    deliveryProductionActionKey,
+    parseDeliveryOperationJobPayload,
+} from "../../../contracts/deliveryWorker.ts";
+import {
     dockerOverviewCacheKey,
     type DockerUpdaterEvent,
 } from "../../../contracts/docker.ts";
@@ -39,6 +51,11 @@ import {
 import {
     dockerFreeJobActionDefinitions,
     dockerOperationJobActionDefinition,
+    deliveryOverviewCacheJobActionKey,
+    deliveryOverviewCacheJobActionDefinition,
+    deliveryGitHubJobActionDefinition,
+    deliveryPreviewJobActionDefinition,
+    deliveryProductionJobActionDefinition,
     jobActionDefinitions,
     hostSystemCleanupJobActionDefinition,
     hostSystemRestartJobActionDefinition,
@@ -48,6 +65,7 @@ import {
     openClawSessionsCleanupJobActionDefinition,
     workspaceFileReplaceJobActionDefinition,
     workspaceFileWriteJobActionDefinition,
+    type JobExecutableActionDefinition,
 } from "./actionRegistry.ts";
 import {
     createJobWorkerCoordinator,
@@ -66,6 +84,8 @@ import {
 } from "./sideEffects.ts";
 
 export interface DashboardWorkerRuntimeOptions {
+    /** Exact executable inventory override used by isolated managed-preview runtimes. */
+    readonly actionDefinitions?: readonly JobExecutableActionDefinition[];
     readonly bootIdentity: LinuxBootIdentity;
     readonly database: DatabaseRuntimeLayerOptions;
     readonly databaseObservability: DatabaseObservabilityCollector;
@@ -74,6 +94,12 @@ export interface DashboardWorkerRuntimeOptions {
         DockerJobExecutionPort,
         "publishEvents" | "readPrevious" | "readPreviousAttemptStatus"
     >;
+    readonly createDelivery?: DeliveryWorkerCompositionFactory;
+    /** Receipt-backed recovery that must finish before schedules or ordinary claims start. */
+    readonly reconcileDeliveryProductionBeforeClaims?: (
+        repository: JobRepository,
+        signal?: AbortSignal
+    ) => Promise<void>;
     readonly logMaintenance: LogMaintenanceExecutionPort;
     readonly hostOperations?: FixedHostOperationsExecutionPort;
     readonly moltbook: MoltbookDashboardCollector;
@@ -94,6 +120,35 @@ export interface DashboardWorkerRuntimeOptions {
     ) => Effect.Effect<never, unknown>;
     readonly workerInstanceId: string;
 }
+
+/** Repository-backed authorities exposed only while composing Delivery in the worker. */
+export interface DeliveryWorkerCompositionAuthority {
+    readonly readActionActive: (input?: {
+        readonly excludeRunId?: string;
+        readonly signal?: AbortSignal;
+    }) => Promise<boolean>;
+    readonly readActivePreviewOperation: (
+        signal?: AbortSignal
+    ) => Promise<
+        | Extract<
+              DeliveryOperationJobPayload,
+              { operation: "start-preview" | "stop-preview" }
+          >
+        | undefined
+    >;
+    readonly readPrevious: (section: DeliveryOverviewSectionId) => unknown;
+}
+
+/** Late factory used because Delivery's active-action authority lives in the Job repository. */
+export type DeliveryWorkerCompositionFactory = (
+    authority: DeliveryWorkerCompositionAuthority
+) => DeliveryJobExecutionPort;
+
+const deliveryMutationActionKeys = Object.freeze([
+    deliveryGitHubActionKey,
+    deliveryPreviewActionKey,
+    deliveryProductionActionKey,
+]);
 
 const defaultTaskNotificationShutdownTimeoutMs = 5000;
 
@@ -439,6 +494,74 @@ export function createDashboardWorkerRuntime(
                 database.database,
                 database.writeAdmission
             );
+            const delivery = options.createDelivery?.(
+                Object.freeze({
+                    readActionActive(
+                        input: {
+                            readonly excludeRunId?: string;
+                            readonly signal?: AbortSignal;
+                        } = {}
+                    ) {
+                        return Promise.resolve().then(() => {
+                            input.signal?.throwIfAborted();
+                            const active = repository.readAnyActionActive({
+                                actionKeys: deliveryMutationActionKeys,
+                                ...(input.excludeRunId === undefined
+                                    ? {}
+                                    : { excludeRunId: input.excludeRunId }),
+                            });
+                            input.signal?.throwIfAborted();
+                            return active;
+                        });
+                    },
+                    readActivePreviewOperation(
+                        signal?: AbortSignal
+                    ): Promise<
+                        | Extract<
+                              DeliveryOperationJobPayload,
+                              { operation: "start-preview" | "stop-preview" }
+                          >
+                        | undefined
+                    > {
+                        return Promise.resolve().then(() => {
+                            signal?.throwIfAborted();
+                            const page = repository.listActiveActionPayloads({
+                                actionKey: deliveryPreviewActionKey,
+                                limit: 2,
+                            });
+                            if (page.truncated || page.payloads.length > 1) {
+                                throw new Error(
+                                    "Delivery preview operation authority is ambiguous"
+                                );
+                            }
+                            const raw = page.payloads[0];
+                            if (raw === undefined) return;
+                            const payload = parseDeliveryOperationJobPayload(
+                                parseJsonText(raw)
+                            );
+                            if (
+                                payload.operation !== "start-preview" &&
+                                payload.operation !== "stop-preview"
+                            ) {
+                                throw new Error(
+                                    "Delivery preview operation authority is invalid"
+                                );
+                            }
+                            signal?.throwIfAborted();
+                            return payload;
+                        });
+                    },
+                    readPrevious(section: DeliveryOverviewSectionId) {
+                        const record = cacheRepository.findEntry(
+                            deliveryOverviewSectionKeys[section]
+                        );
+                        return record?.payloadJson === null ||
+                            record?.payloadJson === undefined
+                            ? undefined
+                            : parseJsonText(record.payloadJson);
+                    },
+                })
+            );
             const availableHostOperations =
                 (await options.hostOperations?.availableOperations()) ?? [];
             if (
@@ -452,39 +575,67 @@ export function createDashboardWorkerRuntime(
                 throw new Error("Fixed host operation availability is invalid");
             }
             const availableHostOperationSet = new Set(availableHostOperations);
-            const baseActionDefinitions =
-                options.docker === undefined
-                    ? dockerFreeJobActionDefinitions
-                    : jobActionDefinitions;
+            let baseActionDefinitions: readonly JobExecutableActionDefinition[];
+            if (options.actionDefinitions !== undefined) {
+                baseActionDefinitions = options.actionDefinitions;
+            } else if (options.docker === undefined) {
+                baseActionDefinitions = Object.freeze([
+                    ...dockerFreeJobActionDefinitions,
+                    ...(delivery === undefined
+                        ? []
+                        : [deliveryOverviewCacheJobActionDefinition]),
+                ]);
+            } else if (delivery === undefined) {
+                baseActionDefinitions = Object.freeze(
+                    jobActionDefinitions.filter(
+                        ({ actionKey }) => actionKey !== deliveryOverviewCacheJobActionKey
+                    )
+                );
+            } else {
+                baseActionDefinitions = jobActionDefinitions;
+            }
+            const optionalActionDefinitions: JobExecutableActionDefinition[] = [];
+            if (options.actionDefinitions === undefined) {
+                if (options.openClawGateway !== undefined) {
+                    optionalActionDefinitions.push(
+                        openClawGatewayRestartJobActionDefinition
+                    );
+                }
+                if (options.openClawServiceActions !== undefined) {
+                    optionalActionDefinitions.push(
+                        openClawSessionsCleanupJobActionDefinition,
+                        openClawInstallationUpdateJobActionDefinition
+                    );
+                }
+                if (availableHostOperationSet.has("system-cleanup")) {
+                    optionalActionDefinitions.push(hostSystemCleanupJobActionDefinition);
+                }
+                if (availableHostOperationSet.has("system-restart")) {
+                    optionalActionDefinitions.push(hostSystemRestartJobActionDefinition);
+                }
+                if (availableHostOperationSet.has("system-update")) {
+                    optionalActionDefinitions.push(hostSystemUpdateJobActionDefinition);
+                }
+                if (options.workspaceFiles !== undefined) {
+                    optionalActionDefinitions.push(
+                        workspaceFileWriteJobActionDefinition,
+                        workspaceFileReplaceJobActionDefinition
+                    );
+                }
+                if (options.docker !== undefined) {
+                    optionalActionDefinitions.push(dockerOperationJobActionDefinition);
+                }
+                if (delivery !== undefined) {
+                    optionalActionDefinitions.push(
+                        deliveryGitHubJobActionDefinition,
+                        deliveryPreviewJobActionDefinition,
+                        deliveryProductionJobActionDefinition
+                    );
+                }
+            }
             const actionDefinitions = Object.freeze([
                 ...baseActionDefinitions,
-                ...(options.openClawGateway === undefined
-                    ? []
-                    : [openClawGatewayRestartJobActionDefinition]),
-                ...(options.openClawServiceActions === undefined
-                    ? []
-                    : [
-                          openClawSessionsCleanupJobActionDefinition,
-                          openClawInstallationUpdateJobActionDefinition,
-                      ]),
-                ...(availableHostOperationSet.has("system-cleanup")
-                    ? [hostSystemCleanupJobActionDefinition]
-                    : []),
-                ...(availableHostOperationSet.has("system-restart")
-                    ? [hostSystemRestartJobActionDefinition]
-                    : []),
-                ...(availableHostOperationSet.has("system-update")
-                    ? [hostSystemUpdateJobActionDefinition]
-                    : []),
-                ...(options.workspaceFiles === undefined
-                    ? []
-                    : [
-                          workspaceFileWriteJobActionDefinition,
-                          workspaceFileReplaceJobActionDefinition,
-                      ]),
-                ...(options.docker === undefined
-                    ? []
-                    : [dockerOperationJobActionDefinition]),
+                ...optionalActionDefinitions,
             ]);
             const monitoringCatalog =
                 options.docker === undefined
@@ -534,6 +685,7 @@ export function createDashboardWorkerRuntime(
                               options.databaseObservabilityReconciler,
                       }),
                 ...(docker === undefined ? {} : { docker }),
+                ...(delivery === undefined ? {} : { delivery }),
                 ...(availableHostOperations.length === 0 ||
                 options.hostOperations === undefined
                     ? {}
@@ -572,6 +724,7 @@ export function createDashboardWorkerRuntime(
                 coordinator.completion,
                 "Durable job coordinator stopped unexpectedly"
             );
+            await options.reconcileDeliveryProductionBeforeClaims?.(repository);
             await coordinator.initialize();
             options.persistentGatewayTransport.start();
             notificationFiber = Effect.runFork(

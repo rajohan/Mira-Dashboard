@@ -20,6 +20,7 @@ import {
     createSystemJobWorkerSideEffects,
     type DashboardWorkerRuntimeDependencies,
     type DashboardWorkerRuntimeOptions,
+    type DeliveryWorkerCompositionAuthority,
 } from "./workerRuntime.ts";
 
 const noSideEffects = Object.freeze({
@@ -117,8 +118,20 @@ function runtimeFixture(initializationFailure?: Error) {
                 : Promise.reject(initializationFailure);
         },
     });
-    const repository = Object.freeze({}) as JobRepository;
-    const cacheRepository = Object.freeze({}) as CacheRepository;
+    const repository = Object.freeze({
+        readAnyActionActive(input: {
+            readonly actionKeys: readonly string[];
+            readonly excludeRunId?: string;
+        }) {
+            events.push(
+                `active-actions:${input.actionKeys.join(",")}:${input.excludeRunId ?? "none"}`
+            );
+            return input.excludeRunId === undefined;
+        },
+    }) as JobRepository;
+    const cacheRepository = Object.freeze({
+        findEntry: () => null,
+    }) as unknown as CacheRepository;
     const notificationQueue = Object.freeze({
         claim: () => Promise.resolve([]),
         markDelivered: () => Promise.resolve(true),
@@ -390,6 +403,55 @@ describe("Dashboard worker runtime", () => {
         const runtime = createDashboardWorkerRuntime(options, dependencies);
 
         await runtime.initialize();
+        await runtime.dispose();
+    });
+
+    test("composes Delivery after repository creation with bounded active-action authority", async () => {
+        const fixture = runtimeFixture();
+        let authority: DeliveryWorkerCompositionAuthority | undefined;
+        const options: DashboardWorkerRuntimeOptions = {
+            ...fixture.options,
+            createDelivery(observedAuthority) {
+                authority = observedAuthority;
+                return Object.freeze({
+                    execute: () =>
+                        Promise.resolve({
+                            operation: "deploy" as const,
+                            outcome: "completed" as const,
+                        }),
+                    readPrevious: observedAuthority.readPrevious,
+                    refresh: () => Promise.reject(new Error("Unused Delivery refresh")),
+                });
+            },
+        };
+        const dependencies: DashboardWorkerRuntimeDependencies = {
+            ...fixture.dependencies,
+            createCoordinator(coordinatorOptions) {
+                const actionKeys = coordinatorOptions.actionDefinitions?.map(
+                    ({ actionKey }) => actionKey
+                );
+                expect(actionKeys).toContain("cache.refresh.delivery-overview");
+                expect(actionKeys).toContain("delivery.github");
+                expect(actionKeys).toContain("delivery.preview");
+                expect(actionKeys).toContain("delivery.production.v1");
+                expect(
+                    coordinatorOptions.findAction?.("cache.refresh.delivery-overview")
+                ).toBeDefined();
+                expect(
+                    coordinatorOptions.findAction?.("delivery.production.v1")
+                ).toBeDefined();
+                return fixture.dependencies.createCoordinator(coordinatorOptions);
+            },
+        };
+        const runtime = createDashboardWorkerRuntime(options, dependencies);
+
+        await runtime.initialize();
+        const runId = Bun.randomUUIDv7();
+        expect(await authority?.readActionActive()).toBe(true);
+        expect(await authority?.readActionActive({ excludeRunId: runId })).toBe(false);
+        expect(fixture.events).toContain(
+            `active-actions:delivery.github,delivery.preview,delivery.production.v1:${runId}`
+        );
         await runtime.dispose();
     });
 

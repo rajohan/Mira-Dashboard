@@ -73,4 +73,24 @@ describe("cache entry row schemas", () => {
             ).toBeFalse();
         }
     });
+
+    test("reserves the larger persisted payload budget only for Delivery", () => {
+        const payloadJson = JSON.stringify({ value: "x".repeat(300 * 1024) });
+        expect(
+            v.safeParse(cacheEntryInsertSchema, {
+                ...validCacheEntry,
+                key: "system.host",
+                payloadJson,
+            }).success
+        ).toBeFalse();
+        expect(
+            v.safeParse(cacheEntryInsertSchema, {
+                ...validCacheEntry,
+                key: "delivery.overview.pull-requests",
+                payloadJson,
+                schemaId: "delivery.overview.pull-requests.v1",
+                source: "github.delivery.pull-requests",
+            }).success
+        ).toBeTrue();
+    });
 });

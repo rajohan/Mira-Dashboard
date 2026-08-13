@@ -24,6 +24,7 @@ const runtimeIdentity: ReleaseRuntimeIdentity = Object.freeze({
 });
 const cleanSourceIdentity: BuildSourceIdentity = Object.freeze({
     commitSha,
+    commitTitle: "Test release",
     state: "clean",
 });
 
@@ -92,6 +93,10 @@ async function releaseFixture(): Promise<{
             path.join(releaseRoot, "server/databaseMaintenance.js"),
             "database-maintenance"
         ),
+        writeFile(
+            path.join(releaseRoot, "server/productionDelivery.js"),
+            "production-delivery"
+        ),
         writeFile(path.join(releaseRoot, "server/web.js"), "web"),
         writeFile(path.join(releaseRoot, "server/worker.js"), "worker"),
         writeFile(
@@ -127,6 +132,13 @@ async function releaseFixture(): Promise<{
         copyDirectory(
             path.join(
                 sourceProjectRoot,
+                "scripts/delivery/provisioning/preview-tailscale"
+            ),
+            path.join(releaseRoot, "scripts/delivery/provisioning/preview-tailscale")
+        ),
+        copyDirectory(
+            path.join(
+                sourceProjectRoot,
                 "scripts/delivery/provisioning/database-observability"
             ),
             path.join(releaseRoot, "scripts/delivery/provisioning/database-observability")
@@ -139,6 +151,7 @@ function creationOptions(fixture: { releaseRoot: string; repositoryRoot: string 
     return {
         ...fixture,
         runtimeIdentity,
+        sourceDisplay: { builtAtMs: 1_800_000_000_000, commitTitle: "Test release" },
         sourceIdentity: cleanSourceIdentity,
     };
 }
@@ -159,6 +172,11 @@ describe("release identity", () => {
         expect(declared).toEqual(created);
         expect(verified).toEqual(created);
         expect(created.source).toEqual({ commitSha, treeState: "clean" });
+        expect(created.display).toEqual({
+            builtAtMs: 1_800_000_000_000,
+            commitTitle: "Test release",
+            schemaTarget: 1,
+        });
         expect(created.runtime).toEqual(runtimeIdentity);
         expect(created.packages).toEqual([
             { name: "react", scope: "dependency", version: "19.2.8" },
@@ -230,6 +248,9 @@ describe("release identity", () => {
             "scripts/delivery/provisioning/log-maintenance/mira-dashboard-log-maintenance",
             "scripts/delivery/provisioning/log-maintenance/mira-dashboard-log-maintenance@.service",
             "scripts/delivery/provisioning/log-maintenance/policy.ts",
+            "scripts/delivery/provisioning/preview-tailscale/README.md",
+            "scripts/delivery/provisioning/preview-tailscale/operator.ts",
+            "scripts/delivery/provisioning/preview-tailscale/policy.ts",
         ]);
         const manifestText = await readFile(
             path.join(fixture.releaseRoot, "release-manifest.json"),
@@ -301,7 +322,11 @@ describe("release identity", () => {
         const dirtyFailure = await rejectionError(
             createReleaseIdentity({
                 ...creationOptions(dirtyFixture),
-                sourceIdentity: { commitSha, state: "dirty" },
+                sourceIdentity: {
+                    commitSha,
+                    commitTitle: "Test release",
+                    state: "dirty",
+                },
             })
         );
         expect(dirtyFailure.message).toBe("Release identity is invalid");

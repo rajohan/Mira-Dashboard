@@ -32,6 +32,8 @@ import { taskIdSchema, taskPrioritySchema, taskStatusSchema } from "./taskModel.
 export const cacheStatusMaximumEntries = 128;
 /** Maximum encoded last-known-good provider payload retained in one cache row. */
 export const cacheEntryPayloadMaximumBytes = 256 * 1024;
+/** Absolute storage ceiling reserved for explicitly reviewed provider-specific budgets. */
+export const cacheEntryStoredPayloadMaximumBytes = 2_359_296;
 /** Maximum encoded provider metadata retained beside one cache payload. */
 export const cacheEntryMetadataMaximumBytes = 16 * 1024;
 
@@ -76,6 +78,16 @@ export const cacheEntrySourceSchema = boundedControlSafeTextSchema(
 export const cacheEntryPayloadSchema = v.pipe(
     jsonObjectSchema,
     v.check(cacheEntryPayloadFitsBudget, "Cache entry payload is outside its budget")
+);
+
+/** Bounded persisted object before its provider-specific key budget is applied. */
+export const cacheEntryStoredPayloadSchema = v.pipe(
+    jsonObjectSchema,
+    v.check(
+        (value) =>
+            utf8ByteLength(JSON.stringify(value)) <= cacheEntryStoredPayloadMaximumBytes,
+        "Stored cache payload is outside its absolute budget"
+    )
 );
 
 /** Bounded structured metadata retained with one provider payload. */

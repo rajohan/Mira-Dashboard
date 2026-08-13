@@ -66,6 +66,7 @@ interface DirectoryIdentity {
 }
 
 interface OpenedDirectory {
+    readonly expectedMode: bigint;
     readonly handle: FileHandle;
     readonly identity: DirectoryIdentity;
     readonly lookupPath: string;
@@ -96,6 +97,14 @@ export interface PromotedDatabaseState {
     readonly previous: PublishedDatabaseSnapshotResult;
     readonly transitionId: string;
 }
+
+/** Immutable retained snapshot admitted as a paired-rollback database source. */
+export type DatabaseSnapshotArtifact = Readonly<
+    Pick<
+        Extract<PublishedDatabaseSnapshotResult, { state: "present" }>,
+        "manifest" | "snapshotDirectory" | "snapshotFile"
+    >
+>;
 
 /** Recovery inspection result for a crash-interrupted prepared journal. */
 export type DatabaseTransitionRecovery =
@@ -170,12 +179,16 @@ function sameDirectoryIdentity(
     return status.dev === expected.dev && status.ino === expected.ino;
 }
 
-function validPrivateDirectory(status: BigIntStats, userId: number): boolean {
+function validPrivateDirectory(
+    status: BigIntStats,
+    userId: number,
+    expectedMode: bigint
+): boolean {
     return (
         status.isDirectory() &&
         !status.isSymbolicLink() &&
         status.uid === BigInt(userId) &&
-        (status.mode & 0o7777n) === 0o700n
+        (status.mode & 0o7777n) === expectedMode
     );
 }
 
@@ -192,7 +205,8 @@ async function closeHandle(handle: FileHandle | undefined): Promise<boolean> {
 async function openPrivateDirectory(
     directory: string,
     expectedDevice?: bigint,
-    expectedCanonicalPath = directory
+    expectedCanonicalPath = directory,
+    expectedMode = 0o700n
 ): Promise<OpenedDirectory> {
     if (process.platform !== "linux" || typeof process.getuid !== "function") {
         throw transitionFailure();
@@ -209,14 +223,15 @@ async function openPrivateDirectory(
         const expected = directoryIdentity(held);
         if (
             canonical !== expectedCanonicalPath ||
-            !validPrivateDirectory(held, process.getuid()) ||
-            !validPrivateDirectory(after, process.getuid()) ||
+            !validPrivateDirectory(held, process.getuid(), expectedMode) ||
+            !validPrivateDirectory(after, process.getuid(), expectedMode) ||
             !sameDirectoryIdentity(after, expected) ||
             (expectedDevice !== undefined && held.dev !== expectedDevice)
         ) {
             throw transitionFailure();
         }
         result = Object.freeze({
+            expectedMode,
             handle,
             identity: expected,
             lookupPath: directory,
@@ -238,8 +253,8 @@ async function revalidateDirectory(directory: OpenedDirectory): Promise<void> {
     ]);
     if (
         canonical !== directory.path ||
-        !validPrivateDirectory(held, process.getuid()) ||
-        !validPrivateDirectory(current, process.getuid()) ||
+        !validPrivateDirectory(held, process.getuid(), directory.expectedMode) ||
+        !validPrivateDirectory(current, process.getuid(), directory.expectedMode) ||
         !sameDirectoryIdentity(held, directory.identity) ||
         !sameDirectoryIdentity(current, directory.identity)
     ) {
@@ -308,12 +323,12 @@ async function hashFile(handle: FileHandle, expectedBytes: number): Promise<stri
     return hasher.digest("hex");
 }
 
-async function readAndValidateSnapshotManifest(
-    snapshotDirectory: string,
-    expected: DatabaseSnapshotManifest
-): Promise<void> {
+async function readSnapshotManifest(
+    snapshotDirectory: string
+): Promise<DatabaseSnapshotManifest> {
     const manifestFile = path.join(snapshotDirectory, snapshotManifestFileName);
     let handle: FileHandle | undefined;
+    let result: DatabaseSnapshotManifest | undefined;
     let failed = false;
     try {
         if (typeof process.getuid !== "function") throw transitionFailure();
@@ -367,19 +382,27 @@ async function readAndValidateSnapshotManifest(
             bytes.subarray(0, offset)
         );
         const value: unknown = JSON.parse(text);
-        const parsed = parseDatabaseSnapshotManifest(value);
-        if (JSON.stringify(parsed) !== JSON.stringify(expected)) {
-            throw transitionFailure();
-        }
+        result = parseDatabaseSnapshotManifest(value);
     } catch {
         failed = true;
     }
     const closed = await closeHandle(handle);
-    if (failed || !closed) throw transitionFailure();
+    if (failed || !closed || !result) throw transitionFailure();
+    return result;
+}
+
+async function readAndValidateSnapshotManifest(
+    snapshotDirectory: string,
+    expected: DatabaseSnapshotManifest
+): Promise<void> {
+    const parsed = await readSnapshotManifest(snapshotDirectory);
+    if (JSON.stringify(parsed) !== JSON.stringify(expected)) {
+        throw transitionFailure();
+    }
 }
 
 async function copyVerifiedSnapshot(
-    snapshot: Extract<PublishedDatabaseSnapshotResult, { state: "present" }>,
+    snapshot: DatabaseSnapshotArtifact,
     destination: string,
     expectedDevice: bigint
 ): Promise<void> {
@@ -480,6 +503,88 @@ async function copyVerifiedSnapshot(
         closeHandle(target),
     ]);
     if (failed || !sourceClosed || !targetClosed) throw transitionFailure();
+}
+
+/**
+ * Loads one exact immutable cutover snapshot for paired rollback.
+ * The retained snapshot is pinned to its transition and schema-owning release identity.
+ * @param lease Held production deployment lease.
+ * @param paths Descriptor-verified production paths.
+ * @param transitionId Exact retained snapshot transition.
+ * @param expectedReleaseId Exact schema-owning release identity.
+ * @returns The verified immutable snapshot artifact.
+ */
+export async function loadDatabaseSnapshotArtifact(
+    lease: DashboardDeploymentLease,
+    paths: PreparedProductionDeliveryPaths,
+    transitionId: string,
+    expectedReleaseId: string
+): Promise<DatabaseSnapshotArtifact> {
+    if (
+        lease.stateDirectory !== paths.stateDirectory ||
+        !v.is(lowercaseUuidV7Schema(), transitionId) ||
+        !/^[a-f\d]{40}$/u.test(expectedReleaseId) ||
+        typeof process.getuid !== "function"
+    ) {
+        throw transitionFailure();
+    }
+    const state = await openPrivateDirectory(paths.stateDirectory);
+    let backups: OpenedDirectory | undefined;
+    let snapshot: OpenedDirectory | undefined;
+    let result: DatabaseSnapshotArtifact | undefined;
+    let failed = false;
+    try {
+        backups = await openPrivateDirectory(
+            path.join(paths.stateDirectory, "backups"),
+            state.identity.dev
+        );
+        const snapshotDirectory = path.join(backups.path, transitionId);
+        snapshot = await openPrivateDirectory(
+            path.join(`/proc/self/fd/${backups.handle.fd}`, transitionId),
+            backups.identity.dev,
+            snapshotDirectory,
+            0o500n
+        );
+        const entries = await readdir(`/proc/self/fd/${snapshot.handle.fd}`);
+        if (
+            entries.length !== 2 ||
+            entries.toSorted().join("\0") !==
+                [databaseFileName, snapshotManifestFileName].toSorted().join("\0")
+        ) {
+            throw transitionFailure();
+        }
+        const manifest = await readSnapshotManifest(snapshotDirectory);
+        const snapshotFile = path.join(snapshotDirectory, databaseFileName);
+        const file = await lstat(snapshotFile, { bigint: true });
+        if (
+            manifest.transitionId !== transitionId ||
+            manifest.releaseId !== expectedReleaseId ||
+            !file.isFile() ||
+            file.isSymbolicLink() ||
+            file.nlink !== 1n ||
+            file.uid !== BigInt(process.getuid()) ||
+            file.dev !== snapshot.identity.dev ||
+            file.size !== BigInt(manifest.database.bytes) ||
+            (file.mode & 0o7777n) !== 0o400n
+        ) {
+            throw transitionFailure();
+        }
+        await revalidateDirectory(snapshot);
+        await revalidateDirectory(backups);
+        await revalidateDirectory(state);
+        result = Object.freeze({ manifest, snapshotDirectory, snapshotFile });
+    } catch {
+        failed = true;
+    }
+    const [snapshotClosed, backupsClosed, stateClosed] = await Promise.all([
+        closeHandle(snapshot?.handle),
+        closeHandle(backups?.handle),
+        closeHandle(state.handle),
+    ]);
+    if (failed || !snapshotClosed || !backupsClosed || !stateClosed || !result) {
+        throw transitionFailure();
+    }
+    return result;
 }
 
 async function removeOwnedWorkspace(
@@ -633,6 +738,32 @@ export async function prepareDatabaseTransitionWorkspace(
         throw transitionFailure();
     }
     return result;
+}
+
+/**
+ * Replaces the private candidate with one exact retained rollback snapshot.
+ * The workspace still retains the freshly captured current snapshot as its failure restore source.
+ */
+export async function replaceDatabaseTransitionCandidateFromSnapshot(
+    workspace: DatabaseTransitionWorkspace,
+    target: DatabaseSnapshotArtifact
+): Promise<void> {
+    if (workspace[workspaceBrand] !== true) throw transitionFailure();
+    const candidate = await openPrivateDirectory(workspace.candidateDirectory);
+    let failed = false;
+    try {
+        await clearOwnedCandidateFiles(candidate);
+        await copyVerifiedSnapshot(
+            target,
+            workspace.candidateDatabase,
+            candidate.identity.dev
+        );
+        await revalidateDirectory(candidate);
+    } catch {
+        failed = true;
+    }
+    const closed = await closeHandle(candidate.handle);
+    if (failed || !closed) throw transitionFailure();
 }
 
 /**

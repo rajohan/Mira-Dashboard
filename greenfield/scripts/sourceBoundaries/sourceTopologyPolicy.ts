@@ -53,14 +53,19 @@ const reviewedApplicationServerTargets: ReadonlyMap<
         "src/app/worker.ts",
         new Set([
             "src/server/domains/jobs/actionExecutors.ts",
+            "src/server/domains/jobs/actionRegistry.ts",
+            "src/server/domains/jobs/deliveryProductionRecovery.ts",
             "src/server/domains/jobs/workerRuntime.ts",
             "src/server/domains/moltbook/provider.ts",
+            "src/server/platform/configuration/githubCredentialsConfiguration.ts",
             "src/server/platform/configuration/workerConfiguration.ts",
             "src/server/platform/filesystem/projectLayout.ts",
             "src/server/platform/gateway/persistentGatewayOpenClawServiceActionsProvider.ts",
             "src/server/platform/gateway/persistentGatewayTransport.ts",
+            "src/server/platform/gateway/previewGatewayTransport.ts",
             "src/server/platform/observability/projectFileLogSink.ts",
             "src/server/platform/observability/structuredLogger.ts",
+            "src/server/platform/release/deliveryCutoverValidation.ts",
             "src/server/platform/release/runtimeRelease.ts",
             "src/server/platform/runtime/processSignals.ts",
         ]),
@@ -68,9 +73,15 @@ const reviewedApplicationServerTargets: ReadonlyMap<
     [
         "src/app/developmentWorker.ts",
         new Set([
+            "src/server/domains/jobs/actionRegistry.ts",
             "src/server/domains/jobs/workerRuntime.ts",
+            "src/server/platform/gateway/previewGatewayTransport.ts",
             "src/server/platform/release/developmentRuntimeRelease.ts",
         ]),
+    ],
+    [
+        "src/app/developmentWeb.ts",
+        new Set(["src/server/platform/gateway/previewGatewayTransport.ts"]),
     ],
     [
         "src/app/databaseMaintenance.ts",

@@ -1,0 +1,41 @@
+{
+  "$id": "urn:mira-dashboard:delivery.updateBranch.input",
+  "type": "object",
+  "properties": {
+    "confirmation": {
+      "const": "update-delivery-pull-request-branch"
+    },
+    "expectedHeadSha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "number": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "operation": {
+      "const": "update-branch"
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 32,
+      "maxLength": 128,
+      "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
+    },
+    "sourceRevision": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  },
+  "required": [
+    "confirmation",
+    "expectedHeadSha",
+    "number",
+    "operation",
+    "idempotencyKey",
+    "sourceRevision"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

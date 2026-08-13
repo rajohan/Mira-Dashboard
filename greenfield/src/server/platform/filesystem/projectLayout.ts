@@ -21,6 +21,7 @@ export interface DashboardProjectLayout {
             readonly jobOutput: string;
             readonly logMaintenance: string;
             readonly logs: string;
+            readonly previews: string;
             readonly root: string;
             readonly terminalBroker: string;
             readonly terminalBrokerSocket: string;
@@ -112,6 +113,7 @@ export function deriveDashboardProjectLayout(
         jobOutput: path.join(stateRoot, "job-output"),
         logMaintenance: path.join(stateRoot, "log-maintenance"),
         logs: path.join(stateRoot, "logs"),
+        previews: path.join(stateRoot, "previews"),
         root: stateRoot,
         terminalBroker: path.join(stateRoot, "terminal-broker"),
         terminalBrokerSocket: path.join(stateRoot, "terminal-broker", "terminal.sock"),

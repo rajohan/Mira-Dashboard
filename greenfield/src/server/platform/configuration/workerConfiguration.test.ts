@@ -75,6 +75,7 @@ describe("worker application configuration", () => {
         expect(Object.isFrozen(configuration.moltbookApiKey)).toBe(true);
         expect(configuration.databaseObservabilityPassword).toBeUndefined();
         expect(configuration.dockerRegistryCredentials).toBeUndefined();
+        expect(configuration.githubCredentials).toBeUndefined();
     });
 
     test("accepts only the database password without topology and redacts it", () => {
@@ -117,9 +118,11 @@ describe("worker application configuration", () => {
         environment.DOCKER_TOKEN = "docker-token-sentinel";
         environment.MIRA_GITHUB_USERNAME = "github-user-sentinel";
         environment.MIRA_GITHUB_TOKEN = "github-token-sentinel";
+        environment.RAJOHAN_GITHUB_TOKEN = "reviewer-token-sentinel";
 
         const configuration = parseWorkerConfiguration(environment);
         const credentials = configuration.dockerRegistryCredentials!;
+        const githubCredentials = configuration.githubCredentials!;
 
         expect(Redacted.value(credentials.dockerHub!.username)).toBe(
             "docker-user-sentinel"
@@ -129,11 +132,21 @@ describe("worker application configuration", () => {
         );
         expect(Redacted.value(credentials.github!.username)).toBe("github-user-sentinel");
         expect(Redacted.value(credentials.github!.token)).toBe("github-token-sentinel");
+        expect(Redacted.value(githubCredentials.ordinary!.username)).toBe(
+            "github-user-sentinel"
+        );
+        expect(Redacted.value(githubCredentials.ordinary!.token)).toBe(
+            "github-token-sentinel"
+        );
+        expect(Redacted.value(githubCredentials.reviewerToken!)).toBe(
+            "reviewer-token-sentinel"
+        );
         for (const secret of [
             "docker-user-sentinel",
             "docker-token-sentinel",
             "github-user-sentinel",
             "github-token-sentinel",
+            "reviewer-token-sentinel",
         ]) {
             expect(JSON.stringify(configuration)).not.toContain(secret);
             expect(inspect(configuration)).not.toContain(secret);
@@ -145,6 +158,11 @@ describe("worker application configuration", () => {
         expect(Object.isFrozen(credentials.dockerHub!.token)).toBe(true);
         expect(Object.isFrozen(credentials.github!.username)).toBe(true);
         expect(Object.isFrozen(credentials.github!.token)).toBe(true);
+        expect(Object.isFrozen(githubCredentials)).toBe(true);
+        expect(Object.isFrozen(githubCredentials.ordinary)).toBe(true);
+        expect(Object.isFrozen(githubCredentials.ordinary!.username)).toBe(true);
+        expect(Object.isFrozen(githubCredentials.ordinary!.token)).toBe(true);
+        expect(Object.isFrozen(githubCredentials.reviewerToken)).toBe(true);
     });
 
     test("requires each optional registry username and token as one complete pair", () => {
@@ -196,6 +214,24 @@ describe("worker application configuration", () => {
             expect(JSON.stringify(failure)).not.toContain("sentinel");
             expect("cause" in (failure as object)).toBe(false);
         }
+    });
+
+    test("accepts the reviewer credential independently and rejects invalid values", () => {
+        const environment = validEnvironment();
+        environment.RAJOHAN_GITHUB_TOKEN = "reviewer-token-sentinel";
+
+        const configuration = parseWorkerConfiguration(environment);
+        expect(configuration.githubCredentials?.ordinary).toBeUndefined();
+        expect(Redacted.value(configuration.githubCredentials!.reviewerToken!)).toBe(
+            "reviewer-token-sentinel"
+        );
+        expect(JSON.stringify(configuration)).not.toContain("reviewer-token-sentinel");
+
+        environment.RAJOHAN_GITHUB_TOKEN = " reviewer-token-sentinel";
+        expect(configurationFailure(environment)).toMatchObject({
+            field: "RAJOHAN_GITHUB_TOKEN",
+            reason: "invalid",
+        });
     });
 
     test("observes only the worker registry projection", () => {

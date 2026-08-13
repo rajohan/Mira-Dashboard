@@ -1,0 +1,455 @@
+import { useQuery } from "@tanstack/react-query";
+import { ExternalLink as ExternalLinkIcon, X } from "lucide-react";
+
+import type {
+    DeliveryPreviewResult,
+    DeliveryProductionCheckoutResult,
+    DeliveryPullRequest,
+    DeliveryPullRequestActionCapability,
+    DeliveryPullRequestGroup,
+    DeliveryPullRequestsResult,
+    DeliveryReleasesResult,
+} from "../../contracts/delivery.ts";
+import { Alert } from "../ui/Alert.tsx";
+import { Button } from "../ui/Button.tsx";
+import { buttonClassNames } from "../ui/buttonStyles.ts";
+import { Card } from "../ui/Card.tsx";
+import { ConfirmModal } from "../ui/ConfirmModal.tsx";
+import { Heading } from "../ui/Heading.tsx";
+import { Icon } from "../ui/Icon.tsx";
+import { PageHeader } from "../ui/PageHeader.tsx";
+import { Text } from "../ui/Text.tsx";
+import type { DeliveryClient } from "./deliveryClient.ts";
+import { DeliveryJobsPanel } from "./DeliveryJobsPanel.tsx";
+import {
+    deployMainPrompt,
+    pullRequestOperationPrompt,
+    rollbackReleasePrompt,
+    stopPreviewPrompt,
+} from "./deliveryOperations.ts";
+import {
+    deliveryCheckoutQueryOptions,
+    deliveryDeploymentsQueryOptions,
+    deliveryPreviewQueryOptions,
+    deliveryPullRequestsQueryOptions,
+    deliveryReleasesQueryOptions,
+    useDeliveryRealtimeInvalidation,
+} from "./deliveryQueries.ts";
+import { DeliveryReadRegion } from "./DeliveryReadRegion.tsx";
+import { PreviewPanel } from "./PreviewPanel.tsx";
+import { ProductionCheckoutCard, ProductionReleasesPanel } from "./ProductionPanel.tsx";
+import { PullRequestBrowser } from "./PullRequestBrowser.tsx";
+import { useDeliveryOperations } from "./useDeliveryOperations.ts";
+
+interface DeliveryRouteProps {
+    readonly client: DeliveryClient;
+}
+
+type AvailablePullRequestsResult = Exclude<
+    DeliveryPullRequestsResult,
+    { readonly state: "unavailable" }
+>;
+type AvailablePreviewResult = Exclude<
+    DeliveryPreviewResult,
+    { readonly state: "unavailable" }
+>;
+type AvailableCheckoutResult = Exclude<
+    DeliveryProductionCheckoutResult,
+    { readonly state: "unavailable" }
+>;
+type AvailableReleasesResult = Exclude<
+    DeliveryReleasesResult,
+    { readonly state: "unavailable" }
+>;
+
+function availablePullRequestsResult(
+    value: DeliveryPullRequestsResult | undefined
+): AvailablePullRequestsResult | undefined {
+    return value === undefined || value.state === "unavailable" ? undefined : value;
+}
+
+function availablePreviewResult(
+    value: DeliveryPreviewResult | undefined
+): AvailablePreviewResult | undefined {
+    return value === undefined || value.state === "unavailable" ? undefined : value;
+}
+
+function availableCheckoutResult(
+    value: DeliveryProductionCheckoutResult | undefined
+): AvailableCheckoutResult | undefined {
+    return value === undefined || value.state === "unavailable" ? undefined : value;
+}
+
+function availableReleasesResult(
+    value: DeliveryReleasesResult | undefined
+): AvailableReleasesResult | undefined {
+    return value === undefined || value.state === "unavailable" ? undefined : value;
+}
+
+/** @returns Complete Delivery parity page with five independently resilient read regions. */
+export function DeliveryRoute({ client }: DeliveryRouteProps) {
+    useDeliveryRealtimeInvalidation();
+    const pullRequestsQuery = useQuery(deliveryPullRequestsQueryOptions(client));
+    const previewQuery = useQuery(deliveryPreviewQueryOptions(client));
+    const checkoutQuery = useQuery(deliveryCheckoutQueryOptions(client));
+    const releasesQuery = useQuery(deliveryReleasesQueryOptions(client));
+    const deploymentsQuery = useQuery(deliveryDeploymentsQueryOptions(client));
+
+    const pullRequests = pullRequestsQuery.data;
+    const preview = previewQuery.data;
+    const checkout = checkoutQuery.data;
+    const releases = releasesQuery.data;
+    const deployments = deploymentsQuery.data;
+    const availablePullRequests = availablePullRequestsResult(pullRequests);
+    const availablePreview = availablePreviewResult(preview);
+    const availableCheckout = availableCheckoutResult(checkout);
+    const availableReleases = availableReleasesResult(releases);
+    const pullRequestsFresh =
+        pullRequests?.state === "fresh" && pullRequestsQuery.error === null;
+    const previewFresh = preview?.state === "fresh" && previewQuery.error === null;
+    const checkoutFresh = checkout?.state === "fresh" && checkoutQuery.error === null;
+    const releasesFresh = releases?.state === "fresh" && releasesQuery.error === null;
+    const currentAuthority = {
+        ...(checkout?.state === "unavailable"
+            ? {}
+            : {
+                  checkout: checkout?.checkout,
+                  checkoutFresh,
+                  checkoutSourceRevision: checkout?.sourceRevision,
+              }),
+        ...(preview?.state === "unavailable"
+            ? {}
+            : {
+                  preview: preview?.preview,
+                  previewActionActive: preview?.actionActive,
+                  previewFresh,
+                  previewSourceRevision: preview?.sourceRevision,
+              }),
+        ...(pullRequests?.state === "unavailable"
+            ? {}
+            : {
+                  pullRequestsFresh,
+                  pullRequestSourceRevision: pullRequests?.sourceRevision,
+                  reviewerRevision: pullRequests?.reviewerCapability.revision,
+              }),
+        ...(releases?.state === "unavailable"
+            ? {}
+            : {
+                  releases: releases?.releases,
+                  releasesActionActive: releases?.actionActive,
+                  releasesFresh,
+                  releasesSourceRevision: releases?.sourceRevision,
+              }),
+    };
+    const operations = useDeliveryOperations(client, currentAuthority);
+
+    function actionState(
+        _pullRequest: DeliveryPullRequest,
+        action: DeliveryPullRequestActionCapability
+    ): { readonly enabled: boolean; readonly reason?: string } {
+        if (!pullRequestsFresh) {
+            return {
+                enabled: false,
+                reason: "Fresh pull request authority is required.",
+            };
+        }
+        if (!action.available) return { enabled: false };
+        switch (action.action) {
+            case "approve-review": {
+                if (!pullRequests.reviewerCapability.available) {
+                    return {
+                        enabled: false,
+                        reason: "The dedicated Raymond (rajohan) approval capability is unavailable.",
+                    };
+                }
+                return { enabled: true };
+            }
+            case "merge": {
+                return checkoutFresh && checkout.checkout.safeForDeploy
+                    ? { enabled: true }
+                    : {
+                          enabled: false,
+                          reason: "A fresh, safe production checkout is required.",
+                      };
+            }
+            case "merge-and-deploy": {
+                if (releasesFresh && releases.actionActive) {
+                    return {
+                        enabled: false,
+                        reason: "Another Delivery action is active.",
+                    };
+                }
+                return checkoutFresh && checkout.checkout.safeForDeploy && releasesFresh
+                    ? { enabled: true }
+                    : {
+                          enabled: false,
+                          reason: "Fresh checkout and activation revisions are required for merge and deploy.",
+                      };
+            }
+            case "preview-start": {
+                if (previewFresh && preview.actionActive) {
+                    return {
+                        enabled: false,
+                        reason: "Another Delivery action is active.",
+                    };
+                }
+                return previewFresh && preview.preview.controlsAvailable
+                    ? { enabled: true }
+                    : {
+                          enabled: false,
+                          reason: "A fresh controllable preview slot is required.",
+                      };
+            }
+            default: {
+                return { enabled: true };
+            }
+        }
+    }
+
+    function requestPullRequestAction(
+        group: DeliveryPullRequestGroup,
+        pullRequest: DeliveryPullRequest,
+        action: DeliveryPullRequestActionCapability
+    ): void {
+        if (!pullRequestsFresh) return;
+        const prompt = pullRequestOperationPrompt({
+            action,
+            ...(checkoutFresh ? { checkout: checkout.checkout } : {}),
+            ...(previewFresh ? { preview: preview.preview } : {}),
+            group,
+            pullRequest,
+            ...(releasesFresh ? { releases: releases.releases } : {}),
+            reviewerRevision: pullRequests.reviewerCapability.revision,
+            sourceRevision: pullRequests.sourceRevision,
+        });
+        if (prompt !== undefined) operations.open(prompt);
+    }
+
+    const deployAvailable =
+        checkoutFresh &&
+        releasesFresh &&
+        !releases.actionActive &&
+        checkout.checkout.safeForDeploy &&
+        releases.releases.current !== undefined;
+    let deployReason: string | undefined;
+    if (!checkoutFresh || !releasesFresh) {
+        deployReason = "Fresh checkout and activation revisions are required.";
+    } else if (releases.actionActive) {
+        deployReason = "Another Delivery action is active.";
+    } else if (!checkout.checkout.safeForDeploy) {
+        deployReason = "The production checkout must be ready, clean, and on main.";
+    } else if (releases.releases.current === undefined) {
+        deployReason = "An active managed release is required before deployment.";
+    }
+
+    return (
+        <div>
+            <PageHeader
+                description="Review ordinary and stacked pull requests, run one isolated preview, and queue exact immutable deploy or paired rollback operations."
+                eyebrow="Release engineering"
+                title="Delivery"
+            />
+            <div className="mt-8 space-y-10">
+                {operations.result === undefined ? null : (
+                    <Card aria-labelledby="delivery-operation-result-heading">
+                        <div className="flex flex-wrap items-start justify-between gap-4">
+                            <div>
+                                <Heading id="delivery-operation-result-heading" level={2}>
+                                    Delivery operation queued
+                                </Heading>
+                                <Text className="mt-1" tone="muted">
+                                    The API accepted {operations.result.operation}.
+                                    Runtime success is not assumed.
+                                </Text>
+                                <code className="text-primary-400 mt-2 block text-xs wrap-anywhere">
+                                    {operations.result.jobRunId}
+                                </code>
+                            </div>
+                            <div className="flex gap-2">
+                                <a
+                                    className={buttonClassNames({ size: "sm" })}
+                                    href={
+                                        "/jobs?runId=" +
+                                        encodeURIComponent(operations.result.jobRunId)
+                                    }
+                                >
+                                    <Icon icon={ExternalLinkIcon} size="sm" />
+                                    View job
+                                </a>
+                                <Button
+                                    onClick={operations.dismissResult}
+                                    size="sm"
+                                    variant="ghost"
+                                >
+                                    <Icon icon={X} size="sm" />
+                                    Dismiss
+                                </Button>
+                            </div>
+                        </div>
+                    </Card>
+                )}
+                {operations.error !== undefined && operations.pending === undefined ? (
+                    <Alert message={operations.error} />
+                ) : null}
+
+                <DeliveryReadRegion
+                    checkedAtMs={preview?.checkedAtMs}
+                    error={previewQuery.error}
+                    fetching={previewQuery.isFetching}
+                    headingId="delivery-preview-heading"
+                    loading={previewQuery.isPending}
+                    observedAtMs={
+                        preview?.state === "unavailable"
+                            ? undefined
+                            : preview?.observedAtMs
+                    }
+                    onRetry={() => void previewQuery.refetch()}
+                    state={preview?.state}
+                    title="Pull request preview"
+                >
+                    {availablePreview === undefined ? null : (
+                        <PreviewPanel
+                            busy={operations.busy}
+                            controlsFresh={previewFresh && !availablePreview.actionActive}
+                            onStop={() => {
+                                const prompt = stopPreviewPrompt(
+                                    availablePreview.preview,
+                                    availablePreview.sourceRevision
+                                );
+                                if (prompt !== undefined) operations.open(prompt);
+                            }}
+                            preview={availablePreview.preview}
+                        />
+                    )}
+                </DeliveryReadRegion>
+
+                <DeliveryReadRegion
+                    checkedAtMs={pullRequests?.checkedAtMs}
+                    error={pullRequestsQuery.error}
+                    fetching={pullRequestsQuery.isFetching}
+                    headingId="delivery-pull-requests-heading"
+                    loading={pullRequestsQuery.isPending}
+                    observedAtMs={
+                        pullRequests?.state === "unavailable"
+                            ? undefined
+                            : pullRequests?.observedAtMs
+                    }
+                    onRetry={() => void pullRequestsQuery.refetch()}
+                    state={pullRequests?.state}
+                    title="Pull requests"
+                >
+                    {availablePullRequests === undefined ? null : (
+                        <PullRequestBrowser
+                            actionState={actionState}
+                            busy={operations.busy}
+                            groups={availablePullRequests.groups}
+                            onAction={requestPullRequestAction}
+                        />
+                    )}
+                </DeliveryReadRegion>
+
+                <DeliveryReadRegion
+                    checkedAtMs={checkout?.checkedAtMs}
+                    error={checkoutQuery.error}
+                    fetching={checkoutQuery.isFetching}
+                    headingId="delivery-checkout-heading"
+                    loading={checkoutQuery.isPending}
+                    observedAtMs={
+                        checkout?.state === "unavailable"
+                            ? undefined
+                            : checkout?.observedAtMs
+                    }
+                    onRetry={() => void checkoutQuery.refetch()}
+                    state={checkout?.state}
+                    title="Production checkout"
+                >
+                    {availableCheckout === undefined ? null : (
+                        <ProductionCheckoutCard checkout={availableCheckout.checkout} />
+                    )}
+                </DeliveryReadRegion>
+
+                <DeliveryReadRegion
+                    checkedAtMs={releases?.checkedAtMs}
+                    error={releasesQuery.error}
+                    fetching={releasesQuery.isFetching}
+                    headingId="delivery-releases-heading"
+                    loading={releasesQuery.isPending}
+                    observedAtMs={
+                        releases?.state === "unavailable"
+                            ? undefined
+                            : releases?.observedAtMs
+                    }
+                    onRetry={() => void releasesQuery.refetch()}
+                    state={releases?.state}
+                    title="Production releases"
+                >
+                    {availableReleases === undefined ? null : (
+                        <ProductionReleasesPanel
+                            busy={operations.busy}
+                            deployAvailable={deployAvailable}
+                            deployReason={deployReason}
+                            onDeploy={() => {
+                                if (
+                                    !checkoutFresh ||
+                                    !releasesFresh ||
+                                    availableCheckout === undefined
+                                )
+                                    return;
+                                operations.open(
+                                    deployMainPrompt(
+                                        availableCheckout.checkout,
+                                        availableCheckout.sourceRevision,
+                                        availableReleases.releases
+                                    )
+                                );
+                            }}
+                            onRollback={() => {
+                                if (!releasesFresh) return;
+                                const prompt = rollbackReleasePrompt(
+                                    availableReleases.releases,
+                                    availableReleases.sourceRevision
+                                );
+                                if (prompt !== undefined) operations.open(prompt);
+                            }}
+                            releases={availableReleases.releases}
+                            releasesFresh={releasesFresh}
+                        />
+                    )}
+                </DeliveryReadRegion>
+
+                <DeliveryReadRegion
+                    checkedAtMs={deployments?.checkedAtMs}
+                    error={deploymentsQuery.error}
+                    fetching={deploymentsQuery.isFetching}
+                    headingId="delivery-deployments-heading"
+                    loading={deploymentsQuery.isPending}
+                    onRetry={() => void deploymentsQuery.refetch()}
+                    state={deployments?.state}
+                    title="Recent Delivery jobs"
+                >
+                    {deployments?.state === "fresh" ? (
+                        <DeliveryJobsPanel deployments={deployments.deployments} />
+                    ) : null}
+                </DeliveryReadRegion>
+            </div>
+            <ConfirmModal
+                busy={operations.busy}
+                confirmDisabled={!operations.current}
+                confirmLabel={operations.pending?.confirmLabel}
+                danger={operations.pending?.danger}
+                description={
+                    operations.pending?.description ?? "No Delivery action is selected."
+                }
+                error={
+                    operations.current
+                        ? operations.error
+                        : "Delivery state changed; reopen this confirmation."
+                }
+                onCancel={operations.close}
+                onConfirm={() => void operations.confirm()}
+                open={operations.pending !== undefined}
+                title={operations.pending?.title ?? "Confirm Delivery action"}
+            />
+        </div>
+    );
+}

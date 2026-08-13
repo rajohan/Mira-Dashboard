@@ -112,6 +112,21 @@ export type JobTriggerType = (typeof jobTriggerTypes)[number];
 export type JobWorkerState = (typeof jobWorkerStates)[number];
 export type ScheduleKind = (typeof scheduleKinds)[number];
 
+/** Secret-free immutable provenance copied from the exact claimed durable run. */
+export interface JobExecutionRunIdentity {
+    readonly actionKey: string;
+    readonly enqueueAuditEventId: string | null;
+    readonly enqueueAuthenticatorId: string | null;
+    readonly enqueueRequestId: string | null;
+    readonly enqueueSha256: string;
+    readonly idempotencyKey: string;
+    readonly payloadSha256: string;
+    readonly queuedAtMs: number;
+    readonly requestedById: string;
+    readonly requestedByKind: "automation" | "system" | "user";
+    readonly runId: string;
+}
+
 export const jobRunStateSchema = v.picklist(jobRunStates, "Job run state is invalid");
 export const jobTriggerTypeSchema = v.picklist(
     jobTriggerTypes,

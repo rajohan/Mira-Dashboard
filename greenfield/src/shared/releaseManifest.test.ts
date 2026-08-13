@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import {
     parseReleaseManifest,
     releaseBuildCommands,
+    releaseDeliveryProtocols,
     releaseProcessRoles,
     serializeReleaseManifest,
 } from "./releaseManifest.ts";
@@ -18,6 +19,12 @@ function manifest() {
         lockfileSha256: checksum,
         documentationSha256: "d".repeat(64),
         buildCommands: [...releaseBuildCommands],
+        deliveryProtocols: [...releaseDeliveryProtocols],
+        display: {
+            builtAtMs: 1_800_000_000_000,
+            commitTitle: "Test release",
+            schemaTarget: 1,
+        },
         processRoles: [...releaseProcessRoles],
         packages: [
             { name: "@trpc/server", scope: "dependency", version: "11.18.0" },
@@ -43,6 +50,7 @@ describe("release manifest", () => {
 
         expect(parsed).toEqual(manifest());
         expect(Object.isFrozen(parsed)).toBe(true);
+        expect(Object.isFrozen(parsed.display)).toBe(true);
         expect(Object.isFrozen(parsed.artifacts)).toBe(true);
         expect(Object.isFrozen(parsed.artifacts[0])).toBe(true);
         expect(Object.isFrozen(parsed.packages[0])).toBe(true);

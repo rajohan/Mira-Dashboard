@@ -1,0 +1,541 @@
+import * as v from "valibot";
+
+import type {
+    DeliveryExpectedHead,
+    DeliveryOperationAuthoritySnapshot,
+} from "../../contracts/delivery.ts";
+import type {
+    DeliveryDashboardMainGitSyncPort,
+    DeliveryGitHubMergeMutationOutcome,
+    DeliveryGitHubPullRequestMutationPort,
+    DeliveryGitHubPullRequestReadPort,
+} from "../../contracts/deliveryGithub.ts";
+import {
+    type DeliveryJobOperationResult,
+    type DeliveryOperationWarningCode,
+    type DeliveryProductionJobPayload,
+    deliveryProductionActionKey,
+} from "../../contracts/deliveryWorker.ts";
+import type { JobExecutionRunIdentity } from "../../contracts/jobModel.ts";
+import { canonicalDeliveryOperationWarnings } from "../../shared/deliveryOperationWarnings.ts";
+import {
+    deliveryProductionProtocol,
+    parseDeliveryProductionOperationCapsule,
+    serializeDeliveryProductionPayload,
+    type DeliveryProductionOperationCapsule,
+    type DeliveryProductionOperationInspection,
+    type DeliveryProductionOperationRecord,
+} from "../../shared/deliveryProductionOperation.ts";
+import { fullCommitShaSchema } from "../../shared/validation.ts";
+import type { DeliveryProductionAuthorityReader } from "./productionAuthorityReader.ts";
+import type { ProductionDeliveryControlPort } from "./productionDeliveryControl.ts";
+import {
+    ensureProductionDeliveryExecutor,
+    launchProductionDeliveryExecutor,
+    type ProductionDeliveryLaunchOptions,
+} from "./productionDeliveryLauncher.ts";
+import type { DeliveryProductionExecutionPort } from "./runtime.ts";
+
+const executionFailureMessage = "Delivery production execution failed";
+const receiptPollIntervalMs = 250;
+const projectRootSchema = v.pipe(
+    v.string(executionFailureMessage),
+    v.maxLength(4096, executionFailureMessage),
+    v.check(
+        (value) =>
+            value.startsWith("/") &&
+            value !== "/" &&
+            !value.includes("\0") &&
+            !value.endsWith("/"),
+        executionFailureMessage
+    )
+);
+const readinessUrlSchema = v.pipe(
+    v.string(executionFailureMessage),
+    v.url(executionFailureMessage),
+    v.check((value) => {
+        const url = new URL(value);
+        return (
+            url.protocol === "http:" &&
+            url.hostname === "127.0.0.1" &&
+            url.pathname === "/api/health/ready" &&
+            url.username === "" &&
+            url.password === "" &&
+            url.search === "" &&
+            url.hash === ""
+        );
+    }, executionFailureMessage)
+);
+
+export class DeliveryProductionExecutionError extends Error {
+    override readonly name = "DeliveryProductionExecutionError";
+}
+
+export interface DeliveryProductionExecutionOptions {
+    readonly authority: DeliveryProductionAuthorityReader;
+    readonly cleanupConfirmed?: (
+        expectedHeads: readonly DeliveryExpectedHead[],
+        signal?: AbortSignal
+    ) => Promise<boolean>;
+    readonly control: ProductionDeliveryControlPort;
+    /** Exact immutable executor that is currently running this worker release. */
+    readonly executorReleaseId: string;
+    /** Exact Bun runtime paired with the currently running executor release. */
+    readonly executorRuntimeRevision: string;
+    readonly github: DeliveryGitHubPullRequestReadPort &
+        DeliveryGitHubPullRequestMutationPort;
+    readonly ensure?: (options: ProductionDeliveryLaunchOptions) => Promise<void>;
+    readonly launch?: (options: ProductionDeliveryLaunchOptions) => Promise<void>;
+    readonly mainGit: DeliveryDashboardMainGitSyncPort;
+    readonly projectRoot: string;
+    readonly readinessUrl: string;
+    readonly wait?: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
+}
+
+function failure(): DeliveryProductionExecutionError {
+    return new DeliveryProductionExecutionError(executionFailureMessage);
+}
+
+function sha256(value: string): string {
+    return new Bun.CryptoHasher("sha256").update(value).digest("hex");
+}
+
+function sameJson(left: unknown, right: unknown): boolean {
+    return JSON.stringify(left) === JSON.stringify(right);
+}
+
+async function wait(milliseconds: number, signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
+    await new Promise<void>((resolve, reject) => {
+        const complete = () => {
+            signal?.removeEventListener("abort", aborted);
+            resolve();
+        };
+        const timeout = setTimeout(complete, milliseconds);
+        const aborted = () => {
+            clearTimeout(timeout);
+            signal?.removeEventListener("abort", aborted);
+            reject(
+                signal?.reason instanceof Error
+                    ? signal.reason
+                    : new DOMException("Aborted", "AbortError")
+            );
+        };
+        signal?.addEventListener("abort", aborted, { once: true });
+    });
+    signal?.throwIfAborted();
+}
+
+function receiptBelongsToRun(
+    record: DeliveryProductionOperationRecord,
+    payload: DeliveryProductionJobPayload,
+    identity: JobExecutionRunIdentity
+): boolean {
+    const enqueue = record.capsule.enqueue;
+    return (
+        record.capsule.protocol === deliveryProductionProtocol &&
+        record.capsule.runId === identity.runId &&
+        record.capsule.transitionId === identity.runId &&
+        enqueue.actionKey === identity.actionKey &&
+        enqueue.actor.id === identity.requestedById &&
+        enqueue.actor.kind === identity.requestedByKind &&
+        enqueue.actor.authenticatorId === identity.enqueueAuthenticatorId &&
+        enqueue.audit.eventId === identity.enqueueAuditEventId &&
+        enqueue.audit.requestId === identity.enqueueRequestId &&
+        enqueue.enqueueSha256 === identity.enqueueSha256 &&
+        enqueue.idempotencyKey === identity.idempotencyKey &&
+        enqueue.payloadSha256 === identity.payloadSha256 &&
+        enqueue.queuedAtMs === identity.queuedAtMs &&
+        sameJson(enqueue.payload, payload)
+    );
+}
+
+function terminalResult(
+    inspection: Extract<DeliveryProductionOperationInspection, { state: "terminal" }>,
+    payload: DeliveryProductionJobPayload,
+    identity: JobExecutionRunIdentity
+): DeliveryJobOperationResult {
+    if (!receiptBelongsToRun(inspection.record, payload, identity)) throw failure();
+    const result = inspection.record.result;
+    const preCutoverWarnings = inspection.record.capsule.preCutoverWarnings ?? [];
+    const mergeCompleted = payload.operation === "merge-pull-request";
+    const partial = (
+        warnings: readonly DeliveryOperationWarningCode[],
+        releaseId?: string
+    ): DeliveryJobOperationResult =>
+        Object.freeze({
+            operation: payload.operation,
+            outcome: "completed-with-warnings",
+            ...(releaseId === undefined ? {} : { releaseId }),
+            warnings: canonicalDeliveryOperationWarnings(warnings),
+        });
+    if (result.outcome === "unknown-outcome") {
+        if (mergeCompleted) {
+            return partial([...preCutoverWarnings, "deployment-outcome-unknown"]);
+        }
+        return Object.freeze({
+            operation: payload.operation,
+            outcome: "unknown-outcome",
+        });
+    }
+    if (result.outcome !== "succeeded") {
+        if (mergeCompleted) {
+            return partial([...preCutoverWarnings, "deployment-failed"]);
+        }
+        throw failure();
+    }
+    if (
+        result.activation.transitionId !== identity.runId ||
+        result.activation.current.releaseId !==
+            inspection.record.capsule.cas.target.releaseId ||
+        result.activation.current.runtimeRevision !==
+            inspection.record.capsule.cas.target.runtimeRevision
+    ) {
+        throw failure();
+    }
+    return preCutoverWarnings.length === 0
+        ? Object.freeze({
+              operation: payload.operation,
+              outcome: "completed",
+              releaseId: result.activation.current.releaseId,
+          })
+        : partial(preCutoverWarnings, result.activation.current.releaseId);
+}
+
+function validateRunIdentity(
+    payload: DeliveryProductionJobPayload,
+    identity: JobExecutionRunIdentity
+): void {
+    if (
+        identity.actionKey !== deliveryProductionActionKey ||
+        identity.requestedByKind !== "user" ||
+        identity.enqueueAuditEventId === null ||
+        identity.enqueueAuthenticatorId === null ||
+        identity.enqueueRequestId === null ||
+        sha256(serializeDeliveryProductionPayload(payload)) !== identity.payloadSha256
+    ) {
+        throw failure();
+    }
+}
+
+async function reconcileMerge(
+    options: DeliveryProductionExecutionOptions,
+    payload: Extract<DeliveryProductionJobPayload, { operation: "merge-pull-request" }>,
+    signal?: AbortSignal
+): Promise<DeliveryGitHubMergeMutationOutcome> {
+    const observed = await Promise.all(
+        payload.expectedHeads.map(({ number }) =>
+            options.github.getPullRequest(number, signal)
+        )
+    );
+    if (
+        observed.some(
+            (pullRequest, index) =>
+                pullRequest.number !== payload.expectedHeads[index]?.number ||
+                pullRequest.headSha !== payload.expectedHeads[index]?.headSha
+        )
+    ) {
+        throw failure();
+    }
+    if (observed.every(({ state }) => state === "MERGED")) {
+        const mainHeadSha = observed.at(-1)?.mergeCommitSha;
+        return mainHeadSha === undefined
+            ? Object.freeze({ outcome: "unknown-outcome" })
+            : Object.freeze({ mainHeadSha, outcome: "completed" });
+    }
+    if (!observed.every(({ state }) => state === "OPEN")) {
+        return Object.freeze({ outcome: "unknown-outcome" });
+    }
+    const outcome = payload.mergeStack
+        ? await options.github.mergeNativeStack(payload.expectedHeads, signal)
+        : await options.github.mergePullRequest(payload.expectedHeads[0]!, signal);
+    if (outcome.outcome === "enqueued" || outcome.outcome === "unknown-outcome") {
+        return outcome;
+    }
+    const confirmed = await Promise.all(
+        payload.expectedHeads.map(({ number }) =>
+            options.github.getPullRequest(number, signal)
+        )
+    );
+    const confirmedMainHeadSha = confirmed.at(-1)?.mergeCommitSha;
+    if (
+        confirmedMainHeadSha !== outcome.mainHeadSha ||
+        confirmed.some(
+            (pullRequest, index) =>
+                pullRequest.state !== "MERGED" ||
+                pullRequest.number !== payload.expectedHeads[index]?.number ||
+                pullRequest.headSha !== payload.expectedHeads[index]?.headSha
+        )
+    ) {
+        return Object.freeze({ outcome: "unknown-outcome" });
+    }
+    return outcome;
+}
+
+async function synchronizeMain(
+    options: DeliveryProductionExecutionOptions,
+    expectedMainHead: string,
+    signal?: AbortSignal
+): Promise<string> {
+    const remote = v.parse(
+        fullCommitShaSchema(executionFailureMessage),
+        await options.github.readMainRef(signal)
+    );
+    if (remote !== expectedMainHead) throw failure();
+    const local = await options.mainGit.inspect(signal);
+    if (!local.safe) throw failure();
+    if (local.headSha !== remote) {
+        const synchronized = await options.mainGit.syncMainToExactRef(
+            remote,
+            local.headSha,
+            signal
+        );
+        if (synchronized.outcome !== "completed" || synchronized.headSha !== remote) {
+            throw failure();
+        }
+    }
+    return remote;
+}
+
+async function awaitReceipt(
+    options: DeliveryProductionExecutionOptions,
+    payload: DeliveryProductionJobPayload,
+    identity: JobExecutionRunIdentity,
+    signal?: AbortSignal
+): Promise<DeliveryJobOperationResult> {
+    while (true) {
+        signal?.throwIfAborted();
+        const inspection = await options.control.inspect(identity.runId, signal);
+        if (inspection.state === "terminal") {
+            return terminalResult(inspection, payload, identity);
+        }
+        if (
+            inspection.state !== "in-progress" ||
+            !receiptBelongsToRun(inspection.record, payload, identity)
+        ) {
+            throw failure();
+        }
+        await (options.wait ?? wait)(receiptPollIntervalMs, signal);
+    }
+}
+
+/**
+ * Creates the exact-once merge/deploy/paired-rollback production execution port.
+ * @returns One immutable, receipt-backed production execution authority.
+ */
+export function createDeliveryProductionExecutionPort(
+    untrustedOptions: DeliveryProductionExecutionOptions
+): DeliveryProductionExecutionPort {
+    const options = Object.freeze({
+        ...untrustedOptions,
+        executorReleaseId: v.parse(
+            fullCommitShaSchema(executionFailureMessage),
+            untrustedOptions.executorReleaseId
+        ),
+        executorRuntimeRevision: v.parse(
+            fullCommitShaSchema(executionFailureMessage),
+            untrustedOptions.executorRuntimeRevision
+        ),
+        projectRoot: v.parse(projectRootSchema, untrustedOptions.projectRoot),
+        readinessUrl: v.parse(readinessUrlSchema, untrustedOptions.readinessUrl),
+    });
+    return Object.freeze({
+        async execute(
+            payload: DeliveryProductionJobPayload,
+            current: DeliveryOperationAuthoritySnapshot,
+            identity: JobExecutionRunIdentity,
+            signal?: AbortSignal
+        ): Promise<DeliveryJobOperationResult> {
+            validateRunIdentity(payload, identity);
+            const existing = await options.control.inspect(identity.runId, signal);
+            if (existing.state === "terminal") {
+                return terminalResult(existing, payload, identity);
+            }
+            if (existing.state === "conflict") throw failure();
+            if (existing.state === "in-progress") {
+                if (!receiptBelongsToRun(existing.record, payload, identity)) {
+                    throw failure();
+                }
+                if (existing.record.phase === "intent-recorded") {
+                    await (
+                        options.ensure ??
+                        (async (launchOptions) => {
+                            await ensureProductionDeliveryExecutor(launchOptions);
+                        })
+                    )({
+                        executorReleaseId: existing.record.capsule.executor.releaseId,
+                        projectRoot: options.projectRoot,
+                        readinessUrl: options.readinessUrl,
+                        runtimeRevision: existing.record.capsule.executor.runtimeRevision,
+                        transitionId: identity.runId,
+                    });
+                }
+                return awaitReceipt(options, payload, identity, signal);
+            }
+
+            let targetReleaseId: string;
+            let mergeCompleted = false;
+            const preCutoverWarnings: DeliveryOperationWarningCode[] = [];
+            if (payload.operation === "merge-pull-request") {
+                const merge = await reconcileMerge(options, payload, signal);
+                if (merge.outcome === "enqueued") {
+                    return Object.freeze({
+                        operation: payload.operation,
+                        outcome: "enqueued",
+                    });
+                }
+                if (merge.outcome === "unknown-outcome") {
+                    return Object.freeze({
+                        operation: payload.operation,
+                        outcome: "unknown-outcome",
+                    });
+                }
+                mergeCompleted = true;
+                if (merge.outcome === "partial-success") {
+                    preCutoverWarnings.push(merge.warning);
+                }
+                try {
+                    targetReleaseId = await synchronizeMain(
+                        options,
+                        merge.mainHeadSha,
+                        signal
+                    );
+                } catch {
+                    signal?.throwIfAborted();
+                    return Object.freeze({
+                        operation: payload.operation,
+                        outcome: "completed-with-warnings",
+                        warnings: canonicalDeliveryOperationWarnings([
+                            ...preCutoverWarnings,
+                            "deployment-not-started",
+                            "main-sync-failed",
+                        ]),
+                    });
+                }
+                if (options.cleanupConfirmed !== undefined) {
+                    try {
+                        if (
+                            !(await options.cleanupConfirmed(
+                                payload.expectedHeads,
+                                signal
+                            ))
+                        ) {
+                            preCutoverWarnings.push("preview-cleanup-failed");
+                        }
+                    } catch {
+                        signal?.throwIfAborted();
+                        preCutoverWarnings.push("preview-cleanup-failed");
+                    }
+                }
+            } else if (payload.operation === "deploy") {
+                targetReleaseId = await synchronizeMain(
+                    options,
+                    payload.expectedMainHeadSha,
+                    signal
+                );
+            } else {
+                targetReleaseId = payload.target.releaseId;
+            }
+
+            const authority = await options.authority.readExact(signal);
+            const activation = authority.activation;
+            const currentRelease = authority.snapshot.releases.current;
+            if (
+                activation === undefined ||
+                currentRelease === undefined ||
+                authority.snapshot.releases.activationRevision !==
+                    current.releases.activationRevision ||
+                authority.snapshot.releases.activationRevision !==
+                    payload.activationRevision ||
+                activation.current.releaseId !== currentRelease.releaseId ||
+                activation.current.runtimeRevision !== currentRelease.runtimeRevision ||
+                targetReleaseId === activation.current.releaseId
+            ) {
+                if (mergeCompleted) {
+                    return Object.freeze({
+                        operation: payload.operation,
+                        outcome: "completed-with-warnings",
+                        warnings: canonicalDeliveryOperationWarnings([
+                            ...preCutoverWarnings,
+                            "deployment-not-started",
+                        ]),
+                    });
+                }
+                throw failure();
+            }
+            if (
+                payload.operation === "rollback-release" &&
+                (activation.previous === null ||
+                    !sameJson(activation.previous, payload.target) ||
+                    !authority.snapshot.releases.rollback.available ||
+                    !sameJson(
+                        authority.snapshot.releases.rollback.target,
+                        payload.target
+                    ))
+            ) {
+                throw failure();
+            }
+
+            const capsule: DeliveryProductionOperationCapsule =
+                parseDeliveryProductionOperationCapsule({
+                    cas: {
+                        current: {
+                            activationTransitionId: activation.transitionId,
+                            releaseId: activation.current.releaseId,
+                            rollbackSnapshotTransitionId: identity.runId,
+                            runtimeRevision: activation.current.runtimeRevision,
+                        },
+                        target:
+                            payload.operation === "rollback-release"
+                                ? {
+                                      databaseSnapshotTransitionId:
+                                          payload.target.databaseSnapshotTransitionId,
+                                      releaseId: payload.target.releaseId,
+                                      runtimeRevision: payload.target.runtimeRevision,
+                                  }
+                                : {
+                                      databaseSnapshotTransitionId: null,
+                                      releaseId: targetReleaseId,
+                                      runtimeRevision: activation.current.runtimeRevision,
+                                  },
+                    },
+                    enqueue: {
+                        actionKey: deliveryProductionActionKey,
+                        actor: {
+                            authenticatorId: identity.enqueueAuthenticatorId!,
+                            id: identity.requestedById,
+                            kind: "user",
+                        },
+                        audit: {
+                            eventId: identity.enqueueAuditEventId!,
+                            requestId: identity.enqueueRequestId!,
+                        },
+                        enqueueSha256: identity.enqueueSha256,
+                        idempotencyKey: identity.idempotencyKey,
+                        payload,
+                        payloadSha256: identity.payloadSha256,
+                        queuedAtMs: identity.queuedAtMs,
+                    },
+                    executor: {
+                        releaseId: options.executorReleaseId,
+                        runtimeRevision: options.executorRuntimeRevision,
+                    },
+                    protocol: deliveryProductionProtocol,
+                    preCutoverWarnings:
+                        canonicalDeliveryOperationWarnings(preCutoverWarnings),
+                    runId: identity.runId,
+                    transitionId: identity.runId,
+                });
+            await options.control.prepare(capsule, signal);
+            await (options.launch ?? launchProductionDeliveryExecutor)({
+                executorReleaseId: options.executorReleaseId,
+                projectRoot: options.projectRoot,
+                readinessUrl: options.readinessUrl,
+                runtimeRevision: options.executorRuntimeRevision,
+                transitionId: identity.runId,
+            });
+            const settled = await awaitReceipt(options, payload, identity, signal);
+            return settled;
+        },
+    });
+}

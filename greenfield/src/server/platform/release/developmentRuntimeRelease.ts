@@ -3,6 +3,7 @@ import path from "node:path";
 import {
     parseReleaseManifest,
     releaseBuildCommands,
+    releaseDeliveryProtocols,
     releaseProcessRoles,
 } from "../../../shared/releaseManifest.ts";
 import { readRuntimeIdentity } from "../runtime/readRuntimeIdentity.ts";
@@ -41,6 +42,12 @@ export function createDevelopmentRuntimeRelease(
             },
         ],
         buildCommands: releaseBuildCommands,
+        deliveryProtocols: releaseDeliveryProtocols,
+        display: {
+            builtAtMs: 0,
+            commitTitle: "Development runtime",
+            schemaTarget: 1,
+        },
         documentationSha256: placeholderSha256,
         formatVersion: 1,
         lockfileSha256: placeholderSha256,

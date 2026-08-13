@@ -29,6 +29,7 @@ import {
     configurationError,
     configurationOpenClawRoot,
     configurationProjectRoot,
+    configurationWebPort,
     configurationWorkspaceRoot,
     pickApplicationEnvironment,
     type PickedApplicationEnvironment,
@@ -54,8 +55,8 @@ export interface WebConfiguration {
     readonly workspaceRoot: string;
 }
 
-const canonicalUnsignedIntegerPattern = /^(?:0|[1-9][0-9]*)$/u;
 const optionalEnvironmentValueSchema = v.optional(v.unknown());
+const canonicalUnsignedIntegerPattern = /^(?:0|[1-9][0-9]*)$/u;
 
 /** Valibot projection for the complete accepted web-process environment surface. */
 export const webConfigurationEnvironmentSchema = v.object({
@@ -307,12 +308,7 @@ export function parseWebConfiguration(
         ] as const),
         nodeEnvironment,
         openClawRoot: configurationOpenClawRoot(input),
-        port: canonicalInteger(
-            input,
-            "PORT",
-            applicationConfigurationLimits.port.minimum,
-            applicationConfigurationLimits.port.maximum
-        ),
+        port: configurationWebPort(input),
         projectRoot: configurationProjectRoot(input),
         publicOrigin: origin,
         recentAuthenticationWindowMs: durationMs(

@@ -5,6 +5,9 @@ export interface MigrationManifestEntry {
     readonly snapshotSha256: string;
 }
 
+/** Public schema target encoded into immutable release display metadata. */
+export const databaseSchemaTarget = 1;
+
 /**
  * Reviewed migration files accepted by runtime and release tooling.
  * The unpublished rewrite keeps one evolving fresh-database baseline until cutover.
@@ -13,8 +16,8 @@ export const migrationManifest = Object.freeze<readonly MigrationManifestEntry[]
     Object.freeze({
         id: "20260804022252_dashboard-foundation",
         migrationSha256:
-            "34939ea6f2e0e82ec872b5c6bb08889ccc9e616ece20a36be718ff9cc3fb1f35",
+            "747341bbfe883f794f78143f6e5693c803a4a3d8bfaae8d01aa2691f71a721dc",
         snapshotSha256:
-            "747d5a56bd663bdd7c61f7a88cd45dbef72338406b2cdb4cf3cbc22b26e19278",
+            "1ae12268580576739e63b8fa042b2d7424d6489b4483221287872e5c9ff12aef",
     }),
 ]);

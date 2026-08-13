@@ -45,6 +45,8 @@ describe("Dashboard process artifacts", () => {
             databaseMaintenanceGzipBytes: number;
             databaseMaintenanceRawBytes: number;
             outputDirectory: string;
+            productionDeliveryGzipBytes: number;
+            productionDeliveryRawBytes: number;
             status: string;
             webGzipBytes: number;
             webRawBytes: number;
@@ -53,18 +55,28 @@ describe("Dashboard process artifacts", () => {
         };
         const directoryEntries = await readdir(outputDirectory);
         const files = directoryEntries.toSorted();
-        const [databaseMaintenance, web, worker] = await Promise.all([
+        const [databaseMaintenance, productionDelivery, web, worker] = await Promise.all([
             readFile(path.join(outputDirectory, "databaseMaintenance.js"), "utf8"),
+            readFile(path.join(outputDirectory, "productionDelivery.js"), "utf8"),
             readFile(path.join(outputDirectory, "web.js"), "utf8"),
             readFile(path.join(outputDirectory, "worker.js"), "utf8"),
         ]);
 
         expect(execution).toMatchObject({ exitCode: 0, stderr: "" });
-        expect(files).toEqual(["databaseMaintenance.js", "web.js", "worker.js"]);
+        expect(files).toEqual([
+            "databaseMaintenance.js",
+            "productionDelivery.js",
+            "web.js",
+            "worker.js",
+        ]);
         expect(result).toMatchObject({ outputDirectory, status: "BUILT" });
         expect(result.databaseMaintenanceGzipBytes).toBeGreaterThan(0);
         expect(result.databaseMaintenanceRawBytes).toBeGreaterThan(
             result.databaseMaintenanceGzipBytes
+        );
+        expect(result.productionDeliveryGzipBytes).toBeGreaterThan(0);
+        expect(result.productionDeliveryRawBytes).toBeGreaterThan(
+            result.productionDeliveryGzipBytes
         );
         expect(result.webGzipBytes).toBeGreaterThan(0);
         expect(result.workerGzipBytes).toBeGreaterThan(0);
@@ -72,9 +84,11 @@ describe("Dashboard process artifacts", () => {
         expect(result.workerRawBytes).toBeGreaterThan(result.workerGzipBytes);
         expect(web).toContain("Mira Dashboard web startup failed");
         expect(databaseMaintenance).toContain("Dashboard database maintenance failed");
+        expect(productionDelivery).toContain("Production Delivery executor failed");
         expect(worker).toContain("Mira Dashboard worker startup failed");
         expect(web).not.toContain("sourceMappingURL");
         expect(databaseMaintenance).not.toContain("sourceMappingURL");
+        expect(productionDelivery).not.toContain("sourceMappingURL");
         expect(worker).not.toContain("sourceMappingURL");
     }, 60_000);
 

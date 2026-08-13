@@ -42,6 +42,7 @@ const temporaryDirectories: string[] = [];
 const commitSha = "b".repeat(40);
 const cleanSource: BuildSourceIdentity = Object.freeze({
     commitSha,
+    commitTitle: "Test release",
     state: "clean",
 });
 const runtimeIdentity: ReleaseRuntimeIdentity = Object.freeze({
@@ -166,6 +167,10 @@ async function materializeCommandOutput(
             writeFile(
                 path.join(repositoryRoot, "dist/processes/databaseMaintenance.js"),
                 "database-maintenance"
+            ),
+            writeFile(
+                path.join(repositoryRoot, "dist/processes/productionDelivery.js"),
+                "production-delivery"
             ),
             writeFile(path.join(repositoryRoot, "dist/processes/web.js"), "web"),
             writeFile(path.join(repositoryRoot, "dist/processes/worker.js"), "worker"),

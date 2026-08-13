@@ -1,0 +1,68 @@
+{
+  "$id": "urn:mira-dashboard:delivery.startPreview.input",
+  "type": "object",
+  "properties": {
+    "confirmation": {
+      "const": "start-delivery-preview"
+    },
+    "expectedHeads": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "headSha": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$"
+          },
+          "number": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "headSha",
+          "number"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 1,
+      "maxItems": 100,
+      "$comment": "Live Valibot validation additionally requires every pull request number in an exact Delivery scope to be unique."
+    },
+    "number": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "operation": {
+      "const": "start-preview"
+    },
+    "previewRevision": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 32,
+      "maxLength": 128,
+      "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
+    },
+    "sourceRevision": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  },
+  "required": [
+    "confirmation",
+    "expectedHeads",
+    "number",
+    "operation",
+    "previewRevision",
+    "idempotencyKey",
+    "sourceRevision"
+  ],
+  "additionalProperties": false,
+  "$comment": "Live Valibot validation additionally requires the selected pull request and exact head to be the final member of its submitted scope.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

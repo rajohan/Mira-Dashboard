@@ -1,8 +1,13 @@
 import { realpath } from "node:fs/promises";
 import path from "node:path";
 
-import { dockerFreeJobActionDefinitions } from "../server/domains/jobs/actionRegistry.ts";
+import {
+    dockerFreeJobActionDefinitions,
+    type JobActionDefinition,
+    managedPreviewJobActionDefinitions,
+} from "../server/domains/jobs/actionRegistry.ts";
 import { createPersistentGatewayTransport } from "../server/platform/gateway/persistentGatewayTransport.ts";
+import { createPreviewGatewayTransport } from "../server/platform/gateway/previewGatewayTransport.ts";
 import { createDevelopmentRuntimeRelease } from "../server/platform/release/developmentRuntimeRelease.ts";
 import { createDashboardApplicationRuntime } from "../server/platform/runtime/applicationRuntime.ts";
 import type { FrontendAssetHandler } from "../server/rawHttp/frontendAssets.ts";
@@ -42,14 +47,15 @@ const developmentWebRuntimeFactories = Object.freeze({
  * @returns The same boundaries with a Docker-free schedule registry injection.
  */
 export function withoutDevelopmentDockerScheduleDefinitions(
-    dependencies: DashboardWebProcessDependencies
+    dependencies: DashboardWebProcessDependencies,
+    actionDefinitions: readonly JobActionDefinition[] = dockerFreeJobActionDefinitions
 ): DashboardWebProcessDependencies {
     return Object.freeze({
         ...dependencies,
         createServer: (options: DashboardServerOptions) =>
             dependencies.createServer({
                 ...options,
-                jobActionDefinitions: dockerFreeJobActionDefinitions,
+                jobActionDefinitions: actionDefinitions,
             }),
     });
 }
@@ -81,6 +87,23 @@ export function createDevelopmentWebRuntime(
     });
 }
 
+function developmentInvocation(arguments_: readonly string[]): Readonly<{
+    commit: string;
+    previewSocket?: string;
+}> {
+    const commit = parseDevelopmentSourceCommit(arguments_.slice(0, 1), "web");
+    if (arguments_.length === 1) return Object.freeze({ commit });
+    const socketPath = arguments_[2];
+    if (
+        arguments_.length !== 3 ||
+        arguments_[1] !== "--managed-preview" ||
+        socketPath === undefined
+    ) {
+        throw new TypeError("Managed preview web arguments are invalid");
+    }
+    return Object.freeze({ commit, previewSocket: socketPath });
+}
+
 /**
  * Runs the source-watched web composition against isolated development state.
  * @param arguments_ Command-line arguments containing the exact source commit.
@@ -89,18 +112,38 @@ export function createDevelopmentWebRuntime(
 export async function runDevelopmentWebProcess(
     arguments_: readonly string[] = Bun.argv.slice(2)
 ): Promise<void> {
+    const invocation = developmentInvocation(arguments_);
     const repositoryRoot = await realpath(path.resolve(import.meta.dir, "../.."));
-    const release = createDevelopmentRuntimeRelease(
-        repositoryRoot,
-        parseDevelopmentSourceCommit(arguments_, "web")
-    );
+    const release = createDevelopmentRuntimeRelease(repositoryRoot, invocation.commit);
+    const previewSocket = invocation.previewSocket;
     const defaults = withoutDevelopmentDockerScheduleDefinitions(
-        createDefaultDashboardWebProcessDependencies()
+        createDefaultDashboardWebProcessDependencies(),
+        previewSocket === undefined
+            ? dockerFreeJobActionDefinitions
+            : managedPreviewJobActionDefinitions
     );
     const dependencies = Object.freeze({
         ...defaults,
         createFrontendAssets: () => Promise.resolve(noFrontendAssets),
-        createRuntime: createDevelopmentWebRuntime,
+        createRuntime:
+            previewSocket === undefined
+                ? createDevelopmentWebRuntime
+                : (_configuration, layout, source, logger) =>
+                      createDashboardApplicationRuntime({
+                          database: {
+                              migrationsDirectory: path.join(
+                                  source.releaseRoot,
+                                  "migrations"
+                              ),
+                              releaseId: source.manifest.source.commitSha,
+                              startupMode: "initialize-empty",
+                              stateDirectory: layout.production.state.root,
+                          },
+                          logger,
+                          persistentGatewayTransport: createPreviewGatewayTransport({
+                              socketPath: previewSocket,
+                          }),
+                      }),
         loadRelease: () => Promise.resolve(release),
     } satisfies DashboardWebProcessDependencies);
     await runDashboardWebProcess(

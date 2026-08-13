@@ -12,6 +12,8 @@ export const applicationConfigurationLimits = Object.freeze({
     elevenLabsApiKeyMaximumLength: 4096,
     gatewayTokenMaximumLength: 4096,
     gatewayUrlMaximumLength: 2048,
+    githubTokenMaximumLength: 4096,
+    githubUsernameMaximumLength: 256,
     moltbookAgentNameMaximumLength: 128,
     moltbookApiKeyMaximumLength: 4096,
     openClawRootMaximumLength: 4096,
@@ -40,8 +42,9 @@ export type ApplicationConfigurationField =
     | "elevenLabsApiKey"
     | "gatewayToken"
     | "gatewayUrl"
-    | "dockerRegistryCredentials.github.token"
-    | "dockerRegistryCredentials.github.username"
+    | "githubCredentials.ordinary.token"
+    | "githubCredentials.ordinary.username"
+    | "githubCredentials.reviewerToken"
     | "logLevel"
     | "moltbookAgentName"
     | "moltbookApiKey"
@@ -74,6 +77,7 @@ export const applicationConfigurationEnvironmentNames = [
     "DOCKER_TOKEN",
     "MIRA_GITHUB_USERNAME",
     "MIRA_GITHUB_TOKEN",
+    "RAJOHAN_GITHUB_TOKEN",
     "MOLTBOOK_API_KEY",
     "MOLTBOOK_AGENT_NAME",
     "OPENCLAW_GATEWAY_TOKEN",
@@ -220,7 +224,7 @@ export const applicationConfigurationRegistry: readonly ApplicationConfiguration
             operationalEffect:
                 "Changes the local listener endpoint used by the reverse proxy.",
             restartRequired: true,
-            roles: Object.freeze(["web"]),
+            roles: Object.freeze(["web", "worker"]),
             secret: false,
             validationConstraints: `Canonical decimal integer from ${applicationConfigurationLimits.port.minimum} through ${applicationConfigurationLimits.port.maximum}.`,
             valueType: "tcp-port",
@@ -329,16 +333,16 @@ export const applicationConfigurationRegistry: readonly ApplicationConfiguration
             browserExposure: "none",
             defaultValue: null,
             description:
-                "Optional worker-only GitHub username paired with MIRA_GITHUB_TOKEN for registry reads and exact-path Git synchronization.",
+                "Optional worker-only Mira GitHub username paired with MIRA_GITHUB_TOKEN for registry, Delivery API, and exact Git operations.",
             environmentName: "MIRA_GITHUB_USERNAME",
-            field: "dockerRegistryCredentials.github.username",
+            field: "githubCredentials.ordinary.username",
             operationalEffect:
-                "Authenticates GHCR and LSCR updater lookups and the fixed github.com Git transport; it does not select inventory or topology.",
+                "Pins ordinary GitHub operations to the Mira identity; review approval never uses this identity.",
             required: false,
             restartRequired: true,
             roles: Object.freeze(["worker"]),
             secret: true,
-            validationConstraints: `Absent together with MIRA_GITHUB_TOKEN, or a trimmed nonblank control-safe credential at most ${applicationConfigurationLimits.dockerRegistryUsernameMaximumLength} code units; never persisted, logged, or browser-exposed.`,
+            validationConstraints: `Absent together with MIRA_GITHUB_TOKEN, or a trimmed nonblank control-safe credential at most ${applicationConfigurationLimits.githubUsernameMaximumLength} code units; never persisted, logged, or browser-exposed.`,
             valueType: "opaque-secret",
         }),
         metadata({
@@ -346,16 +350,33 @@ export const applicationConfigurationRegistry: readonly ApplicationConfiguration
             browserExposure: "none",
             defaultValue: null,
             description:
-                "Optional worker-only GitHub token paired with MIRA_GITHUB_USERNAME for GHCR/LSCR reads and exact-path Git push.",
+                "Optional worker-only Mira GitHub token paired with MIRA_GITHUB_USERNAME for ordinary GitHub operations.",
             environmentName: "MIRA_GITHUB_TOKEN",
-            field: "dockerRegistryCredentials.github.token",
+            field: "githubCredentials.ordinary.token",
             operationalEffect:
-                "Authenticates GHCR and LSCR updater lookups plus fixed github.com ls-remote and push operations; Git receives it only as a process-environment HTTP header, never in argv, output, Docker, or Compose.",
+                "Authenticates GHCR and LSCR reads, fixed Git synchronization, and every ordinary Delivery GitHub operation as Mira; it is never used for Raymond review approval.",
             required: false,
             restartRequired: true,
             roles: Object.freeze(["worker"]),
             secret: true,
-            validationConstraints: `Absent together with MIRA_GITHUB_USERNAME, or a trimmed nonblank control-safe token at most ${applicationConfigurationLimits.dockerRegistryTokenMaximumLength} code units; never persisted, logged, or browser-exposed.`,
+            validationConstraints: `Absent together with MIRA_GITHUB_USERNAME, or a trimmed nonblank control-safe token at most ${applicationConfigurationLimits.githubTokenMaximumLength} code units; never persisted, logged, or browser-exposed.`,
+            valueType: "opaque-secret",
+        }),
+        metadata({
+            allowedValues: null,
+            browserExposure: "none",
+            defaultValue: null,
+            description:
+                "Optional worker-only Raymond GitHub token used exclusively to submit Delivery review approvals.",
+            environmentName: "RAJOHAN_GITHUB_TOKEN",
+            field: "githubCredentials.reviewerToken",
+            operationalEffect:
+                "Enables review approval after exact rajohan identity verification; its absence disables only approval and never falls back to Mira or ambient credentials.",
+            required: false,
+            restartRequired: true,
+            roles: Object.freeze(["worker"]),
+            secret: true,
+            validationConstraints: `Absent, or a trimmed nonblank control-safe token at most ${applicationConfigurationLimits.githubTokenMaximumLength} code units; never persisted, logged, or browser-exposed.`,
             valueType: "opaque-secret",
         }),
         metadata({

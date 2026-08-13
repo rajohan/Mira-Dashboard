@@ -7,6 +7,8 @@ import {
     cacheEntryKeySchema,
     cacheEntryMetadataSchema,
     cacheEntryPayloadSchema,
+    cacheEntryPayloadMaximumBytes,
+    cacheEntryStoredPayloadSchema,
     cacheEntrySchemaIdSchema,
     cacheEntrySourceSchema,
     cacheFailureCodeSchema,
@@ -15,12 +17,20 @@ import {
     cacheLastAttemptNumberSchema,
     cacheLastAttemptStatusSchema,
 } from "../../../contracts/cache.ts";
+import {
+    deliveryOverviewSectionKeys,
+    deliveryPullRequestsPayloadMaximumBytes,
+} from "../../../contracts/delivery.ts";
+import { utf8ByteLength } from "../../../shared/encoding.ts";
 import { parseJsonText } from "../../../shared/json.ts";
 import { cacheEntries } from "../schema/cacheEntries.ts";
 import { nonnegativeDateSchema, uuidV7TextSchema } from "./scalars.ts";
 
 function cacheJsonTextSchema(
-    objectSchema: typeof cacheEntryPayloadSchema | typeof cacheEntryMetadataSchema,
+    objectSchema:
+        | typeof cacheEntryPayloadSchema
+        | typeof cacheEntryStoredPayloadSchema
+        | typeof cacheEntryMetadataSchema,
     message: string
 ) {
     return v.pipe(
@@ -33,7 +43,7 @@ function cacheJsonTextSchema(
 }
 
 const payloadJsonSchema = cacheJsonTextSchema(
-    cacheEntryPayloadSchema,
+    cacheEntryStoredPayloadSchema,
     "Stored cache payload is invalid"
 );
 const metadataJsonSchema = cacheJsonTextSchema(
@@ -65,6 +75,7 @@ interface CacheEntryRowLike {
     readonly expiresAt?: Date | null;
     readonly failureCode?: string | null;
     readonly failureMessage?: string | null;
+    readonly key: string;
     readonly lastAttemptAt: Date;
     readonly lastAttemptStatus: "failed" | "succeeded";
     readonly lastSuccessAt?: Date | null;
@@ -90,6 +101,13 @@ export function cacheEntryRowIsConsistent(row: CacheEntryRowLike): boolean {
     ];
     const hasProjection = successFields.every((value) => value != null);
     if (!hasProjection && !successFields.every((value) => value == null)) return false;
+    if (row.payloadJson != null) {
+        const maximum =
+            row.key === deliveryOverviewSectionKeys["pull-requests"]
+                ? deliveryPullRequestsPayloadMaximumBytes
+                : cacheEntryPayloadMaximumBytes;
+        if (utf8ByteLength(row.payloadJson) > maximum) return false;
+    }
     if (compareAsc(row.updatedAt, row.lastAttemptAt) < 0) return false;
     if (
         hasProjection &&

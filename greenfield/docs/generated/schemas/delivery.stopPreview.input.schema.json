@@ -1,0 +1,41 @@
+{
+  "$id": "urn:mira-dashboard:delivery.stopPreview.input",
+  "type": "object",
+  "properties": {
+    "confirmation": {
+      "const": "stop-delivery-preview"
+    },
+    "number": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "operation": {
+      "const": "stop-preview"
+    },
+    "previewRevision": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 32,
+      "maxLength": 128,
+      "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
+    },
+    "sourceRevision": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  },
+  "required": [
+    "confirmation",
+    "number",
+    "operation",
+    "previewRevision",
+    "idempotencyKey",
+    "sourceRevision"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

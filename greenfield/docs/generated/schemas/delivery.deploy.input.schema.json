@@ -1,0 +1,45 @@
+{
+  "$id": "urn:mira-dashboard:delivery.deploy.input",
+  "type": "object",
+  "properties": {
+    "activationRevision": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "checkoutRevision": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "confirmation": {
+      "const": "deploy-delivery-main"
+    },
+    "expectedMainHeadSha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "operation": {
+      "const": "deploy"
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 32,
+      "maxLength": 128,
+      "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
+    },
+    "sourceRevision": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  },
+  "required": [
+    "activationRevision",
+    "checkoutRevision",
+    "confirmation",
+    "expectedMainHeadSha",
+    "operation",
+    "idempotencyKey",
+    "sourceRevision"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

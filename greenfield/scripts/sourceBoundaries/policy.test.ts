@@ -63,6 +63,12 @@ describe("source-boundary policy", () => {
         ).toBeUndefined();
         expect(
             validateSourceImport(
+                "src/app/worker.ts",
+                staticImport("../server/platform/gateway/previewGatewayTransport.ts")
+            )
+        ).toBeUndefined();
+        expect(
+            validateSourceImport(
                 "src/app/databaseMaintenance.ts",
                 staticImport(
                     "../server/database/runtime/databaseCandidateMigrationOwner.ts"

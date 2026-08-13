@@ -2,7 +2,14 @@ import type { Effect } from "effect";
 import * as v from "valibot";
 
 import { databaseObservabilityCacheKey } from "../../../contracts/database.ts";
+import { deliveryOverviewCacheKey } from "../../../contracts/delivery.ts";
 import {
+    deliveryGitHubActionKey,
+    deliveryPreviewActionKey,
+    deliveryProductionActionKey,
+} from "../../../contracts/deliveryWorker.ts";
+import {
+    type JobExecutionRunIdentity,
     type JobCancellationPolicy,
     type JobResourceClass,
     type JobRunResult,
@@ -54,6 +61,10 @@ export const dockerOperationJobActionKey = "docker.operation";
 export const dockerUpdaterJobActionKey = "docker.updater";
 /** Durable daily Docker updater schedule identity. */
 export const dockerUpdaterJobScheduleId = "docker.updater";
+/** Worker-only GitHub and production Delivery overview refresh identity. */
+export const deliveryOverviewCacheJobActionKey = "cache.refresh.delivery-overview";
+/** Durable minute-level schedule for the Delivery overview projection. */
+export const deliveryOverviewCacheJobScheduleId = "cache.delivery-overview";
 /** Fixed worker-only online SQLite backup and upkeep identity. */
 export const sqliteMaintenanceJobActionKey = "database.sqlite-maintenance";
 /** Durable daily SQLite backup and upkeep schedule identity. */
@@ -203,6 +214,7 @@ export interface JobActionExecutionContext {
     ) => Promise<JobCacheAttemptWriteResult>;
     readonly databaseReleaseId: string;
     readonly nowMs: () => number;
+    readonly runIdentity?: JobExecutionRunIdentity;
     readonly reportProgress: (
         progress: JsonObject
     ) => Effect.Effect<JobActionEventWriteResult, unknown>;
@@ -380,6 +392,15 @@ const workerSmokeDefinition = validateJobActionDefinition({
     timeoutMs: 30_000,
 });
 
+/**
+ * Complete authority surface for an untrusted managed PR preview.
+ *
+ * The preview worker may prove that its isolated database and worker loop boot, but it
+ * receives no scheduled host, network, Docker, PostgreSQL, log, workspace, or Delivery
+ * action. Web schedule reconciliation and worker claiming both consume this exact set.
+ */
+export const managedPreviewJobActionDefinitions = Object.freeze([workerSmokeDefinition]);
+
 const systemHostCacheDefinition = validateJobActionDefinition({
     actionKey: "cache.refresh.system-host",
     actionPayload: Object.freeze({ key: "system.host" }),
@@ -479,6 +500,35 @@ const dockerOverviewCacheDefinition = validateJobActionDefinition({
     resourceKeys: Object.freeze(["docker.engine"]),
     retrySafe: true,
     scheduleId: dockerOverviewCacheJobScheduleId,
+    timeoutMs: 45_000,
+});
+
+export const deliveryOverviewCacheJobActionDefinition = validateJobActionDefinition({
+    actionKey: deliveryOverviewCacheJobActionKey,
+    actionPayload: Object.freeze({ key: deliveryOverviewCacheKey }),
+    attemptLimit: 3,
+    cancellationPolicy: "cooperative",
+    defaultEnabled: true,
+    defaultSchedule: Object.freeze({
+        intervalMs: 60_000,
+        kind: "interval",
+    }),
+    description:
+        "Projects bounded pull request, preview, checkout, and immutable release state.",
+    displayName: "Delivery overview cache",
+    initialDue: "immediate",
+    manualExposure: "cache-internal",
+    priority: 0,
+    // The overview refresh reconciles the durable preview slot before projection.
+    // Treat it as host work and serialize it with every preview lifecycle mutation.
+    resourceClass: "host-heavy",
+    resourceKeys: Object.freeze([
+        "cache.delivery",
+        "delivery.preview",
+        "github.repository",
+    ]),
+    retrySafe: true,
+    scheduleId: deliveryOverviewCacheJobScheduleId,
     timeoutMs: 45_000,
 });
 
@@ -608,6 +658,65 @@ export const dockerOperationJobActionDefinition = validateJobUnscheduledActionDe
     timeoutMs: 35 * 60_000,
 });
 
+/** Non-retryable ordinary GitHub mutation using only the fixed Mira authority. */
+export const deliveryGitHubJobActionDefinition = validateJobUnscheduledActionDefinition({
+    actionKey: deliveryGitHubActionKey,
+    attemptLimit: 1,
+    cancellationPolicy: "never",
+    description:
+        "Executes one exact-state Dashboard repository mutation as the fixed Mira identity.",
+    displayName: "Delivery GitHub operation",
+    manualExposure: "none",
+    priority: 20,
+    resourceClass: "network",
+    resourceKeys: Object.freeze(["delivery.mutation", "github.repository"]),
+    retrySafe: false,
+    timeoutMs: 12 * 60_000,
+});
+
+/** Non-retryable single-slot preview lifecycle mutation. */
+export const deliveryPreviewJobActionDefinition = validateJobUnscheduledActionDefinition({
+    actionKey: deliveryPreviewActionKey,
+    attemptLimit: 1,
+    cancellationPolicy: "never",
+    description:
+        "Starts, rebuilds, or stops one exact-SHA isolated pull request preview.",
+    displayName: "Delivery preview operation",
+    manualExposure: "none",
+    priority: 20,
+    resourceClass: "host-heavy",
+    resourceKeys: Object.freeze([
+        "delivery.mutation",
+        "delivery.preview",
+        "github.repository",
+    ]),
+    retrySafe: false,
+    timeoutMs: 35 * 60_000,
+});
+
+/** Cross-release production workflow backed by the versioned cutover journal protocol. */
+export const deliveryProductionJobActionDefinition =
+    validateJobUnscheduledActionDefinition({
+        actionKey: deliveryProductionActionKey,
+        attemptLimit: 3,
+        cancellationPolicy: "never",
+        description:
+            "Runs one exact-main deployment, merge-and-deploy, or paired rollback through the versioned activation protocol.",
+        displayName: "Delivery production operation",
+        manualExposure: "none",
+        priority: 50,
+        resourceClass: "exclusive",
+        resourceKeys: Object.freeze([
+            "database",
+            "delivery.mutation",
+            "delivery.production",
+            "github.repository",
+            "host.mutation",
+        ]),
+        retrySafe: true,
+        timeoutMs: 90 * 60_000,
+    });
+
 /** Exclusive non-cancellable action that must never be replayed after an uncertain claim. */
 export const openClawGatewayRestartJobActionDefinition =
     validateJobUnscheduledActionDefinition({
@@ -695,6 +804,7 @@ export const jobActionDefinitions = Object.freeze([
     systemHostCacheDefinition,
     moltbookDashboardCacheDefinition,
     databaseObservabilityCacheDefinition,
+    deliveryOverviewCacheJobActionDefinition,
     dockerOverviewCacheDefinition,
     dockerUpdaterJobActionDefinition,
     sqliteMaintenanceJobActionDefinition,
@@ -707,7 +817,8 @@ export const dockerFreeJobActionDefinitions = Object.freeze(
     jobActionDefinitions.filter(
         ({ actionKey }) =>
             actionKey !== dockerOverviewCacheJobActionKey &&
-            actionKey !== dockerUpdaterJobActionKey
+            actionKey !== dockerUpdaterJobActionKey &&
+            actionKey !== deliveryOverviewCacheJobActionKey
     )
 );
 

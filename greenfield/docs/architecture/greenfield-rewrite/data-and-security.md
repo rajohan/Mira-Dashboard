@@ -104,17 +104,17 @@ tag.
 
 ### Target table groups
 
-| Domain               | Tables                                                                                                                                                                                                                                                                         |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Schema/config        | `schema_migrations`, `settings`, `secret_envelopes`, `idempotency_records`                                                                                                                                                                                                     |
-| Security             | `users`, `auth_sessions`, `auth_pending_logins`, `auth_challenges`, `user_totp_factors`, `user_webauthn_credentials`, `user_recovery_codes`, `auth_rate_limit_buckets`, `automation_principals`, `automation_credentials`, `automation_principal_capabilities`, `audit_events` |
-| Tasks/agents         | `tasks`, `task_labels`, `task_automation_profiles`, `task_updates`, `task_events`, `agent_task_runs`                                                                                                                                                                           |
-| Monitoring           | `reports`, `monitor_runs`, `incidents`, `incident_observations`, `notifications`                                                                                                                                                                                               |
-| Realtime             | `realtime_events`                                                                                                                                                                                                                                                              |
-| Scheduling/work      | `scheduled_jobs`, `job_disable_intents`, `job_runs`, `job_run_events`, `worker_instances`, `resource_leases`, `job_worker_control`                                                                                                                                             |
-| Chat                 | `chat_runs`, `chat_run_events`, `chat_runtime_snapshots`                                                                                                                                                                                                                       |
-| Delivery             | `deployments`, `deployment_events`, `release_records`                                                                                                                                                                                                                          |
-| External projections | `cache_entries`                                                                                                                                                                                                                                                                |
+| Domain               | Tables                                                                                                                                                                                                                                                                                                           |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Schema/config        | `schema_migrations`, `settings`, `secret_envelopes`, `idempotency_records`                                                                                                                                                                                                                                       |
+| Security             | `users`, `auth_sessions`, `auth_pending_logins`, `auth_challenges`, `user_totp_factors`, `user_webauthn_credentials`, `user_recovery_codes`, `auth_rate_limit_buckets`, `automation_principals`, `automation_credentials`, `automation_principal_capabilities`, `audit_events`                                   |
+| Tasks/agents         | `tasks`, `task_labels`, `task_automation_profiles`, `task_updates`, `task_events`, `agent_task_runs`                                                                                                                                                                                                             |
+| Monitoring           | `reports`, `monitor_runs`, `incidents`, `incident_observations`, `notifications`                                                                                                                                                                                                                                 |
+| Realtime             | `realtime_events`                                                                                                                                                                                                                                                                                                |
+| Scheduling/work      | `scheduled_jobs`, `job_disable_intents`, `job_runs`, `job_run_events`, `worker_instances`, `resource_leases`, `job_worker_control`                                                                                                                                                                               |
+| Chat                 | `chat_runs`, `chat_run_events`, `chat_runtime_snapshots`                                                                                                                                                                                                                                                         |
+| Delivery             | No domain-specific tables. Bounded read projections use `cache_entries`; durable operations and release history use `job_runs`/`job_run_events`; security history uses `audit_events`; activation state, snapshots, and cross-release operation receipts remain descriptor-protected production-state artifacts. |
+| External projections | `cache_entries`                                                                                                                                                                                                                                                                                                  |
 
 PostgreSQL, PgBouncer, OpenClaw sessions, Gateway history, host logs, files, GitHub, Docker, and
 Moltbook remain external systems. Dashboard persists only configuration, bounded projections,
@@ -141,6 +141,15 @@ retryable through exact-ID upsert. Durable Jobs state and its `queued` event are
 authority; Docker does not duplicate queue admission into updater history or notifications. Compose files, Git history,
 Engine state, registry responses, container output, and secrets remain external and are never
 mirrored into Docker-specific service or event tables.
+
+Delivery follows the same shared-storage rule. Pull requests, preview state, production checkout,
+and release state are four independently refreshed, independently retained `cache_entries` rows;
+one upstream failure cannot erase or stale the other three. The newest production operations are
+an exact indexed projection of `delivery.production.v1` rows in `job_runs`, while their timelines
+and admission/security history remain in `job_run_events` and `audit_events`. GitHub data, Git
+checkouts, preview worktrees, immutable releases, activation state, database snapshots, and
+cross-release operation receipts stay in their owning external or protected filesystem boundary.
+No duplicate deployment queue, event stream, or release-record table is introduced.
 
 Database observability follows that rule. The web process may read Dashboard SQLite only through
 the retained runtime's narrow read port; it does not open another native handle or accept SQL from
@@ -305,38 +314,38 @@ queryable lifecycle.
 
 ### Index plan
 
-| Query shape                    | Index or constraint                                                                       |
-| ------------------------------ | ----------------------------------------------------------------------------------------- |
-| Session lookup                 | unique `auth_sessions(validator_hash)`                                                    |
-| Session expiry cleanup         | `auth_sessions(expires_at_ms)`                                                            |
-| User credentials               | `user_webauthn_credentials(user_id, created_at, id)` and unique credential ID             |
-| WebAuthn challenge             | unique partial binding/purpose indexes plus `(expires_at, id)` cleanup                    |
-| Automation principal history   | `automation_principals_created_id_idx` plus `automation_principals_active_created_id_idx` |
-| Automation credential history  | `automation_credentials_principal_created_idx`                                            |
-| Active automation credentials  | partial `automation_credentials_active_principal_created_idx` while unrevoked             |
-| Staged credential rotation     | full `automation_credentials_replacement_idx` plus a unique partial replacement index     |
-| Task board                     | `tasks(status, priority, updated_at_ms DESC)`                                             |
-| Task label filter              | `task_labels(label, task_id)`                                                             |
-| Task timeline                  | `task_updates(task_id, created_at_ms, id)` and equivalent event index                     |
-| Agent task history             | unique active-agent partial index plus `(agent_id, started_at_ms, id)`                    |
-| Latest reports                 | `reports(kind, occurred_at_ms DESC, id DESC)`                                             |
-| Heartbeat stream               | `reports(source, source_job_id, occurred_at_ms DESC, id DESC)`                            |
-| Active incidents               | partial `incidents(monitor_key, last_seen_at_ms DESC) WHERE state = 'active'`             |
-| Incident identity              | unique `incidents(monitor_key, fingerprint)`                                              |
-| Unread notifications           | partial `notifications(occurred_at_ms DESC) WHERE read_at_ms IS NULL`                     |
-| Incident notification          | unique `(incident_id, incident_generation, channel)` when incident is non-null            |
-| Queue claim                    | partial `job_runs(available_at, priority DESC, queued_at, id) WHERE state = 'queued'`     |
-| One active scheduled run       | unique partial `job_runs(scheduled_job_id) WHERE state IN ('queued', 'running')`          |
-| Active action status           | partial `job_runs_action_active_idx`; exact predicate below                               |
-| Terminal maintenance status    | partial `job_runs_action_payload_terminal_idx`; exact predicate below                     |
-| Terminal Service Action status | partial `job_runs_service_action_terminal_idx`; exact predicate below                     |
-| Worker expiry                  | `worker_instances(heartbeat_at, id)`                                                      |
-| Job timeline                   | `job_run_events(job_run_id, sequence)`                                                    |
-| Realtime catch-up              | `realtime_events(topic, id)`                                                              |
-| Chat replay                    | unique `chat_run_events(chat_run_id, sequence)`                                           |
-| Deployment history             | `deployments(state, updated_at_ms DESC)`                                                  |
-| Cache refresh/expiry           | `cache_entries(last_attempt_status, expires_at_ms, key)`                                  |
-| Audit cursor                   | `audit_events(occurred_at_ms DESC, id DESC)` plus request/target indexes                  |
+| Query shape                    | Index or constraint                                                                                                                          |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Session lookup                 | unique `auth_sessions(validator_hash)`                                                                                                       |
+| Session expiry cleanup         | `auth_sessions(expires_at_ms)`                                                                                                               |
+| User credentials               | `user_webauthn_credentials(user_id, created_at, id)` and unique credential ID                                                                |
+| WebAuthn challenge             | unique partial binding/purpose indexes plus `(expires_at, id)` cleanup                                                                       |
+| Automation principal history   | `automation_principals_created_id_idx` plus `automation_principals_active_created_id_idx`                                                    |
+| Automation credential history  | `automation_credentials_principal_created_idx`                                                                                               |
+| Active automation credentials  | partial `automation_credentials_active_principal_created_idx` while unrevoked                                                                |
+| Staged credential rotation     | full `automation_credentials_replacement_idx` plus a unique partial replacement index                                                        |
+| Task board                     | `tasks(status, priority, updated_at_ms DESC)`                                                                                                |
+| Task label filter              | `task_labels(label, task_id)`                                                                                                                |
+| Task timeline                  | `task_updates(task_id, created_at_ms, id)` and equivalent event index                                                                        |
+| Agent task history             | unique active-agent partial index plus `(agent_id, started_at_ms, id)`                                                                       |
+| Latest reports                 | `reports(kind, occurred_at_ms DESC, id DESC)`                                                                                                |
+| Heartbeat stream               | `reports(source, source_job_id, occurred_at_ms DESC, id DESC)`                                                                               |
+| Active incidents               | partial `incidents(monitor_key, last_seen_at_ms DESC) WHERE state = 'active'`                                                                |
+| Incident identity              | unique `incidents(monitor_key, fingerprint)`                                                                                                 |
+| Unread notifications           | partial `notifications(occurred_at_ms DESC) WHERE read_at_ms IS NULL`                                                                        |
+| Incident notification          | unique `(incident_id, incident_generation, channel)` when incident is non-null                                                               |
+| Queue claim                    | partial `job_runs(available_at, priority DESC, queued_at, id) WHERE state = 'queued'`                                                        |
+| One active scheduled run       | unique partial `job_runs(scheduled_job_id) WHERE state IN ('queued', 'running')`                                                             |
+| Active action status           | partial `job_runs_action_active_idx`; exact predicate below                                                                                  |
+| Terminal maintenance status    | partial `job_runs_action_payload_terminal_idx`; exact predicate below                                                                        |
+| Terminal Service Action status | partial `job_runs_service_action_terminal_idx`; exact predicate below                                                                        |
+| Worker expiry                  | `worker_instances(heartbeat_at, id)`                                                                                                         |
+| Job timeline                   | `job_run_events(job_run_id, sequence)`                                                                                                       |
+| Realtime catch-up              | `realtime_events(topic, id)`                                                                                                                 |
+| Chat replay                    | unique `chat_run_events(chat_run_id, sequence)`                                                                                              |
+| Delivery production history    | partial `job_runs_delivery_production_history_idx` on `(action_key, updated_at DESC, id DESC)` where `action_key = 'delivery.production.v1'` |
+| Cache refresh/expiry           | `cache_entries(last_attempt_status, expires_at_ms, key)`                                                                                     |
+| Audit cursor                   | `audit_events(occurred_at_ms DESC, id DESC)` plus request/target indexes                                                                     |
 
 The action-status indexes intentionally mirror the repository's literal predicates:
 
@@ -440,6 +449,30 @@ Git configuration, credential helpers, prompts, SSH, hooks, and ambient home cre
 requires an authenticated remote read plus dry-run push before Compose mutation. The worker-only
 GitHub credential is injected only as a scoped Git process-environment HTTP header; it is never an
 argument, payload, log field, cache value, or browser value.
+
+Delivery has two non-interchangeable worker-only GitHub authorities. The ordinary port verifies
+the token actor as `mira-2026` and owns every read, stack, merge, branch, reject, and exact-main Git
+operation. The reviewer port verifies `rajohan` and exposes only review approval. Missing reviewer
+authority disables that one capability; it never falls back to Mira, `GH_TOKEN`, `GITHUB_TOKEN`,
+anonymous access, a credential helper, or ambient home configuration. Neither token enters a Job
+payload, cache row, operation receipt, process argument, log, or browser response.
+
+Trusted PR preview code runs in one bounded global slot beneath a transient systemd/Bubblewrap
+boundary with a private network namespace, read-only source/Git administration, isolated writable
+state, frozen dependency installation with lifecycle scripts disabled, and a four-hour maximum
+lifetime. It receives no Doppler, GitHub, Docker, production-database, project-state, or host
+credential authority. A worker-owned `0600` Unix broker exposes only the fixed bounded Gateway
+capability, and Tailscale Serve owns only the exact preview route. Stop retains the managed
+worktree/state while the PR stays open; descriptor-, mount-, inode-, owner-, and exact-head checks
+gate permanent removal after confirmed close or merge.
+
+Production cutover crosses worker generations through a bounded `delivery.production.v1` capsule
+and terminal receipt in the protected production state directory. The immutable transient
+executor receives only the exact project root, transition identity, readiness endpoint, release,
+and runtime tuple through fixed arguments and `env -i`; worker/GitHub/Doppler/Gateway secrets and
+ambient home state are inaccessible. The receipt is retained for every still-restorable paired
+snapshot so a restored database can rehydrate and settle the exact original Job without replaying
+the external effect.
 
 Service Actions are a separate fixed-intent boundary, not a generic exec facade. The contract
 contains exactly `openclaw-cleanup`, `openclaw-restart`, `openclaw-update`, `system-cleanup`,

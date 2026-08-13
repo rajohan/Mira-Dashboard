@@ -5,6 +5,7 @@ import { healthReadinessPath } from "../../src/contracts/system.ts";
 import type { DashboardDeploymentLease } from "./deploymentLease.ts";
 import { installPublishedProductionSystemdUnits } from "./installProductionSystemdUnits.ts";
 import type { PreparedProductionDeliveryPaths } from "./productionDeliveryFilesystem.ts";
+import { runProductionDeliveryTargetSmoke } from "./productionDeliverySmoke.ts";
 import type { ProductionServiceController } from "./productionReleaseActivation.ts";
 import type { PublishedProductionRelease } from "./productionReleasePublication.ts";
 import type { InstalledProductionRuntime } from "./productionRuntime.ts";
@@ -51,6 +52,7 @@ export interface SystemdProductionServiceOptions {
     readonly fetch?: (request: Request) => Promise<Response>;
     readonly installUnits?: typeof installPublishedProductionSystemdUnits;
     readonly readinessUrl: string;
+    readonly smoke?: typeof runProductionDeliveryTargetSmoke;
     readonly systemctlExecutable?: string;
 }
 
@@ -165,6 +167,7 @@ export function createSystemdProductionServiceController(
     const execute = options.execute ?? executeSystemctlProcess;
     const fetch_ = options.fetch ?? fetch;
     const installUnits = options.installUnits ?? installPublishedProductionSystemdUnits;
+    const smoke = options.smoke ?? runProductionDeliveryTargetSmoke;
 
     return Object.freeze({
         prepare(release: PublishedProductionRelease): Promise<void> {
@@ -190,6 +193,14 @@ export function createSystemdProductionServiceController(
         async verifyReady(): Promise<void> {
             await requireUnitsActive(execute, executable);
             await awaitReadiness(fetch_, readinessUrl);
+            await requireUnitsActive(execute, executable);
+        },
+        async verifySmoke(
+            release: PublishedProductionRelease,
+            runtime: InstalledProductionRuntime,
+            transitionId: string
+        ): Promise<void> {
+            await smoke(paths, release, runtime, readinessUrl, transitionId);
             await requireUnitsActive(execute, executable);
         },
     });

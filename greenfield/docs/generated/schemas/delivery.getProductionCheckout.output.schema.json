@@ -1,0 +1,235 @@
+{
+  "$id": "urn:mira-dashboard:delivery.getProductionCheckout.output",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "checkedAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8640000000000000
+        },
+        "state": {
+          "const": "unavailable"
+        }
+      },
+      "required": [
+        "checkedAtMs",
+        "state"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "checkout": {
+          "type": "object",
+          "properties": {
+            "branch": {
+              "type": "string",
+              "maxLength": 255,
+              "minLength": 1,
+              "pattern": "\\S",
+              "allOf": [
+                {
+                  "pattern": "^[^\\u0000]*$"
+                },
+                {
+                  "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                }
+              ]
+            },
+            "condition": {
+              "enum": [
+                "dirty",
+                "off-main",
+                "ready",
+                "unavailable",
+                "wrong-root"
+              ],
+              "type": "string"
+            },
+            "expectedBranch": {
+              "const": "main"
+            },
+            "headSha": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            },
+            "remoteHeadSha": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            },
+            "revision": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "safeForDeploy": {
+              "type": "boolean"
+            },
+            "upstream": {
+              "type": "string",
+              "maxLength": 255,
+              "minLength": 1,
+              "pattern": "\\S",
+              "allOf": [
+                {
+                  "pattern": "^[^\\u0000]*$"
+                },
+                {
+                  "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                }
+              ]
+            }
+          },
+          "required": [
+            "branch",
+            "condition",
+            "expectedBranch",
+            "headSha",
+            "remoteHeadSha",
+            "revision",
+            "safeForDeploy"
+          ],
+          "additionalProperties": false,
+          "$comment": "Live Valibot validation additionally permits a Delivery checkout to be safe for deploy if and only if its condition is ready."
+        },
+        "checkedAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8640000000000000
+        },
+        "observedAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8640000000000000
+        },
+        "sourceRevision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "state": {
+          "const": "fresh"
+        }
+      },
+      "required": [
+        "checkout",
+        "checkedAtMs",
+        "observedAtMs",
+        "sourceRevision",
+        "state"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "checkout": {
+          "type": "object",
+          "properties": {
+            "branch": {
+              "type": "string",
+              "maxLength": 255,
+              "minLength": 1,
+              "pattern": "\\S",
+              "allOf": [
+                {
+                  "pattern": "^[^\\u0000]*$"
+                },
+                {
+                  "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                }
+              ]
+            },
+            "condition": {
+              "enum": [
+                "dirty",
+                "off-main",
+                "ready",
+                "unavailable",
+                "wrong-root"
+              ],
+              "type": "string"
+            },
+            "expectedBranch": {
+              "const": "main"
+            },
+            "headSha": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            },
+            "remoteHeadSha": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            },
+            "revision": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "safeForDeploy": {
+              "type": "boolean"
+            },
+            "upstream": {
+              "type": "string",
+              "maxLength": 255,
+              "minLength": 1,
+              "pattern": "\\S",
+              "allOf": [
+                {
+                  "pattern": "^[^\\u0000]*$"
+                },
+                {
+                  "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                }
+              ]
+            }
+          },
+          "required": [
+            "branch",
+            "condition",
+            "expectedBranch",
+            "headSha",
+            "remoteHeadSha",
+            "revision",
+            "safeForDeploy"
+          ],
+          "additionalProperties": false,
+          "$comment": "Live Valibot validation additionally permits a Delivery checkout to be safe for deploy if and only if its condition is ready."
+        },
+        "checkedAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8640000000000000
+        },
+        "observedAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8640000000000000
+        },
+        "sourceRevision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "state": {
+          "const": "last-known-good"
+        },
+        "staleSinceMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8640000000000000
+        }
+      },
+      "required": [
+        "checkout",
+        "checkedAtMs",
+        "observedAtMs",
+        "sourceRevision",
+        "state",
+        "staleSinceMs"
+      ],
+      "additionalProperties": false
+    }
+  ],
+  "$comment": "Live Valibot validation additionally requires Delivery observation, staleness, and response-check timestamps to be causally ordered.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

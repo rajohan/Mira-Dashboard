@@ -32,6 +32,10 @@ export interface DevelopmentStackConfig {
     readonly workspaceRoot: string;
 }
 
+export interface ManagedPreviewStackConfig extends DevelopmentStackConfig {
+    readonly gatewaySocket: string;
+}
+
 function configuredPort(
     name: string,
     value: string | undefined,
@@ -253,4 +257,52 @@ export function resolveDevelopmentStackConfig(
         tailscalePort,
         workspaceRoot: path.join(stateRoot, "workspace"),
     });
+}
+
+/**
+ * Resolves the explicit sandbox-only preview profile without copying ambient secrets.
+ * @param environment Scrubbed Bubblewrap environment.
+ * @param repositoryRoot Read-only candidate worktree root.
+ * @returns Validated managed-preview stack configuration.
+ */
+export function resolveManagedPreviewStackConfig(
+    environment: Readonly<Record<string, string | undefined>>,
+    repositoryRoot: string
+): ManagedPreviewStackConfig {
+    const stateRoot = absoluteNonRootPath(
+        "MIRA_DASHBOARD_DEV_STATE_ROOT",
+        environment.MIRA_DASHBOARD_DEV_STATE_ROOT
+    );
+    const gatewaySocket = absoluteNonRootPath(
+        "MIRA_DASHBOARD_DEV_GATEWAY_SOCKET",
+        environment.MIRA_DASHBOARD_DEV_GATEWAY_SOCKET
+    );
+    const configuredOrigin = environment.MIRA_DASHBOARD_DEV_PUBLIC_ORIGIN?.trim();
+    if (
+        stateRoot === undefined ||
+        gatewaySocket === undefined ||
+        configuredOrigin === undefined ||
+        configuredOrigin === "" ||
+        gatewaySocket !== "/run/mira-preview/gateway/gateway.sock"
+    ) {
+        throw new TypeError("Managed preview configuration is invalid");
+    }
+    const config = resolveDevelopmentStackConfig(
+        {
+            MIRA_DASHBOARD_DEV_BACKEND_PORT: "3206",
+            MIRA_DASHBOARD_DEV_FRONTEND_PORT: "3205",
+            MIRA_DASHBOARD_DEV_GATEWAY_URL: "ws://127.0.0.1:9/",
+            MIRA_DASHBOARD_DEV_HOT_RELOAD: "0",
+            MIRA_DASHBOARD_DEV_PUBLIC_ORIGIN: configuredOrigin,
+            MIRA_DASHBOARD_DEV_REMOTE_PROXY_PORT: "3207",
+            MIRA_DASHBOARD_DEV_STATE_ROOT: stateRoot,
+            MIRA_DASHBOARD_DEV_TAILSCALE_PORT: "3445",
+            MIRA_DASHBOARD_PROJECT_ROOT: "/state/project-authority-unavailable",
+        },
+        repositoryRoot
+    );
+    if (config.hotReload || config.stateRoot !== stateRoot) {
+        throw new TypeError("Managed preview configuration is invalid");
+    }
+    return Object.freeze({ ...config, gatewaySocket });
 }

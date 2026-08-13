@@ -7,6 +7,7 @@ import {
     dockerFreeJobActionDefinitions,
     dockerOverviewCacheJobActionKey,
     dockerUpdaterJobActionKey,
+    managedPreviewJobActionDefinitions,
 } from "../server/domains/jobs/actionRegistry.ts";
 import { deriveDashboardProjectLayout } from "../server/platform/filesystem/projectLayout.ts";
 import type {
@@ -30,6 +31,7 @@ import {
     withoutDevelopmentDockerScheduleDefinitions,
 } from "./developmentWeb.ts";
 import {
+    developmentWorkerActionDefinitions,
     runDevelopmentWorkerProcess,
     withoutDevelopmentDockerCapabilities,
 } from "./developmentWorker.ts";
@@ -139,5 +141,35 @@ describe("development process entrypoints", () => {
         expect(observedDefinitions?.map(({ actionKey }) => actionKey)).not.toContain(
             dockerUpdaterJobActionKey
         );
+    });
+
+    test("limits both managed-preview processes to the worker smoke action", async () => {
+        let observedDefinitions: DashboardServerOptions["jobActionDefinitions"];
+        const applicationServer = Object.freeze({
+            port: 0,
+            stop: () => Promise.resolve(),
+            url: new URL("http://127.0.0.1:3100/"),
+        } satisfies ApplicationServer);
+        const dependencies = withoutDevelopmentDockerScheduleDefinitions(
+            Object.freeze({
+                ...createDefaultDashboardWebProcessDependencies(),
+                createServer(options: DashboardServerOptions) {
+                    observedDefinitions = options.jobActionDefinitions;
+                    return Promise.resolve(applicationServer);
+                },
+            }),
+            managedPreviewJobActionDefinitions
+        );
+
+        await dependencies.createServer(Object.freeze({}) as DashboardServerOptions);
+
+        expect(observedDefinitions).toBe(managedPreviewJobActionDefinitions);
+        expect(developmentWorkerActionDefinitions(true)).toBe(
+            managedPreviewJobActionDefinitions
+        );
+        expect(developmentWorkerActionDefinitions(false)).toBeUndefined();
+        expect(
+            managedPreviewJobActionDefinitions.map(({ actionKey }) => actionKey)
+        ).toEqual(["system.worker-smoke"]);
     });
 });
