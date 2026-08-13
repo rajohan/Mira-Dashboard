@@ -57,6 +57,7 @@ const backupDockerEnvironment = Object.freeze({
 const backupProviderOutputMaximumBytes = 64 * 1024;
 const backupProviderStderrMaximumBytes = 16 * 1024;
 const backupProviderBusyExitCode = 73;
+const backupProviderTerminationGraceMs = 250;
 
 export interface DockerBackupProviderProcessRequest {
     readonly arguments: readonly string[];
@@ -70,6 +71,17 @@ export type DockerBackupProviderProcessResult = DockerEngineInventoryProcessResu
 export type DockerBackupProviderProcess = (
     request: DockerBackupProviderProcessRequest
 ) => Promise<DockerBackupProviderProcessResult>;
+
+export interface DockerBackupProviderChild {
+    readonly exited: Promise<number>;
+    readonly stderr: ReadableStream<Uint8Array>;
+    readonly stdout: ReadableStream<Uint8Array>;
+    kill(signal: "SIGKILL" | "SIGTERM"): void;
+}
+
+export type DockerBackupProviderLaunch = (
+    request: DockerBackupProviderProcessRequest
+) => DockerBackupProviderChild;
 
 export interface DockerBackupProvider {
     readonly containerId: string;
@@ -329,11 +341,17 @@ export function createDockerBackupProviderDiscovery(
 
 async function readBounded(
     stream: ReadableStream<Uint8Array>,
-    maximumBytes: number
+    maximumBytes: number,
+    signal: AbortSignal
 ): Promise<Uint8Array> {
     const reader = stream.getReader();
     const chunks: Uint8Array[] = [];
     let total = 0;
+    const abort = () => {
+        void reader.cancel().catch(() => {});
+    };
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) abort();
     try {
         while (true) {
             const next = await reader.read();
@@ -343,6 +361,7 @@ async function readBounded(
             chunks.push(next.value);
         }
     } finally {
+        signal.removeEventListener("abort", abort);
         reader.releaseLock();
     }
     const output = new Uint8Array(total);
@@ -354,33 +373,106 @@ async function readBounded(
     return output;
 }
 
-const defaultProcess: DockerBackupProviderProcess = async (request) => {
-    request.signal.throwIfAborted();
-    let child: Bun.Subprocess<"ignore", "pipe", "pipe"> | undefined;
+const defaultLaunch: DockerBackupProviderLaunch = (request) =>
+    Bun.spawn([request.executable, ...request.arguments], {
+        env: request.environment,
+        stderr: "pipe",
+        stdin: "ignore",
+        stdout: "pipe",
+    });
+
+async function waitForExit(
+    child: DockerBackupProviderChild,
+    maximumWaitMs: number
+): Promise<boolean> {
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<false>((resolve) => {
+        timeout = setTimeout(() => resolve(false), maximumWaitMs);
+        timeout.unref?.();
+    });
     try {
-        child = Bun.spawn([request.executable, ...request.arguments], {
-            env: request.environment,
-            signal: request.signal,
-            stderr: "pipe",
-            stdin: "ignore",
-            stdout: "pipe",
-        });
-    } catch (error) {
-        throw new DockerBackupProviderProcessError(false, error);
-    }
-    try {
-        const [exitCode, stdout, stderr] = await Promise.all([
-            child.exited,
-            readBounded(child.stdout, request.stdoutMaximumBytes),
-            readBounded(child.stderr, backupProviderStderrMaximumBytes),
+        return await Promise.race([
+            child.exited.then(
+                () => true as const,
+                () => true as const
+            ),
+            deadline,
         ]);
-        return { exitCode, stderr, stdout };
-    } catch (error) {
-        child.kill();
-        await child.exited.catch(() => {});
-        throw new DockerBackupProviderProcessError(true, error);
+    } finally {
+        if (timeout !== undefined) clearTimeout(timeout);
     }
-};
+}
+
+async function terminate(child: DockerBackupProviderChild): Promise<void> {
+    try {
+        child.kill("SIGTERM");
+    } catch {
+        // The child may already have exited while the failure was observed.
+    }
+    if (await waitForExit(child, backupProviderTerminationGraceMs)) return;
+    try {
+        child.kill("SIGKILL");
+    } catch {
+        // A concurrent exit still leaves the final wait bounded.
+    }
+    await waitForExit(child, backupProviderTerminationGraceMs);
+}
+
+/**
+ * Creates the fixed Docker backup process boundary with bounded child teardown.
+ * @param launch Fixed process launcher, replaceable only at the worker/test boundary.
+ * @returns A fixed process executor that cannot wait forever during teardown.
+ */
+export function createDockerBackupProviderProcess(
+    launch: DockerBackupProviderLaunch = defaultLaunch
+): DockerBackupProviderProcess {
+    return async (request) => {
+        let child: DockerBackupProviderChild;
+        try {
+            request.signal.throwIfAborted();
+            child = launch(request);
+        } catch (error) {
+            throw new DockerBackupProviderProcessError(false, error);
+        }
+        const streamAbortController = new AbortController();
+        let rejectAborted: ((reason?: unknown) => void) | undefined;
+        const aborted = new Promise<never>((_resolve, reject) => {
+            rejectAborted = reject;
+        });
+        const abort = () => {
+            rejectAborted?.(new Error("Backup provider process was aborted"));
+        };
+        request.signal.addEventListener("abort", abort, { once: true });
+        if (request.signal.aborted) abort();
+        try {
+            const [exitCode, stdout, stderr] = await Promise.race([
+                Promise.all([
+                    child.exited,
+                    readBounded(
+                        child.stdout,
+                        request.stdoutMaximumBytes,
+                        streamAbortController.signal
+                    ),
+                    readBounded(
+                        child.stderr,
+                        backupProviderStderrMaximumBytes,
+                        streamAbortController.signal
+                    ),
+                ]),
+                aborted,
+            ]);
+            return { exitCode, stderr, stdout };
+        } catch (error) {
+            streamAbortController.abort();
+            await terminate(child);
+            throw new DockerBackupProviderProcessError(true, error);
+        } finally {
+            request.signal.removeEventListener("abort", abort);
+        }
+    };
+}
+
+const defaultProcess = createDockerBackupProviderProcess();
 
 function operationSignal(
     parentSignal: AbortSignal | undefined,

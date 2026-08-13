@@ -13,6 +13,7 @@ import type {
 } from "../docker/engineInventory.ts";
 import {
     createDockerBackupJobExecutionPort,
+    createDockerBackupProviderProcess,
     createDockerBackupProviderDiscovery,
     DockerBackupProviderProcessError,
     backupDockerExecutable,
@@ -308,6 +309,54 @@ describe("Docker backup provider discovery", () => {
 });
 
 describe("Docker backup execution port", () => {
+    test("bounds TERM-to-KILL teardown when an aborted child never reports exit", async () => {
+        const controller = new AbortController();
+        const launched = Promise.withResolvers<void>();
+        const signals: Array<"SIGKILL" | "SIGTERM"> = [];
+        const process = createDockerBackupProviderProcess(() => {
+            launched.resolve();
+            return {
+                exited: new Promise<number>(() => {}),
+                kill(signal) {
+                    signals.push(signal);
+                },
+                stderr: new ReadableStream<Uint8Array>(),
+                stdout: new ReadableStream<Uint8Array>(),
+            };
+        });
+        const execution = process({
+            arguments: ["fixed"],
+            environment: {},
+            executable: backupDockerExecutable,
+            signal: controller.signal,
+            stdoutMaximumBytes: 1,
+        });
+        await launched.promise;
+        controller.abort();
+
+        let deadline: ReturnType<typeof setTimeout> | undefined;
+        let failure: unknown;
+        try {
+            await Promise.race([
+                execution,
+                new Promise<never>((_resolve, reject) => {
+                    deadline = setTimeout(
+                        () => reject(new Error("Backup teardown did not settle")),
+                        1500
+                    );
+                }),
+            ]);
+        } catch (error) {
+            failure = error;
+        } finally {
+            if (deadline !== undefined) clearTimeout(deadline);
+        }
+
+        expect(failure).toBeInstanceOf(DockerBackupProviderProcessError);
+        expect(failure).toMatchObject({ dispatched: true });
+        expect(signals).toEqual(["SIGTERM", "SIGKILL"]);
+    });
+
     test("uses only fixed non-shell Docker exec wrappers and projects bounded status", async () => {
         const process = providerProcess();
         const port = createDockerBackupJobExecutionPort({
