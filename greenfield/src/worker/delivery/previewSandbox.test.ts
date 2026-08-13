@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 
 import {
     buildPreviewIngressSpecification,
@@ -8,6 +8,28 @@ import {
 const operationId = "018f1f0e-7c52-7d63-8f22-b5f776933127";
 
 describe("preview sandbox specifications", () => {
+    test("derives the exact non-default runtime user for the user manager", () => {
+        const getuid = spyOn(process, "getuid").mockReturnValue(4242);
+        try {
+            const specification = buildPreviewLaunchSpecification({
+                bunExecutable: "/opt/mira/runtime/bun",
+                capabilitySocket: "/srv/mira-preview/gateways/pr-42/gateway.sock",
+                expectedHeadSha: "b".repeat(40),
+                operationId,
+                publicOrigin: "https://preview.example.test",
+                stateRoot: "/srv/mira-preview/states/pr-42",
+                worktreePath: "/srv/mira-preview/worktrees/pr-42",
+            });
+
+            expect(specification.environment).toMatchObject({
+                DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/4242/bus",
+                XDG_RUNTIME_DIR: "/run/user/4242",
+            });
+        } finally {
+            getuid.mockRestore();
+        }
+    });
+
     test("clears the environment and keeps PR code in a private network", () => {
         const specification = buildPreviewLaunchSpecification(
             {

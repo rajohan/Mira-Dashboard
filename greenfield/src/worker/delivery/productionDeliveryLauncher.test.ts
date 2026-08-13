@@ -185,6 +185,7 @@ describe("production Delivery launcher", () => {
 
         expect(observedCommand).toContain("--property=NoNewPrivileges=yes");
         expect(observedCommand).toContain("--property=ProtectHome=tmpfs");
+        expect(observedCommand).toContain("--property=RuntimeMaxSec=90min");
         expect(observedCommand).toContain(`--property=BindPaths=${options.projectRoot}`);
         expect(observedCommand).toContain(
             "--property=InaccessiblePaths=-/run/docker.sock -/var/run/docker.sock -/opt/docker -/tmp/openclaw"
@@ -268,7 +269,7 @@ describe("production Delivery launcher", () => {
         ]);
     });
 
-    test("relaunches an orphan with the capsule-owned immutable executor tuple", async () => {
+    test("relaunches a runtime-bounded failed executor with the capsule-owned immutable tuple", async () => {
         const { executor, options, runtime } = await fixture();
         const commands: Array<readonly string[]> = [];
 
@@ -287,7 +288,26 @@ describe("production Delivery launcher", () => {
         expect(commands).toHaveLength(2);
         expect(commands[1]).toContain(runtime);
         expect(commands[1]).toContain(executor);
+        expect(commands[1]).toContain("--property=RuntimeMaxSec=90min");
         expect(commands[1]).toContain(`--transition=${transitionId}`);
+    });
+
+    test("fails closed when systemd cannot prove that the executor is inactive", async () => {
+        const fixture_ = await fixture();
+        const commands: Array<readonly string[]> = [];
+
+        const failure_ = await rejectionError(
+            ensureProductionDeliveryExecutor(fixture_.options, {
+                execute(command) {
+                    commands.push(command);
+                    return Promise.resolve({ ...success, exitCode: 1 });
+                },
+            })
+        );
+
+        expect(failure_.message).toBe("Production Delivery executor launch failed");
+        expect(commands).toHaveLength(1);
+        expect(commands[0]?.[0]).toBe("/usr/bin/systemctl");
     });
 });
 

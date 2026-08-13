@@ -209,10 +209,10 @@ async function consumeTerminalResult(
     identity: JobExecutionRunIdentity,
     signal?: AbortSignal
 ): Promise<DeliveryJobOperationResult> {
-    const result = terminalResult(inspection, payload, identity);
+    if (!receiptBelongsToRun(inspection.record, payload, identity)) throw failure();
     const cleared = await options.control.clear(identity.runId, signal);
     if (!sameJson(cleared, inspection.record)) throw failure();
-    return result;
+    return terminalResult(inspection, payload, identity);
 }
 
 function validateRunIdentity(

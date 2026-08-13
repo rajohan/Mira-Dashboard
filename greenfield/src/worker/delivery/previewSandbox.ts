@@ -165,15 +165,16 @@ function sandboxCommand(input: PreviewSandboxInput): readonly string[] {
 /**
  * Builds the fixed outer private-network unit and inner Bubblewrap sandbox.
  * @param input Trusted, path-fenced preview launch inputs.
- * @param runtimeUserId Owner of the user-systemd manager.
+ * @param runtimeUserId Owner of the user-systemd manager; defaults to the current worker UID.
  * @returns Exact transient-service command and scrubbed manager environment.
  */
 export function buildPreviewLaunchSpecification(
     input: PreviewSandboxInput,
-    runtimeUserId = 1000
+    runtimeUserId?: number
 ): PreviewLaunchSpecification {
     const suffix = unitSuffix(input.operationId);
-    if (!Number.isSafeInteger(runtimeUserId) || runtimeUserId < 0) fail();
+    const userId = runtimeUserId ?? process.getuid?.();
+    if (userId === undefined || !Number.isSafeInteger(userId) || userId < 0) fail();
     const unitName = `mira-dashboard-preview-${suffix}.service`;
     return Object.freeze({
         argv: Object.freeze([
@@ -201,12 +202,12 @@ export function buildPreviewLaunchSpecification(
             ...sandboxCommand(input),
         ]),
         environment: Object.freeze({
-            DBUS_SESSION_BUS_ADDRESS: `unix:path=/run/user/${runtimeUserId}/bus`,
+            DBUS_SESSION_BUS_ADDRESS: `unix:path=/run/user/${userId}/bus`,
             HOME: "/nonexistent",
             LANG: "C.UTF-8",
             LC_ALL: "C.UTF-8",
             PATH: "/usr/bin:/bin",
-            XDG_RUNTIME_DIR: `/run/user/${runtimeUserId}`,
+            XDG_RUNTIME_DIR: `/run/user/${userId}`,
         }),
         unitName,
     });

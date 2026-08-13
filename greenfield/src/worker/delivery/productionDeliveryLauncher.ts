@@ -361,6 +361,7 @@ function launchCommand(options: ProductionDeliveryLaunchOptions): readonly strin
         "--property=Type=exec",
         "--property=KillMode=control-group",
         "--property=TimeoutStartSec=90min",
+        "--property=RuntimeMaxSec=90min",
         "--property=UMask=0077",
         "--property=NoNewPrivileges=yes",
         "--property=ProtectHome=tmpfs",
