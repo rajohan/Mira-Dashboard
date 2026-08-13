@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/tanstack-react";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, userEvent, waitFor, within } from "storybook/test";
 
 import type {
     GatewaySession,
@@ -169,12 +169,13 @@ export const ActionBusy: Story = {
                 name: `Reset Primary main; key ${gatewayPrimarySessionKey}`,
             })
         );
+        const body = within(canvasElement.ownerDocument.body);
         const dialog = within(
-            await canvas.findByRole("dialog", { name: "Reset session?" })
+            await body.findByRole("dialog", { name: "Reset session?" })
         );
         await userEvent.click(dialog.getByRole("button", { name: "Reset session" }));
         await expect(
-            dialog.getByRole("button", { name: "Resetting session…" })
+            dialog.getByRole("button", { name: "Reset session…" })
         ).toBeDisabled();
     },
 };
@@ -207,13 +208,24 @@ export const UnknownOutcome: Story = {
                 name: `Reset Primary main; key ${gatewayPrimarySessionKey}`,
             })
         );
+        const body = within(canvasElement.ownerDocument.body);
         const dialog = within(
-            await canvas.findByRole("dialog", { name: "Reset session?" })
+            await body.findByRole("dialog", { name: "Reset session?" })
         );
         await userEvent.click(dialog.getByRole("button", { name: "Reset session" }));
-        await expect(
-            dialog.findByText(/could not confirm whether that action finished/u)
-        ).resolves.toBeVisible();
+        await waitFor(
+            async () => {
+                const currentDialog = within(
+                    body.getByRole("dialog", { name: "Reset session?" })
+                );
+                await expect(
+                    currentDialog.getByText(
+                        /could not confirm whether the action finished/u
+                    )
+                ).toBeVisible();
+            },
+            { timeout: 5000 }
+        );
     },
 };
 

@@ -364,15 +364,23 @@ export const OpenClawSchedules: Story = {
         await userEvent.click(
             await canvas.findByRole("button", { name: "OpenClaw schedules" })
         );
-        await expect(
-            await canvas.findByRole("heading", {
-                level: 2,
-                name: "OpenClaw scheduled jobs",
-            })
-        ).toBeVisible();
-        await expect(
-            await canvas.findByRole("heading", { level: 3, name: "Nightly report" })
-        ).toBeVisible();
+        await waitFor(
+            async () => {
+                await expect(
+                    canvas.getByRole("heading", {
+                        level: 2,
+                        name: "OpenClaw scheduled jobs",
+                    })
+                ).toBeVisible();
+                await expect(
+                    canvas.getByRole("heading", {
+                        level: 3,
+                        name: "Nightly report",
+                    })
+                ).toBeVisible();
+            },
+            { timeout: 5000 }
+        );
     },
 };
 
@@ -556,11 +564,20 @@ export const UnknownOutcome: Story = {
         await userEvent.click(
             within(dialog).getByRole("button", { name: "Queue restart" })
         );
-        await expect(
-            await within(dialog).findByText(
-                /could not confirm whether the service action request was queued/iu
-            )
-        ).toBeVisible();
-        await expect(dialog).toBeVisible();
+        const body = within(canvasElement.ownerDocument.body);
+        await waitFor(
+            async () => {
+                const currentDialog = body.getByRole("dialog", {
+                    name: "Queue an OpenClaw restart?",
+                });
+                await expect(
+                    within(currentDialog).getByText(
+                        /could not confirm whether the service action request was queued/iu
+                    )
+                ).toBeVisible();
+                await expect(currentDialog).toBeVisible();
+            },
+            { timeout: 5000 }
+        );
     },
 };

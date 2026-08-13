@@ -67,9 +67,10 @@ function selectedReportRoute(): string {
 async function openDeleteDialog(canvasElement: HTMLElement) {
     const canvas = within(canvasElement);
     await userEvent.click(await canvas.findByRole("button", { name: "Delete" }));
-    await expect(
-        await canvas.findByRole("dialog", { name: "Delete report" })
-    ).toBeVisible();
+    const body = within(canvasElement.ownerDocument.body);
+    const dialog = await body.findByRole("dialog", { name: "Delete report" });
+    await expect(dialog).toBeVisible();
+    return within(dialog);
 }
 
 const meta = {
@@ -138,7 +139,9 @@ export const DetailWithListUnavailable: Story = {
 
 export const DeleteConfirmation: Story = {
     args: { fixtures: reportFixtures(), route: selectedReportRoute() },
-    play: async ({ canvasElement }) => openDeleteDialog(canvasElement),
+    play: async ({ canvasElement }) => {
+        await openDeleteDialog(canvasElement);
+    },
 };
 
 export const DeletePrecondition: Story = {
@@ -155,11 +158,11 @@ export const DeletePrecondition: Story = {
         route: selectedReportRoute(),
     },
     play: async ({ canvasElement }) => {
-        await openDeleteDialog(canvasElement);
-        const canvas = within(canvasElement);
-        await userEvent.click(canvas.getByRole("button", { name: "Delete report" }));
+        const dialog = await openDeleteDialog(canvasElement);
+        await userEvent.click(dialog.getByRole("button", { name: "Delete report" }));
+        const body = within(canvasElement.ownerDocument.body);
         await expect(
-            await canvas.findByText(/too many linked notifications/u)
+            await body.findByText(/too many linked notifications/u)
         ).toBeVisible();
     },
 };
@@ -176,11 +179,11 @@ export const DeleteError: Story = {
         route: selectedReportRoute(),
     },
     play: async ({ canvasElement }) => {
-        await openDeleteDialog(canvasElement);
-        const canvas = within(canvasElement);
-        await userEvent.click(canvas.getByRole("button", { name: "Delete report" }));
+        const dialog = await openDeleteDialog(canvasElement);
+        await userEvent.click(dialog.getByRole("button", { name: "Delete report" }));
+        const body = within(canvasElement.ownerDocument.body);
         await expect(
-            await canvas.findByText("The request could not be completed. Try again.")
+            await body.findByText("The request could not be completed. Try again.")
         ).toBeVisible();
     },
 };

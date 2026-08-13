@@ -333,7 +333,9 @@ export function SystemMetricsCards({ metrics }: SystemMetricsCardsProps) {
                                 ) : (
                                     <ul
                                         aria-label="Cache snapshot metrics"
-                                        className="border-primary-700/70 mt-4 max-h-64 space-y-1 overflow-y-auto border-t pt-2"
+                                        className="border-primary-700/70 focus-visible:ring-accent-300 mt-4 max-h-64 space-y-1 overflow-y-auto border-t pt-2 focus-visible:ring-2 focus-visible:outline-none"
+                                        // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- Bounded diagnostic lists must remain keyboard-scrollable.
+                                        tabIndex={0}
                                     >
                                         {metrics.application.cache.snapshots.map(
                                             (snapshot) => (
@@ -380,7 +382,9 @@ export function SystemMetricsCards({ metrics }: SystemMetricsCardsProps) {
                         </Text>
                         <ul
                             aria-label="HTTP procedure metrics"
-                            className="border-primary-700/70 mt-4 max-h-64 space-y-1 overflow-y-auto border-t pt-2"
+                            className="border-primary-700/70 focus-visible:ring-accent-300 mt-4 max-h-64 space-y-1 overflow-y-auto border-t pt-2 focus-visible:ring-2 focus-visible:outline-none"
+                            // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- Bounded diagnostic lists must remain keyboard-scrollable.
+                            tabIndex={0}
                         >
                             {metrics.application.http.procedures.map((procedure) => (
                                 <li

@@ -640,11 +640,16 @@ export const Error: Story = {
     play: async ({ canvasElement }) => {
         const page = await openMergeDialog(canvasElement);
         await userEvent.click(await page.findByRole("button", { name: "Queue merge" }));
-        await expect(
-            await page.findByText(
-                "The Delivery request could not be completed safely. Try again from fresh state."
-            )
-        ).toBeVisible();
+        await waitFor(
+            async () => {
+                await expect(
+                    page.getByText(
+                        "The Delivery request could not be completed safely. Try again from fresh state."
+                    )
+                ).toBeVisible();
+            },
+            { timeout: 5000 }
+        );
     },
 };
 

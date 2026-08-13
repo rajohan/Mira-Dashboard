@@ -266,8 +266,9 @@ async function openMaintenanceConfirmation(canvasElement: HTMLElement) {
             name: "Run Managed application and container logs",
         })
     );
+    const body = within(canvasElement.ownerDocument.body);
     return within(
-        await canvas.findByRole("dialog", {
+        await body.findByRole("dialog", {
             name: "Run Managed application and container logs?",
         })
     );

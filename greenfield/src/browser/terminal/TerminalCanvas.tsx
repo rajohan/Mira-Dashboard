@@ -78,7 +78,7 @@ export function TerminalCanvas({
 
     return (
         <section
-            aria-label="Interactive terminal"
+            aria-label="Terminal emulator output"
             className={cn(
                 "size-full min-h-72 overflow-hidden bg-[#0b0b0c] p-2 sm:min-h-96",
                 className

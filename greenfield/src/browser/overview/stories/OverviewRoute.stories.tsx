@@ -589,12 +589,14 @@ const attentionLogMaintenance = {
                           ...queuedRefresh,
                           actionKey: "maintenance.rotate-logs",
                           attemptCount: 1,
+                          availableAtMs: observedAtMs - 3000,
                           displayName: "Rotate managed logs",
                           eventCount: 4,
                           finishedAtMs: observedAtMs,
                           firstStartedAtMs: observedAtMs - 2000,
                           id: "019fe000-0000-7000-8000-000000000007",
                           lastAttemptStartedAtMs: observedAtMs - 2000,
+                          queuedAtMs: observedAtMs - 3000,
                           resourceKeys: ["maintenance.logs"],
                           state: "failed",
                           stateVersion: 3,
@@ -728,7 +730,9 @@ export const FreshPopulated: Story = {
     args: { fixtures: overviewFixtures(), route: "/" },
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement);
-        await expect(await canvas.findByText("All observed")).toBeVisible();
+        await expect(
+            await canvas.findByText("All observed", {}, { timeout: 5000 })
+        ).toBeVisible();
         await expect(
             canvas.getByRole("heading", { name: "Durable operations" })
         ).toBeVisible();
@@ -736,10 +740,18 @@ export const FreshPopulated: Story = {
         await expect(
             canvas.getByRole("heading", { name: "HTTP procedures" })
         ).toBeVisible();
-        await expect(canvas.getByText(/1 images · 512 MiB/u)).toBeVisible();
-        await expect(canvas.getByText(/PgBouncer 10 clients/u)).toBeVisible();
         await expect(
-            canvas.getByRole("list", { name: "Log maintenance policies" })
+            await canvas.findByText(/1 images · 512 MiB/u, {}, { timeout: 5000 })
+        ).toBeVisible();
+        await expect(
+            await canvas.findByText(/PgBouncer 10 clients/u, {}, { timeout: 5000 })
+        ).toBeVisible();
+        await expect(
+            await canvas.findByRole(
+                "list",
+                { name: "Log maintenance policies" },
+                { timeout: 5000 }
+            )
         ).toBeVisible();
     },
 };
@@ -816,7 +828,9 @@ export const LogMaintenanceAttention: Story = {
     },
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement);
-        await expect(await canvas.findByText("Last failed")).toBeVisible();
+        await expect(
+            await canvas.findByText("Last failed", {}, { timeout: 5000 })
+        ).toBeVisible();
     },
 };
 

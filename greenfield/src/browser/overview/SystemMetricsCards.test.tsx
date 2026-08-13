@@ -87,14 +87,15 @@ describe("SystemMetricsCards", () => {
         expect(within(card("Cache")).getByText("14 entries")).toBeTruthy();
         expect(within(card("HTTP requests")).getByText("29")).toBeTruthy();
         expect(within(card("HTTP requests")).getByText(/1 errors/u)).toBeTruthy();
-        expect(
-            within(
-                screen.getByRole("list", { name: "Cache snapshot metrics" })
-            ).getByText("system.host")
-        ).toBeTruthy();
+        const cacheMetrics = screen.getByRole("list", {
+            name: "Cache snapshot metrics",
+        });
+        expect(cacheMetrics.getAttribute("tabindex")).toBe("0");
+        expect(within(cacheMetrics).getByText("system.host")).toBeTruthy();
         const procedureMetrics = screen.getByRole("list", {
             name: "HTTP procedure metrics",
         });
+        expect(procedureMetrics.getAttribute("tabindex")).toBe("0");
         expect(within(procedureMetrics).getByText("system.metrics")).toBeTruthy();
         expect(
             within(procedureMetrics).getByText(/25 requests · 0 errors/u)

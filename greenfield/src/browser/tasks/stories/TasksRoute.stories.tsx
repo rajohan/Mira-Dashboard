@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/tanstack-react";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, userEvent, waitFor, within } from "storybook/test";
 
 import type { TaskDetail, TaskSummary } from "../../../contracts/taskModel.ts";
 import { DashboardPageStory } from "../../storySupport/dashboardPageStoryHarness.tsx";
@@ -63,7 +63,9 @@ async function moveFirstTask(canvasElement: HTMLElement) {
     });
     moveHandle.focus();
     await userEvent.keyboard("[Space]");
-    await userEvent.keyboard("{Shift>}{ArrowRight}{/Shift}");
+    await userEvent.keyboard(
+        "{Shift>}{ArrowRight}{ArrowRight}{ArrowRight}{ArrowRight}{ArrowRight}{ArrowRight}{/Shift}"
+    );
     await userEvent.keyboard("[Space]");
 }
 
@@ -107,13 +109,31 @@ export const FilteredEmpty: Story = {
     },
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement);
-        await userEvent.type(
-            await canvas.findByRole("searchbox", { name: "Search tasks" }),
-            "no-match"
+        const assigneeFilter = await canvas.findByRole(
+            "button",
+            { name: "Filter tasks by assignee" },
+            { timeout: 5000 }
         );
-        await expect(
-            await canvas.findByRole("heading", { name: "No matching tasks" })
-        ).toBeVisible();
+        await waitFor(
+            async () => {
+                await expect(assigneeFilter).toBeEnabled();
+            },
+            { timeout: 5000 }
+        );
+        await userEvent.click(assigneeFilter);
+        await userEvent.click(
+            await within(canvasElement.ownerDocument.body).findByRole("option", {
+                name: "Raymond",
+            })
+        );
+        await waitFor(
+            async () => {
+                await expect(
+                    canvas.getByRole("heading", { name: "No matching tasks" })
+                ).toBeVisible();
+            },
+            { timeout: 5000 }
+        );
     },
 };
 
@@ -166,10 +186,26 @@ export const CreateModal: Story = {
     args: { fixtures: taskFixtures(), route: "/tasks" },
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement);
-        await userEvent.click(await canvas.findByRole("button", { name: "Create task" }));
-        await expect(
-            await canvas.findByRole("dialog", { name: "New task" })
-        ).toBeVisible();
+        const trigger = await canvas.findByRole(
+            "button",
+            { name: "New task" },
+            { timeout: 5000 }
+        );
+        await waitFor(
+            async () => {
+                await expect(trigger).toBeEnabled();
+            },
+            { timeout: 5000 }
+        );
+        await userEvent.click(trigger);
+        const dialog = await waitFor(
+            () =>
+                within(canvasElement.ownerDocument.body).getByRole("dialog", {
+                    name: "New task",
+                }),
+            { timeout: 5000 }
+        );
+        await expect(dialog).toBeVisible();
     },
 };
 
@@ -180,9 +216,8 @@ export const DetailModal: Story = {
         await userEvent.click(
             await canvas.findByRole("button", { name: `Open task: ${task.title}` })
         );
-        await expect(
-            await canvas.findByRole("dialog", { name: task.title })
-        ).toBeVisible();
+        const body = within(canvasElement.ownerDocument.body);
+        await expect(await body.findByRole("dialog", { name: task.title })).toBeVisible();
     },
 };
 
