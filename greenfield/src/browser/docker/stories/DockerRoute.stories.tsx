@@ -467,9 +467,18 @@ export const UnknownOutcome: Story = {
         );
         const page = within(canvasElement.ownerDocument.body);
         await userEvent.click(await page.findByRole("button", { name: "Queue scan" }));
-        await expect(
-            await page.findByText(/queue outcome could not be confirmed/iu)
-        ).toBeVisible();
+        await waitFor(
+            async () => {
+                const dialog = page.getByRole("dialog", {
+                    name: "Scan Docker updates?",
+                });
+                await expect(
+                    within(dialog).getByText(/queue outcome could not be confirmed/iu)
+                ).toBeVisible();
+                await expect(dialog).toBeVisible();
+            },
+            { timeout: 5000 }
+        );
     },
 };
 
@@ -491,8 +500,19 @@ export const Error: Story = {
         );
         const page = within(canvasElement.ownerDocument.body);
         await userEvent.click(await page.findByRole("button", { name: "Queue scan" }));
-        await expect(
-            await page.findByText("The request could not be completed. Try again.")
-        ).toBeVisible();
+        await waitFor(
+            async () => {
+                const dialog = page.getByRole("dialog", {
+                    name: "Scan Docker updates?",
+                });
+                await expect(
+                    within(dialog).getByText(
+                        "The request could not be completed. Try again."
+                    )
+                ).toBeVisible();
+                await expect(dialog).toBeVisible();
+            },
+            { timeout: 5000 }
+        );
     },
 };

@@ -67,6 +67,14 @@ async function moveFirstTask(canvasElement: HTMLElement) {
         "{Shift>}{ArrowRight}{ArrowRight}{ArrowRight}{ArrowRight}{ArrowRight}{ArrowRight}{/Shift}"
     );
     await userEvent.keyboard("[Space]");
+    await waitFor(
+        async () => {
+            await expect(
+                canvasElement.querySelector("[data-dnd-overlay]")
+            ).toBeEmptyDOMElement();
+        },
+        { timeout: 5000 }
+    );
 }
 
 const meta = {

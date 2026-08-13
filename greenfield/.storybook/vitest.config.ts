@@ -13,11 +13,6 @@ const ignoredPinnedUpstreamDiagnostics = [
         module: "/src/browser/jobs/stories/ScheduleEditor.stories.tsx",
         test: "Interval To Daily Transition",
     },
-    {
-        message: "useInsertionEffect must not schedule updates.",
-        module: "/src/browser/tasks/stories/TaskBoard.stories.tsx",
-        test: "Busy",
-    },
 ] as const;
 
 export default defineConfig({

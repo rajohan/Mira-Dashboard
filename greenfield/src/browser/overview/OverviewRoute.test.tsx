@@ -8,7 +8,11 @@ import type {
 } from "../../contracts/agentModel.ts";
 import type { ListAgentStatusesResult } from "../../contracts/agents.ts";
 import type { AuthStatus } from "../../contracts/auth.ts";
-import type { KopiaBackupStatus, WalgBackupStatus } from "../../contracts/backups.ts";
+import type {
+    BackupRequestOperationResult,
+    KopiaBackupStatus,
+    WalgBackupStatus,
+} from "../../contracts/backups.ts";
 import type {
     CacheEntry,
     CacheEntryStatus,
@@ -329,6 +333,36 @@ const kopiaBackupStatus = Object.freeze({
     state: "unavailable",
     type: "kopia",
 } as const satisfies KopiaBackupStatus);
+
+const backupRunId = "019fe000-0000-7000-8000-000000000008";
+const freshKopiaBackupStatus = Object.freeze({
+    activity: { state: "idle" },
+    checkedAtMs: timestampMs,
+    payload: {
+        backupCount: 8,
+        healthy: true,
+        observedAtMs: timestampMs,
+        providerIdle: true,
+        sourceRevision: "d".repeat(64),
+        sources: [
+            {
+                health: "current",
+                id: "primary",
+                latestCompletedAtMs: timestampMs,
+                snapshotCount: 8,
+            },
+        ],
+        type: "kopia",
+    },
+    state: "fresh",
+} as const satisfies KopiaBackupStatus);
+
+const queuedKopiaBackup = Object.freeze({
+    jobRunId: backupRunId,
+    operation: "run",
+    queued: true,
+    type: "kopia",
+} as const satisfies BackupRequestOperationResult);
 
 const walgBackupStatus = Object.freeze({
     activity: { state: "idle" },
@@ -803,15 +837,18 @@ interface TransportCall {
 }
 
 interface OverviewTransportOptions {
+    readonly backupMutationOutput?: BackupRequestOperationResult | Error;
     readonly cacheEntryOutputs?: readonly (CacheEntry | Error)[];
     readonly cacheStatusOutputs?: readonly (CacheStatusResult | Error)[];
     readonly databaseOverviewOutput?: DatabaseOverview;
     readonly dockerOverviewOutput?: DockerOverview;
     readonly jobOutputs?: readonly (ListJobRunsResult | Error)[];
+    readonly kopiaBackupStatusOutput?: KopiaBackupStatus;
     readonly logMaintenanceOutputs?: readonly (LogMaintenanceStatusOutput | Error)[];
     readonly refreshOutputs?: readonly (JobRunSummary | Error)[];
     readonly reportOutputs?: readonly (ListReportsResult | Error)[];
     readonly systemMetricsOutputs?: readonly (SystemMetrics | Error)[];
+    readonly walgBackupStatusOutput?: WalgBackupStatus;
 }
 
 function transportOutput(
@@ -827,28 +864,35 @@ function transportOutput(
 }
 
 class OverviewTransport implements DashboardTrpcTransport {
+    readonly #backupMutationOutput: BackupRequestOperationResult | Error;
     readonly #cacheEntryOutputs: readonly (CacheEntry | Error)[];
     readonly #cacheStatusOutputs: readonly (CacheStatusResult | Error)[];
     readonly #databaseOverviewOutput: DatabaseOverview;
     readonly #dockerOverviewOutput: DockerOverview;
     readonly #jobOutputs: readonly (ListJobRunsResult | Error)[];
+    readonly #kopiaBackupStatusOutput: KopiaBackupStatus;
     readonly #logMaintenanceOutputs: readonly (LogMaintenanceStatusOutput | Error)[];
     readonly #refreshOutputs: readonly (JobRunSummary | Error)[];
     readonly #reportOutputs: readonly (ListReportsResult | Error)[];
     readonly #systemMetricsOutputs: readonly (SystemMetrics | Error)[];
+    readonly #walgBackupStatusOutput: WalgBackupStatus;
     readonly mutationCalls: TransportCall[] = [];
     readonly queryCalls: TransportCall[] = [];
 
     constructor(options: OverviewTransportOptions = {}) {
+        this.#backupMutationOutput = options.backupMutationOutput ?? queuedKopiaBackup;
         this.#cacheEntryOutputs = options.cacheEntryOutputs ?? [hostEntry];
         this.#cacheStatusOutputs = options.cacheStatusOutputs ?? [cacheStatus];
         this.#databaseOverviewOutput = options.databaseOverviewOutput ?? databaseOverview;
         this.#dockerOverviewOutput = options.dockerOverviewOutput ?? dockerOverview;
         this.#jobOutputs = options.jobOutputs ?? [jobRunPage];
+        this.#kopiaBackupStatusOutput =
+            options.kopiaBackupStatusOutput ?? kopiaBackupStatus;
         this.#logMaintenanceOutputs = options.logMaintenanceOutputs ?? [logMaintenance];
         this.#refreshOutputs = options.refreshOutputs ?? [queuedRefresh];
         this.#reportOutputs = options.reportOutputs ?? [reportPage];
         this.#systemMetricsOutputs = options.systemMetricsOutputs ?? [systemMetrics];
+        this.#walgBackupStatusOutput = options.walgBackupStatusOutput ?? walgBackupStatus;
     }
 
     mutation(path: string, input?: unknown): Promise<unknown> {
@@ -856,6 +900,11 @@ class OverviewTransport implements DashboardTrpcTransport {
         this.mutationCalls.push({ input, path });
         if (path === "cache.refreshEntry") {
             return transportOutput(this.#refreshOutputs, callIndex, path);
+        }
+        if (path === "backups.runKopia") {
+            return this.#backupMutationOutput instanceof Error
+                ? Promise.reject(this.#backupMutationOutput)
+                : Promise.resolve(this.#backupMutationOutput);
         }
         if (path === "auth.touch") {
             return Promise.resolve({ lastSeenAtMs: timestampMs });
@@ -871,10 +920,10 @@ class OverviewTransport implements DashboardTrpcTransport {
                 return Promise.resolve(authenticatedStatus);
             }
             case "backups.getKopiaStatus": {
-                return Promise.resolve(kopiaBackupStatus);
+                return Promise.resolve(this.#kopiaBackupStatusOutput);
             }
             case "backups.getWalgStatus": {
-                return Promise.resolve(walgBackupStatus);
+                return Promise.resolve(this.#walgBackupStatusOutput);
             }
             case "database.overview": {
                 return Promise.resolve(this.#databaseOverviewOutput);
@@ -1173,6 +1222,33 @@ describe("Dashboard operational overview foundation", () => {
         ).toBeTruthy();
         const queuedRunLink = screen.getByRole("link", { name: "View background job" });
         expect(queuedRunLink.getAttribute("href")).toContain(refreshRunId);
+    });
+
+    test("queues a fresh Kopia backup with a session-bound recovery identity", async () => {
+        const transport = new OverviewTransport({
+            kopiaBackupStatusOutput: freshKopiaBackupStatus,
+        });
+        const { user } = renderOverview(transport);
+
+        const kopiaCard = await screen.findByLabelText("Kopia backup");
+        await user.click(within(kopiaCard).getByRole("button", { name: "Run backup" }));
+
+        await waitFor(() =>
+            expect(
+                transport.mutationCalls.filter(({ path }) => path === "backups.runKopia")
+            ).toHaveLength(1)
+        );
+        const mutationInput = transport.mutationCalls.find(
+            ({ path }) => path === "backups.runKopia"
+        )?.input;
+        expect(mutationInput).toEqual({
+            confirmation: "run-kopia-backup",
+            idempotencyKey: expect.stringMatching(/^[0-9a-f]{32}$/u),
+            sourceRevision: freshKopiaBackupStatus.payload.sourceRevision,
+        });
+        expect(
+            await screen.findByText("Kopia run queued. Runtime success is not assumed.")
+        ).toBeTruthy();
     });
 
     test("marks a recent last-known-good metric sample without hiding cache data", async () => {

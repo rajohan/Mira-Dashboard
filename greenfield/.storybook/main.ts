@@ -15,7 +15,6 @@ const storybookEnvironment = loadEnv(
 
 const pinnedBrowserDiagnostics = Object.freeze([
     "flushSync was called from inside a lifecycle method. React cannot flush when React is already rendering. Consider moving this call to a scheduler task or micro task.",
-    "useInsertionEffect must not schedule updates.",
 ]);
 
 function createStorybookLogger() {

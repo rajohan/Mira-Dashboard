@@ -121,6 +121,14 @@ export const KeyboardMove: Story = {
                 status: "in-progress",
             });
         });
+        await waitFor(
+            async () => {
+                await expect(
+                    canvasElement.querySelector("[data-dnd-overlay]")
+                ).toBeEmptyDOMElement();
+            },
+            { timeout: 5000 }
+        );
     },
 };
 
