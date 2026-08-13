@@ -383,9 +383,7 @@ function projectLogs(
     logs: LogMaintenanceStatusOutput
 ): AvailableSignal<CacheHeartbeatOperationalSignals["logs"]> {
     let condition: "attention" | "healthy" | "running" = "healthy";
-    if (logs.policies.some(({ activeRun }) => activeRun !== undefined)) {
-        condition = "running";
-    } else if (
+    if (
         logs.policies.some(
             ({ lastRun, state }) =>
                 state === "unavailable" ||
@@ -393,6 +391,8 @@ function projectLogs(
         )
     ) {
         condition = "attention";
+    } else if (logs.policies.some(({ activeRun }) => activeRun !== undefined)) {
+        condition = "running";
     }
     return { condition, observedAtMs: logs.observedAtMs, state: "fresh" };
 }

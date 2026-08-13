@@ -67,10 +67,10 @@ function activityBadge(status: ProviderStatus) {
     }
     if (activity === "queued") return <Badge variant="info">Queued</Badge>;
     if (activity === "running") return <Badge variant="info">Running</Badge>;
+    if (activity === "failed") return <Badge variant="danger">Failed</Badge>;
     if (status.state !== "unavailable" && !status.payload.providerIdle) {
         return <Badge variant="info">Busy</Badge>;
     }
-    if (activity === "failed") return <Badge variant="danger">Failed</Badge>;
     if (activity === "succeeded") return <Badge variant="success">Succeeded</Badge>;
     return <Badge>Idle</Badge>;
 }

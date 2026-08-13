@@ -42,6 +42,20 @@ const walg = Object.freeze({
     },
     state: "fresh",
 } as const satisfies WalgBackupStatus);
+const failedBusyWalg = Object.freeze({
+    ...walg,
+    activity: {
+        finishedAtMs: nowMs,
+        jobRunId: "019fc968-1a9b-7765-8f1b-d5b863b0e7b4",
+        jobsUrl: "/jobs?runId=019fc968-1a9b-7765-8f1b-d5b863b0e7b4",
+        queuedAtMs: nowMs,
+        state: "failed",
+    },
+    payload: {
+        ...walg.payload,
+        providerIdle: false,
+    },
+} as const satisfies WalgBackupStatus);
 
 describe("BackupOverviewSectionView", () => {
     test("keeps one healthy provider visible when the other query fails", () => {
@@ -80,5 +94,13 @@ describe("BackupOverviewSectionView", () => {
         expect(
             within(kopiaCard).getByRole("button", { name: "Run backup" })
         ).toBeDisabled();
+    });
+
+    test("keeps a terminal provider failure visible while the provider is busy", () => {
+        render(<BackupOverviewSectionView kopia={kopia} walg={failedBusyWalg} />);
+
+        const walgCard = screen.getByLabelText("WAL-G backup");
+        expect(within(walgCard).getByText("Failed")).toBeTruthy();
+        expect(within(walgCard).queryByText("Busy")).toBeNull();
     });
 });

@@ -260,7 +260,16 @@ describe("heartbeat operational signals", () => {
         });
     });
 
-    test("projects existing sources and provider seams without payload identities", async () => {
+    test("projects existing sources and gives log failures priority over running work", async () => {
+        let logsStatus = {
+            observedAtMs: 4800,
+            policies: [
+                {
+                    activeRun: { state: "running" },
+                    state: "queueable",
+                },
+            ],
+        } as unknown as LogMaintenanceStatusOutput;
         const read = createCacheHeartbeatOperationalSignalsReader({
             databaseService: {
                 read: () =>
@@ -303,16 +312,7 @@ describe("heartbeat operational signals", () => {
                     }) as unknown as DockerOverview,
             },
             logsService: {
-                maintenanceStatus: () =>
-                    Promise.resolve({
-                        observedAtMs: 4800,
-                        policies: [
-                            {
-                                activeRun: { state: "running" },
-                                state: "queueable",
-                            },
-                        ],
-                    } as unknown as LogMaintenanceStatusOutput),
+                maintenanceStatus: () => Promise.resolve(logsStatus),
             },
             nowMs: () => 5000,
             readKopiaBackup: () => ({
@@ -377,6 +377,26 @@ describe("heartbeat operational signals", () => {
         });
         expect(JSON.stringify(result)).not.toContain("container");
         expect(JSON.stringify(result)).not.toContain("path");
+
+        logsStatus = {
+            observedAtMs: 4900,
+            policies: [
+                {
+                    activeRun: { state: "running" },
+                    state: "queueable",
+                },
+                {
+                    lastRun: { run: { state: "failed" } },
+                    state: "queueable",
+                },
+            ],
+        } as unknown as LogMaintenanceStatusOutput;
+        const resultWithFailedPolicy = await read();
+        expect(resultWithFailedPolicy.logs).toEqual({
+            condition: "attention",
+            observedAtMs: 4900,
+            state: "fresh",
+        });
     });
 
     test("contains source and optional-reader failures independently", async () => {
