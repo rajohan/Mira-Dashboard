@@ -105,6 +105,9 @@ const provisioningPolicyArtifactNames = Object.freeze(
     [...provisioningSqlArtifactNames, "runProvisioning.ts" as const].toSorted()
 );
 type ProvisioningPolicyArtifactName = (typeof provisioningPolicyArtifactNames)[number];
+const provisioningPolicyArtifactNameSet = new Set<string>(
+    provisioningPolicyArtifactNames
+);
 
 interface ProvisioningDatabaseCatalogEntry {
     readonly allowsConnections: boolean;
@@ -795,13 +798,8 @@ async function readContainedProvisioningArtifact(
     fileName: ProvisioningPolicyArtifactName,
     state: SqlExpansionState
 ): Promise<string> {
-    const candidate = path.resolve(artifactRoot, fileName);
-    if (
-        path.dirname(candidate) !== artifactRoot ||
-        path.basename(candidate) !== fileName
-    ) {
-        fail();
-    }
+    if (!provisioningPolicyArtifactNameSet.has(fileName)) fail();
+    const candidate = path.join(artifactRoot, fileName);
     let file: Awaited<ReturnType<typeof open>> | undefined;
     let bytes: Buffer | undefined;
     let pathBefore: BigIntStats | undefined;
@@ -811,12 +809,7 @@ async function readContainedProvisioningArtifact(
             constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
         );
         const descriptorPath = await realpath(`/proc/self/fd/${String(file.fd)}`);
-        if (
-            path.dirname(descriptorPath) !== artifactRoot ||
-            path.basename(descriptorPath) !== fileName
-        ) {
-            fail();
-        }
+        if (descriptorPath !== candidate) fail();
         const descriptorBefore = await file.stat({ bigint: true });
         pathBefore = await lstat(candidate, { bigint: true });
         if (
