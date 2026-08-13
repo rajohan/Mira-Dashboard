@@ -802,16 +802,9 @@ async function readContainedProvisioningArtifact(
     ) {
         fail();
     }
-    const before = await lstat(candidate, { bigint: true });
-    if (
-        !validProvisioningArtifact(before, state) ||
-        before.size <= 0n ||
-        before.size > BigInt(sqlArtifactMaximumBytes)
-    ) {
-        fail();
-    }
     let file: Awaited<ReturnType<typeof open>> | undefined;
     let bytes: Buffer | undefined;
+    let pathBefore: BigIntStats | undefined;
     try {
         file = await open(
             candidate,
@@ -825,9 +818,13 @@ async function readContainedProvisioningArtifact(
             fail();
         }
         const descriptorBefore = await file.stat({ bigint: true });
+        pathBefore = await lstat(candidate, { bigint: true });
         if (
             !validProvisioningArtifact(descriptorBefore, state) ||
-            !sameProvisioningArtifactSnapshot(before, descriptorBefore)
+            descriptorBefore.size <= 0n ||
+            descriptorBefore.size > BigInt(sqlArtifactMaximumBytes) ||
+            !validProvisioningArtifact(pathBefore, state) ||
+            !sameProvisioningArtifactSnapshot(descriptorBefore, pathBefore)
         ) {
             fail();
         }
@@ -865,12 +862,13 @@ async function readContainedProvisioningArtifact(
             fail();
         }
     }
-    const after = await lstat(candidate, { bigint: true });
+    const pathAfter = await lstat(candidate, { bigint: true });
     if (
         !bytes ||
-        !validProvisioningArtifact(after, state) ||
-        !sameProvisioningArtifactSnapshot(before, after) ||
-        bytes.byteLength !== Number(before.size)
+        !pathBefore ||
+        !validProvisioningArtifact(pathAfter, state) ||
+        !sameProvisioningArtifactSnapshot(pathBefore, pathAfter) ||
+        bytes.byteLength !== Number(pathBefore.size)
     ) {
         fail();
     }
