@@ -1,8 +1,8 @@
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 
 import type { AgentService } from "../server/domains/agents/service.ts";
-import type { CacheService } from "../server/domains/cache/service.ts";
 import type { BackupService } from "../server/domains/backups/service.ts";
+import type { CacheService } from "../server/domains/cache/service.ts";
 import type { ChatService } from "../server/domains/chat/service.ts";
 import type { DatabaseObservabilityService } from "../server/domains/database/service.ts";
 import type { DeliveryService } from "../server/domains/delivery/service.ts";

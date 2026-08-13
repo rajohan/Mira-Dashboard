@@ -1,6 +1,6 @@
 import { agentProcedureNames, agentRouter } from "../domains/agents/procedures.ts";
-import { cacheProcedureNames, cacheRouter } from "../domains/cache/procedures.ts";
 import { backupProcedureNames, backupRouter } from "../domains/backups/routes.ts";
+import { cacheProcedureNames, cacheRouter } from "../domains/cache/procedures.ts";
 import { chatProcedureNames, chatRouter } from "../domains/chat/procedures.ts";
 import {
     databaseProcedureNames,

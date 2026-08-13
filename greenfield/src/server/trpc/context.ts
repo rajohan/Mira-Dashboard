@@ -1,7 +1,7 @@
 import type { RequestAuthentication } from "../../contracts/security.ts";
 import type { AgentService } from "../domains/agents/service.ts";
-import type { CacheService } from "../domains/cache/service.ts";
 import type { BackupService } from "../domains/backups/service.ts";
+import type { CacheService } from "../domains/cache/service.ts";
 import type { ChatService } from "../domains/chat/service.ts";
 import type { DatabaseObservabilityService } from "../domains/database/service.ts";
 import type { DeliveryService } from "../domains/delivery/service.ts";
