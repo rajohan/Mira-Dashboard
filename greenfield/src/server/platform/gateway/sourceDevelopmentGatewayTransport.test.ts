@@ -3,6 +3,8 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { createInMemoryOpenClawCronIntentStore } from "../../domains/openClawCron/intentStore.ts";
+import { createOpenClawCronService } from "../../domains/openClawCron/service.ts";
 import {
     persistentGatewayAdminMethods,
     persistentGatewayChatReadMutationMethods,
@@ -11,6 +13,7 @@ import {
     persistentGatewayTaskWriteMethods,
 } from "./persistentGatewayProtocol.ts";
 import type { PersistentGatewayTransport } from "./persistentGatewayTransport.ts";
+import { createPersistentOpenClawCronProvider } from "./persistentOpenClawCronProvider.ts";
 import { createSourceDevelopmentGatewayTransport } from "./sourceDevelopmentGatewayTransport.ts";
 
 const temporaryRoots: string[] = [];
@@ -116,7 +119,116 @@ function readTransport(calls: string[]): PersistentGatewayTransport {
     return Object.freeze(transport);
 }
 
+function upstreamCronJob(): Readonly<Record<string, unknown>> {
+    return Object.freeze({
+        configRevision: "revision-1",
+        createdAtMs: 1_800_000_000_000,
+        enabled: true,
+        id: "cron-1",
+        name: "Development cron",
+        payload: Object.freeze({
+            kind: "agentTurn",
+            message: "Exercise development parity.",
+        }),
+        schedule: Object.freeze({
+            expr: "0 7 * * *",
+            kind: "cron",
+            tz: "Europe/Oslo",
+        }),
+        sessionTarget: "isolated",
+        state: Object.freeze({ nextRunAtMs: 1_800_086_400_000 }),
+        updatedAtMs: 1_800_000_000_100,
+        wakeMode: "now",
+    });
+}
+
+function cronReadTransport(calls: string[]): PersistentGatewayTransport {
+    const base = readTransport(calls);
+    const job = upstreamCronJob();
+    const request: PersistentGatewayTransport["request"] = (
+        method,
+        parameters,
+        options
+    ) => {
+        calls.push(`read:${method}`);
+        let response: unknown = Object.freeze({});
+        if (method === "system.info") {
+            response = Object.freeze({ processInstanceId: "live-process" });
+        } else if (method === "cron.get") {
+            response = job;
+        } else if (method === "cron.list") {
+            response = Object.freeze({
+                hasMore: false,
+                jobs: Object.freeze([job]),
+                limit: parameters.limit,
+                nextOffset: null,
+                offset: parameters.offset,
+                snapshotRevision: `sha256:${"a".repeat(43)}`,
+                total: 1,
+            });
+        }
+        options?.onResponseBytes?.(Buffer.byteLength(JSON.stringify(response), "utf8"));
+        return Promise.resolve(response);
+    };
+    return Object.freeze({
+        ...base,
+        request,
+    });
+}
+
 describe("source-development Gateway transport", () => {
+    test("keeps simulated cron deletion authoritative for service readback and inventory", async () => {
+        const stateRoot = await developmentStateRoot();
+        const calls: string[] = [];
+        const transport = createSourceDevelopmentGatewayTransport({
+            nowMs: () => 1_800_000_001_000,
+            readTransport: cronReadTransport(calls),
+            stateRoot,
+        });
+        const provider = createPersistentOpenClawCronProvider(transport);
+        const service = createOpenClawCronService({
+            auditRequired: false,
+            clock: () => 1_800_000_001_000,
+            intentStore: createInMemoryOpenClawCronIntentStore(),
+            provider,
+        });
+
+        expect(
+            await service.delete(
+                { expectedConfigRevision: "revision-1", id: "cron-1" },
+                {
+                    id: "019fc968-1a9b-7770-8f1b-d5b863b0e7b4",
+                    kind: "user",
+                }
+            )
+        ).toEqual({
+            deleted: true,
+            id: "cron-1",
+            observedAtMs: 1_800_000_001_000,
+        });
+        expect(await provider.get({ id: "cron-1" })).toBeUndefined();
+        expect(
+            await provider.list({
+                compact: false,
+                enabled: "all",
+                includeDeliveryPreviews: false,
+                lastRunStatus: "all",
+                limit: 50,
+                offset: 0,
+                scheduleKind: "all",
+                sortBy: "nextRunAtMs",
+                sortDir: "asc",
+            })
+        ).toMatchObject({
+            hasMore: false,
+            jobs: [],
+            nextOffset: null,
+            total: 0,
+        });
+        expect(calls).toEqual(["read:system.info", "read:cron.get", "read:cron.list"]);
+        expect(calls.some((call) => call.startsWith("REAL-WRITE:"))).toBeFalse();
+    });
+
     test("delegates reads but simulates every write method under marked development state", async () => {
         const stateRoot = await developmentStateRoot();
         const calls: string[] = [];

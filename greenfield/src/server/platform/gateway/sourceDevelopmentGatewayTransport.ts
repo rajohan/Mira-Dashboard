@@ -28,6 +28,7 @@ import {
 import {
     type PersistentGatewayConnectionSnapshot,
     type PersistentGatewayRequestOptions,
+    PersistentGatewayRequestError,
     type PersistentGatewayTransport,
 } from "./persistentGatewayTransport.ts";
 
@@ -77,6 +78,7 @@ interface CompanionExchange {
 interface SimulatorState {
     readonly companionExchanges: Map<string, readonly CompanionExchange[]>;
     readonly observedResponses: Map<string, unknown>;
+    readonly removedCronJobIds: Set<string>;
     readonly simulatedResponses: Map<string, unknown>;
 }
 
@@ -144,6 +146,56 @@ function asRecord(value: unknown): Readonly<Record<string, unknown>> | undefined
     return value !== null && typeof value === "object" && !Array.isArray(value)
         ? (value as Readonly<Record<string, unknown>>)
         : undefined;
+}
+
+function simulatedCronSnapshotRevision(
+    upstreamRevision: unknown,
+    removedCronJobIds: ReadonlySet<string>
+): string {
+    const serialized = JSON.stringify([
+        upstreamRevision,
+        [...removedCronJobIds].toSorted(),
+    ]);
+    return `sha256:${new Bun.CryptoHasher("sha256")
+        .update(serialized)
+        .digest("base64url")}`;
+}
+
+function projectCronListAfterRemovals(response: unknown, state: SimulatorState): unknown {
+    if (state.removedCronJobIds.size === 0) return response;
+    const page = asRecord(response);
+    if (page === undefined || !Array.isArray(page.jobs)) return response;
+    const jobs = page.jobs.filter((job) => {
+        const id = asRecord(job)?.id;
+        return typeof id !== "string" || !state.removedCronJobIds.has(id);
+    });
+    const removedCount = page.jobs.length - jobs.length;
+    const offset = page.offset;
+    const total = page.total;
+    if (
+        typeof offset !== "number" ||
+        !Number.isSafeInteger(offset) ||
+        offset < 0 ||
+        typeof total !== "number" ||
+        !Number.isSafeInteger(total) ||
+        total < 0
+    ) {
+        return Object.freeze({ ...page, jobs: Object.freeze(jobs) });
+    }
+    const consumed = offset + jobs.length;
+    const projectedTotal = Math.max(consumed, total - removedCount);
+    const hasMore = consumed < projectedTotal;
+    return Object.freeze({
+        ...page,
+        hasMore,
+        jobs: Object.freeze(jobs),
+        nextOffset: hasMore ? consumed : null,
+        snapshotRevision: simulatedCronSnapshotRevision(
+            page.snapshotRevision,
+            state.removedCronJobIds
+        ),
+        total: projectedTotal,
+    });
 }
 
 function deepMerge(
@@ -373,6 +425,11 @@ function simulatedResponse(
             });
         }
         case "cron.remove": {
+            const id = parameterString(parameters, "id");
+            state.removedCronJobIds.add(id);
+            const key = readKey("cron.get", { id });
+            state.observedResponses.delete(key);
+            state.simulatedResponses.delete(key);
             return Object.freeze({ removed: true });
         }
         case "cron.run": {
@@ -463,6 +520,26 @@ function observedRead(
     });
 }
 
+function observedGatewayRead(
+    state: SimulatorState,
+    method: string,
+    parameters: Readonly<Record<string, unknown>>,
+    read: () => Promise<unknown>
+): Promise<unknown> {
+    if (method === "cron.get") {
+        const id = parameters.id;
+        if (typeof id === "string" && state.removedCronJobIds.has(id)) {
+            return Promise.reject(
+                new PersistentGatewayRequestError({ code: "INVALID_REQUEST" })
+            );
+        }
+    }
+    const key = readKey(method, parameters);
+    return observedRead(state, key, read).then((response) =>
+        method === "cron.list" ? projectCronListAfterRemovals(response, state) : response
+    );
+}
+
 /**
  * Creates a hybrid source-development Gateway transport: all read/event calls stay
  * on the reviewed production read lane, while every mutation is validated, recorded
@@ -484,6 +561,7 @@ export function createSourceDevelopmentGatewayTransport(
     const state: SimulatorState = {
         companionExchanges: new Map(),
         observedResponses: new Map(),
+        removedCronJobIds: new Set(),
         simulatedResponses: new Map(),
     };
     const dispatch = (
@@ -507,8 +585,7 @@ export function createSourceDevelopmentGatewayTransport(
             return options.readTransport.snapshot;
         },
         request(method, parameters, requestOptions) {
-            const key = readKey(method, parameters);
-            return observedRead(state, key, () =>
+            return observedGatewayRead(state, method, parameters, () =>
                 options.readTransport.request(method, parameters, requestOptions)
             );
         },
