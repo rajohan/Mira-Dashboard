@@ -137,6 +137,189 @@ const stackGroup = {
 } as const satisfies DeliveryPullRequestGroup;
 
 describe("Delivery operation intents", () => {
+    test("builds each remaining Mira prompt from the exact server-owned scope", () => {
+        const cases = [
+            {
+                action: capability("create-stack"),
+                expectedOperation: "create-pull-request-stack",
+                group: stackGroup,
+                pullRequest,
+            },
+            {
+                action: capability("preview-start"),
+                expectedOperation: "start-preview",
+                group: standaloneGroup,
+                preview,
+                pullRequest,
+            },
+            {
+                action: capability("reject"),
+                expectedOperation: "reject-pull-request",
+                group: standaloneGroup,
+                pullRequest,
+            },
+            {
+                action: capability("update-branch"),
+                expectedOperation: "update-branch",
+                group: standaloneGroup,
+                pullRequest,
+            },
+        ] as const;
+
+        for (const value of cases) {
+            const prompt = pullRequestOperationPrompt({
+                action: value.action,
+                group: value.group,
+                preview: "preview" in value ? value.preview : undefined,
+                pullRequest: value.pullRequest,
+                sourceRevision,
+            });
+            expect(prompt?.description).toContain("Mira (mira-2026)");
+            expect(prompt?.input.operation).toBe(value.expectedOperation);
+        }
+        expect(
+            pullRequestOperationPrompt({
+                action: capability("create-stack"),
+                group: stackGroup,
+                pullRequest: { ...pullRequest, number: 999 },
+                sourceRevision,
+            })
+        ).toBeUndefined();
+        expect(
+            pullRequestOperationPrompt({
+                action: capability("approve-review", "raymond"),
+                group: standaloneGroup,
+                pullRequest,
+                sourceRevision,
+            })
+        ).toBeUndefined();
+        expect(
+            pullRequestOperationPrompt({
+                action: capability("merge"),
+                group: standaloneGroup,
+                pullRequest,
+                sourceRevision,
+            })
+        ).toBeUndefined();
+        expect(
+            pullRequestOperationPrompt({
+                action: capability("preview-start"),
+                group: standaloneGroup,
+                pullRequest,
+                sourceRevision,
+            })
+        ).toBeUndefined();
+        expect(stopPreviewPrompt({ ...preview, number: undefined }, sourceRevision)).toBe(
+            undefined
+        );
+        expect(
+            rollbackReleasePrompt(
+                {
+                    ...releases,
+                    rollback: {
+                        actor: "mira",
+                        available: false,
+                        reason: "no-previous-release",
+                    },
+                },
+                sourceRevision
+            )
+        ).toBeUndefined();
+    });
+
+    test("invalidates every operation class when its exact authority drifts", () => {
+        const approval = pullRequestOperationPrompt({
+            action: capability("approve-review", "raymond"),
+            group: standaloneGroup,
+            pullRequest,
+            reviewerRevision: resourceRevision,
+            sourceRevision,
+        })!;
+        expect(
+            deliveryOperationIsCurrent(approval.input, {
+                pullRequestsFresh: true,
+                pullRequestSourceRevision: sourceRevision,
+                reviewerRevision: resourceRevision,
+            })
+        ).toBeTrue();
+        expect(
+            deliveryOperationIsCurrent(approval.input, {
+                pullRequestsFresh: true,
+                pullRequestSourceRevision: sourceRevision,
+                reviewerRevision: secondResourceRevision,
+            })
+        ).toBeFalse();
+
+        const update = pullRequestOperationPrompt({
+            action: capability("update-branch"),
+            group: standaloneGroup,
+            pullRequest,
+            sourceRevision,
+        })!;
+        expect(
+            deliveryOperationIsCurrent(update.input, {
+                pullRequestsFresh: true,
+                pullRequestSourceRevision: sourceRevision,
+            })
+        ).toBeTrue();
+        expect(
+            deliveryOperationIsCurrent(update.input, {
+                pullRequestsFresh: false,
+                pullRequestSourceRevision: sourceRevision,
+            })
+        ).toBeFalse();
+
+        const start = pullRequestOperationPrompt({
+            action: capability("preview-start"),
+            group: standaloneGroup,
+            preview,
+            pullRequest,
+            sourceRevision,
+        })!;
+        expect(
+            deliveryOperationIsCurrent(start.input, {
+                preview,
+                previewActionActive: false,
+                previewFresh: true,
+                pullRequestsFresh: true,
+                pullRequestSourceRevision: sourceRevision,
+            })
+        ).toBeTrue();
+        expect(
+            deliveryOperationIsCurrent(start.input, {
+                preview,
+                previewActionActive: true,
+                previewFresh: true,
+                pullRequestsFresh: true,
+                pullRequestSourceRevision: sourceRevision,
+            })
+        ).toBeFalse();
+
+        const merge = pullRequestOperationPrompt({
+            action: capability("merge"),
+            checkout,
+            group: standaloneGroup,
+            pullRequest,
+            sourceRevision,
+        })!;
+        expect(
+            deliveryOperationIsCurrent(merge.input, {
+                checkout,
+                checkoutFresh: true,
+                pullRequestsFresh: true,
+                pullRequestSourceRevision: sourceRevision,
+            })
+        ).toBeTrue();
+        expect(
+            deliveryOperationIsCurrent(merge.input, {
+                checkout: { ...checkout, revision: secondResourceRevision },
+                checkoutFresh: true,
+                pullRequestsFresh: true,
+                pullRequestSourceRevision: sourceRevision,
+            })
+        ).toBeFalse();
+    });
+
     test("uses Raymond only for exact-head review approval", () => {
         const prompt = pullRequestOperationPrompt({
             action: capability("approve-review", "raymond"),

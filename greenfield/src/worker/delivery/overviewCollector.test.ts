@@ -98,6 +98,87 @@ async function pullRequestSection(collector: DeliveryOverviewCollector) {
 }
 
 describe("Delivery overview collector", () => {
+    test("collects the minimum exact authority for every operation class", async () => {
+        const productionSnapshot = {
+            actionActive: false,
+            releases: releases(),
+        } as const;
+        const productionRuns: Array<string | undefined> = [];
+        const collector = createDeliveryOverviewCollector(
+            options({
+                preview: {
+                    status: () =>
+                        Promise.resolve({
+                            expectedHeads: [{ headSha: mainHead, number: 1 }],
+                            headSha: mainHead,
+                            number: 1,
+                            previewRevision: "b".repeat(64),
+                            status: "running",
+                            updatedAtMs: nowMs,
+                        }),
+                },
+                production: {
+                    read: () => {
+                        productionRuns.push(undefined);
+                        return Promise.resolve(productionSnapshot);
+                    },
+                    readForOperation: (runId) => {
+                        productionRuns.push(runId);
+                        return Promise.resolve(productionSnapshot);
+                    },
+                },
+                reviewer: { probe: () => Promise.resolve({ state: "available" }) },
+            })
+        );
+        const sourceRevision = "c".repeat(64);
+
+        const deploy = await collector.collectForOperation({
+            activationRevision: "a".repeat(64),
+            checkoutRevision: "b".repeat(64),
+            expectedMainHeadSha: mainHead,
+            operation: "deploy",
+            sourceRevision,
+        });
+        expect(deploy.checkout.remoteHeadSha).toBe(mainHead);
+
+        const rollback = await collector.collectForOperation(
+            {
+                activationRevision: "a".repeat(64),
+                operation: "rollback-release",
+                sourceRevision,
+                target: {
+                    databaseSnapshotTransitionId: "019fdf70-0000-7000-8000-000000000001",
+                    releaseId: "d".repeat(40),
+                    runtimeRevision: "e".repeat(40),
+                },
+            },
+            "rollback-run"
+        );
+        expect(rollback.releases.activationRevision).toBe("a".repeat(64));
+
+        const stopPreview = await collector.collectForOperation({
+            number: 1,
+            operation: "stop-preview",
+            previewRevision: "b".repeat(64),
+            sourceRevision,
+        });
+        expect(stopPreview.preview).toMatchObject({ number: 1, status: "running" });
+
+        const pullRequestAuthority = await collector.collectForOperation({
+            expectedHeadSha: pullRequest().headSha,
+            number: 1,
+            operation: "approve-review",
+            reviewerRevision: "d".repeat(64),
+            sourceRevision,
+        });
+        expect(pullRequestAuthority.pullRequestGroups).toHaveLength(1);
+        expect(pullRequestAuthority.reviewerCapability).toMatchObject({
+            actor: "raymond",
+            available: true,
+        });
+        expect(productionRuns).toEqual([undefined, "rollback-run", undefined, undefined]);
+    });
+
     test("rediscovers every authority and never trusts retained cache membership", async () => {
         let calls = 0;
         const collector = createDeliveryOverviewCollector(

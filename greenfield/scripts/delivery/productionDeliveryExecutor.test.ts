@@ -29,8 +29,13 @@ import {
     loadProductionActivationState,
 } from "./productionActivationState.ts";
 import {
+    clearProductionDeliveryOperationMarker,
+    inspectActiveProductionDeliveryOperation,
+    inspectProductionDeliveryOperation,
     parseProductionDeliveryExecutorArguments,
+    prepareProductionDeliveryOperation,
     prepareProductionDeliveryTargetUnderLease,
+    runProductionDeliveryExecutor,
     runProductionDeliveryExecutorUnderLease,
     verifyProductionRunBeforeSnapshot,
 } from "./productionDeliveryExecutor.ts";
@@ -446,6 +451,133 @@ describe("production Delivery executor", () => {
             );
             expect(replay).toEqual(receipt);
         });
+    });
+
+    test("preserves one exact receipt through the public project-root lifecycle", async () => {
+        const { options, paths } = await fixture();
+        const capsule = operationCapsule();
+        const targetActivation = {
+            current: {
+                releaseId: targetReleaseId,
+                runtimeRevision: targetRuntimeRevision,
+            },
+            formatVersion: 1 as const,
+            previous: {
+                databaseSnapshotTransitionId: operationTransitionId,
+                releaseId: currentReleaseId,
+                runtimeRevision: currentRuntimeRevision,
+            },
+            transitionId: operationTransitionId,
+        };
+        await withDeploymentLease(paths.stateDirectory, async (lease) => {
+            const empty = await loadProductionActivationState(lease, paths);
+            await commitProductionActivationState(lease, paths, empty, {
+                current: {
+                    releaseId: currentReleaseId,
+                    runtimeRevision: currentRuntimeRevision,
+                },
+                formatVersion: 1,
+                previous: null,
+                transitionId: currentTransitionId,
+            });
+        });
+
+        const prepared = await prepareProductionDeliveryOperation(
+            options.projectRoot,
+            capsule,
+            () => 1000
+        );
+        expect(prepared).toMatchObject({
+            capsule,
+            phase: "intent-recorded",
+            updatedAtMs: 1000,
+        });
+        expect(
+            await prepareProductionDeliveryOperation(
+                options.projectRoot,
+                capsule,
+                () => 2000
+            )
+        ).toEqual(prepared);
+        expect(
+            await inspectActiveProductionDeliveryOperation(options.projectRoot)
+        ).toMatchObject({
+            record: { phase: "intent-recorded" },
+            state: "in-progress",
+            transitionId: operationTransitionId,
+        });
+        expect(
+            await inspectProductionDeliveryOperation(
+                options.projectRoot,
+                operationTransitionId
+            )
+        ).toMatchObject({
+            record: { phase: "intent-recorded" },
+            state: "in-progress",
+            transitionId: operationTransitionId,
+        });
+
+        const receipt = await runProductionDeliveryExecutor(options, {
+            activate: (...arguments_) =>
+                Effect.tryPromise({
+                    catch: () => new Error("activation failed") as never,
+                    try: async () => {
+                        for (const phase of [
+                            "services-stopped",
+                            "current-snapshot-created",
+                            "target-database-ready",
+                            "target-services-started",
+                            "target-verified",
+                            "target-smoke-verified",
+                        ] as const) {
+                            await arguments_[5]?.onProgress?.(phase);
+                        }
+                        return targetActivation;
+                    },
+                }),
+            createServices: () => ({
+                prepare: () => Promise.resolve(),
+                start: () => Promise.resolve(),
+                stop: () => Promise.resolve(),
+                verifyReady: () => Promise.resolve(),
+                verifySmoke: () => Promise.resolve(),
+            }),
+            loadArtifacts: (_paths, releaseId, runtimeRevision) =>
+                Promise.resolve(artifact(releaseId, runtimeRevision)),
+            nowMs: () => 10_000,
+            verifyPreviewTailscaleOperator: () => Promise.resolve(),
+            verifyRunBeforeSnapshot: () => Promise.resolve(),
+        });
+        expect(receipt).toMatchObject({
+            phase: "terminal",
+            result: { activation: targetActivation, outcome: "succeeded" },
+        });
+        expect(
+            await inspectProductionDeliveryOperation(
+                options.projectRoot,
+                operationTransitionId
+            )
+        ).toMatchObject({ state: "terminal", transitionId: operationTransitionId });
+        expect(
+            await clearProductionDeliveryOperationMarker(
+                options.projectRoot,
+                operationTransitionId
+            )
+        ).toEqual(receipt);
+        expect(
+            await inspectActiveProductionDeliveryOperation(options.projectRoot)
+        ).toEqual({ state: "missing" });
+        expect(
+            await inspectProductionDeliveryOperation(
+                options.projectRoot,
+                operationTransitionId
+            )
+        ).toMatchObject({ state: "terminal", transitionId: operationTransitionId });
+
+        const replayFailure = await rejectionError(
+            prepareProductionDeliveryOperation(options.projectRoot, capsule, () => 3000)
+        );
+        expect(replayFailure.message).toBe("Production Delivery executor failed");
     });
 
     test("never records success when the normal runtime restart fails", async () => {

@@ -292,6 +292,24 @@ describe("production Delivery launcher", () => {
 });
 
 describe("production Delivery control port", () => {
+    test("bounds an actual immutable executor control process", async () => {
+        const fixture_ = await fixture();
+        await chmod(fixture_.runtime, 0o700);
+        await writeFile(
+            fixture_.runtime,
+            "#!/bin/sh\nprintf '%s\\n' '{\"state\":\"missing\"}'\n",
+            { mode: 0o500 }
+        );
+        await chmod(fixture_.runtime, 0o500);
+        const control = createProductionDeliveryControlPort({
+            executorReleaseId,
+            projectRoot: fixture_.options.projectRoot,
+            runtimeRevision,
+        });
+
+        expect(await control.inspectActive()).toEqual({ state: "missing" });
+    });
+
     test("uses only the verified executor for prepare, inspect, and clear", async () => {
         const fixture_ = await fixture();
         const capsule = operationCapsule();
