@@ -26,6 +26,7 @@ import {
     type PersistentGatewayTaskWriteMethod,
 } from "./persistentGatewayProtocol.ts";
 import {
+    PersistentGatewayCapacityError,
     type PersistentGatewayConnectionSnapshot,
     type PersistentGatewayRequestOptions,
     PersistentGatewayRequestError,
@@ -38,7 +39,7 @@ const simulatorDirectoryName = "development-authority-simulator";
 const gatewayJournalFileName = "gateway-mutations.ndjson";
 const simulatedCronInventoryMaximum = 1000;
 const simulatedCronInventoryMaximumBytes = 32 * 1024 * 1024;
-const simulatedCronSnapshotMaximum = 4;
+const simulatedCronMaterializationMaximum = 4;
 const simulatedCronUpstreamPageMaximum = 100;
 
 const developmentStateMarkerSchema = v.strictObject({
@@ -94,9 +95,17 @@ interface SimulatedCronListPage {
     readonly total: number;
 }
 
+interface SimulatedCronMaterializationAdmission {
+    readonly tryAcquire: () => SimulatedCronMaterializationLease | undefined;
+}
+
+interface SimulatedCronMaterializationLease {
+    readonly release: () => void;
+}
+
 interface SimulatorState {
     readonly companionExchanges: Map<string, readonly CompanionExchange[]>;
-    readonly cronListSnapshots: Map<string, Promise<SimulatedCronListSnapshot>>;
+    readonly cronMaterializationAdmission: SimulatedCronMaterializationAdmission;
     readonly observedResponses: Map<string, unknown>;
     readonly removedCronJobIds: Set<string>;
     readonly simulatedResponses: Map<string, unknown>;
@@ -181,11 +190,6 @@ function simulatedCronSnapshotRevision(
         .digest("base64url")}`;
 }
 
-function cronListSnapshotKey(parameters: Readonly<Record<string, unknown>>): string {
-    const { limit: _limit, offset: _offset, ...filters } = parameters;
-    return JSON.stringify(filters);
-}
-
 function cronListPageInteger(
     parameters: Readonly<Record<string, unknown>>,
     key: "limit" | "offset",
@@ -202,6 +206,24 @@ function cronListPageInteger(
         throw new TypeError("Development cron list parameters are invalid");
     }
     return value;
+}
+
+function createSimulatedCronMaterializationAdmission(): SimulatedCronMaterializationAdmission {
+    let active = 0;
+    return Object.freeze({
+        tryAcquire(): SimulatedCronMaterializationLease | undefined {
+            if (active >= simulatedCronMaterializationMaximum) return;
+            active += 1;
+            let released = false;
+            return Object.freeze({
+                release(): void {
+                    if (released) return;
+                    released = true;
+                    active -= 1;
+                },
+            });
+        },
+    });
 }
 
 function assertCronUpstreamPage(
@@ -329,7 +351,7 @@ async function materializeCronListSnapshot(
 function projectCronListSnapshot(
     snapshot: SimulatedCronListSnapshot,
     parameters: Readonly<Record<string, unknown>>,
-    state: SimulatorState
+    removedCronJobIds: ReadonlySet<string>
 ): Readonly<SimulatedCronListPage> {
     const limit = cronListPageInteger(parameters, "limit", 1, 100);
     const offset = cronListPageInteger(
@@ -340,7 +362,7 @@ function projectCronListSnapshot(
     );
     const filteredJobs = snapshot.jobs.filter((job) => {
         const id = asRecord(job)?.id;
-        return typeof id !== "string" || !state.removedCronJobIds.has(id);
+        return typeof id !== "string" || !removedCronJobIds.has(id);
     });
     const jobs = filteredJobs.slice(offset, offset + limit);
     const consumed = offset + jobs.length;
@@ -354,24 +376,10 @@ function projectCronListSnapshot(
         offset,
         snapshotRevision: simulatedCronSnapshotRevision(
             snapshot.upstreamRevision,
-            state.removedCronJobIds
+            removedCronJobIds
         ),
         total,
     });
-}
-
-function storeCronListSnapshot(
-    state: SimulatorState,
-    key: string,
-    pendingSnapshot: Promise<SimulatedCronListSnapshot>
-): void {
-    state.cronListSnapshots.delete(key);
-    while (state.cronListSnapshots.size >= simulatedCronSnapshotMaximum) {
-        const oldestKey = state.cronListSnapshots.keys().next().value;
-        if (typeof oldestKey !== "string") break;
-        state.cronListSnapshots.delete(oldestKey);
-    }
-    state.cronListSnapshots.set(key, pendingSnapshot);
 }
 
 async function simulatedCronListRead(
@@ -384,35 +392,25 @@ async function simulatedCronListRead(
     ) => Promise<unknown>
 ): Promise<unknown> {
     cronListPageInteger(parameters, "limit", 1, 100);
-    const offset = cronListPageInteger(
-        parameters,
-        "offset",
-        0,
-        simulatedCronInventoryMaximum
-    );
-    const key = cronListSnapshotKey(parameters);
-    let pendingSnapshot = state.cronListSnapshots.get(key);
-    if (offset === 0 || pendingSnapshot === undefined) {
-        pendingSnapshot = materializeCronListSnapshot(parameters, requestOptions, read);
-        storeCronListSnapshot(state, key, pendingSnapshot);
-    }
+    cronListPageInteger(parameters, "offset", 0, simulatedCronInventoryMaximum);
+    const admission = state.cronMaterializationAdmission.tryAcquire();
+    if (admission === undefined) throw new PersistentGatewayCapacityError();
     try {
-        const response = projectCronListSnapshot(
-            await pendingSnapshot,
+        const snapshot = await materializeCronListSnapshot(
             parameters,
-            state
+            requestOptions,
+            read
+        );
+        const response = projectCronListSnapshot(
+            snapshot,
+            parameters,
+            state.removedCronJobIds
         );
         requestOptions.signal?.throwIfAborted();
         requestOptions.onResponseBytes?.(responseByteLength(response));
-        if (!response.hasMore && state.cronListSnapshots.get(key) === pendingSnapshot) {
-            state.cronListSnapshots.delete(key);
-        }
         return response;
-    } catch (error) {
-        if (state.cronListSnapshots.get(key) === pendingSnapshot) {
-            state.cronListSnapshots.delete(key);
-        }
-        throw error;
+    } finally {
+        admission.release();
     }
 }
 
@@ -776,7 +774,7 @@ export function createSourceDevelopmentGatewayTransport(
     const nowMs = options.nowMs ?? Date.now;
     const state: SimulatorState = {
         companionExchanges: new Map(),
-        cronListSnapshots: new Map(),
+        cronMaterializationAdmission: createSimulatedCronMaterializationAdmission(),
         observedResponses: new Map(),
         removedCronJobIds: new Set(),
         simulatedResponses: new Map(),
