@@ -109,6 +109,7 @@ function SelectedSchedule({
                     }
                 />
                 <JobRunTable
+                    label="Schedule job runs"
                     onSelect={onSelectRun}
                     runs={runs}
                     selectedId={selectedRunId}
@@ -263,7 +264,7 @@ export function ScheduleBrowser({ onRequestRunFocus }: ScheduleBrowserProps) {
     }
 
     return (
-        <section aria-labelledby="schedules-heading">
+        <section aria-label="Dashboard schedule management">
             <div className="flex flex-wrap items-end justify-between gap-4">
                 <div>
                     <Heading id="schedules-heading" level={2}>

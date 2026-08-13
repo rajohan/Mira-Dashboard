@@ -238,7 +238,7 @@ export function DockerContainersTable({
                                                     </div>
                                                 )}
                                                 <code
-                                                    className="text-primary-500 mt-1 block text-xs wrap-anywhere"
+                                                    className="text-primary-400 mt-1 block text-xs wrap-anywhere"
                                                     title={container.id}
                                                 >
                                                     {container.id.slice(0, 12)}

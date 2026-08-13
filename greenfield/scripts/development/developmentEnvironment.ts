@@ -100,7 +100,6 @@ export async function developmentProcessEnvironments(
         MIRA_DASHBOARD_PROJECT_ROOT: config.stateRoot,
         MIRA_DASHBOARD_WORKSPACE_ROOT: config.workspaceRoot,
         NODE_ENV: "development",
-        OPENCLAW_GATEWAY_TOKEN: token,
         OPENCLAW_GATEWAY_URL: config.gatewayUrl,
     };
     const web: Record<string, string> = {
@@ -111,11 +110,14 @@ export async function developmentProcessEnvironments(
         MIRA_DASHBOARD_WEBAUTHN_ORIGINS: config.publicOrigin,
         MIRA_DASHBOARD_WEBAUTHN_RP_ID: config.rpId,
         MIRA_DASHBOARD_WEBAUTHN_RP_NAME: "Mira Dashboard Development",
+        OPENCLAW_GATEWAY_TOKEN: token,
         PORT: String(config.backendPort),
     };
     const worker: Record<string, string> = {
         ...shared,
         MOLTBOOK_API_KEY: moltbookCredential,
+        OPENCLAW_GATEWAY_TOKEN: "source-development-no-gateway-credential",
+        OPENCLAW_GATEWAY_URL: "ws://127.0.0.1:9/",
     };
     const moltbookAgentName = environment.MOLTBOOK_AGENT_NAME;
     if (moltbookAgentName !== undefined) {

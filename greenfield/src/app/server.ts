@@ -5,6 +5,7 @@ import { chatAttachmentLimits } from "../contracts/chatMedia.ts";
 import { workspaceFileLimits } from "../contracts/files.ts";
 import { healthLivenessPath, healthReadinessPath } from "../contracts/system.ts";
 import type { AgentService } from "../server/domains/agents/service.ts";
+import type { BackupService } from "../server/domains/backups/service.ts";
 import type { CacheService } from "../server/domains/cache/service.ts";
 import type { ChatService } from "../server/domains/chat/service.ts";
 import type { DatabaseObservabilityService } from "../server/domains/database/service.ts";
@@ -29,6 +30,7 @@ import type { MfaLoginLifecycleService } from "../server/domains/security/mfa/lo
 import type { SecurityAuditLifecycleService } from "../server/domains/security/securityAuditLifecycle.ts";
 import type { ServiceActionsService } from "../server/domains/serviceActions/service.ts";
 import type { SystemHealthDiagnosticsService } from "../server/domains/system/healthDiagnosticsService.ts";
+import { systemHttpMetricProceduresFromUrl } from "../server/domains/system/httpProcedureMetrics.ts";
 import type { TaskService } from "../server/domains/tasks/service.ts";
 import type { TerminalService } from "../server/domains/terminal/service.ts";
 import type { ReadinessController } from "../server/platform/readiness/readinessState.ts";
@@ -159,6 +161,21 @@ function requestOutcome(status: number): "rejected" | "server-error" | "success"
     return "success";
 }
 
+function recordHttpProcedureMetrics(
+    applicationRuntime: ApplicationRuntime,
+    requestUrl: URL,
+    durationMs: number,
+    status: number
+): void {
+    const procedures = systemHttpMetricProceduresFromUrl(requestUrl);
+    if (procedures.length === 0) return;
+    applicationRuntime.services.systemMetrics.recordHttpRequest?.({
+        durationMs,
+        procedures,
+        status,
+    });
+}
+
 function internalServerErrorResponse(requestId: string): Response {
     return new Response("Internal Server Error", {
         headers: {
@@ -198,6 +215,7 @@ export interface ServerOptions {
     /** Explicit public browser origin when TLS terminates at a trusted proxy. */
     readonly browserOrigin?: string;
     readonly cacheService: CacheService["Service"];
+    readonly backupService?: BackupService;
     /** During production cutover, allow reads and only the fixed worker-smoke enqueue. */
     readonly cutoverValidation?: boolean;
     /** Raw attachment/media routes mounted before browser asset fallback. */
@@ -274,6 +292,9 @@ export async function createServer(options: ServerOptions): Promise<ApplicationS
             automationSecurityLifecycle: options.automationSecurityLifecycle,
             browserOrigin,
             cacheService: options.cacheService,
+            ...(options.backupService === undefined
+                ? {}
+                : { backupService: options.backupService }),
             chatService: options.chatService,
             databaseObservabilityService: options.databaseObservabilityService,
             ...(options.deliveryService === undefined
@@ -311,8 +332,8 @@ export async function createServer(options: ServerOptions): Promise<ApplicationS
             async fetch(request, bunServer) {
                 const requestId = crypto.randomUUID();
                 const startedAtMs = performance.now();
+                const requestUrl = new URL(request.url);
                 try {
-                    const requestUrl = new URL(request.url);
                     const pathname = requestUrl.pathname;
                     if (
                         options.cutoverValidation === true &&
@@ -320,6 +341,12 @@ export async function createServer(options: ServerOptions): Promise<ApplicationS
                         request.method !== "HEAD" &&
                         !(request.method === "POST" && pathname === "/trpc/schedules.run")
                     ) {
+                        recordHttpProcedureMetrics(
+                            options.applicationRuntime,
+                            requestUrl,
+                            requestDurationMs(startedAtMs),
+                            503
+                        );
                         return new Response("Production cutover validation in progress", {
                             headers: { "cache-control": "no-store" },
                             status: 503,
@@ -386,9 +413,16 @@ export async function createServer(options: ServerOptions): Promise<ApplicationS
                         }
                     }
                     if (request.signal.aborted) {
+                        const durationMs = requestDurationMs(startedAtMs);
+                        recordHttpProcedureMetrics(
+                            options.applicationRuntime,
+                            requestUrl,
+                            durationMs,
+                            499
+                        );
                         logger.info({
                             component: "http",
-                            durationMs: requestDurationMs(startedAtMs),
+                            durationMs,
                             event: "http.request.cancelled",
                             fields: { kind: "http-request", method: request.method },
                             outcome: "cancelled",
@@ -397,9 +431,16 @@ export async function createServer(options: ServerOptions): Promise<ApplicationS
                         return cancelledRequestResponse(requestId);
                     }
                     const correlatedResponse = responseWithRequestId(response, requestId);
+                    const durationMs = requestDurationMs(startedAtMs);
+                    recordHttpProcedureMetrics(
+                        options.applicationRuntime,
+                        requestUrl,
+                        durationMs,
+                        correlatedResponse.status
+                    );
                     logger.info({
                         component: "http",
-                        durationMs: requestDurationMs(startedAtMs),
+                        durationMs,
                         event: "http.response.created",
                         fields: {
                             kind: "http-response",
@@ -412,9 +453,16 @@ export async function createServer(options: ServerOptions): Promise<ApplicationS
                     return correlatedResponse;
                 } catch (error) {
                     if (request.signal.aborted) {
+                        const durationMs = requestDurationMs(startedAtMs);
+                        recordHttpProcedureMetrics(
+                            options.applicationRuntime,
+                            requestUrl,
+                            durationMs,
+                            499
+                        );
                         logger.info({
                             component: "http",
-                            durationMs: requestDurationMs(startedAtMs),
+                            durationMs,
                             event: "http.request.cancelled",
                             fields: { kind: "http-request", method: request.method },
                             outcome: "cancelled",
@@ -422,9 +470,16 @@ export async function createServer(options: ServerOptions): Promise<ApplicationS
                         });
                         return cancelledRequestResponse(requestId);
                     }
+                    const durationMs = requestDurationMs(startedAtMs);
+                    recordHttpProcedureMetrics(
+                        options.applicationRuntime,
+                        requestUrl,
+                        durationMs,
+                        500
+                    );
                     logger.error({
                         component: "http",
-                        durationMs: requestDurationMs(startedAtMs),
+                        durationMs,
                         event: "http.request.failed",
                         failure: error,
                         fields: { kind: "http-request", method: request.method },

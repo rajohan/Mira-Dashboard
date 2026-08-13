@@ -12,6 +12,7 @@ import {
     dockerOperationJobActionKey,
     dockerOverviewCacheJobActionKey,
     dockerUpdaterJobActionKey,
+    overviewProviderJobActionKeys,
 } from "./actionRegistry.ts";
 import type { JobWorkerCoordinator } from "./coordinator.ts";
 import type { JobRepository } from "./repository.ts";
@@ -358,6 +359,10 @@ describe("Dashboard worker runtime", () => {
                 ).toBeUndefined();
                 expect(options.findAction?.(dockerUpdaterJobActionKey)).toBeUndefined();
                 expect(options.findAction?.(dockerOperationJobActionKey)).toBeUndefined();
+                for (const actionKey of overviewProviderJobActionKeys) {
+                    expect(actionKeys).not.toContain(actionKey);
+                    expect(options.findAction?.(actionKey)).toBeUndefined();
+                }
                 return fixture.dependencies.createCoordinator(options);
             },
         };

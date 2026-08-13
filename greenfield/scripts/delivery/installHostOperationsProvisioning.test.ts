@@ -18,12 +18,13 @@ import path from "node:path";
 
 import { rejectionError } from "../testSupport/rejection.ts";
 import {
+    activateHostOperationsProvisioning,
     parseInstallHostOperationsProvisioningArguments,
     runInstallHostOperationsProvisioningCli,
 } from "./provisioning/host-operations/installHostOperationsProvisioning.ts";
 import {
     hostOperationsProvisioningArtifacts,
-    hostOperationsProvisioningReleaseArtifactPaths,
+    hostOperationsProvisioningSourceArtifactPaths,
 } from "./provisioning/host-operations/policy.ts";
 
 const releaseId = "a".repeat(40);
@@ -96,8 +97,11 @@ async function releaseFixture(
     );
     await mkdir(releaseRoot, { recursive: true, mode: 0o700 });
     await cp(source, destination, { recursive: true });
+    await cp(path.join(sourceProjectRoot, "systemd"), path.join(releaseRoot, "systemd"), {
+        recursive: true,
+    });
     const artifacts = [];
-    for (const artifactPath of hostOperationsProvisioningReleaseArtifactPaths) {
+    for (const artifactPath of hostOperationsProvisioningSourceArtifactPaths) {
         const bytes = await readFile(path.join(releaseRoot, artifactPath));
         artifacts.push({
             bytes: bytes.byteLength,
@@ -120,6 +124,7 @@ async function releaseFixture(
         "scripts/delivery/provisioning",
         "scripts/delivery",
         "scripts",
+        "systemd",
         "",
     ]) {
         await chmod(path.join(releaseRoot, directory), 0o500);
@@ -185,7 +190,7 @@ async function destinationFixture(
     );
     temporaryRoots.push(destinationRoot);
     await chmod(destinationRoot, 0o700);
-    const directories = ["etc/polkit-1/rules.d", "etc/systemd/system"];
+    const directories = ["etc/polkit-1/rules.d", "etc/systemd/system", "etc/sysusers.d"];
     if (options.includeLibexec === false) directories.push("usr/local");
     else directories.push("usr/local/libexec");
     for (const directory of directories) {
@@ -207,6 +212,40 @@ async function argumentsFor(releaseRoot: string): Promise<readonly string[]> {
 }
 
 describe("root host-operations provisioning installer", () => {
+    test("activates only fixed sysusers and root-systemd topology commands", async () => {
+        const commands: Array<readonly [string, readonly string[]]> = [];
+        await activateHostOperationsProvisioning((executable, arguments_) => {
+            commands.push([executable, [...arguments_]]);
+            return Promise.resolve({
+                exitCode: 0,
+                stderr: new Uint8Array(),
+                stdout: new Uint8Array(),
+            });
+        });
+
+        expect(commands).toEqual([
+            [
+                "/usr/bin/systemd-sysusers",
+                ["/etc/sysusers.d/mira-dashboard-production-authority.conf"],
+            ],
+            ["/usr/bin/systemctl", ["daemon-reload"]],
+            [
+                "/usr/bin/systemctl",
+                ["enable", "mira-dashboard-worker.service", "mira-dashboard-web.service"],
+            ],
+        ]);
+        const failure = await rejectionError(
+            activateHostOperationsProvisioning(() =>
+                Promise.resolve({
+                    exitCode: 1,
+                    stderr: new Uint8Array(),
+                    stdout: new Uint8Array(),
+                })
+            )
+        );
+        expect(failure.message).toBe("Host operations provisioning installation failed");
+    });
+
     test("installs exact manifest bytes atomically without activating host policy", async () => {
         const releaseRoot = await releaseFixture();
         const destinationRoot = await destinationFixture();

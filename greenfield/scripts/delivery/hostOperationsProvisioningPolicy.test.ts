@@ -5,12 +5,13 @@ import path from "node:path";
 import {
     hostOperationsProvisioningArtifacts,
     hostOperationsProvisioningReleaseArtifactPaths,
+    hostOperationsProvisioningSourceArtifactPaths,
 } from "./hostOperationsProvisioningPolicy.ts";
 
 const sourceRoot = path.join(import.meta.dir, "provisioning/host-operations");
 
 describe("host-operations provisioning artifact policy", () => {
-    test("inventories the seven exact root-owned artifacts and all installer support", async () => {
+    test("inventories the exact root-owned authority artifacts and installer support", async () => {
         expect(hostOperationsProvisioningArtifacts).toEqual([
             {
                 artifactPath:
@@ -21,8 +22,21 @@ describe("host-operations provisioning artifact policy", () => {
             },
             {
                 artifactPath:
+                    "scripts/delivery/provisioning/host-operations/mira-dashboard-production-authority.conf",
+                destinationPath:
+                    "/etc/sysusers.d/mira-dashboard-production-authority.conf",
+                mode: 0o644,
+            },
+            {
+                artifactPath:
                     "scripts/delivery/provisioning/host-operations/mira-dashboard-host-operation",
                 destinationPath: "/usr/local/libexec/mira-dashboard-host-operation",
+                mode: 0o755,
+            },
+            {
+                artifactPath:
+                    "scripts/delivery/provisioning/host-operations/mira-dashboard-web-runtime",
+                destinationPath: "/usr/local/libexec/mira-dashboard-web-runtime",
                 mode: 0o755,
             },
             {
@@ -60,6 +74,16 @@ describe("host-operations provisioning artifact policy", () => {
                     "/etc/systemd/system/mira-dashboard-host-system-update.service",
                 mode: 0o644,
             },
+            {
+                artifactPath: "systemd/mira-dashboard-web.service",
+                destinationPath: "/etc/systemd/system/mira-dashboard-web.service",
+                mode: 0o644,
+            },
+            {
+                artifactPath: "systemd/mira-dashboard-worker.service",
+                destinationPath: "/etc/systemd/system/mira-dashboard-worker.service",
+                mode: 0o644,
+            },
         ]);
         const sourceFiles = await readdir(sourceRoot);
         const sourceEntries = sourceFiles.toSorted();
@@ -74,12 +98,21 @@ describe("host-operations provisioning artifact policy", () => {
             "mira-dashboard-host-system-cleanup.service",
             "mira-dashboard-host-system-restart.service",
             "mira-dashboard-host-system-update.service",
+            "mira-dashboard-production-authority.conf",
+            "mira-dashboard-web-runtime",
             "policy.ts",
         ]);
         expect(hostOperationsProvisioningReleaseArtifactPaths).toEqual(
             sourceEntries.map(
                 (fileName) => `scripts/delivery/provisioning/host-operations/${fileName}`
             )
+        );
+        expect(hostOperationsProvisioningSourceArtifactPaths).toEqual(
+            [
+                ...hostOperationsProvisioningReleaseArtifactPaths,
+                "systemd/mira-dashboard-web.service",
+                "systemd/mira-dashboard-worker.service",
+            ].toSorted()
         );
         for (const artifact of hostOperationsProvisioningArtifacts) {
             const source = path.join(

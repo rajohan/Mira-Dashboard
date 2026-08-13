@@ -6,6 +6,7 @@ import { cn } from "../lib/classNames.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { PageHeader } from "../ui/PageHeader.tsx";
 import { TerminalBrowser } from "./TerminalBrowser.tsx";
+import { useTerminalBrowserDependencies } from "./terminalBrowserDependenciesContext.ts";
 import { parseTerminalRouteSearch } from "./terminalRouteSearch.ts";
 
 interface TerminalPageLayoutProps {
@@ -38,6 +39,7 @@ export function TerminalPageLayout({ children }: TerminalPageLayoutProps) {
 
 /** @returns A recent-MFA-gated, worker-owned interactive PTY canvas. */
 export function TerminalRoute() {
+    const dependencies = useTerminalBrowserDependencies();
     const { dockerContainerId } = parseTerminalRouteSearch(
         useSearch({ from: "/terminal" }) as unknown
     );
@@ -58,6 +60,7 @@ export function TerminalRoute() {
                 }
             >
                 <TerminalBrowser
+                    {...dependencies}
                     {...(dockerContainerId === undefined ? {} : { dockerContainerId })}
                 />
             </div>

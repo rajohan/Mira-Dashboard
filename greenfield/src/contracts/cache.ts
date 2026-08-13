@@ -373,7 +373,7 @@ export const cacheStatusResultSchema = v.pipe(
 );
 
 /** Purpose-built heartbeat schema retaining health signals without content identities. */
-export const cacheHeartbeatSchemaVersion = 4 as const;
+export const cacheHeartbeatSchemaVersion = 5 as const;
 /** Hard row budget for the purpose-built heartbeat task projection. */
 export const cacheHeartbeatTaskMaximum = 100;
 /** Hard release-registry budget for Dashboard schedules exposed in one heartbeat. */
@@ -954,6 +954,114 @@ export const cacheHeartbeatDashboardJobsSchema = v.pipe(
     )
 );
 
+/**
+ * @param signal Payload-free operational signal.
+ * @returns Whether one payload-free LKG leaf has causal clocks.
+ */
+export function cacheHeartbeatOperationalSignalIsConsistent(signal: {
+    readonly observedAtMs?: number;
+    readonly staleSinceMs?: number;
+    readonly state: string;
+}): boolean {
+    return (
+        signal.state !== "last-known-good" ||
+        (signal.observedAtMs !== undefined &&
+            signal.staleSinceMs !== undefined &&
+            signal.staleSinceMs >= signal.observedAtMs)
+    );
+}
+
+function operationalSignalSchema<const TConditions extends readonly string[]>(
+    conditions: TConditions,
+    label: string
+) {
+    const condition = v.picklist(conditions, `${label} condition is invalid`);
+    const valueEntries = {
+        condition,
+        observedAtMs: cacheTimestampSchema,
+    } as const;
+    const signalVariant = v.variant("state", [
+        v.strictObject({ state: v.literal("unavailable") }),
+        v.strictObject({ ...valueEntries, state: v.literal("fresh") }),
+        v.strictObject({
+            ...valueEntries,
+            staleSinceMs: cacheTimestampSchema,
+            state: v.literal("last-known-good"),
+        }),
+    ]);
+    return v.pipe(
+        signalVariant,
+        v.check(
+            cacheHeartbeatOperationalSignalIsConsistent as (
+                signal: v.InferOutput<typeof signalVariant>
+            ) => boolean,
+            `${label} last-known-good times are inconsistent`
+        )
+    );
+}
+
+export const cacheHeartbeatBackupSignalSchema = operationalSignalSchema(
+    ["attention", "healthy", "running"] as const,
+    "Heartbeat backup"
+);
+export const cacheHeartbeatDatabaseMaintenanceSignalSchema = operationalSignalSchema(
+    ["attention", "healthy", "not-assessed", "running"] as const,
+    "Heartbeat database maintenance"
+);
+export const cacheHeartbeatDockerHealthSignalSchema = operationalSignalSchema(
+    ["attention", "healthy"] as const,
+    "Heartbeat Docker health"
+);
+export const cacheHeartbeatDockerUpdatesSignalSchema = operationalSignalSchema(
+    ["attention", "current"] as const,
+    "Heartbeat Docker updates"
+);
+export const cacheHeartbeatGitSignalSchema = operationalSignalSchema(
+    ["attention", "clean"] as const,
+    "Heartbeat Git"
+);
+export const cacheHeartbeatHostCapacitySignalSchema = operationalSignalSchema(
+    ["attention", "healthy"] as const,
+    "Heartbeat host capacity"
+);
+export const cacheHeartbeatLogsSignalSchema = operationalSignalSchema(
+    ["attention", "healthy", "running"] as const,
+    "Heartbeat logs"
+);
+export const cacheHeartbeatQuotaSignalSchema = operationalSignalSchema(
+    ["attention", "healthy"] as const,
+    "Heartbeat quota"
+);
+export const cacheHeartbeatWeatherSignalSchema = operationalSignalSchema(
+    ["available"] as const,
+    "Heartbeat weather"
+);
+
+/** Strict payload-free source signals consumed by one heartbeat collection. */
+export const cacheHeartbeatOperationalSignalsSchema = v.strictObject({
+    backups: v.strictObject({
+        kopia: cacheHeartbeatBackupSignalSchema,
+        walg: cacheHeartbeatBackupSignalSchema,
+    }),
+    database: v.strictObject({
+        postgresqlMaintenance: cacheHeartbeatDatabaseMaintenanceSignalSchema,
+        sqliteMaintenance: cacheHeartbeatDatabaseMaintenanceSignalSchema,
+    }),
+    docker: v.strictObject({
+        health: cacheHeartbeatDockerHealthSignalSchema,
+        updates: cacheHeartbeatDockerUpdatesSignalSchema,
+    }),
+    git: cacheHeartbeatGitSignalSchema,
+    hostCapacity: cacheHeartbeatHostCapacitySignalSchema,
+    logs: cacheHeartbeatLogsSignalSchema,
+    quota: cacheHeartbeatQuotaSignalSchema,
+    weather: cacheHeartbeatWeatherSignalSchema,
+});
+
+export type CacheHeartbeatOperationalSignals = v.InferOutput<
+    typeof cacheHeartbeatOperationalSignalsSchema
+>;
+
 const cacheHeartbeatResultObjectSchema = v.strictObject({
     cache: cacheStatusResultSchema,
     dashboardJobs: cacheHeartbeatDashboardJobsSchema,
@@ -963,6 +1071,7 @@ const cacheHeartbeatResultObjectSchema = v.strictObject({
     }),
     generatedAtMs: cacheTimestampSchema,
     openClawCron: cacheHeartbeatOpenClawCronSchema,
+    operationalSignals: cacheHeartbeatOperationalSignalsSchema,
     schemaVersion: v.literal(cacheHeartbeatSchemaVersion),
     tasks: cacheHeartbeatTasksSchema,
 });
@@ -1018,6 +1127,25 @@ export function cacheHeartbeatResultIsConsistent(result: CacheHeartbeatResult): 
                       ? [result.openClawCron.staleSinceMs]
                       : []),
               ]),
+        ...Object.values({
+            ...result.operationalSignals.backups,
+            ...result.operationalSignals.database,
+            ...result.operationalSignals.docker,
+            git: result.operationalSignals.git,
+            hostCapacity: result.operationalSignals.hostCapacity,
+            logs: result.operationalSignals.logs,
+            quota: result.operationalSignals.quota,
+            weather: result.operationalSignals.weather,
+        }).flatMap((signal) =>
+            signal.state === "unavailable"
+                ? []
+                : [
+                      signal.observedAtMs,
+                      ...(signal.state === "last-known-good"
+                          ? [signal.staleSinceMs]
+                          : []),
+                  ]
+        ),
         ...dashboardJobs.flatMap((job) =>
             job.state === "missing"
                 ? []
@@ -1130,7 +1258,8 @@ export const cacheProcedureContracts = [
         name: "cache.getHeartbeat",
         output: cacheHeartbeatResultSchema,
         outputSchemaId: "cache.getHeartbeat.output",
-        summary: "Returns compact cache status plus sanitized operational projections.",
+        summary:
+            "Returns one schema-v5 payload-free heartbeat with independently fresh operational signals.",
         transport: cacheQueryTransport,
     },
     {

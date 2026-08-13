@@ -233,7 +233,10 @@ export function PostgresqlDatabaseOverview({
     else if (browserCacheRetained) observationBadgeLabel = "Browser cache retained";
     return (
         <PageState status="ready">
-            <div className="space-y-6">
+            <section aria-labelledby="postgresql-overview-heading" className="space-y-6">
+                <Heading id="postgresql-overview-heading" level={2} size="section">
+                    PostgreSQL &amp; PgBouncer overview
+                </Heading>
                 {retained ? (
                     <Alert
                         focusOnError={false}
@@ -339,7 +342,7 @@ export function PostgresqlDatabaseOverview({
                     statementsEnabled={observation.summary.pgStatStatementsEnabled}
                     tableHealth={observation.tableHealth}
                 />
-            </div>
+            </section>
         </PageState>
     );
 }

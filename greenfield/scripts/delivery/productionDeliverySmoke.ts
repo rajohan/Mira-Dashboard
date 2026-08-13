@@ -16,6 +16,7 @@ import {
     runtimeIdentitySchema,
     systemHealthDiagnosticsSchema,
 } from "../../src/contracts/system.ts";
+import { runProductionAuthoritySmoke } from "./productionAuthoritySmoke.ts";
 import type { PreparedProductionDeliveryPaths } from "./productionDeliveryFilesystem.ts";
 import type { PublishedProductionRelease } from "./productionReleasePublication.ts";
 import type { InstalledProductionRuntime } from "./productionRuntime.ts";
@@ -387,6 +388,7 @@ export async function runProductionDeliveryTargetSmoke(
         ) {
             throw failure();
         }
+        await runProductionAuthoritySmoke();
 
         const frontend = await fetcher(baseUrl, {
             headers,

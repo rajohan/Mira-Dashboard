@@ -104,7 +104,26 @@ describe("cache procedures", () => {
                         pendingSync: "unknown",
                         state: "unavailable",
                     },
-                    schemaVersion: 4,
+                    operationalSignals: {
+                        backups: {
+                            kopia: { state: "unavailable" },
+                            walg: { state: "unavailable" },
+                        },
+                        database: {
+                            postgresqlMaintenance: { state: "unavailable" },
+                            sqliteMaintenance: { state: "unavailable" },
+                        },
+                        docker: {
+                            health: { state: "unavailable" },
+                            updates: { state: "unavailable" },
+                        },
+                        git: { state: "unavailable" },
+                        hostCapacity: { state: "unavailable" },
+                        logs: { state: "unavailable" },
+                        quota: { state: "unavailable" },
+                        weather: { state: "unavailable" },
+                    },
+                    schemaVersion: 5,
                     tasks: {
                         items: [],
                         state: "available",
@@ -160,7 +179,26 @@ describe("cache procedures", () => {
             },
             generatedAtMs: 1000,
             openClawCron: { pendingSync: "unknown", state: "unavailable" },
-            schemaVersion: 4,
+            operationalSignals: {
+                backups: {
+                    kopia: { state: "unavailable" },
+                    walg: { state: "unavailable" },
+                },
+                database: {
+                    postgresqlMaintenance: { state: "unavailable" },
+                    sqliteMaintenance: { state: "unavailable" },
+                },
+                docker: {
+                    health: { state: "unavailable" },
+                    updates: { state: "unavailable" },
+                },
+                git: { state: "unavailable" },
+                hostCapacity: { state: "unavailable" },
+                logs: { state: "unavailable" },
+                quota: { state: "unavailable" },
+                weather: { state: "unavailable" },
+            },
+            schemaVersion: 5,
             tasks: {
                 items: [],
                 state: "available",

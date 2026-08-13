@@ -5,6 +5,8 @@ import * as v from "valibot";
 import {
     type SystemHealthDiagnostics,
     type SystemMetrics,
+    systemHttpMetricOverflowProcedure,
+    systemHttpMetricProcedureNames,
     systemHealthDiagnosticsContract,
     systemHealthDiagnosticsSchema,
     systemMetricsContract,
@@ -12,6 +14,29 @@ import {
 } from "./system.ts";
 
 const metrics = Object.freeze({
+    application: {
+        cache: { state: "unavailable" },
+        chat: { state: "unavailable" },
+        gateway: { state: "unavailable" },
+        http: {
+            procedures: [
+                ...systemHttpMetricProcedureNames,
+                systemHttpMetricOverflowProcedure,
+            ].map((procedure) => ({
+                errorCount: 0,
+                maximumDurationMs: 0,
+                procedure,
+                requestCount: 0,
+                totalDurationMs: 0,
+            })),
+            state: "observed",
+        },
+        jobs: { state: "unavailable" },
+        operations: { state: "unavailable" },
+        realtime: { state: "unavailable" },
+        sqlite: { state: "unavailable" },
+        web: { state: "unavailable" },
+    },
     cpu: {
         loadAverage: [2, 1, 0.5],
         loadPercent: 50,
@@ -330,6 +355,92 @@ describe("system metrics contract", () => {
                 network: { ...metrics.network, downloadBitsPerSecond: -1 },
             })
         ).toThrow();
+    });
+
+    test("bounds sanitized operation, chat, and registered cache diagnostics", () => {
+        const application = {
+            ...metrics.application,
+            cache: {
+                entryCount: 2,
+                failedEntryCount: 1,
+                maximumAttemptDurationMs: 25,
+                missingEntryCount: 0,
+                refreshAttemptCount: 3,
+                snapshots: [
+                    {
+                        attemptCount: 2,
+                        consecutiveFailures: 0,
+                        freshness: "fresh",
+                        key: "system.host",
+                        lastAttemptDurationMs: 10,
+                        lastAttemptStatus: "succeeded",
+                    },
+                    {
+                        attemptCount: 1,
+                        consecutiveFailures: 1,
+                        freshness: "stale",
+                        key: "weather.spydeberg",
+                        lastAttemptDurationMs: 25,
+                        lastAttemptStatus: "failed",
+                    },
+                ],
+                staleEntryCount: 1,
+                state: "observed",
+            },
+            chat: {
+                activeRuns: 1,
+                failedOrUnknownRuns: 1,
+                retainedEventBytes: 500,
+                retainedEvents: 5,
+                retainedRuns: 2,
+                retainedSnapshotBytes: 200,
+                retainedSnapshots: 1,
+                state: "observed",
+            },
+            operations: {
+                activeRuns: 1,
+                averageDurationMs: 900,
+                failedRuns: 1,
+                maximumDurationMs: 1000,
+                sampledRuns: 3,
+                state: "observed",
+                succeededRuns: 1,
+            },
+        } as const;
+
+        expect(v.parse(systemMetricsSchema, { ...metrics, application })).toMatchObject({
+            application,
+        });
+        expect(() =>
+            v.parse(systemMetricsSchema, {
+                ...metrics,
+                application: {
+                    ...application,
+                    operations: { ...application.operations, sampledRuns: 4 },
+                },
+            })
+        ).toThrow("operation metrics are inconsistent");
+        expect(() =>
+            v.parse(systemMetricsSchema, {
+                ...metrics,
+                application: {
+                    ...application,
+                    cache: {
+                        ...application.cache,
+                        snapshots: application.cache.snapshots.toReversed(),
+                    },
+                },
+            })
+        ).toThrow("not canonically ordered");
+        expect(() =>
+            v.parse(systemMetricsSchema, {
+                ...metrics,
+                application: {
+                    ...application,
+                    chat: { ...application.chat, activeRuns: 3 },
+                },
+            })
+        ).toThrow("chat metrics are inconsistent");
     });
 
     test("is browser-session-only without an automation capability", () => {

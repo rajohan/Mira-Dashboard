@@ -1,0 +1,132 @@
+#!/bin/sh
+set -eu
+
+[ "$(/usr/bin/id -u)" -eq 0 ]
+case "${1-}" in
+    "")
+        [ "$#" -eq 0 ]
+        ;;
+    projected-web-runtime)
+        [ "$#" -eq 1 ]
+        ;;
+    *)
+        exit 1
+        ;;
+esac
+
+web_uid=$(/usr/bin/id -u mira-dashboard-web)
+web_gid=$(/usr/bin/id -g mira-dashboard-web)
+owner_uid=$(/usr/bin/id -u ubuntu)
+owner_gid=$(/usr/bin/id -g ubuntu)
+
+case "$web_uid:$web_gid:$owner_uid:$owner_gid" in
+    *[!0-9:]* | :* | *:)
+        exit 1
+        ;;
+esac
+[ "$web_uid" -ne "$owner_uid" ]
+[ "$web_gid" -ne "$owner_gid" ]
+
+operator_doppler=/home/ubuntu/.doppler
+operator_doppler_config=/home/ubuntu/.doppler/.doppler.yaml
+
+if [ "${1-}" = projected-web-runtime ]; then
+    /usr/bin/umount -- "$operator_doppler"
+    [ ! -e "$operator_doppler_config" ]
+    [ ! -e /run/docker.sock ]
+    [ ! -e /var/run/docker.sock ]
+    [ ! -e /opt/docker ]
+    [ ! -e /run/systemd/private ]
+    [ ! -e /run/dbus/system_bus_socket ]
+
+    exec /usr/bin/setpriv \
+        --reuid=mira-dashboard-web \
+        --regid=mira-dashboard-web \
+        --clear-groups \
+        --inh-caps=-all \
+        --ambient-caps=-all \
+        --bounding-set=-all \
+        --no-new-privs \
+        -- /home/ubuntu/projects/mira-dashboard/production/runtimes/bun/current/bun \
+        /home/ubuntu/projects/mira-dashboard/production/releases/current/server/web.js
+fi
+
+mapping="X-mount.idmap=u:${web_uid}:${owner_uid}:1 g:${web_gid}:${owner_gid}:1"
+mount_idmapped() {
+    source_path=$1
+    destination_path=$2
+    access_mode=$3
+    /usr/bin/mount --bind -o "${access_mode},${mapping}" \
+        "$source_path" "$destination_path"
+    [ "$(/usr/bin/stat -c %u "$destination_path")" -eq "$web_uid" ]
+    [ "$(/usr/bin/stat -c %g "$destination_path")" -eq "$web_gid" ]
+}
+
+mount_idmapped \
+    /run/mira-dashboard-web-mounts/project \
+    /home/ubuntu/projects/mira-dashboard \
+    ro
+mount_idmapped \
+    /run/mira-dashboard-web-mounts/state \
+    /home/ubuntu/projects/mira-dashboard/production/state \
+    rw
+mount_idmapped \
+    /run/mira-dashboard-web-mounts/openclaw \
+    /home/ubuntu/.openclaw \
+    ro
+
+[ ! -L "$operator_doppler" ]
+[ ! -L "$operator_doppler_config" ]
+[ -d "$operator_doppler" ]
+[ -f "$operator_doppler_config" ]
+[ "$(/usr/bin/readlink -f -- "$operator_doppler")" = "$operator_doppler" ]
+[ "$(/usr/bin/readlink -f -- "$operator_doppler_config")" = "$operator_doppler_config" ]
+[ "$(/usr/bin/stat -c %u:%g:%a -- "$operator_doppler")" = "$owner_uid:$owner_gid:700" ]
+[ "$(/usr/bin/stat -c %u:%g:%a:%h -- "$operator_doppler_config")" = "$owner_uid:$owner_gid:600:1" ]
+
+# The root launcher may read the operator credential only long enough to project the
+# fixed web allowlist. The eventual web principal must be unable to traverse or list it.
+if /usr/bin/setpriv \
+    --reuid=mira-dashboard-web \
+    --regid=mira-dashboard-web \
+    --clear-groups \
+    --inh-caps=-all \
+    --ambient-caps=-all \
+    --bounding-set=-all \
+    --no-new-privs \
+    -- /usr/bin/test -r "$operator_doppler"; then
+    exit 1
+fi
+if /usr/bin/setpriv \
+    --reuid=mira-dashboard-web \
+    --regid=mira-dashboard-web \
+    --clear-groups \
+    --inh-caps=-all \
+    --ambient-caps=-all \
+    --bounding-set=-all \
+    --no-new-privs \
+    -- /usr/bin/test -x "$operator_doppler"; then
+    exit 1
+fi
+
+exec /usr/bin/env -i \
+    HOME=/home/ubuntu \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    PATH=/usr/local/bin:/usr/bin:/bin \
+    NODE_ENV=production \
+    MIRA_DASHBOARD_PROJECT_ROOT=/home/ubuntu/projects/mira-dashboard \
+    MIRA_DASHBOARD_OPENCLAW_ROOT=/home/ubuntu/.openclaw \
+    MIRA_DASHBOARD_WORKSPACE_ROOT=/home/ubuntu/.openclaw/workspace \
+    /usr/local/bin/doppler \
+    --config-dir=/home/ubuntu/.doppler \
+    --no-read-env \
+    run \
+    --config prd \
+    --project rajohan \
+    --fallback-readonly \
+    --no-liveness-ping \
+    --only-secrets NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT,MIRA_DASHBOARD_OPENCLAW_ROOT,MIRA_DASHBOARD_WORKSPACE_ROOT,PORT,MIRA_DASHBOARD_PUBLIC_ORIGIN,MIRA_DASHBOARD_TRUSTED_PROXY_IPS,ELEVENLABS_API_KEY,OPENCLAW_GATEWAY_URL,OPENCLAW_GATEWAY_TOKEN,MIRA_DASHBOARD_WEBAUTHN_RP_ID,MIRA_DASHBOARD_WEBAUTHN_ORIGINS,MIRA_DASHBOARD_WEBAUTHN_RP_NAME,MIRA_DASHBOARD_SESSION_IDLE_MINUTES,MIRA_DASHBOARD_RECENT_AUTH_MINUTES,MIRA_DASHBOARD_TOTP_KEYRING,MIRA_DASHBOARD_LOG_LEVEL \
+    --no-exit-on-missing-only-secrets \
+    --preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT,MIRA_DASHBOARD_OPENCLAW_ROOT,MIRA_DASHBOARD_WORKSPACE_ROOT \
+    -- /usr/local/libexec/mira-dashboard-web-runtime projected-web-runtime

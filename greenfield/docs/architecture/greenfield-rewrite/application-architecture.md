@@ -227,11 +227,15 @@ contract for automation merely because the caller is non-browser TypeScript.
 
 ### Compact automation heartbeat
 
-`cache.getHeartbeat` schema v4 is a dedicated declassification query under the existing
+`cache.getHeartbeat` schema v5 is a dedicated declassification query under the existing
 `cache:read` automation scope. It embeds the same at-most-128-row, payload-free cache status used
 by `cache.getStatus`, then adds process-owned Gateway freshness, bounded task and Dashboard-job
-state, and identity-free OpenClaw-cron health. Session keys, display names, cron identifiers and
-names, payloads, credentials, endpoints, and raw errors never cross this boundary.
+state, identity-free OpenClaw-cron health, and independent operational signals. Kopia, WAL-G,
+SQLite maintenance, PostgreSQL maintenance, Docker health, Docker updates, logs, Git, quota, host
+capacity, and weather availability each report `fresh`, `last-known-good`, or `unavailable` plus
+only a fixed condition and causal clocks. Session keys, display names, cron identifiers and names,
+provider payloads, paths, container identities, credentials, endpoints, and raw errors never cross
+this boundary.
 
 Each heartbeat owns a fixed, fresh-only OpenClaw-cron inventory refresh instead of depending on
 unrelated browser list traffic. The process single-flights refreshes, enforces an eight-second
@@ -261,11 +265,18 @@ enumerate every bounded code-owned definition and compact lifecycle state. Each 
 independently to explicit `unavailable`, and cross-object validation prevents stale or truncated
 cron state from asserting an unjustified missing task automation.
 
-This schema v4 summary is not declared a replacement for legacy REST heartbeat schema v3. The
-legacy endpoint also exposes payload-bearing cache diagnostics and identifiable task, Dashboard-job,
-and per-cron rows. Its parity entry remains `planned` until those diagnostic capabilities and the
-repo-external OpenClaw consumer migration are preserved without loss; production's live consumer
-must not change before that cutover gate is satisfied.
+Schema v5 is the reviewed replacement contract for the legacy collection. OpenClaw retains exactly
+one scoped `cache.getHeartbeat` collection followed by one
+`monitoring.submitCompleteSnapshot` write; it does not fan out to domain procedures. The immutable
+release ships a fixed two-command `server/openClawHeartbeat.js` wrapper and a versioned
+`HEARTBEAT.md` cutover artifact. The wrapper reads only the descriptor-pinned `0600`
+`openclaw-heartbeat` credential, accepts bounded stdin for the complete snapshot, validates both
+tRPC envelopes with Valibot, and exposes no caller-selected procedure, method, path, authority, or
+retry. The live external consumer remains on its legacy contract until cutover atomically installs
+the staged prompt after the Greenfield target is ready. The parity row remains planned until an
+authenticated production smoke proves the one-collection/one-report sequence.
+Provider-specific status payloads and identifiable task, job, cron, Git, container, and
+backup-process details are intentionally not restored.
 
 ### Authenticated health diagnostics
 
@@ -288,9 +299,50 @@ and Jobs separately. A failed background refresh retains the last validated snap
 previously healthy component and the aggregate as stale; it can never leave an old green status
 looking current.
 
-This secure replacement closes the legacy health row's readiness/dependency capability. The old
-route's wider application-observability counters remain tracked by the separate planned
-`GET /api/metrics` row; `system.metrics` alone does not claim that broader parity.
+This secure replacement closes the legacy health row's readiness/dependency capability.
+
+### Application metrics
+
+`system.metrics` keeps the existing independent host CPU, disk, memory, network, and uptime gauges
+and adds bounded application observability. The web component reports process RSS, heap, external
+memory, event-loop delay, and monotonic uptime. Independent readers report Jobs
+queue/worker/capacity and oldest schedule lag, the newest 100 durable operations split into
+active/succeeded/failed-or-cancelled duration aggregates, durable chat run/event/snapshot counts and
+bytes, path-free SQLite storage/freelist/read latency, Gateway phase/reconnect/activity,
+realtime-pump counters, and cache refresh/failure/duration aggregates. Registered cache providers
+also expose a maximum of 32 payload-free per-key attempt/freshness rows. These are the bounded
+replacement for legacy generic child-process, chat-runtime, and polling-snapshot diagnostics:
+command arguments, process identity, chat content, cache payloads, host paths, and raw errors never
+cross the contract. A fixed reviewed procedure set has process-local HTTP
+request/error/average/maximum-duration counters rendered per procedure; every other procedure
+shares one overflow bucket, so arbitrary path or procedure text is never retained.
+
+Application readers run independently and serialize `unavailable` on failure. A failed component
+cannot suppress a valid host sample or another application component. The sampler imports no new
+Node compatibility boundary: Bun owns timing and yielding; the Bun runtime does not expose an
+equivalent heap/RSS API, so its ambient process memory API remains the concrete memory source.
+
+### Codex quota boundary
+
+OpenAI quota is collected through the installed Codex CLI's line-delimited app-server JSON-RPC
+boundary, never by scraping a terminal, tmux session, status screen, or web page. The worker starts
+exactly `codex app-server --listen stdio://` with one verified executable, the operator-owned
+non-world-writable `CODEX_HOME`, and a minimal fixed environment. It sends `initialize`, the
+`initialized` notification, and one `account/rateLimits/read` request, then retains only
+Valibot-validated bounded windows and percentages. Responses are capped at 512 KiB, the request is
+bounded to ten seconds, and executable/home ambiguity, protocol drift, malformed data, child
+failure, or an empty result makes only the OpenAI provider `unavailable` without disclosing raw
+output.
+
+Codex app-server is still marked experimental by the CLI, so support is exact-version
+qualification rather than an assumption of protocol stability. The current host qualification
+pins `codex-cli 0.147.0` and the observed `account/rateLimits/read` response shape. Its read-only
+pre-cutover smoke returned one available 10,080-minute window without printing a credential or raw
+provider payload. A CLI upgrade or protocol/schema change invalidates that evidence and requires
+the same read-only host qualification before activation; an unqualified version remains
+fail-closed. Normal post-response teardown closes stdin, sends `SIGTERM`, waits at most 250 ms,
+then sends `SIGKILL` and waits only one further bounded interval, so a successful collection cannot
+hang worker shutdown.
 
 ### Browser-managed automation security
 
@@ -495,10 +547,10 @@ maintenance work.
 Host cleanup, restart, and update have a fixed `/usr/bin/systemctl` worker broker and exact
 root-owned service units. No command, argument, path, environment, secret, or raw process output
 crosses the port. The release ships manifest-verified provisioning and explicit rollback assets,
-but production does not compose or install that authority while web and worker share one Unix
-identity. A later separately approved topology change must give the worker a distinct OS principal,
-keep the web principal outside its host-operation group, install and reload the reviewed assets,
-and only then compose the broker. Until then all three rows remain fail-closed `unavailable`.
+and the root-installed system topology runs web and worker as distinct OS principals. Web has no
+supplementary groups and cannot see Docker paths; the exact polkit rule admits only the worker
+identity and fixed units/verbs. Production composes the broker after root-unit manifest
+verification, while the authenticated delivery smoke proves the live split.
 
 The interactive PTY remains the sole terminal boundary. Shell `cd` and completion are owned by the
 connected shell/readline protocol, termination uses the bounded terminal session control, and no
@@ -506,9 +558,8 @@ new generic command, cwd, or completion API is introduced. The unused synchronou
 endpoint is a reviewed removal because no current browser or scoped automation consumer depends on
 it. Implemented long-running exec consumers map to either the PTY or the fixed durable Service
 Actions queue. The fixed cleanup foundation and bounded PTY cover the consumed behavior without
-restoring a generic command surface, but `POST /api/exec/start` remains planned until the distinct
-worker topology and separately approved provisioning make `system-cleanup` executable in
-production.
+restoring a generic command surface. `POST /api/exec/start` is implemented by that purpose-built
+mapping; no generic command, argv, shell, cwd, or raw-output replacement exists.
 
 ### Current-protocol Control UI projections
 
@@ -1073,16 +1124,45 @@ target, and survive crash or reboot. The restarted worker reconciles the receipt
 claiming and, after an older paired snapshot is restored, rehydrates and settles the exact
 original Job without repeating the external effect.
 
+### Implemented backup vertical
+
+The backup vertical implements the six reviewed Kopia/WAL-G rows as two independent bounded
+status queries and four fixed recent-MFA mutations: run either provider and clear one exact
+provider attention run. Status is collected on one shared frequent schedule but committed to
+independent cache entries, so one provider failure preserves the other's fresh result and each
+provider can retain a bounded last-known-good projection. Manual and daily scheduled runs use the
+existing durable Jobs ledger, audit boundary, source-revision compare-and-swap, non-retryable
+post-dispatch uncertainty, and the shared `backup.heavy-io`/Docker resource lease. The root page
+shows status, freshness, saved activity, and exact Jobs links; accepting a mutation proves only
+that the durable run was queued.
+
+Every refresh re-discovers exactly one healthy provider for each capability from the canonical
+root Compose graph and current Docker Engine inventory. Only
+`mira.dashboard.backup=kopia-v1|wal-g-v1` grants membership. Container, service, project, image,
+port, and mount-source names remain observed data rather than code or configuration allowlists.
+Kopia source identifiers come only from validated read-only `/source/<safe-id>` mounts. The worker
+invokes a fixed status or run wrapper by exact container ID with no caller-selected command,
+argument, path, environment, or provider output. Deadlines and stdout/stderr budgets are fixed;
+provider busy/failure remains sanitized, while any possibly dispatched run lacking a strict
+completion proof settles as `unknown-outcome` and is never replayed automatically.
+
+This vertical creates backups; it deliberately introduces no operator-facing database restore,
+Kopia restore, or WAL-G restore operation. Delivery's immutable SQLite activation/rollback
+snapshots remain a separate recovery mechanism, and Phase 6 restore drills validate recovery
+without widening the product control surface.
+
+### Implemented Database vertical
+
 The implemented Database vertical is one read-only slice rather than an implicit backup or Docker
 control plane. `database.overview` exposes a session-only, bounded projection: live
 Dashboard-owned SQLite lifecycle facts from the retained database runtime plus a worker-owned
 last-known-good PostgreSQL/PgBouncer snapshot. `/database` preserves the reviewed source
 picker, responsive summary/table layout, explicit unavailable/stale states, and non-blocking
 refresh warnings. It must not expose credentials, host paths, raw provider failures, arbitrary
-SQL, or mutation authority. The six Kopia/WAL-G status/control rows and all database
-backup/restore operations remain separately planned. The contract, provider, production
-composition, browser route, and acceptance tests now land together. Its SQLite inventory
-recognizes only two canonical greenfield
+SQL, or mutation authority. Kopia/WAL-G status and backup controls live in the separate implemented
+backup vertical above; neither vertical adds a database restore operation. The Database contract,
+provider, production composition, browser route, and acceptance tests land together. Its SQLite
+inventory recognizes only two canonical greenfield
 provenances: scheduled maintenance snapshots below `backups/sqlite-maintenance/` and activation
 snapshots below `backups/<transitionId>` classified as `cutover`. The activation snapshot securely
 consolidates the recovery purpose of legacy pre-deploy and pre-migration copies; those legacy

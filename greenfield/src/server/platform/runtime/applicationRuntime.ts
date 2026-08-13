@@ -40,7 +40,11 @@ import {
 import { type PersistentGatewayTransport } from "../gateway/persistentGatewayTransport.ts";
 import { createEffectLoggerLayer } from "../observability/effectLogger.ts";
 import type { StructuredLogger } from "../observability/structuredLogger.ts";
-import { RealtimeEventPump, type RealtimeEventDelivery } from "../realtime/eventPump.ts";
+import {
+    RealtimeEventPump,
+    type RealtimeEventDelivery,
+    type RealtimeEventPumpMetrics,
+} from "../realtime/eventPump.ts";
 import {
     realtimeEventPumpLayer,
     type RealtimeEventStreamOptions,
@@ -54,6 +58,7 @@ import {
 
 /** Request-safe realtime methods backed by the process runtime. */
 export interface RealtimeEventRuntimeService {
+    metrics(): Promise<Readonly<RealtimeEventPumpMetrics>>;
     stream(
         options: RealtimeEventStreamOptions,
         lease: RenewableStreamLease
@@ -366,6 +371,13 @@ function createApplicationRuntimeFromManagedRuntime<RuntimeError>(
             },
         }),
         realtimeEvents: Object.freeze({
+            metrics() {
+                return runtime.runPromise(
+                    RealtimeEventPumpService.pipe(
+                        Effect.flatMap((service) => service.metricsSnapshot)
+                    )
+                );
+            },
             stream(
                 streamOptions: RealtimeEventStreamOptions,
                 lease: RenewableStreamLease

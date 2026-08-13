@@ -1,0 +1,803 @@
+{
+  "$id": "urn:mira-dashboard:backups.getWalgStatus.output",
+  "anyOf": [
+    {
+      "type": "object",
+      "properties": {
+        "activity": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "const": "idle"
+                }
+              },
+              "required": [
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "jobRunId": {
+                  "type": "string",
+                  "minLength": 36,
+                  "maxLength": 36,
+                  "format": "uuid",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                "jobsUrl": {
+                  "type": "string",
+                  "pattern": "^\\/jobs\\?runId=[0-9a-f-]{36}$"
+                },
+                "queuedAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "state": {
+                  "const": "queued"
+                }
+              },
+              "required": [
+                "jobRunId",
+                "jobsUrl",
+                "queuedAtMs",
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "jobRunId": {
+                  "type": "string",
+                  "minLength": 36,
+                  "maxLength": 36,
+                  "format": "uuid",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                "jobsUrl": {
+                  "type": "string",
+                  "pattern": "^\\/jobs\\?runId=[0-9a-f-]{36}$"
+                },
+                "queuedAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "startedAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "state": {
+                  "const": "running"
+                }
+              },
+              "required": [
+                "jobRunId",
+                "jobsUrl",
+                "queuedAtMs",
+                "startedAtMs",
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "jobRunId": {
+                  "type": "string",
+                  "minLength": 36,
+                  "maxLength": 36,
+                  "format": "uuid",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                "jobsUrl": {
+                  "type": "string",
+                  "pattern": "^\\/jobs\\?runId=[0-9a-f-]{36}$"
+                },
+                "queuedAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "finishedAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "startedAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "state": {
+                  "const": "failed"
+                }
+              },
+              "required": [
+                "jobRunId",
+                "jobsUrl",
+                "queuedAtMs",
+                "finishedAtMs",
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "jobRunId": {
+                  "type": "string",
+                  "minLength": 36,
+                  "maxLength": 36,
+                  "format": "uuid",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                "jobsUrl": {
+                  "type": "string",
+                  "pattern": "^\\/jobs\\?runId=[0-9a-f-]{36}$"
+                },
+                "queuedAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "finishedAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "startedAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "state": {
+                  "const": "needs-attention"
+                }
+              },
+              "required": [
+                "jobRunId",
+                "jobsUrl",
+                "queuedAtMs",
+                "finishedAtMs",
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "jobRunId": {
+                  "type": "string",
+                  "minLength": 36,
+                  "maxLength": 36,
+                  "format": "uuid",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                "jobsUrl": {
+                  "type": "string",
+                  "pattern": "^\\/jobs\\?runId=[0-9a-f-]{36}$"
+                },
+                "queuedAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "finishedAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "startedAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "state": {
+                  "const": "succeeded"
+                }
+              },
+              "required": [
+                "jobRunId",
+                "jobsUrl",
+                "queuedAtMs",
+                "finishedAtMs",
+                "state"
+              ],
+              "additionalProperties": false
+            }
+          ],
+          "$comment": "Live Valibot validation additionally binds every backup activity to its exact Jobs link and causally ordered lifecycle timestamps."
+        },
+        "checkedAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8640000000000000
+        },
+        "state": {
+          "const": "unavailable"
+        },
+        "type": {
+          "enum": [
+            "kopia",
+            "walg"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "activity",
+        "checkedAtMs",
+        "state",
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "activity": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "const": "idle"
+                    }
+                  },
+                  "required": [
+                    "state"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "jobRunId": {
+                      "type": "string",
+                      "minLength": 36,
+                      "maxLength": 36,
+                      "format": "uuid",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                    },
+                    "jobsUrl": {
+                      "type": "string",
+                      "pattern": "^\\/jobs\\?runId=[0-9a-f-]{36}$"
+                    },
+                    "queuedAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "state": {
+                      "const": "queued"
+                    }
+                  },
+                  "required": [
+                    "jobRunId",
+                    "jobsUrl",
+                    "queuedAtMs",
+                    "state"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "jobRunId": {
+                      "type": "string",
+                      "minLength": 36,
+                      "maxLength": 36,
+                      "format": "uuid",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                    },
+                    "jobsUrl": {
+                      "type": "string",
+                      "pattern": "^\\/jobs\\?runId=[0-9a-f-]{36}$"
+                    },
+                    "queuedAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "startedAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "state": {
+                      "const": "running"
+                    }
+                  },
+                  "required": [
+                    "jobRunId",
+                    "jobsUrl",
+                    "queuedAtMs",
+                    "startedAtMs",
+                    "state"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "jobRunId": {
+                      "type": "string",
+                      "minLength": 36,
+                      "maxLength": 36,
+                      "format": "uuid",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                    },
+                    "jobsUrl": {
+                      "type": "string",
+                      "pattern": "^\\/jobs\\?runId=[0-9a-f-]{36}$"
+                    },
+                    "queuedAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "finishedAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "startedAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "state": {
+                      "const": "failed"
+                    }
+                  },
+                  "required": [
+                    "jobRunId",
+                    "jobsUrl",
+                    "queuedAtMs",
+                    "finishedAtMs",
+                    "state"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "jobRunId": {
+                      "type": "string",
+                      "minLength": 36,
+                      "maxLength": 36,
+                      "format": "uuid",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                    },
+                    "jobsUrl": {
+                      "type": "string",
+                      "pattern": "^\\/jobs\\?runId=[0-9a-f-]{36}$"
+                    },
+                    "queuedAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "finishedAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "startedAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "state": {
+                      "const": "needs-attention"
+                    }
+                  },
+                  "required": [
+                    "jobRunId",
+                    "jobsUrl",
+                    "queuedAtMs",
+                    "finishedAtMs",
+                    "state"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "jobRunId": {
+                      "type": "string",
+                      "minLength": 36,
+                      "maxLength": 36,
+                      "format": "uuid",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                    },
+                    "jobsUrl": {
+                      "type": "string",
+                      "pattern": "^\\/jobs\\?runId=[0-9a-f-]{36}$"
+                    },
+                    "queuedAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "finishedAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "startedAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "state": {
+                      "const": "succeeded"
+                    }
+                  },
+                  "required": [
+                    "jobRunId",
+                    "jobsUrl",
+                    "queuedAtMs",
+                    "finishedAtMs",
+                    "state"
+                  ],
+                  "additionalProperties": false
+                }
+              ],
+              "$comment": "Live Valibot validation additionally binds every backup activity to its exact Jobs link and causally ordered lifecycle timestamps."
+            },
+            "checkedAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "observedAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "providerIdle": {
+                  "type": "boolean"
+                },
+                "sourceRevision": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "backupCount": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1000000
+                },
+                "healthy": {
+                  "type": "boolean"
+                },
+                "latestCompletedAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "type": {
+                  "const": "walg"
+                }
+              },
+              "required": [
+                "observedAtMs",
+                "providerIdle",
+                "sourceRevision",
+                "backupCount",
+                "healthy",
+                "type"
+              ],
+              "additionalProperties": false,
+              "$comment": "Live Valibot validation additionally binds WAL-G aggregate health and count to its latest successful backup time."
+            },
+            "state": {
+              "const": "fresh"
+            }
+          },
+          "required": [
+            "activity",
+            "checkedAtMs",
+            "payload",
+            "state"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "activity": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "const": "idle"
+                    }
+                  },
+                  "required": [
+                    "state"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "jobRunId": {
+                      "type": "string",
+                      "minLength": 36,
+                      "maxLength": 36,
+                      "format": "uuid",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                    },
+                    "jobsUrl": {
+                      "type": "string",
+                      "pattern": "^\\/jobs\\?runId=[0-9a-f-]{36}$"
+                    },
+                    "queuedAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "state": {
+                      "const": "queued"
+                    }
+                  },
+                  "required": [
+                    "jobRunId",
+                    "jobsUrl",
+                    "queuedAtMs",
+                    "state"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "jobRunId": {
+                      "type": "string",
+                      "minLength": 36,
+                      "maxLength": 36,
+                      "format": "uuid",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                    },
+                    "jobsUrl": {
+                      "type": "string",
+                      "pattern": "^\\/jobs\\?runId=[0-9a-f-]{36}$"
+                    },
+                    "queuedAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "startedAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "state": {
+                      "const": "running"
+                    }
+                  },
+                  "required": [
+                    "jobRunId",
+                    "jobsUrl",
+                    "queuedAtMs",
+                    "startedAtMs",
+                    "state"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "jobRunId": {
+                      "type": "string",
+                      "minLength": 36,
+                      "maxLength": 36,
+                      "format": "uuid",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                    },
+                    "jobsUrl": {
+                      "type": "string",
+                      "pattern": "^\\/jobs\\?runId=[0-9a-f-]{36}$"
+                    },
+                    "queuedAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "finishedAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "startedAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "state": {
+                      "const": "failed"
+                    }
+                  },
+                  "required": [
+                    "jobRunId",
+                    "jobsUrl",
+                    "queuedAtMs",
+                    "finishedAtMs",
+                    "state"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "jobRunId": {
+                      "type": "string",
+                      "minLength": 36,
+                      "maxLength": 36,
+                      "format": "uuid",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                    },
+                    "jobsUrl": {
+                      "type": "string",
+                      "pattern": "^\\/jobs\\?runId=[0-9a-f-]{36}$"
+                    },
+                    "queuedAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "finishedAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "startedAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "state": {
+                      "const": "needs-attention"
+                    }
+                  },
+                  "required": [
+                    "jobRunId",
+                    "jobsUrl",
+                    "queuedAtMs",
+                    "finishedAtMs",
+                    "state"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "jobRunId": {
+                      "type": "string",
+                      "minLength": 36,
+                      "maxLength": 36,
+                      "format": "uuid",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                    },
+                    "jobsUrl": {
+                      "type": "string",
+                      "pattern": "^\\/jobs\\?runId=[0-9a-f-]{36}$"
+                    },
+                    "queuedAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "finishedAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "startedAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "state": {
+                      "const": "succeeded"
+                    }
+                  },
+                  "required": [
+                    "jobRunId",
+                    "jobsUrl",
+                    "queuedAtMs",
+                    "finishedAtMs",
+                    "state"
+                  ],
+                  "additionalProperties": false
+                }
+              ],
+              "$comment": "Live Valibot validation additionally binds every backup activity to its exact Jobs link and causally ordered lifecycle timestamps."
+            },
+            "checkedAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "observedAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "providerIdle": {
+                  "type": "boolean"
+                },
+                "sourceRevision": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "backupCount": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1000000
+                },
+                "healthy": {
+                  "type": "boolean"
+                },
+                "latestCompletedAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "type": {
+                  "const": "walg"
+                }
+              },
+              "required": [
+                "observedAtMs",
+                "providerIdle",
+                "sourceRevision",
+                "backupCount",
+                "healthy",
+                "type"
+              ],
+              "additionalProperties": false,
+              "$comment": "Live Valibot validation additionally binds WAL-G aggregate health and count to its latest successful backup time."
+            },
+            "staleSinceMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            },
+            "state": {
+              "const": "last-known-good"
+            }
+          },
+          "required": [
+            "activity",
+            "checkedAtMs",
+            "payload",
+            "staleSinceMs",
+            "state"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  ],
+  "$comment": "Live Valibot validation additionally binds WAL-G status type, observation, staleness, and response-check timestamps causally.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

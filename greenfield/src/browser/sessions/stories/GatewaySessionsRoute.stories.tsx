@@ -1,0 +1,223 @@
+import type { Meta, StoryObj } from "@storybook/tanstack-react";
+import { expect, userEvent, within } from "storybook/test";
+
+import type {
+    GatewaySession,
+    ListGatewaySessionsResult,
+} from "../../../contracts/gatewaySessions.ts";
+import {
+    deriveGatewaySessionStats,
+    gatewayPrimarySessionKey,
+} from "../../../contracts/gatewaySessions.ts";
+import { DashboardPageStory } from "../../storySupport/dashboardPageStoryHarness.tsx";
+import {
+    dashboardStoryFailure,
+    dashboardStoryResolver,
+    dashboardStoryValue,
+    type DashboardStoryFixtures,
+} from "../../storySupport/dashboardStoryTransport.ts";
+import { gatewaySessionQueryKey } from "../gatewaySessionQueries.ts";
+
+const observedAtMs = 1_800_000_000_000;
+const sessions = [
+    {
+        displayName: "Primary main",
+        hasActiveRun: true,
+        key: gatewayPrimarySessionKey,
+        kind: "main",
+        model: "gpt-5.6-sol",
+        modelProvider: "openai",
+        sessionId: "primary-session-generation",
+        totalTokens: 48_320,
+        totalTokensFresh: true,
+        updatedAtMs: observedAtMs,
+    },
+    {
+        channel: "webchat",
+        displayName: "Delivery review",
+        hasActiveRun: false,
+        key: "agent:main:subagent:delivery-review",
+        kind: "subagent",
+        model: "gpt-5.6-sol",
+        modelProvider: "openai",
+        sessionId: "delivery-review-generation",
+        totalTokens: 12_800,
+        totalTokensFresh: true,
+        updatedAtMs: observedAtMs - 90_000,
+    },
+] as const satisfies readonly GatewaySession[];
+
+const freshSnapshot = {
+    filter: "ALL",
+    projectionTruncated: false,
+    sessions: [...sessions],
+    source: {
+        checkedAtMs: observedAtMs,
+        connection: "connected",
+        freshness: "fresh",
+        observedAtMs,
+    },
+    stats: deriveGatewaySessionStats(sessions, observedAtMs),
+} as const satisfies ListGatewaySessionsResult;
+
+const emptySnapshot = {
+    ...freshSnapshot,
+    sessions: [],
+    stats: deriveGatewaySessionStats([], observedAtMs),
+} satisfies ListGatewaySessionsResult;
+
+const lastKnownGoodSnapshot = {
+    ...freshSnapshot,
+    source: {
+        checkedAtMs: observedAtMs + 60_000,
+        connection: "disconnected",
+        freshness: "stale",
+        observedAtMs,
+    },
+} satisfies ListGatewaySessionsResult;
+
+const notifications = { notifications: [], readCount: 0, unreadCount: 0 } as const;
+
+function sessionsFixtures(
+    sessionsFixture = dashboardStoryValue(freshSnapshot),
+    mutations: DashboardStoryFixtures["mutations"] = {}
+): DashboardStoryFixtures {
+    return {
+        mutations,
+        queries: {
+            "gatewaySessions.list": sessionsFixture,
+            "notifications.list": dashboardStoryValue(notifications),
+        },
+    };
+}
+
+const pending = dashboardStoryResolver(
+    () =>
+        new Promise<never>(() => {
+            // Intentionally pending to expose the route loading state.
+        })
+);
+
+const meta = {
+    component: DashboardPageStory,
+    parameters: { layout: "fullscreen" },
+    title: "Pages/Sessions",
+} satisfies Meta<typeof DashboardPageStory>;
+
+export default meta;
+type Story = StoryObj<typeof meta>;
+
+export const Loading: Story = {
+    args: { fixtures: sessionsFixtures(pending), route: "/sessions" },
+};
+
+export const Fresh: Story = {
+    args: { fixtures: sessionsFixtures(), route: "/sessions" },
+};
+
+export const Empty: Story = {
+    args: {
+        fixtures: sessionsFixtures(dashboardStoryValue(emptySnapshot)),
+        route: "/sessions",
+    },
+};
+
+export const LastKnownGood: Story = {
+    args: {
+        fixtures: sessionsFixtures(dashboardStoryValue(lastKnownGoodSnapshot)),
+        route: "/sessions",
+    },
+};
+
+export const InitialError: Story = {
+    args: {
+        fixtures: sessionsFixtures(
+            dashboardStoryFailure(new TypeError("Safe sessions story failure"))
+        ),
+        route: "/sessions",
+    },
+};
+
+export const BackgroundUnavailable: Story = {
+    args: {
+        fixtures: sessionsFixtures(
+            dashboardStoryFailure(new TypeError("Safe background refresh failure"))
+        ),
+        querySeeds: [
+            { key: gatewaySessionQueryKey, updatedAtMs: 1, value: freshSnapshot },
+        ],
+        route: "/sessions",
+    },
+};
+
+export const ActionBusy: Story = {
+    args: {
+        fixtures: sessionsFixtures(undefined, {
+            "gatewaySessions.reset": dashboardStoryResolver(
+                () =>
+                    new Promise<never>(() => {
+                        // Keep the confirmed action visibly busy.
+                    })
+            ),
+        }),
+        route: "/sessions",
+    },
+    play: async ({ canvasElement }) => {
+        const canvas = within(canvasElement);
+        await userEvent.click(
+            await canvas.findByRole("button", {
+                name: `Reset Primary main; key ${gatewayPrimarySessionKey}`,
+            })
+        );
+        const dialog = within(
+            await canvas.findByRole("dialog", { name: "Reset session?" })
+        );
+        await userEvent.click(dialog.getByRole("button", { name: "Reset session" }));
+        await expect(
+            dialog.getByRole("button", { name: "Resetting session…" })
+        ).toBeDisabled();
+    },
+};
+
+export const UnknownOutcome: Story = {
+    args: {
+        fixtures: sessionsFixtures(
+            dashboardStoryResolver((_input, callIndex) =>
+                callIndex === 0
+                    ? freshSnapshot
+                    : Promise.reject(new TypeError("Safe reconciliation failure"))
+            ),
+            {
+                "gatewaySessions.reset": dashboardStoryFailure(
+                    Object.assign(new Error("Safe unknown outcome"), {
+                        data: {
+                            code: "SERVICE_UNAVAILABLE",
+                            reason: "operation_outcome_unknown",
+                        },
+                    })
+                ),
+            }
+        ),
+        route: "/sessions",
+    },
+    play: async ({ canvasElement }) => {
+        const canvas = within(canvasElement);
+        await userEvent.click(
+            await canvas.findByRole("button", {
+                name: `Reset Primary main; key ${gatewayPrimarySessionKey}`,
+            })
+        );
+        const dialog = within(
+            await canvas.findByRole("dialog", { name: "Reset session?" })
+        );
+        await userEvent.click(dialog.getByRole("button", { name: "Reset session" }));
+        await expect(
+            dialog.findByText(/could not confirm whether that action finished/u)
+        ).resolves.toBeVisible();
+    },
+};
+
+export const Mobile: Story = {
+    args: { fixtures: sessionsFixtures(), route: "/sessions" },
+    parameters: { viewport: { defaultViewport: "mobile1" } },
+};

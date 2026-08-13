@@ -43,6 +43,7 @@ function labels(
         "com.docker.compose.project.config_files": null,
         "com.docker.compose.project.working_dir": null,
         "com.docker.compose.service": null,
+        "mira.dashboard.backup": null,
         "mira.updater.autoUpdate": null,
         "mira.updater.enabled": null,
         "mira.updater.tagPattern": null,

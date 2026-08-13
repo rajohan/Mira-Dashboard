@@ -1,29 +1,41 @@
 [Unit]
 Description=Mira Dashboard web
-After=network-online.target openclaw-gateway.service
+After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
+User=mira-dashboard-web
+Group=mira-dashboard-web
 UMask=0077
-WorkingDirectory=%h/projects/mira-dashboard/production/releases/current
+WorkingDirectory=/home/ubuntu/projects/mira-dashboard/production/releases/current
 Environment=NODE_ENV=production
-Environment=MIRA_DASHBOARD_PROJECT_ROOT=%h/projects/mira-dashboard
-Environment=MIRA_DASHBOARD_OPENCLAW_ROOT=%h/.openclaw
-Environment=MIRA_DASHBOARD_WORKSPACE_ROOT=%h/.openclaw/workspace
-UnsetEnvironment=MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD DOCKER_LOGIN DOCKER_TOKEN MIRA_GITHUB_USERNAME MIRA_GITHUB_TOKEN RAJOHAN_GITHUB_TOKEN MOLTBOOK_API_KEY MOLTBOOK_AGENT_NAME
-ExecStart=/usr/local/bin/doppler run --config prd --project rajohan --only-secrets NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT,MIRA_DASHBOARD_OPENCLAW_ROOT,MIRA_DASHBOARD_WORKSPACE_ROOT,PORT,MIRA_DASHBOARD_PUBLIC_ORIGIN,MIRA_DASHBOARD_TRUSTED_PROXY_IPS,ELEVENLABS_API_KEY,OPENCLAW_GATEWAY_URL,OPENCLAW_GATEWAY_TOKEN,MIRA_DASHBOARD_WEBAUTHN_RP_ID,MIRA_DASHBOARD_WEBAUTHN_ORIGINS,MIRA_DASHBOARD_WEBAUTHN_RP_NAME,MIRA_DASHBOARD_SESSION_IDLE_MINUTES,MIRA_DASHBOARD_RECENT_AUTH_MINUTES,MIRA_DASHBOARD_TOTP_KEYRING,MIRA_DASHBOARD_LOG_LEVEL --no-exit-on-missing-only-secrets --preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT,MIRA_DASHBOARD_OPENCLAW_ROOT,MIRA_DASHBOARD_WORKSPACE_ROOT -- %h/projects/mira-dashboard/production/runtimes/bun/current/bun %h/projects/mira-dashboard/production/releases/current/server/web.js
-StandardOutput=append:%h/projects/mira-dashboard/production/state/logs/web-stdout.log
-StandardError=append:%h/projects/mira-dashboard/production/state/logs/web-stderr.log
+Environment=HOME=/home/ubuntu
+Environment=MIRA_DASHBOARD_PROJECT_ROOT=/home/ubuntu/projects/mira-dashboard
+Environment=MIRA_DASHBOARD_OPENCLAW_ROOT=/home/ubuntu/.openclaw
+Environment=MIRA_DASHBOARD_WORKSPACE_ROOT=/home/ubuntu/.openclaw/workspace
+UnsetEnvironment=MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD DOCKER_LOGIN DOCKER_TOKEN MIRA_GITHUB_USERNAME MIRA_GITHUB_TOKEN RAJOHAN_GITHUB_TOKEN MOLTBOOK_API_KEY MOLTBOOK_AGENT_NAME OPENROUTER_API_KEY SYNTHETIC_API_KEY
+ExecStart=!/usr/local/libexec/mira-dashboard-web-runtime
+StandardOutput=append:/home/ubuntu/projects/mira-dashboard/production/state/logs/web-stdout.log
+StandardError=append:/home/ubuntu/projects/mira-dashboard/production/state/logs/web-stderr.log
 Restart=on-failure
 RestartSec=5
 KillMode=control-group
 TimeoutStopSec=45
 NoNewPrivileges=true
 PrivateTmp=true
+ProtectHome=tmpfs
+RuntimeDirectory=mira-dashboard-web-mounts
+RuntimeDirectoryMode=0700
+BindReadOnlyPaths=/home/ubuntu/projects/mira-dashboard
+BindPaths=/home/ubuntu/projects/mira-dashboard/production/state
+BindReadOnlyPaths=/home/ubuntu/.openclaw
+BindReadOnlyPaths=/home/ubuntu/.doppler
+BindReadOnlyPaths=/home/ubuntu/projects/mira-dashboard:/run/mira-dashboard-web-mounts/project
+BindPaths=/home/ubuntu/projects/mira-dashboard/production/state:/run/mira-dashboard-web-mounts/state
+BindReadOnlyPaths=/home/ubuntu/.openclaw:/run/mira-dashboard-web-mounts/openclaw
 BindReadOnlyPaths=-/tmp/openclaw
-ReadOnlyPaths=%h/.openclaw
-InaccessiblePaths=-/run/docker.sock -/var/run/docker.sock -/opt/docker
+InaccessiblePaths=-/run/docker.sock -/var/run/docker.sock -/opt/docker -/run/systemd/private -/run/dbus/system_bus_socket
 CPUWeight=100
 IOWeight=100
 CPUQuota=100%
@@ -32,4 +44,4 @@ MemoryMax=1G
 TasksMax=96
 
 [Install]
-WantedBy=default.target
+WantedBy=multi-user.target

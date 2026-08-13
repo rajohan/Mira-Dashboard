@@ -406,6 +406,8 @@ const inertAuthenticationRuntime: AuthenticationWorkRuntimeService = Object.free
 });
 
 const inertSystemMetricsRuntime: SystemMetricsRuntimeService = Object.freeze({
+    configureApplicationReader: () => {},
+    recordHttpRequest: () => {},
     read: () => Promise.reject(new SystemMetricsUnavailableError()),
 });
 
@@ -661,6 +663,10 @@ export function createTestApplicationRuntime(
         services: Object.freeze({
             authentication: overrides.authentication ?? inertAuthenticationRuntime,
             realtimeEvents: Object.freeze({
+                metrics: () =>
+                    Promise.reject(
+                        new Error("Test application runtime has no realtime metrics")
+                    ),
                 stream:
                     overrides.stream ??
                     (() =>

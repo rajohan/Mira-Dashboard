@@ -2,12 +2,13 @@ import { realpath } from "node:fs/promises";
 import path from "node:path";
 
 import {
-    dockerFreeJobActionDefinitions,
     type JobActionDefinition,
     managedPreviewJobActionDefinitions,
 } from "../server/domains/jobs/actionRegistry.ts";
+import { sourceDevelopmentScheduledJobActionDefinitions } from "../server/domains/jobs/sourceDevelopmentActionComposition.ts";
 import { createPersistentGatewayTransport } from "../server/platform/gateway/persistentGatewayTransport.ts";
 import { createPreviewGatewayTransport } from "../server/platform/gateway/previewGatewayTransport.ts";
+import { createSourceDevelopmentGatewayTransport } from "../server/platform/gateway/sourceDevelopmentGatewayTransport.ts";
 import { createDevelopmentRuntimeRelease } from "../server/platform/release/developmentRuntimeRelease.ts";
 import { createDashboardApplicationRuntime } from "../server/platform/runtime/applicationRuntime.ts";
 import type { FrontendAssetHandler } from "../server/rawHttp/frontendAssets.ts";
@@ -32,23 +33,25 @@ type DevelopmentWebRuntimeConfiguration = Pick<
 
 interface DevelopmentWebRuntimeFactories {
     readonly createApplicationRuntime: typeof createDashboardApplicationRuntime;
-    readonly createGatewayTransport: typeof createPersistentGatewayTransport;
+    readonly createReadGatewayTransport: typeof createPersistentGatewayTransport;
+    readonly createSourceDevelopmentGatewayTransport: typeof createSourceDevelopmentGatewayTransport;
 }
 
 const developmentWebRuntimeFactories = Object.freeze({
     createApplicationRuntime: createDashboardApplicationRuntime,
-    createGatewayTransport: createPersistentGatewayTransport,
+    createReadGatewayTransport: createPersistentGatewayTransport,
+    createSourceDevelopmentGatewayTransport,
 } satisfies DevelopmentWebRuntimeFactories);
 
 /**
- * Removes Docker schedule authority from the source-watched web composition.
- * The development worker shares the same isolated database and exact registry.
+ * Installs the exact source-development schedule authority in the web composition.
+ * The development worker shares the same isolated database and executable registry.
  * @param dependencies Production web composition boundaries.
- * @returns The same boundaries with a Docker-free schedule registry injection.
+ * @returns The same boundaries with the selected schedules and inert cutover detection.
  */
-export function withoutDevelopmentDockerScheduleDefinitions(
+export function withSourceDevelopmentScheduleDefinitions(
     dependencies: DashboardWebProcessDependencies,
-    actionDefinitions: readonly JobActionDefinition[] = dockerFreeJobActionDefinitions
+    actionDefinitions: readonly JobActionDefinition[] = sourceDevelopmentScheduledJobActionDefinitions
 ): DashboardWebProcessDependencies {
     return Object.freeze({
         ...dependencies,
@@ -57,6 +60,7 @@ export function withoutDevelopmentDockerScheduleDefinitions(
                 ...options,
                 jobActionDefinitions: actionDefinitions,
             }),
+        detectCutoverValidation: () => Promise.resolve(false),
     });
 }
 
@@ -71,6 +75,15 @@ export function createDevelopmentWebRuntime(
     logger: Parameters<DashboardWebProcessDependencies["createRuntime"]>[3],
     factories: DevelopmentWebRuntimeFactories = developmentWebRuntimeFactories
 ): ReturnType<DashboardWebProcessDependencies["createRuntime"]> {
+    const readTransport = factories.createReadGatewayTransport({
+        clientVersion: source.manifest.source.commitSha,
+        token: configuration.gatewayToken,
+        url: configuration.gatewayUrl,
+    });
+    const gatewayTransport = factories.createSourceDevelopmentGatewayTransport({
+        readTransport,
+        stateRoot: layout.root,
+    });
     return factories.createApplicationRuntime({
         database: {
             migrationsDirectory: path.join(source.releaseRoot, "migrations"),
@@ -79,11 +92,7 @@ export function createDevelopmentWebRuntime(
             stateDirectory: layout.production.state.root,
         },
         logger,
-        persistentGatewayTransport: factories.createGatewayTransport({
-            clientVersion: source.manifest.source.commitSha,
-            token: configuration.gatewayToken,
-            url: configuration.gatewayUrl,
-        }),
+        persistentGatewayTransport: gatewayTransport,
     });
 }
 
@@ -116,10 +125,10 @@ export async function runDevelopmentWebProcess(
     const repositoryRoot = await realpath(path.resolve(import.meta.dir, "../.."));
     const release = createDevelopmentRuntimeRelease(repositoryRoot, invocation.commit);
     const previewSocket = invocation.previewSocket;
-    const defaults = withoutDevelopmentDockerScheduleDefinitions(
+    const defaults = withSourceDevelopmentScheduleDefinitions(
         createDefaultDashboardWebProcessDependencies(),
         previewSocket === undefined
-            ? dockerFreeJobActionDefinitions
+            ? sourceDevelopmentScheduledJobActionDefinitions
             : managedPreviewJobActionDefinitions
     );
     const dependencies = Object.freeze({

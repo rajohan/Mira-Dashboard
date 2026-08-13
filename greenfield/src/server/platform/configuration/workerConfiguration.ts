@@ -29,6 +29,10 @@ import {
     type ApplicationLogLevel,
     type ApplicationNodeEnvironment,
 } from "./processConfiguration.ts";
+import {
+    configurationQuotaCredentials,
+    type QuotaCredentialsConfiguration,
+} from "./quotaConfiguration.ts";
 
 /** Immutable, validated configuration consumed by the greenfield worker process. */
 export interface WorkerConfiguration {
@@ -44,6 +48,7 @@ export interface WorkerConfiguration {
     readonly openClawRoot: string;
     readonly port: number;
     readonly projectRoot: string;
+    readonly quotaCredentials?: QuotaCredentialsConfiguration;
     readonly workspaceRoot: string;
 }
 
@@ -64,9 +69,12 @@ export const workerConfigurationEnvironmentSchema = v.object({
     MOLTBOOK_AGENT_NAME: optionalEnvironmentValueSchema,
     MOLTBOOK_API_KEY: optionalEnvironmentValueSchema,
     NODE_ENV: optionalEnvironmentValueSchema,
+    OPENROUTER_API_KEY: optionalEnvironmentValueSchema,
     OPENCLAW_GATEWAY_TOKEN: optionalEnvironmentValueSchema,
     OPENCLAW_GATEWAY_URL: optionalEnvironmentValueSchema,
     PORT: optionalEnvironmentValueSchema,
+    SYNTHETIC_API_KEY: optionalEnvironmentValueSchema,
+    ELEVENLABS_API_KEY: optionalEnvironmentValueSchema,
 });
 
 /** Registered environment names consumed by the worker-process parser. */
@@ -91,6 +99,7 @@ export function parseWorkerConfiguration(
         configurationDatabaseObservabilityPassword(input);
     const dockerRegistryCredentials = configurationDockerRegistryCredentials(input);
     const githubCredentials = configurationGitHubCredentials(input);
+    const quotaCredentials = configurationQuotaCredentials(input);
     return Object.freeze({
         ...(databaseObservabilityPassword === undefined
             ? {}
@@ -99,6 +108,7 @@ export function parseWorkerConfiguration(
               }),
         ...(dockerRegistryCredentials === undefined ? {} : { dockerRegistryCredentials }),
         ...(githubCredentials === undefined ? {} : { githubCredentials }),
+        ...(quotaCredentials === undefined ? {} : { quotaCredentials }),
         gatewayToken: configurationGatewayToken(input),
         gatewayUrl: configurationGatewayUrl(input),
         logLevel: configurationChoice(input, "MIRA_DASHBOARD_LOG_LEVEL", [

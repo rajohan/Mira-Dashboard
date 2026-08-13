@@ -121,13 +121,19 @@ const jobRunColumns = jobRunColumnHelper.columns([
 ]);
 
 export interface JobRunTableProps {
+    readonly label?: string;
     readonly onSelect: (id: string) => void;
     readonly runs: readonly JobRunSummary[];
     readonly selectedId?: string;
 }
 
 /** @returns Selectable durable run inventory with bounded virtual rendering. */
-export function JobRunTable({ onSelect, runs, selectedId }: JobRunTableProps) {
+export function JobRunTable({
+    label = "Job runs",
+    onSelect,
+    runs,
+    selectedId,
+}: JobRunTableProps) {
     const table = useTable({
         columns: jobRunColumns,
         data: runs.map((run) => ({
@@ -152,7 +158,7 @@ export function JobRunTable({ onSelect, runs, selectedId }: JobRunTableProps) {
 
     const tableElement = (rowWindow?: VirtualizerRenderState<HTMLTableRowElement>) => (
         <DataTable
-            label="Job runs"
+            label={label}
             rowWindow={rowWindow}
             scrollContainerRef={rowWindow?.scrollContainerRef}
             table={table}

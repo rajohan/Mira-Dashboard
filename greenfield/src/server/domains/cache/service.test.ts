@@ -279,7 +279,7 @@ describe("cache service", () => {
                 pendingSync: "present",
                 state: "fresh",
             },
-            schemaVersion: 4,
+            schemaVersion: 5,
             tasks: {
                 items: [
                     {
@@ -655,6 +655,51 @@ describe("cache service", () => {
                 tasks: { items: [], state: "available" },
             });
         }
+    });
+
+    test("demotes only the malformed operational-signal leaf", async () => {
+        const service = createCacheService({
+            cacheRepository: readOnlyCacheRepository(record),
+            jobRepository: Object.freeze({}) as never,
+            nowMs: () => 7000,
+            readOperationalSignals: () =>
+                ({
+                    backups: {
+                        kopia: { state: "unavailable" },
+                        walg: { state: "unavailable" },
+                    },
+                    database: {
+                        postgresqlMaintenance: { state: "unavailable" },
+                        sqliteMaintenance: { state: "unavailable" },
+                    },
+                    docker: {
+                        health: { state: "unavailable" },
+                        updates: { state: "unavailable" },
+                    },
+                    git: { state: "unavailable" },
+                    hostCapacity: { state: "unavailable" },
+                    logs: { state: "unavailable" },
+                    quota: {
+                        condition: "provider-secret-state",
+                        observedAtMs: 6500,
+                        state: "fresh",
+                    },
+                    weather: {
+                        condition: "available",
+                        observedAtMs: 6500,
+                        state: "fresh",
+                    },
+                }) as never,
+        });
+
+        const result = await Effect.runPromise(service.getHeartbeat());
+        expect(result.operationalSignals.quota).toEqual({ state: "unavailable" });
+        expect(result.operationalSignals.weather).toEqual({
+            condition: "available",
+            observedAtMs: 6500,
+            state: "fresh",
+        });
+        expect(JSON.stringify(result)).not.toContain("provider-secret-state");
     });
 
     test("replays before mutable provider and schedule lookups with caller isolation", async () => {

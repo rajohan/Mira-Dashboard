@@ -222,6 +222,21 @@ export const jobRuns = sqliteTable(
         index("job_runs_delivery_production_history_idx")
             .on(table.actionKey, desc(table.updatedAt), desc(table.id))
             .where(sql`${table.actionKey} = 'delivery.production.v1'`),
+        index("job_runs_backup_attention_history_idx")
+            .on(table.actionKey, desc(table.updatedAt), desc(table.id))
+            .where(
+                sql`${table.actionKey} = 'backup.kopia.run' OR ${table.actionKey} = 'backup.walg.run'`
+            ),
+        index("job_runs_backup_clear_history_idx")
+            .on(
+                sql`json_extract(${table.resultJson}, '$.type')`,
+                sql`json_extract(${table.resultJson}, '$.attentionRunId')`,
+                table.queuedAt,
+                table.id
+            )
+            .where(
+                sql`${table.actionKey} = 'backup.clear-attention' AND ${table.state} = 'succeeded'`
+            ),
         index("job_runs_action_payload_terminal_idx")
             .on(table.actionKey, table.payloadJson, desc(table.queuedAt), desc(table.id))
             .where(

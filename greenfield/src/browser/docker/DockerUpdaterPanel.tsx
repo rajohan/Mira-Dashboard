@@ -238,7 +238,7 @@ export function DockerUpdaterPanel({
                                         </div>
                                         <dl className="mt-3 grid gap-3 text-xs sm:grid-cols-2">
                                             <div>
-                                                <dt className="text-primary-500">
+                                                <dt className="text-primary-400">
                                                     Current image
                                                 </dt>
                                                 <dd className="text-primary-200 mt-1 font-mono wrap-anywhere">
@@ -246,7 +246,7 @@ export function DockerUpdaterPanel({
                                                 </dd>
                                             </div>
                                             <div>
-                                                <dt className="text-primary-500">
+                                                <dt className="text-primary-400">
                                                     Candidate image
                                                 </dt>
                                                 <dd className="text-primary-200 mt-1 font-mono wrap-anywhere">
@@ -257,7 +257,7 @@ export function DockerUpdaterPanel({
                                                 </dd>
                                             </div>
                                         </dl>
-                                        <code className="text-primary-600 mt-2 block text-xs wrap-anywhere">
+                                        <code className="text-primary-400 mt-2 block text-xs wrap-anywhere">
                                             {service.id}
                                         </code>
                                     </section>
@@ -300,7 +300,7 @@ export function DockerUpdaterPanel({
                                             {humanizeDockerEventKind(event.kind)}
                                         </Badge>
                                         <time
-                                            className="text-primary-500 text-xs"
+                                            className="text-primary-400 text-xs"
                                             dateTime={new Date(event.atMs).toISOString()}
                                         >
                                             {formatDashboardDateTime(event.atMs)}

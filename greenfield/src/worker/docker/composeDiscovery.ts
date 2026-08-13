@@ -26,7 +26,13 @@ const updaterLabelKeys = Object.freeze([
     "mira.updater.tagPatternIsRegex",
 ] as const);
 type UpdaterLabelKey = (typeof updaterLabelKeys)[number];
-const updaterLabelKeySet: ReadonlySet<string> = new Set(updaterLabelKeys);
+const backupLabelKeys = Object.freeze(["mira.dashboard.backup"] as const);
+type BackupLabelKey = (typeof backupLabelKeys)[number];
+type ProjectedLabelKey = UpdaterLabelKey | BackupLabelKey;
+const projectedLabelKeySet: ReadonlySet<string> = new Set([
+    ...updaterLabelKeys,
+    ...backupLabelKeys,
+]);
 const sha256Pattern = /^[0-9a-f]{64}$/u;
 const identityPattern = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/u;
 
@@ -44,7 +50,7 @@ export interface DockerComposeDiscoveredService {
     readonly enabled: boolean;
     readonly image?: DockerImageReference;
     readonly imageReference: string;
-    readonly labels: Readonly<Partial<Record<UpdaterLabelKey, string>>>;
+    readonly labels: Readonly<Partial<Record<ProjectedLabelKey, string>>>;
     readonly pinMode: "digest" | "tag";
     readonly project: string;
     readonly service: string;
@@ -308,7 +314,7 @@ function normalizeLabels(rawLabels: unknown): {
     const labels = new Map<string, string>();
     let isValid = true;
     const add = (key: string, rawValue: unknown): void => {
-        if (!updaterLabelKeySet.has(key)) return;
+        if (!projectedLabelKeySet.has(key)) return;
         if (
             typeof rawValue !== "string" ||
             labels.has(key) ||
@@ -555,7 +561,11 @@ function discoveredService(
         tagPolicy !== undefined;
     const autoUpdate = enabled && exactBoolean(owner.labels, "mira.updater.autoUpdate");
     const labels = Object.freeze(
-        Object.fromEntries(owner.labels) as Partial<Record<UpdaterLabelKey, string>>
+        owner.labelsAreValid
+            ? (Object.fromEntries(owner.labels) as Partial<
+                  Record<ProjectedLabelKey, string>
+              >)
+            : {}
     );
     let pinMode: "digest" | "tag";
     if (track === "digest" || track === "tag") {

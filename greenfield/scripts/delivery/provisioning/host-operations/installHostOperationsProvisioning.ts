@@ -10,6 +10,7 @@ import {
 import {
     hostOperationsProvisioningArtifacts,
     hostOperationsProvisioningReleaseArtifactPaths,
+    hostOperationsProvisioningSourceArtifactPaths,
 } from "./policy.ts";
 
 const installationFailureMessage = "Host operations provisioning installation failed";
@@ -25,6 +26,8 @@ const immutableDirectoryMode = 0o500n;
 const immutableFileMode = 0o400n;
 const maximumManifestBytes = 4 * 1024 * 1024;
 const maximumProvisioningArtifactBytes = 64 * 1024;
+const maximumActivationOutputBytes = 64 * 1024;
+const activationDeadlineMs = 30_000;
 const maximumArtifactCount = 4096;
 const commitShaPattern = /^[a-f\d]{40}$/u;
 const artifactShaPattern = /^[a-f\d]{64}$/u;
@@ -85,7 +88,21 @@ export interface InstallHostOperationsProvisioningTestHooks {
     readonly filesystem?: HostOperationsProvisioningFilesystemTestHooks;
     readonly requireRoot?: () => void;
     readonly runtimeBoundary?: HostOperationsProvisioningRuntimeBoundary;
+    readonly executeActivationCommand?: HostOperationsProvisioningCommandExecutor;
 }
+
+/** Bounded fixed-command result used only by the root activation boundary. */
+export interface HostOperationsProvisioningCommandResult {
+    readonly exitCode: number;
+    readonly stderr: Uint8Array;
+    readonly stdout: Uint8Array;
+}
+
+/** Injectable fixed-command process boundary used by provisioning tests. */
+export type HostOperationsProvisioningCommandExecutor = (
+    executable: string,
+    arguments_: readonly string[]
+) => Promise<HostOperationsProvisioningCommandResult>;
 
 /** Exact root installer CLI inputs. */
 export interface InstallHostOperationsProvisioningArguments {
@@ -106,6 +123,105 @@ function installationFailure(): Error {
 
 function sha256(bytes: Uint8Array): string {
     return new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
+}
+
+async function readBoundedActivationOutput(
+    stream: ReadableStream<Uint8Array>
+): Promise<Uint8Array> {
+    const reader = stream.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    try {
+        while (true) {
+            const next = await reader.read();
+            if (next.done) break;
+            total += next.value.byteLength;
+            if (total > maximumActivationOutputBytes) throw installationFailure();
+            chunks.push(next.value);
+        }
+    } finally {
+        reader.releaseLock();
+    }
+    const output = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+        output.set(chunk, offset);
+        offset += chunk.byteLength;
+    }
+    return output;
+}
+
+const executeActivationCommand: HostOperationsProvisioningCommandExecutor = async (
+    executable,
+    arguments_
+) => {
+    const child = Bun.spawn([executable, ...arguments_], {
+        env: {
+            HOME: "/root",
+            LANG: "C",
+            LC_ALL: "C",
+            PATH: "/usr/sbin:/usr/bin:/sbin:/bin",
+        },
+        signal: AbortSignal.timeout(activationDeadlineMs),
+        stderr: "pipe",
+        stdin: "ignore",
+        stdout: "pipe",
+    });
+    try {
+        const [exitCode, stdout, stderr] = await Promise.all([
+            child.exited,
+            readBoundedActivationOutput(child.stdout),
+            readBoundedActivationOutput(child.stderr),
+        ]);
+        return Object.freeze({ exitCode, stderr, stdout });
+    } catch {
+        child.kill();
+        await child.exited.catch(() => null);
+        throw installationFailure();
+    }
+};
+
+/**
+ * Creates the dedicated web principal, reloads root systemd, and enables only the
+ * two manifest-installed Dashboard system units. It accepts no caller arguments.
+ */
+export async function activateHostOperationsProvisioning(
+    execute: HostOperationsProvisioningCommandExecutor = executeActivationCommand
+): Promise<void> {
+    const commands = Object.freeze([
+        Object.freeze({
+            arguments_: Object.freeze([
+                "/etc/sysusers.d/mira-dashboard-production-authority.conf",
+            ]),
+            executable: "/usr/bin/systemd-sysusers",
+        }),
+        Object.freeze({
+            arguments_: Object.freeze(["daemon-reload"]),
+            executable: "/usr/bin/systemctl",
+        }),
+        Object.freeze({
+            arguments_: Object.freeze([
+                "enable",
+                "mira-dashboard-worker.service",
+                "mira-dashboard-web.service",
+            ]),
+            executable: "/usr/bin/systemctl",
+        }),
+    ]);
+    try {
+        for (const command of commands) {
+            const result = await execute(command.executable, command.arguments_);
+            if (
+                result.exitCode !== 0 ||
+                result.stdout.byteLength > maximumActivationOutputBytes ||
+                result.stderr.byteLength > maximumActivationOutputBytes
+            ) {
+                throw installationFailure();
+            }
+        }
+    } catch {
+        throw installationFailure();
+    }
 }
 
 async function closeHandle(handle: FileHandle | undefined): Promise<boolean> {
@@ -495,18 +611,23 @@ async function loadProvisioningRelease(
     releaseManifestSha256: string,
     expectedSourceIdentity: HostOperationsProvisioningSourceIdentity
 ): Promise<LoadedProvisioningRelease> {
-    const provisioningDirectory = provisioningPrefix.slice(0, -1);
+    const sourceDirectories = [
+        ...new Set(
+            hostOperationsProvisioningSourceArtifactPaths.map((artifactPath) =>
+                path.dirname(artifactPath)
+            )
+        ),
+    ].toSorted();
     const directories = await openReleaseDirectories(
         releaseRoot,
-        [provisioningDirectory],
+        sourceDirectories,
         expectedSourceIdentity
     );
     let loaded: LoadedProvisioningRelease | undefined;
     let failed = false;
     try {
         const root = directories.get("");
-        const source = directories.get(provisioningDirectory);
-        if (!root || !source) throw installationFailure();
+        if (!root) throw installationFailure();
         const manifestBytes = await readHeldFile(
             root,
             "release-manifest.json",
@@ -518,16 +639,18 @@ async function loadProvisioningRelease(
         const artifacts = parseManifestArtifacts(manifestBytes, releaseId);
         const byPath = new Map(artifacts.map((artifact) => [artifact.path, artifact]));
         const sourceBytes = new Map<string, Uint8Array>();
-        for (const artifactPath of hostOperationsProvisioningReleaseArtifactPaths) {
+        for (const artifactPath of hostOperationsProvisioningSourceArtifactPaths) {
             const record = byPath.get(artifactPath);
             if (!record || record.bytes > maximumProvisioningArtifactBytes) {
                 throw installationFailure();
             }
+            const source = directories.get(path.dirname(artifactPath));
+            if (!source) throw installationFailure();
             sourceBytes.set(
                 artifactPath,
                 await readHeldFile(
                     source,
-                    artifactPath.slice(provisioningPrefix.length),
+                    path.basename(artifactPath),
                     maximumProvisioningArtifactBytes,
                     record
                 )
@@ -636,7 +759,8 @@ export function parseInstallHostOperationsProvisioningArguments(
 
 /**
  * Verifies one frozen release before and after atomically installing exact root files.
- * This deliberately performs no daemon reload, group mutation, enablement, or service start.
+ * On the real root it also creates the fixed web principal, reloads systemd, and enables
+ * only the two reviewed Dashboard units; it never starts or restarts a service.
  * @param arguments_ Exact release-root and release-id CLI arguments.
  * @param testHooks Deterministic non-production filesystem and identity boundaries.
  * @returns A redacted installed release identity.
@@ -680,6 +804,12 @@ export async function runInstallHostOperationsProvisioningCli(
             expectedSourceIdentity
         );
         if (!sameRelease(first, after)) throw installationFailure();
+        const destinationRoot = testHooks.destinationRoot ?? "/";
+        if (destinationRoot === "/") {
+            await activateHostOperationsProvisioning(
+                testHooks.executeActivationCommand ?? executeActivationCommand
+            );
+        }
         return Object.freeze({ releaseId: parsed.releaseId, status: "INSTALLED" });
     } catch {
         throw installationFailure();

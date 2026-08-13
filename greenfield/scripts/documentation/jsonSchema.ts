@@ -39,6 +39,15 @@ import {
     rotatedAutomationCredentialResultIsConsistent,
 } from "../../src/contracts/automationSecurity.ts";
 import {
+    backupActivityIsConsistent,
+    backupKopiaSourceSummaryIsConsistent,
+    kopiaBackupStatusIsConsistent,
+    kopiaSourcesAreCanonical,
+    kopiaBackupCachePayloadIsConsistent,
+    walgBackupStatusIsConsistent,
+    walgBackupCachePayloadIsConsistent,
+} from "../../src/contracts/backups.ts";
+import {
     cacheEntryIsConsistent,
     cacheEntryMetadataFitsBudget,
     cacheEntryPayloadFitsBudget,
@@ -48,6 +57,7 @@ import {
     cacheHeartbeatCronLastKnownGoodIsConsistent,
     cacheHeartbeatCronProjectionIsConsistent,
     cacheHeartbeatDashboardJobsAreConsistent,
+    cacheHeartbeatOperationalSignalIsConsistent,
     cacheHeartbeatResultIsConsistent,
     cacheHeartbeatSessionsLastKnownGoodIsConsistent,
     cacheHeartbeatTaskCronIsConsistent,
@@ -268,7 +278,14 @@ import {
     systemHealthDiagnosticsQueueIsConsistent,
     systemHealthDiagnosticsSessionsAreConsistent,
     systemHealthDiagnosticsWorkersAreConsistent,
+    systemApplicationMetricsAreConsistent,
+    systemCacheSnapshotsAreCanonical,
+    systemChatMetricsAreConsistent,
+    systemHttpMetricRowIsConsistent,
+    systemHttpMetricRowsAreCanonical,
     systemMetricCapacityIsConsistent,
+    systemMetricsApplicationIsConsistent,
+    systemOperationMetricsAreConsistent,
 } from "../../src/contracts/system.ts";
 import {
     canonicalizeTaskStrings,
@@ -325,6 +342,66 @@ const controlSafeTextJsonSchemaPattern = `^(?![\\s\\S]*(?:${controlSafeTextExclu
 const noNulJsonSchemaPattern = String.raw`^[^\u0000]*$`;
 
 const runtimeCheckComments = new Map<unknown, string>([
+    [
+        kopiaSourcesAreCanonical,
+        "Live Valibot validation additionally requires safe Kopia source IDs to be unique and strictly ordered.",
+    ],
+    [
+        kopiaBackupStatusIsConsistent,
+        "Live Valibot validation additionally binds Kopia status type, observation, staleness, and response-check timestamps causally.",
+    ],
+    [
+        walgBackupStatusIsConsistent,
+        "Live Valibot validation additionally binds WAL-G status type, observation, staleness, and response-check timestamps causally.",
+    ],
+    [
+        backupActivityIsConsistent,
+        "Live Valibot validation additionally binds every backup activity to its exact Jobs link and causally ordered lifecycle timestamps.",
+    ],
+    [
+        backupKopiaSourceSummaryIsConsistent,
+        "Live Valibot validation additionally binds each safe Kopia source health state to its bounded count and latest successful backup time.",
+    ],
+    [
+        kopiaBackupCachePayloadIsConsistent,
+        "Live Valibot validation additionally requires canonical Kopia source summaries and exact aggregate backup count and health.",
+    ],
+    [
+        walgBackupCachePayloadIsConsistent,
+        "Live Valibot validation additionally binds WAL-G aggregate health and count to its latest successful backup time.",
+    ],
+    [
+        cacheHeartbeatOperationalSignalIsConsistent,
+        "Live Valibot validation additionally requires each last-known-good operational signal to have causal observation and staleness timestamps.",
+    ],
+    [
+        systemApplicationMetricsAreConsistent,
+        "Live Valibot validation additionally enforces causal application timestamps and coherent cache, chat, Gateway, worker, SQLite, and web-runtime aggregates.",
+    ],
+    [
+        systemCacheSnapshotsAreCanonical,
+        "Live Valibot validation additionally requires registered cache snapshot rows to use strict canonical key order.",
+    ],
+    [
+        systemChatMetricsAreConsistent,
+        "Live Valibot validation additionally requires active, uncertain, and snapshot chat counts to fit within retained durable runs.",
+    ],
+    [
+        systemHttpMetricRowIsConsistent,
+        "Live Valibot validation additionally requires HTTP error counts and duration aggregates not to exceed their request totals.",
+    ],
+    [
+        systemHttpMetricRowsAreCanonical,
+        "Live Valibot validation additionally requires the fixed HTTP metric buckets to appear once in canonical procedure order.",
+    ],
+    [
+        systemMetricsApplicationIsConsistent,
+        "Live Valibot validation additionally binds all application-metrics timestamps and aggregates to the enclosing host sample.",
+    ],
+    [
+        systemOperationMetricsAreConsistent,
+        "Live Valibot validation additionally requires durable operation states to partition the bounded sample and its durations to agree.",
+    ],
     [
         deliveryOperationWarningsAreCanonical,
         "Live Valibot validation additionally requires Delivery warning lists to be nonempty, unique, and canonically ordered.",

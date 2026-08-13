@@ -1,6 +1,7 @@
 import type { RequestAuthentication } from "../../contracts/security.ts";
 import type { AgentService } from "../domains/agents/service.ts";
 import type { CacheService } from "../domains/cache/service.ts";
+import type { BackupService } from "../domains/backups/service.ts";
 import type { ChatService } from "../domains/chat/service.ts";
 import type { DatabaseObservabilityService } from "../domains/database/service.ts";
 import type { DeliveryService } from "../domains/delivery/service.ts";
@@ -50,6 +51,7 @@ export interface RequestContextOptions {
     readonly automationSecurityLifecycle: AutomationSecurityLifecycleService;
     readonly authenticateCredential: AuthenticateCredential;
     readonly cacheService: CacheService["Service"];
+    readonly backupService?: BackupService;
     readonly chatService?: ChatService;
     readonly databaseObservabilityService: DatabaseObservabilityService;
     readonly deliveryService?: DeliveryService;
@@ -86,6 +88,7 @@ export interface RequestContext {
     readonly automationSecurityLifecycle: AutomationSecurityLifecycleService;
     readonly authenticationLease?: AuthenticationLease;
     readonly cacheService: CacheService["Service"];
+    readonly backupService?: BackupService;
     readonly chatService?: ChatService;
     readonly databaseObservabilityService: DatabaseObservabilityService;
     readonly deliveryService?: DeliveryService;
@@ -133,6 +136,9 @@ export async function createRequestContext(
         authenticationLifecycle: options.authenticationLifecycle,
         automationSecurityLifecycle: options.automationSecurityLifecycle,
         cacheService: options.cacheService,
+        ...(options.backupService === undefined
+            ? {}
+            : { backupService: options.backupService }),
         ...(options.chatService === undefined
             ? {}
             : { chatService: options.chatService }),

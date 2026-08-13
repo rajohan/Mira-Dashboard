@@ -100,6 +100,10 @@ async function releaseFixture(): Promise<{
         writeFile(path.join(releaseRoot, "server/web.js"), "web"),
         writeFile(path.join(releaseRoot, "server/worker.js"), "worker"),
         writeFile(
+            path.join(releaseRoot, "server/openClawHeartbeat.js"),
+            "openclaw-heartbeat"
+        ),
+        writeFile(
             path.join(releaseRoot, "systemd/mira-dashboard-web.service"),
             "[Service]\nExecStart=/web\n"
         ),
@@ -142,6 +146,13 @@ async function releaseFixture(): Promise<{
                 "scripts/delivery/provisioning/database-observability"
             ),
             path.join(releaseRoot, "scripts/delivery/provisioning/database-observability")
+        ),
+        copyDirectory(
+            path.join(
+                sourceProjectRoot,
+                "scripts/delivery/provisioning/openclaw-heartbeat"
+            ),
+            path.join(releaseRoot, "scripts/delivery/provisioning/openclaw-heartbeat")
         ),
     ]);
     return { releaseRoot, repositoryRoot };
@@ -240,6 +251,8 @@ describe("release identity", () => {
             "scripts/delivery/provisioning/host-operations/mira-dashboard-host-system-cleanup.service",
             "scripts/delivery/provisioning/host-operations/mira-dashboard-host-system-restart.service",
             "scripts/delivery/provisioning/host-operations/mira-dashboard-host-system-update.service",
+            "scripts/delivery/provisioning/host-operations/mira-dashboard-production-authority.conf",
+            "scripts/delivery/provisioning/host-operations/mira-dashboard-web-runtime",
             "scripts/delivery/provisioning/host-operations/policy.ts",
             "scripts/delivery/provisioning/log-maintenance/60-mira-dashboard-log-maintenance.rules",
             "scripts/delivery/provisioning/log-maintenance/README.md",
@@ -248,6 +261,7 @@ describe("release identity", () => {
             "scripts/delivery/provisioning/log-maintenance/mira-dashboard-log-maintenance",
             "scripts/delivery/provisioning/log-maintenance/mira-dashboard-log-maintenance@.service",
             "scripts/delivery/provisioning/log-maintenance/policy.ts",
+            "scripts/delivery/provisioning/openclaw-heartbeat/HEARTBEAT.md",
             "scripts/delivery/provisioning/preview-tailscale/README.md",
             "scripts/delivery/provisioning/preview-tailscale/operator.ts",
             "scripts/delivery/provisioning/preview-tailscale/policy.ts",

@@ -81,6 +81,10 @@ test("reads the Gateway token from a private file without following a symlink", 
         expect(environments.web.OPENCLAW_GATEWAY_TOKEN).toBe("private-token");
         expect(environments.web.MOLTBOOK_API_KEY).toBeUndefined();
         expect(environments.worker.MOLTBOOK_API_KEY).toBe("private-moltbook-key");
+        expect(environments.worker.OPENCLAW_GATEWAY_TOKEN).toBe(
+            "source-development-no-gateway-credential"
+        );
+        expect(environments.worker.OPENCLAW_GATEWAY_URL).toBe("ws://127.0.0.1:9/");
 
         const missingMoltbookKey = await developmentProcessEnvironments(
             config,

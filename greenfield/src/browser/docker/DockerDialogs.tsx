@@ -56,13 +56,13 @@ export function DockerContainerDetailsDialog({
                         </Heading>
                         <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
                             <div>
-                                <dt className="text-primary-500">Image</dt>
+                                <dt className="text-primary-400">Image</dt>
                                 <dd className="text-primary-100 mt-1 font-mono wrap-anywhere">
                                     {container.image}
                                 </dd>
                             </div>
                             <div>
-                                <dt className="text-primary-500">Compose identity</dt>
+                                <dt className="text-primary-400">Compose identity</dt>
                                 <dd className="text-primary-100 mt-1 wrap-anywhere">
                                     {container.project === undefined
                                         ? "Not Compose managed"
@@ -70,7 +70,7 @@ export function DockerContainerDetailsDialog({
                                 </dd>
                             </div>
                         </dl>
-                        <code className="text-primary-500 mt-3 block text-xs wrap-anywhere">
+                        <code className="text-primary-400 mt-3 block text-xs wrap-anywhere">
                             {container.id}
                         </code>
                     </section>
@@ -93,13 +93,13 @@ export function DockerContainerDetailsDialog({
                         </div>
                         <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
                             <div>
-                                <dt className="text-primary-500">Created</dt>
+                                <dt className="text-primary-400">Created</dt>
                                 <dd className="text-primary-100 mt-1">
                                     {formatDashboardDateTime(container.createdAtMs)}
                                 </dd>
                             </div>
                             <div>
-                                <dt className="text-primary-500">Started</dt>
+                                <dt className="text-primary-400">Started</dt>
                                 <dd className="text-primary-100 mt-1">
                                     {optionalDockerTimestamp(
                                         container.startedAtMs,
@@ -108,7 +108,7 @@ export function DockerContainerDetailsDialog({
                                 </dd>
                             </div>
                             <div>
-                                <dt className="text-primary-500">Finished</dt>
+                                <dt className="text-primary-400">Finished</dt>
                                 <dd className="text-primary-100 mt-1">
                                     {optionalDockerTimestamp(
                                         container.finishedAtMs,
@@ -117,7 +117,7 @@ export function DockerContainerDetailsDialog({
                                 </dd>
                             </div>
                             <div>
-                                <dt className="text-primary-500">Restarts</dt>
+                                <dt className="text-primary-400">Restarts</dt>
                                 <dd className="text-primary-100 mt-1 tabular-nums">
                                     {container.restartCount}
                                 </dd>
@@ -136,33 +136,33 @@ export function DockerContainerDetailsDialog({
                         ) : (
                             <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
                                 <div>
-                                    <dt className="text-primary-500">CPU</dt>
+                                    <dt className="text-primary-400">CPU</dt>
                                     <dd className="text-primary-100 mt-1 tabular-nums">
                                         {formatPercent(stats.cpuPercent)}
                                     </dd>
                                 </div>
                                 <div>
-                                    <dt className="text-primary-500">Memory</dt>
+                                    <dt className="text-primary-400">Memory</dt>
                                     <dd className="text-primary-100 mt-1 tabular-nums">
                                         {formatDockerMemory(container)}
                                     </dd>
                                 </div>
                                 <div>
-                                    <dt className="text-primary-500">Network I/O</dt>
+                                    <dt className="text-primary-400">Network I/O</dt>
                                     <dd className="text-primary-100 mt-1 tabular-nums">
                                         ↓ {formatByteCount(stats.networkReceivedBytes)} ·
                                         ↑ {formatByteCount(stats.networkSentBytes)}
                                     </dd>
                                 </div>
                                 <div>
-                                    <dt className="text-primary-500">Block I/O</dt>
+                                    <dt className="text-primary-400">Block I/O</dt>
                                     <dd className="text-primary-100 mt-1 tabular-nums">
                                         ↓ {formatByteCount(stats.blockReadBytes)} · ↑{" "}
                                         {formatByteCount(stats.blockWrittenBytes)}
                                     </dd>
                                 </div>
                                 <div>
-                                    <dt className="text-primary-500">Processes</dt>
+                                    <dt className="text-primary-400">Processes</dt>
                                     <dd className="text-primary-100 mt-1 tabular-nums">
                                         {stats.pids}
                                     </dd>
@@ -393,7 +393,7 @@ export function DockerPrunePreviewDialog({
                     <Text className="mt-3" size="sm" tone="muted">
                         Ticket expires {formatDashboardDateTime(result.expiresAtMs)}
                     </Text>
-                    <code className="text-primary-600 mt-1 block text-xs wrap-anywhere">
+                    <code className="text-primary-400 mt-1 block text-xs wrap-anywhere">
                         {result.ticketId}
                     </code>
                     {empty ? (

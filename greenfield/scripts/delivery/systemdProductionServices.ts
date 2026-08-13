@@ -3,7 +3,6 @@ import * as v from "valibot";
 
 import { healthReadinessPath } from "../../src/contracts/system.ts";
 import type { DashboardDeploymentLease } from "./deploymentLease.ts";
-import { installPublishedProductionSystemdUnits } from "./installProductionSystemdUnits.ts";
 import type { PreparedProductionDeliveryPaths } from "./productionDeliveryFilesystem.ts";
 import { runProductionDeliveryTargetSmoke } from "./productionDeliverySmoke.ts";
 import type { ProductionServiceController } from "./productionReleaseActivation.ts";
@@ -15,6 +14,7 @@ import {
     requireSuccessfulSystemctlProcess,
     type SystemctlExecutor,
 } from "./systemctlProcess.ts";
+import { verifyPublishedProductionSystemdUnitsInstalledAtRoot } from "./verifyProductionSystemdUnits.ts";
 
 const systemdServiceFailureMessage = "Production service control failed";
 const readinessAttemptTimeoutMs = secondsToMilliseconds(2);
@@ -50,7 +50,7 @@ export type { SystemctlProcessResult } from "./systemctlProcess.ts";
 export interface SystemdProductionServiceOptions {
     readonly execute?: SystemctlExecutor;
     readonly fetch?: (request: Request) => Promise<Response>;
-    readonly installUnits?: typeof installPublishedProductionSystemdUnits;
+    readonly installUnits?: typeof verifyPublishedProductionSystemdUnitsInstalledAtRoot;
     readonly readinessUrl: string;
     readonly smoke?: typeof runProductionDeliveryTargetSmoke;
     readonly systemctlExecutable?: string;
@@ -88,16 +88,12 @@ async function stopUnits(
 ): Promise<void> {
     let failed = false;
     try {
-        await requireSystemctlSuccess(execute, executable, ["--user", "stop", webUnit]);
+        await requireSystemctlSuccess(execute, executable, ["stop", webUnit]);
     } catch {
         failed = true;
     }
     try {
-        await requireSystemctlSuccess(execute, executable, [
-            "--user",
-            "stop",
-            workerUnit,
-        ]);
+        await requireSystemctlSuccess(execute, executable, ["stop", workerUnit]);
     } catch {
         failed = true;
     }
@@ -140,7 +136,6 @@ async function requireUnitsActive(
 ): Promise<void> {
     for (const unit of [workerUnit, webUnit]) {
         await requireSystemctlSuccess(execute, executable, [
-            "--user",
             "is-active",
             "--quiet",
             unit,
@@ -149,7 +144,7 @@ async function requireUnitsActive(
 }
 
 /**
- * Creates the idempotent user-systemd adapter used by crash-safe activation.
+ * Creates the idempotent root-systemd adapter used by crash-safe activation.
  * Release/runtime pointers are changed only while the activation orchestrator has stopped writers.
  * @param lease Active deployment lease captured by the controller.
  * @param paths Exact project-local production paths.
@@ -166,7 +161,8 @@ export function createSystemdProductionServiceController(
     validateExecutable(executable);
     const execute = options.execute ?? executeSystemctlProcess;
     const fetch_ = options.fetch ?? fetch;
-    const installUnits = options.installUnits ?? installPublishedProductionSystemdUnits;
+    const installUnits =
+        options.installUnits ?? verifyPublishedProductionSystemdUnitsInstalledAtRoot;
     const smoke = options.smoke ?? runProductionDeliveryTargetSmoke;
 
     return Object.freeze({
@@ -178,16 +174,8 @@ export function createSystemdProductionServiceController(
             runtime: InstalledProductionRuntime
         ): Promise<void> {
             await pointProductionProcessesAtRelease(lease, paths, release, runtime);
-            await requireSystemctlSuccess(execute, executable, [
-                "--user",
-                "restart",
-                workerUnit,
-            ]);
-            await requireSystemctlSuccess(execute, executable, [
-                "--user",
-                "restart",
-                webUnit,
-            ]);
+            await requireSystemctlSuccess(execute, executable, ["restart", workerUnit]);
+            await requireSystemctlSuccess(execute, executable, ["restart", webUnit]);
         },
         stop: () => stopUnits(execute, executable),
         async verifyReady(): Promise<void> {

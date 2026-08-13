@@ -28,8 +28,11 @@ import {
     type JobCacheAttemptCommit,
     JobActionOutcomeUnknownError,
     JobActionRetryableError,
+    gitWorkspaceCacheJobActionKey,
     hostSystemRestartJobActionDefinition,
     jobActionDefinitions,
+    quotaCacheJobActionKey,
+    weatherCacheJobActionKey,
 } from "./actionRegistry.ts";
 
 function executionContext(attempts: JobCacheAttemptCommit[]): JobActionExecutionContext {
@@ -118,6 +121,9 @@ describe("worker-only job executor registry", () => {
         expect(findAction("host.system.cleanup")).toBeUndefined();
         expect(findAction("host.system.restart")).toBeUndefined();
         expect(findAction("host.system.update")).toBeUndefined();
+        expect(findAction(gitWorkspaceCacheJobActionKey)).toBeUndefined();
+        expect(findAction(quotaCacheJobActionKey)).toBeUndefined();
+        expect(findAction(weatherCacheJobActionKey)).toBeUndefined();
         expect(findAction("system.shell")).toBeUndefined();
     });
 

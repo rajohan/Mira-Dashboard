@@ -497,21 +497,23 @@ whose only input is the reviewed operation ID and whose only output is an accept
 status. The root-owned units use fixed paths, fixed arguments, bounded output and deadlines, and no
 shell or caller-controlled environment. Manifest-bound provisioning validates no-follow file
 identity, ownership, modes, and content integrity and retains explicit rollback to the previous
-immutable release. Production does not compose that broker while web and worker share one Unix
-identity: the host actions stay unavailable until a distinct worker OS principal exists and
-separately approved provisioning binds only that principal, excludes the web process, reloads the
-reviewed policy and units, and composes the broker.
+immutable release. The root-installed system topology now keeps the trusted production owner as
+the worker principal and runs web under the dedicated `mira-dashboard-web` UID. A root-owned fixed
+launcher creates only reviewed id-mapped path mounts inside web's private namespace and then drops
+all UID, group, and capability authority. Web cannot see Docker or system-manager IPC. The exact
+polkit policy binds the worker identity to the three host units and two Dashboard units; arbitrary
+units and verbs remain denied. Production therefore composes the fixed broker.
 
 `system-cleanup` attempts all fixed phases and fails if any phase fails: package autoremove,
 package-cache cleanup, journald rotation plus 14-day/1 GiB retention, and Docker system prune for
 unused content older than 168 hours. It never prunes volumes. The durable definition is exclusive,
 single-attempt, non-cancellable, non-retry-safe, and reserves both `host.mutation` and `host.logs`.
-Together with the bounded PTY, this defines the narrow replacement for the consumed
+Together with the bounded PTY, this defines the implemented narrow replacement for the consumed
 `POST /api/exec/start` behavior without reintroducing a generic shell, command, path, or
-shared-user privilege grant. The parity row remains planned until the distinct-worker production
-topology and separately approved provisioning make this host action executable.
+shared-user privilege grant. Root-unit manifest verification and the live identity smoke must pass
+before activation completes.
 
-The `cache:read` automation heartbeat is a separate sanitized projection, not a shortcut around
+The `cache:read` automation heartbeat v5 is a separate sanitized projection, not a shortcut around
 session, task, job, or cron detail authorization. It reads process-local validated Gateway
 summaries plus bounded payload-free cache status and purpose-built SQLite task/Dashboard-job
 projections, and requires neither `tasks:read` nor `jobs:read`. Its only upstream work is a
@@ -519,11 +521,26 @@ fixed read-only OpenClaw-cron inventory refresh with an aggregate deadline, atom
 single-flight ownership, success TTL, and failure backoff.
 Task content, assignee and cron identity, schedule metadata, payloads, results, events, actors,
 workers, leases, credentials, endpoints, disable reasons, terminal messages, and raw failures do
-not cross the boundary. Exact task count/truncation and the canonical row prefix share one short
-read transaction that closes before Gateway I/O. Each local projection is structurally and semantically validated inside its own
+not cross the boundary. Backup, database-maintenance, Docker health/update, logs, Git, quota, host
+capacity, and weather leaves carry only fixed conditions and freshness clocks. Every optional
+provider leaf is validated and contained separately; malformed or failed providers cannot erase
+unrelated signals. Exact task count/truncation and the canonical row prefix share one short read
+transaction that closes before Gateway I/O. Each local projection is structurally and semantically validated inside its own
 safe reader boundary, so failure degrades only that projection to `unavailable`. Missing and
 last-known-good Gateway states remain explicit so an empty count is never inferred from
 unavailable upstream state.
+
+The matching external consumer has no generic Dashboard transport. One immutable, release-bound
+wrapper admits only `collect` and `report`: `collect` performs one `cache.getHeartbeat` query and
+requires schema v5; `report` accepts one bounded, strict complete monitoring snapshot over stdin
+and performs one `monitoring.submitCompleteSnapshot` mutation. It reads the existing credential
+through `O_NOFOLLOW`, exact `0600` mode and current-owner checks, permits only loopback HTTP, rejects
+redirects, bounds and fatally decodes response bytes, and collapses transport/provider/validation
+failure to one fixed secret-free error. The automation principal therefore needs exactly
+`cache:read` and `monitoring:write`; the legacy `reports:write` grant is removed at coordinated
+cutover. The current live `HEARTBEAT.md` is not modified ahead of that cutover: its schema-v5
+replacement is an immutable provisioning artifact installed atomically only after target readiness
+and restored from the previous release on rollback.
 
 Queue behavior is explicit:
 
@@ -720,7 +737,13 @@ proxy mode names exact proxies and requires them to overwrite forwarded identity
 
 ### Secrets and dangerous boundaries
 
-- Doppler or systemd credentials remain the source for infrastructure secrets.
+- Doppler or systemd credentials remain the source for infrastructure secrets. The production web
+  unit never receives a reusable Doppler credential: its manifest-installed root launcher keeps
+  the operator's `0700` Doppler directory non-id-mapped, validates its owner and mode, requests only
+  the fixed web allowlist, verifies the dropped web principal cannot read or traverse the
+  credential, then unmounts it and proves its credential file absent before starting Bun.
+  Worker-only GitHub, Docker, database, and provider secrets
+  therefore cannot be fetched through a compromised web process.
 - PostgreSQL/PgBouncer observability uses a distinct Doppler-provided observer password. Existing
   stack-wide `DATABASE_USERNAME`/`DATABASE_PASSWORD` values are never a runtime fallback, and the
   worker never receives an application role, PgBouncer admin role, or PostgreSQL superuser. A

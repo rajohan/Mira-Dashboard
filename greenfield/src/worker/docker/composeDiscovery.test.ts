@@ -44,7 +44,7 @@ afterEach(() => {
 });
 
 describe("Docker Compose discovery", () => {
-    test("recursively joins dynamic Engine identity to the one included image and five policy labels", () => {
+    test("recursively joins dynamic Engine identity to projected policy and capability labels", () => {
         const { appCompose, root, rootCompose } = fixture();
         Fs.writeFileSync(rootCompose, "include:\n  - apps/sample/compose.yaml\n");
         Fs.writeFileSync(
@@ -60,6 +60,7 @@ describe("Docker Compose discovery", () => {
                 "      mira.updater.track: tag",
                 String.raw`      mira.updater.tagPattern: ^v\d+\.\d+\.\d+$$`,
                 '      mira.updater.tagPatternIsRegex: "true"',
+                "      mira.dashboard.backup: kopia-v1",
                 "",
             ].join("\n")
         );
@@ -88,6 +89,7 @@ describe("Docker Compose discovery", () => {
             },
             imageReference: "ghcr.io/example/sample:v2.10.0",
             labels: {
+                "mira.dashboard.backup": "kopia-v1",
                 "mira.updater.autoUpdate": "true",
                 "mira.updater.enabled": "true",
                 "mira.updater.tagPattern": String.raw`^v\d+\.\d+\.\d+$`,
@@ -107,6 +109,32 @@ describe("Docker Compose discovery", () => {
         );
         expect(result.services[0]?.contentSha256).toMatch(/^[0-9a-f]{64}$/u);
         expect(result.sourceRevision).toMatch(/^[0-9a-f]{64}$/u);
+    });
+
+    test("removes backup authority when projected labels are duplicated", () => {
+        for (const duplicate of ["kopia-v1", "wal-g-v1"]) {
+            const { appCompose, root, rootCompose } = fixture();
+            Fs.writeFileSync(rootCompose, "include:\n  - apps/sample/compose.yaml\n");
+            Fs.writeFileSync(
+                appCompose,
+                [
+                    "services:",
+                    "  dynamic-service:",
+                    "    image: ghcr.io/example/sample:current",
+                    "    labels:",
+                    "      - mira.dashboard.backup=kopia-v1",
+                    `      - mira.dashboard.backup=${duplicate}`,
+                    "",
+                ].join("\n")
+            );
+
+            const result = discoverDockerComposeServices([identity(rootCompose)], {
+                rootComposePath: rootCompose,
+                trustRoot: root,
+            });
+
+            expect(result.services[0]?.labels).toEqual({});
+        }
     });
 
     test("reconciles Compose additions, removals and renames before containers exist", () => {

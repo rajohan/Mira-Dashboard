@@ -7,15 +7,15 @@
 This matrix is the living phase status. Update it in the same change that materially advances or
 closes a phase; dated entries below provide the evidence, not a second status source.
 
-| Phase                               | Status                               | Current evidence and remaining gate                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| ----------------------------------- | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0 — Evidence and qualification      | Complete                             | All eight mandatory spikes pass on exact Bun revision `17d6843606d76620cb55d31424d7fb0aed51c367`: build, transport, cross-process SQLite/outbox, Drizzle/Bun SQLite, browser data, chat batching, shutdown, and capped resources. Source-derived parity and the OpenClaw source audit pass as additional evidence.                                                                                                                                                                                                                                                                                                                                                               |
-| 1 — Foundation                      | Complete                             | The self-contained future root builds immutable browser/web/worker artifacts, protects project-local production state, installs exact Bun and systemd artifacts, migrates a database copy, atomically promotes the release/database pair, serves readiness/browser assets, writes project-local logs, and proves crash-safe rollback and shutdown in a disposable lifecycle.                                                                                                                                                                                                                                                                                                     |
-| 2 — Trust and transport             | Complete for the stated server scope | Authentication, MFA, WebAuthn, automation credentials, audit, authenticated renewable SSE, one-shot native Gateway bootstrap verification, and the consolidated [threat model](../../security/greenfield-phase-two-threat-model.md) have executable evidence. Browser UI and production cutover remain later gates.                                                                                                                                                                                                                                                                                                                                                              |
-| 3 — Core operator domains           | Started                              | Task and agent-directory parity are implemented with durable history, realtime invalidation, and browser workflows. Monitoring ingestion plus report, incident, and notification server/browser parity are implemented. Dashboard-local durable schedules/jobs, real worker execution, their `/jobs` operator UI, the first claim-fenced `system.host` cache provider, its cache browser, and bounded system metrics are implemented. Root composition covers every implemented Phase 3 operator domain, and Phase 4A now supplies the OpenClaw-cron half of `/jobs`. Full root parity and privileged/external providers remain later gates, so the Phase 3 exit stays open.     |
-| 4 — Gateway and chat                | Started                              | The current installed OpenClaw source is hash-pinned for the persistent sessions, cron, chat, companion, task, and media surfaces. Process-owned Gateway lifecycle, durable realtime invalidation, sessions and agent availability, OpenClaw cron/tasks, the compact heartbeat, the durable chat journal/runtime, bounded history and reconciliation, managed and descriptor-rooted local-history media through one transcript-authorized proxy, and the `/chat` frontend are implemented. Recorded contract, protocol, service, browser, restart, load-boundary, and security tests cover the slice; live Gateway smoke/restart evidence and the Phase 4 exit gate remain open. |
-| 5 — Privileged and external domains | Started                              | Files, Logs, Moltbook, Terminal, Settings, bounded Service Actions, read-only Database observability, the full Docker vertical, and the full Delivery vertical are implemented. Delivery closes five reads, nine durable operations, ordinary/native/inferred stack behavior, one isolated preview slot, immutable deploy, paired rollback, and `/delivery` over the shared cache/Jobs/audit foundations. Privileged Kopia/WAL-G control, the final consumed exec replacements, production credential/provisioning cutover, and the remaining external adapters stay open, so the Phase 5 exit gate is not claimed.                                                              |
-| 6 — Parity, hardening, and cutover  | Not started                          | Full UI parity, generated `/docs`, load/resource/restore evidence, cutover rehearsal, fresh production database, and legacy removal remain open.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Phase                               | Status                          | Current evidence and remaining gate                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ----------------------------------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0 — Evidence and qualification      | Complete                        | All eight mandatory spikes pass on exact Bun revision `17d6843606d76620cb55d31424d7fb0aed51c367`: build, transport, cross-process SQLite/outbox, Drizzle/Bun SQLite, browser data, chat batching, shutdown, and capped resources. Source-derived parity and the OpenClaw source audit pass as additional evidence.                                                                                                                                                                                                                                          |
+| 1 — Foundation                      | Complete                        | The self-contained future root builds immutable browser/web/worker artifacts, protects project-local production state, installs exact Bun and systemd artifacts, migrates a database copy, atomically promotes the release/database pair, serves readiness/browser assets, writes project-local logs, and proves crash-safe rollback and shutdown in a disposable lifecycle.                                                                                                                                                                                |
+| 2 — Trust and transport             | Complete                        | Authentication, browser session/account-security UI, MFA, WebAuthn, automation credentials, audit, authenticated renewable SSE, one-shot native Gateway bootstrap verification, and the consolidated [threat model](../../security/greenfield-phase-two-threat-model.md) have executable evidence. Production activation remains a Phase 6 gate rather than unfinished Phase 2 scope.                                                                                                                                                                       |
+| 3 — Core operator domains           | Complete                        | Task, agent, monitoring, report, incident, notification, Dashboard Jobs/schedules, cache, host metrics, and application-observability server/browser parity are implemented. `/jobs` includes the OpenClaw-cron projection, and `/` composes the complete operational overview with independent retained-data and unavailable states. The Phase 3 parity and browser gates pass.                                                                                                                                                                            |
+| 4 — Gateway and chat                | Started                         | The installed OpenClaw source is hash-pinned for sessions, cron, chat, companion, task, and media. Process-owned Gateway lifecycle, durable realtime invalidation, sessions and agent availability, OpenClaw cron/tasks, heartbeat schema v5, chat journal/runtime, bounded history/reconciliation, transcript-authorized local-history media, and `/chat` are implemented. The immutable external heartbeat consumer is staged; live Gateway smoke/restart and the atomic consumer cutover plus authenticated one-collection/one-report proof remain open. |
+| 5 — Privileged and external domains | Complete in the greenfield tree | Files, Logs, Moltbook, Terminal, Settings, bounded Service Actions, Database observability, Docker, Delivery, Kopia/WAL-G status/control, quota, Git, and weather are implemented. The consumed generic-exec behavior maps to the bounded PTY and purpose-built durable actions, with the unused synchronous surface removed. Provider/root provisioning is release-owned and fail-closed pending production activation. No operator-facing database restore operation is introduced.                                                                       |
+| 6 — Parity, hardening, and cutover  | Started                         | All 16 legacy browser routes, full-page Storybook coverage, ordinary source-development production inventory parity, and 153 of 154 retained endpoint behaviors are implemented; the three reviewed removals stay removed. The external heartbeat consumer cutover and authenticated live smoke, remaining live Gateway/production smokes, restore/cutover rehearsal, fresh production activation, repository-wide simplification audit, legacy deletion, and full-cycle monitoring remain open.                                                            |
 
 ### 2026-08-03 — Phase 0 started
 
@@ -1835,3 +1835,113 @@ full-browser parity, production rehearsal, cutover, and legacy deletion remain o
   for the supported Bun-only runtime; retained compatibility imports require a concrete documented
   cross-runtime or capability reason. Delivery hashing is being normalized immediately, while the
   full historical audit remains a pre-cutover gate rather than unrelated churn inside this slice.
+
+### 2026-08-13 — Heartbeat schema v5 and application observability implemented
+
+- `cache.getHeartbeat` schema v5 keeps the existing cache, Gateway, task, Dashboard-job, and
+  OpenClaw-cron semantics and adds independent payload-free signals for Kopia, WAL-G, PostgreSQL
+  and SQLite maintenance, Docker health and updates, logs, Git, quota, host capacity, and weather
+  availability. Every leaf is separately `fresh`, `last-known-good`, or `unavailable`; a failed or
+  malformed provider cannot erase healthy sibling evidence or publish raw provider payloads,
+  paths, identities, or failure text.
+- `system.metrics` retains its bounded host sample and adds independently contained web-runtime,
+  Jobs, bounded durable-operation and durable-chat aggregates, SQLite, Gateway, realtime-pump,
+  registered payload-free cache snapshots, and fixed-procedure HTTP observations. The operation,
+  chat, and cache projections are sanitized replacements for legacy generic child-process,
+  chat-runtime, and polling-snapshot diagnostics; no argv, identity, chat content, cache payload,
+  path, or raw error crosses the contract. HTTP traffic is counted and rendered per reviewed
+  procedure plus one overflow bucket, so arbitrary procedure names are never retained. An
+  optional-reader failure cannot suppress the host sample or another valid application component.
+- Heartbeat remains an API-only declassification surface for the repo-external OpenClaw consumer:
+  the consumer contract is still one scoped collection followed by one report. The root overview
+  now renders all independent application-metrics readers, per-procedure HTTP buckets, and bounded
+  registered cache-snapshot rows alongside the
+  host gauges. Component tests and full-page Storybook states cover fully observed, partially
+  degraded, and wholly unavailable application observations; heartbeat adds no parallel browser
+  route or component.
+
+### 2026-08-13 — Generic exec replacement and production authority closed
+
+- The root manifest installer now installs the two Dashboard system units and one exact sysusers
+  declaration alongside the fixed host helper, units, and polkit policy. After revalidating the
+  immutable source it may only create the dedicated web principal, reload root systemd, and enable
+  the two application units; it never starts a service. Reinstalling the previous root-owned
+  immutable release is the explicit rollback.
+- Production retains `ubuntu` as the protected state/worker identity and moves web to
+  `mira-dashboard-web`. A root-owned fixed launcher creates only reviewed id-mapped project,
+  OpenClaw, and state mounts inside web's private namespace. It keeps the operator's Doppler
+  credential non-id-mapped, validates its private ownership/mode, projects only the fixed web
+  allowlist, proves the dropped web identity cannot read or traverse the credential, unmounts it,
+  verifies the credential file absent, and then drops every group and capability. Startup also
+  proves Docker and system-manager IPC paths absent.
+- Polkit admits only the worker identity, `start` for the three exact host-operation units, and
+  `start|stop|restart` for the two Dashboard units. The worker production composition now owns the
+  existing fixed-ID broker; arbitrary units, argv, shell, cwd, environment, and raw output remain
+  impossible. Cleanup retains the apt/journal/Docker age bounds and never prunes volumes.
+- Activation verifies both root-owned unit files against the exact candidate release before pointer
+  mutation. The authenticated target smoke additionally proves distinct live principals, exact
+  root fragment paths, no web supplementary groups, and the worker Docker group.
+- The legacy `POST /api/exec/start` parity row is implemented by the bounded PTY plus purpose-built
+  durable Service Actions. The unused synchronous generic exec endpoint remains a reviewed removal.
+
+### 2026-08-13 — Heartbeat v5 consumer staged for coordinated cutover
+
+- Immutable releases now include one fixed two-command `openClawHeartbeat.js` automation wrapper.
+  `collect` performs exactly one schema-v5 `cache.getHeartbeat` query. `report` accepts one strict,
+  bounded complete monitoring snapshot over stdin and performs exactly one
+  `monitoring.submitCompleteSnapshot` mutation. There is no caller-selected procedure, method,
+  path, host, batching, retry, or fallback surface.
+- The wrapper reuses the existing `openclaw-heartbeat.token` through descriptor-pinned
+  `O_NOFOLLOW`, `0600`, ownership and opaque-token checks. Both input and response bodies are
+  bounded, UTF-8/JSON/tRPC envelopes are strict, and upstream bodies, validation details, paths,
+  and credentials collapse to one fixed safe failure.
+- The versioned schema-v5 `HEARTBEAT.md` is shipped as an immutable provisioning artifact. The live
+  OpenClaw workspace remains unchanged before cutover so the deployed legacy consumer cannot call
+  a not-yet-active Greenfield contract. Final cutover atomically installs the candidate prompt,
+  narrows the principal to `cache:read,monitoring:write`, and requires an authenticated proof of
+  exactly one collection followed by one report. The legacy heartbeat parity row correctly remains
+  planned until that production smoke succeeds.
+
+### 2026-08-13 — Root, backups, Storybook, and source-development parity closed
+
+- `/` now composes the bounded host and application metrics with weather, every provider quota
+  window/reset, managed-Git status, complete Docker image/volume summaries, SQLite and
+  PostgreSQL/PgBouncer summaries, log-source and maintenance-policy state, Kopia/WAL-G status and
+  controls, and the existing task/agent/notification/incident/Jobs/Service Action/report/cache
+  surfaces. Independent query and last-known-good boundaries keep one failed domain visible
+  without erasing healthy siblings.
+- The six Kopia/WAL-G rows are implemented as two bounded independent status queries and four
+  recent-MFA durable operations. Root-Compose/Engine capability discovery, fixed provider
+  wrappers, exact source fencing, daily schedules, one shared heavy-I/O lease, attention
+  clearance, and non-retryable unknown-outcome settlement are covered. This adds backup creation
+  and status/control only; no operator-facing database, Kopia, or WAL-G restore operation exists.
+- All 18 production pages have full-page Storybook coverage, including root application-metrics
+  degradation and log-maintenance attention. The machine page-coverage gate verifies the route
+  registry and material route states rather than relying on a manual story count.
+- Ordinary source development now advertises the exact production inventory of **28 executable
+  actions and 15 schedules**. Contract-valid PostgreSQL/SQLite, Docker, Delivery, backup, Git,
+  quota, and weather data plus deterministic conflict/unknown-outcome simulators exercise normal
+  Jobs/cache/UI paths while writing only marked development receipts. Managed PR previews retain
+  only `system.worker-smoke` and receive none of that simulated authority.
+- The living inventory is **153 implemented, one planned, and three reviewed removals** across 157
+  legacy endpoints; all **16 legacy browser routes** are implemented. The only planned endpoint is
+  `GET /api/cache/heartbeat`, pending the coordinated external-consumer cutover and authenticated
+  one-collection/one-report production proof. Production activation, restore/cutover rehearsal,
+  the remaining live smokes, and the repository-wide simplification audit remain open Phase 6
+  gates.
+
+### 2026-08-13 — Codex app-server quota boundary qualified
+
+- OpenAI quota uses the installed Codex CLI's line-delimited app-server JSON-RPC protocol:
+  `initialize`, `initialized`, then one `account/rateLimits/read`. It never scrapes terminal,
+  tmux, browser, or status-screen output. One uniquely resolved executable, an operator-owned
+  `CODEX_HOME`, a minimal environment, strict response projection, a 512 KiB response cap, and a
+  ten-second deadline keep this worker-only read fail-closed.
+- App-server remains experimental, so the supported boundary is pinned to qualified
+  `codex-cli 0.147.0` and its observed response schema. The required read-only current-host smoke
+  returned `available` with one 10,080-minute window without printing credentials or raw provider
+  data. Any CLI/protocol change requires a fresh exact-host qualification before activation;
+  otherwise only OpenAI quota becomes unavailable.
+- Successful collection teardown is bounded as well as request execution: stdin closes, `SIGTERM`
+  gets 250 ms, then `SIGKILL` gets one final bounded wait. A child that retains stdio after a valid
+  response therefore cannot hang the worker or its cache schedule.

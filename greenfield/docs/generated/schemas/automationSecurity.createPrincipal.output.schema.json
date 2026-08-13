@@ -77,6 +77,8 @@
                 "enum": [
                   "agents:read",
                   "agents:write",
+                  "backups:read",
+                  "backups:write",
                   "cache:read",
                   "cache:write",
                   "chat:read",
@@ -112,7 +114,7 @@
                 ],
                 "type": "string"
               },
-              "maxItems": 34,
+              "maxItems": 36,
               "uniqueItems": true
             },
             "createdAtMs": {
@@ -178,6 +180,8 @@
                 "enum": [
                   "agents:read",
                   "agents:write",
+                  "backups:read",
+                  "backups:write",
                   "cache:read",
                   "cache:write",
                   "chat:read",
@@ -213,7 +217,7 @@
                 ],
                 "type": "string"
               },
-              "maxItems": 34,
+              "maxItems": 36,
               "uniqueItems": true
             },
             "createdAtMs": {

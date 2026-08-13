@@ -1,6 +1,10 @@
 import type { Effect } from "effect";
 import * as v from "valibot";
 
+import {
+    backupStatusCacheGroupKey,
+    backupStatusCacheTtlMs,
+} from "../../../contracts/backups.ts";
 import { databaseObservabilityCacheKey } from "../../../contracts/database.ts";
 import { deliveryOverviewCacheKey } from "../../../contracts/delivery.ts";
 import {
@@ -8,6 +12,7 @@ import {
     deliveryPreviewActionKey,
     deliveryProductionActionKey,
 } from "../../../contracts/deliveryWorker.ts";
+import { gitWorkspaceCacheKey } from "../../../contracts/gitWorkspace.ts";
 import {
     type JobExecutionRunIdentity,
     type JobCancellationPolicy,
@@ -29,6 +34,8 @@ import {
     scheduleConfigurationSchema,
     scheduleIdSchema,
 } from "../../../contracts/jobModel.ts";
+import { quotaCacheKey } from "../../../contracts/quota.ts";
+import { weatherCacheKey } from "../../../contracts/weather.ts";
 import { utf8ByteLength } from "../../../shared/encoding.ts";
 import type { JsonObject } from "../../../shared/json.ts";
 import { logMaintenanceJobActionKey } from "../../../shared/logMaintenanceUnits.ts";
@@ -55,6 +62,26 @@ export const databaseObservabilityCacheJobScheduleId = "cache.database-observabi
 export const dockerOverviewCacheJobActionKey = "cache.refresh.docker-overview";
 /** Durable minute-level schedule for the Docker overview projection. */
 export const dockerOverviewCacheJobScheduleId = "cache.docker-overview";
+/** Worker-only dynamic Kopia and WAL-G status refresh identity. */
+export const backupStatusJobActionKey = "cache.refresh.backup-status";
+/** Durable status refresh schedule shared by the two independent backup entries. */
+export const backupStatusJobScheduleId = "cache.backup-status";
+/** Daily Kopia execution identity, also used by source-fenced manual runs. */
+export const backupKopiaRunJobActionKey = "backup.kopia.run";
+/** Durable daily Kopia schedule identity. */
+export const backupKopiaRunJobScheduleId = "backup.kopia.run";
+/** Daily WAL-G execution identity, also used by source-fenced manual runs. */
+export const backupWalgRunJobActionKey = "backup.walg.run";
+/** Durable daily WAL-G schedule identity. */
+export const backupWalgRunJobScheduleId = "backup.walg.run";
+/** Exact attention-clearance identity; it has no direct Jobs exposure. */
+export const backupClearAttentionJobActionKey = "backup.clear-attention";
+/** Scheduled action identities requiring the worker-only backup execution port. */
+export const backupScheduledJobActionKeys = Object.freeze([
+    backupStatusJobActionKey,
+    backupKopiaRunJobActionKey,
+    backupWalgRunJobActionKey,
+]);
 /** Worker-only operator-requested Docker mutation identity. */
 export const dockerOperationJobActionKey = "docker.operation";
 /** Worker-only scheduled full Docker updater identity. */
@@ -65,6 +92,24 @@ export const dockerUpdaterJobScheduleId = "docker.updater";
 export const deliveryOverviewCacheJobActionKey = "cache.refresh.delivery-overview";
 /** Durable minute-level schedule for the Delivery overview projection. */
 export const deliveryOverviewCacheJobScheduleId = "cache.delivery-overview";
+/** Worker-only bounded managed-repository status refresh identity. */
+export const gitWorkspaceCacheJobActionKey = "cache.refresh.git-workspace";
+/** Durable minute-level managed-repository status schedule. */
+export const gitWorkspaceCacheJobScheduleId = "cache.git-workspace";
+/** Worker-only normalized provider quota refresh identity. */
+export const quotaCacheJobActionKey = "cache.refresh.quotas";
+/** Durable quota refresh schedule. */
+export const quotaCacheJobScheduleId = "cache.quotas";
+/** Worker-only direct Open-Meteo refresh identity. */
+export const weatherCacheJobActionKey = "cache.refresh.weather";
+/** Durable fixed-location weather refresh schedule. */
+export const weatherCacheJobScheduleId = "cache.weather";
+/** Scheduled action identities requiring the bounded overview provider collectors. */
+export const overviewProviderJobActionKeys = Object.freeze([
+    gitWorkspaceCacheJobActionKey,
+    quotaCacheJobActionKey,
+    weatherCacheJobActionKey,
+]);
 /** Fixed worker-only online SQLite backup and upkeep identity. */
 export const sqliteMaintenanceJobActionKey = "database.sqlite-maintenance";
 /** Durable daily SQLite backup and upkeep schedule identity. */
@@ -446,6 +491,73 @@ const moltbookDashboardCacheDefinition = validateJobActionDefinition({
     timeoutMs: 30_000,
 });
 
+const overviewCacheDefinition = (input: {
+    readonly actionKey: string;
+    readonly cacheKey: string;
+    readonly description: string;
+    readonly displayName: string;
+    readonly intervalMs: number;
+    readonly resourceKeys: readonly string[];
+    readonly scheduleId: string;
+    readonly timeoutMs: number;
+}): JobActionDefinition =>
+    validateJobActionDefinition({
+        actionKey: input.actionKey,
+        actionPayload: Object.freeze({ key: input.cacheKey }),
+        attemptLimit: 3,
+        cancellationPolicy: "cooperative",
+        defaultEnabled: true,
+        defaultSchedule: Object.freeze({
+            intervalMs: input.intervalMs,
+            kind: "interval",
+        }),
+        description: input.description,
+        displayName: input.displayName,
+        initialDue: "immediate",
+        manualExposure: "cache-write",
+        priority: 0,
+        resourceClass: "light",
+        resourceKeys: input.resourceKeys,
+        retrySafe: true,
+        scheduleId: input.scheduleId,
+        timeoutMs: input.timeoutMs,
+    });
+
+export const gitWorkspaceCacheJobActionDefinition = overviewCacheDefinition({
+    actionKey: gitWorkspaceCacheJobActionKey,
+    cacheKey: gitWorkspaceCacheKey,
+    description:
+        "Projects path-free status for the three fixed managed Git repositories.",
+    displayName: "Managed Git status",
+    intervalMs: 60_000,
+    resourceKeys: Object.freeze(["git.managed-workspaces"]),
+    scheduleId: gitWorkspaceCacheJobScheduleId,
+    timeoutMs: 20_000,
+});
+
+export const quotaCacheJobActionDefinition = overviewCacheDefinition({
+    actionKey: quotaCacheJobActionKey,
+    cacheKey: quotaCacheKey,
+    description:
+        "Projects provider-isolated OpenAI, OpenRouter, ElevenLabs, and Synthetic limits.",
+    displayName: "Provider quota",
+    intervalMs: 15 * 60_000,
+    resourceKeys: Object.freeze(["network.quota-providers"]),
+    scheduleId: quotaCacheJobScheduleId,
+    timeoutMs: 30_000,
+});
+
+export const weatherCacheJobActionDefinition = overviewCacheDefinition({
+    actionKey: weatherCacheJobActionKey,
+    cacheKey: weatherCacheKey,
+    description: "Projects the fixed Spydeberg current weather and forecast.",
+    displayName: "Spydeberg weather",
+    intervalMs: 30 * 60_000,
+    resourceKeys: Object.freeze(["network.weather"]),
+    scheduleId: weatherCacheJobScheduleId,
+    timeoutMs: 20_000,
+});
+
 const databaseObservabilityCacheDefinition = validateJobActionDefinition({
     actionKey: databaseObservabilityCacheJobActionKey,
     actionPayload: Object.freeze({ key: databaseObservabilityCacheKey }),
@@ -583,6 +695,99 @@ export const sqliteMaintenanceJobActionDefinition = validateJobActionDefinition(
     scheduleId: sqliteMaintenanceJobScheduleId,
     timeoutMs: 16 * 60_000,
 });
+
+/** Frequent independent Kopia/WAL-G status refresh through fixed provider wrappers. */
+export const backupStatusJobActionDefinition = validateJobActionDefinition({
+    actionKey: backupStatusJobActionKey,
+    actionPayload: Object.freeze({ key: backupStatusCacheGroupKey }),
+    attemptLimit: 3,
+    cancellationPolicy: "cooperative",
+    defaultEnabled: true,
+    defaultSchedule: Object.freeze({
+        intervalMs: backupStatusCacheTtlMs,
+        kind: "interval",
+    }),
+    description:
+        "Discovers the root-Compose backup providers and refreshes bounded aggregate status.",
+    displayName: "Backup status",
+    initialDue: "immediate",
+    manualExposure: "cache-internal",
+    priority: 0,
+    resourceClass: "host-heavy",
+    resourceKeys: Object.freeze(["docker.engine"]),
+    retrySafe: true,
+    scheduleId: backupStatusJobScheduleId,
+    timeoutMs: 45_000,
+});
+
+const backupRunDefinition = (input: {
+    readonly actionKey: string;
+    readonly displayName: string;
+    readonly scheduleId: string;
+    readonly timeOfDay: string;
+    readonly type: "kopia" | "walg";
+}): JobActionDefinition =>
+    validateJobActionDefinition({
+        actionKey: input.actionKey,
+        actionPayload: Object.freeze({
+            operation: "run",
+            trigger: "schedule",
+            type: input.type,
+        }),
+        attemptLimit: 1,
+        cancellationPolicy: "never",
+        defaultEnabled: true,
+        defaultSchedule: Object.freeze({
+            kind: "daily",
+            timeOfDay: input.timeOfDay,
+            timeZone: "Europe/Oslo",
+        }),
+        description: `Runs one fixed ${input.displayName} provider backup without replay after dispatch.`,
+        displayName: `${input.displayName} backup`,
+        initialDue: "next-occurrence",
+        manualExposure: "none",
+        priority: 10,
+        resourceClass: "exclusive",
+        resourceKeys: Object.freeze(["backup.heavy-io", "docker.engine"]),
+        retrySafe: false,
+        scheduleId: input.scheduleId,
+        timeoutMs: 6 * 60 * 60_000,
+    });
+
+/** Daily 03:50 Europe/Oslo Kopia backup. */
+export const backupKopiaRunJobActionDefinition = backupRunDefinition({
+    actionKey: backupKopiaRunJobActionKey,
+    displayName: "Kopia",
+    scheduleId: backupKopiaRunJobScheduleId,
+    timeOfDay: "03:50",
+    type: "kopia",
+});
+
+/** Daily 03:20 Europe/Oslo WAL-G backup. */
+export const backupWalgRunJobActionDefinition = backupRunDefinition({
+    actionKey: backupWalgRunJobActionKey,
+    displayName: "WAL-G",
+    scheduleId: backupWalgRunJobScheduleId,
+    timeOfDay: "03:20",
+    type: "walg",
+});
+
+/** Exact source- and run-bound attention clearance with an idle-provider proof. */
+export const backupClearAttentionJobActionDefinition =
+    validateJobUnscheduledActionDefinition({
+        actionKey: backupClearAttentionJobActionKey,
+        attemptLimit: 1,
+        cancellationPolicy: "never",
+        description:
+            "Clears one exact backup attention run only after source and idle-provider verification.",
+        displayName: "Clear backup attention",
+        manualExposure: "none",
+        priority: 20,
+        resourceClass: "exclusive",
+        resourceKeys: Object.freeze(["backup.heavy-io", "docker.engine"]),
+        retrySafe: false,
+        timeoutMs: 45_000,
+    });
 
 const logMaintenanceDefinition = validateJobActionDefinition({
     actionKey: logMaintenanceJobActionKey,
@@ -803,10 +1008,16 @@ export const hostSystemUpdateJobActionDefinition = serviceActionDefinition({
 export const jobActionDefinitions = Object.freeze([
     systemHostCacheDefinition,
     moltbookDashboardCacheDefinition,
+    gitWorkspaceCacheJobActionDefinition,
+    quotaCacheJobActionDefinition,
+    weatherCacheJobActionDefinition,
     databaseObservabilityCacheDefinition,
     deliveryOverviewCacheJobActionDefinition,
     dockerOverviewCacheDefinition,
     dockerUpdaterJobActionDefinition,
+    backupStatusJobActionDefinition,
+    backupKopiaRunJobActionDefinition,
+    backupWalgRunJobActionDefinition,
     sqliteMaintenanceJobActionDefinition,
     logMaintenanceDefinition,
     workerSmokeDefinition,

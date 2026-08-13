@@ -21,6 +21,7 @@ export const applicationConfigurationLimits = Object.freeze({
     projectRootMaximumLength: 4096,
     workspaceRootMaximumLength: 4096,
     publicOriginMaximumLength: 2048,
+    quotaApiKeyMaximumLength: 4096,
     recentAuthenticationMinutes: Object.freeze({ maximum: 60, minimum: 1 }),
     sessionIdleMinutes: Object.freeze({ maximum: 1440, minimum: 5 }),
     totpKeyringMaximumLength: 4096,
@@ -53,6 +54,8 @@ export type ApplicationConfigurationField =
     | "port"
     | "projectRoot"
     | "publicOrigin"
+    | "quotaCredentials.openRouter"
+    | "quotaCredentials.synthetic"
     | "recentAuthenticationWindowMs"
     | "sessionIdleDurationMs"
     | "totpKeyring"
@@ -72,6 +75,8 @@ export const applicationConfigurationEnvironmentNames = [
     "MIRA_DASHBOARD_PUBLIC_ORIGIN",
     "MIRA_DASHBOARD_TRUSTED_PROXY_IPS",
     "ELEVENLABS_API_KEY",
+    "OPENROUTER_API_KEY",
+    "SYNTHETIC_API_KEY",
     "MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD",
     "DOCKER_LOGIN",
     "DOCKER_TOKEN",
@@ -265,16 +270,50 @@ export const applicationConfigurationRegistry: readonly ApplicationConfiguration
             browserExposure: "none",
             defaultValue: null,
             description:
-                "Optional server-only ElevenLabs credential for ephemeral Chat transcription and speech generation.",
+                "Optional server-only ElevenLabs credential for ephemeral Chat speech and worker-owned quota reads.",
             environmentName: "ELEVENLABS_API_KEY",
             field: "elevenLabsApiKey",
             operationalEffect:
-                "Enables capability-scoped Chat speech endpoints; when absent both controls remain unavailable.",
+                "Enables capability-scoped Chat speech endpoints in web and normalized quota reads in worker; neither process persists or shares the credential.",
             required: false,
             restartRequired: true,
-            roles: Object.freeze(["web"]),
+            roles: Object.freeze(["web", "worker"]),
             secret: true,
             validationConstraints: `When present, a trimmed nonblank control-safe secret at most ${applicationConfigurationLimits.elevenLabsApiKeyMaximumLength} code units; never persisted, logged, or browser-exposed.`,
+            valueType: "opaque-secret",
+        }),
+        metadata({
+            allowedValues: null,
+            browserExposure: "none",
+            defaultValue: null,
+            description:
+                "Optional worker-only OpenRouter credential for normalized quota reads.",
+            environmentName: "OPENROUTER_API_KEY",
+            field: "quotaCredentials.openRouter",
+            operationalEffect:
+                "Reads fixed OpenRouter key and credit endpoints; absence marks only that provider not configured.",
+            required: false,
+            restartRequired: true,
+            roles: Object.freeze(["worker"]),
+            secret: true,
+            validationConstraints: `When present, a trimmed nonblank control-safe secret at most ${applicationConfigurationLimits.quotaApiKeyMaximumLength} code units; never persisted, logged, or browser-exposed.`,
+            valueType: "opaque-secret",
+        }),
+        metadata({
+            allowedValues: null,
+            browserExposure: "none",
+            defaultValue: null,
+            description:
+                "Optional worker-only Synthetic credential for normalized quota reads.",
+            environmentName: "SYNTHETIC_API_KEY",
+            field: "quotaCredentials.synthetic",
+            operationalEffect:
+                "Reads the fixed Synthetic quota endpoint; absence marks only that provider not configured.",
+            required: false,
+            restartRequired: true,
+            roles: Object.freeze(["worker"]),
+            secret: true,
+            validationConstraints: `When present, a trimmed nonblank control-safe secret at most ${applicationConfigurationLimits.quotaApiKeyMaximumLength} code units; never persisted, logged, or browser-exposed.`,
             valueType: "opaque-secret",
         }),
         metadata({

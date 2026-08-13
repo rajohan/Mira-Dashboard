@@ -8,15 +8,22 @@ import type {
 } from "../../contracts/agentModel.ts";
 import type { ListAgentStatusesResult } from "../../contracts/agents.ts";
 import type { AuthStatus } from "../../contracts/auth.ts";
+import type { KopiaBackupStatus, WalgBackupStatus } from "../../contracts/backups.ts";
 import type {
     CacheEntry,
     CacheEntryStatus,
     CacheStatusResult,
     RefreshCacheEntryInput,
 } from "../../contracts/cache.ts";
+import type { DatabaseOverview } from "../../contracts/database.ts";
+import type { DockerOverview } from "../../contracts/docker.ts";
 import type { ListIncidentsResult } from "../../contracts/incidents.ts";
 import type { JobRunSummary } from "../../contracts/jobModel.ts";
 import type { JobQueueSummary, ListJobRunsResult } from "../../contracts/jobs.ts";
+import type {
+    ListLogSourcesOutput,
+    LogMaintenanceStatusOutput,
+} from "../../contracts/logs.ts";
 import type {
     IncidentSummary,
     NotificationRecord,
@@ -41,6 +48,7 @@ import {
 import { createDashboardRouter } from "../router.tsx";
 import type { DashboardWebAuthnClient } from "../security/webauthn/webauthnClient.ts";
 import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
+import { observedSystemApplicationMetrics } from "../test/systemMetrics.ts";
 
 const { render, screen, waitFor, within } = await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
@@ -69,6 +77,7 @@ const authenticatedStatus: AuthStatus = {
 };
 
 const systemMetrics = Object.freeze({
+    application: observedSystemApplicationMetrics(timestampMs),
     cpu: {
         loadAverage: [2, 1, 0.5],
         loadPercent: 50,
@@ -136,6 +145,162 @@ const hostStatus = Object.freeze(
     (({ payload: _payload, ...status }) => status)(hostEntry)
 ) satisfies CacheEntryStatus;
 
+const weatherEntry = Object.freeze({
+    consecutiveFailures: 0,
+    expiresAtMs: timestampMs + 90 * 60_000,
+    freshness: "fresh",
+    key: "weather.spydeberg",
+    lastAttemptAtMs: timestampMs,
+    lastAttemptDurationMs: 120,
+    lastAttemptNumber: 1,
+    lastAttemptRunId: "019fe000-0000-7000-8000-000000000004",
+    lastAttemptStatus: "succeeded",
+    lastSuccessAtMs: timestampMs,
+    manualRunAvailable: true,
+    metadata: {},
+    payload: {
+        apparentTemperatureC: 13,
+        condition: "cloudy",
+        forecast: [
+            {
+                condition: "rain",
+                date: "2026-08-13",
+                maximumTemperatureC: 18,
+                minimumTemperatureC: 11,
+            },
+            {
+                condition: "cloudy",
+                date: "2026-08-14",
+                maximumTemperatureC: 19,
+                minimumTemperatureC: 10,
+            },
+            {
+                condition: "clear",
+                date: "2026-08-15",
+                maximumTemperatureC: 21,
+                minimumTemperatureC: 12,
+            },
+        ],
+        humidityPercent: 68,
+        location: "Spydeberg",
+        observedAtMs: timestampMs,
+        temperatureC: 15,
+        timezone: "Europe/Oslo",
+        windKilometresPerHour: 9,
+    },
+    schemaId: "weather.spydeberg.v1",
+    source: "weather.open-meteo",
+    updatedAtMs: timestampMs,
+} as const satisfies CacheEntry);
+
+const quotaEntry = Object.freeze({
+    consecutiveFailures: 0,
+    expiresAtMs: timestampMs + 60 * 60_000,
+    freshness: "fresh",
+    key: "quotas.summary",
+    lastAttemptAtMs: timestampMs,
+    lastAttemptDurationMs: 120,
+    lastAttemptNumber: 1,
+    lastAttemptRunId: "019fe000-0000-7000-8000-000000000005",
+    lastAttemptStatus: "succeeded",
+    lastSuccessAtMs: timestampMs,
+    manualRunAvailable: true,
+    metadata: {},
+    payload: {
+        observedAtMs: timestampMs,
+        providers: [
+            {
+                id: "elevenlabs",
+                label: "ElevenLabs",
+                remainingPercent: 72,
+                status: "available",
+            },
+            {
+                id: "openai",
+                label: "OpenAI Codex",
+                status: "available",
+                windows: [
+                    {
+                        resetsAtMs: timestampMs + 60_000,
+                        usedPercent: 24,
+                        windowDurationMinutes: 300,
+                    },
+                ],
+            },
+            {
+                id: "openrouter",
+                label: "OpenRouter",
+                remaining: 12,
+                status: "available",
+                unit: "currency-usd",
+            },
+            { id: "synthetic", label: "Synthetic", status: "not-configured" },
+        ],
+    },
+    schemaId: "quotas.summary.v1",
+    source: "quota.providers",
+    updatedAtMs: timestampMs,
+} as const satisfies CacheEntry);
+
+const gitEntry = Object.freeze({
+    consecutiveFailures: 0,
+    expiresAtMs: timestampMs + 5 * 60_000,
+    freshness: "fresh",
+    key: "git.workspace",
+    lastAttemptAtMs: timestampMs,
+    lastAttemptDurationMs: 120,
+    lastAttemptNumber: 1,
+    lastAttemptRunId: "019fe000-0000-7000-8000-000000000006",
+    lastAttemptStatus: "succeeded",
+    lastSuccessAtMs: timestampMs,
+    manualRunAvailable: true,
+    metadata: {},
+    payload: {
+        observedAtMs: timestampMs,
+        repositories: [
+            {
+                branch: "main",
+                changedFileCount: 0,
+                detached: false,
+                headSha: "a".repeat(40),
+                id: "dashboard",
+                stagedFileCount: 0,
+                state: "available",
+                untrackedFileCount: 0,
+            },
+            {
+                branch: "main",
+                changedFileCount: 1,
+                detached: false,
+                headSha: "b".repeat(40),
+                id: "docker",
+                stagedFileCount: 0,
+                state: "available",
+                untrackedFileCount: 1,
+            },
+            {
+                branch: "main",
+                changedFileCount: 0,
+                detached: false,
+                headSha: "c".repeat(40),
+                id: "openclaw",
+                stagedFileCount: 0,
+                state: "available",
+                untrackedFileCount: 0,
+            },
+        ],
+    },
+    schemaId: "git.workspace.v1",
+    source: "git.managed-workspace",
+    updatedAtMs: timestampMs,
+} as const satisfies CacheEntry);
+
+const overviewProviderEntries = new Map<string, CacheEntry>([
+    [weatherEntry.key, weatherEntry],
+    [quotaEntry.key, quotaEntry],
+    [gitEntry.key, gitEntry],
+]);
+
 const missingStatus = Object.freeze({
     consecutiveFailures: 1,
     failureCode: "provider/unavailable",
@@ -157,6 +322,276 @@ const cacheStatus = Object.freeze({
     totalCount: 129,
     truncated: true,
 } as const satisfies CacheStatusResult);
+
+const kopiaBackupStatus = Object.freeze({
+    activity: { state: "idle" },
+    checkedAtMs: timestampMs,
+    state: "unavailable",
+    type: "kopia",
+} as const satisfies KopiaBackupStatus);
+
+const walgBackupStatus = Object.freeze({
+    activity: { state: "idle" },
+    checkedAtMs: timestampMs,
+    state: "unavailable",
+    type: "walg",
+} as const satisfies WalgBackupStatus);
+
+const dockerOverview = Object.freeze({
+    checkedAtMs: timestampMs,
+    state: "unavailable",
+} as const satisfies DockerOverview);
+
+const databaseOverview = Object.freeze({
+    checkedAtMs: timestampMs,
+    postgresql: { state: "unavailable" },
+    sqlite: { state: "unavailable" },
+} as const satisfies DatabaseOverview);
+
+const detailedDockerOverview = Object.freeze({
+    checkedAtMs: timestampMs,
+    containers: [
+        {
+            createdAtMs: timestampMs - 60_000,
+            health: "healthy",
+            id: "1".repeat(64),
+            image: "example/dashboard:1.0.0",
+            imageId: `sha256:${"2".repeat(64)}`,
+            mounts: [],
+            name: "dashboard-web",
+            networks: [],
+            ports: [],
+            project: "dashboard",
+            restartCount: 0,
+            service: "web",
+            startedAtMs: timestampMs - 50_000,
+            state: "running",
+        },
+    ],
+    images: [
+        {
+            createdAtMs: timestampMs - 60_000,
+            id: `sha256:${"2".repeat(64)}`,
+            references: ["example/dashboard:1.0.0"],
+            sizeBytes: 512 * 1024 ** 2,
+            usedByContainerIds: ["1".repeat(64)],
+        },
+    ],
+    observedAtMs: timestampMs,
+    sourceRevision: "a".repeat(64),
+    state: "fresh",
+    updaterEvents: [],
+    updaterServices: [],
+    volumes: [
+        {
+            createdAtMs: timestampMs - 60_000,
+            driver: "local",
+            name: "dashboard-data",
+            scope: "local",
+            sizeBytes: 2 * 1024 ** 3,
+            usedByContainerIds: ["1".repeat(64)],
+        },
+    ],
+} as const satisfies DockerOverview);
+
+const detailedDatabaseOverview = Object.freeze({
+    checkedAtMs: timestampMs,
+    postgresql: {
+        databases: [
+            {
+                blocksHit: 984,
+                blocksRead: 16,
+                cacheHitRatio: 98.4,
+                committedTransactions: 1234,
+                connections: 7,
+                detailsState: "available",
+                name: "mira_app",
+                pool: {
+                    activeClients: 5,
+                    activeServers: 3,
+                    averageQueryMs: 14,
+                    averageTransactionMs: 21.5,
+                    idleServers: 2,
+                    totalQueries: 4500,
+                    usedServers: 1,
+                    waitingClients: 1,
+                },
+                rolledBackTransactions: 12,
+                sizeBytes: 6 * 1024 ** 3,
+            },
+            {
+                blocksHit: 961,
+                blocksRead: 39,
+                cacheHitRatio: 96.1,
+                committedTransactions: 800,
+                connections: 3,
+                detailsState: "available",
+                name: "search_index",
+                rolledBackTransactions: 2,
+                sizeBytes: 2 * 1024 ** 3,
+            },
+        ],
+        observedAtMs: timestampMs,
+        pgbouncer: {
+            averageQueryMs: 14,
+            averageTransactionMs: 21.5,
+            clientConnections: 10,
+            maxWaitSeconds: 0.25,
+            serverConnections: 6,
+            waitingClients: 1,
+        },
+        state: "fresh",
+        statements: [
+            {
+                calls: 640,
+                meanExecutionMs: 508.25,
+                rank: 1,
+                rows: 1280,
+                sharedBlocksHit: 9100,
+                sharedBlocksRead: 42,
+                totalExecutionMs: 5280,
+            },
+        ],
+        summary: {
+            activeConnections: 4,
+            averageCacheHitRatio: 97.25,
+            idleConnections: 6,
+            maintenance: {
+                assessedPhysicalBytes: 6 * 1024 ** 3,
+                assessmentComplete: true,
+                estimatedReclaimableBytes: 5 * 1024 ** 3,
+                estimatedReclaimablePercent: (5 / 6) * 100,
+                highDeadTupleTableCount: 1,
+                requiresBloatReview: true,
+                slowStatementCount: 1,
+                status: "review",
+                unassessedPhysicalBytes: 0,
+                unassessedTableCount: 0,
+            },
+            pgStatStatementsEnabled: true,
+            totalConnections: 10,
+            totalDatabaseSizeBytes: 8 * 1024 ** 3,
+            unavailableDatabaseCount: 0,
+        },
+        tableHealth: [
+            {
+                assessment: "assessed",
+                database: "mira_app",
+                deadTuplePercent: 25,
+                deadTuples: 2000,
+                estimatedReclaimableBytes: 5 * 1024 ** 3,
+                lastAutoanalyzeAtMs: timestampMs - 1000,
+                lastAutovacuumAtMs: timestampMs - 2000,
+                liveTuples: 8000,
+                physicalBytes: 6 * 1024 ** 3,
+                schema: "public",
+                table: "events",
+            },
+        ],
+        torrentCounts: {
+            bitmagnet: { count: 125_000, state: "available" },
+            comet: { state: "unavailable" },
+        },
+    },
+    sqlite: {
+        connection: {
+            busyPolicy: "non-blocking",
+            checksEnforced: true,
+            foreignKeysEnabled: true,
+            journalMode: "wal",
+            synchronousMode: "full",
+            trustedSchemaEnabled: false,
+            walAutoCheckpointPages: 1000,
+        },
+        fileName: "mira-dashboard.db",
+        lifecycle: {
+            backupInventory: { reason: "inventory-unavailable", state: "unavailable" },
+            maintenance: { reason: "maintenance-unavailable", state: "unavailable" },
+            restoreVerification: {
+                reason: "verification-unavailable",
+                state: "unavailable",
+            },
+        },
+        migrations: { applied: 12, available: 12, current: true },
+        observedAtMs: timestampMs,
+        state: "fresh",
+        storage: {
+            databaseBytes: 64 * 1024 ** 2,
+            freeBytes: 4 * 1024 ** 2,
+            freePages: 1024,
+            freePercent: 6.25,
+            pageCount: 16_384,
+            pageSizeBytes: 4096,
+            permissions: {
+                dataDirectory: "0700",
+                database: "0600",
+                secure: true,
+                shm: "0600",
+                wal: "0600",
+            },
+            requiresVacuumReview: false,
+            shmBytes: 32_768,
+            storageBytes: 68 * 1024 ** 2,
+            walBytes: 4 * 1024 ** 2 - 32_768,
+        },
+    },
+} as const satisfies DatabaseOverview);
+
+const logSources = Object.freeze({
+    observedAtMs: timestampMs,
+    sources: [
+        {
+            availability: "available",
+            group: "dashboard",
+            id: "dashboard.web",
+            label: "Dashboard web",
+            modifiedAtMs: timestampMs,
+            sizeBytes: 2048,
+        },
+        {
+            availability: "missing",
+            group: "openclaw",
+            id: "openclaw.gateway",
+            label: "OpenClaw Gateway",
+        },
+    ],
+} as const satisfies ListLogSourcesOutput);
+
+const logMaintenance = Object.freeze({
+    observedAtMs: timestampMs,
+    policies: [
+        {
+            id: "docker-managed",
+            label: "Managed application and container logs",
+            scope: "docker",
+            state: "queueable",
+        },
+        {
+            id: "host-alternatives",
+            label: "Host alternatives log",
+            scope: "host",
+            state: "unavailable",
+        },
+        {
+            id: "host-apport",
+            label: "Host Apport log",
+            scope: "host",
+            state: "unavailable",
+        },
+        {
+            id: "host-dpkg",
+            label: "Host package log",
+            scope: "host",
+            state: "unavailable",
+        },
+        {
+            id: "host-rsyslog",
+            label: "Host system logs",
+            scope: "host",
+            state: "unavailable",
+        },
+    ],
+} as const satisfies LogMaintenanceStatusOutput);
 
 const queuedRefresh = Object.freeze({
     actionKey: "cache.refresh.system-host",
@@ -194,6 +629,26 @@ const failedRefresh = Object.freeze({
     terminalMessage: "The provider attempt failed safely.",
     updatedAtMs: timestampMs + 1000,
 } as const satisfies JobRunSummary);
+
+const attentionLogMaintenance = Object.freeze({
+    ...logMaintenance,
+    policies: logMaintenance.policies.map((policy) =>
+        policy.id === "docker-managed"
+            ? {
+                  ...policy,
+                  lastRun: {
+                      run: {
+                          ...failedRefresh,
+                          actionKey: "maintenance.rotate-logs",
+                          displayName: "Rotate managed logs",
+                          id: "019fe000-0000-7000-8000-000000000007",
+                          resourceKeys: ["maintenance.logs"],
+                      },
+                  },
+              }
+            : policy
+    ),
+} satisfies LogMaintenanceStatusOutput);
 
 const overviewReport = Object.freeze({
     id: "019fd974-54a2-74dd-a64b-d4186f8d8828",
@@ -350,7 +805,10 @@ interface TransportCall {
 interface OverviewTransportOptions {
     readonly cacheEntryOutputs?: readonly (CacheEntry | Error)[];
     readonly cacheStatusOutputs?: readonly (CacheStatusResult | Error)[];
+    readonly databaseOverviewOutput?: DatabaseOverview;
+    readonly dockerOverviewOutput?: DockerOverview;
     readonly jobOutputs?: readonly (ListJobRunsResult | Error)[];
+    readonly logMaintenanceOutputs?: readonly (LogMaintenanceStatusOutput | Error)[];
     readonly refreshOutputs?: readonly (JobRunSummary | Error)[];
     readonly reportOutputs?: readonly (ListReportsResult | Error)[];
     readonly systemMetricsOutputs?: readonly (SystemMetrics | Error)[];
@@ -371,7 +829,10 @@ function transportOutput(
 class OverviewTransport implements DashboardTrpcTransport {
     readonly #cacheEntryOutputs: readonly (CacheEntry | Error)[];
     readonly #cacheStatusOutputs: readonly (CacheStatusResult | Error)[];
+    readonly #databaseOverviewOutput: DatabaseOverview;
+    readonly #dockerOverviewOutput: DockerOverview;
     readonly #jobOutputs: readonly (ListJobRunsResult | Error)[];
+    readonly #logMaintenanceOutputs: readonly (LogMaintenanceStatusOutput | Error)[];
     readonly #refreshOutputs: readonly (JobRunSummary | Error)[];
     readonly #reportOutputs: readonly (ListReportsResult | Error)[];
     readonly #systemMetricsOutputs: readonly (SystemMetrics | Error)[];
@@ -381,7 +842,10 @@ class OverviewTransport implements DashboardTrpcTransport {
     constructor(options: OverviewTransportOptions = {}) {
         this.#cacheEntryOutputs = options.cacheEntryOutputs ?? [hostEntry];
         this.#cacheStatusOutputs = options.cacheStatusOutputs ?? [cacheStatus];
+        this.#databaseOverviewOutput = options.databaseOverviewOutput ?? databaseOverview;
+        this.#dockerOverviewOutput = options.dockerOverviewOutput ?? dockerOverview;
         this.#jobOutputs = options.jobOutputs ?? [jobRunPage];
+        this.#logMaintenanceOutputs = options.logMaintenanceOutputs ?? [logMaintenance];
         this.#refreshOutputs = options.refreshOutputs ?? [queuedRefresh];
         this.#reportOutputs = options.reportOutputs ?? [reportPage];
         this.#systemMetricsOutputs = options.systemMetricsOutputs ?? [systemMetrics];
@@ -406,6 +870,18 @@ class OverviewTransport implements DashboardTrpcTransport {
             case "auth.status": {
                 return Promise.resolve(authenticatedStatus);
             }
+            case "backups.getKopiaStatus": {
+                return Promise.resolve(kopiaBackupStatus);
+            }
+            case "backups.getWalgStatus": {
+                return Promise.resolve(walgBackupStatus);
+            }
+            case "database.overview": {
+                return Promise.resolve(this.#databaseOverviewOutput);
+            }
+            case "docker.overview": {
+                return Promise.resolve(this.#dockerOverviewOutput);
+            }
             case "agents.getConfiguration": {
                 return Promise.resolve(agentConfiguration);
             }
@@ -413,13 +889,35 @@ class OverviewTransport implements DashboardTrpcTransport {
                 return Promise.resolve(agentStatusPage);
             }
             case "cache.getEntry": {
-                return transportOutput(this.#cacheEntryOutputs, callIndex, path);
+                const key = (input as { readonly key?: unknown } | undefined)?.key;
+                if (typeof key === "string") {
+                    const providerEntry = overviewProviderEntries.get(key);
+                    if (providerEntry !== undefined)
+                        return Promise.resolve(providerEntry);
+                }
+                const providerCallCount = this.queryCalls.filter(
+                    (call) =>
+                        call.path === path &&
+                        (call.input as { readonly key?: unknown } | undefined)?.key ===
+                            "system.host"
+                ).length;
+                return transportOutput(
+                    this.#cacheEntryOutputs,
+                    providerCallCount - 1,
+                    path
+                );
             }
             case "cache.getStatus": {
                 return transportOutput(this.#cacheStatusOutputs, callIndex, path);
             }
             case "jobs.listRuns": {
                 return transportOutput(this.#jobOutputs, callIndex, path);
+            }
+            case "logs.listSources": {
+                return Promise.resolve(logSources);
+            }
+            case "logs.maintenanceStatus": {
+                return transportOutput(this.#logMaintenanceOutputs, callIndex, path);
             }
             case "incidents.list": {
                 return Promise.resolve(incidentPage);
@@ -501,7 +999,46 @@ describe("Dashboard operational overview foundation", () => {
         expect(cpuCard).toBeTruthy();
         expect(within(cpuCard as HTMLElement).getByText("50%")).toBeTruthy();
         expect(screen.getByText("12.3 Mbit/s")).toBeTruthy();
+        expect(screen.getByText("All observed")).toBeTruthy();
+        expect(screen.getByText("3 subscribers")).toBeTruthy();
         expect(screen.queryByText("mira-vps")).toBeNull();
+        expect(
+            await screen.findByRole("heading", { level: 2, name: "Environment" })
+        ).toBeTruthy();
+        expect(screen.getByRole("heading", { level: 3, name: "Weather" })).toBeTruthy();
+        expect(screen.getByText("15 °C")).toBeTruthy();
+        expect(
+            screen.getByRole("heading", { level: 3, name: "Provider quota" })
+        ).toBeTruthy();
+        expect(screen.getByText("72% remaining")).toBeTruthy();
+        expect(screen.getByText("1 active window")).toBeTruthy();
+        expect(screen.getByText("5h window")).toBeTruthy();
+        expect(screen.getByText(/24% used · resets/u)).toBeTruthy();
+        expect(
+            screen.getByRole("heading", { level: 3, name: "Managed Git" })
+        ).toBeTruthy();
+        expect(screen.getByText("1 changed")).toBeTruthy();
+        expect(screen.getByText("0 staged · 1 untracked")).toBeTruthy();
+        expect(
+            await screen.findByRole("heading", {
+                level: 2,
+                name: "Services and data",
+            })
+        ).toBeTruthy();
+        expect(screen.getByText("Docker inventory is unavailable.")).toBeTruthy();
+        expect(screen.getByText("SQLite: Unavailable")).toBeTruthy();
+        expect(screen.getByText("1 available")).toBeTruthy();
+        expect(
+            screen.getByRole("list", { name: "Log maintenance policies" })
+        ).toBeTruthy();
+        expect(screen.getByText("Managed application and container logs")).toBeTruthy();
+        expect(screen.getByRole("link", { name: "View Docker" })).toHaveAttribute(
+            "href",
+            "/docker"
+        );
+        expect(
+            await screen.findByRole("heading", { level: 2, name: "Backups" })
+        ).toBeTruthy();
         expect(
             await screen.findByRole("heading", {
                 level: 2,
@@ -586,9 +1123,17 @@ describe("Dashboard operational overview foundation", () => {
             "/reports"
         );
         expect(await screen.findByText("Showing 2 of 129")).toBeTruthy();
-        expect(
-            transport.queryCalls.filter(({ path }) => path === "cache.getEntry")
-        ).toHaveLength(0);
+        await waitFor(() =>
+            expect(
+                transport.queryCalls.filter(
+                    ({ input, path }) =>
+                        path === "cache.getEntry" &&
+                        overviewProviderEntries.has(
+                            (input as { readonly key: string }).key
+                        )
+                )
+            ).toHaveLength(3)
+        );
         expect(screen.getAllByText("Up to date").length).toBeGreaterThan(0);
         expect(screen.getAllByText("Failed").length).toBeGreaterThan(0);
 
@@ -600,7 +1145,11 @@ describe("Dashboard operational overview foundation", () => {
         expect(screen.queryByText("never-render-this-metadata")).toBeNull();
         await waitFor(() =>
             expect(
-                transport.queryCalls.filter(({ path }) => path === "cache.getEntry")
+                transport.queryCalls.filter(
+                    ({ input, path }) =>
+                        path === "cache.getEntry" &&
+                        (input as { readonly key: string }).key === "system.host"
+                )
             ).toHaveLength(1)
         );
 
@@ -639,6 +1188,29 @@ describe("Dashboard operational overview foundation", () => {
         ).toBeTruthy();
         expect(screen.getAllByText("Out of date")).not.toHaveLength(0);
         expect(await screen.findByText("Showing 2 of 129")).toBeTruthy();
+    });
+
+    test("renders complete Docker, database, and log-maintenance summaries", async () => {
+        const transport = new OverviewTransport({
+            databaseOverviewOutput: detailedDatabaseOverview,
+            dockerOverviewOutput: detailedDockerOverview,
+            logMaintenanceOutputs: [attentionLogMaintenance],
+        });
+        renderOverview(transport);
+
+        expect(await screen.findByText(/1 images · 512 MiB/u)).toBeTruthy();
+        expect(screen.getByText(/1 volumes · 2\.0 GiB across 1 measured/u)).toBeTruthy();
+        expect(
+            screen.getByText(/SQLite 64 MiB database · 68 MiB total · 4\.0 MiB reusable/u)
+        ).toBeTruthy();
+        expect(
+            screen.getByText(/PostgreSQL 8\.0 GiB · 10 connections · 97\.3% cache hit/u)
+        ).toBeTruthy();
+        expect(
+            screen.getByText(/PgBouncer 10 clients · 6 servers · 1 waiting/u)
+        ).toBeTruthy();
+        expect(screen.getByText("Maintenance review")).toBeTruthy();
+        expect(screen.getByText("Last failed")).toBeTruthy();
     });
 
     test("does not present an empty truncated snapshot as a complete inventory", async () => {
@@ -716,7 +1288,11 @@ describe("Dashboard operational overview foundation", () => {
         await user.click(screen.getByRole("button", { name: "Refresh now" }));
         await waitFor(() =>
             expect(
-                transport.queryCalls.filter(({ path }) => path === "cache.getEntry")
+                transport.queryCalls.filter(
+                    ({ input, path }) =>
+                        path === "cache.getEntry" &&
+                        (input as { readonly key: string }).key === "system.host"
+                )
             ).toHaveLength(2)
         );
         await waitFor(() =>

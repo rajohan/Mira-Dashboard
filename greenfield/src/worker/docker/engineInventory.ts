@@ -52,17 +52,26 @@ export const dockerEngineInventoryUpdaterLabelNames = Object.freeze([
     "mira.updater.tagPatternIsRegex",
 ] as const);
 
+/** Purpose-built capabilities projected for non-updater worker domains. */
+export const dockerEngineInventoryBackupLabelNames = Object.freeze([
+    "mira.dashboard.backup",
+] as const);
+
 export type DockerEngineInventoryComposeLabel =
     (typeof dockerEngineInventoryComposeLabelNames)[number];
 export type DockerEngineInventoryUpdaterLabel =
     (typeof dockerEngineInventoryUpdaterLabelNames)[number];
+export type DockerEngineInventoryBackupLabel =
+    (typeof dockerEngineInventoryBackupLabelNames)[number];
 export type DockerEngineInventoryAllowedLabel =
     | DockerEngineInventoryComposeLabel
-    | DockerEngineInventoryUpdaterLabel;
+    | DockerEngineInventoryUpdaterLabel
+    | DockerEngineInventoryBackupLabel;
 
 const allowedLabelNames = Object.freeze([
     ...dockerEngineInventoryComposeLabelNames,
     ...dockerEngineInventoryUpdaterLabelNames,
+    ...dockerEngineInventoryBackupLabelNames,
 ] as const);
 
 function projectedLabel(label: DockerEngineInventoryAllowedLabel): string {

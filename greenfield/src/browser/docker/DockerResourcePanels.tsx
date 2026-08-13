@@ -149,7 +149,7 @@ export function DockerResourcePanels({
                                                         )}
                                                     </ul>
                                                 )}
-                                                <code className="text-primary-500 mt-2 block text-xs wrap-anywhere">
+                                                <code className="text-primary-400 mt-2 block text-xs wrap-anywhere">
                                                     {image.id}
                                                 </code>
                                             </td>

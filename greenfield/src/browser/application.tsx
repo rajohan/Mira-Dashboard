@@ -37,6 +37,7 @@ const webAuthnClient = createDashboardWebAuthnClient();
 export interface DashboardBrowserApplicationProps {
     readonly collections: DashboardBrowserCollections;
     readonly queryClient: QueryClient;
+    readonly onAuthenticatedCacheReset?: (queryClient: QueryClient) => void;
     readonly realtimeClient: DashboardRealtimeClient;
     readonly router: DashboardRouter;
     readonly trpcClient: DashboardTrpcClient;
@@ -51,6 +52,7 @@ export interface DashboardBrowserApplicationProps {
 export function DashboardBrowserApplication({
     collections,
     queryClient,
+    onAuthenticatedCacheReset,
     realtimeClient,
     router,
     trpcClient,
@@ -62,7 +64,9 @@ export function DashboardBrowserApplication({
                 <DashboardCollectionsProvider collections={collections}>
                     <DashboardRealtimeProvider client={realtimeClient}>
                         <DashboardTrpcProvider client={trpcClient}>
-                            <AuthenticatedBrowserCacheBoundary>
+                            <AuthenticatedBrowserCacheBoundary
+                                onCacheReset={onAuthenticatedCacheReset}
+                            >
                                 <AuthenticatedSessionActivity />
                                 <ChatRuntimeStoreProvider>
                                     <DashboardWebAuthnProvider client={webAuthnClient}>

@@ -2,6 +2,7 @@
 export {
     hostOperationsProvisioningArtifacts,
     hostOperationsProvisioningReleaseArtifactPaths,
+    hostOperationsProvisioningSourceArtifactPaths,
     hostOperationsProvisioningSupportArtifactPaths,
     type HostOperationsProvisioningArtifactPolicy,
 } from "./provisioning/host-operations/policy.ts";

@@ -4,22 +4,26 @@ import { Redacted } from "effect";
 
 import { rejectionError } from "../../scripts/testSupport/rejection.ts";
 import {
-    dockerFreeJobActionDefinitions,
-    dockerOverviewCacheJobActionKey,
-    dockerUpdaterJobActionKey,
+    jobActionDefinitions,
     managedPreviewJobActionDefinitions,
 } from "../server/domains/jobs/actionRegistry.ts";
+import {
+    sourceDevelopmentExecutableJobActionDefinitions,
+    sourceDevelopmentScheduledJobActionDefinitions,
+} from "../server/domains/jobs/sourceDevelopmentActionComposition.ts";
 import { deriveDashboardProjectLayout } from "../server/platform/filesystem/projectLayout.ts";
 import type {
     PersistentGatewayTransport,
     PersistentGatewayTransportOptions,
 } from "../server/platform/gateway/persistentGatewayTransport.ts";
+import type { SourceDevelopmentGatewayTransportOptions } from "../server/platform/gateway/sourceDevelopmentGatewayTransport.ts";
 import { createDevelopmentRuntimeRelease } from "../server/platform/release/developmentRuntimeRelease.ts";
 import type {
     DashboardApplicationRuntime,
     DashboardApplicationRuntimeOptions,
 } from "../server/platform/runtime/applicationRuntime.ts";
 import { createTestStructuredLogger } from "../server/test/support/requestContext.ts";
+import { createDevelopmentPtyProcess } from "../worker/terminal/developmentPtyProcess.ts";
 import {
     type DashboardServerOptions,
     type DashboardWebProcessDependencies,
@@ -28,9 +32,10 @@ import {
 import {
     createDevelopmentWebRuntime,
     runDevelopmentWebProcess,
-    withoutDevelopmentDockerScheduleDefinitions,
+    withSourceDevelopmentScheduleDefinitions,
 } from "./developmentWeb.ts";
 import {
+    developmentTerminalBrokerOptions,
     developmentWorkerActionDefinitions,
     runDevelopmentWorkerProcess,
     withoutDevelopmentDockerCapabilities,
@@ -50,8 +55,14 @@ describe("development process entrypoints", () => {
             gatewayUrl: "ws://127.0.0.1:18789",
         });
         const gatewayTransport = Object.freeze({}) as PersistentGatewayTransport;
+        const sourceDevelopmentTransport = Object.freeze(
+            {}
+        ) as PersistentGatewayTransport;
         const runtime = Object.freeze({}) as DashboardApplicationRuntime;
         let gatewayOptions: PersistentGatewayTransportOptions | undefined;
+        let sourceDevelopmentOptions:
+            | SourceDevelopmentGatewayTransportOptions
+            | undefined;
         let runtimeOptions: DashboardApplicationRuntimeOptions | undefined;
 
         const result = createDevelopmentWebRuntime(
@@ -64,9 +75,13 @@ describe("development process entrypoints", () => {
                     runtimeOptions = options;
                     return runtime;
                 },
-                createGatewayTransport(options) {
+                createReadGatewayTransport(options) {
                     gatewayOptions = options;
                     return gatewayTransport;
+                },
+                createSourceDevelopmentGatewayTransport(options) {
+                    sourceDevelopmentOptions = options;
+                    return sourceDevelopmentTransport;
                 },
             }
         );
@@ -77,6 +92,10 @@ describe("development process entrypoints", () => {
             token: configuration.gatewayToken,
             url: configuration.gatewayUrl,
         });
+        expect(sourceDevelopmentOptions).toEqual({
+            readTransport: gatewayTransport,
+            stateRoot: projectRoot,
+        });
         expect(runtimeOptions).toEqual({
             database: {
                 migrationsDirectory: `${projectRoot}/migrations`,
@@ -85,7 +104,7 @@ describe("development process entrypoints", () => {
                 stateDirectory: layout.production.state.root,
             },
             logger,
-            persistentGatewayTransport: gatewayTransport,
+            persistentGatewayTransport: sourceDevelopmentTransport,
         });
     });
 
@@ -103,16 +122,55 @@ describe("development process entrypoints", () => {
         );
     });
 
-    test("does not expose production Docker capabilities to development", () => {
-        const dependencies = withoutDevelopmentDockerCapabilities(
-            createDefaultDashboardWorkerProcessDependencies()
-        );
+    test("removes production Docker and cutover authority while retaining fixed brokers", async () => {
+        const productionDependencies = createDefaultDashboardWorkerProcessDependencies();
+        const dependencies = withoutDevelopmentDockerCapabilities(productionDependencies);
+        const createCutoverRuntime = dependencies.createCutoverRuntime;
+        const detectCutoverValidation = dependencies.detectCutoverValidation;
+        const reconcileCutoverValidation = dependencies.reconcileCutoverValidation;
+        if (
+            createCutoverRuntime === undefined ||
+            detectCutoverValidation === undefined ||
+            reconcileCutoverValidation === undefined
+        ) {
+            throw new Error("Development cutover guards are missing");
+        }
 
         expect("createDocker" in dependencies).toBe(false);
-        expect("startDockerBroker" in dependencies).toBe(false);
+        expect(dependencies.startDockerBroker).toBeFunction();
+        expect(createCutoverRuntime).not.toBe(
+            productionDependencies.createCutoverRuntime
+        );
+        expect(reconcileCutoverValidation).not.toBe(
+            productionDependencies.reconcileCutoverValidation
+        );
+        expect(await detectCutoverValidation("/isolated/dev/state")).toBeFalse();
+        expect(() =>
+            createCutoverRuntime(
+                undefined as never,
+                undefined as never,
+                undefined as never,
+                undefined as never
+            )
+        ).toThrow("Production cutover runtime is unavailable in development");
+        const recoveryFailure = await rejectionError(
+            reconcileCutoverValidation(undefined as never, undefined as never, 3206)
+        );
+        expect(recoveryFailure.message).toBe(
+            "Production cutover recovery is unavailable in development"
+        );
     });
 
-    test("injects the Docker-free schedule registry only into development web", async () => {
+    test("replaces only the ordinary source-development PTY with the isolated simulator", () => {
+        const options = Object.freeze({ projectRoot: "/srv/mira-dashboard-dev" });
+
+        const ordinary = developmentTerminalBrokerOptions(options, false);
+        expect(ordinary).not.toBe(options);
+        expect(ordinary.sessionBrokerDependencies?.pty).toBe(createDevelopmentPtyProcess);
+        expect(developmentTerminalBrokerOptions(options, true)).toBe(options);
+    });
+
+    test("injects the complete production-shaped schedule inventory", async () => {
         let observedDefinitions: DashboardServerOptions["jobActionDefinitions"];
         const applicationServer = Object.freeze({
             port: 0,
@@ -127,19 +185,25 @@ describe("development process entrypoints", () => {
             },
         } satisfies DashboardWebProcessDependencies);
         const developmentDependencies =
-            withoutDevelopmentDockerScheduleDefinitions(productionDependencies);
+            withSourceDevelopmentScheduleDefinitions(productionDependencies);
         const serverOptions = Object.freeze({}) as DashboardServerOptions;
 
         await productionDependencies.createServer(serverOptions);
         expect(observedDefinitions).toBeUndefined();
 
         await developmentDependencies.createServer(serverOptions);
-        expect(observedDefinitions).toBe(dockerFreeJobActionDefinitions);
-        expect(observedDefinitions?.map(({ actionKey }) => actionKey)).not.toContain(
-            dockerOverviewCacheJobActionKey
+        expect(observedDefinitions).toBe(sourceDevelopmentScheduledJobActionDefinitions);
+        expect(observedDefinitions?.map(({ actionKey }) => actionKey)).toEqual(
+            jobActionDefinitions.map(({ actionKey }) => actionKey)
         );
-        expect(observedDefinitions?.map(({ actionKey }) => actionKey)).not.toContain(
-            dockerUpdaterJobActionKey
+        const executableKeys = new Set(
+            developmentWorkerActionDefinitions(false).map(({ actionKey }) => actionKey)
+        );
+        expect(
+            observedDefinitions?.every(({ actionKey }) => executableKeys.has(actionKey))
+        ).toBeTrue();
+        expect(developmentWorkerActionDefinitions(false)).toBe(
+            sourceDevelopmentExecutableJobActionDefinitions
         );
     });
 
@@ -150,7 +214,7 @@ describe("development process entrypoints", () => {
             stop: () => Promise.resolve(),
             url: new URL("http://127.0.0.1:3100/"),
         } satisfies ApplicationServer);
-        const dependencies = withoutDevelopmentDockerScheduleDefinitions(
+        const dependencies = withSourceDevelopmentScheduleDefinitions(
             Object.freeze({
                 ...createDefaultDashboardWebProcessDependencies(),
                 createServer(options: DashboardServerOptions) {
@@ -167,9 +231,54 @@ describe("development process entrypoints", () => {
         expect(developmentWorkerActionDefinitions(true)).toBe(
             managedPreviewJobActionDefinitions
         );
-        expect(developmentWorkerActionDefinitions(false)).toBeUndefined();
+        expect(developmentWorkerActionDefinitions(false)).toBe(
+            sourceDevelopmentExecutableJobActionDefinitions
+        );
         expect(
             managedPreviewJobActionDefinitions.map(({ actionKey }) => actionKey)
         ).toEqual(["system.worker-smoke"]);
     });
+
+    for (const profile of [
+        { managedPreview: false, name: "ordinary" },
+        { managedPreview: true, name: "managed-preview" },
+    ] as const) {
+        for (const startupOrder of [
+            ["web", "worker"],
+            ["worker", "web"],
+        ] as const) {
+            test(`disables cutover reconciliation for ${profile.name} ${startupOrder.join("-first-")} startup`, async () => {
+                const webDependencies = withSourceDevelopmentScheduleDefinitions(
+                    createDefaultDashboardWebProcessDependencies(),
+                    profile.managedPreview
+                        ? managedPreviewJobActionDefinitions
+                        : sourceDevelopmentScheduledJobActionDefinitions
+                );
+                const workerDependencies = withoutDevelopmentDockerCapabilities(
+                    createDefaultDashboardWorkerProcessDependencies()
+                );
+                const dependenciesByRole = Object.freeze({
+                    web: webDependencies,
+                    worker: workerDependencies,
+                });
+
+                for (const role of startupOrder) {
+                    const detectCutoverValidation =
+                        dependenciesByRole[role].detectCutoverValidation;
+                    if (detectCutoverValidation === undefined) {
+                        throw new Error("Development cutover detector is missing");
+                    }
+                    expect(
+                        await detectCutoverValidation("/isolated/development/state")
+                    ).toBeFalse();
+                }
+
+                expect(developmentWorkerActionDefinitions(profile.managedPreview)).toBe(
+                    profile.managedPreview
+                        ? managedPreviewJobActionDefinitions
+                        : sourceDevelopmentExecutableJobActionDefinitions
+                );
+            });
+        }
+    }
 });

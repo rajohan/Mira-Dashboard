@@ -47,6 +47,7 @@ const preview: Preview = {
             storySort: {
                 method: "alphabetical",
                 order: [
+                    "Pages",
                     "UI",
                     "Authentication",
                     "Agents",

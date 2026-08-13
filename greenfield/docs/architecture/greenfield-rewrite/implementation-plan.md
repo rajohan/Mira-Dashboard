@@ -191,16 +191,15 @@ including restart during streaming.
   command, shell, or cwd API for the unused synchronous exec route. Stage the replacement for the
   consumed `POST /api/exec/start` behavior as that PTY plus one fixed `system-cleanup` operation
   that preserves package cleanup, bounded journald retention, and age-filtered Docker pruning
-  without deleting volumes. Keep the parity row planned until the host operation is executable in
-  the approved production topology.
+  without deleting volumes. The implemented parity row is gated by root-unit manifest verification
+  and the live production identity smoke.
 - expose the six fixed Service Action intents in contract/UI, but advertise only exact executors
   owned by a fresh worker on the current release. OpenClaw cleanup/update use reviewed worker-only
   Gateway methods, while OpenClaw restart reuses the existing fixed restart executor/provider also
-  exposed in Settings. Host cleanup/restart/update use only exact root-owned systemd units through the
-  fixed worker broker. Production must not compose that broker until the worker has a distinct OS
-  principal. Separately approved provisioning must bind only that principal, exclude the web
-  principal, validate immutable artifacts, and preserve explicit rollback; a shared-user/group
-  grant is forbidden.
+  exposed in Settings. Host cleanup/restart/update use only exact root-owned systemd units through
+  the fixed production worker broker. Root provisioning runs web and worker as distinct OS
+  principals, excludes web from Docker and broker authority, validates immutable artifacts, and
+  preserves explicit rollback; no shared web/worker privilege grant remains.
 - keep the implemented `database.overview` and `/database` read-only vertical bounded: compose live
   Dashboard-SQLite lifecycle facts with a worker-owned, bounded last-known-good
   PostgreSQL/PgBouncer projection; preserve the source picker, maintenance assessment, responsive
@@ -266,8 +265,8 @@ including restart during streaming.
   prerequisites and before `verify-current-catalog --approved`, because verification requires an
   existing matching approval. On later releases, verification may run first only when the retained
   current or previous policy digest already approves that release; otherwise activation runs first.
-  Before Phase 5 can close, finish the production credential cutover rather than inheriting
-  legacy defaults: provision a distinct `MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD` through
+  Before production activation, finish the credential cutover rather than inheriting legacy
+  defaults: provision a distinct `MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD` through
   Doppler, apply it to `mira_dashboard_observer` through a reviewed non-logging activation path,
   and never fall back to `DATABASE_USERNAME`/`DATABASE_PASSWORD`, `postgres/postgres`, or a
   superuser credential. `/opt/docker/apps/pgbouncer/userlist.txt` currently contains a tracked
@@ -287,10 +286,10 @@ including restart during streaming.
   anchored atomic-retire cleanup under the trusted same-UID deployment-lease boundary. A future
   root-owned immutable handoff and different-principal garbage collector are required to defend
   against malicious concurrent mutation by that UID.
-  Keep the six Kopia/WAL-G status/control rows and database backup/restore in their separate
-  privileged slices. The final backup slice must discover exactly one healthy provider per
-  reviewed capability from the canonical root Compose graph, using only
-  `mira.dashboard.backup=kopia-v1` or `mira.dashboard.backup=wal-g-v1` as membership authority.
+  The six Kopia/WAL-G status/control rows are implemented in one separate privileged backup
+  vertical. It discovers exactly one healthy provider per reviewed capability from the canonical
+  root Compose graph, using only `mira.dashboard.backup=kopia-v1` or
+  `mira.dashboard.backup=wal-g-v1` as membership authority.
   Container, service, project, image, port, and source-mount names remain data rather than
   allowlists; additions, removals, and renames therefore converge without Dashboard changes.
   Ambiguity, disappearance, or graph drift preserves bounded last-known-good state and never
@@ -298,7 +297,9 @@ including restart during streaming.
   `/source/<safe-id>` mounts. Provider actions reuse durable Jobs, exact source CAS, recent MFA,
   non-retryable unknown-outcome handling, and one shared heavy-I/O lease. The coordinated
   `/opt/docker` capability-label/wrapper change remains a separate reviewed infrastructure PR and
-  is not applied implicitly by Dashboard delivery.
+  is not applied implicitly by Dashboard delivery. No operator-facing database, Kopia, or WAL-G
+  restore operation is introduced; immutable SQLite activation/rollback recovery and Phase 6
+  restore drills remain separate from the backup control surface.
 
 **Exit gate:** capability, step-up, audit, cancellation, resource-limit, and failure-recovery
 tests pass for every privileged operation.

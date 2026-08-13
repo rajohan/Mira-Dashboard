@@ -2,6 +2,7 @@ import { realpath } from "node:fs/promises";
 import path from "node:path";
 
 import { managedPreviewJobActionDefinitions } from "../server/domains/jobs/actionRegistry.ts";
+import { sourceDevelopmentExecutableJobActionDefinitions } from "../server/domains/jobs/sourceDevelopmentActionComposition.ts";
 import {
     createDashboardWorkerRuntime,
     createSystemJobWorkerSideEffects,
@@ -14,9 +15,14 @@ import {
 } from "../shared/developmentProcessSupport.ts";
 import { createUnavailableDatabaseObservabilityCollector } from "../worker/database/bunSqlDatabaseObservabilityCollector.ts";
 import { createFixedSqliteLifecycleMaintenance } from "../worker/database/fixedSqliteLifecycleMaintenance.ts";
+import {
+    createDevelopmentRuntimeAuthority,
+    type DevelopmentRuntimeAuthority,
+} from "../worker/developmentRuntimeAuthority.ts";
 import { developmentTaskNotificationLoop } from "../worker/developmentTaskNotifications.ts";
 import { createDescriptorWorkspaceFileStructuralWriter } from "../worker/files/descriptorWorkspaceFileStructuralWriter.ts";
 import { createDevelopmentLogMaintenanceExecutor } from "../worker/logs/developmentLogMaintenance.ts";
+import { createDevelopmentPtyProcess } from "../worker/terminal/developmentPtyProcess.ts";
 import { environmentSource } from "./environmentSource.ts";
 import {
     type DashboardWorkerProcessDependencies,
@@ -25,31 +31,73 @@ import {
 } from "./worker.ts";
 
 /**
- * Removes host Docker discovery and mutation authority from the source-watched worker.
- * Development state may be isolated while the host Docker daemon is still production.
+ * Removes host Docker and production-cutover authority from the source-watched worker.
+ * Development state may be isolated while host Docker and Delivery are still production.
  * @param dependencies Production worker composition boundaries.
- * @returns The same boundaries without either Docker composition or its broker.
+ * The broker lifecycle is retained because ordinary source development supplies
+ * it with development-only fixed operations rather than Docker daemon authority.
+ * @returns Development-safe boundaries with inert cutover guards and no Docker composition.
  */
 export function withoutDevelopmentDockerCapabilities(
     dependencies: DashboardWorkerProcessDependencies
 ): DashboardWorkerProcessDependencies {
     const {
+        createCutoverRuntime: _createCutoverRuntime,
         createDocker: _createDocker,
-        startDockerBroker: _startDockerBroker,
+        reconcileCutoverValidation: _reconcileCutoverValidation,
         ...safeDependencies
     } = dependencies;
-    return Object.freeze(safeDependencies);
+    return Object.freeze({
+        ...safeDependencies,
+        createCutoverRuntime: () => {
+            throw new Error("Production cutover runtime is unavailable in development");
+        },
+        detectCutoverValidation: () => Promise.resolve(false),
+        reconcileCutoverValidation: () =>
+            Promise.reject(
+                new Error("Production cutover recovery is unavailable in development")
+            ),
+    });
 }
 
 /**
- * Returns the exact job authority set for the managed-preview worker profile.
+ * Returns the exact job authority set for one development worker profile.
  * @param managedPreview Whether the process is an untrusted managed preview.
- * @returns The smoke-only authority set for previews, otherwise undefined.
+ * @returns The smoke-only preview inventory or complete source-development inventory.
  */
 export function developmentWorkerActionDefinitions(
     managedPreview: boolean
-): typeof managedPreviewJobActionDefinitions | undefined {
-    return managedPreview ? managedPreviewJobActionDefinitions : undefined;
+):
+    | typeof managedPreviewJobActionDefinitions
+    | typeof sourceDevelopmentExecutableJobActionDefinitions {
+    return managedPreview
+        ? managedPreviewJobActionDefinitions
+        : sourceDevelopmentExecutableJobActionDefinitions;
+}
+
+type DevelopmentTerminalBrokerOptions = Parameters<
+    DashboardWorkerProcessDependencies["startTerminalBroker"]
+>[0];
+
+/**
+ * Selects the process-free PTY factory only for ordinary source development.
+ * Managed preview retains its existing sandbox-owned terminal composition unchanged.
+ * @param options Existing terminal broker composition.
+ * @param managedPreview Whether the process is an untrusted managed preview.
+ * @returns The profile-specific terminal broker composition.
+ */
+export function developmentTerminalBrokerOptions(
+    options: DevelopmentTerminalBrokerOptions,
+    managedPreview: boolean
+): DevelopmentTerminalBrokerOptions {
+    return managedPreview
+        ? options
+        : Object.freeze({
+              ...options,
+              sessionBrokerDependencies: Object.freeze({
+                  pty: createDevelopmentPtyProcess,
+              }),
+          });
 }
 
 function developmentInvocation(arguments_: readonly string[]): Readonly<{
@@ -85,16 +133,27 @@ export async function runDevelopmentWorkerProcess(
         createDefaultDashboardWorkerProcessDependencies()
     );
     const isManagedPreview = invocation.managedPreview;
+    let developmentAuthority: DevelopmentRuntimeAuthority | undefined;
     const dependencies = Object.freeze({
         ...defaults,
+        ...(isManagedPreview
+            ? {}
+            : {
+                  createDocker: () => {
+                      if (developmentAuthority === undefined) {
+                          throw new Error(
+                              "Development runtime authority is not initialized"
+                          );
+                      }
+                      return Object.freeze({
+                          operations: developmentAuthority.dockerOperations,
+                          runtime: developmentAuthority.docker,
+                      });
+                  },
+              }),
         createHostOperations: () => void 0,
         createLogMaintenanceExecutor: createDevelopmentLogMaintenanceExecutor,
-        ...(isManagedPreview
-            ? {
-                  createGatewayTransport: () =>
-                      createManagedPreviewTaskNotificationTransport(),
-              }
-            : {}),
+        createGatewayTransport: () => createManagedPreviewTaskNotificationTransport(),
         createOpenClawGatewayLifecycle: () => void 0,
         createOpenClawServiceActions: () => void 0,
         createRuntime: (
@@ -102,17 +161,22 @@ export async function runDevelopmentWorkerProcess(
             source,
             _logger,
             gatewayTransport,
-            openClawGateway,
-            openClawServiceActions,
+            _openClawGateway,
+            _openClawServiceActions,
             workspaceRoot,
             openClawRoot,
             logMaintenance,
             moltbook,
+            _overviewProviders,
             _databaseObservability,
             _databaseObservabilityReconciler,
-            hostOperations,
+            _hostOperations,
             bootIdentity
         ) => {
+            const developmentAuthorities = developmentAuthority;
+            if (!isManagedPreview && developmentAuthorities === undefined) {
+                throw new Error("Development runtime authority is not initialized");
+            }
             const writer = isManagedPreview
                 ? undefined
                 : createDescriptorWorkspaceFileStructuralWriter({
@@ -122,7 +186,7 @@ export async function runDevelopmentWorkerProcess(
             const actionDefinitions =
                 developmentWorkerActionDefinitions(isManagedPreview);
             return createDashboardWorkerRuntime({
-                ...(actionDefinitions === undefined ? {} : { actionDefinitions }),
+                actionDefinitions,
                 bootIdentity,
                 database: {
                     migrationsDirectory: path.join(source.releaseRoot, "migrations"),
@@ -130,14 +194,23 @@ export async function runDevelopmentWorkerProcess(
                     startupMode: "initialize-empty",
                     stateDirectory: layout.production.state.root,
                 },
-                databaseObservability: createUnavailableDatabaseObservabilityCollector(),
+                databaseObservability:
+                    developmentAuthorities?.databaseObservability ??
+                    createUnavailableDatabaseObservabilityCollector(),
                 logMaintenance,
                 moltbook,
-                ...(openClawGateway === undefined ? {} : { openClawGateway }),
-                ...(openClawServiceActions === undefined
+                ...(developmentAuthorities === undefined
                     ? {}
-                    : { openClawServiceActions }),
-                ...(hostOperations === undefined ? {} : { hostOperations }),
+                    : {
+                          hostOperations: developmentAuthorities.hostOperations,
+                          openClawGateway: developmentAuthorities.openClawGateway,
+                          openClawServiceActions:
+                              developmentAuthorities.openClawServiceActions,
+                          backups: developmentAuthorities.backups,
+                          createDelivery: developmentAuthorities.createDelivery,
+                          docker: developmentAuthorities.docker,
+                          overviewProviders: developmentAuthorities.overviewProviders,
+                      }),
                 persistentGatewayTransport: gatewayTransport,
                 pid: process.pid,
                 releaseId: source.manifest.source.commitSha,
@@ -158,6 +231,19 @@ export async function runDevelopmentWorkerProcess(
             });
         },
         loadRelease: () => Promise.resolve(release),
+        resolveProjectLayout: async (projectRoot) => {
+            const layout = await defaults.resolveProjectLayout(projectRoot);
+            if (!isManagedPreview) {
+                developmentAuthority = createDevelopmentRuntimeAuthority({
+                    stateRoot: layout.root,
+                });
+            }
+            return layout;
+        },
+        startTerminalBroker: (options) =>
+            defaults.startTerminalBroker(
+                developmentTerminalBrokerOptions(options, isManagedPreview)
+            ),
     } satisfies DashboardWorkerProcessDependencies);
     await runDashboardWorkerProcess(
         {

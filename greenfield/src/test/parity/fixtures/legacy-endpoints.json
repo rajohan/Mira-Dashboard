@@ -244,10 +244,10 @@
             "id": "GET /api/backups/kopia",
             "method": "GET",
             "path": "/api/backups/kopia",
-            "purpose": "Reads Kopia backup state.",
+            "purpose": "Reads dynamically discovered Kopia provider state through an independent bounded fresh, last-known-good, or unavailable projection.",
             "section": "Backups, Cache, Metrics, Ops",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["backups.getKopiaStatus"],
                 "phase": "phase-5"
@@ -257,10 +257,10 @@
             "id": "GET /api/backups/walg",
             "method": "GET",
             "path": "/api/backups/walg",
-            "purpose": "Reads WAL-G backup state.",
+            "purpose": "Reads dynamically discovered WAL-G provider state through an independent bounded fresh, last-known-good, or unavailable projection.",
             "section": "Backups, Cache, Metrics, Ops",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["backups.getWalgStatus"],
                 "phase": "phase-5"
@@ -283,7 +283,7 @@
             "id": "GET /api/cache/heartbeat",
             "method": "GET",
             "path": "/api/cache/heartbeat",
-            "purpose": "Reads legacy schema v3 payload-bearing cache envelopes plus identifiable task, Dashboard-job, and OpenClaw-cron diagnostics. cache.getHeartbeat schema v4 is a bounded secure operational summary, but this legacy row remains planned until every diagnostic capability and the external consumer migration are preserved without loss.",
+            "purpose": "Reads legacy schema v3 payload-bearing cache envelopes plus identifiable operational diagnostics. cache.getHeartbeat schema v5 is the bounded payload-free replacement producer, but this legacy row remains planned until the repo-external OpenClaw consumer migrates to the exact scoped tRPC wrapper and a smoke verifies exactly one collection followed by one report without loss.",
             "section": "Backups, Cache, Metrics, Ops",
             "target": {
                 "delivery": "planned",
@@ -709,10 +709,10 @@
             "id": "GET /api/metrics",
             "method": "GET",
             "path": "/api/metrics",
-            "purpose": "Reads legacy host and application observability, HTTP counters, polling-snapshot state, token projections, and the wider counters deferred from legacy health diagnostics. The bounded system.metrics host gauges are implemented, but this row remains planned until the complete capability is preserved.",
+            "purpose": "Replaces legacy host and application observability with bounded host gauges plus independently isolated web-runtime, Jobs, durable-operation, durable-chat, SQLite, Gateway, realtime, registered cache-snapshot, and fixed-procedure HTTP counters. Identifiable token projections are replaced by the separate bounded quota capability; process arguments, cache payloads, chat content, paths, and identities are never exposed.",
             "section": "Backups, Cache, Metrics, Ops",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["system.metrics"],
                 "phase": "phase-3"
@@ -1360,10 +1360,10 @@
             "id": "POST /api/backups/kopia/clear-needs-attention",
             "method": "POST",
             "path": "/api/backups/kopia/clear-needs-attention",
-            "purpose": "Queues clearing Kopia attention state.",
+            "purpose": "Queues an exact Kopia attention-clear operation through durable Jobs with recent MFA, source CAS, idempotency, and audit.",
             "section": "Backups, Cache, Metrics, Ops",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["backups.clearKopiaAttention"],
                 "phase": "phase-5"
@@ -1373,10 +1373,10 @@
             "id": "POST /api/backups/kopia/run",
             "method": "POST",
             "path": "/api/backups/kopia/run",
-            "purpose": "Queues Kopia backup.",
+            "purpose": "Queues a dynamically discovered Kopia backup through durable Jobs with recent MFA, source CAS, idempotency, audit, and unknown-outcome handling.",
             "section": "Backups, Cache, Metrics, Ops",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["backups.runKopia"],
                 "phase": "phase-5"
@@ -1386,10 +1386,10 @@
             "id": "POST /api/backups/walg/clear-needs-attention",
             "method": "POST",
             "path": "/api/backups/walg/clear-needs-attention",
-            "purpose": "Queues clearing WAL-G attention state.",
+            "purpose": "Queues an exact WAL-G attention-clear operation through durable Jobs with recent MFA, source CAS, idempotency, and audit.",
             "section": "Backups, Cache, Metrics, Ops",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["backups.clearWalgAttention"],
                 "phase": "phase-5"
@@ -1399,10 +1399,10 @@
             "id": "POST /api/backups/walg/run",
             "method": "POST",
             "path": "/api/backups/walg/run",
-            "purpose": "Queues WAL-G backup.",
+            "purpose": "Queues a dynamically discovered WAL-G backup through durable Jobs with recent MFA, source CAS, idempotency, audit, and unknown-outcome handling.",
             "section": "Backups, Cache, Metrics, Ops",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["backups.runWalg"],
                 "phase": "phase-5"
@@ -1593,10 +1593,10 @@
             "id": "POST /api/exec/start",
             "method": "POST",
             "path": "/api/exec/start",
-            "purpose": "Partially replaced by the bounded PTY and fixed Service Actions without a generic command API. The system-cleanup foundation preserves package autoremove/cache cleanup, journald rotation with 14-day and 1 GiB retention bounds, and Docker pruning only for unused content older than 168 hours; it never deletes volumes. This row remains planned until the distinct-worker production topology and separately approved root provisioning make that host action executable.",
+            "purpose": "Replaced by bounded PTY and fixed Service Actions, never generic exec. Activation verifies root unit bytes against the exact release. Authenticated smoke proves distinct OS principals, exact root fragments, empty web groups, and the worker Docker group; the launcher proves Docker/system-manager IPC absent before dropping privilege. Polkit rejects arbitrary unit/argv requests. Cleanup keeps package autoremove/cache cleanup, 14-day and 1 GiB retention, pruning older than 168 hours, and never deletes volumes.",
             "section": "Exec And Terminal",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["serviceActions.request", "terminal.prepareSession"],
                 "phase": "phase-5"

@@ -40,6 +40,7 @@ const applicationCompositionTestFiles: ReadonlySet<string> = new Set([
     "src/app/dashboardServerProcess.test.ts",
     "src/app/databaseMaintenance.test.ts",
     "src/app/developmentProcesses.test.ts",
+    "src/app/runtimeAuthorityBundle.test.ts",
     "src/app/trpcHttpHandler.test.ts",
     "src/app/trpcRequestPolicy.test.ts",
     "src/app/worker.test.ts",
@@ -74,6 +75,7 @@ const reviewedApplicationServerTargets: ReadonlyMap<
         "src/app/developmentWorker.ts",
         new Set([
             "src/server/domains/jobs/actionRegistry.ts",
+            "src/server/domains/jobs/sourceDevelopmentActionComposition.ts",
             "src/server/domains/jobs/workerRuntime.ts",
             "src/server/platform/gateway/previewGatewayTransport.ts",
             "src/server/platform/release/developmentRuntimeRelease.ts",

@@ -203,7 +203,35 @@ describe("cache contracts", () => {
                 staleSinceMs: 1500,
                 state: "last-known-good",
             },
-            schemaVersion: 4,
+            operationalSignals: {
+                backups: {
+                    kopia: {
+                        condition: "healthy",
+                        observedAtMs: 1800,
+                        state: "fresh",
+                    },
+                    walg: {
+                        condition: "attention",
+                        observedAtMs: 1000,
+                        staleSinceMs: 1500,
+                        state: "last-known-good",
+                    },
+                },
+                database: {
+                    postgresqlMaintenance: { state: "unavailable" },
+                    sqliteMaintenance: { state: "unavailable" },
+                },
+                docker: {
+                    health: { state: "unavailable" },
+                    updates: { state: "unavailable" },
+                },
+                git: { state: "unavailable" },
+                hostCapacity: { state: "unavailable" },
+                logs: { state: "unavailable" },
+                quota: { state: "unavailable" },
+                weather: { state: "unavailable" },
+            },
+            schemaVersion: 5,
             tasks: {
                 items: [
                     {
@@ -223,6 +251,22 @@ describe("cache contracts", () => {
             },
         } as const;
         expect(v.parse(cacheHeartbeatResultSchema, heartbeat)).toEqual(heartbeat);
+        expect(JSON.stringify(heartbeat.operationalSignals)).not.toContain("path");
+        expect(
+            v.safeParse(cacheHeartbeatResultSchema, {
+                ...heartbeat,
+                operationalSignals: {
+                    ...heartbeat.operationalSignals,
+                    backups: {
+                        ...heartbeat.operationalSignals.backups,
+                        walg: {
+                            ...heartbeat.operationalSignals.backups.walg,
+                            staleSinceMs: 999,
+                        },
+                    },
+                },
+            }).success
+        ).toBeFalse();
 
         const futureLinkedRun = {
             ...heartbeat,

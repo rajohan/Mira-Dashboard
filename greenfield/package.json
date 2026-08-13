@@ -24,7 +24,6 @@
         "docs:generate": "bun scripts/generateDocs.ts",
         "delivery:prepare-state": "bun scripts/delivery/prepareProductionState.ts",
         "delivery:install-log-maintenance": "bun scripts/delivery/provisioning/log-maintenance/installLogMaintenanceProvisioning.ts",
-        "delivery:install-units": "bun scripts/delivery/installProductionSystemdUnits.ts",
         "delivery:activate": "bun scripts/delivery/activateProductionRelease.ts",
         "format": "oxfmt --write .",
         "format:check": "oxfmt --check .",

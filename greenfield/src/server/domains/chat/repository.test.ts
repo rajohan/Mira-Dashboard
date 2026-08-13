@@ -90,6 +90,16 @@ describe("durable chat repository", () => {
             expect(stored?.event_bytes).toBeLessThanOrEqual(
                 chatRunEventPayloadMaximumBytes
             );
+            const repositoryMetrics = repository.readMetrics();
+            expect(repositoryMetrics).toMatchObject({
+                activeRuns: 1,
+                failedOrUnknownRuns: 0,
+                retainedEventBytes: stored?.event_bytes,
+                retainedEvents: 1,
+                retainedRuns: 1,
+                retainedSnapshots: 1,
+            });
+            expect(repositoryMetrics.retainedSnapshotBytes).toBeGreaterThan(0);
             expect(
                 chatRunEventBytesMaximum - (stored?.event_bytes ?? 0)
             ).toBeGreaterThanOrEqual(
