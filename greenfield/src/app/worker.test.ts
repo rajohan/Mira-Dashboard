@@ -4,7 +4,10 @@ import { inspect } from "node:util";
 
 import { Redacted } from "effect";
 
-import type { DeliveryWorkerCompositionFactory } from "../server/domains/jobs/workerRuntime.ts";
+import type {
+    DeliveryWorkerCompositionAuthority,
+    DeliveryWorkerCompositionFactory,
+} from "../server/domains/jobs/workerRuntime.ts";
 import { deriveDashboardProjectLayout } from "../server/platform/filesystem/projectLayout.ts";
 import type { PersistentGatewayTaskNotificationTransport } from "../server/platform/gateway/persistentGatewayTransport.ts";
 import type { ProjectFileLogDestination } from "../server/platform/observability/projectFileLogSink.ts";
@@ -16,10 +19,16 @@ import {
     releaseDeliveryProtocols,
     releaseProcessRoles,
 } from "../shared/releaseManifest.ts";
+import type {
+    DeliveryPreviewExecutionPort,
+    DeliveryProductionExecutionPort,
+} from "../worker/delivery/runtime.ts";
 import type { ManagedLogManifest } from "../worker/logs/managedLogManifest.ts";
 import type { DashboardWorkerRuntime } from "../worker/runtime.ts";
 import {
     createDefaultDashboardWorkerProcessDependencies,
+    createWorkerDeliveryComposition,
+    createWorkerDeliveryProcessComposition,
     createWorkerDockerComposition,
     createWorkerLogMaintenanceExecutor,
     type DashboardWorkerProcessDependencies,
@@ -59,6 +68,24 @@ const release: RuntimeRelease = Object.freeze({
     }),
     releaseRoot: `${layout.production.releases}/${releaseId}`,
 });
+
+const unusedDeliveryPreview = Object.freeze({
+    start: () => Promise.reject(new Error("Unused preview start")),
+    status: () => Promise.reject(new Error("Unused preview status")),
+    stop: () => Promise.reject(new Error("Unused preview stop")),
+}) satisfies DeliveryPreviewExecutionPort;
+
+const unusedDeliveryProduction = Object.freeze({
+    execute: () => Promise.reject(new Error("Unused production execution")),
+}) satisfies DeliveryProductionExecutionPort;
+
+const deliveryCompositionAuthority = Object.freeze({
+    readActionActive: () => Promise.resolve(false),
+    readActivePreviewOperation: () => Promise.resolve(undefined),
+    readPrevious() {
+        return;
+    },
+}) satisfies DeliveryWorkerCompositionAuthority;
 
 function processFixture(
     initializationFailure?: Error,
@@ -437,6 +464,153 @@ const processOptions = Object.freeze({
         OPENCLAW_GATEWAY_URL: "ws://127.0.0.1:18789",
     },
     releaseRoot: release.releaseRoot,
+});
+
+function deliveryGitHubCredentials(includeReviewer = false) {
+    return Object.freeze({
+        ordinary: Object.freeze({
+            token: Redacted.make("mira-token-long-enough-for-composition"),
+            username: Redacted.make("mira-2026"),
+        }),
+        ...(includeReviewer
+            ? {
+                  reviewerToken: Redacted.make(
+                      "raymond-token-long-enough-for-composition"
+                  ),
+              }
+            : {}),
+    });
+}
+
+describe("Delivery worker composition", () => {
+    test("stays unavailable when only reviewer authority is configured", () => {
+        expect(
+            createWorkerDeliveryComposition({
+                checkoutRoot: layout.production.checkout,
+                githubCredentials: {
+                    reviewerToken: Redacted.make(
+                        "raymond-token-long-enough-for-composition"
+                    ),
+                },
+                preview: unusedDeliveryPreview,
+                releasesDirectory: layout.production.releases,
+                stateDirectory: layout.production.state.root,
+            })
+        ).toBeUndefined();
+    });
+
+    test("fails closed when no preview mutation authority is supplied", () => {
+        const factory = createWorkerDeliveryComposition({
+            checkoutRoot: layout.production.checkout,
+            githubCredentials: deliveryGitHubCredentials(),
+            releasesDirectory: layout.production.releases,
+            stateDirectory: layout.production.state.root,
+        });
+
+        expect(factory).toBeFunction();
+        expect(() => factory!(deliveryCompositionAuthority)).toThrow(
+            "Delivery preview authority is unavailable"
+        );
+    });
+
+    test("binds explicit preview, production, and separated reviewer capabilities", () => {
+        let observedProduction:
+            | Parameters<
+                  NonNullable<
+                      Parameters<
+                          typeof createWorkerDeliveryComposition
+                      >[0]["createProduction"]
+                  >
+              >[0]
+            | undefined;
+        const factory = createWorkerDeliveryComposition({
+            checkoutRoot: layout.production.checkout,
+            createPreview: () => {
+                throw new Error("Explicit preview authority must win");
+            },
+            createProduction(input) {
+                observedProduction = input;
+                return unusedDeliveryProduction;
+            },
+            githubCredentials: deliveryGitHubCredentials(true),
+            preview: unusedDeliveryPreview,
+            previewControlsAvailable: false,
+            releasesDirectory: layout.production.releases,
+            stateDirectory: layout.production.state.root,
+        });
+
+        const runtime = factory!(deliveryCompositionAuthority);
+
+        expect(Object.keys(runtime).toSorted()).toEqual([
+            "execute",
+            "readPrevious",
+            "refresh",
+        ]);
+        expect(observedProduction?.preview).toBe(unusedDeliveryPreview);
+        expect(observedProduction?.authority.readExact).toBeFunction();
+        expect(observedProduction?.authority.readForOperation).toBeFunction();
+        expect(observedProduction?.github.listOpenPullRequests).toBeFunction();
+        expect(observedProduction?.mainGit.inspect).toBeFunction();
+        expect(observedProduction?.mainGit.syncMainToExactRef).toBeFunction();
+        expect(runtime.readPrevious("pull-requests")).toBeUndefined();
+    });
+
+    test("creates preview authority from the ordinary GitHub port when requested", () => {
+        let previewCreated = false;
+        const factory = createWorkerDeliveryComposition({
+            checkoutRoot: layout.production.checkout,
+            createPreview(github) {
+                previewCreated = true;
+                expect(github.getPullRequest).toBeFunction();
+                return unusedDeliveryPreview;
+            },
+            githubCredentials: deliveryGitHubCredentials(),
+            releasesDirectory: layout.production.releases,
+            stateDirectory: layout.production.state.root,
+        });
+
+        const runtime = factory!(deliveryCompositionAuthority);
+
+        expect(previewCreated).toBe(true);
+        expect(runtime.execute).toBeFunction();
+    });
+
+    test("keeps the production process composition unavailable without Mira", () => {
+        expect(
+            createWorkerDeliveryProcessComposition({
+                gatewayTransport: {} as never,
+                githubCredentials: {
+                    reviewerToken: Redacted.make(
+                        "raymond-token-long-enough-for-composition"
+                    ),
+                },
+                layout,
+                port: 3100,
+                release,
+            })
+        ).toBeUndefined();
+    });
+
+    test("builds immutable preview and cutover capabilities without executing them", () => {
+        const factory = createWorkerDeliveryProcessComposition({
+            gatewayTransport: {} as never,
+            githubCredentials: deliveryGitHubCredentials(true),
+            layout,
+            port: 3100,
+            release,
+        });
+
+        expect(factory).toBeFunction();
+        const runtime = factory!(deliveryCompositionAuthority);
+
+        expect(Object.keys(runtime).toSorted()).toEqual([
+            "execute",
+            "readPrevious",
+            "refresh",
+        ]);
+        expect(runtime.execute).toBeFunction();
+        expect(runtime.refresh).toBeFunction();
+    });
 });
 
 describe("Dashboard worker process", () => {

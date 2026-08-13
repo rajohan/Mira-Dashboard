@@ -2,6 +2,7 @@ import * as v from "valibot";
 
 /** Stable, secret-free partial-success reasons retained across Delivery releases. */
 export const deliveryOperationWarningCodes = Object.freeze([
+    "branch-cleanup-unconfirmed",
     "branch-retained",
     "comment-failed",
     "deployment-failed",

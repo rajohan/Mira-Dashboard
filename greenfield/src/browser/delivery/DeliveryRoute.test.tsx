@@ -388,4 +388,45 @@ describe("DeliveryRoute", () => {
             view.unmount();
         }
     });
+
+    test("renders authoritative head-guard limitations as disabled controls", async () => {
+        const baseGroup = pullRequestsResult.groups[0];
+        const basePullRequest = baseGroup.members[0];
+        const harness = createClient({
+            pullRequests: {
+                ...pullRequestsResult,
+                groups: [
+                    {
+                        ...baseGroup,
+                        members: [
+                            {
+                                ...basePullRequest,
+                                actions: [
+                                    {
+                                        action: "reject",
+                                        actor: "mira",
+                                        available: false,
+                                        reason: "head-guard-unavailable",
+                                        scope: "self",
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        });
+        const view = renderDelivery(harness.client);
+        try {
+            expect(await screen.findByRole("button", { name: "Reject" })).toBeDisabled();
+            expect(
+                screen.getByText(
+                    "GitHub cannot atomically bind this action to the reviewed pull request head or stack heads."
+                )
+            ).toBeVisible();
+            expect(harness.mutation).not.toHaveBeenCalled();
+        } finally {
+            view.unmount();
+        }
+    });
 });

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
     deliveryPullRequestsPayloadMaximumBytes,
+    type DeliveryPullRequestActionCapability,
     type DeliveryReleases,
 } from "../../contracts/delivery.ts";
 import type { DeliveryGitHubPullRequest } from "../../contracts/deliveryGithub.ts";
@@ -199,7 +200,8 @@ describe("Delivery overview projection", () => {
         const topActions = group.members[1]!.actions;
         expect(topActions.find(({ action }) => action === "create-stack")).toMatchObject({
             actor: "mira",
-            available: true,
+            available: false,
+            reason: "head-guard-unavailable",
             scope: "group",
         });
         expect(
@@ -221,12 +223,68 @@ describe("Delivery overview projection", () => {
                 .members[1]!.actions.find(({ action }) => action === "merge")
         ).toMatchObject({
             available: false,
-            reason: "checks-blocked",
+            reason: "head-guard-unavailable",
             scope: "prefix",
         });
     });
 
-    test("blocks untrusted native authors without blocking ordinary external PRs", () => {
+    test("publishes head-guard limitations without disabling safe ordinary actions", () => {
+        const candidateBottom = pullRequest(1);
+        const candidateTop = pullRequest(2, {
+            baseRefName: candidateBottom.headRefName,
+        });
+        const nativeBottom = pullRequest(3, {
+            stack: { baseRefName: "main", number: 90, position: 1, size: 2 },
+        });
+        const nativeTop = pullRequest(4, {
+            baseRefName: nativeBottom.headRefName,
+            stack: { baseRefName: "main", number: 90, position: 2, size: 2 },
+        });
+        const ordinary = pullRequest(5, { mergeStateStatus: "BEHIND" });
+        const reviewable = pullRequest(6, { reviews: [] });
+        const payload = project([
+            candidateTop,
+            nativeTop,
+            ordinary,
+            candidateBottom,
+            reviewable,
+            nativeBottom,
+        ]);
+        const member = (number: number) =>
+            payload.pullRequestGroups
+                .flatMap(({ members }) => members)
+                .find((pullRequest) => pullRequest.number === number)!;
+        const action = (
+            number: number,
+            id: DeliveryPullRequestActionCapability["action"]
+        ) => member(number).actions.find(({ action }) => action === id);
+
+        expect(action(candidateTop.number, "create-stack")).toMatchObject({
+            available: false,
+            reason: "head-guard-unavailable",
+        });
+        for (const id of ["merge", "merge-and-deploy"] as const) {
+            expect(action(nativeTop.number, id)).toMatchObject({
+                available: false,
+                reason: "head-guard-unavailable",
+            });
+        }
+        expect(action(nativeTop.number, "preview-start")).toMatchObject({
+            available: true,
+        });
+        expect(action(ordinary.number, "reject")).toMatchObject({
+            available: false,
+            reason: "head-guard-unavailable",
+        });
+        for (const id of ["merge", "preview-start", "update-branch"] as const) {
+            expect(action(ordinary.number, id)).toMatchObject({ available: true });
+        }
+        expect(action(reviewable.number, "approve-review")).toMatchObject({
+            available: true,
+        });
+    });
+
+    test("keeps untrusted native previews and merges fail-closed without blocking ordinary external PRs", () => {
         const native = pullRequest(1, {
             authorLogin: "external-user",
             stack: { baseRefName: "main", number: 90, position: 2, size: 2 },
@@ -241,8 +299,14 @@ describe("Delivery overview projection", () => {
 
         expect(merge(native.number)).toMatchObject({
             available: false,
-            reason: "untrusted-author",
+            reason: "head-guard-unavailable",
         });
+        expect(
+            payload.pullRequestGroups
+                .flatMap(({ members }) => members)
+                .find((pullRequest) => pullRequest.number === native.number)!
+                .actions.find(({ action }) => action === "preview-start")
+        ).toMatchObject({ available: false, reason: "untrusted-author" });
         expect(merge(ordinary.number)).toMatchObject({ available: true });
     });
 

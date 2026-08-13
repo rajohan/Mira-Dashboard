@@ -16,6 +16,8 @@ interface DeliveryJobsPanelProps {
 }
 
 const warningLabels: Readonly<Record<DeliveryOperationWarningCode, string>> = {
+    "branch-cleanup-unconfirmed":
+        "GitHub branch cleanup could not be confirmed after the merge.",
     "branch-retained": "The merged branch was retained.",
     "comment-failed": "The GitHub follow-up comment was not published.",
     "deployment-failed": "Deployment failed after the GitHub operation completed.",

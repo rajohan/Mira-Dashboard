@@ -27,6 +27,8 @@ const actionReasonLabels: Readonly<Record<DeliveryActionCapabilityReason, string
     "checks-blocked": "All latest CI checks must pass before this action.",
     "credential-missing": "The dedicated Raymond approval credential is unavailable.",
     draft: "Draft pull requests cannot use this action.",
+    "head-guard-unavailable":
+        "GitHub cannot atomically bind this action to the reviewed pull request head or stack heads.",
     "merge-conflict": "GitHub reports a merge conflict or blocked merge state.",
     "native-stacks-unavailable": "GitHub native stacks are currently unavailable.",
     "not-behind": "GitHub does not report this branch as behind its base.",

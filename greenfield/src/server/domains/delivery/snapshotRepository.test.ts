@@ -17,7 +17,7 @@ const record = {
     lastSuccessAt: new Date(2000),
     metadataJson: "{}",
     payloadJson: '{"sourceRevision":"value"}',
-    schemaId: "delivery.overview.pull-requests.v1",
+    schemaId: "delivery.overview.pull-requests.v2",
     source: "github.delivery.pull-requests",
     updatedAt: new Date(2000),
 } as const satisfies CacheEntryRecord;
@@ -38,7 +38,7 @@ describe("Delivery overview snapshot repository", () => {
             lastAttemptStatus: "succeeded",
             lastSuccessAtMs: 2000,
             payload: { sourceRevision: "value" },
-            schemaId: "delivery.overview.pull-requests.v1",
+            schemaId: "delivery.overview.pull-requests.v2",
             source: "github.delivery.pull-requests",
         });
         expect(keys).toEqual(["delivery.overview.pull-requests"]);

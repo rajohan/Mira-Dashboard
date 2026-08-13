@@ -57,7 +57,6 @@ export type DeliveryGitHubHttpOperation =
       }>
     | Readonly<{ kind: "main-ref" }>
     | Readonly<{ branch: string; kind: "branch-ref" }>
-    | Readonly<{ branch: string; kind: "branch-delete" }>
     | Readonly<{ kind: "native-stack-find"; pullRequestNumber: number }>
     | Readonly<{ kind: "native-stack-create"; pullRequestNumbers: readonly number[] }>
     | Readonly<{
@@ -198,14 +197,6 @@ function prepareRequest(operation: DeliveryGitHubHttpOperation): PreparedRequest
             path = repositoryPath(
                 `/git/ref/heads/${encodePathSegment(operation.branch)}`
             );
-            break;
-        }
-        case "branch-delete": {
-            method = "DELETE";
-            path = repositoryPath(
-                `/git/refs/heads/${encodePathSegment(operation.branch)}`
-            );
-            mutation = true;
             break;
         }
         case "native-stack-find": {
@@ -451,11 +442,7 @@ export function createDeliveryGitHubHttpTransport(
             }
             if (response.status < 200 || response.status >= 300) {
                 await response.body?.cancel().catch(() => {});
-                if (
-                    response.status === 404 &&
-                    (operation.kind === "branch-ref" ||
-                        operation.kind === "branch-delete")
-                ) {
+                if (response.status === 404 && operation.kind === "branch-ref") {
                     return Object.freeze({ body: null, status: response.status });
                 }
                 if (

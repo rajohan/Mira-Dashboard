@@ -301,15 +301,7 @@ function mergeBlockReason(input: {
             ? readOnlyReason(input.group)
             : "ambiguous-chain";
     }
-    if (
-        input.group.kind === "native-stack" &&
-        input.scopeMembers.some(
-            ({ authorLogin }) =>
-                authorLogin === undefined || !trustedPreviewAuthors.has(authorLogin)
-        )
-    ) {
-        return "untrusted-author";
-    }
+    if (input.group.kind === "native-stack") return "head-guard-unavailable";
     if (input.production.actionActive) return "action-active";
     if (input.scopeMembers.some(({ isDraft }) => isDraft)) return "draft";
     if (
@@ -398,13 +390,12 @@ function nonOrdinaryReason(group: GroupDraft): DeliveryActionCapabilityReason {
 function rejectBlockReason(
     ordinary: boolean,
     group: GroupDraft,
-    pullRequest: DeliveryGitHubPullRequest,
     supportsNativeStacks: boolean,
     actionActive: boolean
 ): DeliveryActionCapabilityReason | undefined {
     if (actionActive) return "action-active";
     if (!supportsNativeStacks) return "native-stacks-unavailable";
-    if (ordinary) return pullRequest.isDraft ? "draft" : undefined;
+    if (ordinary) return "head-guard-unavailable";
     return nonOrdinaryReason(group);
 }
 
@@ -465,7 +456,12 @@ function actions(input: {
         input.group.kind === "candidate-stack" &&
         input.index === input.group.members.length - 1
     ) {
-        let createStack = available("create-stack", "mira", "group");
+        let createStack = unavailable(
+            "create-stack",
+            "mira",
+            "head-guard-unavailable",
+            "group"
+        );
         if (input.production.actionActive) {
             createStack = unavailable("create-stack", "mira", "action-active", "group");
         } else if (!input.supportsNativeStacks) {
@@ -519,7 +515,6 @@ function actions(input: {
     const rejectReason = rejectBlockReason(
         ordinary,
         input.group,
-        pullRequest,
         input.supportsNativeStacks,
         input.production.actionActive
     );

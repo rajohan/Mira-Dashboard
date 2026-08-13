@@ -88,7 +88,7 @@ describe("cache entry row schemas", () => {
                 ...validCacheEntry,
                 key: "delivery.overview.pull-requests",
                 payloadJson,
-                schemaId: "delivery.overview.pull-requests.v1",
+                schemaId: "delivery.overview.pull-requests.v2",
                 source: "github.delivery.pull-requests",
             }).success
         ).toBeTrue();

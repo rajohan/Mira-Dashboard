@@ -20,7 +20,7 @@ const actor = Object.freeze({
 });
 
 function payload(
-    action: "approve-review" | "merge" = "merge"
+    action: "approve-review" | "merge" | "reject" = "merge"
 ): DeliveryOperationAuthoritySnapshot {
     return {
         checkout: {
@@ -172,6 +172,12 @@ function fixture(value = payload()) {
         audits,
         queued,
         service,
+        setSchemaId(section: DeliveryOverviewSectionId, schemaId: string) {
+            currentRecords = {
+                ...currentRecords,
+                [section]: { ...currentRecords[section], schemaId },
+            };
+        },
         setExpires(expiresAtMs: number) {
             currentRecords = Object.fromEntries(
                 Object.entries(currentRecords).map(([section, current]) => [
@@ -209,6 +215,15 @@ describe("Delivery service", () => {
         expect(next.service.listPullRequests()).toMatchObject({
             staleSinceMs: 2500,
             state: "last-known-good",
+        });
+    });
+
+    test("rejects the superseded pull-request capability cache schema", () => {
+        const next = fixture();
+        next.setSchemaId("pull-requests", "delivery.overview.pull-requests.v1");
+        expect(next.service.listPullRequests()).toEqual({
+            checkedAtMs: 3000,
+            state: "unavailable",
         });
     });
 
@@ -281,6 +296,37 @@ describe("Delivery service", () => {
                 context
             );
             throw new Error("expected reviewer capability conflict");
+        } catch (error) {
+            expect(error).toBeInstanceOf(DeliveryServiceError);
+            expect((error as DeliveryServiceError).reason).toBe("conflict");
+        }
+        expect(next.queued).toHaveLength(0);
+    });
+
+    test("does not enqueue an action denied by the authoritative head guard", async () => {
+        const value = payload("reject");
+        value.pullRequestGroups[0]!.members[0]!.actions[0] = {
+            action: "reject",
+            actor: "mira",
+            available: false,
+            reason: "head-guard-unavailable",
+            scope: "self",
+        };
+        const next = fixture(value);
+
+        try {
+            await next.service.rejectPullRequest(
+                {
+                    confirmation: "reject-delivery-pull-request",
+                    expectedHeadSha: headSha,
+                    idempotencyKey: "A".repeat(43),
+                    number: 42,
+                    operation: "reject-pull-request",
+                    sourceRevision,
+                },
+                context
+            );
+            throw new Error("expected authoritative capability conflict");
         } catch (error) {
             expect(error).toBeInstanceOf(DeliveryServiceError);
             expect((error as DeliveryServiceError).reason).toBe("conflict");

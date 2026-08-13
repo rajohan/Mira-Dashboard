@@ -37,7 +37,7 @@ export const deliveryOverviewCacheKeys = Object.freeze(
 export const deliveryOverviewSectionSchemaIds = Object.freeze({
     checkout: "delivery.overview.checkout.v1",
     preview: "delivery.overview.preview.v1",
-    "pull-requests": "delivery.overview.pull-requests.v1",
+    "pull-requests": "delivery.overview.pull-requests.v2",
     releases: "delivery.overview.releases.v1",
 } as const satisfies Readonly<Record<DeliveryOverviewSectionId, string>>);
 export const deliveryOverviewSectionSources = Object.freeze({
@@ -144,6 +144,7 @@ export const deliveryActionCapabilityReasons = [
     "checks-blocked",
     "credential-missing",
     "draft",
+    "head-guard-unavailable",
     "merge-conflict",
     "native-stacks-unavailable",
     "not-behind",

@@ -249,7 +249,7 @@ describe("Delivery worker runtime", () => {
         expect(cleaned).toEqual([1]);
     });
 
-    test("derives the exact native prefix before an asynchronous stack merge", async () => {
+    test("refuses an asynchronous native stack merge without a full-prefix head guard", async () => {
         const bottom = pullRequest(1, {
             stack: { baseRefName: "main", number: 80, position: 1, size: 2 },
         });
@@ -313,15 +313,15 @@ describe("Delivery worker runtime", () => {
                 operation: "merge-pull-request",
                 sourceRevision: current.sourceRevision,
             })
-        ).resolves.toEqual({ operation: "merge-pull-request", outcome: "enqueued" });
+        ).rejects.toMatchObject({ reason: "conflict" });
         expect({ cleanupCalls, mergeCalls, syncCalls }).toEqual({
             cleanupCalls: 0,
-            mergeCalls: 1,
+            mergeCalls: 0,
             syncCalls: 0,
         });
     });
 
-    test("keeps native merge authority for one remaining open stack layer", () => {
+    test("refuses native merge authority even for one remaining open stack layer", () => {
         const remaining = pullRequest(2, {
             stack: { baseRefName: "main", number: 80, position: 2, size: 2 },
         });
@@ -349,14 +349,11 @@ describe("Delivery worker runtime", () => {
             sourceRevision: current.sourceRevision,
         };
 
-        expect(runtime.execute(input)).resolves.toEqual({
-            operation: "merge-pull-request",
-            outcome: "enqueued",
-        });
+        expect(runtime.execute(input)).rejects.toMatchObject({ reason: "conflict" });
         expect(runtime.execute({ ...input, mergeStack: false })).rejects.toMatchObject({
             reason: "conflict",
         });
-        expect(mergeCalls).toBe(1);
+        expect(mergeCalls).toBe(0);
     });
 
     test("starts preview with the exact authorized scope and fails closed without production authority", async () => {

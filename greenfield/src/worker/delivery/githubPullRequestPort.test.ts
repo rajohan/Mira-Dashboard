@@ -141,7 +141,7 @@ describe("Delivery GitHub pull-request port", () => {
         expect(operations).toEqual(["graphql", "graphql"]);
     });
 
-    test("revalidates an ordinary exact head and safely deletes only its matching branch", () => {
+    test("merges an exact ordinary head but retains its observed branch without delete CAS", () => {
         let merged = false;
         const operations: string[] = [];
         const port = createDeliveryGitHubPullRequestPort({
@@ -158,17 +158,81 @@ describe("Delivery GitHub pull-request port", () => {
                 if (operation.kind === "branch-ref") {
                     return { object: { sha: head, type: "commit" } };
                 }
-                if (operation.kind === "branch-delete") return null;
                 throw new Error(`Unexpected ${operation.kind}`);
             }),
         });
 
         expect(port.mergePullRequest({ headSha: head, number: 12 })).resolves.toEqual({
             mainHeadSha: mergedMainHead,
-            outcome: "completed",
+            outcome: "partial-success",
+            warning: "branch-retained",
         });
         expect(operations).toContain("pull-request-merge");
-        expect(operations.at(-1)).toBe("branch-delete");
+        expect(operations).toContain("branch-ref");
+        expect(operations).not.toContain("branch-delete");
+    });
+
+    test("reports completion when provider-managed cleanup removed the merged branch", () => {
+        let merged = false;
+        const baseTransport = transport("mira-2026", (operation) => {
+            if (operation.kind === "graphql") {
+                return graphQlResponse(operation, merged ? "MERGED" : "OPEN");
+            }
+            if (operation.kind === "native-stack-find") return [];
+            if (operation.kind === "pull-request-merge") {
+                merged = true;
+                return { merged: true, message: "merged", sha: mergedMainHead };
+            }
+            throw new Error(`Unexpected ${operation.kind}`);
+        });
+        const port = createDeliveryGitHubPullRequestPort({
+            transport: {
+                ...baseTransport,
+                requestJsonWithStatus: (operation) => {
+                    if (operation.kind === "branch-ref") {
+                        return Promise.resolve({ body: null, status: 404 });
+                    }
+                    return baseTransport.requestJsonWithStatus(operation);
+                },
+            },
+        });
+
+        expect(port.mergePullRequest({ headSha: head, number: 12 })).resolves.toEqual({
+            mainHeadSha: mergedMainHead,
+            outcome: "completed",
+        });
+    });
+
+    test("reports unconfirmed cleanup when the post-merge branch read is unavailable", () => {
+        let merged = false;
+        const baseTransport = transport("mira-2026", (operation) => {
+            if (operation.kind === "graphql") {
+                return graphQlResponse(operation, merged ? "MERGED" : "OPEN");
+            }
+            if (operation.kind === "native-stack-find") return [];
+            if (operation.kind === "pull-request-merge") {
+                merged = true;
+                return { merged: true, message: "merged", sha: mergedMainHead };
+            }
+            throw new Error(`Unexpected ${operation.kind}`);
+        });
+        const port = createDeliveryGitHubPullRequestPort({
+            transport: {
+                ...baseTransport,
+                requestJsonWithStatus: (operation) => {
+                    if (operation.kind === "branch-ref") {
+                        return Promise.reject(new DeliveryGitHubError("unavailable"));
+                    }
+                    return baseTransport.requestJsonWithStatus(operation);
+                },
+            },
+        });
+
+        expect(port.mergePullRequest({ headSha: head, number: 12 })).resolves.toEqual({
+            mainHeadSha: mergedMainHead,
+            outcome: "partial-success",
+            warning: "branch-cleanup-unconfirmed",
+        });
     });
 
     test("keeps Raymond approval physically separate and validates Mira readback", () => {
@@ -241,147 +305,33 @@ describe("Delivery GitHub pull-request port", () => {
         expect(reviewCalled).toBeFalse();
     });
 
-    test("revalidates a native exact prefix and polls its attributed merge result", () => {
-        let merged = false;
+    test("does not dispatch native merge without an atomic full-prefix head guard", () => {
+        let mergeCalled = false;
         const operations: string[] = [];
         const port = createDeliveryGitHubPullRequestPort({
-            pollIntervalMs: 1,
             transport: transport("mira-2026", (operation) => {
                 operations.push(operation.kind);
-                if (operation.kind === "graphql") {
-                    if (operation.document.includes("query DeliveryStackCapability")) {
-                        return {
-                            data: {
-                                __type: {
-                                    fields: [{ name: "stack" }, { name: "stackEntry" }],
-                                },
-                            },
-                        };
-                    }
-                    const row = {
-                        ...rawPullRequest(merged ? "MERGED" : "OPEN"),
-                        stack: { baseRefName: "main", number: 9, size: 1 },
-                        stackEntry: { position: 1 },
-                    };
-                    return { data: { repository: { pullRequest: row } } };
-                }
-                if (operation.kind === "native-stack-find") {
-                    return [
-                        {
-                            base: { ref: "main" },
-                            id: 9,
-                            number: 9,
-                            open: true,
-                            pull_requests: [
-                                {
-                                    draft: false,
-                                    head: { ref: "mira/delivery", sha: head },
-                                    merged_at: null,
-                                    number: 12,
-                                    state: "open",
-                                },
-                            ],
-                        },
-                    ];
-                }
                 if (operation.kind === "native-stack-merge-start") {
-                    return {
-                        details: {
-                            expected_head_sha: head,
-                            merge_action: "default",
-                            merge_method: "squash",
-                            message: "pending",
-                            uuid: "merge-1",
-                        },
-                        status: "pending",
-                    };
-                }
-                if (operation.kind === "native-stack-merge-poll") {
-                    merged = true;
-                    return {
-                        details: { message: "merged", sha: mergedMainHead },
-                        status: "merged",
-                    };
+                    mergeCalled = true;
                 }
                 throw new Error(`Unexpected ${operation.kind}`);
             }),
         });
 
-        expect(port.mergeNativeStack([{ headSha: head, number: 12 }])).resolves.toEqual({
-            mainHeadSha: mergedMainHead,
-            outcome: "completed",
-        });
-        expect(operations).toContain("native-stack-merge-start");
-        expect(operations).toContain("native-stack-merge-poll");
+        expect(
+            port.mergeNativeStack([{ headSha: head, number: 12 }])
+        ).rejects.toMatchObject({ reason: "capability-unavailable" });
+        expect(mergeCalled).toBeFalse();
+        expect(operations).not.toContain("native-stack-merge-start");
     });
 
-    test("binds a complete native prefix to the selected layer's merge commit", () => {
+    test("does not dispatch when a lower native stack head could race", () => {
         const bottomHead = "c".repeat(40);
-        const bottomMergeHead = "d".repeat(40);
-        let merged = false;
-        const row = (number: number) => ({
-            ...rawPullRequest(merged ? "MERGED" : "OPEN"),
-            headRefName: number === 11 ? "mira/bottom" : "mira/delivery",
-            headRefOid: number === 11 ? bottomHead : head,
-            mergeCommit: merged
-                ? { oid: number === 11 ? bottomMergeHead : mergedMainHead }
-                : null,
-            number,
-            stack: { baseRefName: "main", number: 9, size: 2 },
-            stackEntry: { position: number === 11 ? 1 : 2 },
-        });
+        let mergeCalled = false;
         const port = createDeliveryGitHubPullRequestPort({
             transport: transport("mira-2026", (operation) => {
-                if (operation.kind === "graphql") {
-                    if (operation.document.includes("query DeliveryStackCapability")) {
-                        return {
-                            data: {
-                                __type: {
-                                    fields: [{ name: "stack" }, { name: "stackEntry" }],
-                                },
-                            },
-                        };
-                    }
-                    return {
-                        data: {
-                            repository: {
-                                pullRequest: row(Number(operation.variables.number)),
-                            },
-                        },
-                    };
-                }
-                if (operation.kind === "native-stack-find") {
-                    return [
-                        {
-                            base: { ref: "main" },
-                            id: 9,
-                            number: 9,
-                            open: true,
-                            pull_requests: [
-                                {
-                                    draft: false,
-                                    head: { ref: "mira/bottom", sha: bottomHead },
-                                    merged_at: null,
-                                    number: 11,
-                                    state: "open",
-                                },
-                                {
-                                    draft: false,
-                                    head: { ref: "mira/delivery", sha: head },
-                                    merged_at: null,
-                                    number: 12,
-                                    state: "open",
-                                },
-                            ],
-                        },
-                    ];
-                }
                 if (operation.kind === "native-stack-merge-start") {
-                    merged = true;
-                    return {
-                        details: { message: "merged", sha: mergedMainHead },
-                        status: "merged",
-                    };
+                    mergeCalled = true;
                 }
                 throw new Error(`Unexpected ${operation.kind}`);
             }),
@@ -392,188 +342,17 @@ describe("Delivery GitHub pull-request port", () => {
                 { headSha: bottomHead, number: 11 },
                 { headSha: head, number: 12 },
             ])
-        ).resolves.toEqual({
-            mainHeadSha: mergedMainHead,
-            outcome: "completed",
-        });
-    });
-
-    test("rejects a closed unmerged lower stack layer before mutation", () => {
-        let mergeCalled = false;
-        const port = createDeliveryGitHubPullRequestPort({
-            transport: transport("mira-2026", (operation) => {
-                if (operation.kind === "graphql") {
-                    return {
-                        data: {
-                            __type: {
-                                fields: [{ name: "stack" }, { name: "stackEntry" }],
-                            },
-                        },
-                    };
-                }
-                if (operation.kind === "native-stack-find") {
-                    return [
-                        {
-                            base: { ref: "main" },
-                            id: 9,
-                            number: 9,
-                            open: true,
-                            pull_requests: [
-                                {
-                                    draft: false,
-                                    head: { ref: "mira/lower", sha: "b".repeat(40) },
-                                    merged_at: null,
-                                    number: 11,
-                                    state: "closed",
-                                },
-                                {
-                                    draft: false,
-                                    head: { ref: "mira/delivery", sha: head },
-                                    merged_at: null,
-                                    number: 12,
-                                    state: "open",
-                                },
-                            ],
-                        },
-                    ];
-                }
-                if (operation.kind === "native-stack-merge-start") {
-                    mergeCalled = true;
-                }
-                throw new Error(`Unexpected ${operation.kind}`);
-            }),
-        });
-
-        expect(
-            port.mergeNativeStack([{ headSha: head, number: 12 }])
-        ).rejects.toBeInstanceOf(DeliveryGitHubError);
+        ).rejects.toMatchObject({ reason: "capability-unavailable" });
         expect(mergeCalled).toBeFalse();
     });
 
-    test("revalidates trusted authors for native stack merge", () => {
-        let mergeCalled = false;
-        const external = {
-            ...rawPullRequest(),
-            author: { login: "external-contributor" },
-            stack: { baseRefName: "main", number: 9, size: 1 },
-            stackEntry: { position: 1 },
-        };
-        const port = createDeliveryGitHubPullRequestPort({
-            transport: transport("mira-2026", (operation) => {
-                if (operation.kind === "graphql") {
-                    if (operation.document.includes("query DeliveryStackCapability")) {
-                        return {
-                            data: {
-                                __type: {
-                                    fields: [{ name: "stack" }, { name: "stackEntry" }],
-                                },
-                            },
-                        };
-                    }
-                    return { data: { repository: { pullRequest: external } } };
-                }
-                if (operation.kind === "native-stack-find") {
-                    return [
-                        {
-                            base: { ref: "main" },
-                            id: 9,
-                            number: 9,
-                            open: true,
-                            pull_requests: [
-                                {
-                                    draft: false,
-                                    head: { ref: "external/delivery", sha: head },
-                                    merged_at: null,
-                                    number: 12,
-                                    state: "open",
-                                },
-                            ],
-                        },
-                    ];
-                }
-                if (operation.kind === "native-stack-merge-start") {
-                    mergeCalled = true;
-                }
-                throw new Error(`Unexpected ${operation.kind}`);
-            }),
-        });
-
-        expect(
-            port.mergeNativeStack([{ headSha: head, number: 12 }])
-        ).rejects.toBeInstanceOf(DeliveryGitHubError);
-        expect(mergeCalled).toBeFalse();
-    });
-
-    test("creates only the complete exact inferred chain", () => {
+    test("does not create a native stack without atomic expected-head guards", () => {
         const bottomHead = "b".repeat(40);
-        const bottom = {
-            ...rawPullRequest(),
-            headRefName: "mira/bottom",
-            headRefOid: bottomHead,
-            number: 11,
-            url: "https://github.com/rajohan/Mira-Dashboard/pull/11",
-        };
-        const top = {
-            ...rawPullRequest(),
-            baseRefName: bottom.headRefName,
-        };
+        let createCalled = false;
         const port = createDeliveryGitHubPullRequestPort({
             transport: transport("mira-2026", (operation) => {
-                if (operation.kind === "graphql") {
-                    if (operation.document.includes("query DeliveryStackCapability")) {
-                        return {
-                            data: {
-                                __type: {
-                                    fields: [{ name: "stack" }, { name: "stackEntry" }],
-                                },
-                            },
-                        };
-                    }
-                    if (operation.document.includes("pullRequests(")) {
-                        return {
-                            data: {
-                                repository: {
-                                    pullRequests: {
-                                        nodes: [top, bottom],
-                                        pageInfo: { endCursor: null, hasNextPage: false },
-                                    },
-                                },
-                            },
-                        };
-                    }
-                    return {
-                        data: {
-                            repository: {
-                                pullRequest:
-                                    operation.variables.number === 11 ? bottom : top,
-                            },
-                        },
-                    };
-                }
                 if (operation.kind === "native-stack-create") {
-                    expect(operation.pullRequestNumbers).toEqual([11, 12]);
-                    return {
-                        base: { ref: "main" },
-                        id: 9,
-                        number: 9,
-                        open: true,
-                        pull_requests: [
-                            {
-                                draft: false,
-                                head: { ref: bottom.headRefName, sha: bottomHead },
-                                merged_at: null,
-                                number: 11,
-                                state: "open",
-                            },
-                            {
-                                draft: false,
-                                head: { ref: top.headRefName, sha: head },
-                                merged_at: null,
-                                number: 12,
-                                state: "open",
-                            },
-                        ],
-                    };
+                    createCalled = true;
                 }
                 throw new Error(`Unexpected ${operation.kind}`);
             }),
@@ -584,13 +363,8 @@ describe("Delivery GitHub pull-request port", () => {
                 { headSha: bottomHead, number: 11 },
                 { headSha: head, number: 12 },
             ])
-        ).resolves.toMatchObject({
-            number: 9,
-            pullRequests: [
-                { headSha: bottomHead, number: 11 },
-                { headSha: head, number: 12 },
-            ],
-        });
+        ).rejects.toMatchObject({ reason: "capability-unavailable" });
+        expect(createCalled).toBeFalse();
     });
 
     test("reports GitHub's asynchronous update-branch acceptance as enqueued", () => {
@@ -638,6 +412,35 @@ describe("Delivery GitHub pull-request port", () => {
         expect(
             port.updatePullRequestBranch({ headSha: head, number: 12 })
         ).resolves.toEqual({ outcome: "enqueued" });
+    });
+
+    test("does not close a PR when GitHub cannot bind rejection to its head", () => {
+        let closeCalled = false;
+        let commentCalled = false;
+        const port = createDeliveryGitHubPullRequestPort({
+            transport: transport("mira-2026", (operation) => {
+                if (operation.kind === "pull-request-close") {
+                    closeCalled = true;
+                    return {
+                        base: { ref: "main" },
+                        head: { sha: "f".repeat(40) },
+                        number: 12,
+                        state: "closed",
+                    };
+                }
+                if (operation.kind === "pull-request-comment") {
+                    commentCalled = true;
+                    return {};
+                }
+                throw new Error(`Unexpected ${operation.kind}`);
+            }),
+        });
+
+        expect(
+            port.rejectPullRequest({ headSha: head, number: 12 })
+        ).rejects.toMatchObject({ reason: "capability-unavailable" });
+        expect(closeCalled).toBeFalse();
+        expect(commentCalled).toBeFalse();
     });
 
     test("refuses to compose the ordinary port with Raymond authority", () => {

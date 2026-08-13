@@ -228,6 +228,7 @@
                     "type": "array",
                     "items": {
                       "enum": [
+                        "branch-cleanup-unconfirmed",
                         "branch-retained",
                         "comment-failed",
                         "deployment-failed",
@@ -238,7 +239,7 @@
                       ],
                       "type": "string"
                     },
-                    "maxItems": 7,
+                    "maxItems": 8,
                     "$comment": "Live Valibot validation additionally requires Delivery warning lists to be nonempty, unique, and canonically ordered."
                   }
                 },

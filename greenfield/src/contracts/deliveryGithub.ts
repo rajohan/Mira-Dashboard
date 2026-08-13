@@ -183,7 +183,7 @@ export type DeliveryGitHubMergeMutationOutcome =
     | Readonly<{
           mainHeadSha: string;
           outcome: "partial-success";
-          warning: "branch-retained";
+          warning: "branch-cleanup-unconfirmed" | "branch-retained";
       }>
     | Readonly<{ outcome: "unknown-outcome" }>;
 

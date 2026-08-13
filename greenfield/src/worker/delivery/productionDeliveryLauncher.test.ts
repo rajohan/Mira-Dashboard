@@ -4,11 +4,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { rejectionError } from "../../../scripts/testSupport/rejection.ts";
+import type { DeliveryProductionOperationCapsule } from "../../shared/deliveryProductionOperation.ts";
 import {
     releaseBuildCommands,
     releaseDeliveryProtocols,
     releaseProcessRoles,
 } from "../../shared/releaseManifest.ts";
+import { createProductionDeliveryControlPort } from "./productionDeliveryControl.ts";
 import {
     ensureProductionDeliveryExecutor,
     launchProductionDeliveryExecutor,
@@ -19,6 +21,7 @@ const temporaryDirectories: string[] = [];
 const executorReleaseId = "a".repeat(40);
 const runtimeRevision = "b".repeat(40);
 const transitionId = "019fd974-54a2-74dd-a64b-d4186f8d8801";
+const previousTransitionId = "019fd974-54a2-74dd-a64b-d4186f8d8800";
 
 afterEach(async () => {
     for (const directory of temporaryDirectories.splice(0)) {
@@ -107,6 +110,64 @@ const success: ProductionDeliveryLaunchProcessResult = Object.freeze({
     stderr: new Uint8Array(),
     stdout: new Uint8Array(),
 });
+
+function operationCapsule(): DeliveryProductionOperationCapsule {
+    const payload = {
+        activationRevision: "1".repeat(64),
+        checkoutRevision: "2".repeat(64),
+        expectedMainHeadSha: "c".repeat(40),
+        operation: "deploy" as const,
+        sourceRevision: "f".repeat(64),
+    };
+    return Object.freeze({
+        cas: {
+            current: {
+                activationTransitionId: previousTransitionId,
+                releaseId: "e".repeat(40),
+                rollbackSnapshotTransitionId: transitionId,
+                runtimeRevision: "f".repeat(40),
+            },
+            target: {
+                databaseSnapshotTransitionId: null,
+                releaseId: "c".repeat(40),
+                runtimeRevision: "d".repeat(40),
+            },
+        },
+        enqueue: {
+            actionKey: "delivery.production.v1" as const,
+            actor: {
+                authenticatorId: "a".repeat(32),
+                id: "019fd974-54a2-74dd-a64b-d4186f8d8805",
+                kind: "user" as const,
+            },
+            audit: {
+                eventId: "019fd974-54a2-74dd-a64b-d4186f8d8804",
+                requestId: "request-delivery-control",
+            },
+            enqueueSha256: "e".repeat(64),
+            idempotencyKey: "A".repeat(32),
+            payload,
+            payloadSha256: new Bun.CryptoHasher("sha256")
+                .update(JSON.stringify(payload))
+                .digest("hex"),
+            queuedAtMs: 1000,
+        },
+        executor: {
+            releaseId: executorReleaseId,
+            runtimeRevision,
+        },
+        protocol: "delivery.production.v1" as const,
+        runId: transitionId,
+        transitionId,
+    });
+}
+
+function jsonResult(value: unknown): ProductionDeliveryLaunchProcessResult {
+    return Object.freeze({
+        ...success,
+        stdout: new TextEncoder().encode(JSON.stringify(value)),
+    });
+}
 
 describe("production Delivery launcher", () => {
     test("starts one fixed transient executor with an empty child environment", async () => {
@@ -227,5 +288,190 @@ describe("production Delivery launcher", () => {
         expect(commands[1]).toContain(runtime);
         expect(commands[1]).toContain(executor);
         expect(commands[1]).toContain(`--transition=${transitionId}`);
+    });
+});
+
+describe("production Delivery control port", () => {
+    test("uses only the verified executor for prepare, inspect, and clear", async () => {
+        const fixture_ = await fixture();
+        const capsule = operationCapsule();
+        const commands: Array<readonly string[]> = [];
+        const standardInputs: Uint8Array[] = [];
+        const terminal = {
+            capsule,
+            phase: "terminal" as const,
+            result: {
+                activation: null,
+                completedAtMs: 2000,
+                outcome: "failed" as const,
+                reason: "activation-failed" as const,
+            },
+            updatedAtMs: 2000,
+        };
+        const control = createProductionDeliveryControlPort(
+            {
+                executorReleaseId,
+                projectRoot: fixture_.options.projectRoot,
+                runtimeRevision,
+            },
+            {
+                execute(command, environment, standardInput) {
+                    commands.push(command);
+                    standardInputs.push(standardInput);
+                    expect(environment).toEqual({ LANG: "C", PATH: "/usr/bin:/bin" });
+                    const operation = command.find((part) =>
+                        part.startsWith("--operation=")
+                    );
+                    switch (operation) {
+                        case "--operation=prepare": {
+                            return Promise.resolve(
+                                jsonResult({
+                                    capsule,
+                                    phase: "intent-recorded",
+                                    updatedAtMs: 1000,
+                                })
+                            );
+                        }
+                        case "--operation=inspect-active": {
+                            return Promise.resolve(jsonResult({ state: "missing" }));
+                        }
+                        case "--operation=inspect": {
+                            return Promise.resolve(
+                                jsonResult({
+                                    record: terminal,
+                                    state: "terminal",
+                                    transitionId,
+                                })
+                            );
+                        }
+                        case "--operation=clear": {
+                            return Promise.resolve(jsonResult(terminal));
+                        }
+                        default: {
+                            throw new Error("Unexpected control operation");
+                        }
+                    }
+                },
+            }
+        );
+
+        expect(await control.prepare(capsule)).toEqual({
+            capsule,
+            phase: "intent-recorded",
+            updatedAtMs: 1000,
+        });
+        expect(await control.inspectActive()).toEqual({ state: "missing" });
+        expect(await control.inspect(transitionId)).toEqual({
+            record: terminal,
+            state: "terminal",
+            transitionId,
+        });
+        expect(await control.clear(transitionId)).toEqual(terminal);
+        expect(commands).toHaveLength(4);
+        for (const command of commands) {
+            expect(command.slice(0, 5)).toEqual([
+                "/usr/bin/env",
+                "-i",
+                "NODE_ENV=production",
+                fixture_.runtime,
+                fixture_.executor,
+            ]);
+        }
+        expect(JSON.parse(new TextDecoder().decode(standardInputs[0]))).toEqual(capsule);
+        expect(standardInputs.slice(1).every((input) => input.byteLength === 0)).toBe(
+            true
+        );
+    });
+
+    test("rejects process diagnostics and mismatched executor responses", async () => {
+        const fixture_ = await fixture();
+        const capsule = operationCapsule();
+        const options = {
+            executorReleaseId,
+            projectRoot: fixture_.options.projectRoot,
+            runtimeRevision,
+        };
+        const diagnosticControl = createProductionDeliveryControlPort(options, {
+            execute: () =>
+                Promise.resolve({
+                    exitCode: 0,
+                    stderr: new TextEncoder().encode("private diagnostic"),
+                    stdout: new Uint8Array(),
+                }),
+        });
+        const diagnosticFailure = await rejectionError(diagnosticControl.inspectActive());
+        expect(diagnosticFailure.message).toBe("Production Delivery control failed");
+
+        const mismatchControl = createProductionDeliveryControlPort(options, {
+            execute: () =>
+                Promise.resolve(
+                    jsonResult({
+                        capsule,
+                        phase: "intent-recorded",
+                        updatedAtMs: 1000,
+                    })
+                ),
+        });
+        const mismatchFailure = await rejectionError(mismatchControl.clear(transitionId));
+        expect(mismatchFailure.message).toBe("Production Delivery control failed");
+        const invalidTransitionFailure = await rejectionError(
+            mismatchControl.inspect("not-a-transition")
+        );
+        expect(invalidTransitionFailure.name).toBe("ValiError");
+
+        const invalidJsonControl = createProductionDeliveryControlPort(options, {
+            execute: () =>
+                Promise.resolve({
+                    ...success,
+                    stdout: new TextEncoder().encode("{"),
+                }),
+        });
+        const invalidJsonFailure = await rejectionError(
+            invalidJsonControl.inspectActive()
+        );
+        expect(invalidJsonFailure.message).toBe("Production Delivery control failed");
+
+        const terminalPrepareControl = createProductionDeliveryControlPort(options, {
+            execute: () =>
+                Promise.resolve(
+                    jsonResult({
+                        capsule,
+                        phase: "terminal",
+                        result: {
+                            activation: null,
+                            completedAtMs: 2000,
+                            outcome: "failed",
+                            reason: "activation-failed",
+                        },
+                        updatedAtMs: 2000,
+                    })
+                ),
+        });
+        const terminalPrepareFailure = await rejectionError(
+            terminalPrepareControl.prepare(capsule)
+        );
+        expect(terminalPrepareFailure.message).toBe("Production Delivery control failed");
+
+        const changedCapsule = {
+            ...capsule,
+            enqueue: {
+                ...capsule.enqueue,
+                idempotencyKey: "B".repeat(32),
+            },
+        };
+        const changedCapsuleControl = createProductionDeliveryControlPort(options, {
+            execute: () =>
+                Promise.resolve(
+                    jsonResult({
+                        capsule: changedCapsule,
+                        phase: "intent-recorded",
+                        updatedAtMs: 1000,
+                    })
+                ),
+        });
+        const changedCapsuleFailure = await rejectionError(
+            changedCapsuleControl.prepare(capsule)
+        );
+        expect(changedCapsuleFailure.message).toBe("Production Delivery control failed");
     });
 });
