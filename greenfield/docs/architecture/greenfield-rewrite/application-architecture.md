@@ -1046,13 +1046,17 @@ an indexed, sanitized projection of `delivery.production.v1` Jobs. There is no D
 queue, deployment-event stream, or release-record table.
 
 The worker verifies two non-interchangeable GitHub actors. `mira-2026` owns every ordinary read,
-stack, merge, update, reject, exact-main synchronization, preview, deploy, and rollback workflow;
-`rajohan` owns review approval only. Missing reviewer authority disables that one operation and
-never falls back to Mira, anonymous GitHub, `GH_TOKEN`, `GITHUB_TOKEN`, `gh`, a credential helper,
-or ambient host configuration. Normal, inferred, and native stacks are server-authoritative and
-bind the complete ordered number/head scope before admission and immediately before external
-effects. Partial and uncertain provider outcomes remain explicit and cannot authorize blind
-replay.
+provider-guarded ordinary merge/update, exact-main synchronization, preview, deploy, and rollback
+workflow; `rajohan` owns review approval only. Missing reviewer authority disables that one
+operation and never falls back to Mira, anonymous GitHub, `GH_TOKEN`, `GITHUB_TOKEN`, `gh`, a
+credential helper, or ambient host configuration. Normal, inferred, and native stack inventory,
+grouping, preview, and review scopes are server-authoritative and bind the complete ordered
+number/head set. GitHub currently exposes neither full-prefix head/membership CAS for native stack
+create/merge nor expected-head CAS for pull request closure. Those three mutation capabilities are
+therefore explicitly `head-guard-unavailable`, dispatch no provider request, and remain represented
+by strict fail-closed procedures rather than reproducing legacy post-effect validation. Ordinary
+exact-head merge, update, and review remain available. Partial and uncertain provider outcomes
+remain explicit and cannot authorize blind replay.
 
 One managed preview slot runs the exact admitted PR/stack heads for at most four hours in a
 transient systemd/Bubblewrap boundary with private networking, read-only source/Git

@@ -1114,7 +1114,7 @@ export const deliveryProcedureContracts = [
     mutationContract(
         "delivery.approvePullRequest",
         deliveryApprovePullRequestInputSchema,
-        "Queues an exact-head squash merge, optionally followed by one fenced deployment."
+        "Queues an exact-head ordinary squash merge, optionally followed by one fenced deployment; native-stack merge remains unavailable without a provider-enforced full-prefix guard."
     ),
     mutationContract(
         "delivery.startPreview",
@@ -1129,7 +1129,7 @@ export const deliveryProcedureContracts = [
     mutationContract(
         "delivery.rejectPullRequest",
         deliveryRejectPullRequestInputSchema,
-        "Queues an exact-head close using the fixed Dashboard comment."
+        "Fails closed until GitHub exposes an expected-head guard for pull request closure."
     ),
     mutationContract(
         "delivery.approveReview",
@@ -1154,6 +1154,6 @@ export const deliveryProcedureContracts = [
     mutationContract(
         "delivery.createPullRequestStack",
         deliveryCreatePullRequestStackInputSchema,
-        "Queues native stack creation for one exact ordered pull request scope."
+        "Fails closed until GitHub exposes expected-head guards for native stack creation."
     ),
 ] as const satisfies readonly ProcedureContract[];

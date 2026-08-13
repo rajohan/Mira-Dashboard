@@ -451,11 +451,14 @@ GitHub credential is injected only as a scoped Git process-environment HTTP head
 argument, payload, log field, cache value, or browser value.
 
 Delivery has two non-interchangeable worker-only GitHub authorities. The ordinary port verifies
-the token actor as `mira-2026` and owns every read, stack, merge, branch, reject, and exact-main Git
-operation. The reviewer port verifies `rajohan` and exposes only review approval. Missing reviewer
-authority disables that one capability; it never falls back to Mira, `GH_TOKEN`, `GITHUB_TOKEN`,
-anonymous access, a credential helper, or ambient home configuration. Neither token enters a Job
-payload, cache row, operation receipt, process argument, log, or browser response.
+the token actor as `mira-2026` and owns bounded reads plus provider-guarded ordinary merge/update
+and exact-main Git operations. The reviewer port verifies `rajohan` and exposes only exact-commit
+review approval. Missing reviewer authority disables that one capability; it never falls back to
+Mira, `GH_TOKEN`, `GITHUB_TOKEN`, anonymous access, a credential helper, or ambient home
+configuration. GitHub's native stack create/merge and pull-request close APIs cannot bind the
+complete admitted head scope, so those capabilities are advertised as `head-guard-unavailable`
+and never dispatch. Neither token enters a Job payload, cache row, operation receipt, process
+argument, log, or browser response.
 
 Trusted PR preview code runs in one bounded global slot beneath a transient systemd/Bubblewrap
 boundary with a private network namespace, read-only source/Git administration, isolated writable

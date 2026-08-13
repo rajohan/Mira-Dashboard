@@ -1798,15 +1798,19 @@ full-browser parity, production rehearsal, cutover, and legacy deletion remain o
   admission in `audit_events`. No `deployments`, `deployment_events`, `release_records`, second
   queue, or parallel history store is added.
 - GitHub authority is worker-only and split by identity. The verified `mira-2026` credential owns
-  every ordinary read, stack, merge, update, reject, exact-main Git synchronization, preview, and
-  production workflow. The separately verified `rajohan` credential owns review approval only.
+  every bounded read, provider-guarded ordinary merge/update, exact-main Git synchronization,
+  preview, and production workflow. The separately verified `rajohan` credential owns review
+  approval only.
   Missing Raymond authority disables only approval and never falls back to Mira, anonymous access,
   `gh`, ambient GitHub variables, global Git configuration, or a host credential store. Job
   payloads, cache rows, logs, receipts, and browser responses contain neither token.
-- Normal, inferred, and native stack operations bind and revalidate the complete ordered number/head
-  scope. Stale membership, author, CI, review, checkout, preview, release, snapshot, or activation
-  state fails closed. Confirmed partial effects and uncertain provider settlement remain truthful
-  partial/unknown outcomes and are never blindly replayed.
+- Normal, inferred, and native stack inventory, grouping, preview, and review bind and revalidate
+  the complete ordered number/head scope. Ordinary merge/update/review use provider-enforced head
+  guards. Native stack create/merge and pull-request close remain explicit fail-closed procedures
+  with `head-guard-unavailable` because GitHub exposes no atomic full-prefix/membership or close-head
+  CAS; no provider request is dispatched. Stale membership, author, CI, review, checkout, preview,
+  release, snapshot, or activation state fails closed. Confirmed partial effects and uncertain
+  provider settlement remain truthful partial/unknown outcomes and are never blindly replayed.
 - The exact admitted PR/stack heads run in one four-hour managed preview slot under a transient
   systemd/Bubblewrap boundary with private networking, read-only source/Git administration,
   isolated writable state, frozen lifecycle-script-free installation, one fixed `0600` Unix
