@@ -25,6 +25,14 @@ const runtimeIdentity: ReleaseRuntimeIdentity = Object.freeze({
 });
 const temporaryDirectories: string[] = [];
 
+function systemctlOutput(value: string) {
+    return Object.freeze({
+        exitCode: 0,
+        stderr: new Uint8Array(),
+        stdout: new TextEncoder().encode(`${value}\n`),
+    });
+}
+
 afterEach(async () => {
     await removeProductionDeliveryFixtures(temporaryDirectories);
 });
@@ -72,7 +80,17 @@ describe("root-installed production systemd unit verification", () => {
                 );
                 await chmod(destination, 0o644);
             }
+            let staleWebDropIn = false;
             const identity = {
+                executeSystemctl: (_executable: string, arguments_: readonly string[]) =>
+                    Promise.resolve(
+                        systemctlOutput(
+                            arguments_[3] === "mira-dashboard-web.service" &&
+                                staleWebDropIn
+                                ? "/etc/systemd/system/mira-dashboard-web.service.d/stale.conf"
+                                : ""
+                        )
+                    ),
                 expectedGroupId: process.getgid?.() ?? -1,
                 expectedUserId: process.getuid?.() ?? -1,
                 rootUnitDirectory: unitDirectory,
@@ -83,6 +101,20 @@ describe("root-installed production systemd unit verification", () => {
                 release,
                 identity
             );
+
+            staleWebDropIn = true;
+            const dropInFailure = await rejectionError(
+                verifyPublishedProductionSystemdUnitsInstalledAtRoot(
+                    lease,
+                    paths,
+                    release,
+                    identity
+                )
+            );
+            expect(dropInFailure.message).toBe(
+                "Production systemd authority verification failed"
+            );
+            staleWebDropIn = false;
 
             await writeFile(
                 path.join(unitDirectory, "mira-dashboard-web.service"),

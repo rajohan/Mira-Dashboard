@@ -119,3 +119,37 @@ export async function requireSuccessfulSystemctlProcess(
         throw systemctlProcessFailure();
     }
 }
+
+/**
+ * Reads one bounded systemd property through an exact caller-owned unit/property pair.
+ * @param execute Injectable bounded process executor.
+ * @param executable Absolute systemctl executable.
+ * @param unit Exact systemd unit name.
+ * @param property Exact systemd property name.
+ * @returns Fatal-UTF-8 decoded and trimmed property value.
+ */
+export async function readSystemctlProperty(
+    execute: SystemctlExecutor,
+    executable: string,
+    unit: string,
+    property: string
+): Promise<string> {
+    try {
+        const result = await execute(executable, [
+            "show",
+            `--property=${property}`,
+            "--value",
+            unit,
+        ]);
+        if (
+            result.exitCode !== 0 ||
+            result.stdout.byteLength > maximumSystemctlOutputBytes ||
+            result.stderr.byteLength !== 0
+        ) {
+            throw systemctlProcessFailure();
+        }
+        return new TextDecoder("utf-8", { fatal: true }).decode(result.stdout).trim();
+    } catch {
+        throw systemctlProcessFailure();
+    }
+}

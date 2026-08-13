@@ -10,6 +10,11 @@ import {
     type PublishedProductionRelease,
 } from "./productionReleasePublication.ts";
 import { productionSystemdUnits } from "./productionSystemdUnitPolicy.ts";
+import {
+    executeSystemctlProcess,
+    readSystemctlProperty,
+    type SystemctlExecutor,
+} from "./systemctlProcess.ts";
 
 const verificationFailureMessage = "Production systemd authority verification failed";
 const maximumUnitBytes = 64 * 1024;
@@ -20,8 +25,9 @@ const directoryFlags =
     constants.O_NONBLOCK;
 const fileFlags = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
 
-/** Test-only root identity and destination substitution. */
+/** Test-only process, root identity, and destination substitution. */
 export interface ProductionSystemdAuthorityVerificationOptions {
+    readonly executeSystemctl?: SystemctlExecutor;
     readonly expectedGroupId?: number;
     readonly expectedUserId?: number;
     readonly rootUnitDirectory?: string;
@@ -141,6 +147,7 @@ export async function verifyPublishedProductionSystemdUnitsInstalledAtRoot(
     const unitDirectory = options.rootUnitDirectory ?? "/etc/systemd/system";
     const expectedUserId = options.expectedUserId ?? 0;
     const expectedGroupId = options.expectedGroupId ?? 0;
+    const executeSystemctl = options.executeSystemctl ?? executeSystemctlProcess;
     let directory: FileHandle | undefined;
     let failed = false;
     try {
@@ -207,6 +214,20 @@ export async function verifyPublishedProductionSystemdUnitsInstalledAtRoot(
             ) {
                 throw verificationFailure();
             }
+        }
+
+        const dropInPaths = await Promise.all(
+            productionSystemdUnits.map(({ fileName }) =>
+                readSystemctlProperty(
+                    executeSystemctl,
+                    "/usr/bin/systemctl",
+                    fileName,
+                    "DropInPaths"
+                )
+            )
+        );
+        if (dropInPaths.some((value) => value.length > 0)) {
+            throw verificationFailure();
         }
 
         const directoryAfter = await directory.stat({ bigint: true });

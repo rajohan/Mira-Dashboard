@@ -27,6 +27,8 @@ describe("production authority smoke", () => {
             ],
             ["mira-dashboard-web.service:SupplementaryGroups", ""],
             ["mira-dashboard-worker.service:SupplementaryGroups", "docker"],
+            ["mira-dashboard-web.service:DropInPaths", ""],
+            ["mira-dashboard-worker.service:DropInPaths", ""],
         ]);
         await runProductionAuthoritySmoke((_executable, arguments_) => {
             calls.push([...arguments_]);
@@ -34,7 +36,7 @@ describe("production authority smoke", () => {
             const unit = arguments_[3];
             return Promise.resolve(output(values.get(`${unit}:${property}`) ?? ""));
         });
-        expect(calls).toHaveLength(6);
+        expect(calls).toHaveLength(8);
         expect(calls.every((call) => call[0] === "show")).toBeTrue();
 
         const failure = await rejectionError(
@@ -49,5 +51,23 @@ describe("production authority smoke", () => {
             })
         );
         expect(failure.message).toBe("Production authority smoke failed");
+
+        for (const unit of [
+            "mira-dashboard-web.service",
+            "mira-dashboard-worker.service",
+        ]) {
+            const dropInFailure = await rejectionError(
+                runProductionAuthoritySmoke((_executable, arguments_) => {
+                    const property = arguments_[1]?.slice("--property=".length);
+                    const observedUnit = arguments_[3];
+                    const value =
+                        observedUnit === unit && property === "DropInPaths"
+                            ? `/etc/systemd/system/${unit}.d/stale.conf`
+                            : (values.get(`${observedUnit}:${property}`) ?? "");
+                    return Promise.resolve(output(value));
+                })
+            );
+            expect(dropInFailure.message).toBe("Production authority smoke failed");
+        }
     });
 });
