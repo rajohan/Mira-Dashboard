@@ -19,6 +19,11 @@ job so they do not extend the coverage job's critical path. On a new development
 the pinned browser once with `bun run storybook:install-browser`. The project-local browser cache
 keeps Storybook's Playwright version isolated from other tools on the same host.
 
+Storybook trusts only its directly bound host by default. A development proxy with a different DNS
+host must set `MIRA_DASHBOARD_STORYBOOK_ALLOWED_HOST` to that exact lowercase DNS name. Schemes,
+ports, wildcards, IP addresses, whitespace, and invalid DNS labels are rejected. Keep the variable
+unset for ordinary local development and static verification builds.
+
 Story files run through one Chromium worker. This keeps local and CI resource use predictable and
 avoids cross-file browser state while the faster Bun and Happy DOM suites continue to use three
 timing-balanced workers. The Storybook runner also applies the repository test-output policy, so an
