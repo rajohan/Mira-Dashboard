@@ -21,9 +21,8 @@ test("stages the exact heartbeat-v5 prompt metadata without changing external au
         promptConfigPath: "agents.entries.ops.heartbeat.prompt",
     });
     expect("targetPath" in openClawHeartbeatProvisioningPolicy).toBe(false);
-    expect(JSON.stringify(openClawHeartbeatProvisioningPolicy)).not.toContain(
-        "/workspace/HEARTBEAT.md"
-    );
+    expect(artifact).not.toContain("/workspace/HEARTBEAT.md");
+    expect(artifact).toContain("agents.entries.ops.heartbeat.prompt");
     expect(openClawHeartbeatProvisioningReleaseArtifactPaths).toEqual([
         "scripts/delivery/provisioning/openclaw-heartbeat/HEARTBEAT.md",
     ]);
