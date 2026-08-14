@@ -1,17 +1,30 @@
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { mkdir, readdir, readFile, readlink, symlink, unlink } from "node:fs/promises";
+import { afterEach, describe, expect, test } from "bun:test";
+import {
+    chmod,
+    mkdir,
+    readdir,
+    readFile,
+    readlink,
+    symlink,
+    unlink,
+    writeFile,
+} from "node:fs/promises";
 import path from "node:path";
 
 import { configurationEnvironmentNamesForRole } from "../../src/shared/configuration/applicationConfigurationRegistry.ts";
+import type { ReleaseManifest } from "../../src/shared/releaseManifest.ts";
 import {
-    createLocalReleaseFixture,
     createProductionTargetFixture,
-    publishProductionDeliveryFixtures,
     removeProductionDeliveryFixtures,
 } from "../testSupport/productionDeliveryFixture.ts";
 import { rejectionError } from "../testSupport/rejection.ts";
 import { withDeploymentLease } from "./deploymentLease.ts";
-import { prepareProductionDeliveryDirectories } from "./productionDeliveryFilesystem.ts";
+import {
+    prepareProductionDeliveryDirectories,
+    type PreparedProductionDeliveryPaths,
+} from "./productionDeliveryFilesystem.ts";
+import type { PublishedProductionRelease } from "./productionReleasePublication.ts";
+import type { InstalledProductionRuntime } from "./productionRuntime.ts";
 import { pointProductionProcessesAtRelease } from "./productionRuntimePointers.ts";
 import { prepareProtectedProductionStatePath } from "./productionStateFilesystem.ts";
 import type { ReleaseRuntimeIdentity } from "./releaseIdentity.ts";
@@ -27,40 +40,53 @@ const runtimeIdentity: ReleaseRuntimeIdentity = Object.freeze({
     revision: "c".repeat(40),
     version: "1.4.0",
 });
-const releaseFixtureDirectories: string[] = [];
 const temporaryDirectories: string[] = [];
-let sharedSourceReleases: readonly [string, string] | undefined;
-
-beforeAll(async () => {
-    sharedSourceReleases = await Promise.all([
-        createLocalReleaseFixture(
-            sourceProjectRoot,
-            firstReleaseId,
-            runtimeIdentity,
-            releaseFixtureDirectories
-        ),
-        createLocalReleaseFixture(
-            sourceProjectRoot,
-            secondReleaseId,
-            runtimeIdentity,
-            releaseFixtureDirectories
-        ),
-    ]);
-});
 
 afterEach(async () => {
     await removeProductionDeliveryFixtures(temporaryDirectories);
 });
 
-afterAll(async () => {
-    await removeProductionDeliveryFixtures(releaseFixtureDirectories);
-});
+function releaseManifest(commitSha: string): ReleaseManifest {
+    return {
+        runtime: runtimeIdentity,
+        source: { commitSha, treeState: "clean" },
+    } as unknown as ReleaseManifest;
+}
 
-function sourceReleaseFixtures(): readonly [string, string] {
-    if (sharedSourceReleases === undefined) {
-        throw new Error("Production release fixtures are not initialized");
-    }
-    return sharedSourceReleases;
+async function createRuntimePointerFixture(
+    paths: PreparedProductionDeliveryPaths
+): Promise<{
+    readonly first: PublishedProductionRelease;
+    readonly runtime: InstalledProductionRuntime;
+    readonly second: PublishedProductionRelease;
+}> {
+    const bunRoot = path.join(paths.runtimesDirectory, "bun");
+    const firstReleaseRoot = path.join(paths.releasesDirectory, firstReleaseId);
+    const secondReleaseRoot = path.join(paths.releasesDirectory, secondReleaseId);
+    const runtimeRoot = path.join(bunRoot, runtimeIdentity.revision);
+    const runtimeExecutable = path.join(runtimeRoot, "bun");
+    await mkdir(bunRoot, { mode: 0o700 });
+    await Promise.all([
+        mkdir(firstReleaseRoot, { mode: 0o500 }),
+        mkdir(secondReleaseRoot, { mode: 0o500 }),
+        mkdir(runtimeRoot, { mode: 0o700 }),
+    ]);
+    await writeFile(runtimeExecutable, "test-bun-runtime", { mode: 0o500 });
+    await chmod(runtimeRoot, 0o500);
+    return Object.freeze({
+        first: Object.freeze({
+            manifest: releaseManifest(firstReleaseId),
+            releaseRoot: firstReleaseRoot,
+        }),
+        runtime: Object.freeze({
+            executable: runtimeExecutable,
+            identity: runtimeIdentity,
+        }),
+        second: Object.freeze({
+            manifest: releaseManifest(secondReleaseId),
+            releaseRoot: secondReleaseRoot,
+        }),
+    });
 }
 
 function successfulProcessResult(): SystemctlProcessResult {
@@ -81,19 +107,11 @@ function inactiveProcessResult(): SystemctlProcessResult {
 
 describe("production root-systemd service control", () => {
     test("points at exact artifacts and controls worker/web in safe order", async () => {
-        const sourceReleases = sourceReleaseFixtures();
-        const { projectRoot, runtimeSource } =
-            await createProductionTargetFixture(temporaryDirectories);
+        const { projectRoot } = await createProductionTargetFixture(temporaryDirectories);
         const state = await prepareProtectedProductionStatePath(projectRoot);
         await withDeploymentLease(state.stateDirectory, async (lease) => {
             const paths = await prepareProductionDeliveryDirectories(state);
-            const fixtures = await publishProductionDeliveryFixtures(
-                lease,
-                paths,
-                sourceReleases,
-                runtimeSource,
-                runtimeIdentity
-            );
+            const fixtures = await createRuntimePointerFixture(paths);
             const commands: string[][] = [];
             const requests: Request[] = [];
             const smokes: string[] = [];
@@ -240,19 +258,11 @@ describe("production root-systemd service control", () => {
     });
 
     test("removes crash-left pointer stages before replacing current", async () => {
-        const sourceReleases = sourceReleaseFixtures();
-        const { projectRoot, runtimeSource } =
-            await createProductionTargetFixture(temporaryDirectories);
+        const { projectRoot } = await createProductionTargetFixture(temporaryDirectories);
         const state = await prepareProtectedProductionStatePath(projectRoot);
         await withDeploymentLease(state.stateDirectory, async (lease) => {
             const paths = await prepareProductionDeliveryDirectories(state);
-            const fixtures = await publishProductionDeliveryFixtures(
-                lease,
-                paths,
-                sourceReleases,
-                runtimeSource,
-                runtimeIdentity
-            );
+            const fixtures = await createRuntimePointerFixture(paths);
             await pointProductionProcessesAtRelease(
                 lease,
                 paths,
@@ -293,19 +303,11 @@ describe("production root-systemd service control", () => {
     });
 
     test("refuses to remove an untrusted pointer-stage symlink", async () => {
-        const sourceReleases = sourceReleaseFixtures();
-        const { projectRoot, runtimeSource } =
-            await createProductionTargetFixture(temporaryDirectories);
+        const { projectRoot } = await createProductionTargetFixture(temporaryDirectories);
         const state = await prepareProtectedProductionStatePath(projectRoot);
         await withDeploymentLease(state.stateDirectory, async (lease) => {
             const paths = await prepareProductionDeliveryDirectories(state);
-            const fixtures = await publishProductionDeliveryFixtures(
-                lease,
-                paths,
-                sourceReleases,
-                runtimeSource,
-                runtimeIdentity
-            );
+            const fixtures = await createRuntimePointerFixture(paths);
             await pointProductionProcessesAtRelease(
                 lease,
                 paths,
@@ -341,19 +343,11 @@ describe("production root-systemd service control", () => {
     });
 
     test("bounds crash-left pointer-stage inventory before mutation", async () => {
-        const sourceReleases = sourceReleaseFixtures();
-        const { projectRoot, runtimeSource } =
-            await createProductionTargetFixture(temporaryDirectories);
+        const { projectRoot } = await createProductionTargetFixture(temporaryDirectories);
         const state = await prepareProtectedProductionStatePath(projectRoot);
         await withDeploymentLease(state.stateDirectory, async (lease) => {
             const paths = await prepareProductionDeliveryDirectories(state);
-            const fixtures = await publishProductionDeliveryFixtures(
-                lease,
-                paths,
-                sourceReleases,
-                runtimeSource,
-                runtimeIdentity
-            );
+            const fixtures = await createRuntimePointerFixture(paths);
             await pointProductionProcessesAtRelease(
                 lease,
                 paths,
@@ -385,19 +379,11 @@ describe("production root-systemd service control", () => {
     });
 
     test("refuses to replace an untrusted current entry", async () => {
-        const sourceReleases = sourceReleaseFixtures();
-        const { projectRoot, runtimeSource } =
-            await createProductionTargetFixture(temporaryDirectories);
+        const { projectRoot } = await createProductionTargetFixture(temporaryDirectories);
         const state = await prepareProtectedProductionStatePath(projectRoot);
         await withDeploymentLease(state.stateDirectory, async (lease) => {
             const paths = await prepareProductionDeliveryDirectories(state);
-            const fixtures = await publishProductionDeliveryFixtures(
-                lease,
-                paths,
-                sourceReleases,
-                runtimeSource,
-                runtimeIdentity
-            );
+            const fixtures = await createRuntimePointerFixture(paths);
             await pointProductionProcessesAtRelease(
                 lease,
                 paths,

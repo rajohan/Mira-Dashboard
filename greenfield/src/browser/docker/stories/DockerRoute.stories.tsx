@@ -285,6 +285,7 @@ const operationOutcomeUnknown = Object.assign(new TypeError("Private provider de
 const meta = {
     component: DashboardPageStory,
     parameters: { layout: "fullscreen" },
+    render: (args, context) => <DashboardPageStory {...args} key={context.id} />,
     title: "Pages/Docker",
 } satisfies Meta<typeof DashboardPageStory>;
 

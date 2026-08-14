@@ -10,7 +10,10 @@ import type {
     DeliveryReleasesResult,
     DeliveryRequestOperationResult,
 } from "../../../contracts/delivery.ts";
-import { DashboardPageStory } from "../../storySupport/dashboardPageStoryHarness.tsx";
+import {
+    DashboardPageStory,
+    type DashboardPageStoryQuerySeed,
+} from "../../storySupport/dashboardPageStoryHarness.tsx";
 import {
     dashboardStoryFailure,
     dashboardStoryResolver,
@@ -18,6 +21,12 @@ import {
     type DashboardStoryFixtureValue,
     type DashboardStoryFixtures,
 } from "../../storySupport/dashboardStoryTransport.ts";
+import {
+    deliveryCheckoutQueryKey,
+    deliveryPreviewQueryKey,
+    deliveryPullRequestsQueryKey,
+    deliveryReleasesQueryKey,
+} from "../deliveryQueries.ts";
 
 const observedAtMs = 1_800_000_000_000;
 const headSha = "a".repeat(40);
@@ -305,6 +314,13 @@ const deploymentsResult = {
     state: "fresh",
 } as const satisfies DeliveryDeploymentsResult;
 
+const loadedDeliveryQuerySeeds = Object.freeze([
+    { key: deliveryPullRequestsQueryKey, updatedAtMs: 1, value: pullRequestsResult },
+    { key: deliveryPreviewQueryKey, updatedAtMs: 1, value: previewResult },
+    { key: deliveryCheckoutQueryKey, updatedAtMs: 1, value: checkoutResult },
+    { key: deliveryReleasesQueryKey, updatedAtMs: 1, value: releasesResult },
+] satisfies readonly DashboardPageStoryQuerySeed[]);
+
 const queuedResult = {
     jobRunId,
     operation: "merge-pull-request",
@@ -362,17 +378,44 @@ const operationOutcomeUnknown = Object.assign(new TypeError("Private provider de
 });
 
 async function openMergeDialog(canvasElement: HTMLElement) {
-    const canvas = within(canvasElement);
-    const mergeButtons = await canvas.findAllByRole("button", { name: "Merge" });
+    const pullRequestRegion = await loadedPullRequestRegion(canvasElement);
+    const mergeButtons = pullRequestRegion.getAllByRole("button", { name: "Merge" });
     const mergeButton = mergeButtons.at(-1);
     if (mergeButton === undefined) throw new TypeError("Merge story control is missing");
     await userEvent.click(mergeButton);
     return within(canvasElement.ownerDocument.body);
 }
 
+async function loadedDeliveryRegion(canvasElement: HTMLElement, name: string) {
+    const canvas = within(canvasElement);
+    const heading = await canvas.findByRole("heading", {
+        level: 2,
+        name,
+    });
+    const region = heading.closest("section");
+    if (region === null) throw new TypeError(`${name} story region is missing`);
+    const scoped = within(region);
+    await scoped.findByText("Fresh");
+    return scoped;
+}
+
+async function loadedPullRequestRegion(canvasElement: HTMLElement) {
+    const [pullRequestRegion] = await Promise.all([
+        loadedDeliveryRegion(canvasElement, "Pull requests"),
+        loadedDeliveryRegion(canvasElement, "Pull request preview"),
+        loadedDeliveryRegion(canvasElement, "Production checkout"),
+        loadedDeliveryRegion(canvasElement, "Production releases"),
+    ]);
+    await pullRequestRegion.findByRole("link", {
+        name: /#\s*424\s+Delivery parity/iu,
+    });
+    return pullRequestRegion;
+}
+
 const meta = {
     component: DashboardPageStory,
     parameters: { layout: "fullscreen" },
+    render: (args, context) => <DashboardPageStory {...args} key={context.id} />,
     title: "Pages/Delivery",
 } satisfies Meta<typeof DashboardPageStory>;
 
@@ -393,11 +436,15 @@ export const Loading: Story = {
 };
 
 export const PullRequests: Story = {
-    args: { fixtures: deliveryFixtures(), route: "/delivery" },
+    args: {
+        fixtures: deliveryFixtures(),
+        querySeeds: loadedDeliveryQuerySeeds,
+        route: "/delivery",
+    },
     play: async ({ canvasElement }) => {
-        const canvas = within(canvasElement);
+        const pullRequestRegion = await loadedPullRequestRegion(canvasElement);
         for (const action of ["Merge", "Merge + deploy"]) {
-            const buttons = await canvas.findAllByRole("button", { name: action });
+            const buttons = pullRequestRegion.getAllByRole("button", { name: action });
             await expect(buttons).toHaveLength(3);
             for (const button of buttons.slice(0, 2)) {
                 await expect(button).toBeDisabled();
@@ -408,7 +455,9 @@ export const PullRequests: Story = {
             await expect(buttons[2]).toBeEnabled();
         }
 
-        const rejectButtons = await canvas.findAllByRole("button", { name: "Reject" });
+        const rejectButtons = pullRequestRegion.getAllByRole("button", {
+            name: "Reject",
+        });
         await expect(rejectButtons).toHaveLength(3);
         for (const button of rejectButtons) {
             await expect(button).toBeDisabled();
@@ -420,7 +469,9 @@ export const PullRequests: Story = {
             "Run / rebuild preview",
             "Update branch",
         ]) {
-            const buttons = await canvas.findAllByRole("button", { name: action });
+            const buttons = pullRequestRegion.getAllByRole("button", {
+                name: action,
+            });
             const ordinaryButton = buttons.at(-1);
             if (ordinaryButton === undefined) {
                 throw new TypeError(`Ordinary pull request action is missing: ${action}`);
@@ -577,7 +628,11 @@ export const ActionActive: Story = {
 };
 
 export const Confirmation: Story = {
-    args: { fixtures: deliveryFixtures(), route: "/delivery" },
+    args: {
+        fixtures: deliveryFixtures(),
+        querySeeds: loadedDeliveryQuerySeeds,
+        route: "/delivery",
+    },
     play: async ({ canvasElement }) => {
         const page = await openMergeDialog(canvasElement);
         await expect(
@@ -592,7 +647,11 @@ export const Confirmation: Story = {
 };
 
 export const Queued: Story = {
-    args: { fixtures: deliveryFixtures(), route: "/delivery" },
+    args: {
+        fixtures: deliveryFixtures(),
+        querySeeds: loadedDeliveryQuerySeeds,
+        route: "/delivery",
+    },
     play: async ({ canvasElement }) => {
         const page = await openMergeDialog(canvasElement);
         await userEvent.click(await page.findByRole("button", { name: "Queue merge" }));
@@ -615,6 +674,7 @@ export const UnknownOutcome: Story = {
         fixtures: deliveryFixtures({
             mutation: dashboardStoryFailure(operationOutcomeUnknown),
         }),
+        querySeeds: loadedDeliveryQuerySeeds,
         route: "/delivery",
     },
     play: async ({ canvasElement }) => {
@@ -635,6 +695,7 @@ export const Error: Story = {
                 new TypeError("Safe Delivery operation failure")
             ),
         }),
+        querySeeds: loadedDeliveryQuerySeeds,
         route: "/delivery",
     },
     play: async ({ canvasElement }) => {

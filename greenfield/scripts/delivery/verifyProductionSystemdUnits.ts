@@ -30,6 +30,7 @@ export interface ProductionSystemdAuthorityVerificationOptions {
     readonly executeSystemctl?: SystemctlExecutor;
     readonly expectedGroupId?: number;
     readonly expectedUserId?: number;
+    readonly loadPublishedRelease?: typeof loadPublishedProductionRelease;
     readonly rootUnitDirectory?: string;
 }
 
@@ -148,6 +149,8 @@ export async function verifyPublishedProductionSystemdUnitsInstalledAtRoot(
     const expectedUserId = options.expectedUserId ?? 0;
     const expectedGroupId = options.expectedGroupId ?? 0;
     const executeSystemctl = options.executeSystemctl ?? executeSystemctlProcess;
+    const loadPublishedRelease =
+        options.loadPublishedRelease ?? loadPublishedProductionRelease;
     let directory: FileHandle | undefined;
     let failed = false;
     try {
@@ -160,7 +163,7 @@ export async function verifyPublishedProductionSystemdUnitsInstalledAtRoot(
         ) {
             throw verificationFailure();
         }
-        const verifiedRelease = await loadPublishedProductionRelease(
+        const verifiedRelease = await loadPublishedRelease(
             paths,
             release.manifest.source.commitSha,
             release.manifest.runtime.revision
@@ -231,7 +234,7 @@ export async function verifyPublishedProductionSystemdUnitsInstalledAtRoot(
         }
 
         const directoryAfter = await directory.stat({ bigint: true });
-        const releaseAfter = await loadPublishedProductionRelease(
+        const releaseAfter = await loadPublishedRelease(
             paths,
             release.manifest.source.commitSha,
             release.manifest.runtime.revision

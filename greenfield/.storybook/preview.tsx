@@ -1,11 +1,18 @@
 import type { Preview } from "@storybook/tanstack-react";
 import { themes } from "storybook/theming";
 
+import {
+    prepareStorybookBrowserStorage,
+    resetStorybookBrowserStorage,
+} from "../src/browser/storySupport/storybookBrowserStorage.ts";
+
 import "../src/browser/storySupport/storybook.css";
 
 const dashboardBackground = "#0b0b0c";
 
 const preview: Preview = {
+    afterEach: resetStorybookBrowserStorage,
+    beforeEach: prepareStorybookBrowserStorage,
     initialGlobals: {
         backgrounds: {
             value: "dashboard",

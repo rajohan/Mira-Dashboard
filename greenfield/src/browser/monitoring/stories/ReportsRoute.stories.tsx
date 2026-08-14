@@ -76,6 +76,7 @@ async function openDeleteDialog(canvasElement: HTMLElement) {
 const meta = {
     component: DashboardPageStory,
     parameters: { layout: "fullscreen" },
+    render: (args, context) => <DashboardPageStory {...args} key={context.id} />,
     title: "Pages/Reports",
 } satisfies Meta<typeof DashboardPageStory>;
 

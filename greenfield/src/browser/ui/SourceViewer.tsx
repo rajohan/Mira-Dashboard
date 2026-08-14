@@ -93,7 +93,7 @@ function SourceSurfaceFrame({
     return (
         <section
             aria-label={ariaLabel}
-            className="focus-visible:ring-accent-300 min-h-0 min-w-0 flex-1 overflow-auto outline-none focus-visible:ring-2 focus-visible:ring-inset"
+            className="focus-visible:ring-accent-300 min-h-0 min-w-0 flex-1 overflow-auto contain-[layout_paint_style] outline-none focus-visible:ring-2 focus-visible:ring-inset"
             tabIndex={0}
         >
             <pre

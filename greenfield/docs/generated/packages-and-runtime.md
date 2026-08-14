@@ -80,6 +80,7 @@
 | `@types/react-syntax-highlighter` | `^15.5.13` | `15.5.13` | development |
 | `@valibot/to-json-schema` | `1.7.1` | `1.7.1` | development |
 | `@vitest/browser-playwright` | `4.1.10` | `4.1.10` | development |
+| `@vitest/coverage-v8` | `4.1.10` | `4.1.10` | development |
 | `babel-plugin-react-compiler` | `^1.0.0` | `1.0.0` | development |
 | `bun-plugin-tailwind` | `^0.1.2` | `0.1.2` | development |
 | `bun-types` | `1.4.0-canary.20260519T150915` | `1.4.0-canary.20260519T150915` | development |

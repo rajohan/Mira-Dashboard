@@ -220,11 +220,11 @@ async function collectRepository(
     process: GitWorkspaceProcess
 ): Promise<ManagedGitRepository> {
     const controller = new AbortController();
-    const abort = () => controller.abort();
-    parentSignal?.addEventListener("abort", abort, { once: true });
-    const timeout = setTimeout(abort, gitTimeoutMs);
+    const abortFromParent = () => controller.abort(parentSignal?.reason);
+    parentSignal?.addEventListener("abort", abortFromParent, { once: true });
+    const timeout = setTimeout(() => controller.abort(), gitTimeoutMs);
     try {
-        if (parentSignal?.aborted) return emptyRepository(repository.id, "unavailable");
+        parentSignal?.throwIfAborted();
         const result = await process(
             gitExecutable,
             [
@@ -239,13 +239,15 @@ async function collectRepository(
             controller.signal,
             gitOutputMaximumBytes
         );
+        parentSignal?.throwIfAborted();
         if (result.exitCode !== 0) return emptyRepository(repository.id, "missing");
         return parseGitStatus(repository.id, result.stdout);
     } catch {
+        parentSignal?.throwIfAborted();
         return emptyRepository(repository.id, "unavailable");
     } finally {
         clearTimeout(timeout);
-        parentSignal?.removeEventListener("abort", abort);
+        parentSignal?.removeEventListener("abort", abortFromParent);
     }
 }
 
@@ -275,8 +277,10 @@ export async function collectGitWorkspacePayload(
             collectRepository(repository, signal, gitProcess)
         )
     );
+    const observedAtMs = (options.nowMs ?? Date.now)();
+    signal?.throwIfAborted();
     return v.parse(gitWorkspaceCachePayloadSchema, {
-        observedAtMs: (options.nowMs ?? Date.now)(),
+        observedAtMs,
         repositories: projections,
     });
 }

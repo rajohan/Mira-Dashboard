@@ -324,6 +324,7 @@ async function openServiceActionDialog(
 const meta = {
     component: DashboardPageStory,
     parameters: { layout: "fullscreen" },
+    render: (args, context) => <DashboardPageStory {...args} key={context.id} />,
     title: "Pages/Jobs",
 } satisfies Meta<typeof DashboardPageStory>;
 
@@ -346,14 +347,20 @@ export const DashboardJobs: Story = {
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement);
         await expect(
-            await canvas.findByRole("heading", { level: 2, name: "Service actions" })
+            await canvas.findByRole("heading", { level: 1, name: "Jobs" })
         ).toBeVisible();
-        await expect(
-            await canvas.findByRole("table", { name: "Job runs" })
-        ).toBeVisible();
-        await expect(
-            await canvas.findByRole("table", { name: "Dashboard schedules" })
-        ).toBeVisible();
+        const [serviceActionsHeading, jobRunsTable, dashboardSchedulesTable] =
+            await Promise.all([
+                canvas.findByRole("heading", {
+                    level: 2,
+                    name: "Service actions",
+                }),
+                canvas.findByRole("table", { name: "Job runs" }),
+                canvas.findByRole("table", { name: "Dashboard schedules" }),
+            ]);
+        await expect(serviceActionsHeading).toBeVisible();
+        await expect(jobRunsTable).toBeVisible();
+        await expect(dashboardSchedulesTable).toBeVisible();
     },
 };
 

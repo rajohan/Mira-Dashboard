@@ -2,7 +2,10 @@ import type { QueryKey } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { type ReactElement, useEffect, useState } from "react";
 
-import type { DashboardRouteDocumentation } from "../../shared/browserRouteRegistry.ts";
+import {
+    dashboardRouteDocumentation,
+    type DashboardRouteDocumentation,
+} from "../../shared/browserRouteRegistry.ts";
 import { createDashboardQueryClient } from "../api/queryClient.ts";
 import type {
     DashboardRealtimeClient,
@@ -10,12 +13,14 @@ import type {
 } from "../api/realtimeClient.ts";
 import { createDashboardTrpcClient } from "../api/trpcClient.ts";
 import { DashboardBrowserApplication } from "../application.tsx";
+import { authStatusQueryKey } from "../auth/authQueries.ts";
 import { createDashboardBrowserCollections } from "../data/dashboardCollections.ts";
 import { createDashboardRouter } from "../router.tsx";
 import type { DashboardWebAuthnClient } from "../security/webauthn/webauthnClient.ts";
 import { TerminalBrowserDependenciesProvider } from "../terminal/terminalBrowserDependencies.tsx";
 import type { TerminalBrowserDependencies } from "../terminal/terminalBrowserDependenciesContext.ts";
 import {
+    authenticatedDashboardStoryStatus,
     DashboardStoryTransport,
     type DashboardStoryFixtures,
 } from "./dashboardStoryTransport.ts";
@@ -34,6 +39,12 @@ const noOpStorySubscription: DashboardRealtimeSubscription = Object.freeze({
 const noOpStoryRealtimeClient: DashboardRealtimeClient = Object.freeze({
     subscribe: () => noOpStorySubscription,
 });
+
+const authenticatedStoryRoutes = new Set<string>(
+    dashboardRouteDocumentation
+        .filter(({ access }) => access === "session")
+        .map(({ path }) => path)
+);
 
 export interface DashboardPageStoryProps {
     readonly fixtures?: DashboardStoryFixtures;
@@ -69,6 +80,11 @@ function createPageStoryDependencies({
     route,
 }: DashboardPageStoryProps) {
     const queryClient = createPageStoryQueryClient();
+    if (authenticatedStoryRoutes.has(route)) {
+        queryClient.setQueryData(authStatusQueryKey, authenticatedDashboardStoryStatus, {
+            updatedAt: 1,
+        });
+    }
     const trpcClient = createDashboardTrpcClient(new DashboardStoryTransport(fixtures));
     return {
         collections: createDashboardBrowserCollections(queryClient, trpcClient),
@@ -81,7 +97,9 @@ function createPageStoryDependencies({
         },
         queryClient,
         realtimeClient: noOpStoryRealtimeClient,
-        router: createDashboardRouter(createMemoryHistory({ initialEntries: [route] })),
+        router: createDashboardRouter(createMemoryHistory({ initialEntries: [route] }), {
+            scrollRestoration: false,
+        }),
         trpcClient,
         webAuthnClient: unavailableStoryWebAuthnClient,
     };

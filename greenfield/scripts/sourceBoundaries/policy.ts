@@ -10,6 +10,7 @@ import {
     isTestPath,
     isReviewedApplicationServerTarget,
     isReviewedScriptBrowserTarget,
+    isReviewedStorybookConfigScriptTarget,
     normalizeRepositoryPath,
     relativeImportTarget,
     sourceRole,
@@ -329,6 +330,12 @@ export function validateSourceImport(
     if (
         targetRole === "browser" &&
         isReviewedScriptBrowserTarget(normalizedImporter, target)
+    ) {
+        return undefined;
+    }
+    if (
+        targetRole === "scripts" &&
+        isReviewedStorybookConfigScriptTarget(normalizedImporter, target)
     ) {
         return undefined;
     }

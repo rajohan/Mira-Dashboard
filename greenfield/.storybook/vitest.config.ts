@@ -5,29 +5,40 @@ import { storybookTest } from "@storybook/addon-vitest/vitest-plugin";
 import { playwright } from "@vitest/browser-playwright";
 import { defineConfig } from "vitest/config";
 
-const configDirectory = path.dirname(fileURLToPath(import.meta.url));
+import {
+    createStorybookTestProjectPlan,
+    discoverStorybookTestFiles,
+} from "../scripts/storybookTestProjects.ts";
 
-export default defineConfig({
-    test: {
-        onConsoleLog(_log, type, _entity) {
-            if (type === "stderr") {
-                process.stderr.write("[Storybook unexpected stderr]\n");
-            }
-        },
-        projects: [
-            {
-                extends: true,
+const configDirectory = path.dirname(fileURLToPath(import.meta.url));
+const projectRoot = path.resolve(configDirectory, "..");
+
+export default defineConfig(async () => {
+    const storyFiles = await discoverStorybookTestFiles(projectRoot);
+    const projectPlans = createStorybookTestProjectPlan(storyFiles);
+
+    return {
+        test: {
+            onConsoleLog(_log: string, type: "stderr" | "stdout", _entity: unknown) {
+                if (type === "stderr") {
+                    process.stderr.write("[Storybook unexpected stderr]\n");
+                }
+            },
+            projects: projectPlans.map((plan) => ({
+                extends: true as const,
                 plugins: [storybookTest({ configDir: configDirectory })],
                 test: {
-                    name: "storybook",
+                    exclude: [...plan.excludedFiles],
+                    name: plan.name,
+                    sequence: { groupOrder: plan.groupOrder },
                     browser: {
                         enabled: true,
                         headless: true,
                         provider: playwright({}),
-                        instances: [{ browser: "chromium" }],
+                        instances: [{ browser: "chromium" as const }],
                     },
                 },
-            },
-        ],
-    },
+            })),
+        },
+    };
 });

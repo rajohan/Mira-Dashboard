@@ -97,6 +97,7 @@ const pending = dashboardStoryResolver(
 const meta = {
     component: DashboardPageStory,
     parameters: { layout: "fullscreen" },
+    render: (args, context) => <DashboardPageStory {...args} key={context.id} />,
     title: "Pages/Agents",
 } satisfies Meta<typeof DashboardPageStory>;
 

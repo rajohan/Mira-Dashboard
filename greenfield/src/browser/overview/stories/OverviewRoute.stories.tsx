@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from "@storybook/tanstack-react";
 import { expect, userEvent, within } from "storybook/test";
 
 import type { AgentConfiguration } from "../../../contracts/agentModel.ts";
+import type { ListAgentStatusesResult } from "../../../contracts/agents.ts";
 import type { KopiaBackupStatus, WalgBackupStatus } from "../../../contracts/backups.ts";
 import type { CacheEntry, CacheStatusResult } from "../../../contracts/cache.ts";
 import type { DatabaseOverview } from "../../../contracts/database.ts";
@@ -720,6 +721,7 @@ const emptyCacheStatus = {
 const meta = {
     component: DashboardPageStory,
     parameters: { layout: "fullscreen" },
+    render: (args, context) => <DashboardPageStory {...args} key={context.id} />,
     title: "Pages/Dashboard",
 } satisfies Meta<typeof DashboardPageStory>;
 
@@ -760,7 +762,16 @@ export const Empty: Story = {
     args: {
         fixtures: overviewFixtures({
             queries: {
-                "agents.listStatuses": dashboardStoryValue({ statuses: [] }),
+                "agents.listStatuses": dashboardStoryValue({
+                    statuses: [
+                        {
+                            agentId: "main",
+                            freshness: "unavailable",
+                            gatewayAvailability: "disconnected",
+                            state: "idle",
+                        },
+                    ],
+                } satisfies ListAgentStatusesResult),
                 "cache.getStatus": dashboardStoryValue(emptyCacheStatus),
                 "incidents.list": dashboardStoryValue({ incidents: [] }),
                 "notifications.list": dashboardStoryValue({
@@ -840,14 +851,14 @@ export const LastKnownGood: Story = {
             queries: {
                 "backups.getKopiaStatus": dashboardStoryValue({
                     ...kopiaStatus,
-                    staleSinceMs: observedAtMs - 1000,
+                    staleSinceMs: observedAtMs,
                     state: "last-known-good",
-                }),
+                } satisfies KopiaBackupStatus),
                 "backups.getWalgStatus": dashboardStoryValue({
                     ...walgStatus,
-                    staleSinceMs: observedAtMs - 1000,
+                    staleSinceMs: observedAtMs,
                     state: "last-known-good",
-                }),
+                } satisfies WalgBackupStatus),
                 "cache.getEntry": dashboardStoryResolver((input) => {
                     const key =
                         typeof input === "object" && input !== null && "key" in input

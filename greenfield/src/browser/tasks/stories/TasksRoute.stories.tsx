@@ -80,6 +80,7 @@ async function moveFirstTask(canvasElement: HTMLElement) {
 const meta = {
     component: DashboardPageStory,
     parameters: { layout: "fullscreen" },
+    render: (args, context) => <DashboardPageStory {...args} key={context.id} />,
     title: "Pages/Tasks",
 } satisfies Meta<typeof DashboardPageStory>;
 

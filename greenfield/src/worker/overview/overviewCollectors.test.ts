@@ -659,12 +659,47 @@ describe("overview collectors", () => {
         }
     });
 
-    test("does not launch Git when collection is already aborted", async () => {
+    test("propagates a pre-existing Git collection cancellation without work", async () => {
         const controller = new AbortController();
-        controller.abort();
-        let launches = 0;
+        const failure = new DOMException("Git collection cancelled", "AbortError");
+        controller.abort(failure);
+        let clockReads = 0;
+        let processCalls = 0;
 
-        const payload = await collectGitWorkspacePayload(
+        const rejection = await rejectionOf(
+            collectGitWorkspacePayload(
+                [
+                    { id: "dashboard", root: "/dashboard" },
+                    { id: "docker", root: "/docker" },
+                    { id: "openclaw", root: "/openclaw" },
+                ],
+                controller.signal,
+                {
+                    nowMs: () => {
+                        clockReads += 1;
+                        return 9000;
+                    },
+                    process: () => {
+                        processCalls += 1;
+                        throw new Error("must not launch");
+                    },
+                }
+            )
+        );
+
+        expect(rejection).toBe(failure);
+        expect(processCalls).toBe(0);
+        expect(clockReads).toBe(0);
+    });
+
+    test("propagates parent cancellation from in-flight Git processes", async () => {
+        const controller = new AbortController();
+        const failure = new DOMException("Git refresh cancelled", "AbortError");
+        const allProcessesStarted = Promise.withResolvers<void>();
+        const childSignals: AbortSignal[] = [];
+        let clockReads = 0;
+
+        const collection = collectGitWorkspacePayload(
             [
                 { id: "dashboard", root: "/dashboard" },
                 { id: "docker", root: "/docker" },
@@ -672,20 +707,67 @@ describe("overview collectors", () => {
             ],
             controller.signal,
             {
-                launch: () => {
-                    launches += 1;
-                    throw new Error("must not launch");
+                nowMs: () => {
+                    clockReads += 1;
+                    return 9000;
                 },
-                nowMs: () => 9000,
+                process: (_executable, _arguments, childSignal) => {
+                    childSignals.push(childSignal);
+                    if (childSignals.length === 3) allProcessesStarted.resolve();
+                    return new Promise((_resolve, reject) => {
+                        childSignal.addEventListener(
+                            "abort",
+                            () => reject(new Error("Git child stopped")),
+                            { once: true }
+                        );
+                    });
+                },
             }
         );
+        await allProcessesStarted.promise;
+        controller.abort(failure);
 
-        expect(launches).toBe(0);
-        expect(payload.repositories).toEqual([
-            expect.objectContaining({ id: "dashboard", state: "unavailable" }),
-            expect.objectContaining({ id: "docker", state: "unavailable" }),
-            expect.objectContaining({ id: "openclaw", state: "unavailable" }),
-        ]);
+        expect(await rejectionOf(collection)).toBe(failure);
+        expect(childSignals).toHaveLength(3);
+        expect(
+            childSignals.every(
+                (childSignal) => childSignal.aborted && childSignal.reason === failure
+            )
+        ).toBeTrue();
+        expect(clockReads).toBe(0);
+    });
+
+    test("does not publish a Git payload cancelled after repository settlement", async () => {
+        const controller = new AbortController();
+        const failure = new DOMException("Git snapshot cancelled", "AbortError");
+        let processCalls = 0;
+
+        const rejection = await rejectionOf(
+            collectGitWorkspacePayload(
+                [
+                    { id: "dashboard", root: "/dashboard" },
+                    { id: "docker", root: "/docker" },
+                    { id: "openclaw", root: "/openclaw" },
+                ],
+                controller.signal,
+                {
+                    nowMs: () => {
+                        controller.abort(failure);
+                        return 9000;
+                    },
+                    process: () => {
+                        processCalls += 1;
+                        return Promise.resolve({
+                            exitCode: 0,
+                            stdout: new Uint8Array(),
+                        });
+                    },
+                }
+            )
+        );
+
+        expect(rejection).toBe(failure);
+        expect(processCalls).toBe(3);
     });
 
     test("kills Git children after stream or process failures and bounds exit waits", async () => {

@@ -131,12 +131,20 @@ export function dashboardScrollRestorationKey(
     return location.pathname;
 }
 
+interface DashboardRouterOptions {
+    readonly scrollRestoration?: boolean;
+}
+
 /**
  * Creates one browser router owned by the browser composition root.
  * @param history Optional memory history for deterministic browser tests.
+ * @param options Optional lifecycle-specific router behavior.
  * @returns Typed Dashboard browser router.
  */
-export function createDashboardRouter(history?: RouterHistory) {
+export function createDashboardRouter(
+    history?: RouterHistory,
+    { scrollRestoration = true }: DashboardRouterOptions = {}
+) {
     return createRouter({
         defaultPendingComponent: () => <LoadingState label="Loading page…" />,
         defaultPreload: "intent",
@@ -144,7 +152,7 @@ export function createDashboardRouter(history?: RouterHistory) {
         ...(history === undefined ? {} : { history }),
         getScrollRestorationKey: dashboardScrollRestorationKey,
         routeTree,
-        scrollRestoration: true,
+        scrollRestoration,
         scrollToTopSelectors: ["#dashboard-content"],
     });
 }

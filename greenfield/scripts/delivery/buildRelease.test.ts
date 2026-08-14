@@ -30,6 +30,7 @@ const runtimeIdentity: ReleaseRuntimeIdentity = Object.freeze({
     revision: "a".repeat(40),
     version: "1.4.0",
 });
+const documentationFixture = "# Dashboard release build fixture\n";
 
 async function restoreOwnerWrite(directory: string): Promise<void> {
     const status = await stat(directory).catch(() => {});
@@ -52,11 +53,11 @@ afterEach(async () => {
 async function repositoryFixture(): Promise<string> {
     const repositoryRoot = await mkdtemp(path.join(tmpdir(), "mira-release-build-"));
     temporaryDirectories.push(repositoryRoot);
+    await mkdir(path.join(repositoryRoot, "docs/generated"), { recursive: true });
     await Promise.all([
-        cp(
-            path.join(sourceProjectRoot, "docs/generated"),
-            path.join(repositoryRoot, "docs/generated"),
-            { recursive: true }
+        writeFile(
+            path.join(repositoryRoot, "docs/generated/README.md"),
+            documentationFixture
         ),
         cp(
             path.join(sourceProjectRoot, "migrations"),

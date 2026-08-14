@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
 import { createMemoryHistory } from "@tanstack/react-router";
+import { act } from "react";
 
 import type {
     AgentConfiguration,
@@ -1005,33 +1006,36 @@ afterEach(async () => {
     for (const queryClient of queryClients.splice(0)) queryClient.clear();
 });
 
-function renderOverview(transport: OverviewTransport) {
+async function renderOverview(transport: OverviewTransport) {
     const queryClient = createDashboardQueryClient();
     queryClients.push(queryClient);
     const trpcClient = createDashboardTrpcClient(transport);
     const collections = createDashboardBrowserCollections(queryClient, trpcClient);
     collectionRegistries.push(collections);
-    mountedViews.push(
-        render(
-            <DashboardBrowserApplication
-                collections={collections}
-                queryClient={queryClient}
-                realtimeClient={noOpDashboardRealtimeClient}
-                router={createDashboardRouter(
-                    createMemoryHistory({ initialEntries: ["/"] })
-                )}
-                trpcClient={trpcClient}
-                webAuthnClient={unexpectedWebAuthnClient}
-            />
-        )
-    );
+    const router = createDashboardRouter(createMemoryHistory({ initialEntries: ["/"] }));
+    await act(async () => {
+        await router.load();
+        mountedViews.push(
+            render(
+                <DashboardBrowserApplication
+                    collections={collections}
+                    queryClient={queryClient}
+                    realtimeClient={noOpDashboardRealtimeClient}
+                    router={router}
+                    trpcClient={trpcClient}
+                    webAuthnClient={unexpectedWebAuthnClient}
+                />
+            )
+        );
+        await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    });
     return { queryClient, user: userEvent.setup() };
 }
 
 describe("Dashboard operational overview foundation", () => {
     test("loads bounded status before exact payload and queues refresh as a job", async () => {
         const transport = new OverviewTransport();
-        const { user } = renderOverview(transport);
+        const { user } = await renderOverview(transport);
 
         expect(
             await screen.findByRole("heading", { level: 2, name: "Service actions" })
@@ -1228,7 +1232,7 @@ describe("Dashboard operational overview foundation", () => {
         const transport = new OverviewTransport({
             kopiaBackupStatusOutput: freshKopiaBackupStatus,
         });
-        const { user } = renderOverview(transport);
+        const { user } = await renderOverview(transport);
 
         const kopiaCard = await screen.findByLabelText("Kopia backup");
         await user.click(within(kopiaCard).getByRole("button", { name: "Run backup" }));
@@ -1255,7 +1259,7 @@ describe("Dashboard operational overview foundation", () => {
         const transport = new OverviewTransport({
             systemMetricsOutputs: [{ ...systemMetrics, freshness: "stale" }],
         });
-        renderOverview(transport);
+        await renderOverview(transport);
 
         expect(
             await screen.findByText(
@@ -1272,7 +1276,7 @@ describe("Dashboard operational overview foundation", () => {
             dockerOverviewOutput: detailedDockerOverview,
             logMaintenanceOutputs: [attentionLogMaintenance],
         });
-        renderOverview(transport);
+        await renderOverview(transport);
 
         expect(await screen.findByText(/1 images · 512 MiB/u)).toBeTruthy();
         expect(screen.getByText(/1 volumes · 2\.0 GiB across 1 measured/u)).toBeTruthy();
@@ -1300,7 +1304,7 @@ describe("Dashboard operational overview foundation", () => {
                 },
             ],
         });
-        renderOverview(transport);
+        await renderOverview(transport);
 
         expect(
             await screen.findByText("Showing 0 of 1", {}, { timeout: 5000 })
@@ -1320,7 +1324,7 @@ describe("Dashboard operational overview foundation", () => {
         const transport = new OverviewTransport({
             refreshOutputs: [rawFailure, failedRefresh],
         });
-        const { user } = renderOverview(transport);
+        const { user } = await renderOverview(transport);
 
         await screen.findByText("Showing 2 of 129");
         await user.click(screen.getByRole("button", { name: "system.host" }));
@@ -1356,7 +1360,7 @@ describe("Dashboard operational overview foundation", () => {
         const transport = new OverviewTransport({
             cacheEntryOutputs: [hostEntry, completedEntry],
         });
-        const { user } = renderOverview(transport);
+        const { user } = await renderOverview(transport);
 
         await screen.findByText("Showing 2 of 129");
         await user.click(screen.getByRole("button", { name: "system.host" }));

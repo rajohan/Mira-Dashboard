@@ -30,6 +30,7 @@ function loginStory(status: AuthStatus) {
 const meta = {
     component: DashboardPageStory,
     parameters: { layout: "fullscreen" },
+    render: (args, context) => <DashboardPageStory {...args} key={context.id} />,
     title: "Pages/Login",
 } satisfies Meta<typeof DashboardPageStory>;
 

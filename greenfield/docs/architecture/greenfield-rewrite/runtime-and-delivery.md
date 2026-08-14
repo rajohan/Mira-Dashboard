@@ -497,10 +497,11 @@ build                   deterministic browser and server/worker artifacts
 typecheck               root TypeScript solution (browser + Bun), no emit
 lint                    oxlint type-aware rules and type-check diagnostics, partitioned by runtime
 format / format:check   oxfmt
-test                    Bun graph followed by browser graph
+test                    Bun, Happy DOM browser, then real-browser Storybook graphs
 test:bun                scripts, server, worker, contracts, integration, and parity tests
 test:browser            Happy DOM + Testing Library behavior tests
-test:coverage           all tests + 85% executable-source line gate and LCOV
+test:storybook          real Chromium stories, interactions, and accessibility tests
+test:coverage           all three test graphs + 85% executable-source line gate and LCOV
 docs:generate/check     deterministic generated documentation
 verify                  sequential local gate with explicit resource caps
 ```
