@@ -50,7 +50,7 @@ export type { SystemctlProcessResult } from "./systemctlProcess.ts";
 export interface SystemdProductionServiceOptions {
     readonly execute?: SystemctlExecutor;
     readonly fetch?: (request: Request) => Promise<Response>;
-    readonly installUnits?: typeof verifyPublishedProductionSystemdUnitsInstalledAtRoot;
+    readonly verifyUnits?: typeof verifyPublishedProductionSystemdUnitsInstalledAtRoot;
     readonly readinessUrl: string;
     readonly smoke?: typeof runProductionDeliveryTargetSmoke;
     readonly systemctlExecutable?: string;
@@ -161,13 +161,13 @@ export function createSystemdProductionServiceController(
     validateExecutable(executable);
     const execute = options.execute ?? executeSystemctlProcess;
     const fetch_ = options.fetch ?? fetch;
-    const installUnits =
-        options.installUnits ?? verifyPublishedProductionSystemdUnitsInstalledAtRoot;
+    const verifyUnits =
+        options.verifyUnits ?? verifyPublishedProductionSystemdUnitsInstalledAtRoot;
     const smoke = options.smoke ?? runProductionDeliveryTargetSmoke;
 
     return Object.freeze({
         prepare(release: PublishedProductionRelease): Promise<void> {
-            return installUnits(lease, paths, release);
+            return verifyUnits(lease, paths, release);
         },
         async start(
             release: PublishedProductionRelease,

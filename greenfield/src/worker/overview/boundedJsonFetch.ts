@@ -67,6 +67,7 @@ export interface BoundedJsonRequest {
  * @returns The parsed JSON value after transport validation.
  */
 export async function fetchBoundedJson(request: BoundedJsonRequest): Promise<unknown> {
+    request.signal?.throwIfAborted();
     if (request.url.protocol !== "https:") unavailable();
     const maximumBytes = request.maximumBytes ?? defaultResponseMaximumBytes;
     const timeoutMs = request.timeoutMs ?? defaultTimeoutMs;
@@ -83,7 +84,7 @@ export async function fetchBoundedJson(request: BoundedJsonRequest): Promise<unk
     request.signal?.addEventListener("abort", abort, { once: true });
     const timeout = setTimeout(abort, timeoutMs);
     try {
-        if (request.signal?.aborted) unavailable();
+        request.signal?.throwIfAborted();
         const response = await (request.fetch ?? globalThis.fetch)(request.url, {
             headers: {
                 Accept: "application/json",
@@ -97,13 +98,17 @@ export async function fetchBoundedJson(request: BoundedJsonRequest): Promise<unk
         if (!response.ok) unavailable();
         const body = await readBoundedBody(response, maximumBytes);
         try {
-            return JSON.parse(
+            const value = JSON.parse(
                 new TextDecoder("utf-8", { fatal: true }).decode(body)
             ) as unknown;
+            request.signal?.throwIfAborted();
+            return value;
         } catch {
+            request.signal?.throwIfAborted();
             return unavailable();
         }
     } catch (error) {
+        request.signal?.throwIfAborted();
         if (error instanceof OverviewProviderUnavailableError) throw error;
         return unavailable();
     } finally {

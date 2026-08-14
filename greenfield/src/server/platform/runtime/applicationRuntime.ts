@@ -1,5 +1,6 @@
 import type { SQLiteBunDatabase } from "drizzle-orm/bun-sqlite";
 import {
+    Clock,
     Context,
     Data,
     Effect,
@@ -134,8 +135,14 @@ export interface DashboardApplicationRuntime extends ApplicationRuntime {
 /** Scoped layers owned by one composition root for the full process lifetime. */
 export interface ApplicationRuntimeOptions {
     readonly authenticationWork?: AuthenticationWorkLayerOptions;
+    /** Test seam; production omits this and retains Effect's live clock. */
+    readonly clock?: Clock.Clock;
     readonly logger: StructuredLogger;
     readonly realtimeEventPumpLayer: Layer.Layer<RealtimeEventPumpService>;
+}
+
+function applicationClockLayer(clock?: Clock.Clock): Layer.Layer<never> {
+    return clock === undefined ? Layer.empty : Layer.succeed(Clock.Clock, clock);
 }
 
 /** Production Dashboard runtime inputs with explicit state and release identity. */
@@ -457,6 +464,7 @@ export function createApplicationRuntime(
 ): ApplicationRuntime {
     const runtime = ManagedRuntime.make(
         Layer.mergeAll(
+            applicationClockLayer(options.clock),
             options.realtimeEventPumpLayer,
             authenticationWorkLayer(options.authenticationWork),
             createEffectLoggerLayer(options.logger)
@@ -509,6 +517,7 @@ export function createDashboardApplicationRuntime(
               }).pipe(Layer.provideMerge(databaseBackedRealtimeLayer));
     const runtime = ManagedRuntime.make(
         Layer.mergeAll(
+            applicationClockLayer(options.clock),
             realtimeAndGatewayLayer,
             authenticationWorkLayer(options.authenticationWork),
             createEffectLoggerLayer(options.logger)

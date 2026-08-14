@@ -776,6 +776,11 @@ closes a phase; dated entries below provide the evidence, not a second status so
   verified stop-owner units before the first stop (using the candidate on an empty host), starts
   worker before web, and stops web before worker; rollback reinstalls the previous release's units
   first.
+- This Phase 1 user-unit installer was subsequently superseded by the root-systemd authority
+  completed on 2026-08-13 and is no longer present in the candidate. The first production cutover
+  is a manual replacement: the operator removes the legacy user units, provisions the exact
+  manifest-bound root units, and invokes Greenfield activation only after root-unit verification.
+  It does not attempt to roll the candidate through the earlier user-systemd executor.
 - A disposable project lifecycle performs the real browser/process build, documentation and
   migration gates, exact runtime publication, empty-database initialization, web/worker startup,
   readiness, browser serving, project-local logging, and complete shutdown. Focused adversarial

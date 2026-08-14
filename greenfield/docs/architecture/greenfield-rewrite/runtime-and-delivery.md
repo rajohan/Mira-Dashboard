@@ -753,6 +753,18 @@ rollback. Only installed copies of systemd unit files may live outside
 `<project-root>/development` or `<project-root>/production`; all Dashboard state, logs, backups,
 runtime binaries, checkouts, and release artifacts remain inside those project directories.
 
+The first production cutover is an explicit operator-run replacement, not a rolling activation
+through the previously published user-systemd executor. The operator stops, disables, and removes
+the legacy user units, stages and runs the manifest-bound root installer, verifies the exact
+root-owned candidate units and principals, and only then invokes `bun run delivery:activate`
+directly from the verified candidate. It does not launch the previously published
+`server/productionDelivery.js` or its user-unit installer, and the legacy service pair is not
+recorded as a Greenfield rollback target. The candidate repository therefore contains no
+compatibility installer for user units. After this one-time authority transfer, ordinary
+Greenfield activation controls only root systemd and fails closed before service effects whenever
+the installed root-unit bytes differ from the candidate manifest; changed unit bytes require the
+root provisioning step before activation.
+
 Recommended layout:
 
 ```text
@@ -825,7 +837,7 @@ uses `sudo`. Production cutover reads Tailscale preferences and requires the exa
 confirming the journal or stopping services. Missing or drifted delegation therefore fails closed
 before deployment effects, and bootstrap is never applied implicitly by deployment.
 
-Deployment flow:
+Post-cutover Greenfield deployment flow:
 
 1. Build and test one artifact using the same resolved Bun runtime throughout the build.
 2. Verify every source artifact hash and the exact runtime identity without copying into the
@@ -846,19 +858,19 @@ Deployment flow:
    manifest-verifies the current immutable executor and launches it through a fixed transient
    user-systemd unit in a separate cgroup with `env -i`; GitHub, Doppler, Gateway, Docker, and
    reviewer credentials never cross that handoff. The executor confirms the exact journal before
-   installing/reloading the verified stop-owner units, draining active jobs, entering maintenance
+   verifying the manifest-bound root-installed stop-owner units, draining active jobs, entering maintenance
    mode, and quiescing database writers. Recovery treats the pre-snapshot phase as
    database-unmodified and idempotently restores the previous service owner.
 5. Snapshot and verify the current database while writers remain stopped.
 6. Apply migrations to a copy, run schema/preflight checks, then atomically promote the
    database state.
-7. Reinstall the candidate release's manifest-verified user units, reload user systemd, then let
-   the deployment-held activation start worker in `validate-only` mode before web, with readiness
-   deadlines. The authoritative activation record is not committed until target readiness and the
-   required target validation succeed. A rollback preloads only the exact authoritative previous
-   snapshot, snapshots the current database before restoring it, and records that fresh snapshot
-   beside the now-previous release. Repeated `current → previous → current` rollback therefore
-   preserves the correct database state in both directions.
+7. Reverify the candidate release's manifest-bound root units, then let the deployment-held
+   activation start worker in `validate-only` mode before web, with readiness deadlines. The
+   authoritative activation record is not committed until target readiness and the required target
+   validation succeed. A rollback preloads only the exact authoritative previous snapshot,
+   snapshots the current database before restoring it, and records that fresh snapshot beside the
+   now-previous release. Repeated `current → previous → current` rollback therefore preserves the
+   correct database state in both directions.
 8. Run authenticated smoke checks, including tRPC, SSE, Gateway, docs, and one safe queued job.
 9. Store one immutable terminal operation receipt before clearing the in-flight record. A restarted
    worker reconciles that receipt before ordinary Job claiming; if paired rollback restored an

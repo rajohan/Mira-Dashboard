@@ -10,14 +10,31 @@ import type {
 import { Button } from "../../ui/Button.tsx";
 import { LogsView } from "../LogsView.tsx";
 
-async function settleFollowLayout(frameCount = 20): Promise<void> {
-    for (let index = 0; index < frameCount; index += 1) {
-        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    }
-}
-
 function stableId(index: number): string {
     return index.toString(16).padStart(64, "0");
+}
+
+async function stableRelativeTop(
+    element: HTMLElement,
+    container: HTMLElement
+): Promise<number> {
+    let previousTop: number | undefined;
+    let stableFrames = 0;
+    for (let frame = 0; frame < 12; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        if (!element.isConnected) {
+            throw new TypeError("The log reading anchor was removed while settling");
+        }
+        const currentTop =
+            element.getBoundingClientRect().top - container.getBoundingClientRect().top;
+        stableFrames =
+            previousTop !== undefined && Math.abs(currentTop - previousTop) <= 1
+                ? stableFrames + 1
+                : 0;
+        if (stableFrames >= 2) return currentTop;
+        previousTop = currentTop;
+    }
+    throw new Error("The log reading anchor did not settle inside 12 frames");
 }
 
 function longSnapshot(count: number): LogSnapshotOutput {
@@ -334,15 +351,19 @@ export const SystemAndOpenClawFormatting: Story = {
 export const FollowLatestLongTail: Story = {
     render: (properties) => <FollowLogsStory {...properties} />,
     play: async ({ canvasElement }) => {
-        await settleFollowLayout();
         const canvas = within(canvasElement);
         const log = canvas.getByRole("log", {
             name: "Log lines with sensitive values removed",
         });
-        await expect(log.scrollHeight).toBeGreaterThan(log.clientHeight);
-        await expect(
-            log.scrollHeight - log.scrollTop - log.clientHeight
-        ).toBeLessThanOrEqual(32);
+        await waitFor(
+            async () => {
+                await expect(log.scrollHeight).toBeGreaterThan(log.clientHeight);
+                await expect(
+                    log.scrollHeight - log.scrollTop - log.clientHeight
+                ).toBeLessThanOrEqual(32);
+            },
+            { timeout: 5000 }
+        );
 
         await fireEvent.wheel(log, { deltaY: -500 });
         log.scrollTop = Math.max(0, log.scrollHeight - log.clientHeight - 500);
@@ -357,20 +378,23 @@ export const FollowLatestLongTail: Story = {
         if (readingAnchor === undefined)
             throw new TypeError("Expected a visible log row");
         const readingAnchorIndex = readingAnchor.dataset.index;
-        const readingAnchorTop = readingAnchor.getBoundingClientRect().top - logTop;
+        const readingAnchorTop = await stableRelativeTop(readingAnchor, log);
 
         await userEvent.click(canvas.getByRole("button", { name: "Append test line" }));
-        await settleFollowLayout();
-        const restoredAnchor = log.querySelector<HTMLElement>(
-            `li[data-index="${readingAnchorIndex}"]`
+        const restoredAnchor = await waitFor(
+            async () => {
+                const candidate = log.querySelector<HTMLElement>(
+                    `li[data-index="${readingAnchorIndex}"]`
+                );
+                await expect(candidate).not.toBeNull();
+                if (candidate === null)
+                    throw new TypeError("Expected the reading anchor");
+                return candidate;
+            },
+            { timeout: 5000 }
         );
-        await expect(restoredAnchor).not.toBeNull();
         await expect(
-            Math.abs(
-                (restoredAnchor?.getBoundingClientRect().top ?? logTop) -
-                    logTop -
-                    readingAnchorTop
-            )
+            Math.abs((await stableRelativeTop(restoredAnchor, log)) - readingAnchorTop)
         ).toBeLessThanOrEqual(1);
 
         await userEvent.click(jump);
@@ -384,10 +408,11 @@ export const FollowLatestLongTail: Story = {
         });
 
         await userEvent.click(canvas.getByRole("button", { name: "Append test line" }));
-        await settleFollowLayout();
-        await expect(
-            log.scrollHeight - log.scrollTop - log.clientHeight
-        ).toBeLessThanOrEqual(32);
+        await waitFor(async () => {
+            await expect(
+                log.scrollHeight - log.scrollTop - log.clientHeight
+            ).toBeLessThanOrEqual(32);
+        });
     },
 };
 

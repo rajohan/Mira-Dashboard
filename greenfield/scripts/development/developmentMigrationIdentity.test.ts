@@ -4,11 +4,35 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import {
+    type DevelopmentMigrationIdentityPollScheduler,
     observeDevelopmentMigrationIdentity,
     readDevelopmentMigrationIdentity,
 } from "./developmentMigrationIdentity.ts";
 
 const migrationId = "20260812000000_development-identity-test";
+
+class ManualPollScheduler implements DevelopmentMigrationIdentityPollScheduler {
+    callback: (() => Promise<void>) | undefined;
+    cancelled = false;
+    intervalMs: number | undefined;
+
+    schedule(callback: () => Promise<void>, intervalMs: number) {
+        this.callback = callback;
+        this.intervalMs = intervalMs;
+        return {
+            cancel: () => {
+                this.cancelled = true;
+            },
+        };
+    }
+
+    poll(): Promise<void> {
+        if (this.callback === undefined || this.cancelled) {
+            return Promise.reject(new Error("Migration poll is unavailable"));
+        }
+        return this.callback();
+    }
+}
 
 function sha256(contents: string): string {
     return new Bun.CryptoHasher("sha256").update(contents).digest("hex");
@@ -148,25 +172,33 @@ describe("development migration identity", () => {
     test("ignores ordinary source edits so normal HMR remains child-owned", async () => {
         await withMigrationFixture(async (repositoryRoot) => {
             const initial = await readDevelopmentMigrationIdentity(repositoryRoot);
+            const scheduler = new ManualPollScheduler();
             const observation = observeDevelopmentMigrationIdentity(
                 repositoryRoot,
-                initial
+                initial,
+                scheduler
             );
             try {
                 expect(await observation.ready).toBeUndefined();
+                expect(scheduler.intervalMs).toBe(250);
+                let changed = false;
+                void observation.changed.then(() => {
+                    changed = true;
+                    return changed;
+                });
                 await writeFile(
                     path.join(repositoryRoot, "src", "unrelated.ts"),
                     "export const unrelated = true;\n",
                     "utf8"
                 );
-                const changed = await Promise.race([
-                    observation.changed.then(() => true),
-                    Bun.sleep(500).then(() => false),
-                ]);
+                await scheduler.poll();
+                await scheduler.poll();
+                await Promise.resolve();
                 expect(changed).toBeFalse();
             } finally {
                 observation.close();
             }
+            expect(scheduler.cancelled).toBeTrue();
         });
     });
 

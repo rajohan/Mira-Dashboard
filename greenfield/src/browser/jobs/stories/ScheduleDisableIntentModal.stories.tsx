@@ -94,12 +94,12 @@ async function expectEqualDurationCardHeights(dialog: HTMLElement): Promise<void
 
     await expect(duration).toHaveAttribute("aria-orientation", "horizontal");
     await expect(radioCards).toHaveLength(2);
-    await waitFor(() => {
+    await waitFor(async () => {
         const expectedHeight = radioCards[0]?.getBoundingClientRect().height;
-        expect(expectedHeight).toBeGreaterThan(0);
+        await expect(expectedHeight).toBeGreaterThan(0);
 
         for (const radioCard of radioCards.slice(1)) {
-            expect(radioCard.getBoundingClientRect().height).toBeCloseTo(
+            await expect(radioCard.getBoundingClientRect().height).toBeCloseTo(
                 expectedHeight ?? 0,
                 2
             );

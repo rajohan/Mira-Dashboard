@@ -21,10 +21,10 @@
 | `@simplewebauthn/browser` | `13.3.0` | `13.3.0` | runtime |
 | `@simplewebauthn/server` | `13.3.2` | `13.3.2` | runtime |
 | `@tailwindcss/typography` | `^0.5.20` | `0.5.20` | runtime |
-| `@tanstack/db` | `0.6.17` | `0.6.17` | runtime |
+| `@tanstack/db` | `0.7.2` | `0.7.2` | runtime |
 | `@tanstack/query-core` | `5.101.4` | `5.101.4` | runtime |
-| `@tanstack/query-db-collection` | `1.2.1` | `1.2.1` | runtime |
-| `@tanstack/react-db` | `0.1.95` | `0.1.95` | runtime |
+| `@tanstack/query-db-collection` | `1.2.4` | `1.2.4` | runtime |
+| `@tanstack/react-db` | `0.2.1` | `0.2.1` | runtime |
 | `@tanstack/react-form` | `^1.33.5` | `1.33.5` | runtime |
 | `@tanstack/react-query` | `^5.101.4` | `5.101.4` | runtime |
 | `@tanstack/react-router` | `^1.170.27` | `1.170.27` | runtime |
@@ -84,7 +84,7 @@
 | `bun-plugin-tailwind` | `^0.1.2` | `0.1.2` | development |
 | `bun-types` | `1.4.0-canary.20260519T150915` | `1.4.0-canary.20260519T150915` | development |
 | `drizzle-kit` | `1.0.0-rc.4` | `1.0.0-rc.4` | development |
-| `eventsource` | `5.0.0` | `5.0.0` | development |
+| `eventsource` | `5.1.0` | `5.1.0` | development |
 | `happy-dom` | `^20.11.2` | `20.11.2` | development |
 | `jsdom-testing-mocks` | `^1.16.0` | `1.16.0` | development |
 | `jsonc-parser` | `3.3.1` | `3.3.1` | development |

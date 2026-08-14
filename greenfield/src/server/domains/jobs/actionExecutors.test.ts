@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 
 import { Effect } from "effect";
 
+import { backupStatusCacheGroupKey } from "../../../contracts/backups.ts";
+import type { BackupJobExecutionPort } from "../../../contracts/backupsWorker.ts";
 import { databaseObservabilityCacheSchemaId } from "../../../contracts/database.ts";
 import { DatabaseObservabilityCollectionLeaseError } from "../../../shared/databaseObservabilityReconciliation.ts";
 import { OpenClawServiceActionsExecutionError } from "../../../shared/openClawServiceActions.ts";
@@ -34,6 +36,7 @@ import {
     quotaCacheJobActionKey,
     weatherCacheJobActionKey,
 } from "./actionRegistry.ts";
+import { createBackupStatusJobExecutor } from "./backupActionExecutors.ts";
 
 function executionContext(attempts: JobCacheAttemptCommit[]): JobActionExecutionContext {
     return {
@@ -54,6 +57,39 @@ function executionContext(attempts: JobCacheAttemptCommit[]): JobActionExecution
 const successfulExecutor = () => Effect.succeed({});
 
 describe("worker-only job executor registry", () => {
+    test("does not commit backup status after provider refresh cancellation", async () => {
+        const cancellation = new DOMException("claim lost", "AbortError");
+        const attempts: JobCacheAttemptCommit[] = [];
+        let refreshSignal: AbortSignal | undefined;
+        const executionPort: BackupJobExecutionPort = {
+            clearAttention: () =>
+                Promise.resolve({
+                    outcome: "completed",
+                    sourceRevision: "a".repeat(64),
+                }),
+            refresh(signal) {
+                refreshSignal = signal;
+                return Promise.reject(cancellation);
+            },
+            run: () =>
+                Promise.resolve({
+                    outcome: "completed",
+                    sourceRevision: "a".repeat(64),
+                }),
+        };
+
+        const failure = await Effect.runPromise(
+            createBackupStatusJobExecutor(executionPort)(executionContext(attempts), {
+                key: backupStatusCacheGroupKey,
+            })
+        ).catch((error: unknown) => error);
+
+        expect(refreshSignal).toBeInstanceOf(AbortSignal);
+        expect(failure).toBeInstanceOf(JobActionRetryableError);
+        expect((failure as JobActionRetryableError).cause).toBe(cancellation);
+        expect(attempts).toEqual([]);
+    });
+
     test("persists only the validated path-free SQLite maintenance result", () => {
         const signalSeen: AbortSignal[] = [];
         const executor = createSqliteMaintenanceJobExecutor({

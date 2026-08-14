@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
 import { secondsToMilliseconds } from "date-fns";
-import { Effect, Layer, Stream } from "effect";
+import { Clock, Context, Effect, Layer, ManagedRuntime, Stream } from "effect";
+import { TestClock } from "effect/testing";
 import * as v from "valibot";
 
 import {
@@ -28,7 +29,11 @@ const unchangedRenewalObservationMs = leaseDurationMs + 250;
 
 type InvalidationMutation = "disable-principal" | "revoke-credential";
 
-function createQuietAutomationRuntime() {
+async function createQuietAutomationRuntime() {
+    const clockRuntime = ManagedRuntime.make(TestClock.layer());
+    await clockRuntime.runPromise(TestClock.setTime(Date.now()));
+    const clock = Context.get(await clockRuntime.context(), Clock.Clock);
+    let nextClockRead: ReturnType<typeof Promise.withResolvers<void>> | undefined;
     const quietStream = Stream.make(automationHttpReportDelivery).pipe(
         Stream.concat(Stream.fromEffect(Effect.never))
     );
@@ -39,19 +44,48 @@ function createQuietAutomationRuntime() {
         wake: Effect.void,
     });
     const realtimeEventPumpLayer = Layer.succeed(RealtimeEventPumpService, eventPump);
-    return createApplicationRuntime({
+    const applicationRuntime = createApplicationRuntime({
+        clock,
         logger: createTestStructuredLogger(),
         realtimeEventPumpLayer,
+    });
+    return Object.freeze({
+        advanceClock(milliseconds: number) {
+            return clockRuntime.runPromise(TestClock.adjust(milliseconds));
+        },
+        applicationRuntime,
+        disposeClock: () => clockRuntime.dispose(),
+        now() {
+            nextClockRead?.resolve();
+            nextClockRead = undefined;
+            return new Date(clock.currentTimeMillisUnsafe());
+        },
+        observeNextClockRead(): Promise<void> {
+            if (nextClockRead !== undefined) {
+                throw new Error("Authentication clock observation is already pending");
+            }
+            nextClockRead = Promise.withResolvers<void>();
+            return nextClockRead.promise;
+        },
     });
 }
 
 async function expectQuietLeaseInvalidation(
     mutation: InvalidationMutation
 ): Promise<void> {
+    const runtime = await createQuietAutomationRuntime();
     const system = await openAutomationHttpSystem({
-        applicationRuntime: createQuietAutomationRuntime(),
+        applicationRuntime: runtime.applicationRuntime,
         authenticationLeaseDurationMs: leaseDurationMs,
+        now: runtime.now,
         principalId: `quiet-${mutation}`,
+    }).catch(async (error: unknown) => {
+        try {
+            await runtime.applicationRuntime.dispose();
+        } finally {
+            await runtime.disposeClock();
+        }
+        throw error;
     });
     const streamFailure = Promise.withResolvers<Error>();
     const firstEvent = Promise.withResolvers<RealtimeStreamOutput>();
@@ -84,7 +118,13 @@ async function expectQuietLeaseInvalidation(
                 "Quiet automation stream did not emit its opening event"
             )
         ).toMatchObject({ data: { kind: "change" }, id: "1" });
-        await Bun.sleep(unchangedRenewalObservationMs);
+        const unchangedRenewal = runtime.observeNextClockRead();
+        await runtime.advanceClock(unchangedRenewalObservationMs);
+        await withTestTimeout(
+            unchangedRenewal,
+            automationHttpSubscriptionTimeoutMs,
+            "Quiet automation stream did not renew its unchanged lease"
+        );
         expect(String(streamState)).toBe("active");
         const invalidationStartedAtMs = Date.now();
         const mutationResponse = await postTrpcMutation(
@@ -123,6 +163,7 @@ async function expectQuietLeaseInvalidation(
             ).toMatchObject({ changed: true, revokedCredentials: 1 });
         }
 
+        await runtime.advanceClock(leaseDurationMs);
         const failure = await withTestTimeout(
             streamFailure.promise,
             invalidationTimeoutMs,
@@ -134,7 +175,11 @@ async function expectQuietLeaseInvalidation(
         );
     } finally {
         subscription.unsubscribe();
-        await system.close();
+        try {
+            await system.close();
+        } finally {
+            await runtime.disposeClock();
+        }
     }
 }
 

@@ -43,13 +43,28 @@ if (!isHappyDomTimerOwner(happyDomTimerOwner)) {
     throw new TypeError("HappyDOM did not expose its owning window timer");
 }
 const browserSetTimeout = globalThis.setTimeout;
+const maximumZeroDelayDrainPasses = 64;
+const maximumZeroDelaySchedulesDuringDrain = 256;
 let zeroDelayGeneration = 0;
+let drainedZeroDelayGeneration = 0;
+let drainingZeroDelayQueue = false;
+let zeroDelaySchedulesDuringDrain = 0;
 const trackedBrowserSetTimeout = (
     callback: Parameters<typeof globalThis.setTimeout>[0],
     delay?: number,
     ...arguments_: unknown[]
 ): ReturnType<typeof globalThis.setTimeout> => {
-    if (!delay) zeroDelayGeneration += 1;
+    if (!delay) {
+        zeroDelayGeneration += 1;
+        if (drainingZeroDelayQueue) {
+            zeroDelaySchedulesDuringDrain += 1;
+            if (zeroDelaySchedulesDuringDrain > maximumZeroDelaySchedulesDuringDrain) {
+                throw new Error(
+                    `HappyDOM scheduled more than ${maximumZeroDelaySchedulesDuringDrain} zero-delay callbacks during teardown`
+                );
+            }
+        }
+    }
     return Reflect.apply(browserSetTimeout, happyDomTimerOwner, [
         callback,
         delay,
@@ -97,11 +112,27 @@ function isHappyDomAsyncTaskOwner(value: unknown): value is HappyDomAsyncTaskOwn
 }
 
 async function drainHappyDomZeroDelayQueue(): Promise<void> {
+    if (zeroDelayGeneration === drainedZeroDelayGeneration) return;
+
+    drainingZeroDelayQueue = true;
+    zeroDelaySchedulesDuringDrain = 0;
+    let passCount = 0;
     let expectedGeneration: number;
-    do {
-        expectedGeneration = zeroDelayGeneration + 1;
-        await new Promise<void>((resolve) => trackedBrowserSetTimeout(resolve, 0));
-    } while (zeroDelayGeneration !== expectedGeneration);
+    try {
+        do {
+            passCount += 1;
+            if (passCount > maximumZeroDelayDrainPasses) {
+                throw new Error(
+                    `HappyDOM zero-delay work did not settle after ${maximumZeroDelayDrainPasses} drain passes`
+                );
+            }
+            expectedGeneration = zeroDelayGeneration + 1;
+            await new Promise<void>((resolve) => trackedBrowserSetTimeout(resolve, 0));
+        } while (zeroDelayGeneration !== expectedGeneration);
+        drainedZeroDelayGeneration = zeroDelayGeneration;
+    } finally {
+        drainingZeroDelayQueue = false;
+    }
 }
 
 afterEach(async () => {
@@ -109,7 +140,10 @@ afterEach(async () => {
     document.body.replaceChildren();
     // HappyDOM groups zero-delay callbacks. Drain every finite nested batch before
     // aborting longer-lived tasks, or abort can strand its private callback queue.
-    await drainHappyDomZeroDelayQueue();
     const happyDom: unknown = Reflect.get(globalThis, "happyDOM");
-    if (isHappyDomAsyncTaskOwner(happyDom)) await happyDom.abort();
+    try {
+        await drainHappyDomZeroDelayQueue();
+    } finally {
+        if (isHappyDomAsyncTaskOwner(happyDom)) await happyDom.abort();
+    }
 });

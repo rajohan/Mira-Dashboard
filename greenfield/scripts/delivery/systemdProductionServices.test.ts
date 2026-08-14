@@ -106,7 +106,7 @@ describe("production root-systemd service control", () => {
                     requests.push(request);
                     return Promise.resolve(new Response(null, { status: 200 }));
                 },
-                installUnits: (observedLease, observedPaths, observedRelease) => {
+                verifyUnits: (observedLease, observedPaths, observedRelease) => {
                     expect(observedLease).toBe(lease);
                     expect(observedPaths).toBe(paths);
                     expect(observedRelease).toBe(fixtures.first);

@@ -949,8 +949,8 @@ It is not used merely because data came from the server:
 
 Collections are created once per `QueryClient` and cache key and hidden behind a small Dashboard
 adapter because TanStack DB is still pre-1.0. The exact-qualified package set is
-`@tanstack/db@0.6.17`, `@tanstack/query-db-collection@1.2.1`,
-`@tanstack/react-db@0.1.95`, and `@tanstack/query-core@5.101.4`. Route teardown disposes only the
+`@tanstack/db@0.7.2`, `@tanstack/query-db-collection@1.2.4`,
+`@tanstack/react-db@0.2.1`, and `@tanstack/query-core@5.101.4`. Route teardown disposes only the
 route subscription; it does not destroy and recreate an asynchronous collection under the same
 cache key. A server snapshot always wins over conflicting speculative collection state.
 

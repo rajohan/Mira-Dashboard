@@ -501,7 +501,7 @@ describe("Dashboard Settings route", () => {
                 restartScheduled: false,
             });
         };
-        renderSettings(transport);
+        const { queryClient } = renderSettings(transport);
         const user = userEvent.setup();
         const primaryModel = await screen.findByRole("textbox", {
             name: "Primary model",
@@ -535,40 +535,56 @@ describe("Dashboard Settings route", () => {
         expect(lastTouchedAt.tagName).toBe("TIME");
         expect(lastTouchedAt).toHaveAttribute("dateTime", configuration.lastTouchedAt);
 
-        await user.clear(primaryModel);
-        await user.type(primaryModel, "openai/gpt-5.6-terra");
-        await user.click(screen.getByRole("button", { name: "Save model settings" }));
-
-        expect(await screen.findByText("OpenClaw settings saved.")).toBeTruthy();
-        const mutations = transport.calls.filter(({ kind }) => kind === "mutation");
-        expect(mutations).toHaveLength(1);
-        expect(mutations[0]).toMatchObject({
-            input: {
-                baseHash: configurationHash,
-                baseRevisionHash: configurationRevisionHash,
-                confirmation: "apply-reviewed-settings",
-                update: {
-                    fallbacks: ["openai/gpt-5.6-terra"],
-                    primary: "openai/gpt-5.6-terra",
-                    section: "models",
-                },
-            },
-            path: "openClawSettings.updateConfiguration",
+        const skillsRefreshSettled = Promise.withResolvers<void>();
+        const unsubscribeSkillsRefresh = queryClient.getQueryCache().subscribe(() => {
+            const skillsQueryCount = transport.calls.filter(
+                ({ kind, path }) =>
+                    kind === "query" && path === "openClawSettings.listSkills"
+            ).length;
+            if (
+                skillsQueryCount === 2 &&
+                queryClient.getQueryState(openClawSkillsQueryKey)?.fetchStatus === "idle"
+            ) {
+                skillsRefreshSettled.resolve();
+            }
         });
-        expect(mutations[0]?.signal).toBeInstanceOf(AbortSignal);
-        await waitFor(() =>
+        try {
+            await user.clear(primaryModel);
+            await user.type(primaryModel, "openai/gpt-5.6-terra");
+            await user.click(screen.getByRole("button", { name: "Save model settings" }));
+
+            expect(await screen.findByText("OpenClaw settings saved.")).toBeTruthy();
+            const mutations = transport.calls.filter(({ kind }) => kind === "mutation");
+            expect(mutations).toHaveLength(1);
+            expect(mutations[0]).toMatchObject({
+                input: {
+                    baseHash: configurationHash,
+                    baseRevisionHash: configurationRevisionHash,
+                    confirmation: "apply-reviewed-settings",
+                    update: {
+                        fallbacks: ["openai/gpt-5.6-terra"],
+                        primary: "openai/gpt-5.6-terra",
+                        section: "models",
+                    },
+                },
+                path: "openClawSettings.updateConfiguration",
+            });
+            expect(mutations[0]?.signal).toBeInstanceOf(AbortSignal);
+            await act(() => skillsRefreshSettled.promise);
             expect(
                 transport.calls.filter(
                     ({ kind, path }) =>
                         kind === "query" && path === "openClawSettings.listSkills"
                 )
-            ).toHaveLength(2)
-        );
-        expect(
-            screen.getByRole<HTMLInputElement>("textbox", {
-                name: "Primary model",
-            }).value
-        ).toBe("openai/gpt-5.6-terra");
+            ).toHaveLength(2);
+            expect(
+                screen.getByRole<HTMLInputElement>("textbox", {
+                    name: "Primary model",
+                }).value
+            ).toBe("openai/gpt-5.6-terra");
+        } finally {
+            unsubscribeSkillsRefresh();
+        }
     });
 
     test("keeps normalized heartbeat text changes as a semantic no-op", async () => {
@@ -1540,21 +1556,16 @@ describe("Dashboard Settings route", () => {
     test("renders a fresh independent skill result but locks it without configuration", async () => {
         const transport = new SettingsTransport();
         transport.configurationError = privateForbiddenError();
-        const consoleError = spyOn(console, "error").mockImplementation(() => {});
-        try {
-            renderSettings(transport);
+        renderSettings(transport);
 
-            expect(
-                await screen.findByText(/OpenClaw configuration is unavailable/iu)
-            ).toBeTruthy();
-            expect(screen.getByRole("heading", { name: "Skills" })).toBeTruthy();
-            expect(
-                screen.getByRole("switch", { name: "Enable Search first" })
-            ).toBeDisabled();
-            expect(screen.queryByText(/private upstream query detail/iu)).toBeNull();
-        } finally {
-            consoleError.mockRestore();
-        }
+        expect(
+            await screen.findByText(/OpenClaw configuration is unavailable/iu)
+        ).toBeTruthy();
+        expect(screen.getByRole("heading", { name: "Skills" })).toBeTruthy();
+        expect(
+            screen.getByRole("switch", { name: "Enable Search first" })
+        ).toBeDisabled();
+        expect(screen.queryByText(/private upstream query detail/iu)).toBeNull();
     });
 
     test("locks stale controls after a partial refresh failure", async () => {
@@ -1567,32 +1578,27 @@ describe("Dashboard Settings route", () => {
             screen.getByRole("button", { name: "Exec override for Main (main)" })
         ).toBeEnabled();
         transport.configurationError = privateForbiddenError();
-        const consoleError = spyOn(console, "error").mockImplementation(() => {});
-        try {
-            await act(async () => {
-                await queryClient.refetchQueries({
-                    exact: true,
-                    queryKey: openClawConfigurationQueryKey,
-                });
+        await act(async () => {
+            await queryClient.refetchQueries({
+                exact: true,
+                queryKey: openClawConfigurationQueryKey,
             });
+        });
 
-            expect(
-                await screen.findByText(
-                    /Current OpenClaw configuration could not be refreshed/iu
-                )
-            ).toBeTruthy();
-            expect(screen.getByRole("textbox", { name: "Primary model" })).toBeDisabled();
-            expect(
-                screen.getByRole("switch", { name: "Enable Search first" })
-            ).toBeDisabled();
-            expect(
-                screen.getByRole("button", {
-                    name: "Exec override for Main (main)",
-                })
-            ).toBeDisabled();
-        } finally {
-            consoleError.mockRestore();
-        }
+        expect(
+            await screen.findByText(
+                /Current OpenClaw configuration could not be refreshed/iu
+            )
+        ).toBeTruthy();
+        expect(screen.getByRole("textbox", { name: "Primary model" })).toBeDisabled();
+        expect(
+            screen.getByRole("switch", { name: "Enable Search first" })
+        ).toBeDisabled();
+        expect(
+            screen.getByRole("button", {
+                name: "Exec override for Main (main)",
+            })
+        ).toBeDisabled();
     });
 
     test("locks only stale skill controls after an independent refresh failure", async () => {
@@ -1602,32 +1608,25 @@ describe("Dashboard Settings route", () => {
             await screen.findByRole("switch", { name: "Enable Disabled skill" })
         ).toBeEnabled();
         transport.skillsError = privateForbiddenError();
-        const consoleError = spyOn(console, "error").mockImplementation(() => {});
-        try {
-            await act(async () => {
-                await queryClient.refetchQueries({
-                    exact: true,
-                    queryKey: openClawSkillsQueryKey,
-                });
+        await act(async () => {
+            await queryClient.refetchQueries({
+                exact: true,
+                queryKey: openClawSkillsQueryKey,
             });
+        });
 
-            expect(
-                await screen.findByText(
-                    /Current OpenClaw skills could not be refreshed/iu
-                )
-            ).toBeTruthy();
-            expect(
-                screen.getByRole("switch", { name: "Enable Disabled skill" })
-            ).toBeDisabled();
-            expect(screen.getByRole("textbox", { name: "Primary model" })).toBeEnabled();
-            expect(
-                screen.getByRole("button", {
-                    name: "Exec override for Main (main)",
-                })
-            ).toBeEnabled();
-        } finally {
-            consoleError.mockRestore();
-        }
+        expect(
+            await screen.findByText(/Current OpenClaw skills could not be refreshed/iu)
+        ).toBeTruthy();
+        expect(
+            screen.getByRole("switch", { name: "Enable Disabled skill" })
+        ).toBeDisabled();
+        expect(screen.getByRole("textbox", { name: "Primary model" })).toBeEnabled();
+        expect(
+            screen.getByRole("button", {
+                name: "Exec override for Main (main)",
+            })
+        ).toBeEnabled();
     });
 
     test("never retries an unknown mutation outcome and unlocks only after reconciliation", async () => {

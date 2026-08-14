@@ -18,6 +18,15 @@ function inputUrl(input: Parameters<typeof fetch>[0]): string {
     return input instanceof Request ? input.url : input.toString();
 }
 
+async function rejectionOf(promise: Promise<unknown>): Promise<unknown> {
+    try {
+        await promise;
+    } catch (error) {
+        return error;
+    }
+    throw new Error("Expected the promise to reject");
+}
+
 function quotaProviderResponse(
     url: string,
     invalidProvider?: "elevenlabs" | "openai" | "openrouter" | "synthetic"
@@ -91,6 +100,209 @@ function validCodexLaunch(invalidProjection = false) {
 }
 
 describe("overview collectors", () => {
+    test("does no quota provider work when collection is already aborted", async () => {
+        const controller = new AbortController();
+        const failure = new DOMException("quota collection cancelled", "AbortError");
+        let clockReads = 0;
+        let fetches = 0;
+        let launches = 0;
+        controller.abort(failure);
+
+        expect(
+            await rejectionOf(
+                collectQuotaPayload(
+                    {
+                        elevenLabs: Redacted.make("eleven-secret"),
+                        openRouter: Redacted.make("router-secret"),
+                        synthetic: Redacted.make("synthetic-secret"),
+                    },
+                    controller.signal,
+                    {
+                        codex: {
+                            codexHome: "/operator/.codex",
+                            executable: "/operator/bin/codex",
+                            home: "/operator",
+                            launch: () => {
+                                launches += 1;
+                                return validCodexLaunch();
+                            },
+                        },
+                        fetch: ((_input) => {
+                            fetches += 1;
+                            return Promise.reject(new Error("must not fetch"));
+                        }) as typeof fetch,
+                        nowMs: () => {
+                            clockReads += 1;
+                            return 5000;
+                        },
+                    }
+                )
+            )
+        ).toBe(failure);
+
+        expect({ clockReads, fetches, launches }).toEqual({
+            clockReads: 0,
+            fetches: 0,
+            launches: 0,
+        });
+    });
+
+    test("does not launch Codex quota collection when already aborted", async () => {
+        const controller = new AbortController();
+        const failure = new DOMException("Codex quota cancelled", "AbortError");
+        let launches = 0;
+        controller.abort(failure);
+
+        expect(
+            await rejectionOf(
+                collectCodexQuota(
+                    {
+                        codexHome: "/operator/.codex",
+                        executable: "/operator/bin/codex",
+                        home: "/operator",
+                        launch: () => {
+                            launches += 1;
+                            return validCodexLaunch();
+                        },
+                    },
+                    controller.signal
+                )
+            )
+        ).toBe(failure);
+
+        expect(launches).toBe(0);
+    });
+
+    test("propagates parent cancellation from in-flight Codex quota collection", async () => {
+        const controller = new AbortController();
+        const failure = new DOMException("Codex quota cancelled", "AbortError");
+        const exited = Promise.withResolvers<number>();
+        const launched = Promise.withResolvers<void>();
+        const kills: Array<number | NodeJS.Signals | undefined> = [];
+        let stdoutController: ReadableStreamDefaultController<Uint8Array> | undefined;
+        let settled = false;
+        const collecting = collectCodexQuota(
+            {
+                codexHome: "/operator/.codex",
+                executable: "/operator/bin/codex",
+                home: "/operator",
+                launch: () => {
+                    launched.resolve();
+                    return {
+                        exited: exited.promise,
+                        kill(signal) {
+                            kills.push(signal);
+                            if (settled) return;
+                            settled = true;
+                            stdoutController?.close();
+                            exited.resolve(signal === "SIGKILL" ? 137 : 0);
+                        },
+                        stdin: {
+                            end() {},
+                            write(value) {
+                                return value.byteLength;
+                            },
+                        },
+                        stdout: new ReadableStream<Uint8Array>({
+                            start(streamController) {
+                                stdoutController = streamController;
+                            },
+                        }),
+                    };
+                },
+            },
+            controller.signal
+        );
+        await launched.promise;
+
+        controller.abort(failure);
+
+        expect(await rejectionOf(collecting)).toBe(failure);
+        expect(kills[0]).toBe("SIGKILL");
+        expect(kills).toContain("SIGTERM");
+    });
+
+    test("propagates parent cancellation from an in-flight HTTP quota request", async () => {
+        const controller = new AbortController();
+        const failure = new DOMException("HTTP quota cancelled", "AbortError");
+        const requestStarted = Promise.withResolvers<AbortSignal>();
+        let clockReads = 0;
+        const collecting = collectQuotaPayload(
+            { elevenLabs: Redacted.make("eleven-secret") },
+            controller.signal,
+            {
+                fetch: ((_input, init) =>
+                    new Promise<Response>((_resolve, reject) => {
+                        const requestSignal = init?.signal;
+                        if (!(requestSignal instanceof AbortSignal)) {
+                            reject(new Error("quota request must be abortable"));
+                            return;
+                        }
+                        requestSignal.addEventListener(
+                            "abort",
+                            () =>
+                                reject(
+                                    new DOMException(
+                                        "bounded quota request aborted",
+                                        "AbortError"
+                                    )
+                                ),
+                            { once: true }
+                        );
+                        requestStarted.resolve(requestSignal);
+                    })) as typeof fetch,
+                nowMs: () => {
+                    clockReads += 1;
+                    return 5000;
+                },
+            }
+        );
+
+        const requestSignal = await requestStarted.promise;
+        controller.abort(failure);
+
+        expect(await rejectionOf(collecting)).toBe(failure);
+        expect(requestSignal.aborted).toBeTrue();
+        expect(clockReads).toBe(0);
+    });
+
+    test("keeps provider-local HTTP aborts isolated as unavailable", async () => {
+        const payload = await collectQuotaPayload(
+            { elevenLabs: Redacted.make("eleven-secret") },
+            undefined,
+            {
+                fetch: ((_input) =>
+                    Promise.reject(
+                        new DOMException("provider deadline elapsed", "TimeoutError")
+                    )) as typeof fetch,
+                nowMs: () => 5000,
+            }
+        );
+
+        expect(payload.providers).toEqual([
+            { id: "elevenlabs", label: "ElevenLabs", status: "unavailable" },
+            { id: "openai", label: "OpenAI", status: "unavailable" },
+            { id: "openrouter", label: "OpenRouter", status: "not-configured" },
+            { id: "synthetic", label: "Synthetic", status: "not-configured" },
+        ]);
+    });
+
+    test("does not publish a quota payload cancelled after provider settlement", async () => {
+        const controller = new AbortController();
+        const failure = new DOMException("quota snapshot cancelled", "AbortError");
+
+        expect(
+            await rejectionOf(
+                collectQuotaPayload({}, controller.signal, {
+                    nowMs: () => {
+                        controller.abort(failure);
+                        return 5000;
+                    },
+                })
+            )
+        ).toBe(failure);
+    });
+
     test("bounds Codex app-server teardown after a successful quota response", async () => {
         const exit = Promise.withResolvers<number>();
         const signals: Array<number | NodeJS.Signals | undefined> = [];

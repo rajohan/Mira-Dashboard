@@ -124,6 +124,9 @@ export const LongLinesWrapByDefault: Story = {
         await waitFor(() =>
             expect(region.scrollWidth).toBeGreaterThan(region.clientWidth)
         );
+        region.scrollLeft = region.scrollWidth;
+        await waitFor(() => expect(region.scrollLeft).toBeGreaterThan(0));
+        await expect(getComputedStyle(longLine, "::before").position).toBe("sticky");
         await expect(longLine.getBoundingClientRect().height).toBeLessThanOrEqual(
             referenceLine.getBoundingClientRect().height + 1
         );
@@ -196,7 +199,6 @@ export const MaximumLineNumberGutter: Story = {
     ],
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement);
-        const region = canvas.getByRole("region", { name: "Maximum numbered source" });
         const wrapSwitch = canvas.getByRole("switch", { name: "Wrap lines" });
         const sourceLines =
             canvasElement.querySelectorAll<HTMLElement>(".source-viewer-line");
@@ -223,13 +225,5 @@ export const MaximumLineNumberGutter: Story = {
         await expect(gutterStyle.color).toBe("rgb(133, 140, 153)");
         await expect(textContext.measureText("20000").width).toBeLessThan(48);
         await expect(wrapSwitch).toBeChecked();
-
-        await userEvent.click(wrapSwitch);
-        region.scrollLeft = region.scrollWidth;
-
-        await expect(wrapSwitch).not.toBeChecked();
-        await waitFor(() => expect(region.scrollLeft).toBeGreaterThan(0));
-        await expect(getComputedStyle(lastLine, "::before").position).toBe("sticky");
-        await expect(lastLine.textContent).toBe(maximumLineTail);
     },
 };

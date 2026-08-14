@@ -21,6 +21,12 @@ const options = Object.freeze([
     },
     { disabled: true, label: "America/New_York", value: "America/New_York" },
 ] satisfies readonly ComboboxOption<TimeZone>[]);
+const manyDescribedOptions = Object.freeze(
+    Array.from({ length: 60 }, (_value, index) => {
+        const value = `Option ${index}`;
+        return { description: `Description ${index}`, label: value, value };
+    })
+) satisfies readonly ComboboxOption<string>[];
 
 function ControlledTimeZoneCombobox({
     disabled = false,
@@ -98,5 +104,24 @@ describe("Combobox", () => {
 
         expect(screen.getByRole("combobox", { name: "Time zone" })).toBeDisabled();
         expect(screen.getByRole("button", { name: "Open Time zone" })).toBeDisabled();
+    });
+
+    test("keeps variable-height described option sets out of fixed-row virtualization", async () => {
+        render(
+            <Combobox
+                ariaLabel="Described options"
+                onChange={() => {}}
+                options={manyDescribedOptions}
+                value="Option 0"
+            />
+        );
+        const user = userEvent.setup();
+
+        await user.click(screen.getByRole("button", { name: "Open Described options" }));
+
+        const renderedOptions = await screen.findAllByRole("option");
+        expect(renderedOptions).toHaveLength(manyDescribedOptions.length);
+        for (const option of renderedOptions) expect(option).not.toHaveClass("h-10");
+        expect(document.querySelector("[data-index]")).toBeNull();
     });
 });

@@ -17,12 +17,6 @@ async function settleLayout(): Promise<void> {
     });
 }
 
-async function settleFollowLayout(): Promise<void> {
-    for (let index = 0; index < 6; index += 1) {
-        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    }
-}
-
 async function expectStoryViewport(
     canvasElement: HTMLElement,
     { height, width }: Readonly<{ height: number; width: number }>
@@ -1134,15 +1128,21 @@ export const LongHistory: Story = {
         }),
     },
     play: async ({ canvasElement }) => {
-        await settleFollowLayout();
         const canvas = within(canvasElement);
         const transcript = canvas.getByRole("log", { name: "Messages" });
-        await expect(
-            transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight
-        ).toBeLessThanOrEqual(32);
-        await expect(
-            canvas.queryByRole("button", { name: "Back to latest" })
-        ).not.toBeInTheDocument();
+        await waitFor(
+            async () => {
+                await expect(
+                    transcript.scrollHeight -
+                        transcript.scrollTop -
+                        transcript.clientHeight
+                ).toBeLessThanOrEqual(32);
+                await expect(
+                    canvas.queryByRole("button", { name: "Back to latest" })
+                ).not.toBeInTheDocument();
+            },
+            { timeout: 5000 }
+        );
     },
 };
 
@@ -1151,11 +1151,25 @@ export const FollowMessagesMobile: Story = {
     globals: { viewport: { isRotated: false, value: "mobile1" } },
     play: async ({ canvasElement }) => {
         await expectStoryViewport(canvasElement, mobileViewport);
-        await settleFollowLayout();
         const canvas = within(canvasElement);
         const transcript = canvas.getByRole("log", { name: "Messages" });
         const composer = canvas.getByRole("region", { name: "Message composer" });
-        await expect(transcript.scrollHeight).toBeGreaterThan(transcript.clientHeight);
+        await waitFor(
+            async () => {
+                await expect(transcript.scrollHeight).toBeGreaterThan(
+                    transcript.clientHeight
+                );
+                await expect(
+                    transcript.scrollHeight -
+                        transcript.scrollTop -
+                        transcript.clientHeight
+                ).toBeLessThanOrEqual(32);
+                await expect(
+                    canvas.queryByRole("button", { name: "Back to latest" })
+                ).not.toBeInTheDocument();
+            },
+            { timeout: 5000 }
+        );
 
         await fireEvent.wheel(transcript, { deltaY: -500 });
         transcript.scrollTop = Math.max(

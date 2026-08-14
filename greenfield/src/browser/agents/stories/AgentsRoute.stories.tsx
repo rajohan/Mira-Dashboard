@@ -131,7 +131,7 @@ export const InitialError: Story = {
     args: {
         fixtures: agentsFixtures({
             queries: {
-                "agents.getConfiguration": dashboardStoryFailure(
+                "agents.listTaskHistory": dashboardStoryFailure(
                     new TypeError("Safe agent story failure")
                 ),
             },

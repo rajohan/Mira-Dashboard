@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, jest, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, jest, test } from "bun:test";
 
 import { QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -32,6 +32,7 @@ import {
     type DashboardBrowserCollections,
 } from "../data/dashboardCollections.ts";
 import { DashboardCollectionsProvider } from "../data/dashboardCollectionsContext.tsx";
+import { captureExpectedConsoleErrors } from "../test/expectedConsoleError.ts";
 import { ControlledDashboardRealtimeClient } from "../test/realtime.ts";
 import { OverviewAgentsSection } from "./OverviewAgentsSection.tsx";
 
@@ -354,7 +355,7 @@ describe("OverviewAgentsSection", () => {
 
     test("retains complete agent data when a background refresh fails", async () => {
         const rawFailure = new TypeError("private agent status detail");
-        const consoleError = spyOn(console, "error").mockImplementation(() => {});
+        const consoleErrors = captureExpectedConsoleErrors([rawFailure]);
         try {
             const harness = renderSection(
                 [configuration, configuration],
@@ -368,14 +369,15 @@ describe("OverviewAgentsSection", () => {
             ).toBeTruthy();
             expect(screen.getByText("Initial Dashboard task")).toBeTruthy();
             expect(screen.queryByText(rawFailure.message)).toBeNull();
+            consoleErrors.expectObserved();
         } finally {
-            consoleError.mockRestore();
+            consoleErrors.restore();
         }
     });
 
     test("recovers an initial safe configuration error through retry", async () => {
         const rawFailure = new TypeError("private agent configuration detail");
-        const consoleError = spyOn(console, "error").mockImplementation(() => {});
+        const consoleErrors = captureExpectedConsoleErrors([rawFailure]);
         try {
             renderSection(
                 [rawFailure, configuration],
@@ -396,8 +398,9 @@ describe("OverviewAgentsSection", () => {
             await waitFor(() =>
                 expect(screen.getByText("Initial Dashboard task")).toBeTruthy()
             );
+            consoleErrors.expectObserved();
         } finally {
-            consoleError.mockRestore();
+            consoleErrors.restore();
         }
     });
 });

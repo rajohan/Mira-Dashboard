@@ -83,6 +83,14 @@ export type DockerBackupProviderLaunch = (
     request: DockerBackupProviderProcessRequest
 ) => DockerBackupProviderChild;
 
+export interface DockerBackupProviderTerminationTimer {
+    cancel(): void;
+}
+
+export interface DockerBackupProviderTerminationScheduler {
+    schedule(callback: () => void, delayMs: number): DockerBackupProviderTerminationTimer;
+}
+
 export interface DockerBackupProvider {
     readonly containerId: string;
     readonly kopiaSourceIds: readonly string[];
@@ -381,14 +389,23 @@ const defaultLaunch: DockerBackupProviderLaunch = (request) =>
         stdout: "pipe",
     });
 
+const defaultTerminationScheduler: DockerBackupProviderTerminationScheduler =
+    Object.freeze({
+        schedule(callback: () => void, delayMs: number) {
+            const timer = setTimeout(callback, delayMs);
+            timer.unref?.();
+            return Object.freeze({ cancel: () => clearTimeout(timer) });
+        },
+    });
+
 async function waitForExit(
     child: DockerBackupProviderChild,
-    maximumWaitMs: number
+    maximumWaitMs: number,
+    scheduler: DockerBackupProviderTerminationScheduler
 ): Promise<boolean> {
-    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let timeout: DockerBackupProviderTerminationTimer | undefined;
     const deadline = new Promise<false>((resolve) => {
-        timeout = setTimeout(() => resolve(false), maximumWaitMs);
-        timeout.unref?.();
+        timeout = scheduler.schedule(() => resolve(false), maximumWaitMs);
     });
     try {
         return await Promise.race([
@@ -399,32 +416,37 @@ async function waitForExit(
             deadline,
         ]);
     } finally {
-        if (timeout !== undefined) clearTimeout(timeout);
+        timeout?.cancel();
     }
 }
 
-async function terminate(child: DockerBackupProviderChild): Promise<void> {
+async function terminate(
+    child: DockerBackupProviderChild,
+    scheduler: DockerBackupProviderTerminationScheduler
+): Promise<void> {
     try {
         child.kill("SIGTERM");
     } catch {
         // The child may already have exited while the failure was observed.
     }
-    if (await waitForExit(child, backupProviderTerminationGraceMs)) return;
+    if (await waitForExit(child, backupProviderTerminationGraceMs, scheduler)) return;
     try {
         child.kill("SIGKILL");
     } catch {
         // A concurrent exit still leaves the final wait bounded.
     }
-    await waitForExit(child, backupProviderTerminationGraceMs);
+    await waitForExit(child, backupProviderTerminationGraceMs, scheduler);
 }
 
 /**
  * Creates the fixed Docker backup process boundary with bounded child teardown.
  * @param launch Fixed process launcher, replaceable only at the worker/test boundary.
+ * @param terminationScheduler Cancellable termination deadline scheduler.
  * @returns A fixed process executor that cannot wait forever during teardown.
  */
 export function createDockerBackupProviderProcess(
-    launch: DockerBackupProviderLaunch = defaultLaunch
+    launch: DockerBackupProviderLaunch = defaultLaunch,
+    terminationScheduler: DockerBackupProviderTerminationScheduler = defaultTerminationScheduler
 ): DockerBackupProviderProcess {
     return async (request) => {
         let child: DockerBackupProviderChild;
@@ -464,7 +486,7 @@ export function createDockerBackupProviderProcess(
             return { exitCode, stderr, stdout };
         } catch (error) {
             streamAbortController.abort();
-            await terminate(child);
+            await terminate(child, terminationScheduler);
             throw new DockerBackupProviderProcessError(true, error);
         } finally {
             request.signal.removeEventListener("abort", abort);
@@ -613,6 +635,7 @@ export function createDockerBackupJobExecutionPort(
             });
         },
         async refresh(signal): Promise<BackupRefreshResult> {
+            signal?.throwIfAborted();
             const observedAtMs = checkedNow(nowMs);
             const results = await Promise.allSettled(
                 backupTypes.map(async (type): Promise<BackupCachePayload> => {
@@ -658,6 +681,7 @@ export function createDockerBackupJobExecutionPort(
                     });
                 })
             );
+            signal?.throwIfAborted();
             return Object.freeze({
                 kopia:
                     results[0]?.status === "fulfilled"

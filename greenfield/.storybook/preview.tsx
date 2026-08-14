@@ -1,16 +1,11 @@
 import type { Preview } from "@storybook/tanstack-react";
 import { themes } from "storybook/theming";
 
-import { installPinnedStorybookDiagnosticWorkarounds } from "../src/browser/storySupport/storybookDiagnostics.ts";
-
 import "../src/browser/storySupport/storybook.css";
 
 const dashboardBackground = "#0b0b0c";
 
 const preview: Preview = {
-    beforeEach(context) {
-        return installPinnedStorybookDiagnosticWorkarounds(context.id);
-    },
     initialGlobals: {
         backgrounds: {
             value: "dashboard",

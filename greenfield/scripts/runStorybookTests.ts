@@ -13,13 +13,12 @@ export function createStorybookTestCommand(projectRoot: string): readonly string
         "--config",
         ".storybook/vitest.config.ts",
         "--project=storybook",
-        "--maxWorkers=1",
-        "--no-file-parallelism",
+        "--maxWorkers=3",
     ];
 }
 
 /**
- * Runs Storybook in one Chromium worker behind the repository output policy.
+ * Runs Storybook in three isolated Chromium workers behind the repository output policy.
  * @param projectRoot Repository root containing the pinned Vitest executable.
  * @param command Optional exact command used by focused runner tests.
  * @returns The child failure code, or one for forbidden otherwise-green output.

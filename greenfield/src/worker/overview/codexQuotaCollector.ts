@@ -223,6 +223,7 @@ export async function collectCodexQuota(
     options: CodexQuotaCollectorOptions,
     parentSignal?: AbortSignal
 ): Promise<QuotaProviderProjection> {
+    parentSignal?.throwIfAborted();
     if (
         !validAbsolutePath(options.executable) ||
         !validAbsolutePath(options.codexHome) ||
@@ -236,8 +237,9 @@ export async function collectCodexQuota(
     const timeout = setTimeout(abort, requestTimeoutMs);
     let child: CodexAppServerChild | undefined;
     let kill: (() => void) | undefined;
+    let projection: QuotaProviderProjection;
     try {
-        if (controller.signal.aborted) unavailable();
+        parentSignal?.throwIfAborted();
         child = (options.launch ?? defaultLaunch)(options.executable, {
             CODEX_DISABLE_UPDATE_CHECK: "1",
             CODEX_HOME: options.codexHome,
@@ -281,7 +283,7 @@ export async function collectCodexQuota(
             }));
         if (windows.length === 0) unavailable();
         const usedPercent = Math.max(...windows.map((window) => window.usedPercent));
-        return v.parse(quotaProviderProjectionSchema, {
+        projection = v.parse(quotaProviderProjectionSchema, {
             id: "openai",
             label: "OpenAI",
             remainingPercent: 100 - usedPercent,
@@ -290,7 +292,8 @@ export async function collectCodexQuota(
             windows,
         });
     } catch {
-        return v.parse(quotaProviderProjectionSchema, {
+        parentSignal?.throwIfAborted();
+        projection = v.parse(quotaProviderProjectionSchema, {
             id: "openai",
             label: "OpenAI",
             status: "unavailable",
@@ -301,4 +304,6 @@ export async function collectCodexQuota(
         if (kill !== undefined) controller.signal.removeEventListener("abort", kill);
         if (child !== undefined) await terminate(child);
     }
+    parentSignal?.throwIfAborted();
+    return projection;
 }

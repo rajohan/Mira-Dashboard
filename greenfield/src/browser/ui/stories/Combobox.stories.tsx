@@ -139,9 +139,28 @@ export const LargeVirtualized: Story = {
 
         await userEvent.click(canvas.getByRole("button", { name: "Open Time zone" }));
         await waitFor(async () => {
+            await expect(page.getByRole("listbox").getBoundingClientRect().height).toBe(
+                256
+            );
             const renderedOptions = page.getAllByRole("option");
             await expect(renderedOptions.length).toBeGreaterThan(0);
             await expect(renderedOptions.length).toBeLessThan(manyOptions.length);
+            for (const option of renderedOptions) {
+                await expect(option.getBoundingClientRect().height).toBe(40);
+            }
+        });
+
+        await userEvent.clear(input);
+        await userEvent.type(input, "No such zone");
+        await waitFor(async () => {
+            await expect(page.getByRole("listbox").getBoundingClientRect().height).toBe(
+                256
+            );
+            await expect(
+                page
+                    .getByRole("option", { name: "No matching options" })
+                    .getBoundingClientRect().height
+            ).toBe(40);
         });
 
         await userEvent.clear(input);

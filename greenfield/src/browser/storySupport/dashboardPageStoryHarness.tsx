@@ -48,12 +48,27 @@ export interface DashboardPageStoryQuerySeed {
     readonly value: unknown;
 }
 
+function createPageStoryQueryClient() {
+    const queryClient = createDashboardQueryClient();
+    const defaults = queryClient.getDefaultOptions();
+    queryClient.setDefaultOptions({
+        ...defaults,
+        queries: {
+            ...defaults.queries,
+            // Preserve the production retry count while deterministic fixtures avoid
+            // spending three seconds on real-world exponential backoff.
+            retryDelay: 0,
+        },
+    });
+    return queryClient;
+}
+
 function createPageStoryDependencies({
     fixtures,
     querySeeds = [],
     route,
 }: DashboardPageStoryProps) {
-    const queryClient = createDashboardQueryClient();
+    const queryClient = createPageStoryQueryClient();
     const trpcClient = createDashboardTrpcClient(new DashboardStoryTransport(fixtures));
     return {
         collections: createDashboardBrowserCollections(queryClient, trpcClient),

@@ -442,7 +442,8 @@ describe("Dashboard task route", () => {
                 }
                 await new Promise((resolve) => setTimeout(resolve, 0));
             }
-            await new Promise((resolve) => setTimeout(resolve, 250));
+            await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+            await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
         });
         expect(screen.queryByRole("dialog", { name: "Build task domain" })).toBeNull();
         expect(screen.queryByText("Build task domain")).toBeNull();

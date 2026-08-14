@@ -3,31 +3,16 @@ import { fileURLToPath } from "node:url";
 
 import type { StorybookConfig } from "@storybook/tanstack-react";
 import tailwindcss from "@tailwindcss/vite";
-import { createLogger, loadEnv } from "vite";
+import { loadEnv } from "vite";
 
 const storybookAllowedHostEnvironmentName = "MIRA_DASHBOARD_STORYBOOK_ALLOWED_HOST";
+const storybookBrowserPort = 6006;
 const dnsLabelPattern = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const storybookEnvironment = loadEnv(
     "storybook",
     fileURLToPath(new URL(".", import.meta.url)),
     "MIRA_DASHBOARD_STORYBOOK_"
 );
-
-const pinnedBrowserDiagnostics = Object.freeze([
-    "flushSync was called from inside a lifecycle method. React cannot flush when React is already rendering. Consider moving this call to a scheduler task or micro task.",
-]);
-
-function createStorybookLogger() {
-    const logger = createLogger();
-    const writeError = logger.error.bind(logger);
-    logger.error = (message, options) => {
-        if (pinnedBrowserDiagnostics.some((diagnostic) => message.includes(diagnostic))) {
-            return;
-        }
-        writeError(message, options);
-    };
-    return logger;
-}
 
 function optionalStorybookAllowedHost(): string | undefined {
     const configured = storybookEnvironment[storybookAllowedHostEnvironmentName];
@@ -62,9 +47,6 @@ const config: StorybookConfig = {
     viteFinal(viteConfiguration) {
         return {
             ...viteConfiguration,
-            // Vitest independently verifies the exact story provenance before waiving
-            // these pinned upstream diagnostics. This only removes Vite's duplicate.
-            customLogger: createStorybookLogger(),
             optimizeDeps: {
                 ...viteConfiguration.optimizeDeps,
                 include: [
@@ -86,6 +68,13 @@ const config: StorybookConfig = {
                                         ...(viteConfiguration.server?.allowedHosts ?? []),
                                         storybookAllowedHost,
                                     ],
+                          ws:
+                              viteConfiguration.server?.ws === false
+                                  ? false
+                                  : {
+                                        ...viteConfiguration.server?.ws,
+                                        clientPort: storybookBrowserPort,
+                                    },
                       },
                   }),
         };

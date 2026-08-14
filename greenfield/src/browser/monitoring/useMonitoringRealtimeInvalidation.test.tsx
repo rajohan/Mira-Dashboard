@@ -32,54 +32,58 @@ function IncidentRealtimeProbe() {
 
 describe("monitoring realtime invalidation", () => {
     test("coalesces report changes into report-only cache invalidation", async () => {
-        const queryClient = createDashboardQueryClient();
-        const realtimeClient = new ControlledDashboardRealtimeClient();
-        const reportKey = reportDetailQueryKey(reportId);
-        const incidentKey = incidentDetailQueryKey(incidentId);
-        queryClient.setQueryData(reportKey, { id: reportId });
-        queryClient.setQueryData(incidentKey, { id: incidentId });
-        const view = render(
-            <StrictMode>
-                <QueryClientProvider client={queryClient}>
-                    <DashboardRealtimeProvider client={realtimeClient}>
-                        <ReportRealtimeProbe />
-                    </DashboardRealtimeProvider>
-                </QueryClientProvider>
-            </StrictMode>
-        );
-
-        expect(realtimeClient.input).toEqual({
-            lastEventId: "0",
-            topics: [monitoringRealtimeTopics.reports],
-        });
-        expect(realtimeClient.activeSubscriptionCount).toBe(1);
-        await act(async () => {
-            const output: RealtimeStreamOutput = {
-                data: {
-                    event: {
-                        entityId: reportId,
-                        entityType: "report",
-                        occurredAtMs: 1_800_000_000_000,
-                        operation: "created",
-                        payload: { id: reportId },
-                        topic: monitoringRealtimeTopics.reports,
-                    },
-                    kind: "change",
-                },
-                id: "18",
-            };
-            realtimeClient.emit(output);
-            realtimeClient.emit(output);
-            await new Promise((resolve) =>
-                setTimeout(resolve, monitoringRealtimeRefreshDelayMs + 20)
+        jest.useFakeTimers();
+        try {
+            const queryClient = createDashboardQueryClient();
+            const realtimeClient = new ControlledDashboardRealtimeClient();
+            const reportKey = reportDetailQueryKey(reportId);
+            const incidentKey = incidentDetailQueryKey(incidentId);
+            queryClient.setQueryData(reportKey, { id: reportId });
+            queryClient.setQueryData(incidentKey, { id: incidentId });
+            const view = render(
+                <StrictMode>
+                    <QueryClientProvider client={queryClient}>
+                        <DashboardRealtimeProvider client={realtimeClient}>
+                            <ReportRealtimeProbe />
+                        </DashboardRealtimeProvider>
+                    </QueryClientProvider>
+                </StrictMode>
             );
-        });
 
-        expect(queryClient.getQueryState(reportKey)?.isInvalidated).toBeTrue();
-        expect(queryClient.getQueryState(incidentKey)?.isInvalidated).toBeFalse();
-        view.unmount();
-        expect(realtimeClient.activeSubscriptionCount).toBe(0);
-        queryClient.clear();
+            expect(realtimeClient.input).toEqual({
+                lastEventId: "0",
+                topics: [monitoringRealtimeTopics.reports],
+            });
+            expect(realtimeClient.activeSubscriptionCount).toBe(1);
+            await act(async () => {
+                const output: RealtimeStreamOutput = {
+                    data: {
+                        event: {
+                            entityId: reportId,
+                            entityType: "report",
+                            occurredAtMs: 1_800_000_000_000,
+                            operation: "created",
+                            payload: { id: reportId },
+                            topic: monitoringRealtimeTopics.reports,
+                        },
+                        kind: "change",
+                    },
+                    id: "18",
+                };
+                realtimeClient.emit(output);
+                realtimeClient.emit(output);
+                jest.advanceTimersByTime(monitoringRealtimeRefreshDelayMs);
+                await Promise.resolve();
+            });
+
+            expect(queryClient.getQueryState(reportKey)?.isInvalidated).toBeTrue();
+            expect(queryClient.getQueryState(incidentKey)?.isInvalidated).toBeFalse();
+            view.unmount();
+            expect(realtimeClient.activeSubscriptionCount).toBe(0);
+            queryClient.clear();
+        } finally {
+            jest.useRealTimers();
+        }
     });
 
     test("refreshes immediately and periodically after terminal incident resync", async () => {

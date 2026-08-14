@@ -25,52 +25,56 @@ function TaskRealtimeProbe() {
 
 describe("task realtime invalidation", () => {
     test("coalesces validated task changes and disposes the stream", async () => {
-        const queryClient = createDashboardQueryClient();
-        const realtimeClient = new ControlledDashboardRealtimeClient();
-        const queryKey = taskDetailQueryKey(taskId);
-        queryClient.setQueryData(queryKey, { id: taskId });
-        const view = render(
-            <StrictMode>
-                <QueryClientProvider client={queryClient}>
-                    <DashboardRealtimeProvider client={realtimeClient}>
-                        <TaskRealtimeProbe />
-                    </DashboardRealtimeProvider>
-                </QueryClientProvider>
-            </StrictMode>
-        );
-
-        expect(realtimeClient.input).toEqual({
-            lastEventId: "0",
-            topics: [taskRealtimeTopic],
-        });
-        expect(realtimeClient.activeSubscriptionCount).toBe(1);
-        await act(async () => {
-            const output: RealtimeStreamOutput = {
-                data: {
-                    event: {
-                        entityId: taskId,
-                        entityType: "task",
-                        occurredAtMs: 1_800_000_000_000,
-                        operation: "updated",
-                        payload: { id: taskId },
-                        topic: taskRealtimeTopic,
-                    },
-                    kind: "change",
-                },
-                id: "18",
-            };
-            realtimeClient.emit(output);
-            realtimeClient.emit(output);
-            await new Promise((resolve) =>
-                setTimeout(resolve, taskRealtimeRefreshDelayMs + 20)
+        jest.useFakeTimers();
+        try {
+            const queryClient = createDashboardQueryClient();
+            const realtimeClient = new ControlledDashboardRealtimeClient();
+            const queryKey = taskDetailQueryKey(taskId);
+            queryClient.setQueryData(queryKey, { id: taskId });
+            const view = render(
+                <StrictMode>
+                    <QueryClientProvider client={queryClient}>
+                        <DashboardRealtimeProvider client={realtimeClient}>
+                            <TaskRealtimeProbe />
+                        </DashboardRealtimeProvider>
+                    </QueryClientProvider>
+                </StrictMode>
             );
-        });
-        expect(queryClient.getQueryState(queryKey)?.isInvalidated).toBeTrue();
 
-        view.unmount();
-        expect(realtimeClient.activeSubscriptionCount).toBe(0);
-        expect(realtimeClient.unsubscribeCount).toBeGreaterThanOrEqual(1);
-        queryClient.clear();
+            expect(realtimeClient.input).toEqual({
+                lastEventId: "0",
+                topics: [taskRealtimeTopic],
+            });
+            expect(realtimeClient.activeSubscriptionCount).toBe(1);
+            await act(async () => {
+                const output: RealtimeStreamOutput = {
+                    data: {
+                        event: {
+                            entityId: taskId,
+                            entityType: "task",
+                            occurredAtMs: 1_800_000_000_000,
+                            operation: "updated",
+                            payload: { id: taskId },
+                            topic: taskRealtimeTopic,
+                        },
+                        kind: "change",
+                    },
+                    id: "18",
+                };
+                realtimeClient.emit(output);
+                realtimeClient.emit(output);
+                jest.advanceTimersByTime(taskRealtimeRefreshDelayMs);
+                await Promise.resolve();
+            });
+            expect(queryClient.getQueryState(queryKey)?.isInvalidated).toBeTrue();
+
+            view.unmount();
+            expect(realtimeClient.activeSubscriptionCount).toBe(0);
+            expect(realtimeClient.unsubscribeCount).toBeGreaterThanOrEqual(1);
+            queryClient.clear();
+        } finally {
+            jest.useRealTimers();
+        }
     });
 
     test("falls back to slow polling after a terminal stream failure", async () => {

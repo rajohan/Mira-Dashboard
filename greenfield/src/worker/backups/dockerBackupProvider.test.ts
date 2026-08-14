@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { rejectionError } from "../../../scripts/testSupport/rejection.ts";
 import type { BackupType } from "../../contracts/backups.ts";
 import { backupWrapperProtocol } from "../../contracts/backupsWorker.ts";
 import type {
@@ -21,12 +22,55 @@ import {
     backupProviderStatusWrapper,
     type DockerBackupProviderProcess,
     type DockerBackupProviderProcessRequest,
+    type DockerBackupProviderTerminationScheduler,
 } from "./dockerBackupProvider.ts";
 
 const rootCompose = "/opt/docker/compose.yaml";
 const firstId = "1".repeat(64);
 const secondId = "2".repeat(64);
 const foreignId = "3".repeat(64);
+
+interface ManualTerminationDeadline {
+    cancelled: boolean;
+    readonly delayMs: number;
+    fire(): void;
+}
+
+class ManualTerminationScheduler implements DockerBackupProviderTerminationScheduler {
+    readonly entries: ManualTerminationDeadline[] = [];
+    readonly #waiters = new Map<
+        number,
+        ReturnType<typeof Promise.withResolvers<ManualTerminationDeadline>>
+    >();
+
+    schedule(callback: () => void, delayMs: number) {
+        let fired = false;
+        const entry: ManualTerminationDeadline = {
+            cancelled: false,
+            delayMs,
+            fire() {
+                if (entry.cancelled || fired) return;
+                fired = true;
+                callback();
+            },
+        };
+        const index = this.entries.push(entry) - 1;
+        this.#waiters.get(index)?.resolve(entry);
+        return {
+            cancel() {
+                entry.cancelled = true;
+            },
+        };
+    }
+
+    waitForEntry(index: number): Promise<ManualTerminationDeadline> {
+        const entry = this.entries[index];
+        if (entry !== undefined) return Promise.resolve(entry);
+        const waiter = Promise.withResolvers<ManualTerminationDeadline>();
+        this.#waiters.set(index, waiter);
+        return waiter.promise;
+    }
+}
 
 function composeService(
     type: BackupType,
@@ -309,9 +353,97 @@ describe("Docker backup provider discovery", () => {
 });
 
 describe("Docker backup execution port", () => {
+    test("rejects an already-aborted refresh before reading provider state", async () => {
+        const cancellation = new DOMException("claim lost", "AbortError");
+        const controller = new AbortController();
+        controller.abort(cancellation);
+        const calls: string[] = [];
+        const port = createDockerBackupJobExecutionPort({
+            discoverCompose() {
+                calls.push("compose");
+                return compose();
+            },
+            engine: {
+                collect() {
+                    calls.push("engine");
+                    return Promise.resolve(snapshot());
+                },
+            },
+            nowMs() {
+                calls.push("clock");
+                return 2_000_000;
+            },
+            process() {
+                calls.push("process");
+                return Promise.resolve(result({}));
+            },
+        });
+
+        expect(await rejectionError(port.refresh(controller.signal))).toBe(cancellation);
+        expect(calls).toEqual([]);
+    });
+
+    test("rethrows the exact parent cancellation after provider settlement", async () => {
+        const cancellation = new DOMException("claim lost", "AbortError");
+        const controller = new AbortController();
+        const baseProcess = providerProcess();
+        const statusContainers: string[] = [];
+        const port = createDockerBackupJobExecutionPort({
+            discoverCompose: () => compose(),
+            engine: engine(snapshot(), snapshot()),
+            nowMs: () => 2_000_000,
+            process(request) {
+                statusContainers.push(request.arguments[3] ?? "");
+                if (request.arguments[3] === secondId) {
+                    controller.abort(cancellation);
+                }
+                return baseProcess.process(request);
+            },
+        });
+
+        expect(await rejectionError(port.refresh(controller.signal))).toBe(cancellation);
+        expect(statusContainers).toEqual([firstId, secondId]);
+    });
+
+    test("cancels the termination grace when an aborted child exits on TERM", async () => {
+        const controller = new AbortController();
+        const exited = Promise.withResolvers<number>();
+        const launched = Promise.withResolvers<void>();
+        const scheduler = new ManualTerminationScheduler();
+        const signals: Array<"SIGKILL" | "SIGTERM"> = [];
+        const process = createDockerBackupProviderProcess(() => {
+            launched.resolve();
+            return {
+                exited: exited.promise,
+                kill(signal) {
+                    signals.push(signal);
+                    exited.resolve(0);
+                },
+                stderr: new ReadableStream<Uint8Array>(),
+                stdout: new ReadableStream<Uint8Array>(),
+            };
+        }, scheduler);
+        const execution = process({
+            arguments: ["fixed"],
+            environment: {},
+            executable: backupDockerExecutable,
+            signal: controller.signal,
+            stdoutMaximumBytes: 1,
+        });
+        await launched.promise;
+        controller.abort();
+
+        const termDeadline = await scheduler.waitForEntry(0);
+        expect(await rejectionError(execution)).toMatchObject({ dispatched: true });
+        expect(signals).toEqual(["SIGTERM"]);
+        expect(termDeadline.cancelled).toBe(true);
+        expect(scheduler.entries).toHaveLength(1);
+    });
+
     test("bounds TERM-to-KILL teardown when an aborted child never reports exit", async () => {
         const controller = new AbortController();
         const launched = Promise.withResolvers<void>();
+        const scheduler = new ManualTerminationScheduler();
         const signals: Array<"SIGKILL" | "SIGTERM"> = [];
         const process = createDockerBackupProviderProcess(() => {
             launched.resolve();
@@ -323,7 +455,7 @@ describe("Docker backup execution port", () => {
                 stderr: new ReadableStream<Uint8Array>(),
                 stdout: new ReadableStream<Uint8Array>(),
             };
-        });
+        }, scheduler);
         const execution = process({
             arguments: ["fixed"],
             environment: {},
@@ -334,27 +466,22 @@ describe("Docker backup execution port", () => {
         await launched.promise;
         controller.abort();
 
-        let deadline: ReturnType<typeof setTimeout> | undefined;
-        let failure: unknown;
-        try {
-            await Promise.race([
-                execution,
-                new Promise<never>((_resolve, reject) => {
-                    deadline = setTimeout(
-                        () => reject(new Error("Backup teardown did not settle")),
-                        1500
-                    );
-                }),
-            ]);
-        } catch (error) {
-            failure = error;
-        } finally {
-            if (deadline !== undefined) clearTimeout(deadline);
-        }
+        const termDeadline = await scheduler.waitForEntry(0);
+        expect(signals).toEqual(["SIGTERM"]);
+        expect(termDeadline.delayMs).toBe(250);
+        termDeadline.fire();
+
+        const killDeadline = await scheduler.waitForEntry(1);
+        expect(signals).toEqual(["SIGTERM", "SIGKILL"]);
+        expect(killDeadline.delayMs).toBe(250);
+        killDeadline.fire();
+
+        const failure = await rejectionError(execution);
 
         expect(failure).toBeInstanceOf(DockerBackupProviderProcessError);
         expect(failure).toMatchObject({ dispatched: true });
         expect(signals).toEqual(["SIGTERM", "SIGKILL"]);
+        expect(scheduler.entries.every(({ cancelled }) => cancelled)).toBe(true);
     });
 
     test("uses only fixed non-shell Docker exec wrappers and projects bounded status", async () => {

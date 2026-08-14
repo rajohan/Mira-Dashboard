@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 
 import { QueryClientProvider } from "@tanstack/react-query";
 import type { TRPCRequestOptions } from "@trpc/client";
@@ -22,6 +22,7 @@ import { DashboardTrpcProvider } from "../api/trpcContext.tsx";
 import { authStatusQueryKey } from "../auth/authQueries.ts";
 import { createDashboardBrowserCollections } from "../data/dashboardCollections.ts";
 import { DashboardCollectionsProvider } from "../data/dashboardCollectionsContext.tsx";
+import { captureExpectedConsoleErrors } from "../test/expectedConsoleError.ts";
 import { ControlledDashboardRealtimeClient } from "../test/realtime.ts";
 import { AuthenticatedNotificationCenter } from "./AuthenticatedNotificationCenter.tsx";
 import {
@@ -346,7 +347,6 @@ describe("Notification center", () => {
             unreadCount: 0,
         });
         const harness = renderCenter(transport, status);
-        const consoleError = spyOn(console, "error").mockImplementation(() => {});
 
         try {
             const { trigger } = await openNotificationCenter();
@@ -389,7 +389,6 @@ describe("Notification center", () => {
             });
         } finally {
             await harness.cleanup();
-            consoleError.mockRestore();
         }
     });
 
@@ -401,7 +400,8 @@ describe("Notification center", () => {
             unreadCount: 0,
         });
         transport.latestResponder = () => pendingLatest.promise;
-        const consoleError = spyOn(console, "error").mockImplementation(() => {});
+        const queryFailure = new TypeError("notification query failed");
+        const consoleErrors = captureExpectedConsoleErrors([queryFailure]);
         const harness = renderCenter(transport);
 
         try {
@@ -413,7 +413,7 @@ describe("Notification center", () => {
             expect(screen.queryByRole("status")).toBeNull();
 
             await act(async () => {
-                pendingLatest.reject(new TypeError("notification query failed"));
+                pendingLatest.reject(queryFailure);
                 await Promise.resolve();
             });
             expect(
@@ -422,7 +422,7 @@ describe("Notification center", () => {
                 })
             ).toBeTruthy();
             expect(screen.queryByRole("status")).toBeNull();
-            expect(consoleError).toHaveBeenCalled();
+            consoleErrors.expectObserved();
         } finally {
             pendingLatest.resolve({
                 notifications: [],
@@ -430,7 +430,7 @@ describe("Notification center", () => {
                 unreadCount: 0,
             });
             await harness.cleanup();
-            consoleError.mockRestore();
+            consoleErrors.restore();
         }
     });
 
@@ -1147,12 +1147,12 @@ describe("Notification center", () => {
         const notFound = Object.assign(new Error("Synthetic not found"), {
             data: { code: "NOT_FOUND" as const },
         });
+        const refreshFailure = new TypeError("Refresh unavailable");
         transport.mutationResponder = () => {
-            transport.latestResponder = () =>
-                Promise.reject(new TypeError("Refresh unavailable"));
+            transport.latestResponder = () => Promise.reject(refreshFailure);
             return Promise.reject(notFound);
         };
-        const consoleError = spyOn(console, "error").mockImplementation(() => {});
+        const consoleErrors = captureExpectedConsoleErrors([refreshFailure]);
         const harness = renderCenter(transport);
 
         try {
@@ -1183,10 +1183,10 @@ describe("Notification center", () => {
                 "notifications.markRead",
                 "notifications.delete",
             ]);
-            expect(consoleError).toHaveBeenCalled();
+            consoleErrors.expectObserved();
         } finally {
             await harness.cleanup();
-            consoleError.mockRestore();
+            consoleErrors.restore();
         }
     });
 

@@ -106,8 +106,8 @@ export const Busy: Story = {
     },
     play: async ({ canvasElement }) => {
         await waitFor(async () => {
-            const portalRoot = canvasElement.ownerDocument.getElementById(
-                "headlessui-portal-root"
+            const portalRoot = canvasElement.ownerDocument.querySelector(
+                "#headlessui-portal-root"
             );
 
             if (!(portalRoot instanceof HTMLElement)) {

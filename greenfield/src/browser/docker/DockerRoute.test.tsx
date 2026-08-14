@@ -10,7 +10,9 @@ import type {
     DockerRequestOperationResult,
 } from "../../contracts/docker.ts";
 import type { JobRunSummary } from "../../contracts/jobModel.ts";
+import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import type { DockerClient } from "./dockerClient.ts";
+import { dockerOverviewQueryKey } from "./dockerQueries.ts";
 import { DockerRoute } from "./DockerRoute.tsx";
 
 const { render, screen, waitFor, within } = await import("@testing-library/react");
@@ -189,6 +191,35 @@ const freshOverview = {
     ],
 } as const satisfies DockerOverview;
 
+const minimalRefreshOverview = {
+    ...freshOverview,
+    containers: [],
+    images: [],
+    updaterEvents: [],
+    updaterServices: [],
+    volumes: [],
+} as const satisfies DockerOverview;
+
+const minimalRefreshedOverview = {
+    ...minimalRefreshOverview,
+    checkedAtMs: freshOverview.checkedAtMs + 60_000,
+} as const satisfies DockerOverview;
+
+const refreshedOverview = {
+    ...freshOverview,
+    checkedAtMs: freshOverview.checkedAtMs + 60_000,
+} as const satisfies DockerOverview;
+
+const serviceUpdateOverview = {
+    ...minimalRefreshOverview,
+    updaterServices: [freshOverview.updaterServices[0]],
+} as const satisfies DockerOverview;
+
+const refreshedServiceUpdateOverview = {
+    ...serviceUpdateOverview,
+    checkedAtMs: freshOverview.checkedAtMs + 60_000,
+} as const satisfies DockerOverview;
+
 const logsResult = {
     containerId: firstContainerId,
     lines: ["request accepted", "token=[redacted]"],
@@ -196,6 +227,12 @@ const logsResult = {
     redacted: true,
     sourceRevision,
     truncated: true,
+} as const satisfies DockerGetContainerLogsResult;
+
+const longerLogsResult = {
+    ...logsResult,
+    lines: [...logsResult.lines, "500-line request complete"],
+    observedAtMs: observedAtMs + 1,
 } as const satisfies DockerGetContainerLogsResult;
 
 const prunePreview = {
@@ -249,18 +286,34 @@ function deferred<T>() {
     return { promise, resolve: resolveDeferred };
 }
 
+async function waitForDialogExit(): Promise<void> {
+    await act(async () => {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
+    expect(screen.queryByRole("dialog", { hidden: true })).toBeNull();
+}
+
 interface ClientOverrides {
     readonly mutation?: DockerClient["mutation"];
     readonly overview?: DockerOverview;
+    readonly overviewAfterFirstRead?: DockerOverview;
     readonly query?: DockerClient["query"];
 }
 
 function createClient(overrides: ClientOverrides = {}) {
+    let overviewReadCount = 0;
     const query =
         overrides.query ??
         (jest.fn((name: string) => {
             if (name === "docker.overview") {
-                return Promise.resolve(overrides.overview ?? freshOverview);
+                overviewReadCount += 1;
+                return Promise.resolve(
+                    overviewReadCount > 1 &&
+                        overrides.overviewAfterFirstRead !== undefined
+                        ? overrides.overviewAfterFirstRead
+                        : (overrides.overview ?? freshOverview)
+                );
             }
             if (name === "docker.getContainerLogs") return Promise.resolve(logsResult);
             if (name === "docker.preparePrune") return Promise.resolve(prunePreview);
@@ -271,7 +324,14 @@ function createClient(overrides: ClientOverrides = {}) {
         (jest.fn(() =>
             Promise.resolve(queuedResult)
         ) as unknown as DockerClient["mutation"]);
-    return { client: { mutation, query } satisfies DockerClient, mutation, query };
+    return {
+        client: { mutation, query } satisfies DockerClient,
+        mutation,
+        get overviewReadCount() {
+            return overviewReadCount;
+        },
+        query,
+    };
 }
 
 function renderDocker(client: DockerClient) {
@@ -288,7 +348,7 @@ function renderDocker(client: DockerClient) {
     );
     return {
         queryClient,
-        unmount() {
+        unmount(): void {
             view.unmount();
             queryClient.clear();
         },
@@ -301,10 +361,15 @@ describe("DockerRoute", () => {
             if (name === "cache.refreshEntry") return Promise.resolve(refreshRun);
             return Promise.resolve(queuedResult);
         }) as unknown as DockerClient["mutation"];
-        const harness = createClient({ mutation });
+        const harness = createClient({
+            mutation,
+            overview: minimalRefreshOverview,
+            overviewAfterFirstRead: minimalRefreshedOverview,
+        });
         const view = renderDocker(harness.client);
         try {
             await screen.findByText("Fresh snapshot");
+            const overviewReadsBeforeRefresh = harness.overviewReadCount;
             const user = userEvent.setup();
             await user.click(screen.getByRole("button", { name: "Refresh snapshot" }));
             expect(
@@ -321,6 +386,20 @@ describe("DockerRoute", () => {
             expect(
                 screen.getByRole("link", { name: "View refresh job" })
             ).toHaveAttribute("href", "/jobs?runId=" + refreshRun.id);
+            expect(
+                await screen.findByText(
+                    "Checked " +
+                        formatDashboardDateTime(minimalRefreshedOverview.checkedAtMs)
+                )
+            ).toBeVisible();
+            await waitFor(() => {
+                expect(harness.overviewReadCount).toBeGreaterThan(
+                    overviewReadsBeforeRefresh
+                );
+                expect(
+                    view.queryClient.isFetching({ queryKey: dockerOverviewQueryKey })
+                ).toBe(0);
+            });
         } finally {
             view.unmount();
         }
@@ -396,7 +475,7 @@ describe("DockerRoute", () => {
             await user.click(
                 within(detailsDialog).getByRole("button", { name: "Close dialog" })
             );
-            await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+            await waitForDialogExit();
 
             const table = screen.getByRole("table", { name: "Docker containers" });
             let rows = within(table).getAllByRole("row").slice(1);
@@ -506,10 +585,14 @@ describe("DockerRoute", () => {
         const mutation = jest.fn(
             () => pending.promise
         ) as unknown as DockerClient["mutation"];
-        const harness = createClient({ mutation });
+        const harness = createClient({
+            mutation,
+            overviewAfterFirstRead: refreshedOverview,
+        });
         const view = renderDocker(harness.client);
         try {
             await screen.findByText("Fresh snapshot");
+            const overviewReadsBeforeOperation = harness.overviewReadCount;
             const user = userEvent.setup();
             await user.click(screen.getByRole("button", { name: "Stop alpha-api" }));
             expect(screen.getByRole("dialog")).toHaveTextContent(firstContainerId);
@@ -541,22 +624,43 @@ describe("DockerRoute", () => {
                 "/jobs?runId=" + queuedJobId
             );
             expect(screen.getByText(/No runtime success is assumed/u)).toBeVisible();
+            expect(
+                await screen.findByText(
+                    "Checked " + formatDashboardDateTime(refreshedOverview.checkedAtMs)
+                )
+            ).toBeVisible();
+            await waitForDialogExit();
+            await waitFor(() => {
+                expect(
+                    view.queryClient.isFetching({ queryKey: dockerOverviewQueryKey })
+                ).toBe(0);
+            });
+            expect(harness.overviewReadCount).toBeGreaterThan(
+                overviewReadsBeforeOperation
+            );
         } finally {
             view.unmount();
         }
     });
 
     test("carries the exact confirmed current and candidate images into a service update", async () => {
-        const mutation = jest.fn(() =>
-            Promise.resolve({
-                ...queuedResult,
-                operation: "updater-update-service" as const,
-            })
+        const result = {
+            ...queuedResult,
+            operation: "updater-update-service" as const,
+        };
+        const pending = deferred<DockerRequestOperationResult>();
+        const mutation = jest.fn(
+            () => pending.promise
         ) as unknown as DockerClient["mutation"];
-        const harness = createClient({ mutation });
+        const harness = createClient({
+            mutation,
+            overview: serviceUpdateOverview,
+            overviewAfterFirstRead: refreshedServiceUpdateOverview,
+        });
         const view = renderDocker(harness.client);
         try {
             await screen.findByText("Fresh snapshot");
+            const overviewReadsBeforeOperation = harness.overviewReadCount;
             const user = userEvent.setup();
             await user.click(
                 screen.getByRole("button", {
@@ -582,15 +686,45 @@ describe("DockerRoute", () => {
                 },
                 expect.objectContaining({ signal: expect.any(AbortSignal) })
             );
+            await act(async () => {
+                pending.resolve(result);
+                await pending.promise;
+            });
+            expect(
+                await screen.findByRole("heading", {
+                    name: "Docker operation queued",
+                })
+            ).toBeVisible();
+            expect(
+                await screen.findByText(
+                    "Checked " +
+                        formatDashboardDateTime(
+                            refreshedServiceUpdateOverview.checkedAtMs
+                        )
+                )
+            ).toBeVisible();
+            await waitForDialogExit();
+            await waitFor(() => {
+                expect(harness.overviewReadCount).toBeGreaterThan(
+                    overviewReadsBeforeOperation
+                );
+                expect(
+                    view.queryClient.isFetching({ queryKey: dockerOverviewQueryKey })
+                ).toBe(0);
+            });
         } finally {
             view.unmount();
         }
     });
 
     test("reads bounded exact-container logs and changes the requested tail", async () => {
-        const query = jest.fn((name: string) => {
+        const query = jest.fn((name: string, input: { tail?: number }) => {
             if (name === "docker.overview") return Promise.resolve(freshOverview);
-            if (name === "docker.getContainerLogs") return Promise.resolve(logsResult);
+            if (name === "docker.getContainerLogs") {
+                return Promise.resolve(
+                    input.tail === 500 ? longerLogsResult : logsResult
+                );
+            }
             return Promise.reject(new Error("Unexpected Docker query"));
         }) as unknown as DockerClient["query"];
         const harness = createClient({ query });
@@ -616,7 +750,6 @@ describe("DockerRoute", () => {
                     expect.objectContaining({ signal: expect.any(AbortSignal) })
                 )
             );
-
             await user.click(
                 screen.getByRole("button", { name: "Docker log line count" })
             );
@@ -632,13 +765,21 @@ describe("DockerRoute", () => {
                     expect.objectContaining({ signal: expect.any(AbortSignal) })
                 )
             );
+            await waitFor(() => {
+                expect(
+                    screen.getByLabelText("Docker container log output")
+                ).toHaveTextContent("500-line request complete");
+                expect(view.queryClient.isFetching()).toBe(0);
+            });
         } finally {
             view.unmount();
         }
     });
 
     test("previews exact prune candidates before queueing the one-time ticket", async () => {
-        const harness = createClient();
+        const harness = createClient({
+            overviewAfterFirstRead: refreshedOverview,
+        });
         const view = renderDocker(harness.client);
         try {
             await screen.findByText("Fresh snapshot");
@@ -659,6 +800,7 @@ describe("DockerRoute", () => {
                 { sourceRevision, target: "images" },
                 expect.objectContaining({ signal: expect.any(AbortSignal) })
             );
+            const overviewReadsBeforeOperation = harness.overviewReadCount;
 
             await user.click(screen.getByRole("button", { name: "Queue exact prune" }));
             await waitFor(() => expect(harness.mutation).toHaveBeenCalledTimes(1));
@@ -674,6 +816,25 @@ describe("DockerRoute", () => {
                 },
                 expect.objectContaining({ signal: expect.any(AbortSignal) })
             );
+            expect(
+                await screen.findByRole("heading", {
+                    name: "Docker operation queued",
+                })
+            ).toBeVisible();
+            expect(
+                await screen.findByText(
+                    "Checked " + formatDashboardDateTime(refreshedOverview.checkedAtMs)
+                )
+            ).toBeVisible();
+            await waitForDialogExit();
+            await waitFor(() => {
+                expect(harness.overviewReadCount).toBeGreaterThan(
+                    overviewReadsBeforeOperation
+                );
+                expect(
+                    view.queryClient.isFetching({ queryKey: dockerOverviewQueryKey })
+                ).toBe(0);
+            });
         } finally {
             view.unmount();
         }

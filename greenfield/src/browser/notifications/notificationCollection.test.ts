@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 
 import type { TRPCRequestOptions } from "@trpc/client";
 
@@ -8,6 +8,7 @@ import {
     createDashboardTrpcClient,
     type DashboardTrpcTransport,
 } from "../api/trpcClient.ts";
+import { captureExpectedConsoleErrors } from "../test/expectedConsoleError.ts";
 import { createNotificationCollection } from "./notificationCollection.ts";
 import { notificationLatestQueryKey } from "./notificationQueries.ts";
 
@@ -102,7 +103,7 @@ describe("notification collection", () => {
             queryClient,
             createDashboardTrpcClient(transport)
         );
-        const consoleError = spyOn(console, "error").mockImplementation(() => {});
+        const consoleErrors = captureExpectedConsoleErrors([refreshFailure]);
 
         try {
             await collection.toArrayWhenReady();
@@ -116,9 +117,9 @@ describe("notification collection", () => {
                     notificationLatestQueryKey
                 )
             ).toEqual(result);
-            expect(consoleError).toHaveBeenCalled();
+            consoleErrors.expectObserved();
         } finally {
-            consoleError.mockRestore();
+            consoleErrors.restore();
             await collection.cleanup();
             queryClient.clear();
         }

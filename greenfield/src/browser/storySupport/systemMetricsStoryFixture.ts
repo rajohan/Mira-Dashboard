@@ -131,9 +131,9 @@ export function observedStorySystemApplicationMetrics(
         },
         operations: {
             activeRuns: 2,
-            averageDurationMs: 1_200,
+            averageDurationMs: 1200,
             failedRuns: 1,
-            maximumDurationMs: 4_500,
+            maximumDurationMs: 4500,
             sampledRuns: 12,
             state: "observed",
             succeededRuns: 9,

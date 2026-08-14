@@ -117,6 +117,7 @@ async function collectOpenRouter(
             usedPercent: percentage(Math.max(limit - remaining, 0), limit),
         });
     } catch {
+        signal?.throwIfAborted();
         return unavailableProvider("openrouter", "OpenRouter");
     }
 }
@@ -164,6 +165,7 @@ async function collectElevenLabs(
             ),
         });
     } catch {
+        signal?.throwIfAborted();
         return unavailableProvider("elevenlabs", "ElevenLabs");
     }
 }
@@ -198,6 +200,7 @@ async function collectSynthetic(
             usedPercent: percentage(used, quota.max),
         });
     } catch {
+        signal?.throwIfAborted();
         return unavailableProvider("synthetic", "Synthetic");
     }
 }
@@ -211,6 +214,7 @@ export async function collectQuotaPayload(
     signal?: AbortSignal,
     options: QuotaCollectorOptions = {}
 ): Promise<QuotaCachePayload> {
+    signal?.throwIfAborted();
     const [elevenLabs, openAi, openRouter, synthetic] = await Promise.all([
         collectElevenLabs(credentials.elevenLabs, options.fetch, signal),
         (async () => {
@@ -223,14 +227,17 @@ export async function collectQuotaPayload(
                     await collectCodexQuota(options.codex, signal)
                 );
             } catch {
+                signal?.throwIfAborted();
                 return unavailableProvider("openai", "OpenAI");
             }
         })(),
         collectOpenRouter(credentials.openRouter, options.fetch, signal),
         collectSynthetic(credentials.synthetic, options.fetch, signal),
     ]);
+    const observedAtMs = (options.nowMs ?? Date.now)();
+    signal?.throwIfAborted();
     return v.parse(quotaCachePayloadSchema, {
-        observedAtMs: (options.nowMs ?? Date.now)(),
+        observedAtMs,
         providers: [elevenLabs, openAi, openRouter, synthetic],
     });
 }

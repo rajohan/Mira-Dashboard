@@ -17,10 +17,29 @@ export interface DevelopmentMigrationIdentityObservation {
     close(): void;
 }
 
+export interface DevelopmentMigrationIdentityPollTimer {
+    cancel(): void;
+}
+
+export interface DevelopmentMigrationIdentityPollScheduler {
+    schedule(
+        callback: () => Promise<void>,
+        intervalMs: number
+    ): DevelopmentMigrationIdentityPollTimer;
+}
+
 export type ObserveDevelopmentMigrationIdentity = (
     repositoryRoot: string,
     initialFingerprint: string
 ) => DevelopmentMigrationIdentityObservation;
+
+const defaultPollScheduler: DevelopmentMigrationIdentityPollScheduler = Object.freeze({
+    schedule(callback: () => Promise<void>, intervalMs: number) {
+        const interval = setInterval(() => void callback(), intervalMs);
+        interval.unref();
+        return Object.freeze({ cancel: () => clearInterval(interval) });
+    },
+});
 
 function migrationIdentityFailure(): Error {
     return new Error(migrationIdentityFailureMessage);
@@ -246,11 +265,13 @@ export async function readDevelopmentMigrationIdentity(
  * exact-graph poll avoids broad repository watchers and closes atomic-editor replacement gaps.
  * @param repositoryRoot Canonical development source root.
  * @param initialFingerprint Stable identity returned by state preparation.
+ * @param scheduler Cancellable exact-cadence poll scheduler.
  * @returns Closeable one-shot observation resolving with the new stable identity.
  */
 export function observeDevelopmentMigrationIdentity(
     repositoryRoot: string,
-    initialFingerprint: string
+    initialFingerprint: string,
+    scheduler: DevelopmentMigrationIdentityPollScheduler = defaultPollScheduler
 ): DevelopmentMigrationIdentityObservation {
     if (!validFingerprint(initialFingerprint)) throw migrationIdentityFailure();
     let closed = false;
@@ -264,7 +285,6 @@ export function observeDevelopmentMigrationIdentity(
     const ready = new Promise<string | undefined>((resolve) => {
         resolveReady = resolve;
     });
-
     const inspect = async () => {
         if (closed || reading) return;
         reading = true;
@@ -273,7 +293,7 @@ export function observeDevelopmentMigrationIdentity(
                 await readDevelopmentMigrationIdentity(repositoryRoot);
             if (nextFingerprint !== initialFingerprint) {
                 closed = true;
-                clearInterval(poll);
+                poll?.cancel();
                 if (!readySettled) {
                     readySettled = true;
                     resolveReady(nextFingerprint);
@@ -290,8 +310,7 @@ export function observeDevelopmentMigrationIdentity(
         }
     };
 
-    const poll = setInterval(() => void inspect(), migrationIdentityPollIntervalMs);
-    poll.unref();
+    const poll = scheduler.schedule(inspect, migrationIdentityPollIntervalMs);
     void inspect();
 
     return Object.freeze({
@@ -300,7 +319,7 @@ export function observeDevelopmentMigrationIdentity(
         close() {
             if (closed) return;
             closed = true;
-            clearInterval(poll);
+            poll?.cancel();
         },
     });
 }

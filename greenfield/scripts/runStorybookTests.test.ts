@@ -6,15 +6,14 @@ import { createStorybookTestCommand, runStorybookTests } from "./runStorybookTes
 const projectRoot = path.resolve(import.meta.dir, "..");
 
 describe("Storybook test runner", () => {
-    test("uses one deterministic browser worker", () => {
+    test("uses three file-parallel browser workers", () => {
         expect(createStorybookTestCommand("/tmp/dashboard")).toEqual([
             "/tmp/dashboard/node_modules/.bin/vitest",
             "run",
             "--config",
             ".storybook/vitest.config.ts",
             "--project=storybook",
-            "--maxWorkers=1",
-            "--no-file-parallelism",
+            "--maxWorkers=3",
         ]);
     });
 
