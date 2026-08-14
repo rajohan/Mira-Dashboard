@@ -26,7 +26,7 @@
         },
         {
             "file": "settings.json",
-            "sha256": "e5c032104bae76d0ed50ed4dcb7f16eab3560ce7d8e51485507d518b45b01c0a"
+            "sha256": "2befe2e990d2703a43ee161ec41032daf662a6793949c59b51df3663973a090a"
         },
         {
             "file": "tasks.json",
@@ -156,6 +156,12 @@
             "path": "dist/redact-snapshot-CaQsZc2V.js",
             "role": "config-redaction",
             "sha256": "af96c4390304bb2d10646cdbc559b6441c09fe31f9ac9185fc7b6ad034b48ac0"
+        },
+        {
+            "bytes": 10703,
+            "path": "dist/config-reload-plan-DurxjSJ6.js",
+            "role": "config-reload-plan",
+            "sha256": "fe52de7a20a72992b80cf83dddb60eb1df3d6d33344353608b12b0bf1aa11365"
         },
         {
             "bytes": 527552,
@@ -288,6 +294,12 @@
             "path": "dist/server-ws-runtime-BSymIEDW.js",
             "role": "gateway-websocket",
             "sha256": "ef51e2b35c7d1172dda3e1049caa6de7d0e8d5fde64267e06086689c7a01e652"
+        },
+        {
+            "bytes": 93435,
+            "path": "dist/heartbeat-runner-BC25bDq9.js",
+            "role": "heartbeat-prompt-runtime",
+            "sha256": "0ae6d29a8f59779ff0a2f8e10443e6107edf7a4da056377813c10c98fd68d32b"
         },
         {
             "bytes": 41357,

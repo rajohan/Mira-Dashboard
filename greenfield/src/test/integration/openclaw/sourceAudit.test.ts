@@ -66,6 +66,7 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
         "zod-schema.agent-runtime-fixture.js": `
             const HeartbeatSchema = object({
                 every: string().optional(),
+                prompt: string().optional(),
                 target: string().optional()
             }).strict().optional();
             const SandboxDockerSchema = object({});
@@ -96,6 +97,31 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
                 tools: AgentToolsSchema
             }).strict();
             const ToolsSchema = object({});
+        `,
+        "heartbeat-runner-fixture.js": `
+            //#region src/infra/heartbeat-runner-config.ts
+            function resolveHeartbeatConfig(cfg, agentId) {
+                const defaults = cfg.agents?.defaults?.heartbeat;
+                if (!agentId) return defaults;
+                const overrides = resolveAgentConfig(cfg, agentId)?.heartbeat;
+                if (!defaults && !overrides) return overrides;
+                return {
+                    ...defaults,
+                    ...overrides
+                };
+            }
+            function resolveAmbientHeartbeatAgentId(cfg) { return cfg.agentId; }
+            function resolveHeartbeatAgents(cfg) { return cfg.agents ?? []; }
+            function resolveHeartbeatPromptRaw(cfg, heartbeat) {
+                return heartbeat?.prompt ?? cfg.agents?.defaults?.heartbeat?.prompt;
+            }
+            function resolveHeartbeatPrompt(cfg, heartbeat) {
+                return resolveHeartbeatPromptRaw(cfg, heartbeat);
+            }
+            function resolveHeartbeatResponseToolPrompt(cfg, heartbeat) {
+                return resolveHeartbeatPromptRaw(cfg, heartbeat);
+            }
+            //#endregion
         `,
         "automations-tool-name-fixture.js": `
             const AUTOMATIONS_TOOL_NAME = "automations";
@@ -1021,6 +1047,58 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
                 },
                 "config.apply": async ({ params, respond }) => {}
             };
+        `,
+        "config-reload-plan-fixture.js": `
+            //#region src/gateway/config-reload-plan.ts
+            function isNoopGatewayReloadPlan(plan) {
+                return !plan.restartGateway && !plan.restartHeartbeat;
+            }
+            const BASE_RELOAD_RULES = [
+                {
+                    prefix: "agents.entries",
+                    kind: "hot",
+                    actions: ["restart-heartbeat"]
+                },
+                {
+                    prefix: "agent.heartbeat",
+                    kind: "hot",
+                    actions: ["restart-heartbeat"]
+                }
+            ];
+            function buildGatewayReloadPlan(changedPaths, options = {}) {
+                const plan = {
+                    changedPaths,
+                    restartGateway: false,
+                    restartReasons: [],
+                    hotReasons: [],
+                    restartHeartbeat: false
+                };
+                const applyAction = (action) => {
+                    switch (action) {
+                        case "restart-heartbeat":
+                            plan.restartHeartbeat = true;
+                            break;
+                        default: break;
+                    }
+                };
+                for (const path of changedPaths) {
+                    const rule = BASE_RELOAD_RULES.find((candidate) => path.startsWith(candidate.prefix));
+                    if (!rule) {
+                        plan.restartGateway = true;
+                        plan.restartReasons.push(path);
+                        continue;
+                    }
+                    if (rule.kind === "restart") {
+                        plan.restartGateway = true;
+                        plan.restartReasons.push(path);
+                        continue;
+                    }
+                    plan.hotReasons.push(path);
+                    for (const action of rule.actions ?? []) applyAction(action, path, rule.accountScopedPlugin);
+                }
+                return plan;
+            }
+            //#endregion
         `,
         "skills-fixture.js": `
             function patchSkillConfigEntry(cfg, skillKey, patch) {
@@ -3014,7 +3092,14 @@ describe("reviewed OpenClaw protocol fixtures", () => {
             "chat-delta",
             "chat-terminal",
         ]);
-        expect(reviewed.audit.sourceArtifacts).toHaveLength(90);
+        expect(reviewed.audit.sourceArtifacts).toHaveLength(92);
+        expect(reviewed.audit.settings.heartbeatPrompt).toEqual({
+            entrySchema: "optional-string",
+            gatewayRestart: false,
+            pathTemplate: "agents.entries.<agentId>.heartbeat.prompt",
+            reload: "hot-restart-heartbeat",
+            resolution: "agent-entry-then-default",
+        });
         expect(reviewed.audit.chat.adapter.media.localHistory).toEqual({
             canonical: {
                 fields: [
@@ -3889,7 +3974,7 @@ describe("explicit OpenClaw source audit", () => {
                     perStepRatherThanWholeOperation: true,
                 },
             });
-            expect(audit.sourceArtifacts).toHaveLength(90);
+            expect(audit.sourceArtifacts).toHaveLength(92);
             expect(audit.chat.adapter.media.localHistory.precedence.url).toEqual([
                 "canonical.url",
                 "MediaUrls[index]",
@@ -4439,6 +4524,48 @@ describe("explicit OpenClaw source audit", () => {
                         from: "heartbeat: HeartbeatSchema.unwrap().safeExtend({ agentId: string().trim().min(1).optional() }).optional()",
                         name: "heartbeat-target-defaults-path",
                         to: "heartbeat: HeartbeatSchema.optional()",
+                    },
+                    {
+                        expected: "agent heartbeat schema changed",
+                        fileName: "zod-schema.agent-runtime-fixture.js",
+                        from: "prompt: string().optional()",
+                        name: "heartbeat-prompt-optional-leaf",
+                        to: "prompt: string()",
+                    },
+                    {
+                        expected: "heartbeat config resolution changed",
+                        fileName: "heartbeat-runner-fixture.js",
+                        from: "...defaults,\n                    ...overrides",
+                        name: "heartbeat-entry-override-order",
+                        to: "...overrides,\n                    ...defaults",
+                    },
+                    {
+                        expected: "heartbeat prompt precedence changed",
+                        fileName: "heartbeat-runner-fixture.js",
+                        from: "return heartbeat?.prompt ?? cfg.agents?.defaults?.heartbeat?.prompt;",
+                        name: "heartbeat-prompt-entry-precedence",
+                        to: "return cfg.agents?.defaults?.heartbeat?.prompt ?? heartbeat?.prompt;",
+                    },
+                    {
+                        expected: "heartbeat prompt reload rule changed",
+                        fileName: "config-reload-plan-fixture.js",
+                        from: 'prefix: "agents.entries",\n                    kind: "hot",',
+                        name: "heartbeat-prompt-hot-reload",
+                        to: 'prefix: "agents.entries",\n                    kind: "restart",',
+                    },
+                    {
+                        expected: "heartbeat prompt reload execution changed",
+                        fileName: "config-reload-plan-fixture.js",
+                        from: "plan.restartHeartbeat = true;",
+                        name: "heartbeat-prompt-restart-action",
+                        to: "plan.restartGateway = true;",
+                    },
+                    {
+                        expected: "heartbeat prompt reload execution changed",
+                        fileName: "config-reload-plan-fixture.js",
+                        from: "restartGateway: false,",
+                        name: "heartbeat-prompt-no-gateway-restart",
+                        to: "restartGateway: true,",
                     },
                     {
                         expected: "agent heartbeat schema changed",

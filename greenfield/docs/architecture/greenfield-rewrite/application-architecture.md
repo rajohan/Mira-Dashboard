@@ -268,13 +268,23 @@ cron state from asserting an unjustified missing task automation.
 Schema v5 is the reviewed replacement contract for the legacy collection. OpenClaw retains exactly
 one scoped `cache.getHeartbeat` collection followed by one
 `monitoring.submitCompleteSnapshot` write; it does not fan out to domain procedures. The immutable
-release ships a fixed two-command `server/openClawHeartbeat.js` wrapper and a versioned
-`HEARTBEAT.md` cutover artifact. The wrapper reads only the descriptor-pinned `0600`
-`openclaw-heartbeat` credential, accepts bounded stdin for the complete snapshot, validates both
-tRPC envelopes with Valibot, and exposes no caller-selected procedure, method, path, authority, or
-retry. The live external consumer remains on its legacy contract until cutover atomically installs
-the staged prompt after the Greenfield target is ready. The parity row remains planned until an
-authenticated production smoke proves the one-collection/one-report sequence.
+release ships a fixed two-command `server/openClawHeartbeat.js` wrapper and an immutable Markdown
+prompt source. Its retained `HEARTBEAT.md` artifact filename is release inventory, not a workspace
+target; OpenClaw runtime authority is `agents.entries.ops.heartbeat.prompt`. The wrapper reads only
+the descriptor-pinned `0600` Greenfield `openclaw-heartbeat` credential, accepts bounded stdin for
+the complete snapshot, validates both tRPC envelopes with Valibot, and exposes no caller-selected
+procedure, method, path, authority, or retry. Build, publication, and application activation never
+mutate the external OpenClaw prompt or credential.
+
+After Greenfield is active and ready, an operator performs the one-time external transition: create
+or qualify the `openclaw-heartbeat` principal with exactly `cache:read` and `monitoring:write`, issue
+a new canonical Greenfield opaque credential, atomically install its token in the fixed private
+file, and base-hash/CAS patch the reviewed prompt into
+`agents.entries.ops.heartbeat.prompt`. The legacy `openclaw-heartbeat.<64-hex>` token is structurally
+incompatible and is never reused. The `agents.entries` change hot-restarts only the heartbeat
+scheduler; it does not require a full Gateway restart. Legacy is not a rollback target, and later
+Greenfield release rollbacks retain the same schema-v5 prompt and credential. The parity row remains
+planned until an authenticated production smoke proves the one-collection/one-report sequence.
 Provider-specific status payloads and identifiable task, job, cron, Git, container, and
 backup-process details are intentionally not restored.
 

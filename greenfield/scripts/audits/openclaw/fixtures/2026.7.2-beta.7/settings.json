@@ -209,6 +209,13 @@
         "omittedModeDerivedFromSecurityAndAsk": true,
         "policyLayerOrder": ["global", "agent", "session-legacy", "request-overrides"]
     },
+    "heartbeatPrompt": {
+        "entrySchema": "optional-string",
+        "gatewayRestart": false,
+        "pathTemplate": "agents.entries.<agentId>.heartbeat.prompt",
+        "reload": "hot-restart-heartbeat",
+        "resolution": "agent-entry-then-default"
+    },
     "io": {
         "snapshot": {
             "configAlias": "runtimeConfig",

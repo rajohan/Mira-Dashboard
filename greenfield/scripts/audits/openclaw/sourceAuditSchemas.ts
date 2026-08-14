@@ -1983,6 +1983,13 @@ export const settingsFixtureSchema = v.strictObject({
             v.literal("request-overrides"),
         ]),
     }),
+    heartbeatPrompt: v.strictObject({
+        entrySchema: v.literal("optional-string"),
+        gatewayRestart: v.literal(false),
+        pathTemplate: v.literal("agents.entries.<agentId>.heartbeat.prompt"),
+        reload: v.literal("hot-restart-heartbeat"),
+        resolution: v.literal("agent-entry-then-default"),
+    }),
     io: v.strictObject({
         snapshot: v.strictObject({
             configAlias: v.literal("runtimeConfig"),
@@ -2161,6 +2168,7 @@ export const sourceArtifactSchema = v.strictObject({
         "config-merge-patch",
         "config-mutation",
         "config-redaction",
+        "config-reload-plan",
         "control-ui-chat",
         "control-ui-plan-renderer",
         "control-ui-plan-rail",
@@ -2183,6 +2191,7 @@ export const sourceArtifactSchema = v.strictObject({
         "gateway-methods",
         "gateway-restart-scheduler",
         "gateway-websocket",
+        "heartbeat-prompt-runtime",
         "managed-outgoing-media",
         "media-facts",
         "media-output-directives",
@@ -2239,7 +2248,7 @@ export const sourceArtifactSchema = v.strictObject({
 
 const sourceArtifactsSchema = v.pipe(
     v.array(sourceArtifactSchema),
-    v.length(90),
+    v.length(92),
     v.check(
         (artifacts) => isSortedAndUnique(artifacts.map((artifact) => artifact.role)),
         "Source artifact roles must be sorted and unique"

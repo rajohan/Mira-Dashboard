@@ -237,6 +237,15 @@ const distributionArtifactSpecs: readonly DistributionArtifactSpec[] = [
         role: "config-redaction",
     },
     {
+        fileNamePattern: /^config-reload-plan-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "//#region src/gateway/config-reload-plan.ts",
+            "function isNoopGatewayReloadPlan(plan)",
+            "function buildGatewayReloadPlan(changedPaths, options = {})",
+        ],
+        role: "config-reload-plan",
+    },
+    {
         directory: "dist/control-ui/assets",
         fileNamePattern: /^chat-page-[A-Za-z0-9_-]+\.js$/u,
         markers: [
@@ -414,6 +423,15 @@ const distributionArtifactSpecs: readonly DistributionArtifactSpec[] = [
         fileNamePattern: /^server-ws-runtime-[A-Za-z0-9_-]+\.js$/u,
         markers: ["connect.challenge", "MAX_PREAUTH_PAYLOAD_BYTES"],
         role: "gateway-websocket",
+    },
+    {
+        fileNamePattern: /^heartbeat-runner-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "//#region src/infra/heartbeat-runner-config.ts",
+            "function resolveHeartbeatConfig(cfg, agentId)",
+            "function resolveHeartbeatPromptRaw(cfg, heartbeat)",
+        ],
+        role: "heartbeat-prompt-runtime",
     },
     {
         fileNamePattern: /^restart-[A-Za-z0-9_-]+\.js$/u,
@@ -5012,6 +5030,7 @@ function assertSettingsSemantics(
         "agent heartbeat schema"
     );
     assertRequiredMarkers(heartbeatSchema, "agent heartbeat schema", [
+        "prompt: string().optional()",
         "target: string().optional()",
     ]);
     assertRequiredMarkers(agentToolsSchema, "agent heartbeat attachment", [
@@ -5027,6 +5046,72 @@ function assertSettingsSemantics(
     );
     assertRequiredMarkers(agentDefaultsSchema, "agent heartbeat defaults schema", [
         "heartbeat: HeartbeatSchema.unwrap().safeExtend({ agentId: string().trim().min(1).optional() }).optional()",
+    ]);
+    const heartbeatRuntime = artifactByRole(
+        artifacts,
+        "heartbeat-prompt-runtime"
+    ).contents;
+    const heartbeatConfigResolution = boundedSourceRegion(
+        heartbeatRuntime,
+        "function resolveHeartbeatConfig(cfg, agentId) {",
+        "function resolveAmbientHeartbeatAgentId(cfg) {",
+        1024,
+        "heartbeat config resolution"
+    );
+    assertRequiredMarkers(heartbeatConfigResolution, "heartbeat config resolution", [
+        "const defaults = cfg.agents?.defaults?.heartbeat",
+        "const overrides = resolveAgentConfig(cfg, agentId)?.heartbeat",
+        "...defaults",
+        "...overrides",
+    ]);
+    if (
+        heartbeatConfigResolution.indexOf("...defaults") >=
+        heartbeatConfigResolution.indexOf("...overrides")
+    ) {
+        throw new Error(
+            "OpenClaw heartbeat config resolution changed outside the reviewed source-backed shape"
+        );
+    }
+    const heartbeatPromptResolution = boundedSourceRegion(
+        heartbeatRuntime,
+        "function resolveHeartbeatPromptRaw(cfg, heartbeat) {",
+        "function resolveHeartbeatPrompt(cfg, heartbeat) {",
+        256,
+        "heartbeat prompt precedence"
+    );
+    assertRequiredMarkers(heartbeatPromptResolution, "heartbeat prompt precedence", [
+        "return heartbeat?.prompt ?? cfg.agents?.defaults?.heartbeat?.prompt",
+    ]);
+    const configReloadPlan = artifactByRole(artifacts, "config-reload-plan").contents;
+    const agentEntryReloadRule = boundedSourceRegion(
+        configReloadPlan,
+        'prefix: "agents.entries",',
+        'prefix: "agent.heartbeat",',
+        256,
+        "heartbeat prompt reload rule"
+    );
+    assertRequiredMarkers(agentEntryReloadRule, "heartbeat prompt reload rule", [
+        'kind: "hot"',
+        'actions: ["restart-heartbeat"]',
+    ]);
+    assertForbiddenMarkers(agentEntryReloadRule, "heartbeat prompt reload rule", [
+        'kind: "restart"',
+    ]);
+    const gatewayReloadPlanning = boundedSourceRegion(
+        configReloadPlan,
+        "function buildGatewayReloadPlan(changedPaths, options = {}) {",
+        "//#endregion",
+        16 * 1024,
+        "heartbeat prompt reload execution"
+    );
+    assertRequiredMarkers(gatewayReloadPlanning, "heartbeat prompt reload execution", [
+        "restartGateway: false",
+        'case "restart-heartbeat":',
+        "plan.restartHeartbeat = true",
+        'if (rule.kind === "restart") {',
+        "plan.restartGateway = true",
+        "plan.hotReasons.push(path)",
+        "for (const action of rule.actions ?? []) applyAction(action, path, rule.accountScopedPlugin)",
     ]);
     const descriptors = artifactByRole(artifacts, "method-descriptors").contents;
     assertMethodPermission(descriptors, "config.get", "operator.read", false);
@@ -6105,6 +6190,13 @@ function assertSettingsSemantics(
             ],
             omittedModeDerivedFromSecurityAndAsk: true,
             policyLayerOrder: ["global", "agent", "session-legacy", "request-overrides"],
+        },
+        heartbeatPrompt: {
+            entrySchema: "optional-string",
+            gatewayRestart: false,
+            pathTemplate: "agents.entries.<agentId>.heartbeat.prompt",
+            reload: "hot-restart-heartbeat",
+            resolution: "agent-entry-then-default",
         },
         io: {
             snapshot: {
