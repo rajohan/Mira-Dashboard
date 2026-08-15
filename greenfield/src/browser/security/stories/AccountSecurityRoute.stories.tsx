@@ -314,9 +314,12 @@ export const StalePasswordEnrollment: Story = {
         const retry = await page.findByRole("button", {
             name: "Retry secure session refresh",
         });
-        await expect(
-            page.getByText("The request could not be completed. Try again.")
-        ).toBeVisible();
+        const reconciliation = page.getByRole("dialog", {
+            name: "Verify current password",
+        });
+        await expect(within(reconciliation).getByRole("alert")).toHaveTextContent(
+            "The request could not be completed. Try again."
+        );
         await userEvent.click(retry);
         await waitFor(async () => {
             await expect(
