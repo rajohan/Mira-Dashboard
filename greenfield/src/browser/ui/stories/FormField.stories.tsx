@@ -47,3 +47,19 @@ export const Multiline: Story = {
         label: "Description",
     },
 };
+
+export const MixedDescriptions: Story = {
+    render: () => (
+        <div className="grid max-w-2xl gap-4 sm:grid-cols-2">
+            <FormField
+                description="A stable ID used by scripts and configuration."
+                label="Account ID"
+            >
+                <Input className="mt-2" placeholder="openclaw-heartbeat" />
+            </FormField>
+            <FormField label="Account name">
+                <Input className="mt-2" placeholder="OpenClaw heartbeat" />
+            </FormField>
+        </div>
+    ),
+};

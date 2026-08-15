@@ -24,6 +24,7 @@ const task: TaskDetail = Object.freeze({
     createdAtMs: 1_800_000_000_000,
     id: "019fd974-54a2-74dd-a64b-d4186f8d8828",
     labels: ["database", "needs,triage"],
+    number: 232,
     priority: "high",
     status: "in-progress",
     title: "Existing task",

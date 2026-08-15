@@ -8,6 +8,7 @@ import {
     compareGatewaySessions,
     gatewayPrimarySessionKey,
 } from "../../contracts/gatewaySessions.ts";
+import { formatCompactCount } from "../lib/formatMeasurements.ts";
 
 export const gatewaySessionFilterLabels: Readonly<Record<GatewaySessionFilter, string>> =
     {
@@ -116,18 +117,45 @@ export function gatewaySessionMatchesFilter(
     return filter === "ALL" || session.kind === filter.toLowerCase();
 }
 
-/** @returns Compact token-count copy that preserves unknown and explicit stale states. */
-export function gatewaySessionTokenLabel(
+export interface GatewaySessionTokenPresentation {
+    readonly accessibleLabel: string;
+    readonly compactLabel: string;
+    readonly maximum?: number;
+    readonly value?: number;
+}
+
+/** @returns Compact token copy, exact accessible detail, and a fresh bounded meter. */
+export function gatewaySessionTokenPresentation(
     session: Pick<GatewaySession, "contextTokens" | "totalTokens" | "totalTokensFresh">
-): string {
-    if (session.totalTokens === undefined) return "Unknown";
+): GatewaySessionTokenPresentation {
+    if (session.totalTokens === undefined) {
+        return {
+            accessibleLabel: "Session token use: Unknown",
+            compactLabel: "Unknown",
+        };
+    }
     const formatter = new Intl.NumberFormat();
-    const count = formatter.format(session.totalTokens);
-    const usage =
+    const exactUsage =
         session.contextTokens === undefined
-            ? count
-            : `${count} / ${formatter.format(session.contextTokens)}`;
-    return session.totalTokensFresh ? usage : `~${usage} (last known)`;
+            ? formatter.format(session.totalTokens)
+            : `${formatter.format(session.totalTokens)} of ${formatter.format(session.contextTokens)}`;
+    const compactUsage =
+        session.contextTokens === undefined
+            ? formatCompactCount(session.totalTokens)
+            : `${formatCompactCount(session.totalTokens)} / ${formatCompactCount(session.contextTokens)}`;
+    const current = session.totalTokensFresh;
+    return {
+        accessibleLabel: `Session token use: ${exactUsage}, ${current ? "current" : "out of date"}`,
+        compactLabel: `${current ? "" : "~"}${compactUsage}${current ? "" : " (last known)"}`,
+        maximum:
+            current && session.contextTokens !== undefined
+                ? session.contextTokens
+                : undefined,
+        value:
+            current && session.contextTokens !== undefined
+                ? session.totalTokens
+                : undefined,
+    };
 }
 
 /** @returns Visual kind treatment without implying online health. */
@@ -168,10 +196,10 @@ export function gatewaySessionConfirmationCopy(
     switch (action) {
         case "compact": {
             return {
-                confirmLabel: "Summarize session",
+                confirmLabel: "Compact session",
                 danger: false,
-                description: `Summarize older context for “${displayName}”? This keeps the session but reduces how much previous conversation it carries forward.`,
-                title: "Summarize older context?",
+                description: `Compact older context for “${displayName}”? This keeps the session but reduces how much previous conversation it carries forward.`,
+                title: "Compact session?",
             };
         }
         case "reset": {
@@ -184,10 +212,10 @@ export function gatewaySessionConfirmationCopy(
         }
         case "delete": {
             return {
-                confirmLabel: "Delete transcript",
+                confirmLabel: "Delete session",
                 danger: true,
                 description: `Delete “${displayName}” and its OpenClaw transcript? This cannot be undone from the Dashboard.`,
-                title: "Delete session transcript?",
+                title: "Delete session?",
             };
         }
     }

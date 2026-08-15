@@ -11,12 +11,12 @@ import type {
 import { gatewaySessionFilters } from "../../contracts/gatewaySessions.ts";
 import { isDashboardOperationOutcomeUnknown } from "../api/trpcError.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
+import { formatCompactCount } from "../lib/formatMeasurements.ts";
 import { Alert } from "../ui/Alert.tsx";
-import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
-import { Card } from "../ui/Card.tsx";
 import { ConfirmModal } from "../ui/ConfirmModal.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
+import { Fieldset } from "../ui/Fieldset.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { Text } from "../ui/Text.tsx";
 import {
@@ -50,8 +50,8 @@ function successMessage(result: GatewaySessionActionResult): string {
         case "compact": {
             action =
                 result.outcome === "changed"
-                    ? "Older session context summarized."
-                    : "This session did not need summarizing.";
+                    ? "Session compacted."
+                    : "This session did not need compacting.";
             break;
         }
         case "reset": {
@@ -59,7 +59,7 @@ function successMessage(result: GatewaySessionActionResult): string {
             break;
         }
         case "delete": {
-            action = "Session transcript deleted.";
+            action = "Session deleted.";
             break;
         }
     }
@@ -110,9 +110,11 @@ export function GatewaySessionsView({
 
     function restoreActionFocus(action: PendingGatewaySessionAction) {
         queueMicrotask(() => {
-            const target = action.trigger.isConnected
-                ? action.trigger
-                : inventoryFocus.current;
+            const triggerVisible = action.trigger.checkVisibility();
+            const target =
+                action.trigger.isConnected && triggerVisible
+                    ? action.trigger
+                    : inventoryFocus.current;
             target?.focus();
         });
     }
@@ -169,39 +171,10 @@ export function GatewaySessionsView({
     }
 
     return (
-        <div className="space-y-5">
-            <Card aria-labelledby="gateway-session-status-heading">
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                    <div>
-                        <div className="flex flex-wrap items-center gap-2">
-                            <Heading
-                                id="gateway-session-status-heading"
-                                level={2}
-                                size="subsection"
-                            >
-                                Current status
-                            </Heading>
-                            <Badge variant={stale ? "warning" : "success"}>
-                                {stale ? "Last known" : "Connected"}
-                            </Badge>
-                        </div>
-                        <Text className="mt-1" tone="muted">
-                            Last updated{" "}
-                            <time
-                                dateTime={new Date(
-                                    snapshot.source.observedAtMs
-                                ).toISOString()}
-                            >
-                                {formatDashboardDateTime(snapshot.source.observedAtMs)}
-                            </time>
-                            . The totals below use this data.
-                        </Text>
-                        <Text className="mt-1" size="sm" tone="muted">
-                            Updates automatically every 10 seconds and when OpenClaw
-                            reports a change.
-                        </Text>
-                    </div>
-                    {unknownOutcomeBlocked && pendingAction === undefined && (
+        <div className="space-y-7">
+            <section aria-label="Session metrics">
+                {unknownOutcomeBlocked && pendingAction === undefined && (
+                    <div className="mb-3 flex justify-end">
                         <Button
                             busy={reconciliationState === "refreshing"}
                             busyLabel="Refreshing sessions…"
@@ -211,27 +184,27 @@ export function GatewaySessionsView({
                         >
                             Try refresh again
                         </Button>
-                    )}
-                </div>
-                <dl className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-                    <div className="border-primary-700 rounded-lg border p-3">
+                    </div>
+                )}
+                <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+                    <div className="border-primary-700 bg-primary-800/80 rounded-lg border p-3 text-center shadow-sm shadow-black/10">
                         <dt className="text-primary-400 text-xs font-medium uppercase">
-                            Shown
+                            Sessions
                         </dt>
                         <dd className="text-primary-50 mt-1 text-2xl font-semibold">
                             {snapshot.stats.shown}
                             {snapshot.projectionTruncated ? "+" : ""}
                         </dd>
                     </div>
-                    <div className="border-primary-700 rounded-lg border p-3">
+                    <div className="border-primary-700 bg-primary-800/80 rounded-lg border p-3 text-center shadow-sm shadow-black/10">
                         <dt className="text-primary-400 text-xs font-medium uppercase">
-                            Active in last hour
+                            Active (1h)
                         </dt>
                         <dd className="text-primary-50 mt-1 text-2xl font-semibold">
                             {snapshot.stats.activeInLastHour}
                         </dd>
                     </div>
-                    <div className="border-primary-700 rounded-lg border p-3">
+                    <div className="border-primary-700 bg-primary-800/80 rounded-lg border p-3 text-center shadow-sm shadow-black/10">
                         <dt className="text-primary-400 text-xs font-medium uppercase">
                             Main
                         </dt>
@@ -239,7 +212,7 @@ export function GatewaySessionsView({
                             {snapshot.stats.byKind.main}
                         </dd>
                     </div>
-                    <div className="border-primary-700 rounded-lg border p-3">
+                    <div className="border-primary-700 bg-primary-800/80 rounded-lg border p-3 text-center shadow-sm shadow-black/10">
                         <dt className="text-primary-400 text-xs font-medium uppercase">
                             Subagents
                         </dt>
@@ -247,29 +220,17 @@ export function GatewaySessionsView({
                             {snapshot.stats.byKind.subagent}
                         </dd>
                     </div>
-                    <div className="border-primary-700 rounded-lg border p-3">
+                    <div className="border-primary-700 bg-primary-800/80 rounded-lg border p-3 text-center shadow-sm shadow-black/10">
                         <dt className="text-primary-400 text-xs font-medium uppercase">
-                            Known tokens
+                            Tokens
                         </dt>
                         <dd className="text-primary-50 mt-1 text-2xl font-semibold">
                             {snapshot.stats.tokenTotalState === "overflow"
                                 ? "Too large"
-                                : new Intl.NumberFormat().format(
-                                      snapshot.stats.totalTokens ?? 0
-                                  )}
-                            {snapshot.stats.tokenTotalState === "partial" && (
-                                <Text
-                                    as="span"
-                                    className="mt-1 block"
-                                    size="sm"
-                                    tone="muted"
-                                >
-                                    Partial total
-                                </Text>
-                            )}
+                                : formatCompactCount(snapshot.stats.totalTokens ?? 0)}
                         </dd>
                     </div>
-                    <div className="border-primary-700 rounded-lg border p-3">
+                    <div className="border-primary-700 bg-primary-800/80 rounded-lg border p-3 text-center shadow-sm shadow-black/10">
                         <dt className="text-primary-400 text-xs font-medium uppercase">
                             Models
                         </dt>
@@ -285,7 +246,7 @@ export function GatewaySessionsView({
                         the first {snapshot.stats.shown}.
                     </Text>
                 )}
-            </Card>
+            </section>
 
             {stale && (
                 <Alert
@@ -311,7 +272,7 @@ export function GatewaySessionsView({
                 />
             </div>
 
-            <Card aria-labelledby="gateway-session-inventory-heading">
+            <section aria-labelledby="gateway-session-inventory-heading">
                 <div className="outline-none" ref={inventoryFocus} tabIndex={-1}>
                     <div className="flex flex-wrap items-end justify-between gap-4">
                         <div>
@@ -327,27 +288,34 @@ export function GatewaySessionsView({
                                 first.
                             </Text>
                         </div>
-                        <fieldset>
-                            <legend className="sr-only">Session type filter</legend>
-                            <div className="border-primary-700 flex flex-wrap rounded-lg border p-1">
+                        <Fieldset
+                            className="w-full max-w-full min-w-0 lg:w-auto"
+                            legend={<span className="sr-only">Session type filter</span>}
+                        >
+                            <div className="border-primary-700 bg-primary-800/80 flex w-full min-w-0 flex-nowrap gap-1 rounded-lg border p-1 lg:w-auto">
                                 {gatewaySessionFilters.map((value) => (
                                     <Button
+                                        aria-label={gatewaySessionFilterLabels[value]}
                                         aria-pressed={filter === value}
-                                        className={
-                                            filter === value
-                                                ? "bg-primary-600 text-primary-50"
-                                                : undefined
-                                        }
+                                        className="min-h-8 min-w-0 flex-1 px-1 text-[0.625rem] sm:min-h-10 sm:px-4 sm:text-sm lg:flex-none"
                                         key={value}
                                         onClick={() => setFilter(value)}
-                                        size="sm"
-                                        variant="ghost"
+                                        variant={filter === value ? "primary" : "ghost"}
                                     >
-                                        {gatewaySessionFilterLabels[value]}
+                                        {value === "SUBAGENT" ? (
+                                            <span>
+                                                SUB
+                                                <span className="hidden sm:inline">
+                                                    AGENT
+                                                </span>
+                                            </span>
+                                        ) : (
+                                            gatewaySessionFilterLabels[value]
+                                        )}
                                     </Button>
                                 ))}
                             </div>
-                        </fieldset>
+                        </Fieldset>
                     </div>
                     <output
                         aria-atomic="true"
@@ -386,7 +354,7 @@ export function GatewaySessionsView({
                         )}
                     </div>
                 </div>
-            </Card>
+            </section>
 
             <ConfirmModal
                 busy={actionPending || reconciliationState === "refreshing"}

@@ -1,15 +1,5 @@
+import { formatCompactCount } from "../lib/formatMeasurements.ts";
 import type { ChatSessionOption } from "./chatTypes.ts";
-
-function compactTokenCount(value: number): string {
-    if (value < 1000) return new Intl.NumberFormat().format(value);
-    const divisor = value >= 1_000_000 ? 1_000_000 : 1000;
-    const suffix = value >= 1_000_000 ? "m" : "k";
-    const scaled = value / divisor;
-    const maximumFractionDigits = scaled < 10 && !Number.isInteger(scaled) ? 1 : 0;
-    return `${new Intl.NumberFormat(undefined, {
-        maximumFractionDigits,
-    }).format(scaled)}${suffix}`;
-}
 
 export interface ChatSessionTokenPresentation {
     readonly accessibleLabel: string;
@@ -35,6 +25,6 @@ export function chatSessionTokenPresentation(
     const freshness = session.totalTokensFresh ? "current" : "out of date";
     return {
         accessibleLabel: `Session token use: ${exact}, ${freshness}`,
-        compactLabel: `${session.totalTokensFresh ? "" : "~"}${compactTokenCount(session.totalTokens)} / ${compactTokenCount(session.contextTokens)}`,
+        compactLabel: `${session.totalTokensFresh ? "" : "~"}${formatCompactCount(session.totalTokens)} / ${formatCompactCount(session.contextTokens)}`,
     };
 }

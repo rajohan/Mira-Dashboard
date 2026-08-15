@@ -47,8 +47,8 @@ describe("CopyTextButton", () => {
 
         await user.click(screen.getByRole("button", { name: "Copy JSON" }));
 
-        expect(screen.getByRole("button", { name: "Copy JSON" })).toHaveTextContent(
-            "Copy unavailable"
-        );
+        expect(
+            screen.getByRole("button", { name: "Copy JSON (copy unavailable)" })
+        ).toHaveTextContent("Copy unavailable");
     });
 });

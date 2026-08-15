@@ -17,6 +17,7 @@ import {
     openClawCronDeliveryModeLabel,
     openClawCronDeliveryStatusLabel,
     openClawCronPayloadLabel,
+    openClawCronRunStatusBadgeVariant,
     openClawCronRunStatusLabel,
     openClawCronScheduleLabel,
     openClawCronSessionTargetLabel,
@@ -56,12 +57,6 @@ function synchronizationBadgeVariant(
     if (state === "confirmed") return "success";
     if (state === "pending") return "warning";
     return "danger";
-}
-
-function runBadgeVariant(status: "error" | "ok" | "skipped" | "unknown") {
-    if (status === "ok") return "success" as const;
-    if (status === "error") return "danger" as const;
-    return "default" as const;
 }
 
 /** @returns Bounded OpenClaw definition, controls, and Gateway-owned run history. */
@@ -336,7 +331,11 @@ export function OpenClawCronDetail({
                                             Status
                                         </dt>
                                         <dd className="mt-1">
-                                            <Badge variant={runBadgeVariant(run.status)}>
+                                            <Badge
+                                                variant={openClawCronRunStatusBadgeVariant(
+                                                    run.status
+                                                )}
+                                            >
                                                 {openClawCronRunStatusLabel(run.status)}
                                             </Badge>
                                         </dd>

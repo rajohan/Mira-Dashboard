@@ -232,7 +232,7 @@ describe("chat workspace", () => {
         await user.click(screen.getByRole("button", { name: "Open activity panel" }));
         await user.click(screen.getByRole("button", { name: /Chat helper Idle/iu }));
         await user.type(
-            screen.getByRole("textbox", { name: "Ask chat helper" }),
+            screen.getByRole("textbox", { name: "Ask about this chat" }),
             "Session A draft"
         );
         await user.click(screen.getByRole("button", { name: "Chat settings" }));
@@ -427,7 +427,9 @@ describe("chat workspace", () => {
             screen.getByRole("button", { name: "Shorten chat history" })
         ).toBeDisabled();
         expect(screen.getByRole("button", { name: "Reset chat history" })).toBeDisabled();
-        expect(screen.getByRole("textbox", { name: "Ask chat helper" })).toBeDisabled();
+        expect(
+            screen.getByRole("textbox", { name: "Ask about this chat" })
+        ).toBeDisabled();
         expect(screen.getByRole("button", { name: "Reset" })).toBeDisabled();
         expect(screen.getByRole("button", { name: "Cancel task" })).toBeDisabled();
     });

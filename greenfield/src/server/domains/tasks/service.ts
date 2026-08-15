@@ -12,6 +12,7 @@ import type {
     DeleteTaskProgressResult,
     DeleteTaskResult,
     GetTaskInput,
+    ListTaskLabelsResult,
     ListTaskProgressInput,
     ListTaskProgressResult,
     ListTasksInput,
@@ -72,6 +73,7 @@ interface TaskServiceShape {
     readonly getTask: (
         input: GetTaskInput
     ) => Effect.Effect<TaskDetail, TaskNotFoundError>;
+    readonly listTaskLabels: () => Effect.Effect<ListTaskLabelsResult>;
     readonly listTaskProgress: (
         input: ListTaskProgressInput
     ) => Effect.Effect<ListTaskProgressResult, TaskNotFoundError>;
@@ -191,6 +193,7 @@ export function createTaskService(
         deleteTaskProgress: (principal, input) =>
             mutationEffect(() => progress.deleteTaskProgress(principal, input)),
         getTask: (input) => readEffect(() => queries.getTask(input)),
+        listTaskLabels: () => listEffect(() => queries.listTaskLabels()),
         listTaskProgress: (input) => readEffect(() => queries.listTaskProgress(input)),
         listTasks: (input) => listEffect(() => queries.listTasks(input)),
         moveTask: (principal, input) =>

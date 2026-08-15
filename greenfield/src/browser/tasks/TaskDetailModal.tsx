@@ -1,10 +1,10 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
-import { Bot, Pencil, Trash2, TriangleAlert } from "lucide-react";
+import { Pencil, Trash2, TriangleAlert } from "lucide-react";
 import { useState } from "react";
 
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { dashboardBrowserFailureMessage } from "../api/trpcError.ts";
+import { formatDashboardDateTimeToMinute } from "../lib/formatDateTime.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -13,33 +13,99 @@ import { LoadingState } from "../ui/LoadingState.tsx";
 import { Markdown } from "../ui/Markdown.tsx";
 import { Modal } from "../ui/Modal.tsx";
 import { Text } from "../ui/Text.tsx";
+import { TaskAutomationSummary } from "./TaskAutomationSummary.tsx";
 import { TaskEditorForm } from "./TaskEditorForm.tsx";
+import { TaskLabelBadge } from "./TaskLabelBadge.tsx";
 import { TaskMetadataControls } from "./TaskMetadataControls.tsx";
 import { useDeleteTaskMutation } from "./taskMutations.ts";
+import {
+    taskPriorityBadgeVariant,
+    taskRelativeTime,
+    taskStatusBadgeVariant,
+    taskStatusLabel,
+} from "./taskPresentation.ts";
 import { TaskProgressSection } from "./TaskProgressSection.tsx";
 import { taskDetailQueryKey, taskDetailQueryOptions } from "./taskQueries.ts";
 
 interface TaskDetailModalProps {
+    readonly availableLabels?: readonly string[];
     readonly onClose: () => void;
     readonly taskId: string;
 }
 
 /** @returns Complete task detail, edit, progress, and deletion dialog. */
-export function TaskDetailModal({ onClose, taskId }: TaskDetailModalProps) {
+export function TaskDetailModal({
+    availableLabels = [],
+    onClose,
+    taskId,
+}: TaskDetailModalProps) {
     const client = useDashboardTrpcClient();
     const queryClient = useQueryClient();
     const task = useQuery(taskDetailQueryOptions(client, taskId));
     const deleteTask = useDeleteTaskMutation(onClose);
     const [editing, setEditing] = useState(false);
     const [confirmingDelete, setConfirmingDelete] = useState(false);
+    let modalTitle = "Task details";
+    if (task.data !== undefined) {
+        modalTitle = editing
+            ? `Edit task #${task.data.number}`
+            : `#${task.data.number}: ${task.data.title}`;
+    }
 
     return (
         <Modal
+            description={
+                task.data === undefined ? undefined : (
+                    <span className="block">
+                        <span className="flex flex-col gap-0.5 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-4">
+                            <time
+                                dateTime={new Date(task.data.createdAtMs).toISOString()}
+                            >
+                                Created{" "}
+                                {formatDashboardDateTimeToMinute(
+                                    task.data.createdAtMs
+                                ).replace(" · ", ", ")}
+                            </time>
+                            <time
+                                dateTime={new Date(task.data.updatedAtMs).toISOString()}
+                                title={formatDashboardDateTimeToMinute(
+                                    task.data.updatedAtMs
+                                )}
+                            >
+                                Updated {taskRelativeTime(task.data.updatedAtMs)}
+                            </time>
+                        </span>
+                        {task.data.labels.length > 0 && (
+                            <span className="mt-2 flex flex-wrap items-center gap-1.5">
+                                {task.data.labels.map((label) => (
+                                    <TaskLabelBadge key={label} label={label} />
+                                ))}
+                            </span>
+                        )}
+                    </span>
+                )
+            }
             dismissible={!deleteTask.isPending}
+            eyebrow={
+                !editing && task.data !== undefined ? (
+                    <>
+                        <Badge variant={taskStatusBadgeVariant(task.data.status)}>
+                            {taskStatusLabel(task.data.status)}
+                        </Badge>
+                        <Badge
+                            className="capitalize"
+                            variant={taskPriorityBadgeVariant(task.data.priority)}
+                        >
+                            {task.data.priority}
+                        </Badge>
+                    </>
+                ) : undefined
+            }
             onClose={onClose}
             open
-            size="lg"
-            title={task.data?.title ?? "Task details"}
+            scrollOwner={editing ? "content" : "page"}
+            size={editing ? "md" : "lg"}
+            title={modalTitle}
         >
             {task.isPending && <LoadingState label="Loading task…" />}
             {task.isError && (
@@ -47,6 +113,7 @@ export function TaskDetailModal({ onClose, taskId }: TaskDetailModalProps) {
             )}
             {task.data !== undefined && editing && (
                 <TaskEditorForm
+                    availableLabels={availableLabels}
                     key={task.data.version}
                     onCancel={() => setEditing(false)}
                     onSaved={(saved) => {
@@ -110,28 +177,10 @@ export function TaskDetailModal({ onClose, taskId }: TaskDetailModalProps) {
             {task.data !== undefined && !editing && !confirmingDelete && (
                 <div>
                     <TaskMetadataControls task={task.data} />
-                    <div className="mt-5 flex flex-wrap items-center gap-2">
-                        <Badge>{task.data.priority} priority</Badge>
-                        {task.data.labels.map((label) => (
-                            <Badge key={label}>{label}</Badge>
-                        ))}
-                        {task.data.automation !== undefined && (
-                            <Link
-                                aria-label={`Open OpenClaw cron job ${task.data.automation.cronJobId}`}
-                                className="border-accent-500/30 bg-accent-500/15 text-accent-300 hover:border-accent-400/50 hover:text-accent-200 inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium"
-                                search={{
-                                    cronJobId: task.data.automation.cronJobId,
-                                    source: "openclaw",
-                                }}
-                                to="/jobs"
-                            >
-                                <Icon icon={Bot} size="sm" tone="inherit" />
-                                {task.data.automation.scheduleSummary ??
-                                    task.data.automation.cronJobId}
-                            </Link>
-                        )}
-                    </div>
-                    <div className="border-primary-700 mt-5 border-t pt-5">
+                    {task.data.automation !== undefined && (
+                        <TaskAutomationSummary automation={task.data.automation} />
+                    )}
+                    <div className="border-primary-700 bg-primary-900/40 mt-5 rounded-lg border p-4">
                         {task.data.bodyMarkdown === undefined ? (
                             <Text tone="muted">No task description.</Text>
                         ) : (
@@ -148,7 +197,7 @@ export function TaskDetailModal({ onClose, taskId }: TaskDetailModalProps) {
                         </Button>
                         <Button onClick={() => setEditing(true)} variant="secondary">
                             <Icon icon={Pencil} size="sm" tone="inherit" />
-                            Edit content
+                            Edit
                         </Button>
                     </div>
                     <TaskProgressSection taskId={taskId} />

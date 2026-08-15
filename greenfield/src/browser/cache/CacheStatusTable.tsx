@@ -4,6 +4,7 @@ import type { CacheEntryStatus } from "../../contracts/cache.ts";
 import { cn } from "../lib/classNames.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { Badge } from "../ui/Badge.tsx";
+import { Button } from "../ui/Button.tsx";
 import { DataTable } from "../ui/DataTable.tsx";
 import { Text } from "../ui/Text.tsx";
 import { Virtualizer, type VirtualizerRenderState } from "../ui/Virtualizer.tsx";
@@ -31,18 +32,19 @@ const cacheStatusColumnHelper = createColumnHelper<
 const cacheStatusColumns = cacheStatusColumnHelper.columns([
     cacheStatusColumnHelper.accessor((row) => row.entry.key, {
         cell: ({ getValue, row }) => (
-            <button
+            <Button
                 aria-current={row.original.selected ? "true" : undefined}
                 className={cn(
-                    "text-primary-100 hover:text-accent-300 focus-visible:ring-accent-300 block min-h-8 min-w-8 rounded px-2 py-1 text-left font-mono text-sm font-medium wrap-break-word outline-none focus-visible:ring-2",
+                    "text-primary-100 hover:text-accent-300 focus-visible:ring-accent-300 block min-h-8 min-w-8 rounded px-2 py-1 text-left font-mono text-sm font-medium wrap-break-word",
                     row.original.selected &&
                         "bg-accent-500/10 text-accent-300 underline decoration-2"
                 )}
                 onClick={() => row.original.onSelect(getValue())}
+                variant="unstyled"
                 type="button"
             >
                 {getValue()}
-            </button>
+            </Button>
         ),
         header: "Data source",
         id: "key",

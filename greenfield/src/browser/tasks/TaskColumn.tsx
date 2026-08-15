@@ -1,5 +1,6 @@
 import { useDroppable } from "@dnd-kit/react";
 
+import type { OpenClawCronJob } from "../../contracts/openClawCron.ts";
 import type { TaskStatus, TaskSummary } from "../../contracts/taskModel.ts";
 import { cn } from "../lib/classNames.ts";
 import { Heading } from "../ui/Heading.tsx";
@@ -8,6 +9,7 @@ import { TaskCard } from "./TaskCard.tsx";
 import { taskStatusDefinitions } from "./taskPresentation.ts";
 
 interface TaskColumnProps {
+    readonly cronJobsById: ReadonlyMap<string, OpenClawCronJob>;
     readonly disabled: boolean;
     readonly onSelectTask: (taskId: string) => void;
     readonly status: TaskStatus;
@@ -15,7 +17,13 @@ interface TaskColumnProps {
 }
 
 /** @returns One task-board status column and its droppable card region. */
-export function TaskColumn({ disabled, onSelectTask, status, tasks }: TaskColumnProps) {
+export function TaskColumn({
+    cronJobsById,
+    disabled,
+    onSelectTask,
+    status,
+    tasks,
+}: TaskColumnProps) {
     const definition = taskStatusDefinitions.find(
         (candidate) => candidate.status === status
     );
@@ -27,7 +35,7 @@ export function TaskColumn({ disabled, onSelectTask, status, tasks }: TaskColumn
     if (definition === undefined) return null;
 
     return (
-        <section className="flex min-w-0 flex-col lg:min-h-0 lg:min-w-70 lg:flex-1">
+        <section className="flex min-w-0 flex-col lg:min-h-0 lg:flex-1">
             <header className="mb-2 flex items-center gap-2 px-0.5">
                 <span
                     aria-hidden="true"
@@ -42,7 +50,7 @@ export function TaskColumn({ disabled, onSelectTask, status, tasks }: TaskColumn
             </header>
             <div
                 className={cn(
-                    "border-primary-700/60 bg-primary-800/30 flex min-h-32 flex-col gap-2 rounded-lg border-2 border-dashed p-2 transition-colors lg:min-h-0 lg:flex-1",
+                    "border-primary-700/60 bg-primary-800/30 flex min-h-32 flex-col gap-2 rounded-lg border-2 border-dashed p-2 transition-colors lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:overscroll-y-contain",
                     isDropTarget && "border-accent-400 bg-accent-500/5"
                 )}
                 ref={ref}
@@ -54,6 +62,11 @@ export function TaskColumn({ disabled, onSelectTask, status, tasks }: TaskColumn
                 ) : (
                     tasks.map((task) => (
                         <TaskCard
+                            automationJob={
+                                task.automation === undefined
+                                    ? undefined
+                                    : cronJobsById.get(task.automation.cronJobId)
+                            }
                             disabled={disabled}
                             key={task.id}
                             onSelect={onSelectTask}

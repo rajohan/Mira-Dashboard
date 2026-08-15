@@ -13,8 +13,8 @@ import {
 } from "../../contracts/jobModel.ts";
 
 const editorTextSchema = v.pipe(
-    v.string("Schedule value is invalid"),
-    v.maxLength(400, "Schedule value is outside its budget")
+    v.string("Enter a schedule value."),
+    v.maxLength(400, "Use no more than 400 characters.")
 );
 
 const scheduleEditorObjectSchema = v.strictObject({

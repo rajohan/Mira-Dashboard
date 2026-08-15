@@ -10,7 +10,10 @@ export function dashboardContentContainerClassName(pathname: string): string {
         return "h-full min-h-0 w-full";
     }
     if (pathname === "/files") {
-        return `h-full min-h-0 ${dashboardPageContainerClassName}`;
+        return `lg:h-full lg:min-h-0 ${dashboardPageContainerClassName}`;
+    }
+    if (pathname === "/tasks") {
+        return `lg:h-full lg:min-h-0 ${dashboardPageContainerClassName}`;
     }
     return dashboardPageContainerClassName;
 }

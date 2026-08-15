@@ -81,7 +81,9 @@ test("files lazy route waits for authentication before composing the workspace b
         expect(await screen.findByLabelText("Authentication status")).toHaveTextContent(
             "Checking your session…"
         );
-        expect(screen.queryByRole("heading", { level: 1, name: "Files" })).toBeNull();
+        expect(
+            screen.queryByRole("heading", { level: 2, name: "Workspace explorer" })
+        ).toBeNull();
         expect(query).toHaveBeenCalledTimes(1);
         expect(query).toHaveBeenCalledWith("auth.status", {}, expect.any(Object));
 
@@ -90,14 +92,6 @@ test("files lazy route waits for authentication before composing the workspace b
             await authentication.promise;
         });
 
-        expect(
-            await screen.findByRole("heading", { level: 1, name: "Files" })
-        ).toBeVisible();
-        expect(
-            screen.getByText(
-                "Browse and edit files in the approved Dashboard and Mira workspace folders. Preview, download, upload, and replace files without exposing server paths."
-            )
-        ).toBeVisible();
         expect(
             await screen.findByRole("heading", { level: 2, name: "Workspace explorer" })
         ).toBeVisible();

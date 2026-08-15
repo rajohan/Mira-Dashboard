@@ -702,7 +702,10 @@ describe("DatabaseRoute", () => {
             const databases = screen.getByRole("region", {
                 name: "PostgreSQL databases",
             });
-            expect(databases).toHaveClass("overflow-x-auto");
+            expect(databases).toHaveClass(
+                "dashboard-data-table-container",
+                "overflow-x-hidden"
+            );
             expect(within(databases).getByText("mira_app")).toBeVisible();
             expect(within(databases).getByText("1,234")).toBeVisible();
             expect(within(databases).getByText("98.4%")).toBeVisible();

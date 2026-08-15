@@ -7,6 +7,7 @@ import type {
     SecurityPersistenceDatabase,
     SecurityUserInsert,
     SecurityUserMfaStateUpdateInput,
+    SecurityUserPasswordResetInput,
     SecurityUserPasswordUpdateInput,
     SecurityUserRecord,
 } from "./securityPersistenceTypes.ts";
@@ -103,6 +104,33 @@ export class DrizzleSecurityUserStore {
                     eq(users.id, input.userId),
                     eq(users.authenticationVersion, input.expectedAuthenticationVersion),
                     eq(users.passwordHash, input.expectedPasswordHash),
+                    isNull(users.disabledAt)
+                )
+            )
+            .returning()
+            .get();
+        return row === undefined ? undefined : parseSecurityUser(row);
+    }
+
+    resetPassword(input: SecurityUserPasswordResetInput): SecurityUserRecord | undefined {
+        const expectedMfaState =
+            input.expectedMfaEnabledAt === null
+                ? isNull(users.mfaEnabledAt)
+                : eq(users.mfaEnabledAt, input.expectedMfaEnabledAt);
+        const row = this.#database
+            .update(users)
+            .set({
+                authenticationVersion: sql`${users.authenticationVersion} + 1`,
+                ...(input.resetMfa ? { mfaEnabledAt: null } : {}),
+                passwordHash: input.passwordHash,
+                updatedAt: input.updatedAt,
+            })
+            .where(
+                and(
+                    eq(users.id, input.userId),
+                    eq(users.authenticationVersion, input.expectedAuthenticationVersion),
+                    eq(users.passwordHash, input.expectedPasswordHash),
+                    expectedMfaState,
                     isNull(users.disabledAt)
                 )
             )

@@ -1,5 +1,6 @@
 import path from "node:path";
 
+import { moltbookAvatarOrigin } from "../../contracts/moltbook.ts";
 import {
     createImmutableReleaseFileReader,
     type ImmutableReleaseFileIdentity,
@@ -70,7 +71,7 @@ function fixedSecurityHeaders(): Headers {
             "font-src 'self'",
             "form-action 'self'",
             "frame-ancestors 'none'",
-            "img-src 'self' data:",
+            `img-src 'self' data: ${moltbookAvatarOrigin}`,
             "manifest-src 'self'",
             "object-src 'none'",
             "script-src 'self'",

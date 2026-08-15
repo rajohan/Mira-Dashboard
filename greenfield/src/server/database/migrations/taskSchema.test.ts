@@ -3,19 +3,21 @@ import { describe, expect, test } from "bun:test";
 import { openFreshMigratedDatabase } from "../../test/support/freshDatabase.ts";
 
 const taskId = "019fd100-0000-7000-8000-000000000001";
+const secondTaskId = "019fd100-0000-7000-8000-000000000005";
 const eventId = "019fd100-0000-7000-8000-000000000002";
 const updateId = "019fd100-0000-7000-8000-000000000003";
 const userId = "019fd100-0000-7000-8000-000000000004";
 
 function insertTask(
-    database: Awaited<ReturnType<typeof openFreshMigratedDatabase>>
+    database: Awaited<ReturnType<typeof openFreshMigratedDatabase>>,
+    id = taskId
 ): void {
     database.sqlite.run(
         `INSERT INTO tasks (
             assignee, body_markdown, created_at, id, priority, status, title,
             updated_at, version
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [null, null, 1000, taskId, "medium", "todo", "Schema task", 1000, 1]
+        [null, null, 1000, id, "medium", "todo", "Schema task", 1000, 1]
     );
 }
 
@@ -66,6 +68,41 @@ describe("task baseline schema", () => {
                     detail.includes("task_labels_label_task_idx")
                 )
             ).toBeTrue();
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("allocates durable monotonic task numbers without reusing deletions", async () => {
+        const database = await openFreshMigratedDatabase();
+
+        try {
+            insertTask(database);
+            expect(
+                database.sqlite
+                    .query<{ number: number }, [string]>(
+                        "SELECT number FROM tasks WHERE id = ?"
+                    )
+                    .get(taskId)
+            ).toEqual({ number: 1 });
+
+            database.sqlite.run("DELETE FROM tasks WHERE id = ?", [taskId]);
+            insertTask(database, secondTaskId);
+            expect(
+                database.sqlite
+                    .query<{ number: number }, [string]>(
+                        "SELECT number FROM tasks WHERE id = ?"
+                    )
+                    .get(secondTaskId)
+            ).toEqual({ number: 2 });
+            expect(
+                database.sqlite
+                    .query<{ seq: number }, []>(
+                        "SELECT seq FROM sqlite_sequence WHERE name = 'tasks'"
+                    )
+                    .get()
+            ).toEqual({ seq: 2 });
+            expect(() => insertTask(database, secondTaskId)).toThrow();
         } finally {
             database.sqlite.close(true);
         }

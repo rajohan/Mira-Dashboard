@@ -9,6 +9,7 @@ import type { ReactNode } from "react";
 
 import { cn } from "../lib/classNames.ts";
 import { Icon } from "./Icon.tsx";
+import { interactiveTapClassName } from "./interactionStyles.ts";
 
 interface CheckboxProps {
     readonly checked: boolean;
@@ -36,6 +37,7 @@ export function Checkbox({
             <HeadlessCheckbox
                 checked={checked}
                 className={cn(
+                    interactiveTapClassName,
                     "border-primary-500 bg-primary-900 group mt-0.5 flex size-5 shrink-0 items-center justify-center rounded border transition-colors",
                     "data-checked:border-accent-500 data-checked:bg-accent-500",
                     "not-data-disabled:data-hover:border-accent-400 not-data-disabled:data-hover:bg-primary-800 hover:not-data-disabled:border-accent-400 hover:not-data-disabled:bg-primary-800",
@@ -54,7 +56,7 @@ export function Checkbox({
                 />
             </HeadlessCheckbox>
             <div className="min-w-0">
-                <Label className="text-primary-200 block text-sm font-medium data-disabled:opacity-55">
+                <Label className="text-primary-200 block cursor-pointer text-sm font-medium data-disabled:cursor-not-allowed data-disabled:opacity-55">
                     {label}
                 </Label>
                 {description !== undefined && (

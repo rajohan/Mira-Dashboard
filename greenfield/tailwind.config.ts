@@ -32,6 +32,16 @@ export default {
                     950: "#17244A",
                 },
             },
+            keyframes: {
+                "loading-state-second-dot": {
+                    "0%, 32%": { opacity: "0" },
+                    "33%, 100%": { opacity: "1" },
+                },
+                "loading-state-third-dot": {
+                    "0%, 65%": { opacity: "0" },
+                    "66%, 100%": { opacity: "1" },
+                },
+            },
         },
     },
     plugins: [typography],

@@ -3,7 +3,15 @@ import superjson from "superjson";
 import * as v from "valibot";
 
 import type { RegisteredProcedureContract } from "../../contracts/contractRegistry.ts";
-import type { ProcedureContract } from "../../contracts/registry.ts";
+import type {
+    ContractAuthenticationErrorReason,
+    ProcedureContract,
+} from "../../contracts/registry.ts";
+import {
+    SecurityVerificationCancelledError,
+    type SecurityVerificationCoordinator,
+} from "../security/securityVerificationCoordinator.ts";
+import { dashboardAuthenticationPolicyReason } from "./trpcFailureData.ts";
 
 type ProcedureOfKind<TKind extends RegisteredProcedureContract["kind"]> = Extract<
     RegisteredProcedureContract,
@@ -61,6 +69,11 @@ export interface DashboardTrpcClient {
         input: DashboardProcedureInput<TName>,
         options?: TRPCRequestOptions
     ): Promise<DashboardProcedureOutput<TName>>;
+}
+
+/** Optional browser-wide control-flow services applied after contract validation. */
+export interface DashboardTrpcClientOptions {
+    readonly securityVerification?: SecurityVerificationCoordinator;
 }
 
 async function procedureContractsFor(
@@ -204,6 +217,53 @@ function parseContractValue<TValue>(schema: v.GenericSchema, value: unknown): TV
     return result.output as TValue;
 }
 
+function contractAllowsSecurityVerification(
+    contract: ProcedureContract,
+    reason: ContractAuthenticationErrorReason
+): boolean {
+    return (
+        contract.access.kind === "recent-auth" &&
+        contract.errors.includes("FORBIDDEN") &&
+        contract.errorReasons?.includes(reason) === true
+    );
+}
+
+async function invokeTransportWithSecurityVerification(
+    contract: ProcedureContract,
+    input: unknown,
+    kind: "mutation" | "query",
+    name: DashboardProcedureName,
+    options: TRPCRequestOptions | undefined,
+    transport: DashboardTrpcTransport,
+    securityVerification: SecurityVerificationCoordinator | undefined
+): Promise<unknown> {
+    const invoke = () => transport[kind](name, input, options);
+    try {
+        return await invoke();
+    } catch (error) {
+        const reason = dashboardAuthenticationPolicyReason(error);
+        if (
+            securityVerification === undefined ||
+            reason === undefined ||
+            !contractAllowsSecurityVerification(contract, reason)
+        ) {
+            throw error;
+        }
+        const lease = securityVerification.request(reason, {
+            signal: options?.signal,
+        });
+        if (lease === undefined) throw error;
+        try {
+            if ((await lease.outcome) === "cancelled") {
+                throw new SecurityVerificationCancelledError();
+            }
+            return await invoke();
+        } finally {
+            lease.releaseAfterAttempt();
+        }
+    }
+}
+
 /**
  * Creates the same-origin, non-batching tRPC transport used by the browser.
  * @param url Same-origin tRPC mount.
@@ -234,7 +294,8 @@ export function createDashboardTrpcTransport(url = "/trpc"): DashboardTrpcTransp
  * @returns Typed query and mutation operations.
  */
 export function createDashboardTrpcClient(
-    transport: DashboardTrpcTransport = createDashboardTrpcTransport()
+    transport: DashboardTrpcTransport = createDashboardTrpcTransport(),
+    { securityVerification }: DashboardTrpcClientOptions = {}
 ): DashboardTrpcClient {
     return {
         async mutation(name, input, options) {
@@ -243,7 +304,15 @@ export function createDashboardTrpcClient(
                 contract.input,
                 input
             );
-            const output = await transport.mutation(name, parsedInput, options);
+            const output = await invokeTransportWithSecurityVerification(
+                contract,
+                parsedInput,
+                "mutation",
+                name,
+                options,
+                transport,
+                securityVerification
+            );
             return parseContractValue<DashboardProcedureOutput<typeof name>>(
                 contract.output,
                 output
@@ -255,7 +324,15 @@ export function createDashboardTrpcClient(
                 contract.input,
                 input
             );
-            const output = await transport.query(name, parsedInput, options);
+            const output = await invokeTransportWithSecurityVerification(
+                contract,
+                parsedInput,
+                "query",
+                name,
+                options,
+                transport,
+                securityVerification
+            );
             return parseContractValue<DashboardProcedureOutput<typeof name>>(
                 contract.output,
                 output

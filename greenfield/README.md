@@ -35,6 +35,21 @@ coexisting application or its `node_modules`.
 immutable release containing browser/process artifacts, migrations, generated documentation,
 package/runtime identity, and the reviewed systemd units; it does not mutate production.
 
+## Host password recovery
+
+An operator with an interactive terminal on the Dashboard host can reset a forgotten Dashboard
+password through the active, manifest-bound production release:
+
+```bash
+cd /home/ubuntu/projects/mira-dashboard/production/checkout
+bun run auth:reset-password -- --username <username>
+```
+
+Add `--reset-mfa` only for break-glass recovery that must also remove the user's authenticator
+apps, security keys, and recovery codes. The command prompts twice with terminal echo disabled;
+never place the new password in arguments, environment variables, shell history, or messages.
+See the [password-recovery runbook](docs/operations/runbooks.md#forgotten-dashboard-password).
+
 ## Documentation
 
 - [Documentation index](docs/index.md)
@@ -43,6 +58,8 @@ package/runtime identity, and the reviewed systemd units; it does not mutate pro
 - [Local development](docs/development/local-development.md)
 - [Testing and pull requests](docs/development/testing-and-prs.md)
 - [Storybook](docs/development/storybook.md)
+- [Operator runbooks](docs/operations/runbooks.md)
+- [Authentication trust boundaries](docs/security/auth-and-trust-boundaries.md)
 
 ## Cutover
 

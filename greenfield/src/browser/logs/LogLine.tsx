@@ -6,6 +6,7 @@ import type { LogLine as LogLineContract } from "../../contracts/logs.ts";
 import { cn } from "../lib/classNames.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { Badge } from "../ui/Badge.tsx";
+import { Button } from "../ui/Button.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import {
     presentRedactedLogLine,
@@ -187,7 +188,11 @@ export function LogLine({
             {(presentation.kind === "structured" ||
                 presentation.message !== presentation.raw) && (
                 <Disclosure as="div" className="mt-1.5 min-w-0 sm:ml-[11.75rem]">
-                    <DisclosureButton className="text-primary-400 hover:text-primary-200 focus-visible:ring-accent-400 group flex items-center gap-1 rounded text-[0.6875rem] outline-none focus-visible:ring-2">
+                    <DisclosureButton
+                        as={Button}
+                        className="text-primary-400 hover:text-primary-200 group focus-visible:ring-accent-400 flex items-center gap-1 rounded text-[0.6875rem]"
+                        variant="unstyled"
+                    >
                         <Icon
                             className="transition-transform group-data-open:rotate-180"
                             icon={ChevronDown}

@@ -410,18 +410,15 @@ describe("LogsView", () => {
         expect(screen.queryByText(/raw \[REDACTED\]/u)).toBeNull();
     });
 
-    test("balances source and search fields with an aria-hidden description row", () => {
+    test("keeps the search helper attached without a synthetic source description", () => {
         const { container } = render(<LogsView {...properties()} />);
-        const spacer = container.querySelector<HTMLElement>(
-            "[data-log-source-description-spacer]"
-        );
         const sourceSelect = container.querySelector<HTMLElement>(
             '[aria-haspopup="listbox"]'
         );
 
-        expect(spacer).toHaveClass("invisible", "select-none");
-        expect(spacer).toHaveAttribute("aria-hidden", "true");
-        expect(spacer).toHaveTextContent("Searches recent lines from this source.");
+        expect(
+            container.querySelector("[data-log-source-description-spacer]")
+        ).toBeNull();
         expect(sourceSelect).not.toBeNull();
         expect(sourceSelect).not.toHaveAccessibleDescription(
             "Searches recent lines from this source."

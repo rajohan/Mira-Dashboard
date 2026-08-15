@@ -1,4 +1,5 @@
 import { MessageSquare, Star, UserRound, UsersRound } from "lucide-react";
+import { useState } from "react";
 
 import type {
     MoltbookFeedPost,
@@ -45,6 +46,10 @@ export function MoltbookProfileCard({
     home,
     profile,
 }: Readonly<{ home: MoltbookHome; profile: MoltbookProfile }>) {
+    const [failedAvatarUrl, setFailedAvatarUrl] = useState<string>();
+    const avatarVisible =
+        profile.avatarUrl !== undefined && failedAvatarUrl !== profile.avatarUrl;
+
     return (
         <Card className="flex flex-col gap-4 sm:flex-row sm:items-start">
             <ExternalLink
@@ -53,7 +58,18 @@ export function MoltbookProfileCard({
                 href={moltbookProfileUrl(profile.name)}
                 showIcon={false}
             >
-                <Icon icon={UserRound} size="lg" tone="accent" />
+                {avatarVisible ? (
+                    <img
+                        alt=""
+                        className="size-full rounded-full object-cover"
+                        decoding="async"
+                        onError={() => setFailedAvatarUrl(profile.avatarUrl)}
+                        referrerPolicy="no-referrer"
+                        src={profile.avatarUrl}
+                    />
+                ) : (
+                    <Icon icon={UserRound} size="lg" tone="accent" />
+                )}
             </ExternalLink>
             <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">

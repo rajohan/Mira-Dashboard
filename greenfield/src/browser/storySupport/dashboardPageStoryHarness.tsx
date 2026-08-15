@@ -2,6 +2,7 @@ import type { QueryKey } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { type ReactElement, useEffect, useState } from "react";
 
+import type { AuthStatus } from "../../contracts/auth.ts";
 import {
     dashboardRouteDocumentation,
     type DashboardRouteDocumentation,
@@ -13,9 +14,10 @@ import type {
 } from "../api/realtimeClient.ts";
 import { createDashboardTrpcClient } from "../api/trpcClient.ts";
 import { DashboardBrowserApplication } from "../application.tsx";
-import { authStatusQueryKey } from "../auth/authQueries.ts";
+import { authStatusCacheIdentity, authStatusQueryKey } from "../auth/authQueries.ts";
 import { createDashboardBrowserCollections } from "../data/dashboardCollections.ts";
 import { createDashboardRouter } from "../router.tsx";
+import { createSecurityVerificationCoordinator } from "../security/securityVerificationCoordinator.ts";
 import type { DashboardWebAuthnClient } from "../security/webauthn/webauthnClient.ts";
 import { TerminalBrowserDependenciesProvider } from "../terminal/terminalBrowserDependencies.tsx";
 import type { TerminalBrowserDependencies } from "../terminal/terminalBrowserDependenciesContext.ts";
@@ -85,7 +87,13 @@ function createPageStoryDependencies({
             updatedAt: 1,
         });
     }
-    const trpcClient = createDashboardTrpcClient(new DashboardStoryTransport(fixtures));
+    const securityVerification = createSecurityVerificationCoordinator(() => {
+        const status = queryClient.getQueryData<AuthStatus>(authStatusQueryKey);
+        return status === undefined ? undefined : authStatusCacheIdentity(status);
+    });
+    const trpcClient = createDashboardTrpcClient(new DashboardStoryTransport(fixtures), {
+        securityVerification,
+    });
     return {
         collections: createDashboardBrowserCollections(queryClient, trpcClient),
         onAuthenticatedCacheReset: () => {
@@ -100,6 +108,7 @@ function createPageStoryDependencies({
         router: createDashboardRouter(createMemoryHistory({ initialEntries: [route] }), {
             scrollRestoration: false,
         }),
+        securityVerification,
         trpcClient,
         webAuthnClient: unavailableStoryWebAuthnClient,
     };

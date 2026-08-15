@@ -73,25 +73,32 @@ export function isValidBrowserSessionUserAgent(value: string): boolean {
 
 /** Login username normalized before lookup without weakening the storage contract. */
 export const authUsernameInputSchema = v.pipe(
-    v.string("Username is invalid"),
-    v.maxLength(32, "Username is invalid"),
-    v.regex(/^[A-Za-z0-9][A-Za-z0-9._-]{2,31}$/u, "Username is invalid"),
+    v.string("Enter a username."),
+    v.minLength(1, "Enter a username."),
+    v.maxLength(
+        32,
+        "Use 3–32 letters, numbers, periods, underscores, or hyphens. Start with a letter or number."
+    ),
+    v.regex(
+        /^[A-Za-z0-9][A-Za-z0-9._-]{2,31}$/u,
+        "Use 3–32 letters, numbers, periods, underscores, or hyphens. Start with a letter or number."
+    ),
     v.transform((username) => username.toLowerCase())
 );
 
 /** Shared password input budget for bootstrap, login, and password change. */
 export const authPasswordInputSchema = v.pipe(
-    v.string("Password is invalid"),
-    v.minLength(authPasswordMinimumLength, "Password is invalid"),
-    v.maxLength(authPasswordMaximumLength * 2, "Password is invalid"),
-    v.check(hasValidAuthPasswordLength, "Password is invalid")
+    v.string("Enter a password."),
+    v.minLength(1, "Enter a password."),
+    v.maxLength(authPasswordMaximumLength * 2, "Password must contain 8–256 characters."),
+    v.check(hasValidAuthPasswordLength, "Password must contain 8–256 characters.")
 );
 
 /** Exact six-digit authenticator-app proof. */
 export const totpCodeInputSchema = v.pipe(
-    v.string("Authenticator code is invalid"),
-    v.length(6, "Authenticator code is invalid"),
-    v.regex(/^\d{6}$/u, "Authenticator code is invalid")
+    v.string("Enter the 6-digit code from your authenticator app."),
+    v.length(6, "Enter the 6-digit code from your authenticator app."),
+    v.regex(/^\d{6}$/u, "Enter the 6-digit code from your authenticator app.")
 );
 
 /** Canonical one-time recovery code returned only at generation time. */
@@ -103,17 +110,25 @@ export const recoveryCodeSchema = v.pipe(
 
 /** Recovery proof normalized only after its exact shape has been validated. */
 export const recoveryCodeInputSchema = v.pipe(
-    v.string("Recovery code is invalid"),
-    v.maxLength(128, "Recovery code is invalid"),
-    v.regex(/^\s*[0-9A-Fa-f]{32}-[0-9A-Fa-f]{32}\s*$/u, "Recovery code is invalid"),
+    v.string(
+        "Enter the full recovery code, including the hyphen between both 32-character parts."
+    ),
+    v.maxLength(
+        128,
+        "Enter the full recovery code, including the hyphen between both 32-character parts."
+    ),
+    v.regex(
+        /^\s*[0-9A-Fa-f]{32}-[0-9A-Fa-f]{32}\s*$/u,
+        "Enter the full recovery code, including the hyphen between both 32-character parts."
+    ),
     v.transform((code) => code.trim().toLowerCase())
 );
 
 const gatewayCredentialInputSchema = v.pipe(
-    v.string("Gateway credential is invalid"),
-    v.minLength(1, "Gateway credential is invalid"),
-    v.maxLength(1024, "Gateway credential is invalid"),
-    v.regex(/^[\u0021-\u007E]+$/u, "Gateway credential is invalid")
+    v.string("Enter the OpenClaw Gateway credential."),
+    v.minLength(1, "Enter the OpenClaw Gateway credential."),
+    v.maxLength(1024, "Use 1–1,024 printable characters with no spaces."),
+    v.regex(/^[\u0021-\u007E]+$/u, "Use 1–1,024 printable characters with no spaces.")
 );
 
 const authSessionUserAgentSchema = v.pipe(

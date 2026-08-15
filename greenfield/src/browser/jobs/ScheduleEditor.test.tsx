@@ -43,7 +43,7 @@ function cronSchedule(): ScheduleSummary {
 }
 
 describe("schedule editor", () => {
-    test("balances the cron controls with a hidden schedule-type spacer", () => {
+    test("keeps the cron helper attached without a hidden schedule-type spacer", () => {
         render(
             <ScheduleEditor busy={false} onSave={jest.fn()} schedule={cronSchedule()} />
         );
@@ -52,7 +52,6 @@ describe("schedule editor", () => {
             name: "Edit Worker smoke schedule",
         });
         const cronExpression = screen.getByLabelText("Cron expression");
-        const spacer = form.querySelector<HTMLElement>("[data-cron-description-spacer]");
         const descriptionId = cronExpression.getAttribute("aria-describedby");
         const helper =
             descriptionId === null
@@ -60,13 +59,12 @@ describe("schedule editor", () => {
                 : document.querySelector<HTMLElement>(`[id="${descriptionId}"]`);
 
         expect(form).toHaveClass("sm:items-start");
-        expect(spacer).toHaveClass("invisible", "select-none");
-        expect(spacer).toHaveAttribute("aria-hidden", "true");
+        expect(form.querySelector("[data-cron-description-spacer]")).toBeNull();
         expect(helper).toHaveTextContent("Order: minute, hour, day, month, weekday.");
-        expect(cronExpression).toHaveAttribute("placeholder", "Example: 0 6 * * 1-5");
+        expect(cronExpression).toHaveAttribute("placeholder", "0 6 * * 1-5");
         expect(screen.getByLabelText("Time zone")).toHaveAttribute(
             "placeholder",
-            "Example: Europe/Oslo"
+            "Europe/Oslo"
         );
     });
 
@@ -90,7 +88,7 @@ describe("schedule editor", () => {
             name: "Edit Worker smoke schedule",
         });
         const interval = screen.getByLabelText("Interval (seconds)");
-        expect(interval).toHaveAttribute("placeholder", "Example: 300");
+        expect(interval).toHaveAttribute("placeholder", "300");
         const save = screen.getByRole("button", { name: "Save schedule" });
         expect(form).toHaveAttribute("novalidate");
         expect(save).toBeDisabled();

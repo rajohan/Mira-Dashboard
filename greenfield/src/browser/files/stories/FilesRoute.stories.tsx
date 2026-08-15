@@ -157,6 +157,27 @@ export const Populated: Story = {
     args: { fixtures: fileFixtures(), route: "/files" },
 };
 
+export const UploadDialog: Story = {
+    args: { fixtures: fileFixtures(), route: "/files" },
+    play: async ({ canvasElement }) => {
+        const canvas = within(canvasElement);
+        const page = within(canvasElement.ownerDocument.body);
+        await userEvent.click(
+            await canvas.findByRole("button", { name: "Upload file" }, { timeout: 5000 })
+        );
+        const dialog = await page.findByRole(
+            "dialog",
+            { name: "Upload file" },
+            { timeout: 5000 }
+        );
+        await expect(
+            within(dialog).getByRole("button", {
+                name: /Drop a file here or choose a file/iu,
+            })
+        ).toBeVisible();
+    },
+};
+
 export const EmptyReadOnly: Story = {
     args: {
         fixtures: fileFixtures({

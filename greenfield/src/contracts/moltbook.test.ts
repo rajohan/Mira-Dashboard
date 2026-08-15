@@ -5,6 +5,7 @@ import * as v from "valibot";
 import {
     moltbookFeedMaximumPosts,
     moltbookFeedSchema,
+    moltbookProfileSchema,
     moltbookProcedureContracts,
     moltbookSnapshotResultSchema,
     moltbookSnapshotStatusSchema,
@@ -23,6 +24,27 @@ const post = Object.freeze({
 });
 
 describe("Moltbook contracts", () => {
+    test("accepts only the fixed Moltbook avatar CDN path", () => {
+        const profile = {
+            avatarUrl: "https://d3r1u9brut0jdf.cloudfront.net/avatars/mira/avatar.png",
+            commentsCount: 0,
+            description: "Dashboard agent",
+            displayName: "Mira",
+            followerCount: 0,
+            followingCount: 0,
+            karma: 0,
+            name: "mira",
+            postsCount: 0,
+        };
+        expect(v.safeParse(moltbookProfileSchema, profile).success).toBe(true);
+        expect(
+            v.safeParse(moltbookProfileSchema, {
+                ...profile,
+                avatarUrl: "https://attacker.example/avatar.png",
+            }).success
+        ).toBe(false);
+    });
+
     test("keeps provider content strict and within row budgets", () => {
         expect(
             v.safeParse(moltbookFeedSchema, {

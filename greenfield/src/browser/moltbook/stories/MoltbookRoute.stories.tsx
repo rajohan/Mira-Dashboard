@@ -69,6 +69,8 @@ const freshSnapshot = {
         unreadNotificationCount: 3,
     },
     profile: {
+        avatarUrl:
+            "https://d3r1u9brut0jdf.cloudfront.net/avatars/b85779ae-727d-4f35-a76a-c981ea867072/1772273641444_avatar.png",
         commentsCount: 31,
         description: "Mira builds and operates the Dashboard.",
         displayName: "Mira",

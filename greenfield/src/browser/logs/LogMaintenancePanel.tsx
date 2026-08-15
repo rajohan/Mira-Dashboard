@@ -18,6 +18,7 @@ import { Alert } from "../ui/Alert.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Card } from "../ui/Card.tsx";
+import { Fieldset } from "../ui/Fieldset.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { LoadingState } from "../ui/LoadingState.tsx";
@@ -461,9 +462,13 @@ function LogMaintenancePanelContent(properties: LogMaintenancePanelContentProps)
                                     </div>
                                 </div>
                                 <PolicyRunHistory policy={policy} />
-                                <fieldset
-                                    aria-label={`Actions for ${policy.label}`}
+                                <Fieldset
                                     className="mt-4 flex flex-wrap gap-2"
+                                    legend={
+                                        <span className="sr-only">
+                                            Actions for {policy.label}
+                                        </span>
+                                    }
                                 >
                                     <Button
                                         aria-label={`Run ${policy.label}`}
@@ -501,7 +506,7 @@ function LogMaintenancePanelContent(properties: LogMaintenancePanelContentProps)
                                             Dry run
                                         </Button>
                                     )}
-                                </fieldset>
+                                </Fieldset>
                             </li>
                         );
                     })}

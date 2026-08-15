@@ -1,10 +1,14 @@
 import { useQueryClient } from "@tanstack/react-query";
+import { KeyRound, ShieldCheck } from "lucide-react";
 import { useState } from "react";
 
 import type { AccountSecuritySummary } from "../../contracts/accountSecurity.ts";
-import type { MultiFactorAuthenticationMethod } from "../../contracts/security.ts";
 import { useExclusiveDashboardAction } from "../hooks/useExclusiveDashboardAction.ts";
 import { Alert } from "../ui/Alert.tsx";
+import { Badge } from "../ui/Badge.tsx";
+import { Button } from "../ui/Button.tsx";
+import { Heading } from "../ui/Heading.tsx";
+import { Modal } from "../ui/Modal.tsx";
 import { PasswordChangeForm } from "./PasswordChangeForm.tsx";
 import { SecurityProofControls } from "./SecurityProofControls.tsx";
 import { refreshSecurityQueries } from "./securityQueries.ts";
@@ -14,13 +18,7 @@ interface SecurityVerificationSectionProps {
     readonly summary: AccountSecuritySummary;
 }
 
-/**
- * Coordinates recent-auth proofs and password rotation without caching secrets.
- * @returns The verification management section.
- */
-export function SecurityVerificationSection({
-    summary,
-}: SecurityVerificationSectionProps) {
+function useSecurityActionCompletion() {
     const action = useExclusiveDashboardAction();
     const queryClient = useQueryClient();
     const [notice, setNotice] = useState<string>();
@@ -28,44 +26,133 @@ export function SecurityVerificationSection({
     async function complete(
         operation: () => Promise<unknown>,
         successMessage: string
-    ): Promise<void> {
+    ): Promise<boolean> {
         setNotice(undefined);
         const result = await action.run(async () => {
             await operation();
             await refreshSecurityQueries(queryClient);
         });
-        if (result.status === "success") setNotice(successMessage);
+        if (result.status !== "success") return false;
+        setNotice(successMessage);
+        return true;
     }
 
-    const methods: readonly MultiFactorAuthenticationMethod[] = summary.mfa.methods;
+    return { action, complete, notice };
+}
+
+/**
+ * Shows account verification status and opens the appropriate proof in a modal.
+ * @returns The compact two-step-login status section.
+ */
+export function SecurityVerificationSection({
+    summary,
+}: SecurityVerificationSectionProps) {
+    const { action, complete, notice } = useSecurityActionCompletion();
+    const [verificationMode, setVerificationMode] = useState<"mfa" | "password">();
+    let verificationAction;
+    if (summary.mfa.enabled) {
+        verificationAction = (
+            <Button
+                disabled={action.busy}
+                onClick={() => setVerificationMode("mfa")}
+                variant="secondary"
+            >
+                Verify now
+            </Button>
+        );
+    } else if (!summary.recentAuth.password.recent) {
+        verificationAction = (
+            <Button
+                disabled={action.busy}
+                onClick={() => setVerificationMode("password")}
+                variant="secondary"
+            >
+                Verify password
+            </Button>
+        );
+    }
+
     return (
-        <SecuritySection
-            description="Confirm your identity before sensitive changes, or change your Dashboard password."
-            id="security-verification-heading"
-            title="Verification and password"
-        >
-            <Alert className="mb-4" message={action.error} />
-            <Alert className="mb-4" message={notice} variant="success" />
-            <dl className="mb-6 grid gap-3 text-sm sm:grid-cols-2">
-                <div>
-                    <dt className="text-primary-400">Password confirmed recently</dt>
-                    <dd className="text-primary-100 font-medium">
-                        {summary.recentAuth.password.recent ? "Yes" : "Needed"}
-                    </dd>
-                </div>
-                <div>
-                    <dt className="text-primary-400">MFA confirmed recently</dt>
-                    <dd className="text-primary-100 font-medium">
-                        {summary.recentAuth.mfa.recent ? "Yes" : "Needed"}
-                    </dd>
-                </div>
-            </dl>
-            <SecurityProofControls
+        <div className="contents">
+            <Heading className="sr-only" id="security-verification-heading" level={2}>
+                Verification and password
+            </Heading>
+            <Alert message={notice} variant="success" />
+            <SecuritySection
+                actions={verificationAction}
+                badge={
+                    <Badge variant={summary.mfa.enabled ? "success" : "warning"}>
+                        {summary.mfa.enabled ? "Enabled" : "Not enabled"}
+                    </Badge>
+                }
+                description="Security keys are phishing-resistant. Authenticator apps are supported as an alternative."
+                id="two-step-login-heading"
+                icon={ShieldCheck}
+                title="Two-step login"
+            />
+            <Modal
+                description={
+                    verificationMode === "password"
+                        ? "Confirm your current Dashboard password."
+                        : "Use one of your registered second-factor methods."
+                }
+                dismissible={!action.busy}
+                onClose={() => setVerificationMode(undefined)}
+                open={verificationMode !== undefined}
+                size="sm"
+                title={
+                    verificationMode === "password"
+                        ? "Verify current password"
+                        : "Verify second factor"
+                }
+            >
+                <Alert className="mb-4" message={action.error} />
+                {verificationMode !== undefined && (
+                    <SecurityProofControls
+                        action={action}
+                        complete={complete}
+                        methods={summary.mfa.methods}
+                        mode={verificationMode}
+                        onVerified={() => setVerificationMode(undefined)}
+                    />
+                )}
+            </Modal>
+        </div>
+    );
+}
+
+/**
+ * Keeps password rotation compact until the user explicitly opens its modal.
+ * @returns The Dashboard-password management section.
+ */
+export function DashboardPasswordSection() {
+    const { action, complete, notice } = useSecurityActionCompletion();
+    const [open, setOpen] = useState(false);
+
+    return (
+        <div className="contents">
+            <Alert message={notice} variant="success" />
+            <SecuritySection
+                actions={
+                    <Button
+                        disabled={action.busy}
+                        onClick={() => setOpen(true)}
+                        variant="secondary"
+                    >
+                        Change password
+                    </Button>
+                }
+                description="Changing it signs every other Dashboard browser out. Forgotten passwords require the host-local recovery command."
+                id="dashboard-password-heading"
+                icon={KeyRound}
+                title="Dashboard password"
+            />
+            <PasswordChangeForm
                 action={action}
                 complete={complete}
-                methods={methods}
+                onClose={() => setOpen(false)}
+                open={open}
             />
-            <PasswordChangeForm action={action} complete={complete} />
-        </SecuritySection>
+        </div>
     );
 }

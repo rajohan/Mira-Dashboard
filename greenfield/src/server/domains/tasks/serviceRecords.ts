@@ -42,6 +42,7 @@ function taskSummaryInput(record: TaskAggregateRecord) {
         createdAtMs: getTime(record.task.createdAt),
         id: record.task.id,
         labels: record.labels.map(({ label }) => label),
+        number: record.task.number,
         priority: record.task.priority,
         status: record.task.status,
         title: record.task.title,
@@ -79,11 +80,20 @@ export function toTaskDetail(record: TaskAggregateRecord): TaskDetail {
  * @returns Validated public progress update.
  */
 export function toTaskProgressUpdate(record: TaskProgressRecord): TaskProgressUpdate {
+    const author =
+        record.authorKind === "automation"
+            ? {
+                  id: record.authorId,
+                  kind: record.authorKind,
+                  label: record.authorLabel,
+              }
+            : {
+                  id: record.authorId,
+                  kind: record.authorKind,
+                  username: record.authorUsername,
+              };
     return v.parse(taskProgressUpdateSchema, {
-        author: {
-            id: record.authorId,
-            kind: record.authorKind,
-        },
+        author,
         createdAtMs: getTime(record.createdAt),
         id: record.id,
         messageMarkdown: record.messageMarkdown,

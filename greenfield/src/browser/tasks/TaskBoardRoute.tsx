@@ -1,17 +1,23 @@
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { ListTodo, Plus } from "lucide-react";
-import { useDeferredValue, useState } from "react";
+import { useDeferredValue, useEffect, useState } from "react";
 
+import type { OpenClawCronJob } from "../../contracts/openClawCron.ts";
 import type { TaskSummary } from "../../contracts/taskModel.ts";
 import type { ListTasksInput } from "../../contracts/tasks.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { dashboardBrowserFailureMessage } from "../api/trpcError.ts";
+import {
+    accumulateOpenClawCronInventoryPages,
+    openClawCronListQueryOptions,
+} from "../openClawCron/openClawCronQueries.ts";
+import { useOpenClawCronRealtimeInvalidation } from "../openClawCron/useOpenClawCronRealtimeInvalidation.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
+import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { LoadingState } from "../ui/LoadingState.tsx";
-import { PageHeader } from "../ui/PageHeader.tsx";
 import { NewTaskModal } from "./NewTaskModal.tsx";
 import { TaskBoard } from "./TaskBoard.tsx";
 import {
@@ -21,7 +27,7 @@ import {
 } from "./TaskBoardToolbar.tsx";
 import { TaskDetailModal } from "./TaskDetailModal.tsx";
 import { useTaskMutation } from "./taskMutations.ts";
-import { taskListQueryOptions } from "./taskQueries.ts";
+import { taskLabelSuggestionsQueryOptions, taskListQueryOptions } from "./taskQueries.ts";
 import { useTaskRealtimeInvalidation } from "./useTaskRealtimeInvalidation.ts";
 
 function taskFilters(
@@ -48,9 +54,26 @@ function uniqueTasks(pages: readonly { readonly tasks: TaskSummary[] }[]): TaskS
     return [...tasks.values()];
 }
 
+function linkedCronJobIds(tasks: readonly TaskSummary[]): readonly string[] {
+    return [
+        ...new Set(
+            tasks.flatMap((task) =>
+                task.automation === undefined ? [] : [task.automation.cronJobId]
+            )
+        ),
+    ];
+}
+
+function cronJobsById(
+    jobs: readonly OpenClawCronJob[]
+): ReadonlyMap<string, OpenClawCronJob> {
+    return new Map(jobs.map((job) => [job.id, job]));
+}
+
 /** @returns Server-filtered task board with complete task mutation dialogs. */
 export function TaskBoardRoute() {
     useTaskRealtimeInvalidation();
+    useOpenClawCronRealtimeInvalidation();
     const client = useDashboardTrpcClient();
     const [search, setSearch] = useState("");
     const [assignee, setAssignee] = useState<TaskAssigneeFilter>("all");
@@ -60,22 +83,41 @@ export function TaskBoardRoute() {
     const deferredSearch = useDeferredValue(search);
     const filters = taskFilters(deferredSearch, assignee, automation);
     const taskPages = useInfiniteQuery(taskListQueryOptions(client, filters));
+    const labelSuggestions = useQuery(taskLabelSuggestionsQueryOptions(client));
     const moveTask = useTaskMutation("tasks.move");
     const tasks = uniqueTasks(taskPages.data?.pages ?? []);
+    const linkedJobIds = linkedCronJobIds(tasks);
+    const cronInventory = useInfiniteQuery(
+        openClawCronListQueryOptions(client, linkedJobIds.length > 0)
+    );
+    const cronInventoryAccumulation = accumulateOpenClawCronInventoryPages(
+        cronInventory.data?.pages ?? []
+    );
+    const linkedCronJobsById = cronJobsById(cronInventoryAccumulation?.result.jobs ?? []);
+    const linkedJobIsUnresolved = linkedJobIds.some((id) => !linkedCronJobsById.has(id));
+    const shouldLoadMoreCronJobs =
+        linkedJobIsUnresolved &&
+        cronInventoryAccumulation?.stable === true &&
+        cronInventory.hasNextPage === true &&
+        !cronInventory.isFetchingNextPage;
+    const fetchNextCronPage = cronInventory.fetchNextPage;
+    useEffect(() => {
+        if (!shouldLoadMoreCronJobs) return;
+        void fetchNextCronPage();
+    }, [fetchNextCronPage, shouldLoadMoreCronJobs]);
+    const labels = labelSuggestions.data?.labels ?? [];
     const hasFilters = filters !== undefined;
 
     return (
-        <div>
-            <PageHeader
-                description="Track, assign, automate, and audit work across the operator and Mira. Updates automatically from task events, with 30-second safety polling if realtime disconnects."
-                eyebrow="Work management"
-                title="Tasks"
-            />
-            <div className="mt-6">
+        <div className="flex min-h-full flex-col lg:h-full lg:min-h-0">
+            <Heading className="sr-only" level={1}>
+                Tasks
+            </Heading>
+            <div>
                 <TaskBoardToolbar
                     assignee={assignee}
                     automation={automation}
-                    busy={taskPages.isFetching || moveTask.isPending}
+                    busy={moveTask.isPending}
                     onAssigneeChange={setAssignee}
                     onAutomationChange={setAutomation}
                     onCreate={() => setNewTaskOpen(true)}
@@ -86,9 +128,11 @@ export function TaskBoardRoute() {
             <Alert
                 className="mt-4"
                 message={
-                    moveTask.error === null
+                    moveTask.error === null && labelSuggestions.error === null
                         ? undefined
-                        : dashboardBrowserFailureMessage(moveTask.error)
+                        : dashboardBrowserFailureMessage(
+                              moveTask.error ?? labelSuggestions.error
+                          )
                 }
             />
             {taskPages.isPending && (
@@ -139,8 +183,9 @@ export function TaskBoardRoute() {
                 </div>
             )}
             {tasks.length > 0 && (
-                <div className="mt-6">
+                <div className="mt-6 flex flex-1 flex-col lg:min-h-0">
                     <TaskBoard
+                        cronJobsById={linkedCronJobsById}
                         disabled={moveTask.isPending}
                         onMoveTask={(input) => moveTask.mutate(input)}
                         onSelectTask={setSelectedTaskId}
@@ -160,6 +205,7 @@ export function TaskBoardRoute() {
                 </div>
             )}
             <NewTaskModal
+                availableLabels={labels}
                 onClose={() => setNewTaskOpen(false)}
                 onCreated={(task) => {
                     setNewTaskOpen(false);
@@ -169,6 +215,7 @@ export function TaskBoardRoute() {
             />
             {selectedTaskId !== undefined && (
                 <TaskDetailModal
+                    availableLabels={labels}
                     key={selectedTaskId}
                     onClose={() => setSelectedTaskId(undefined)}
                     taskId={selectedTaskId}

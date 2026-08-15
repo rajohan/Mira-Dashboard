@@ -35,7 +35,12 @@ export type TaskAutomationProfileRecord = v.InferOutput<
 export type TaskAutomationProfileInsert = v.InferOutput<
     typeof taskAutomationProfileInsertSchema
 >;
-export type TaskProgressRecord = v.InferOutput<typeof taskProgressRowSelectSchema>;
+export type TaskProgressRecord = v.InferOutput<typeof taskProgressRowSelectSchema> & {
+    /** Present for validated automation-authored rows resolved against its principal. */
+    readonly authorLabel?: string;
+    /** Present for validated user-authored rows resolved against the users table. */
+    readonly authorUsername?: string;
+};
 export type TaskProgressInsert = v.InferOutput<typeof taskProgressRowInsertSchema>;
 export type TaskProgressMutableUpdate = v.InferOutput<typeof taskProgressRowUpdateSchema>;
 export type TaskEventInsert = v.InferOutput<typeof taskEventInsertSchema>;
@@ -98,6 +103,7 @@ export interface VersionedTaskProgressMutationInput {
 export interface TaskRepositoryReader {
     findTask(id: string): TaskAggregateRecord | undefined;
     findTaskProgress(taskId: string, updateId: string): TaskProgressRecord | undefined;
+    listTaskLabels(): string[];
     listTaskProgress(input: ListTaskProgressInput): TaskProgressRecord[];
     listTasks(input: ListTasksInput): TaskAggregateRecord[];
     listOpenTasksByCronJobIds(cronJobIds: readonly string[]): TaskOpenCronLinkRecord[];

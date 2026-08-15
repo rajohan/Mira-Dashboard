@@ -8,7 +8,7 @@ import {
 
 import "../src/browser/storySupport/storybook.css";
 
-const dashboardBackground = "#0b0b0c";
+const dashboardBackground = "#121316";
 
 const preview: Preview = {
     afterEach: resetStorybookBrowserStorage,

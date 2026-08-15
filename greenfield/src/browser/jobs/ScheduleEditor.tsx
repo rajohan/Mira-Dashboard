@@ -104,17 +104,6 @@ export function ScheduleEditor({ busy, onSave, schedule }: ScheduleEditorProps) 
             <form.Field name="kind">
                 {(field) => (
                     <FormField
-                        description={
-                            field.state.value === "cron" ? (
-                                <span
-                                    aria-hidden="true"
-                                    className="invisible select-none"
-                                    data-cron-description-spacer=""
-                                >
-                                    Order: minute, hour, day, month, weekday.
-                                </span>
-                            ) : undefined
-                        }
                         disabled={busy}
                         error={firstFormFieldError(field.state.meta.errors)}
                         label="Schedule type"
@@ -155,7 +144,7 @@ export function ScheduleEditor({ busy, onSave, schedule }: ScheduleEditorProps) 
                                                     event.currentTarget.value
                                                 )
                                             }
-                                            placeholder="Example: 300"
+                                            placeholder="300"
                                             required
                                             step="0.001"
                                             type="number"
@@ -200,7 +189,7 @@ export function ScheduleEditor({ busy, onSave, schedule }: ScheduleEditorProps) 
                                                     event.currentTarget.value
                                                 )
                                             }
-                                            placeholder="Example: 0 6 * * 1-5"
+                                            placeholder="0 6 * * 1-5"
                                             required
                                             value={field.state.value}
                                         />
@@ -227,7 +216,7 @@ export function ScheduleEditor({ busy, onSave, schedule }: ScheduleEditorProps) 
                                             onBlur={field.handleBlur}
                                             onChange={field.handleChange}
                                             options={timeZoneOptions}
-                                            placeholder="Example: Europe/Oslo"
+                                            placeholder="Europe/Oslo"
                                             value={field.state.value}
                                         />
                                     </FormField>

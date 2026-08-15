@@ -37,11 +37,11 @@ describe("Dashboard shell layout", () => {
         );
     });
 
-    test("bounds Files to the viewport without losing normal page centering", () => {
+    test("bounds desktop Files without clipping its mobile document flow", () => {
         expect(dashboardContentContainerClassName("/files").split(" ")).toEqual(
             expect.arrayContaining([
-                "h-full",
-                "min-h-0",
+                "lg:h-full",
+                "lg:min-h-0",
                 "mx-auto",
                 "w-full",
                 "max-w-7xl",

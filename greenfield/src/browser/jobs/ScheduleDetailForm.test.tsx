@@ -103,7 +103,7 @@ describe("schedule detail disable form", () => {
         const reason = screen.getByLabelText("Comment");
         expect(reason).toHaveAttribute(
             "placeholder",
-            "Example: Waiting for the maintenance window to finish"
+            "Waiting for the maintenance window to finish"
         );
         fireEvent.change(reason, { target: { value: "Unsafe\nreason" } });
         await user.click(screen.getByRole("button", { name: "Disable schedule" }));

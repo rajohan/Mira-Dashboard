@@ -1,11 +1,14 @@
 import { useForm } from "@tanstack/react-form";
 import { Fingerprint, LifeBuoy, ShieldCheck, Smartphone } from "lucide-react";
+import { useState } from "react";
 
 import {
     recoveryLoginInputSchema,
     totpLoginInputSchema,
     type AuthStatus,
 } from "../../contracts/auth.ts";
+import type { MultiFactorAuthenticationMethod } from "../../contracts/security.ts";
+import { MfaMethodChooser } from "../security/MfaMethodChooser.tsx";
 import { useDashboardWebAuthnClient } from "../security/webauthn/webauthnContextValue.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -23,11 +26,13 @@ interface PendingMfaFormProps {
 
 /**
  * Completes pending authentication with one available MFA method.
- * @returns TOTP, recovery-code, and WebAuthn second-step controls.
+ * @returns A method chooser followed by the selected second-step control.
  */
 export function PendingMfaForm({ status }: PendingMfaFormProps) {
-    const { busy, client, error, run } = useAuthenticationAction();
+    const { busy, clearError, client, error, run } = useAuthenticationAction();
     const webAuthn = useDashboardWebAuthnClient();
+    const [selectedMethod, setSelectedMethod] =
+        useState<MultiFactorAuthenticationMethod>();
     const totpForm = useForm({
         defaultValues: { code: "" },
         onSubmit: async ({ formApi, value }) => {
@@ -49,9 +54,18 @@ export function PendingMfaForm({ status }: PendingMfaFormProps) {
         validators: { onSubmit: recoveryLoginInputSchema },
     });
     const methods = status.pendingLogin.methods;
-    const hasTotp = methods.includes("totp");
-    const hasRecovery = methods.includes("recovery");
-    const hasWebAuthn = methods.includes("webauthn");
+    const activeMethod =
+        selectedMethod !== undefined && methods.includes(selectedMethod)
+            ? selectedMethod
+            : undefined;
+    const canChangeMethod = methods.length > 1;
+
+    function chooseAnotherMethod() {
+        totpForm.reset();
+        recoveryForm.reset();
+        clearError();
+        setSelectedMethod(undefined);
+    }
 
     async function submitWebAuthn() {
         await run(async () => {
@@ -61,14 +75,25 @@ export function PendingMfaForm({ status }: PendingMfaFormProps) {
         });
     }
 
+    function chooseMethod(method: MultiFactorAuthenticationMethod) {
+        clearError();
+        setSelectedMethod(method);
+        if (method === "webauthn") void submitWebAuthn();
+    }
+
     return (
         <LoginPanel
             description={`Complete the second step for ${status.pendingLogin.username}.`}
+            footer="A full Dashboard session is created after verification succeeds."
             icon={ShieldCheck}
+            showStepHeading={false}
             title="Multi-factor authentication"
         >
             <Alert className="mb-5" message={error} />
-            {hasTotp && (
+            {activeMethod === undefined && (
+                <MfaMethodChooser busy={busy} methods={methods} onChoose={chooseMethod} />
+            )}
+            {activeMethod === "totp" && (
                 <Form onSubmit={() => void totpForm.handleSubmit()}>
                     <totpForm.Field name="code">
                         {(field) => (
@@ -86,7 +111,7 @@ export function PendingMfaForm({ status }: PendingMfaFormProps) {
                                     onChange={(event) =>
                                         field.handleChange(event.currentTarget.value)
                                     }
-                                    placeholder="Example: 123456"
+                                    placeholder="123456"
                                     required
                                     value={field.state.value}
                                 />
@@ -114,13 +139,8 @@ export function PendingMfaForm({ status }: PendingMfaFormProps) {
                     </totpForm.Subscribe>
                 </Form>
             )}
-            {hasRecovery && (
-                <Form
-                    className={
-                        hasTotp ? "border-primary-700 mt-6 border-t pt-6" : undefined
-                    }
-                    onSubmit={() => void recoveryForm.handleSubmit()}
-                >
+            {activeMethod === "recovery" && (
+                <Form onSubmit={() => void recoveryForm.handleSubmit()}>
                     <recoveryForm.Field name="code">
                         {(field) => (
                             <FormField
@@ -136,7 +156,7 @@ export function PendingMfaForm({ status }: PendingMfaFormProps) {
                                     onChange={(event) =>
                                         field.handleChange(event.currentTarget.value)
                                     }
-                                    placeholder="Example: ABCD-EFGH-IJKL"
+                                    placeholder="Paste a recovery code"
                                     required
                                     spellCheck={false}
                                     type="password"
@@ -158,7 +178,6 @@ export function PendingMfaForm({ status }: PendingMfaFormProps) {
                                 disabled={!canSubmit}
                                 fullWidth
                                 type="submit"
-                                variant="secondary"
                             >
                                 <Icon icon={LifeBuoy} size="sm" tone="inherit" />
                                 Use recovery code
@@ -167,19 +186,42 @@ export function PendingMfaForm({ status }: PendingMfaFormProps) {
                     </recoveryForm.Subscribe>
                 </Form>
             )}
-            {hasWebAuthn && (
-                <Button
-                    busy={busy}
-                    busyLabel="Waiting for security key…"
-                    className="mt-6"
-                    fullWidth
-                    onClick={() => void submitWebAuthn()}
-                    variant="secondary"
-                >
-                    <Icon icon={Fingerprint} size="sm" tone="inherit" />
-                    Use a security key
-                </Button>
+            {activeMethod === "webauthn" && (
+                <div className="space-y-3">
+                    <Button
+                        busy={busy}
+                        busyLabel="Waiting for security key…"
+                        fullWidth
+                        onClick={() => void submitWebAuthn()}
+                    >
+                        <Icon icon={Fingerprint} size="sm" tone="inherit" />
+                        Use a security key
+                    </Button>
+                    {canChangeMethod && (
+                        <Button
+                            disabled={busy}
+                            fullWidth
+                            onClick={chooseAnotherMethod}
+                            variant="ghost"
+                        >
+                            Choose another method
+                        </Button>
+                    )}
+                </div>
             )}
+            {activeMethod !== undefined &&
+                activeMethod !== "webauthn" &&
+                canChangeMethod && (
+                    <Button
+                        className="mt-3"
+                        disabled={busy}
+                        fullWidth
+                        onClick={chooseAnotherMethod}
+                        variant="ghost"
+                    >
+                        Choose another method
+                    </Button>
+                )}
         </LoginPanel>
     );
 }

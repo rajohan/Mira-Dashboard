@@ -423,11 +423,11 @@ describe("monitoring browser routes", () => {
         expect(await screen.findByText("Primary disk warning")).toBeTruthy();
         expect(screen.getByLabelText("Problem type")).toHaveAttribute(
             "placeholder",
-            "Example: filesystem"
+            "filesystem"
         );
         expect(screen.getByLabelText("Check")).toHaveAttribute(
             "placeholder",
-            "Example: ops-check"
+            "ops-check"
         );
         expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
     });
@@ -471,8 +471,8 @@ describe("monitoring browser routes", () => {
         await screen.findByText("Primary heartbeat");
         const kind = screen.getByLabelText("Report type");
         const source = screen.getByLabelText("Source");
-        expect(kind).toHaveAttribute("placeholder", "Example: heartbeat");
-        expect(source).toHaveAttribute("placeholder", "Example: openclaw");
+        expect(kind).toHaveAttribute("placeholder", "heartbeat");
+        expect(source).toHaveAttribute("placeholder", "openclaw");
         await user.type(kind, "heartbeat");
         await user.type(source, "openclaw");
         expect(

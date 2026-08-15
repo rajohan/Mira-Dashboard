@@ -15,6 +15,7 @@ import { cn } from "../lib/classNames.ts";
 import { Button } from "../ui/Button.tsx";
 import { FormField } from "../ui/FormField.tsx";
 import { Icon } from "../ui/Icon.tsx";
+import { IconOnlyButton } from "../ui/IconOnlyButton.tsx";
 import { Select } from "../ui/Select.tsx";
 import { chatModelDisplayName } from "./chatModelPresentation.ts";
 import type {
@@ -53,10 +54,10 @@ function DisplayToggle({
     pressed: boolean;
 }>) {
     return (
-        <button
+        <Button
             aria-pressed={pressed}
             className={cn(
-                "focus-visible:ring-accent-300 flex w-full min-w-0 items-center gap-2.5 rounded-lg border px-2.5 py-2 text-left transition-colors outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-45",
+                "focus-visible:ring-accent-300 flex w-full min-w-0 items-center gap-2.5 rounded-lg border px-2.5 py-2 text-left transition-colors disabled:opacity-45",
                 pressed
                     ? "border-accent-400 bg-primary-900"
                     : "border-primary-500 bg-primary-800 hover:border-primary-400 hover:bg-primary-900"
@@ -64,6 +65,7 @@ function DisplayToggle({
             disabled={disabled}
             onClick={onToggle}
             type="button"
+            variant="unstyled"
         >
             <span
                 className={cn(
@@ -82,7 +84,7 @@ function DisplayToggle({
             <span className="text-primary-300 shrink-0 text-[10px] font-medium tracking-wide uppercase">
                 {pressed ? "On" : "Off"}
             </span>
-        </button>
+        </Button>
     );
 }
 
@@ -115,12 +117,13 @@ export function ChatSettingsPanel({
             {({ close }) => (
                 <>
                     <PopoverButton
-                        aria-label="Chat settings"
-                        className="text-primary-300 hover:bg-primary-700 hover:text-primary-50 focus-visible:ring-accent-400 inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center rounded-lg bg-transparent px-0 text-sm font-medium outline-none focus-visible:ring-2 sm:min-h-9 sm:min-w-9"
-                        title="Chat settings"
-                    >
-                        <Icon icon={Settings2} size="sm" tone="inherit" />
-                    </PopoverButton>
+                        as={IconOnlyButton}
+                        className="focus-visible:ring-accent-400 min-h-10 min-w-10 shrink-0 px-0 focus-visible:ring-offset-0 sm:min-h-9 sm:min-w-9"
+                        icon={Settings2}
+                        label="Chat settings"
+                        size="sm"
+                        variant="ghost"
+                    />
                     <PopoverPanel
                         anchor={{ gap: 10, padding: 12, to: "top start" }}
                         aria-label="Chat settings"
@@ -137,15 +140,14 @@ export function ChatSettingsPanel({
                                     Response preferences and local display controls
                                 </p>
                             </div>
-                            <Button
-                                aria-label="Close chat settings"
+                            <IconOnlyButton
                                 className="shrink-0 p-1.5"
+                                icon={X}
+                                label="Close chat settings"
                                 onClick={() => close()}
                                 size="sm"
                                 variant="ghost"
-                            >
-                                <Icon icon={X} size="sm" tone="inherit" />
-                            </Button>
+                            />
                         </div>
 
                         <section

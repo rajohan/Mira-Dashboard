@@ -198,6 +198,7 @@ function externalRuntimePage(
             {
                 ...(abortBoundary === undefined ? {} : { abortBoundary }),
                 continuity: "complete" as const,
+                lifecycle: "active" as const,
                 hasUnprojectedActivity: false,
                 observationEpoch,
                 observedAtMs: providerObservedAtMs,
@@ -321,17 +322,18 @@ async function waitForConnectedComposer(): Promise<void> {
 }
 
 async function revealCompanionControls(): Promise<void> {
+    const user = userEvent.setup();
     const activityTrigger = screen.queryByRole("button", {
         name: "Open activity panel",
     });
-    if (activityTrigger !== null) fireEvent.click(activityTrigger);
-    const companion = screen.getByRole("button", { name: /Chat helper/iu });
-    if (companion.getAttribute("aria-expanded") === "false") {
-        fireEvent.click(companion);
+    if (activityTrigger !== null) await user.click(activityTrigger);
+    const companion = await screen.findByRole("button", { name: /Chat helper/iu });
+    if (companion.getAttribute("aria-expanded") !== "true") {
+        await user.click(companion);
     }
-    await waitFor(() =>
-        expect(screen.getByRole("textbox", { name: "Ask chat helper" })).toBeVisible()
-    );
+    expect(
+        await screen.findByRole("textbox", { name: "Ask about this chat" })
+    ).toBeVisible();
 }
 
 describe("chat browser", () => {
@@ -755,8 +757,16 @@ describe("chat browser", () => {
                                       phase: "update" as const,
                                       steps: [
                                           {
+                                              status: "completed" as const,
+                                              text: "Read stored snapshot",
+                                          },
+                                          {
                                               status: "in_progress" as const,
                                               text: "Inspect live state",
+                                          },
+                                          {
+                                              status: "pending" as const,
+                                              text: "Reconcile final history",
                                           },
                                       ],
                                   },
@@ -774,7 +784,20 @@ describe("chat browser", () => {
                     "This explanation remains visible during catch-up."
                 )
             ).toBeVisible();
-            expect(screen.getByText("Inspect live state")).toBeVisible();
+            const completed = screen.getByRole("listitem", {
+                name: "Read stored snapshot, completed",
+            });
+            const current = screen.getByRole("listitem", {
+                name: "Inspect live state, in progress",
+            });
+            const pending = screen.getByRole("listitem", {
+                name: "Reconcile final history, pending",
+            });
+            expect(completed.querySelector(".lucide-circle-check")).not.toBeNull();
+            expect(current.querySelector(".lucide-circle-dot")).not.toBeNull();
+            expect(pending.querySelector(".lucide-circle")).not.toBeNull();
+            expect(current.querySelector("svg")).toHaveClass("text-accent-300");
+            expect(pending.querySelector("svg")).toHaveClass("text-primary-400");
         } finally {
             await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
             view.rendered.unmount();
@@ -2259,7 +2282,7 @@ describe("chat browser", () => {
             await screen.findByRole("button", { name: "Stop response 1" });
             await revealCompanionControls();
             await user.type(
-                screen.getByRole("textbox", { name: "Ask chat helper" }),
+                screen.getByRole("textbox", { name: "Ask about this chat" }),
                 "What changed?"
             );
             await user.click(screen.getByRole("button", { name: "Ask chat helper" }));
@@ -2294,7 +2317,7 @@ describe("chat browser", () => {
             });
             expect(screen.queryByText("Stale answer")).toBeNull();
             expect(
-                screen.getByRole("textbox", { name: "Ask chat helper" })
+                screen.getByRole("textbox", { name: "Ask about this chat" })
             ).toBeDisabled();
             await user.click(screen.getByRole("button", { name: "Ask chat helper" }));
             expect(
@@ -2335,7 +2358,7 @@ describe("chat browser", () => {
             await waitForConnectedComposer();
             await revealCompanionControls();
             await user.type(
-                screen.getByRole("textbox", { name: "Ask chat helper" }),
+                screen.getByRole("textbox", { name: "Ask about this chat" }),
                 "What changed?"
             );
             await user.click(screen.getByRole("button", { name: "Ask chat helper" }));
@@ -2389,7 +2412,7 @@ describe("chat browser", () => {
             ).toBeVisible();
             expect(screen.getByRole("button", { name: "Resetting…" })).toBeDisabled();
             expect(
-                screen.getByRole("textbox", { name: "Ask chat helper" })
+                screen.getByRole("textbox", { name: "Ask about this chat" })
             ).toBeDisabled();
             expect(
                 view.mutation.mock.calls.filter(
@@ -2593,7 +2616,9 @@ describe("chat browser", () => {
         try {
             await screen.findByRole("button", { name: "Stop response 1" });
             await revealCompanionControls();
-            const question = screen.getByRole("textbox", { name: "Ask chat helper" });
+            const question = screen.getByRole("textbox", {
+                name: "Ask about this chat",
+            });
             await user.type(question, "Do not duplicate");
             await user.dblClick(screen.getByRole("button", { name: "Ask chat helper" }));
             expect(

@@ -4,6 +4,7 @@ import * as v from "valibot";
 import { cacheEntryPayloadSchema } from "../../../contracts/cache.ts";
 import {
     type MoltbookDashboardCachePayload,
+    moltbookAvatarUrlSchema,
     moltbookDashboardCachePayloadSchema,
     moltbookFeedMaximumPosts,
     moltbookNextActionsMaximum,
@@ -419,7 +420,16 @@ function normalizeProfile(value: unknown) {
     const profile = optionalRecord(response.agent);
     if (profile === undefined) return;
     const name = requiredString(profile.name);
+    const avatarUrl =
+        typeof profile.avatar_url === "string" ? profile.avatar_url : undefined;
+    const parsedAvatarUrl =
+        avatarUrl === undefined
+            ? undefined
+            : v.safeParse(moltbookAvatarUrlSchema, avatarUrl, { abortEarly: true });
+    const normalizedAvatarUrl =
+        parsedAvatarUrl?.success === true ? parsedAvatarUrl.output : undefined;
     return {
+        ...(normalizedAvatarUrl === undefined ? {} : { avatarUrl: normalizedAvatarUrl }),
         commentsCount: nonnegativeCount(profile.comments_count),
         description: optionalString(profile.description) ?? "",
         displayName: optionalString(profile.display_name) ?? name,

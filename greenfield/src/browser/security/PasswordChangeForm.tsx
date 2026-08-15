@@ -2,7 +2,6 @@ import { useForm } from "@tanstack/react-form";
 import { ShieldCheck } from "lucide-react";
 
 import type { AuthStatus } from "../../contracts/auth.ts";
-import { passwordChangeInputSchema } from "../../contracts/auth.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import {
     authStatusQueryKey,
@@ -13,34 +12,47 @@ import {
     useAuthenticatedMutationBoundary,
 } from "../auth/useAuthenticatedMutationBoundary.ts";
 import type { useExclusiveDashboardAction } from "../hooks/useExclusiveDashboardAction.ts";
+import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Form } from "../ui/Form.tsx";
 import { firstFormFieldError } from "../ui/formErrors.ts";
 import { FormField } from "../ui/FormField.tsx";
-import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { Input } from "../ui/Input.tsx";
+import { Modal } from "../ui/Modal.tsx";
+import { passwordChangeFormSchema, passwordChangeInput } from "./passwordChangeForm.ts";
 
 interface PasswordChangeFormProps {
     readonly action: ReturnType<typeof useExclusiveDashboardAction>;
     readonly complete: (
         operation: () => Promise<unknown>,
         successMessage: string
-    ) => Promise<void>;
+    ) => Promise<boolean>;
+    readonly onClose: () => void;
+    readonly open: boolean;
 }
 
 /**
- * Rotates the Dashboard password and clears both proof fields after success.
- * @returns The password-change form.
+ * Rotates the Dashboard password from a transient, validated modal form.
+ * @returns The password-change dialog.
  */
-export function PasswordChangeForm({ action, complete }: PasswordChangeFormProps) {
+export function PasswordChangeForm({
+    action,
+    complete,
+    onClose,
+    open,
+}: PasswordChangeFormProps) {
     const client = useDashboardTrpcClient();
     const mutationBoundary = useAuthenticatedMutationBoundary();
     const queryClient = mutationBoundary.queryClient;
     const form = useForm({
-        defaultValues: { currentPassword: "", newPassword: "" },
+        defaultValues: {
+            confirmPassword: "",
+            currentPassword: "",
+            newPassword: "",
+        },
         onSubmit: async ({ formApi, value }) => {
-            await complete(async () => {
+            const succeeded = await complete(async () => {
                 const cachedStatus =
                     queryClient.getQueryData<AuthStatus>(authStatusQueryKey);
                 if (cachedStatus?.state !== "authenticated") {
@@ -50,12 +62,12 @@ export function PasswordChangeForm({ action, complete }: PasswordChangeFormProps
                 }
                 const mutation = await mutationBoundary.run(async (signal, isActive) => ({
                     isActive,
-                    result: await client.mutation("auth.changePassword", value, {
-                        signal,
-                    }),
+                    result: await client.mutation(
+                        "auth.changePassword",
+                        passwordChangeInput(value),
+                        { signal }
+                    ),
                 }));
-                formApi.setFieldValue("currentPassword", "");
-                formApi.setFieldValue("newPassword", "");
                 const published = await publishAuthenticationStatusIfCurrent(
                     queryClient,
                     {
@@ -66,17 +78,31 @@ export function PasswordChangeForm({ action, complete }: PasswordChangeFormProps
                 );
                 if (!published) throw new AuthenticatedMutationExpiredError();
             }, "Password changed. Your other browsers were signed out.");
+            if (succeeded) {
+                formApi.reset();
+                onClose();
+            }
         },
-        validators: { onSubmit: passwordChangeInputSchema },
+        validators: { onSubmit: passwordChangeFormSchema },
     });
 
+    function close(): void {
+        if (action.busy) return;
+        form.reset();
+        onClose();
+    }
+
     return (
-        <Form
-            className="border-primary-700 mt-8 border-t pt-6"
-            onSubmit={() => void form.handleSubmit()}
+        <Modal
+            description="Changing it signs every other browser out. Forgotten passwords require the host-local recovery command."
+            dismissible={!action.busy}
+            onClose={close}
+            open={open}
+            size="sm"
+            title="Change Dashboard password"
         >
-            <Heading level={3}>Change password</Heading>
-            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <Alert className="mb-4" message={action.error} />
+            <Form className="space-y-4" onSubmit={() => void form.handleSubmit()}>
                 <form.Field name="currentPassword">
                     {(field) => (
                         <FormField
@@ -87,6 +113,7 @@ export function PasswordChangeForm({ action, complete }: PasswordChangeFormProps
                             <Input
                                 autoComplete="current-password"
                                 className="mt-2"
+                                data-autofocus
                                 name={field.name}
                                 onBlur={field.handleBlur}
                                 onChange={(event) =>
@@ -104,6 +131,7 @@ export function PasswordChangeForm({ action, complete }: PasswordChangeFormProps
                     {(field) => (
                         <FormField
                             disabled={action.busy}
+                            description="Use 8–256 characters."
                             error={firstFormFieldError(field.state.meta.errors)}
                             label="New password"
                         >
@@ -123,23 +151,55 @@ export function PasswordChangeForm({ action, complete }: PasswordChangeFormProps
                         </FormField>
                     )}
                 </form.Field>
-            </div>
-            <form.Subscribe
-                selector={(state) => [state.canSubmit, state.isSubmitting] as const}
-            >
-                {([canSubmit, isSubmitting]) => (
-                    <Button
-                        busy={action.busy || isSubmitting}
-                        busyLabel="Changing password…"
-                        className="mt-3"
-                        disabled={!canSubmit}
-                        type="submit"
-                    >
-                        <Icon icon={ShieldCheck} size="sm" tone="inherit" />
-                        Change password
-                    </Button>
-                )}
-            </form.Subscribe>
-        </Form>
+                <form.Field name="confirmPassword">
+                    {(field) => (
+                        <FormField
+                            disabled={action.busy}
+                            error={firstFormFieldError(field.state.meta.errors)}
+                            label="Confirm new password"
+                        >
+                            <Input
+                                autoComplete="new-password"
+                                className="mt-2"
+                                name={field.name}
+                                onBlur={field.handleBlur}
+                                onChange={(event) =>
+                                    field.handleChange(event.currentTarget.value)
+                                }
+                                placeholder="Re-enter your new password"
+                                required
+                                type="password"
+                                value={field.state.value}
+                            />
+                        </FormField>
+                    )}
+                </form.Field>
+                <form.Subscribe
+                    selector={(state) => [state.canSubmit, state.isSubmitting] as const}
+                >
+                    {([canSubmit, isSubmitting]) => (
+                        <div className="flex flex-col-reverse gap-2 pt-1 sm:flex-row sm:justify-end">
+                            <Button
+                                disabled={action.busy || isSubmitting}
+                                onClick={close}
+                                type="button"
+                                variant="secondary"
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                busy={action.busy || isSubmitting}
+                                busyLabel="Changing password…"
+                                disabled={!canSubmit}
+                                type="submit"
+                            >
+                                <Icon icon={ShieldCheck} size="sm" tone="inherit" />
+                                Change and sign out others
+                            </Button>
+                        </div>
+                    )}
+                </form.Subscribe>
+            </Form>
+        </Modal>
     );
 }

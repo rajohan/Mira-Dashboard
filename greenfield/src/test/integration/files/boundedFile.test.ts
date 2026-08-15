@@ -241,6 +241,7 @@ test("rejects an in-flight same-size overwrite after the initial stat", async ()
             64,
             async () => {
                 await openMutator.write(Buffer.from("after!"), 0, 6, 0);
+                await openMutator.utimes(new Date(0), new Date(0));
                 await openMutator.sync();
             }
         );

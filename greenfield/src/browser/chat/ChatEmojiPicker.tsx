@@ -2,8 +2,8 @@ import { Popover, PopoverButton, PopoverPanel } from "@headlessui/react";
 import { Smile } from "lucide-react";
 import { type KeyboardEvent, useEffect, useRef } from "react";
 
-import { buttonClassNames } from "../ui/buttonStyles.ts";
-import { Icon } from "../ui/Icon.tsx";
+import { Button } from "../ui/Button.tsx";
+import { IconOnlyButton } from "../ui/IconOnlyButton.tsx";
 
 const emojis = Object.freeze([
     ["😀", "Grinning face"],
@@ -99,9 +99,9 @@ function EmojiGrid({ close, onSelect }: EmojiGridProps) {
                                     const index = rowIndex * columnCount + columnIndex;
                                     return (
                                         <td key={emoji}>
-                                            <button
+                                            <Button
                                                 aria-label={label}
-                                                className="hover:bg-primary-700 focus-visible:ring-accent-400 flex size-10 items-center justify-center rounded-lg text-xl outline-none focus-visible:ring-2"
+                                                className="hover:bg-primary-700 flex size-10 items-center justify-center rounded-lg text-xl"
                                                 onClick={() => {
                                                     onSelect(emoji);
                                                     close();
@@ -114,9 +114,10 @@ function EmojiGrid({ close, onSelect }: EmojiGridProps) {
                                                 }}
                                                 title={label}
                                                 type="button"
+                                                variant="unstyled"
                                             >
                                                 <span aria-hidden="true">{emoji}</span>
-                                            </button>
+                                            </Button>
                                         </td>
                                     );
                                 })}
@@ -143,17 +144,14 @@ export function ChatEmojiPicker({ disabled = false, onSelect }: ChatEmojiPickerP
             {({ close }) => (
                 <>
                     <PopoverButton
-                        aria-label="Insert emoji"
-                        className={buttonClassNames({
-                            className: "min-h-10 min-w-10 px-0 sm:min-h-9 sm:min-w-9",
-                            size: "sm",
-                            variant: "ghost",
-                        })}
+                        as={IconOnlyButton}
+                        className="min-h-10 min-w-10 px-0 sm:min-h-9 sm:min-w-9"
                         disabled={disabled}
-                        title="Insert emoji"
-                    >
-                        <Icon icon={Smile} size="sm" tone="inherit" />
-                    </PopoverButton>
+                        icon={Smile}
+                        label="Insert emoji"
+                        size="sm"
+                        variant="ghost"
+                    />
                     <PopoverPanel
                         anchor={{ gap: 8, to: "top start" }}
                         className="border-primary-500 bg-primary-800 z-50 max-h-64 w-[min(18rem,calc(100vw-1rem))] overflow-y-auto rounded-xl border p-2 shadow-2xl shadow-black/60"

@@ -1,5 +1,11 @@
-import { DragDropProvider, DragOverlay } from "@dnd-kit/react";
+import {
+    DragDropProvider,
+    DragOverlay,
+    KeyboardSensor,
+    PointerSensor,
+} from "@dnd-kit/react";
 
+import type { OpenClawCronJob } from "../../contracts/openClawCron.ts";
 import type { TaskStatus, TaskSummary } from "../../contracts/taskModel.ts";
 import type { MoveTaskInput } from "../../contracts/tasks.ts";
 import { taskMoveInputForDrop } from "./taskBoardDrop.ts";
@@ -8,6 +14,26 @@ import { TaskColumn } from "./TaskColumn.tsx";
 import { taskStatusDefinitions } from "./taskPresentation.ts";
 
 const taskPriorityRank = Object.freeze({ high: 0, low: 2, medium: 1 });
+
+const taskBoardSensors = [
+    PointerSensor.configure({
+        activationConstraints(event, source) {
+            const defaults = PointerSensor.defaults.activationConstraints;
+            const constraints =
+                typeof defaults === "function" ? defaults(event, source) : defaults;
+
+            // The installed pointer sensor's final mouse constraint is distance.
+            // Retaining only it keeps clicks immediate while requiring movement to drag.
+            return event.pointerType === "mouse" ? constraints?.slice(-1) : constraints;
+        },
+    }),
+    KeyboardSensor.configure({
+        keyboardCodes: {
+            ...KeyboardSensor.defaults.keyboardCodes,
+            start: ["Space"],
+        },
+    }),
+];
 
 function compareTasks(left: TaskSummary, right: TaskSummary): number {
     if (left.status !== "done") {
@@ -20,6 +46,7 @@ function compareTasks(left: TaskSummary, right: TaskSummary): number {
 }
 
 interface TaskBoardProps {
+    readonly cronJobsById: ReadonlyMap<string, OpenClawCronJob>;
     readonly disabled: boolean;
     readonly onMoveTask: (input: MoveTaskInput) => void;
     readonly onSelectTask: (taskId: string) => void;
@@ -27,7 +54,13 @@ interface TaskBoardProps {
 }
 
 /** @returns Four-column task board with accessible dnd-kit movement. */
-export function TaskBoard({ disabled, onMoveTask, onSelectTask, tasks }: TaskBoardProps) {
+export function TaskBoard({
+    cronJobsById,
+    disabled,
+    onMoveTask,
+    onSelectTask,
+    tasks,
+}: TaskBoardProps) {
     const tasksByStatus = Object.fromEntries(
         taskStatusDefinitions.map(({ status }) => [
             status,
@@ -46,10 +79,12 @@ export function TaskBoard({ disabled, onMoveTask, onSelectTask, tasks }: TaskBoa
                 );
                 if (input !== undefined) onMoveTask(input);
             }}
+            sensors={taskBoardSensors}
         >
-            <div className="grid gap-4 lg:min-h-136 lg:grid-cols-4">
+            <div className="grid gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-2 xl:grid-cols-4">
                 {taskStatusDefinitions.map(({ status }) => (
                     <TaskColumn
+                        cronJobsById={cronJobsById}
                         disabled={disabled}
                         key={status}
                         onSelectTask={onSelectTask}
@@ -64,7 +99,15 @@ export function TaskBoard({ disabled, onMoveTask, onSelectTask, tasks }: TaskBoa
                         (candidate) => `task:${candidate.id}` === source.id
                     );
                     return task === undefined ? null : (
-                        <TaskCardContent overlay task={task} />
+                        <TaskCardContent
+                            automationJob={
+                                task.automation === undefined
+                                    ? undefined
+                                    : cronJobsById.get(task.automation.cronJobId)
+                            }
+                            overlay
+                            task={task}
+                        />
                     );
                 }}
             </DragOverlay>

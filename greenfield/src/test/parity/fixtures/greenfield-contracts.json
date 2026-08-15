@@ -628,6 +628,10 @@
         },
         {
             "kind": "query",
+            "name": "tasks.listLabels"
+        },
+        {
+            "kind": "query",
             "name": "tasks.listUpdates"
         },
         {

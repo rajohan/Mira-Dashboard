@@ -9,6 +9,7 @@ import type { ReactNode } from "react";
 
 import { cn } from "../lib/classNames.ts";
 import { useFormFieldInvalid } from "./formFieldContext.ts";
+import { interactiveTapClassName } from "./interactionStyles.ts";
 
 export interface RadioGroupOption<TValue extends string> {
     readonly description?: ReactNode;
@@ -87,7 +88,8 @@ export function RadioGroup<TValue extends string>({
                         >
                             <Radio
                                 className={cn(
-                                    "border-primary-500 bg-primary-950 text-primary-200 group flex size-full max-w-full min-w-0 cursor-pointer items-start gap-3 rounded-lg border p-3 text-left shadow-sm transition-colors",
+                                    interactiveTapClassName,
+                                    "border-primary-500 bg-primary-950 text-primary-200 group flex size-full max-w-full min-w-0 items-start gap-3 rounded-lg border p-3 text-left shadow-sm transition-colors",
                                     "not-data-disabled:data-hover:border-accent-400 not-data-disabled:data-hover:bg-primary-900 hover:not-data-disabled:border-accent-400 hover:not-data-disabled:bg-primary-900",
                                     "data-checked:border-accent-400 data-checked:bg-accent-500/15 data-checked:text-primary-50",
                                     "data-focus:ring-accent-400 data-focus:ring-offset-primary-950 data-focus:ring-2 data-focus:ring-offset-2 data-focus:outline-none",

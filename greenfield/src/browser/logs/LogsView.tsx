@@ -450,18 +450,7 @@ export function LogsView({
                     </div>
                 </div>
                 <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(14rem,22rem)_minmax(18rem,1fr)]">
-                    <FormField
-                        description={
-                            <span
-                                aria-hidden="true"
-                                className="invisible select-none"
-                                data-log-source-description-spacer=""
-                            >
-                                Searches recent lines from this source.
-                            </span>
-                        }
-                        label="Log source"
-                    >
+                    <FormField label="Log source">
                         <div className="mt-2">
                             <Select
                                 ariaLabel="Log source"

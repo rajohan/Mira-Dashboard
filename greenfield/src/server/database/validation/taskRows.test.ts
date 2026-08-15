@@ -36,8 +36,11 @@ const taskInsert = {
 describe("task database row validation", () => {
     test("validates task insert, select, and mutable fields", () => {
         expect(v.parse(taskInsertSchema, taskInsert)).toEqual(taskInsert);
-        expect(v.parse(taskSelectSchema, { ...taskInsert, version: 1 })).toEqual({
+        expect(
+            v.parse(taskSelectSchema, { ...taskInsert, number: 232, version: 1 })
+        ).toEqual({
             ...taskInsert,
+            number: 232,
             version: 1,
         });
         expect(
@@ -55,12 +58,26 @@ describe("task database row validation", () => {
         expect(
             v.safeParse(taskInsertSchema, {
                 ...taskInsert,
+                number: 232,
+            }).success
+        ).toBeFalse();
+        expect(
+            v.safeParse(taskSelectSchema, {
+                ...taskInsert,
+                number: 0,
+                version: 1,
+            }).success
+        ).toBeFalse();
+        expect(
+            v.safeParse(taskInsertSchema, {
+                ...taskInsert,
                 title: "Hidden\u200Bformat",
             }).success
         ).toBeFalse();
         expect(
             v.safeParse(taskSelectSchema, {
                 ...taskInsert,
+                number: 232,
                 updatedAt: new Date(999),
                 version: 1,
             }).success

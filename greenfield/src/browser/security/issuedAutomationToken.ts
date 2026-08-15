@@ -2,7 +2,7 @@
  * Reveals a validated automation token before any cache refresh can delay the
  * one-time secret boundary.
  * @param token One-time token returned by the validated browser client.
- * @param revealToken Component-local secret-state writer.
+ * @param revealToken Same-user-validated transient secret presenter.
  * @param refreshQueries Non-secret cache refresh started after reveal.
  */
 export async function revealIssuedAutomationToken(

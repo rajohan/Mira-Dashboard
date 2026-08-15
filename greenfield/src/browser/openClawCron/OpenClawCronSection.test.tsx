@@ -637,7 +637,7 @@ describe("OpenClawCronSection", () => {
         ).not.toBeInTheDocument();
         expect(
             within(dialog).getByRole("textbox", { name: "Disable reason" })
-        ).toHaveAttribute("placeholder", "Example: Paused during database maintenance");
+        ).toHaveAttribute("placeholder", "Paused during database maintenance");
         await userEvent.type(
             within(dialog).getByRole("textbox", { name: "Disable reason" }),
             "Gateway maintenance"

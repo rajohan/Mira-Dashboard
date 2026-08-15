@@ -2,7 +2,6 @@ import { afterEach, describe, expect, test } from "bun:test";
 
 import { createMemoryHistory } from "@tanstack/react-router";
 import type { TRPCRequestOptions } from "@trpc/client";
-import { act } from "react";
 
 import type {
     AccountSecuritySummary,
@@ -26,7 +25,11 @@ import {
     type DashboardTrpcTransport,
 } from "../api/trpcClient.ts";
 import { DashboardBrowserApplication } from "../application.tsx";
-import { authStatusQueryKey, publishAuthenticationStatus } from "../auth/authQueries.ts";
+import {
+    authStatusCacheIdentity,
+    authStatusQueryKey,
+    publishAuthenticationStatus,
+} from "../auth/authQueries.ts";
 import {
     createDashboardBrowserCollections,
     type DashboardBrowserCollections,
@@ -34,9 +37,10 @@ import {
 import { createDashboardRouter } from "../router.tsx";
 import { emptyNotificationListResult } from "../test/notifications.ts";
 import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
+import { createSecurityVerificationCoordinator } from "./securityVerificationCoordinator.ts";
 import type { DashboardWebAuthnClient } from "./webauthn/webauthnClient.ts";
 
-const { render, screen, waitFor } = await import("@testing-library/react");
+const { act, render, screen, waitFor, within } = await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
 const userEvent = userEventModule.default;
 
@@ -72,6 +76,10 @@ const authenticatedStatus: AuthStatus = Object.freeze({
     session: currentSession,
     state: "authenticated",
     user,
+});
+const rotatedAuthenticatedStatus: AuthStatus = Object.freeze({
+    ...authenticatedStatus,
+    session: rotatedSession,
 });
 const recentVerification = Object.freeze({
     expiresAtMs: timestampMs + 300_000,
@@ -323,14 +331,21 @@ function renderAccountSecurity(
     webAuthnClient: DashboardWebAuthnClient = unexpectedWebAuthnClient,
     transformCollections: (
         collections: DashboardBrowserCollections
-    ) => DashboardBrowserCollections = (collections) => collections
+    ) => DashboardBrowserCollections = (collections) => collections,
+    securityVerificationEnabled = false
 ) {
     const queryClient = createDashboardQueryClient();
     queryClients.push(queryClient);
     const router = createDashboardRouter(
         createMemoryHistory({ initialEntries: ["/account-security"] })
     );
-    const trpcClient = createDashboardTrpcClient(transport);
+    const securityVerification = securityVerificationEnabled
+        ? createSecurityVerificationCoordinator(() => {
+              const status = queryClient.getQueryData<AuthStatus>(authStatusQueryKey);
+              return status === undefined ? undefined : authStatusCacheIdentity(status);
+          })
+        : undefined;
+    const trpcClient = createDashboardTrpcClient(transport, { securityVerification });
     const collections = transformCollections(
         createDashboardBrowserCollections(queryClient, trpcClient)
     );
@@ -342,6 +357,7 @@ function renderAccountSecurity(
                 queryClient={queryClient}
                 realtimeClient={noOpDashboardRealtimeClient}
                 router={router}
+                securityVerification={securityVerification}
                 trpcClient={trpcClient}
                 webAuthnClient={webAuthnClient}
             />
@@ -373,6 +389,52 @@ async function waitForDialogExit(): Promise<void> {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     });
     expect(screen.queryByRole("dialog", { hidden: true })).toBeNull();
+}
+
+async function submitGlobalTotpProofAndWaitForToken(
+    queryClient: ReturnType<typeof createDashboardQueryClient>,
+    operationReplayed: Promise<void>
+): Promise<void> {
+    const refreshCompletion = Promise.withResolvers<void>();
+    let replayed = false;
+    let observedRefresh = false;
+    let settled = false;
+    const resolveWhenSettled = () => {
+        const authentication = queryClient.getQueryData<AuthStatus>(authStatusQueryKey);
+        if (!replayed || settled) return;
+        if (queryClient.isFetching() !== 0) {
+            observedRefresh = true;
+            return;
+        }
+        if (
+            !observedRefresh ||
+            authentication?.state !== "authenticated" ||
+            authentication.session.id !== rotatedSession.id
+        ) {
+            return;
+        }
+        settled = true;
+        refreshCompletion.resolve();
+    };
+    const unsubscribeQueryCache = queryClient
+        .getQueryCache()
+        .subscribe(resolveWhenSettled);
+    const replayReadiness = operationReplayed.then(() => {
+        replayed = true;
+        resolveWhenSettled();
+        return true;
+    });
+    await act(async () => {
+        try {
+            screen.getByRole("button", { name: "Verify authenticator" }).click();
+            await replayReadiness;
+            await refreshCompletion.promise;
+        } finally {
+            unsubscribeQueryCache();
+        }
+    });
+    expect(settled).toBeTrue();
+    expect(screen.getByRole("dialog", { name: "Save access token now" })).toBeTruthy();
 }
 
 afterEach(async () => {
@@ -407,7 +469,7 @@ describe("Dashboard account security route", () => {
         for (const name of [
             "Verification and password",
             "Multi-factor authentication",
-            "Browser sessions",
+            "Active sessions",
             "Automation access",
             "Security audit",
         ]) {
@@ -429,7 +491,7 @@ describe("Dashboard account security route", () => {
             },
             register: () => Promise.reject(new TypeError("Unexpected registration")),
         });
-        transport.summary = {
+        const mfaProofSummary = {
             ...enabledSummary,
             mfa: {
                 ...enabledSummary.mfa,
@@ -446,6 +508,10 @@ describe("Dashboard account security route", () => {
                     },
                 ],
             },
+        } satisfies AccountSecuritySummary;
+        transport.summary = {
+            ...disabledSummary,
+            recentAuth: { mfa: staleVerification, password: staleVerification },
         };
         const paths: string[] = [];
         transport.mutationHandler = (path, input) => {
@@ -453,6 +519,7 @@ describe("Dashboard account security route", () => {
             switch (path) {
                 case "accountSecurity.reauthenticatePassword": {
                     expect(input).toEqual({ password: "password proof" });
+                    transport.summary = mfaProofSummary;
                     return Promise.resolve({
                         session: currentSession,
                         verifiedAtMs: timestampMs,
@@ -525,42 +592,99 @@ describe("Dashboard account security route", () => {
             );
         });
 
+        await userActions.click(screen.getByRole("button", { name: "Verify password" }));
+        const passwordVerificationDialog = screen.getByRole("dialog", {
+            name: "Verify current password",
+        });
         await userActions.type(
-            screen.getByLabelText("Password to confirm your identity"),
+            within(passwordVerificationDialog).getByLabelText(
+                "Password to confirm your identity"
+            ),
             "password proof"
         );
-        await userActions.click(screen.getByRole("button", { name: "Verify password" }));
-        await screen.findByText("Password confirmed.");
-
-        await userActions.type(screen.getByLabelText("Authenticator code"), "123456");
         await userActions.click(
-            screen.getByRole("button", { name: "Verify authenticator" })
+            within(passwordVerificationDialog).getByRole("button", {
+                name: "Verify password",
+            })
+        );
+        await screen.findByText("Password confirmed.");
+        await waitForDialogExit();
+
+        await userActions.click(screen.getByRole("button", { name: "Verify now" }));
+        let mfaVerificationDialog = screen.getByRole("dialog", {
+            name: "Verify second factor",
+        });
+        await userActions.click(
+            within(mfaVerificationDialog).getByRole("button", {
+                name: "Use authenticator app",
+            })
+        );
+        await userActions.type(
+            within(mfaVerificationDialog).getByLabelText("Authenticator code"),
+            "123456"
+        );
+        await userActions.click(
+            within(mfaVerificationDialog).getByRole("button", {
+                name: "Verify authenticator",
+            })
         );
         await screen.findByText("Authenticator code accepted.");
+        await waitForDialogExit();
 
+        await userActions.click(screen.getByRole("button", { name: "Verify now" }));
+        mfaVerificationDialog = screen.getByRole("dialog", {
+            name: "Verify second factor",
+        });
+        await userActions.click(
+            within(mfaVerificationDialog).getByRole("button", {
+                name: "Use recovery code",
+            })
+        );
         await userActions.type(
-            screen.getByLabelText("Recovery code"),
+            within(mfaVerificationDialog).getByLabelText("Recovery code"),
             recoveryCodes()[0]!
         );
         await userActions.click(
-            screen.getByRole("button", { name: "Use recovery code" })
+            within(mfaVerificationDialog).getByRole("button", {
+                name: "Use recovery code",
+            })
         );
         await screen.findByText("Recovery code accepted.");
+        await waitForDialogExit();
 
+        await userActions.click(screen.getByRole("button", { name: "Verify now" }));
+        mfaVerificationDialog = screen.getByRole("dialog", {
+            name: "Verify second factor",
+        });
         await userActions.click(
-            screen.getByRole("button", { name: "Verify security key" })
+            within(mfaVerificationDialog).getByRole("button", {
+                name: "Use a security key",
+            })
         );
         await screen.findByText("Security key confirmed.");
+        await waitForDialogExit();
 
+        await userActions.click(screen.getByRole("button", { name: "Change password" }));
+        const passwordChangeDialog = screen.getByRole("dialog", {
+            name: "Change Dashboard password",
+        });
         await userActions.type(
-            screen.getByLabelText("Current password"),
+            within(passwordChangeDialog).getByLabelText("Current password"),
             "current password"
         );
         await userActions.type(
-            screen.getByLabelText("New password"),
+            within(passwordChangeDialog).getByLabelText("New password"),
             "new strong password"
         );
-        await userActions.click(screen.getByRole("button", { name: "Change password" }));
+        await userActions.type(
+            within(passwordChangeDialog).getByLabelText("Confirm new password"),
+            "new strong password"
+        );
+        await userActions.click(
+            within(passwordChangeDialog).getByRole("button", {
+                name: "Change and sign out others",
+            })
+        );
         await waitFor(() => expect(paths.at(-1)).toBe("auth.changePassword"));
         const authenticationPublished = Promise.withResolvers<void>();
         const unsubscribeAuthentication = queryClient.getQueryCache().subscribe(() => {
@@ -623,7 +747,7 @@ describe("Dashboard account security route", () => {
         ]) {
             expect(cachedData(queryClient)).not.toContain(secret);
         }
-    });
+    }, 15_000);
 
     test("does not republish a delayed password rotation after logout", async () => {
         const transport = new SecurityTransport(disabledSummary);
@@ -662,16 +786,28 @@ describe("Dashboard account security route", () => {
                 name: "Account security",
             });
 
+            await userActions.click(
+                screen.getByRole("button", { name: "Change password" })
+            );
+            const passwordChangeDialog = screen.getByRole("dialog", {
+                name: "Change Dashboard password",
+            });
             await userActions.type(
-                screen.getByLabelText("Current password"),
+                within(passwordChangeDialog).getByLabelText("Current password"),
                 "current password"
             );
             await userActions.type(
-                screen.getByLabelText("New password"),
+                within(passwordChangeDialog).getByLabelText("New password"),
+                "new strong password"
+            );
+            await userActions.type(
+                within(passwordChangeDialog).getByLabelText("Confirm new password"),
                 "new strong password"
             );
             await userActions.click(
-                screen.getByRole("button", { name: "Change password" })
+                within(passwordChangeDialog).getByRole("button", {
+                    name: "Change and sign out others",
+                })
             );
             await waitFor(() => expect(passwordChangeSignal).toBeInstanceOf(AbortSignal));
             expect(passwordChangeSignal?.aborted).toBeFalse();
@@ -732,7 +868,7 @@ describe("Dashboard account security route", () => {
         }
     });
 
-    test("enrolls TOTP and reveals recovery codes only in component state", async () => {
+    test("preserves first-TOTP recovery codes through the session rotation", async () => {
         const transport = new SecurityTransport(disabledSummary);
         const enrollment = {
             expiresAtMs: timestampMs + 300_000,
@@ -751,12 +887,13 @@ describe("Dashboard account security route", () => {
             expect(path).toBe("accountSecurity.confirmTotpEnrollment");
             expect(input).toEqual({ code: "123456", factorId: totpFactor.id });
             transport.summary = enabledSummary;
+            transport.authStatus = rotatedAuthenticatedStatus;
             return Promise.resolve({
                 enabledNow: true,
                 factor: totpFactor,
                 recoveryCodes: codes,
                 revokedSessions: 0,
-                session: { ...currentSession, authMethod: "totp" },
+                session: { ...rotatedSession, authMethod: "totp" },
             });
         };
         const queryClient = renderAccountSecurity(transport);
@@ -770,20 +907,142 @@ describe("Dashboard account security route", () => {
         const authenticatorName = screen.getByLabelText("Name");
         expect(authenticatorName).toHaveFocus();
         await userActions.type(authenticatorName, "Phone authenticator");
-        await userActions.click(screen.getByRole("button", { name: "Continue" }));
+        await act(async () => {
+            screen.getByRole("button", { name: "Continue" }).click();
+            for (let attempt = 0; attempt < 50; attempt += 1) {
+                if (screen.queryByText(enrollment.secret) !== null) break;
+                await new Promise((resolve) => setTimeout(resolve, 0));
+            }
+            await new Promise((resolve) => setTimeout(resolve, 0));
+        });
         expect(await screen.findByText(enrollment.secret)).toBeTruthy();
         expect(cachedData(queryClient)).not.toContain(enrollment.secret);
 
         await userActions.type(screen.getByLabelText("Confirmation code"), "123456");
-        await userActions.click(
-            screen.getByRole("button", { name: "Confirm authenticator" })
+        await act(async () => {
+            screen.getByRole("button", { name: "Confirm authenticator" }).click();
+            for (let attempt = 0; attempt < 50; attempt += 1) {
+                if (
+                    screen.queryByRole("dialog", {
+                        name: "Save recovery codes now",
+                    }) !== null &&
+                    queryClient.isFetching() === 0
+                ) {
+                    break;
+                }
+                await new Promise((resolve) => setTimeout(resolve, 0));
+            }
+            await new Promise((resolve) => setTimeout(resolve, 0));
+        });
+        const recoveryDialog = await screen.findByRole("dialog", {
+            name: "Save recovery codes now",
+        });
+        expect(screen.getAllByRole("dialog")).toHaveLength(1);
+        await waitFor(() =>
+            expect(queryClient.getQueryData<AuthStatus>(authStatusQueryKey)).toEqual(
+                rotatedAuthenticatedStatus
+            )
         );
-        expect(
-            await screen.findByRole("heading", { level: 3, name: "New recovery codes" })
-        ).toBeTruthy();
-        expect(screen.getByText(codes[0]!)).toBeTruthy();
+        expect(within(recoveryDialog).getByText(codes[0]!)).toBeTruthy();
         expect(cachedData(queryClient)).not.toContain(codes[0]!);
-        await userActions.click(screen.getByRole("button", { name: "Dismiss" }));
+        await userActions.click(
+            within(recoveryDialog).getByRole("button", { name: "Close dialog" })
+        );
+        await waitForDialogExit();
+        expect(screen.queryByText(codes[0]!)).toBeNull();
+    });
+
+    test("preserves first-WebAuthn recovery codes through the session rotation", async () => {
+        const transport = new SecurityTransport(disabledSummary);
+        const codes = recoveryCodes();
+        const registrationInputs: WebAuthnRegistrationOptions[] = [];
+        const webAuthnClient: DashboardWebAuthnClient = Object.freeze({
+            authenticate: () =>
+                Promise.reject(new TypeError("Unexpected authentication")),
+            register: (options: WebAuthnRegistrationOptions) => {
+                registrationInputs.push(options);
+                return Promise.resolve(registrationResponse);
+            },
+        });
+        const credential = {
+            backedUp: false,
+            createdAtMs: timestampMs,
+            deviceType: "singleDevice" as const,
+            id: "019fd978-1e89-7819-b845-0c843bec6937",
+            label: "Primary security key",
+            transports: ["usb" as const],
+            usable: true,
+        } satisfies WebAuthnCredentialSummary;
+        transport.mutationHandler = (path, input) => {
+            if (path === "accountSecurity.beginWebAuthnEnrollment") {
+                expect(input).toEqual({});
+                return Promise.resolve({
+                    expiresAtMs: timestampMs + 60_000,
+                    options: registrationOptions,
+                });
+            }
+            expect(path).toBe("accountSecurity.confirmWebAuthnEnrollment");
+            expect(input).toEqual({
+                label: credential.label,
+                response: registrationResponse,
+            });
+            transport.summary = {
+                ...enabledSummary,
+                mfa: {
+                    ...enabledSummary.mfa,
+                    methods: ["recovery", "webauthn"],
+                    totpFactors: [],
+                    webAuthnCredentials: [credential],
+                },
+            };
+            transport.authStatus = rotatedAuthenticatedStatus;
+            return Promise.resolve({
+                credential,
+                enabledNow: true,
+                recoveryCodes: codes,
+                revokedSessions: 0,
+                session: { ...rotatedSession, authMethod: "webauthn" },
+            });
+        };
+        const queryClient = renderAccountSecurity(transport, webAuthnClient);
+        const userActions = userEvent.setup();
+
+        await userActions.click(
+            await screen.findByRole("button", { name: "Add security key" })
+        );
+        await userActions.type(screen.getByLabelText("Name"), credential.label);
+        await act(async () => {
+            screen.getByRole("button", { name: "Continue" }).click();
+            for (let attempt = 0; attempt < 50; attempt += 1) {
+                if (
+                    screen.queryByRole("dialog", {
+                        name: "Save recovery codes now",
+                    }) !== null &&
+                    queryClient.isFetching() === 0
+                ) {
+                    break;
+                }
+                await new Promise((resolve) => setTimeout(resolve, 0));
+            }
+            await new Promise((resolve) => setTimeout(resolve, 0));
+        });
+
+        const recoveryDialog = await screen.findByRole("dialog", {
+            name: "Save recovery codes now",
+        });
+        expect(screen.getAllByRole("dialog")).toHaveLength(1);
+        await waitFor(() =>
+            expect(queryClient.getQueryData<AuthStatus>(authStatusQueryKey)).toEqual(
+                rotatedAuthenticatedStatus
+            )
+        );
+        expect(registrationInputs).toEqual([registrationOptions]);
+        expect(within(recoveryDialog).getByText(codes[0]!)).toBeTruthy();
+        expect(cachedData(queryClient)).not.toContain(codes[0]!);
+        await userActions.click(
+            within(recoveryDialog).getByRole("button", { name: "Close dialog" })
+        );
+        await waitForDialogExit();
         expect(screen.queryByText(codes[0]!)).toBeNull();
     });
 
@@ -939,20 +1198,26 @@ describe("Dashboard account security route", () => {
         await waitFor(() => expect(screen.queryByText(totpFactor.label)).toBeNull());
         await waitForDialogExit();
 
-        await userActions.click(
-            screen.getByRole("button", { name: "Create new recovery codes" })
-        );
+        await userActions.click(screen.getByRole("button", { name: "Create new codes" }));
         expect(
             transport.calls.filter(
                 (call) => call.path === "accountSecurity.rotateRecoveryCodes"
             )
         ).toHaveLength(0);
         await userActions.click(
-            screen.getByRole("button", { name: "Create new recovery codes" })
+            within(
+                screen.getByRole("dialog", { name: "Create new recovery codes?" })
+            ).getByRole("button", { name: "Create new recovery codes" })
+        );
+        const recoveryDialog = await screen.findByRole("dialog", {
+            name: "Save recovery codes now",
+        });
+        expect(within(recoveryDialog).getByText(codes[0]!)).toBeTruthy();
+        await userActions.click(
+            within(recoveryDialog).getByRole("button", { name: "Close dialog" })
         );
         await waitForDialogExit();
-        expect(screen.getByText(codes[0]!)).toBeTruthy();
-        await userActions.click(screen.getByRole("button", { name: "Dismiss" }));
+        expect(screen.queryByText(codes[0]!)).toBeNull();
     });
 
     test("confirms destructive automation actions before mutation", async () => {
@@ -1015,7 +1280,7 @@ describe("Dashboard account security route", () => {
         await userActions.click(
             screen.getByRole("button", { name: "Revoke access token" })
         );
-        expect(await screen.findByText(/revoked /u)).toBeTruthy();
+        expect(await screen.findByText(/^Created .* · revoked /u)).toBeTruthy();
         await waitForDialogExit();
         expect(
             transport.calls.filter(
@@ -1089,10 +1354,16 @@ describe("Dashboard account security route", () => {
 
     test("revokes one, other, and all browser sessions with final cache teardown", async () => {
         const transport = new SecurityTransport();
+        const remainingOtherSession = {
+            ...otherSession,
+            id: "d".repeat(32),
+            userAgent: "Remaining browser",
+        } satisfies AuthSessionSummary;
+        transport.sessions = [currentSession, otherSession, remainingOtherSession];
         transport.mutationHandler = (path, input) => {
             if (path === "auth.revokeSession") {
                 expect(input).toEqual({ sessionId: otherSession.id });
-                transport.sessions = [currentSession];
+                transport.sessions = [currentSession, remainingOtherSession];
                 return Promise.resolve({ revoked: true });
             }
             if (path === "auth.revokeOtherSessions") {
@@ -1109,32 +1380,36 @@ describe("Dashboard account security route", () => {
         await screen.findByText("Other browser");
 
         await userActions.click(
-            screen.getByRole("button", { name: "Sign out browser Other browser" })
+            screen.getByRole("button", { name: "Revoke Other browser" })
         );
-        expect(
-            screen.getByRole("dialog", { name: "Sign out this browser?" })
-        ).toBeTruthy();
+        expect(screen.getByRole("dialog", { name: "Revoke this session?" })).toBeTruthy();
         expect(
             transport.calls.filter((call) => call.path === "auth.revokeSession")
         ).toHaveLength(0);
-        await userActions.click(screen.getByRole("button", { name: "Sign out browser" }));
-        await waitFor(() => expect(screen.queryByText("Other browser")).toBeNull());
         await userActions.click(
-            screen.getByRole("button", { name: "Sign out other browsers" })
+            within(
+                screen.getByRole("dialog", { name: "Revoke this session?" })
+            ).getByRole("button", { name: "Revoke" })
         );
+        await waitFor(() => expect(screen.queryByText("Other browser")).toBeNull());
+        await waitForDialogExit();
+        await userActions.click(screen.getByRole("button", { name: "Log out others" }));
         await userActions.click(
-            screen.getByRole("button", { name: "Sign out other browsers" })
+            within(
+                screen.getByRole("dialog", { name: "Log out every other browser?" })
+            ).getByRole("button", { name: "Log out others" })
         );
         await waitFor(() =>
             expect(
                 transport.calls.filter((call) => call.path === "auth.revokeOtherSessions")
             ).toHaveLength(1)
         );
+        await waitForDialogExit();
+        await userActions.click(screen.getByRole("button", { name: "Log out all" }));
         await userActions.click(
-            screen.getByRole("button", { name: "Sign out every browser" })
-        );
-        await userActions.click(
-            screen.getByRole("button", { name: "Sign out every browser" })
+            within(
+                screen.getByRole("dialog", { name: "Log out every browser?" })
+            ).getByRole("button", { name: "Log out all" })
         );
 
         await screen.findByRole("heading", { level: 1, name: "Sign in" });
@@ -1150,10 +1425,21 @@ describe("Dashboard account security route", () => {
         ]);
     });
 
-    test("reveals a created automation token once without placing it in query data", async () => {
+    test("preserves a created automation token through stale-auth step-up and session rotation", async () => {
         const transport = new SecurityTransport();
         const token = `${automationCredential.prefix}.${"d".repeat(64)}`;
+        const operationReplayed = Promise.withResolvers<void>();
+        let createAttempts = 0;
         transport.mutationHandler = (path, input) => {
+            if (path === "accountSecurity.stepUpTotp") {
+                expect(input).toEqual({ code: "123456" });
+                transport.authStatus = rotatedAuthenticatedStatus;
+                return Promise.resolve({
+                    method: "totp",
+                    session: { ...rotatedSession, authMethod: "totp" },
+                    verifiedAtMs: timestampMs,
+                });
+            }
             expect(path).toBe("automationSecurity.createPrincipal");
             expect(input).toEqual({
                 capabilities: ["notifications:read"],
@@ -1161,15 +1447,27 @@ describe("Dashboard account security route", () => {
                 initialCredential: { label: automationCredential.label },
                 label: automationPrincipal.label,
             });
+            createAttempts += 1;
+            if (createAttempts === 1) {
+                throw Object.assign(new Error("Step-up required"), {
+                    data: { code: "FORBIDDEN", reason: "step_up_required" },
+                });
+            }
             transport.principals = [automationPrincipal];
             transport.credentials.set(automationPrincipal.id, [automationCredential]);
+            operationReplayed.resolve();
             return Promise.resolve({
                 credential: automationCredential,
                 principal: automationPrincipal,
                 token,
             });
         };
-        const queryClient = renderAccountSecurity(transport);
+        const queryClient = renderAccountSecurity(
+            transport,
+            unexpectedWebAuthnClient,
+            (collections) => collections,
+            true
+        );
         const userActions = userEvent.setup();
         await screen.findByRole("heading", {
             level: 3,
@@ -1193,10 +1491,148 @@ describe("Dashboard account security route", () => {
             screen.getByRole("button", { name: "Create account and token" })
         );
 
-        expect(await screen.findByText(token)).toBeTruthy();
+        const verificationDialog = await screen.findByRole("dialog", {
+            name: "Verify your session",
+        });
+        await userActions.click(
+            within(verificationDialog).getByRole("button", {
+                name: "Use authenticator app",
+            })
+        );
+        await userActions.type(
+            within(verificationDialog).getByLabelText("Authenticator code"),
+            "123456"
+        );
+        await submitGlobalTotpProofAndWaitForToken(
+            queryClient,
+            operationReplayed.promise
+        );
+
+        const tokenDialog = await screen.findByRole("dialog", {
+            name: "Save access token now",
+        });
+        expect(within(tokenDialog).getByText(token)).toBeTruthy();
+        expect(queryClient.getQueryData<AuthStatus>(authStatusQueryKey)).toEqual(
+            rotatedAuthenticatedStatus
+        );
+        expect(createAttempts).toBe(2);
         expect(cachedData(queryClient)).not.toContain(token);
-        await userActions.click(screen.getByRole("button", { name: "Dismiss" }));
+        await userActions.click(
+            within(tokenDialog).getByRole("button", { name: "Dismiss" })
+        );
+        await waitForDialogExit();
         expect(screen.queryByText(token)).toBeNull();
         expect(await screen.findByText(automationPrincipal.label)).toBeTruthy();
-    });
+    }, 15_000);
+
+    test("preserves a rotated automation token through stale-auth step-up and session rotation", async () => {
+        const transport = new SecurityTransport();
+        const replacementLabel = "August rotation";
+        const replacementCredential = Object.freeze({
+            ...automationCredential,
+            createdAtMs: timestampMs + 1,
+            id: "019fd979-42cc-7ce4-8392-3de63748a595",
+            label: replacementLabel,
+            prefix: "e".repeat(32),
+            replacesCredentialId: automationCredential.id,
+        } satisfies AutomationCredentialSummary);
+        const token = `${replacementCredential.prefix}.${"f".repeat(64)}`;
+        const operationReplayed = Promise.withResolvers<void>();
+        let rotateAttempts = 0;
+        transport.principals = [automationPrincipal];
+        transport.credentials.set(automationPrincipal.id, [automationCredential]);
+        transport.mutationHandler = (path, input) => {
+            if (path === "accountSecurity.stepUpTotp") {
+                expect(input).toEqual({ code: "123456" });
+                transport.authStatus = rotatedAuthenticatedStatus;
+                return Promise.resolve({
+                    method: "totp",
+                    session: { ...rotatedSession, authMethod: "totp" },
+                    verifiedAtMs: timestampMs,
+                });
+            }
+            expect(path).toBe("automationSecurity.rotateCredential");
+            expect(input).toEqual({
+                credentialId: automationCredential.id,
+                expectedAuthorizationVersion: automationPrincipal.authorizationVersion,
+                principalId: automationPrincipal.id,
+                replacement: { label: replacementLabel },
+            });
+            rotateAttempts += 1;
+            if (rotateAttempts === 1) {
+                throw Object.assign(new Error("Step-up required"), {
+                    data: { code: "FORBIDDEN", reason: "step_up_required" },
+                });
+            }
+            transport.principals = [
+                Object.freeze({
+                    ...automationPrincipal,
+                    activeCredentialCount: 2,
+                    authorizationVersion: 2,
+                    totalCredentialCount: 2,
+                    updatedAtMs: timestampMs + 1,
+                }),
+            ];
+            transport.credentials.set(automationPrincipal.id, [
+                replacementCredential,
+                automationCredential,
+            ]);
+            operationReplayed.resolve();
+            return Promise.resolve({ credential: replacementCredential, token });
+        };
+        const queryClient = renderAccountSecurity(
+            transport,
+            unexpectedWebAuthnClient,
+            (collections) => collections,
+            true
+        );
+        const userActions = userEvent.setup();
+        await screen.findByText(automationPrincipal.label);
+
+        await userActions.click(
+            screen.getByRole("button", { name: /Manage access tokens/u })
+        );
+        await screen.findByText(automationCredential.label);
+        await userActions.type(screen.getByLabelText("New token name"), replacementLabel);
+        await userActions.click(
+            screen.getByRole("button", {
+                name: `Create replacement access token for ${automationCredential.label}`,
+            })
+        );
+
+        const verificationDialog = await screen.findByRole("dialog", {
+            name: "Verify your session",
+        });
+        await userActions.click(
+            within(verificationDialog).getByRole("button", {
+                name: "Use authenticator app",
+            })
+        );
+        await userActions.type(
+            within(verificationDialog).getByLabelText("Authenticator code"),
+            "123456"
+        );
+        await submitGlobalTotpProofAndWaitForToken(
+            queryClient,
+            operationReplayed.promise
+        );
+
+        const tokenDialog = await screen.findByRole("dialog", {
+            name: "Save access token now",
+        });
+        expect(within(tokenDialog).getByText(token)).toBeTruthy();
+        expect(queryClient.getQueryData<AuthStatus>(authStatusQueryKey)).toEqual(
+            rotatedAuthenticatedStatus
+        );
+        expect(rotateAttempts).toBe(2);
+        expect(cachedData(queryClient)).not.toContain(token);
+        await userActions.click(
+            within(tokenDialog).getByRole("button", { name: "Dismiss" })
+        );
+        await waitForDialogExit();
+        expect(screen.queryByText(token)).toBeNull();
+        expect(transport.credentials.get(automationPrincipal.id)).toContain(
+            replacementCredential
+        );
+    }, 15_000);
 });

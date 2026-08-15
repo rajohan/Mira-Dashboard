@@ -10,6 +10,7 @@ export interface FormFieldProps {
     readonly disabled?: boolean;
     readonly error?: string;
     readonly label: ReactNode;
+    readonly labelAdornment?: ReactNode;
 }
 
 /**
@@ -23,6 +24,7 @@ export function FormField({
     disabled = false,
     error,
     label,
+    labelAdornment,
 }: FormFieldProps) {
     const invalid = error !== undefined;
 
@@ -32,17 +34,20 @@ export function FormField({
             data-invalid={invalid ? "" : undefined}
             disabled={disabled}
         >
-            <Label className="text-primary-200 block text-sm font-medium data-disabled:opacity-60">
-                {label}
-            </Label>
-            {description !== undefined && (
-                <Description className="text-primary-400 mt-1 text-xs leading-5 data-disabled:opacity-60">
-                    {description}
-                </Description>
-            )}
+            <div className="flex min-w-0 items-center justify-between gap-2">
+                <Label className="text-primary-200 block min-w-0 cursor-pointer text-sm font-medium data-disabled:cursor-not-allowed data-disabled:opacity-60">
+                    {label}
+                </Label>
+                {labelAdornment}
+            </div>
             <FormFieldInvalidContext.Provider value={invalid}>
                 {children}
             </FormFieldInvalidContext.Provider>
+            {description !== undefined && (
+                <Description className="text-primary-400 mt-1.5 text-xs leading-5 data-disabled:opacity-60">
+                    {description}
+                </Description>
+            )}
             {error !== undefined && (
                 <Description className="mt-1.5 text-sm text-red-300">{error}</Description>
             )}

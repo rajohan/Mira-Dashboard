@@ -707,6 +707,7 @@ export const procedureExpectedErrorPolicy = freezeProcedureExpectedErrorPolicy({
     ],
     "tasks.get": ["FORBIDDEN", "NOT_FOUND", "UNAUTHORIZED"],
     "tasks.list": ["FORBIDDEN", "UNAUTHORIZED"],
+    "tasks.listLabels": ["FORBIDDEN", "UNAUTHORIZED"],
     "tasks.listUpdates": ["FORBIDDEN", "NOT_FOUND", "UNAUTHORIZED"],
     "tasks.move": [
         "CONFLICT",

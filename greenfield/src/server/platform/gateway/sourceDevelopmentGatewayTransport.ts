@@ -543,10 +543,10 @@ function simulatedResponse(
 ): unknown {
     switch (method) {
         case "chat.send": {
-            return Object.freeze({
-                runId: parameterString(parameters, "idempotencyKey", 256),
-                status: "started",
-            });
+            // Development reads and events still come from the live Gateway. A local
+            // started ACK would therefore create a run that can never receive events.
+            parameterString(parameters, "idempotencyKey", 256);
+            throw new PersistentGatewayRequestError({ code: "UNAVAILABLE" });
         }
         case "chat.abort": {
             const runId =
@@ -788,7 +788,20 @@ export function createSourceDevelopmentGatewayTransport(
             requestOptions.signal?.throwIfAborted();
             const parametersJson = JSON.stringify(parameters);
             const now = checkedNow(nowMs);
-            const response = simulatedResponse(method, parameters, now, state);
+            let response: unknown;
+            try {
+                response = simulatedResponse(method, parameters, now, state);
+            } catch (error) {
+                if (method === "chat.send") {
+                    appendJournalReceipt(journalPath, {
+                        atMs: now,
+                        method,
+                        parametersJson,
+                    });
+                    requestOptions.signal?.throwIfAborted();
+                }
+                throw error;
+            }
             appendJournalReceipt(journalPath, { atMs: now, method, parametersJson });
             requestOptions.signal?.throwIfAborted();
             requestOptions.onResponseBytes?.(responseByteLength(response));

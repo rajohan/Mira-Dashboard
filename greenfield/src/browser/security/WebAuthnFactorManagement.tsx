@@ -1,13 +1,11 @@
 import { Fingerprint, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useRef } from "react";
 
 import type { AccountSecuritySummary } from "../../contracts/accountSecurity.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import type { useExclusiveDashboardAction } from "../hooks/useExclusiveDashboardAction.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
-import { Button } from "../ui/Button.tsx";
-import { Heading } from "../ui/Heading.tsx";
-import { Icon } from "../ui/Icon.tsx";
+import { IconOnlyButton } from "../ui/IconOnlyButton.tsx";
 import { MfaEnrollmentLabelModal } from "./MfaEnrollmentLabelModal.tsx";
 import { useDashboardWebAuthnClient } from "./webauthn/webauthnContextValue.ts";
 
@@ -15,7 +13,9 @@ interface WebAuthnFactorManagementProps {
     readonly action: ReturnType<typeof useExclusiveDashboardAction>;
     readonly available: boolean;
     readonly credentials: AccountSecuritySummary["mfa"]["webAuthnCredentials"];
-    readonly factorCapacityReached: boolean;
+    readonly labelModalOpen: boolean;
+    readonly onEnrollmentLabelClose: () => void;
+    readonly onEnrollmentFlowComplete: () => void;
     readonly onRecoveryCodes: (codes: readonly string[]) => void;
     readonly onRemove: (credential: Readonly<{ id: string; label: string }>) => void;
     readonly refreshAfter: (operation: () => Promise<unknown>) => Promise<boolean>;
@@ -29,17 +29,19 @@ export function WebAuthnFactorManagement({
     action,
     available,
     credentials,
-    factorCapacityReached,
+    labelModalOpen,
+    onEnrollmentLabelClose,
+    onEnrollmentFlowComplete,
     onRecoveryCodes,
     onRemove,
     refreshAfter,
 }: WebAuthnFactorManagementProps) {
     const client = useDashboardTrpcClient();
     const webAuthn = useDashboardWebAuthnClient();
-    const [labelModalOpen, setLabelModalOpen] = useState(false);
+    const pendingRecoveryCodes = useRef<readonly string[] | undefined>(undefined);
 
     async function enrollSecurityKey(label: string): Promise<boolean> {
-        return refreshAfter(async () => {
+        const succeeded = await refreshAfter(async () => {
             const challenge = await client.mutation(
                 "accountSecurity.beginWebAuthnEnrollment",
                 {}
@@ -49,65 +51,70 @@ export function WebAuthnFactorManagement({
                 "accountSecurity.confirmWebAuthnEnrollment",
                 label.length === 0 ? { response } : { label, response }
             );
-            if (result.enabledNow) onRecoveryCodes(result.recoveryCodes);
+            pendingRecoveryCodes.current = result.enabledNow
+                ? result.recoveryCodes
+                : undefined;
         });
+        return succeeded || pendingRecoveryCodes.current !== undefined;
+    }
+
+    function closeEnrollmentFlow(): void {
+        onEnrollmentLabelClose();
+        const recoveryCodes = pendingRecoveryCodes.current;
+        pendingRecoveryCodes.current = undefined;
+        if (recoveryCodes !== undefined) onRecoveryCodes(recoveryCodes);
+        onEnrollmentFlowComplete();
     }
 
     return (
         <div>
-            <Heading level={3}>Security keys</Heading>
-            <ul className="mt-3 space-y-3">
+            <ul className="space-y-2">
                 {credentials.map((credential) => (
                     <li
-                        className="border-primary-700 rounded-lg border p-3 text-sm"
+                        className="border-primary-700 bg-primary-900/40 flex items-start justify-between gap-3 rounded-lg border p-3 text-sm"
                         key={credential.id}
                     >
-                        <p className="text-primary-100 font-medium">{credential.label}</p>
-                        <p className="text-primary-400 mt-1">
-                            Added {formatDashboardDateTime(credential.createdAtMs)} ·
-                            {credential.usable ? " ready to use" : " unavailable"}
-                        </p>
-                        <Button
-                            aria-label={`Remove security key ${credential.label}`}
-                            busy={action.busy}
-                            busyLabel="Removing…"
-                            className="mt-3"
+                        <div className="min-w-0">
+                            <p className="text-primary-100 truncate font-medium">
+                                {credential.label}
+                            </p>
+                            <p className="text-primary-400 mt-1">
+                                Added {formatDashboardDateTime(credential.createdAtMs)} ·
+                                {credential.usable ? " ready to use" : " unavailable"}
+                            </p>
+                        </div>
+                        <IconOnlyButton
+                            className="self-center"
+                            disabled={action.busy}
+                            icon={Trash2}
+                            label={`Remove security key ${credential.label}`}
                             onClick={() => onRemove(credential)}
-                            size="sm"
                             variant="danger"
-                        >
-                            <Icon icon={Trash2} size="sm" tone="inherit" />
-                            Remove
-                        </Button>
+                        />
                     </li>
                 ))}
             </ul>
-            {available ? (
-                <>
-                    <Button
-                        className="mt-4"
-                        disabled={factorCapacityReached || action.busy}
-                        onClick={() => setLabelModalOpen(true)}
-                    >
-                        <Icon icon={Fingerprint} size="sm" tone="inherit" />
-                        Add security key
-                    </Button>
-                    {labelModalOpen && (
-                        <MfaEnrollmentLabelModal
-                            busy={action.busy}
-                            busyLabel="Waiting for your security key…"
-                            description="Give this key a name so you can recognize it later. You can leave the name blank."
-                            icon={Fingerprint}
-                            inputLabel="Name"
-                            onClose={() => setLabelModalOpen(false)}
-                            onSubmit={enrollSecurityKey}
-                            placeholder="Example: Primary security key"
-                            submitLabel="Continue"
-                            title="Add security key"
-                        />
-                    )}
-                </>
-            ) : (
+            {credentials.length === 0 && (
+                <p className="text-primary-400 py-2 text-sm">
+                    No security keys registered.
+                </p>
+            )}
+            {labelModalOpen && (
+                <MfaEnrollmentLabelModal
+                    busy={action.busy}
+                    busyLabel="Waiting for your security key…"
+                    description="Give this key a name so you can recognize it later. You can leave the name blank."
+                    icon={Fingerprint}
+                    inputLabel="Name"
+                    onCancel={closeEnrollmentFlow}
+                    onCompleted={closeEnrollmentFlow}
+                    onSubmit={enrollSecurityKey}
+                    placeholder="Primary security key"
+                    submitLabel="Continue"
+                    title="Add security key"
+                />
+            )}
+            {!available && (
                 <p className="text-primary-400 mt-3 text-sm">
                     Security keys are not available in this browser or at this address.
                 </p>

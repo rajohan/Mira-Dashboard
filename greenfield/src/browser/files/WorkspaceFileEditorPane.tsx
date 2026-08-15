@@ -56,6 +56,8 @@ interface WorkspaceFileEditorPaneProps {
 
 type TextMode = "edit" | "raw" | "rendered";
 
+const paneAlertClassName = "rounded-none border-x-0 border-t-0";
+
 function renderableKind(
     entry: WorkspaceFileEntry
 ): "json" | "json5" | "markdown" | undefined {
@@ -183,6 +185,7 @@ function MediaPresentation({
                     description="The Dashboard cannot preview this file type. Download it to open it."
                     headingLevel={3}
                     icon={Download}
+                    surface="plain"
                     title="Download to inspect"
                 />
             );
@@ -238,6 +241,8 @@ export function WorkspaceFileEditorPane({
         entry.writable &&
         (entry.requiresSecretReveal !== true ||
             preview.prepared?.secretsRevealed === true);
+    const showSecretNotice =
+        entry.requiresSecretReveal === true && preview.prepared?.secretsRevealed !== true;
 
     async function save() {
         if (!canEdit || !changed || json?.valid === false || saving) return;
@@ -385,24 +390,29 @@ export function WorkspaceFileEditorPane({
                 </div>
             </header>
 
-            {entry.requiresSecretReveal === true &&
-                preview.prepared?.secretsRevealed !== true && (
-                    <Alert
-                        focusOnError={false}
-                        message="If needed, enroll and confirm MFA in Account security before revealing. Reveal exposes raw secrets only in this pane; inspect and repair invalid JSON without copying secrets into logs or messages."
-                        variant="info"
-                    />
-                )}
+            {showSecretNotice && (
+                <Alert
+                    className={paneAlertClassName}
+                    focusOnError={false}
+                    message="If needed, enroll and confirm MFA in Account security before revealing. Reveal exposes raw secrets only in this pane; inspect and repair invalid JSON without copying secrets into logs or messages."
+                    variant="info"
+                />
+            )}
             {prefixOnly && (
                 <Alert
+                    className={paneAlertClassName}
                     focusOnError={false}
                     message="This source exceeds the reviewed full-file limit. Only its bounded first 1 MiB prefix is available here, and replacement is disabled."
                     variant="info"
                 />
             )}
-            <Alert message={preview.error} />
-            <Alert message={preview.revealError} />
-            <Alert message={saveError} onDismiss={() => setSaveError(undefined)} />
+            <Alert className={paneAlertClassName} message={preview.error} />
+            <Alert className={paneAlertClassName} message={preview.revealError} />
+            <Alert
+                className={paneAlertClassName}
+                message={saveError}
+                onDismiss={() => setSaveError(undefined)}
+            />
             <div className="bg-primary-950/70 min-h-0 flex-1 overflow-auto">
                 {preview.loading && (
                     <div className="flex h-full min-h-80 items-center justify-center">

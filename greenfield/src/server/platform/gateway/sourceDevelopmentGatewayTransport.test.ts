@@ -3,9 +3,15 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { createChatRepository } from "../../domains/chat/repository.ts";
+import { createChatService, ChatServiceError } from "../../domains/chat/service.ts";
 import { createInMemoryOpenClawCronIntentStore } from "../../domains/openClawCron/intentStore.ts";
 import { createOpenClawCronService } from "../../domains/openClawCron/service.ts";
+import { testImmediateDatabaseWriteAdmission } from "../../test/support/databaseWriteAdmission.ts";
+import { openFreshMigratedDatabase } from "../../test/support/freshDatabase.ts";
 import { captureFailure, rejectOnAbort } from "../../test/support/promise.ts";
+import { createInMemoryChatMediaReferences } from "../chat/inMemoryChatMediaReferences.ts";
+import { createPersistentGatewayChatProvider } from "./persistentGatewayChatProvider.ts";
 import {
     persistentGatewayAdminMethods,
     persistentGatewayChatReadMutationMethods,
@@ -15,6 +21,7 @@ import {
 } from "./persistentGatewayProtocol.ts";
 import {
     PersistentGatewayCapacityError,
+    PersistentGatewayRequestError,
     type PersistentGatewayRequestOptions,
     type PersistentGatewayTransport,
 } from "./persistentGatewayTransport.ts";
@@ -624,6 +631,107 @@ describe("source-development Gateway transport", () => {
         ]);
     });
 
+    test("definitively fails source-development chat sends without leaving active runs", async () => {
+        const stateRoot = await developmentStateRoot();
+        const calls: string[] = [];
+        const transport = createSourceDevelopmentGatewayTransport({
+            nowMs: () => 1_800_000_000_000,
+            readTransport: readTransport(calls),
+            stateRoot,
+        });
+        const mediaReferences = createInMemoryChatMediaReferences();
+        const database = await openFreshMigratedDatabase();
+        const repository = createChatRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission,
+            "main",
+            () => 1_800_000_000_000
+        );
+        const service = createChatService({
+            attachmentConsumer: {
+                reserve: () =>
+                    Promise.reject(
+                        new Error("Attachment reservation is not used by this test")
+                    ),
+            },
+            attachmentPreparer: {
+                prepare: () =>
+                    Promise.reject(
+                        new Error("Attachment preparation is not used by this test")
+                    ),
+            },
+            nowMs: () => 1_800_000_000_000,
+            provider: createPersistentGatewayChatProvider(transport, mediaReferences),
+            repository,
+        });
+        const sends = [
+            {
+                clientRunId: "019fe5a1-6cb9-7e51-ad2a-bf1f69861218",
+                idempotencyKey: "A".repeat(32),
+                message: "first private dev message",
+            },
+            {
+                clientRunId: "019fe5a1-6cb9-7e51-ad2a-bf1f69861219",
+                idempotencyKey: "B".repeat(32),
+                message: "second private dev message",
+            },
+        ] as const;
+
+        try {
+            for (const send of sends) {
+                const failure = await captureFailure(() =>
+                    service.send(
+                        { ...send, sessionKey: "agent:main:main" },
+                        {
+                            id: "019fc968-1a9b-7770-8f1b-d5b863b0e7b4",
+                            kind: "user",
+                        }
+                    )
+                );
+                expect(failure).toBeInstanceOf(ChatServiceError);
+                expect(failure).toMatchObject({ reason: "provider-unavailable" });
+                const failedRun = repository.findRun(send.clientRunId);
+                expect(failedRun).toMatchObject({ state: "failed" });
+                expect(failedRun?.providerRunId).toBeUndefined();
+            }
+
+            const runtime = await service.runtime({
+                afterCursor: "0",
+                afterTranscriptGeneration: 0,
+                limit: 128,
+                sessionKey: "agent:main:main",
+            });
+            expect(runtime.externalRuns).toEqual([]);
+            expect(runtime.runs.map(({ run }) => run.state)).toEqual([
+                "failed",
+                "failed",
+            ]);
+            expect(repository.listProviderRunWatermarks("agent:main:main")).toEqual([]);
+            expect(calls.some((call) => call.startsWith("REAL-WRITE:"))).toBeFalse();
+
+            const journal = await readFile(
+                path.join(
+                    stateRoot,
+                    "development-authority-simulator",
+                    "gateway-mutations.ndjson"
+                ),
+                "utf8"
+            );
+            const receipts = journal
+                .trim()
+                .split("\n")
+                .map((line) => (JSON.parse(line) as { method: string }).method);
+            expect(receipts).toEqual(["chat.send", "chat.send"]);
+            expect(journal).not.toContain("first private dev message");
+            expect(journal).not.toContain("second private dev message");
+            expect(journal).not.toContain("agent:main:main");
+        } finally {
+            await service.dispose();
+            mediaReferences.dispose();
+            database.sqlite.close(true);
+        }
+    });
+
     test("delegates reads but simulates every write method under marked development state", async () => {
         const stateRoot = await developmentStateRoot();
         const calls: string[] = [];
@@ -636,14 +744,16 @@ describe("source-development Gateway transport", () => {
         expect(await transport.request("system.info", {})).toEqual({
             processInstanceId: "live-process",
         });
-        expect(
-            await transport.requestChatWrite("chat.send", {
+        const chatSendFailure = await captureFailure(() =>
+            transport.requestChatWrite("chat.send", {
                 attachments: [],
                 idempotencyKey: "a".repeat(32),
                 message: "private dev message",
                 sessionKey: "agent:main:main",
             })
-        ).toEqual({ runId: "a".repeat(32), status: "started" });
+        );
+        expect(chatSendFailure).toBeInstanceOf(PersistentGatewayRequestError);
+        expect(chatSendFailure).toMatchObject({ code: "UNAVAILABLE" });
         await transport.requestChatWrite("chat.abort", {
             preserveSideRuns: false,
             runId: "provider-run-1",

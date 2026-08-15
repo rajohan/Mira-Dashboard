@@ -97,6 +97,10 @@ async function releaseFixture(): Promise<{
             path.join(releaseRoot, "server/productionDelivery.js"),
             "production-delivery"
         ),
+        writeFile(
+            path.join(releaseRoot, "server/resetDashboardPassword.js"),
+            "password-recovery"
+        ),
         writeFile(path.join(releaseRoot, "server/web.js"), "web"),
         writeFile(path.join(releaseRoot, "server/worker.js"), "worker"),
         writeFile(
@@ -196,6 +200,12 @@ describe("release identity", () => {
         expect(
             created.artifacts.some(
                 ({ path: artifactPath }) => artifactPath === "server/worker.js"
+            )
+        ).toBe(true);
+        expect(
+            created.artifacts.some(
+                ({ path: artifactPath }) =>
+                    artifactPath === "server/resetDashboardPassword.js"
             )
         ).toBe(true);
         expect(
@@ -379,5 +389,16 @@ describe("release identity", () => {
             verifyReleaseIdentity(fixture.releaseRoot, runtimeIdentity)
         );
         expect(tamperFailure.message).toBe("Release identity is invalid");
+    });
+
+    test("rejects a release without the host password-recovery executable", async () => {
+        const fixture = await releaseFixture();
+        await rm(path.join(fixture.releaseRoot, "server/resetDashboardPassword.js"));
+
+        const failure = await rejectionError(
+            createReleaseIdentity(creationOptions(fixture))
+        );
+
+        expect(failure.message).toBe("Release identity is invalid");
     });
 });

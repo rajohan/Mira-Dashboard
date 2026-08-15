@@ -322,13 +322,15 @@ export function WorkspaceFilesView({
             return (
                 <div
                     aria-busy="true"
-                    className="min-h-128 min-w-0 flex-1"
+                    className="flex min-w-0 flex-1 items-center lg:min-h-0"
                     data-testid="workspace-folder-loading"
                 >
                     <EmptyState
+                        className="w-full py-4 sm:py-6 lg:py-10"
                         description="The file tree stays open while this folder loads."
                         headingLevel={2}
                         icon={FolderTree}
+                        surface="plain"
                         title="Loading folder…"
                     />
                 </div>
@@ -336,25 +338,29 @@ export function WorkspaceFilesView({
         }
         if (directoryUnavailable) {
             return (
-                <div className="min-h-128 min-w-0 flex-1">
+                <div className="flex min-w-0 flex-1 items-center lg:min-h-0">
                     <EmptyState
+                        className="w-full py-4 sm:py-6 lg:py-10"
                         description={
                             backgroundError ??
                             "Refresh to retry loading this workspace folder."
                         }
                         headingLevel={2}
                         icon={FolderTree}
+                        surface="plain"
                         title="Folder unavailable"
                     />
                 </div>
             );
         }
         return (
-            <div className="min-h-128 min-w-0 flex-1">
+            <div className="flex min-w-0 flex-1 items-center lg:min-h-0">
                 <EmptyState
+                    className="w-full py-4 sm:py-6 lg:py-10"
                     description="Choose a file from the tree to preview, download, or edit it without losing your place."
                     headingLevel={2}
                     icon={FileSearch}
+                    surface="plain"
                     title="Select a file"
                 />
             </div>
@@ -362,7 +368,7 @@ export function WorkspaceFilesView({
     }
 
     return (
-        <div className="flex h-full min-h-0 flex-col gap-4">
+        <div className="flex flex-col gap-4 lg:h-full lg:min-h-0">
             <Card aria-labelledby="workspace-files-location-heading" className="p-4">
                 <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
                     <div className="min-w-0 flex-1">
@@ -484,7 +490,7 @@ export function WorkspaceFilesView({
                 variant={status?.variant ?? "success"}
             />
 
-            <Card className="flex min-h-[42rem] min-w-0 flex-col overflow-hidden p-0 lg:min-h-0 lg:flex-1 lg:flex-row">
+            <Card className="flex min-w-0 flex-col overflow-hidden p-0 lg:min-h-0 lg:flex-1 lg:flex-row">
                 <aside className="border-primary-700 flex max-h-96 min-h-0 w-full shrink-0 flex-col border-b lg:max-h-none lg:w-72 lg:border-r lg:border-b-0">
                     <div className="border-primary-700 flex items-center gap-2 border-b px-4 py-3">
                         <Icon icon={FolderTree} size="sm" />

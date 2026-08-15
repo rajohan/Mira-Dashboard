@@ -25,6 +25,7 @@ import {
     dashboardBrowserFailureMessage,
     isDashboardOperationOutcomeUnknown,
 } from "../api/trpcError.ts";
+import { authenticatedAbortSignal } from "../auth/authenticatedOperationRegistry.ts";
 import {
     AuthenticatedMutationExpiredError,
     useAuthenticatedMutationBoundary,
@@ -566,7 +567,7 @@ export function ChatBrowser({
         .filter(([, run]) => run.phase === "active")
         .map(([runId]) => runId);
     const externalActiveRunIds = Object.entries(runtimeSession?.externalRuns ?? {})
-        .filter(([, run]) => run.continuity === "complete")
+        .filter(([, run]) => run.continuity === "complete" && run.lifecycle === "active")
         .map(([providerRunId]) => providerRunId);
     const allActiveRunIds = [...localActiveRunIds, ...externalActiveRunIds];
     const activeRunIds = [
@@ -938,7 +939,12 @@ export function ChatBrowser({
         const sessionKey = selectedSessionKey;
         const externalRun =
             runtimeStore.state.sessions[sessionKey]?.externalRuns[providerRunId];
-        if (externalRun?.continuity !== "complete") return;
+        if (
+            externalRun?.continuity !== "complete" ||
+            externalRun.lifecycle !== "active"
+        ) {
+            return;
+        }
         if (externalAbortBoundaryIsGated(externalRun)) return;
         const priorGate = externalAbortLocks.current.get(controlId);
         if (priorGate !== undefined) {
@@ -1632,7 +1638,9 @@ export function ChatBrowser({
                 const result = await client.mutation(
                     "chat.companionAsk",
                     { question, sessionKey },
-                    { signal: AbortSignal.any([signal, askController.signal]) }
+                    {
+                        signal: authenticatedAbortSignal(signal, [askController.signal]),
+                    }
                 );
                 assertAuthenticatedMutationOwner(isActive);
                 return result;

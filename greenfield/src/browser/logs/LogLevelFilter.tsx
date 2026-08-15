@@ -2,6 +2,7 @@ import { CheckCheck, X } from "lucide-react";
 
 import { cn } from "../lib/classNames.ts";
 import { Button } from "../ui/Button.tsx";
+import { Fieldset } from "../ui/Fieldset.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import {
     allLogLevels,
@@ -33,8 +34,10 @@ export function LogLevelFilter({
     const allSelected = activeLevels.size === filterableLogLevels.length;
     return (
         <div>
-            <fieldset className="m-0 flex min-w-0 flex-wrap items-center gap-1.5 border-0 p-0">
-                <legend className="sr-only">Log levels in current snapshot</legend>
+            <Fieldset
+                className="m-0 flex min-w-0 flex-wrap items-center gap-1.5 border-0 p-0"
+                legend={<span className="sr-only">Log levels in current snapshot</span>}
+            >
                 {filterableLogLevels.map((level) => {
                     const pressed = activeLevels.has(level);
                     return (
@@ -81,7 +84,7 @@ export function LogLevelFilter({
                     <Icon icon={X} size="sm" tone="inherit" />
                     Clear
                 </Button>
-            </fieldset>
+            </Fieldset>
             <p className="text-primary-400 mt-1.5 text-xs">
                 Filters only this loaded snapshot. Unclassified lines appear only when all
                 six levels are selected.

@@ -13,6 +13,7 @@ interface EmptyStateProps {
     readonly description?: ReactNode;
     readonly headingLevel?: 1 | 2 | 3;
     readonly icon?: LucideIcon;
+    readonly surface?: "card" | "plain";
     readonly title: ReactNode;
 }
 
@@ -26,10 +27,17 @@ export function EmptyState({
     description,
     headingLevel = 2,
     icon = Inbox,
+    surface = "card",
     title,
 }: EmptyStateProps) {
     return (
-        <Card className={cn("py-10 text-center", className)}>
+        <Card
+            className={cn(
+                "py-10 text-center",
+                surface === "plain" && "rounded-none border-0 bg-transparent shadow-none",
+                className
+            )}
+        >
             <Icon className="mx-auto" icon={icon} size="xl" />
             <Heading
                 className="text-primary-100 mt-3"

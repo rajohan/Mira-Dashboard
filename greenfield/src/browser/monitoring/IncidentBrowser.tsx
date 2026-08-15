@@ -11,6 +11,7 @@ import { Alert } from "../ui/Alert.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Card } from "../ui/Card.tsx";
+import { ExpandableCard } from "../ui/ExpandableCard.tsx";
 import { Form } from "../ui/Form.tsx";
 import { FormField } from "../ui/FormField.tsx";
 import { Heading } from "../ui/Heading.tsx";
@@ -107,14 +108,11 @@ function IncidentDetailPanel({ id }: { readonly id: string }) {
                     </div>
                 ))}
             </dl>
-            <details className="border-primary-700 mt-6 rounded-lg border p-3" open>
-                <summary className="text-primary-200 cursor-pointer text-sm font-medium">
-                    Incident details
-                </summary>
-                <pre className="bg-primary-950 text-primary-300 mt-3 max-h-96 overflow-auto rounded-lg p-3 text-xs">
+            <ExpandableCard className="mt-6" compact defaultOpen title="Incident details">
+                <pre className="bg-primary-950 text-primary-300 max-h-96 overflow-auto rounded-lg p-3 text-xs">
                     {JSON.stringify(detail.details, undefined, 2)}
                 </pre>
-            </details>
+            </ExpandableCard>
         </Card>
     );
 }
@@ -219,7 +217,7 @@ export function IncidentBrowser() {
                         className="mt-2"
                         maxLength={100}
                         onChange={(event) => setKindDraft(event.currentTarget.value)}
-                        placeholder="Example: filesystem"
+                        placeholder="filesystem"
                         value={kindDraft}
                     />
                 </FormField>
@@ -228,7 +226,7 @@ export function IncidentBrowser() {
                         className="mt-2"
                         maxLength={200}
                         onChange={(event) => setMonitorDraft(event.currentTarget.value)}
-                        placeholder="Example: ops-check"
+                        placeholder="ops-check"
                         value={monitorDraft}
                     />
                 </FormField>

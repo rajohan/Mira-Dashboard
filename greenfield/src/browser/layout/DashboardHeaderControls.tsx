@@ -41,16 +41,16 @@ const overallLabels: Readonly<Record<DashboardSystemComponentState, string>> =
 function statusClassName(state: DashboardSystemComponentState): string {
     switch (state) {
         case "online": {
-            return "border-green-500/40 bg-green-500/10 text-green-300 hover:bg-green-500/20";
+            return "border-green-500/40 bg-green-500/10 text-green-300 data-hover:bg-green-500/20 data-hover:text-green-300 hover:bg-green-500/20 hover:text-green-300";
         }
         case "offline": {
-            return "border-red-500/40 bg-red-500/10 text-red-300 hover:bg-red-500/20";
+            return "border-red-500/40 bg-red-500/10 text-red-300 data-hover:bg-red-500/20 data-hover:text-red-300 hover:bg-red-500/20 hover:text-red-300";
         }
         case "stale": {
-            return "border-amber-500/40 bg-amber-500/10 text-amber-200 hover:bg-amber-500/20";
+            return "border-amber-500/40 bg-amber-500/10 text-amber-200 data-hover:bg-amber-500/20 data-hover:text-amber-200 hover:bg-amber-500/20 hover:text-amber-200";
         }
         case "unavailable": {
-            return "border-amber-500/40 bg-amber-500/10 text-amber-200 hover:bg-amber-500/20";
+            return "border-amber-500/40 bg-amber-500/10 text-amber-200 data-hover:bg-amber-500/20 data-hover:text-amber-200 hover:bg-amber-500/20 hover:text-amber-200";
         }
     }
 }

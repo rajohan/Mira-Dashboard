@@ -15,7 +15,7 @@ interface DashboardActionState {
 /**
  * Runs one browser security action at a time without using the mutation cache.
  * Rejections are reduced immediately to fixed safe text and never retained.
- * @returns Exclusive action state and runner.
+ * @returns Exclusive action state, error reset, and runner.
  */
 export function useExclusiveDashboardAction() {
     const inFlight = useRef(false);
@@ -23,6 +23,13 @@ export function useExclusiveDashboardAction() {
         busy: false,
         error: undefined,
     });
+
+    function clearError(): void {
+        if (inFlight.current) return;
+        setState((current) =>
+            current.error === undefined ? current : { ...current, error: undefined }
+        );
+    }
 
     async function run<TValue>(
         action: () => Promise<TValue>
@@ -42,5 +49,5 @@ export function useExclusiveDashboardAction() {
         }
     }
 
-    return { ...state, run };
+    return { ...state, clearError, run };
 }

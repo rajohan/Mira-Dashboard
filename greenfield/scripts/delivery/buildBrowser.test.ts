@@ -81,20 +81,14 @@ describe("Dashboard browser artifact", () => {
         expect(result.compressedFileCount).toBeGreaterThan(0);
         expect(metrics.formatVersion).toBe(1);
         expect(html).toContain("<title>Mira Dashboard</title>");
-        expect(css).toContain(
-            "input[type=search]::-webkit-search-cancel-button{-webkit-appearance:none;appearance:none}"
-        );
-        expect(css).toMatch(
-            /\.loading-state-dot:nth-child\(2\)\{[^}]*animation:[^}]*loading-state-second-dot[^}]*\}/u
-        );
-        expect(css).toMatch(
-            /\.loading-state-dot:nth-child\(3\)\{[^}]*animation:[^}]*loading-state-third-dot[^}]*\}/u
-        );
+        expect(css).toContain("::-webkit-search-cancel-button{-webkit-appearance:none}");
+        expect(css).toContain("::-webkit-search-cancel-button{appearance:none}");
+        expect(css).toContain("infinite loading-state-second-dot}");
+        expect(css).toContain("infinite loading-state-third-dot}");
         expect(css).toContain("@keyframes loading-state-second-dot");
         expect(css).toContain("@keyframes loading-state-third-dot");
-        expect(css).toContain(
-            "@media (prefers-reduced-motion:reduce){.loading-state-dot:nth-child(2),.loading-state-dot:nth-child(3){animation:none;opacity:1}}"
-        );
+        expect(css).toContain(String.raw`.motion-reduce\:animate-none{animation:none}`);
+        expect(css).toContain(String.raw`.motion-reduce\:opacity-100{opacity:1}`);
         expect(css).toContain("-webkit-overflow-scrolling:touch");
         expect(css).not.toContain("scroll-margin-top:123.456px");
         expect(html).toMatch(

@@ -4,6 +4,7 @@ import type { OpenClawCronJob } from "../../contracts/openClawCron.ts";
 import { cn } from "../lib/classNames.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { Badge } from "../ui/Badge.tsx";
+import { StretchedAction } from "../ui/StretchedAction.tsx";
 import { Text } from "../ui/Text.tsx";
 import {
     openClawCronRunStatusLabel,
@@ -72,11 +73,11 @@ export function OpenClawCronTable({
                         )}
                         key={job.id}
                     >
-                        <button
+                        <StretchedAction
                             aria-current={selected ? "true" : undefined}
-                            aria-label={job.name}
                             aria-pressed={selected}
-                            className="focus-visible:ring-accent-400 absolute inset-0 z-10 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-inset"
+                            className="z-10 focus-visible:ring-inset"
+                            label={job.name}
                             onClick={() => onSelect(job.id)}
                             onPointerEnter={() => setHoveredId(job.id)}
                             onPointerLeave={() =>
@@ -84,7 +85,6 @@ export function OpenClawCronTable({
                                     current === job.id ? undefined : current
                                 )
                             }
-                            type="button"
                         />
                         <div className="max-w-full min-w-0">
                             <div className="flex max-w-full min-w-0 items-start justify-between gap-2">

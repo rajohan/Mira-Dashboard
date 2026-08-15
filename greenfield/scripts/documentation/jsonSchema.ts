@@ -205,6 +205,7 @@ import {
     logMaintenanceTerminalRunIsConsistent,
     logSourcesHaveUniqueIds,
 } from "../../src/contracts/logs.ts";
+import { moltbookAvatarUrlIsTrusted } from "../../src/contracts/moltbook.ts";
 import {
     activeIncidentSummaryTimesAreConsistent,
     activeIncidentTimesAreConsistent,
@@ -342,6 +343,10 @@ const controlSafeTextJsonSchemaPattern = `^(?![\\s\\S]*(?:${controlSafeTextExclu
 const noNulJsonSchemaPattern = String.raw`^[^\u0000]*$`;
 
 const runtimeCheckComments = new Map<unknown, string>([
+    [
+        moltbookAvatarUrlIsTrusted,
+        "Live Valibot validation additionally restricts profile avatars to the fixed Moltbook CDN /avatars/ path without credentials or fragments.",
+    ],
     [
         kopiaSourcesAreCanonical,
         "Live Valibot validation additionally requires safe Kopia source IDs to be unique and strictly ordered.",

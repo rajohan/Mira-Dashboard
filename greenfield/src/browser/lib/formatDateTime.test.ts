@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import {
     formatDashboardDateTime,
     formatDashboardDateTimeToMinute,
+    formatDashboardRelativeTime,
 } from "./formatDateTime.ts";
 
 describe("formatDashboardDateTime", () => {
@@ -13,5 +14,16 @@ describe("formatDashboardDateTime", () => {
         expect(formatDashboardDateTimeToMinute(localTimestamp)).toBe(
             "08.08.2026 · 21:32"
         );
+    });
+
+    test("formats activity relative to an explicit reference clock", () => {
+        const referenceTimestamp = new Date(2026, 7, 14, 15, 22).getTime();
+
+        expect(
+            formatDashboardRelativeTime(
+                referenceTimestamp - 13 * 60_000,
+                referenceTimestamp
+            )
+        ).toBe("13 minutes ago");
     });
 });

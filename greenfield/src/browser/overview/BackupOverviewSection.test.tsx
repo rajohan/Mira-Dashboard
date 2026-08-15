@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 
 import { QueryClientProvider } from "@tanstack/react-query";
+import {
+    createMemoryHistory,
+    createRootRoute,
+    createRoute,
+    createRouter,
+    RouterProvider,
+} from "@tanstack/react-router";
+import type { ReactElement } from "react";
 
 import type { AuthStatus } from "../../contracts/auth.ts";
 import type {
@@ -15,6 +23,7 @@ import {
 } from "../api/trpcClient.ts";
 import { DashboardTrpcProvider } from "../api/trpcContext.tsx";
 import { authStatusQueryKey } from "../auth/authQueries.ts";
+import { parseJobsRouteSearch } from "../jobs/jobRouteSearch.ts";
 import {
     BackupOverviewSection,
     BackupOverviewSectionView,
@@ -181,6 +190,30 @@ interface ConnectedHarness {
 
 const connectedHarnesses: ConnectedHarness[] = [];
 
+function createBackupOverviewRouter(component: () => ReactElement) {
+    const rootRoute = createRootRoute();
+    const overviewRoute = createRoute({
+        component,
+        getParentRoute: () => rootRoute,
+        path: "/overview",
+    });
+    const jobsRoute = createRoute({
+        component: () => null,
+        getParentRoute: () => rootRoute,
+        path: "/jobs",
+        validateSearch: parseJobsRouteSearch,
+    });
+    return createRouter({
+        history: createMemoryHistory({ initialEntries: ["/overview"] }),
+        routeTree: rootRoute.addChildren([overviewRoute, jobsRoute]),
+    });
+}
+
+function renderBackupOverviewView(element: ReactElement) {
+    const router = createBackupOverviewRouter(() => element);
+    return render(<RouterProvider router={router} />);
+}
+
 afterEach(() => {
     for (const { queryClient, view } of connectedHarnesses.splice(0)) {
         view.unmount();
@@ -197,10 +230,11 @@ function renderConnectedSection(
     queryClient.setQueryData(authStatusQueryKey, authenticatedStatus);
     const transport = new BackupTransport(kopiaStatus, walgStatus);
     const client = createDashboardTrpcClient(transport);
+    const router = createBackupOverviewRouter(BackupOverviewSection);
     const view = render(
         <QueryClientProvider client={queryClient}>
             <DashboardTrpcProvider client={client}>
-                <BackupOverviewSection />
+                <RouterProvider router={router} />
             </DashboardTrpcProvider>
         </QueryClientProvider>
     );
@@ -210,8 +244,8 @@ function renderConnectedSection(
 }
 
 describe("BackupOverviewSectionView", () => {
-    test("keeps one healthy provider visible when the other query fails", () => {
-        render(
+    test("keeps one healthy provider visible when the other query fails", async () => {
+        renderBackupOverviewView(
             <BackupOverviewSectionView
                 error="Kopia status failed."
                 kopia={undefined}
@@ -219,7 +253,7 @@ describe("BackupOverviewSectionView", () => {
             />
         );
 
-        expect(screen.getByText("Kopia status failed.")).toBeTruthy();
+        expect(await screen.findByText("Kopia status failed.")).toBeTruthy();
         expect(screen.getByRole("heading", { name: "Kopia" })).toBeTruthy();
         const walgCard = screen.getByLabelText("WAL-G backup");
         expect(within(walgCard).getByText("Fresh")).toBeTruthy();
@@ -228,8 +262,8 @@ describe("BackupOverviewSectionView", () => {
         ).toBeEnabled();
     });
 
-    test("gates stale controls while preserving last-known-good data", () => {
-        render(
+    test("gates stale controls while preserving last-known-good data", async () => {
+        renderBackupOverviewView(
             <BackupOverviewSectionView
                 kopia={{
                     ...kopia,
@@ -240,7 +274,7 @@ describe("BackupOverviewSectionView", () => {
             />
         );
 
-        const kopiaCard = screen.getByLabelText("Kopia backup");
+        const kopiaCard = await screen.findByLabelText("Kopia backup");
         expect(within(kopiaCard).getByText("Last known good")).toBeTruthy();
         expect(within(kopiaCard).getByText("1", { selector: "strong" })).toBeTruthy();
         expect(
@@ -248,18 +282,20 @@ describe("BackupOverviewSectionView", () => {
         ).toBeDisabled();
     });
 
-    test("keeps a terminal provider failure visible while the provider is busy", () => {
-        render(<BackupOverviewSectionView kopia={kopia} walg={failedBusyWalg} />);
+    test("keeps a terminal provider failure visible while the provider is busy", async () => {
+        renderBackupOverviewView(
+            <BackupOverviewSectionView kopia={kopia} walg={failedBusyWalg} />
+        );
 
-        const walgCard = screen.getByLabelText("WAL-G backup");
+        const walgCard = await screen.findByLabelText("WAL-G backup");
         expect(within(walgCard).getByText("Failed")).toBeTruthy();
         expect(within(walgCard).queryByText("Busy")).toBeNull();
     });
 
-    test("exposes attention recovery while independently gating a busy provider", () => {
+    test("exposes attention recovery while independently gating a busy provider", async () => {
         const runId = "019fc968-1a9b-7765-8f1b-d5b863b0e7b4";
         const onClearKopiaAttention = mock(() => {});
-        render(
+        renderBackupOverviewView(
             <BackupOverviewSectionView
                 kopia={{
                     ...kopia,
@@ -280,7 +316,7 @@ describe("BackupOverviewSectionView", () => {
             />
         );
 
-        const kopiaCard = screen.getByLabelText("Kopia backup");
+        const kopiaCard = await screen.findByLabelText("Kopia backup");
         expect(within(kopiaCard).getByText("Needs attention")).toBeTruthy();
         const clearAttention = within(kopiaCard).getByRole("button", {
             name: "Clear attention",
@@ -298,9 +334,9 @@ describe("BackupOverviewSectionView", () => {
         ).toBeDisabled();
     });
 
-    test("keeps unavailable and missing providers actionable without enabling backup controls", () => {
+    test("keeps unavailable and missing providers actionable without enabling backup controls", async () => {
         const onRetryWalg = mock(() => {});
-        render(
+        renderBackupOverviewView(
             <BackupOverviewSectionView
                 controlsDisabled
                 kopia={{
@@ -314,7 +350,7 @@ describe("BackupOverviewSectionView", () => {
             />
         );
 
-        const kopiaCard = screen.getByLabelText("Kopia backup");
+        const kopiaCard = await screen.findByLabelText("Kopia backup");
         expect(within(kopiaCard).getByText("Unavailable")).toBeTruthy();
         expect(
             within(kopiaCard).getByText(
@@ -334,10 +370,12 @@ describe("BackupOverviewSectionView", () => {
         expect(onRetryWalg).toHaveBeenCalledTimes(1);
     });
 
-    test("shows per-provider loading while preserving available status", () => {
-        render(<BackupOverviewSectionView kopia={kopia} loading walg={undefined} />);
+    test("shows per-provider loading while preserving available status", async () => {
+        renderBackupOverviewView(
+            <BackupOverviewSectionView kopia={kopia} loading walg={undefined} />
+        );
 
-        expect(screen.getByLabelText("Kopia backup")).toBeTruthy();
+        expect(await screen.findByLabelText("Kopia backup")).toBeTruthy();
         expect(
             screen.getByRole("status", { name: "Loading WAL-G backup status…" })
         ).toBeTruthy();

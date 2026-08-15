@@ -23,6 +23,7 @@ describe("live OpenClaw chat projection", () => {
         ) =>
             projectChatExternalRun({
                 continuity: "complete",
+                lifecycle: "active" as const,
                 hasUnprojectedActivity: false,
                 observationEpoch: occurredAtMs,
                 observedAtMs: occurredAtMs,
@@ -75,11 +76,38 @@ describe("live OpenClaw chat projection", () => {
         expect(messages[0]?.id).toBe(
             "external:agent:main:main:live-compaction:segment:compaction:compaction:live-compaction"
         );
+
+        store.installExternalRuns(sessionKey, [projection("Compacting context", 2000)]);
+        messages = chatRuntimeMessages(store.state, sessionKey);
+        expect(messages[0]).toMatchObject({
+            parts: [
+                {
+                    activity: "complete",
+                    kind: "control",
+                    text: "Context compacted",
+                },
+            ],
+            timestampMs: 3000,
+        });
+
+        store.installExternalRuns(sessionKey, [projection("Compacting context", 4000)]);
+        messages = chatRuntimeMessages(store.state, sessionKey);
+        expect(messages[0]).toMatchObject({
+            parts: [
+                {
+                    activity: "running",
+                    kind: "control",
+                    text: "Compacting context",
+                },
+            ],
+            timestampMs: 4000,
+        });
     });
 
     test("renders exact provider order and complete session.tool bubbles without raw items", () => {
         const projection = projectChatExternalRun({
             continuity: "complete",
+            lifecycle: "active" as const,
             hasUnprojectedActivity: false,
             observationEpoch: 1,
             observedAtMs: 1000,
@@ -229,9 +257,9 @@ describe("live OpenClaw chat projection", () => {
             expect(within(tool).getAllByText("Tool input")).toHaveLength(1);
             expect(within(tool).getAllByText("Tool output")).toHaveLength(1);
         }
-        expect(within(tools[0]!).getAllByText("pwd (workspace)")).toHaveLength(2);
+        expect(within(tools[0]!).getAllByText("pwd (workspace)")).toHaveLength(1);
         expect(within(tools[0]!).getByText("/workspace")).toBeVisible();
-        expect(within(tools[1]!).getAllByText("bun test (workspace)")).toHaveLength(2);
+        expect(within(tools[1]!).getAllByText("bun test (workspace)")).toHaveLength(1);
         expect(within(tools[1]!).getByText(/12 pass/iu)).toBeVisible();
         expect(screen.queryByText(/raw-(?:analysis|command|tool)-label/iu)).toBeNull();
         const visibleText = document.body.textContent ?? "";
@@ -264,6 +292,7 @@ describe("live OpenClaw chat projection", () => {
 
         const toolOnly = projectChatExternalRun({
             continuity: "complete",
+            lifecycle: "active" as const,
             hasUnprojectedActivity: false,
             observationEpoch: 1,
             observedAtMs: 1001,
@@ -297,6 +326,7 @@ describe("live OpenClaw chat projection", () => {
     test("renders an aggregate assistant replacement at the replaced provider position", () => {
         const projection = projectChatExternalRun({
             continuity: "complete",
+            lifecycle: "active" as const,
             hasUnprojectedActivity: false,
             observationEpoch: 1,
             observedAtMs: 1000,

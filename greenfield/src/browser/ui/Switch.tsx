@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 
 import { cn } from "../lib/classNames.ts";
 import { useFormFieldInvalid } from "./formFieldContext.ts";
+import { interactiveTapClassName } from "./interactionStyles.ts";
 
 interface SwitchProps {
     readonly checked: boolean;
@@ -65,7 +66,8 @@ export function Switch({
                 aria-invalid={resolvedInvalid || undefined}
                 checked={checked}
                 className={cn(
-                    "border-primary-500 bg-primary-700 group relative mt-0.5 inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border shadow-sm transition-colors",
+                    interactiveTapClassName,
+                    "border-primary-500 bg-primary-700 group relative mt-0.5 inline-flex h-6 w-11 shrink-0 items-center rounded-full border shadow-sm transition-colors",
                     "not-data-disabled:data-hover:border-primary-300 not-data-disabled:data-hover:bg-primary-600 hover:not-data-disabled:border-primary-300 hover:not-data-disabled:bg-primary-600",
                     "data-checked:border-accent-300 data-checked:bg-accent-500",
                     "not-data-disabled:data-checked:data-hover:border-accent-100 not-data-disabled:data-checked:data-hover:bg-accent-400 hover:not-data-disabled:data-checked:border-accent-100 hover:not-data-disabled:data-checked:bg-accent-400",

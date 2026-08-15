@@ -37,7 +37,9 @@ export function BootstrapForm() {
     return (
         <LoginPanel
             description="Connect the Dashboard to OpenClaw and create the first account."
+            footer="The Gateway credential is only needed during first-user setup."
             icon={UserRoundPlus}
+            showStepHeading={false}
             title="Set up Mira Dashboard"
         >
             <Alert className="mb-5" message={error} />
@@ -59,7 +61,7 @@ export function BootstrapForm() {
                                     onChange={(event) =>
                                         field.handleChange(event.currentTarget.value)
                                     }
-                                    placeholder="Example: operator"
+                                    placeholder="operator"
                                     required
                                     spellCheck={false}
                                     value={field.state.value}
@@ -95,7 +97,6 @@ export function BootstrapForm() {
                             <FormField
                                 disabled={busy}
                                 error={firstFormFieldError(field.state.meta.errors)}
-                                description="Use the credential configured for your OpenClaw Gateway."
                                 label="OpenClaw Gateway credential"
                             >
                                 <Input

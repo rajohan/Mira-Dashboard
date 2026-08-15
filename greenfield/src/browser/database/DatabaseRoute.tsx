@@ -18,6 +18,7 @@ import { Alert } from "../ui/Alert.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Card } from "../ui/Card.tsx";
+import { Fieldset } from "../ui/Fieldset.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { MetricCard } from "../ui/MetricCard.tsx";
@@ -490,25 +491,41 @@ interface DatabaseSourcePickerProps {
 
 function DatabaseSourcePicker({ onSelect, source }: DatabaseSourcePickerProps) {
     return (
-        <fieldset className="border-primary-700 mt-6 grid w-full gap-1 rounded-lg border p-1 sm:inline-grid sm:w-auto sm:grid-cols-2">
-            <legend className="sr-only">Database source</legend>
-            <Button
-                aria-pressed={source === "sqlite"}
-                className="justify-center"
-                onClick={() => onSelect("sqlite")}
-                variant={source === "sqlite" ? "primary" : "ghost"}
-            >
-                Dashboard SQLite
-            </Button>
-            <Button
-                aria-pressed={source === "postgresql"}
-                className="justify-center"
-                onClick={() => onSelect("postgresql")}
-                variant={source === "postgresql" ? "primary" : "ghost"}
-            >
-                PostgreSQL &amp; PgBouncer
-            </Button>
-        </fieldset>
+        <Fieldset
+            className="mt-6 w-full sm:inline-block sm:w-auto"
+            legend={<span className="sr-only">Database source</span>}
+        >
+            <div className="border-primary-700 bg-primary-800/80 grid w-full grid-cols-2 gap-1 rounded-lg border p-1 sm:inline-grid sm:w-auto">
+                <Button
+                    aria-label="Dashboard SQLite"
+                    aria-pressed={source === "sqlite"}
+                    className="min-w-0 justify-center"
+                    onClick={() => onSelect("sqlite")}
+                    variant={source === "sqlite" ? "primary" : "ghost"}
+                >
+                    <span aria-hidden className="sm:hidden">
+                        SQLite
+                    </span>
+                    <span aria-hidden className="hidden sm:inline">
+                        Dashboard SQLite
+                    </span>
+                </Button>
+                <Button
+                    aria-label="PostgreSQL & PgBouncer"
+                    aria-pressed={source === "postgresql"}
+                    className="min-w-0 justify-center"
+                    onClick={() => onSelect("postgresql")}
+                    variant={source === "postgresql" ? "primary" : "ghost"}
+                >
+                    <span aria-hidden className="sm:hidden">
+                        PostgreSQL
+                    </span>
+                    <span aria-hidden className="hidden sm:inline">
+                        PostgreSQL &amp; PgBouncer
+                    </span>
+                </Button>
+            </div>
+        </Fieldset>
     );
 }
 

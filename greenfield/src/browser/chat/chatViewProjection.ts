@@ -281,6 +281,455 @@ function chatDisplayMessageText(message: ChatDisplayMessage): string {
         .join("");
 }
 
+function externalRuntimeMessage(message: ChatDisplayMessage): boolean {
+    return message.providerRunId !== undefined && message.id.startsWith("external:");
+}
+
+function toolPartsShareIdentity(
+    left: Extract<ChatMessagePart, { kind: "tool" }>,
+    right: Extract<ChatMessagePart, { kind: "tool" }>
+): boolean {
+    if (left.callId === right.callId) return true;
+    if (
+        chatToolResultMatchesCall(left, right) ||
+        chatToolResultMatchesCall(right, left)
+    ) {
+        return true;
+    }
+    if (
+        left.status === "running" ||
+        right.status === "running" ||
+        left.callIdSource !== "synthetic" ||
+        right.callIdSource !== "synthetic" ||
+        left.nameSource === "synthetic" ||
+        right.nameSource === "synthetic" ||
+        left.name !== right.name
+    ) {
+        return false;
+    }
+    const comparableDetails = ["input", "output"] as const;
+    let compared = false;
+    for (const key of comparableDetails) {
+        if (left[key] === undefined || right[key] === undefined) continue;
+        compared = true;
+        try {
+            if (JSON.stringify(left[key]) !== JSON.stringify(right[key])) return false;
+        } catch {
+            return false;
+        }
+    }
+    return compared;
+}
+
+function mergeExternalPartIntoCanonical(
+    canonical: ChatDisplayMessage[],
+    candidateIndexes: readonly number[],
+    externalPart: ChatMessagePart,
+    claimedCanonicalToolParts: Set<string>,
+    removedCanonicalParts: ReadonlyMap<number, ReadonlySet<number>>
+): boolean {
+    for (const messageIndex of candidateIndexes) {
+        const message = canonical[messageIndex];
+        if (message === undefined) continue;
+        const partIndex = message.parts.findIndex((part, candidatePartIndex) => {
+            if (removedCanonicalParts.get(messageIndex)?.has(candidatePartIndex)) {
+                return false;
+            }
+            if (part.kind !== externalPart.kind) return false;
+            if (part.kind === "tool" && externalPart.kind === "tool") {
+                return (
+                    !claimedCanonicalToolParts.has(
+                        `${messageIndex}:${candidatePartIndex}`
+                    ) && toolPartsShareIdentity(part, externalPart)
+                );
+            }
+            if (part.kind === "thinking" && externalPart.kind === "thinking") {
+                return (
+                    (part.sourceKey !== undefined &&
+                        part.sourceKey === externalPart.sourceKey) ||
+                    part.text.startsWith(externalPart.text) ||
+                    externalPart.text.startsWith(part.text)
+                );
+            }
+            if (part.kind === "control" && externalPart.kind === "control") {
+                return (
+                    part.text === externalPart.text ||
+                    (part.activity !== undefined &&
+                        part.activity === externalPart.activity)
+                );
+            }
+            return false;
+        });
+        if (partIndex === -1) continue;
+        const previous = message.parts[partIndex];
+        if (previous === undefined) return true;
+        let merged = externalPart;
+        if (previous.kind === "tool" && externalPart.kind === "tool") {
+            merged = mergeChatToolPart(previous, externalPart);
+        } else if (previous.kind === "thinking" && externalPart.kind === "thinking") {
+            merged = {
+                ...previous,
+                ...externalPart,
+                status:
+                    previous.status === "complete" || externalPart.status === "complete"
+                        ? "complete"
+                        : "running",
+                text:
+                    externalPart.text.length > previous.text.length
+                        ? externalPart.text
+                        : previous.text,
+            };
+        } else if (previous.kind === "control" && externalPart.kind === "control") {
+            merged = {
+                ...previous,
+                ...externalPart,
+                ...(previous.activity === "complete"
+                    ? { activity: "complete" as const }
+                    : {}),
+            };
+        }
+        canonical[messageIndex] = {
+            ...message,
+            parts: message.parts.with(partIndex, merged),
+        };
+        if (externalPart.kind === "tool") {
+            claimedCanonicalToolParts.add(`${messageIndex}:${partIndex}`);
+        }
+        return true;
+    }
+    return false;
+}
+
+function markCanonicalPartRemoved(
+    removedCanonicalParts: Map<number, Set<number>>,
+    messageIndex: number,
+    partIndex: number
+): void {
+    const removed = removedCanonicalParts.get(messageIndex) ?? new Set<number>();
+    removed.add(partIndex);
+    removedCanonicalParts.set(messageIndex, removed);
+}
+
+function mergeCanonicalPartIntoAnchoredExternal(
+    canonical: ChatDisplayMessage[],
+    candidateIndexes: readonly number[],
+    externalPart: ChatMessagePart,
+    claimedCanonicalToolParts: Set<string>,
+    removedCanonicalParts: Map<number, Set<number>>
+): ChatMessagePart {
+    for (const messageIndex of candidateIndexes) {
+        const message = canonical[messageIndex];
+        if (message === undefined) continue;
+        const partIndex = message.parts.findIndex((part, candidatePartIndex) => {
+            if (removedCanonicalParts.get(messageIndex)?.has(candidatePartIndex)) {
+                return false;
+            }
+            if (part.kind !== externalPart.kind) return false;
+            if (part.kind === "tool" && externalPart.kind === "tool") {
+                return (
+                    !claimedCanonicalToolParts.has(
+                        `${messageIndex}:${candidatePartIndex}`
+                    ) && toolPartsShareIdentity(part, externalPart)
+                );
+            }
+            if (part.kind === "thinking" && externalPart.kind === "thinking") {
+                return (
+                    (part.sourceKey !== undefined &&
+                        part.sourceKey === externalPart.sourceKey) ||
+                    part.text.startsWith(externalPart.text) ||
+                    externalPart.text.startsWith(part.text)
+                );
+            }
+            if (part.kind === "control" && externalPart.kind === "control") {
+                return (
+                    part.text === externalPart.text ||
+                    (part.activity !== undefined &&
+                        part.activity === externalPart.activity)
+                );
+            }
+            if (part.kind === "text" && externalPart.kind === "text") {
+                return (
+                    (part.sourceKey !== undefined &&
+                        part.sourceKey === externalPart.sourceKey) ||
+                    part.text === externalPart.text ||
+                    externalPart.text.startsWith(part.text) ||
+                    part.text.startsWith(externalPart.text)
+                );
+            }
+            return false;
+        });
+        if (partIndex === -1) continue;
+        const canonicalPart = message.parts[partIndex];
+        if (canonicalPart === undefined) return externalPart;
+        if (canonicalPart.kind === "tool" && externalPart.kind === "tool") {
+            claimedCanonicalToolParts.add(`${messageIndex}:${partIndex}`);
+            markCanonicalPartRemoved(removedCanonicalParts, messageIndex, partIndex);
+            return mergeChatToolPart(canonicalPart, externalPart);
+        }
+        if (canonicalPart.kind === "thinking" && externalPart.kind === "thinking") {
+            const sameSource =
+                canonicalPart.sourceKey !== undefined &&
+                canonicalPart.sourceKey === externalPart.sourceKey;
+            if (sameSource || externalPart.text.startsWith(canonicalPart.text)) {
+                markCanonicalPartRemoved(removedCanonicalParts, messageIndex, partIndex);
+                return {
+                    ...canonicalPart,
+                    ...externalPart,
+                    status:
+                        canonicalPart.status === "complete" ||
+                        externalPart.status === "complete"
+                            ? "complete"
+                            : "running",
+                    text:
+                        externalPart.text.length > canonicalPart.text.length
+                            ? externalPart.text
+                            : canonicalPart.text,
+                };
+            }
+            if (canonicalPart.text.startsWith(externalPart.text)) {
+                canonical[messageIndex] = {
+                    ...message,
+                    parts: message.parts.with(partIndex, {
+                        ...canonicalPart,
+                        text: canonicalPart.text.slice(externalPart.text.length),
+                    }),
+                };
+            }
+            return externalPart;
+        }
+        if (canonicalPart.kind === "control" && externalPart.kind === "control") {
+            markCanonicalPartRemoved(removedCanonicalParts, messageIndex, partIndex);
+            return {
+                ...canonicalPart,
+                ...externalPart,
+                ...(canonicalPart.activity === "complete"
+                    ? { activity: "complete" as const }
+                    : {}),
+            };
+        }
+        if (canonicalPart.kind === "text" && externalPart.kind === "text") {
+            const sameSource =
+                canonicalPart.sourceKey !== undefined &&
+                canonicalPart.sourceKey === externalPart.sourceKey;
+            if (
+                sameSource ||
+                canonicalPart.text === externalPart.text ||
+                externalPart.text.startsWith(canonicalPart.text)
+            ) {
+                markCanonicalPartRemoved(removedCanonicalParts, messageIndex, partIndex);
+                return {
+                    ...canonicalPart,
+                    ...externalPart,
+                    text:
+                        externalPart.text.length > canonicalPart.text.length
+                            ? externalPart.text
+                            : canonicalPart.text,
+                };
+            }
+            if (canonicalPart.text.startsWith(externalPart.text)) {
+                canonical[messageIndex] = {
+                    ...message,
+                    parts: message.parts.with(partIndex, {
+                        ...canonicalPart,
+                        text: canonicalPart.text.slice(externalPart.text.length),
+                    }),
+                };
+                return externalPart;
+            }
+        }
+        return externalPart;
+    }
+    return externalPart;
+}
+
+interface ExternalAnchorPlacement {
+    readonly afterCanonical: ReadonlyMap<string, readonly string[]>;
+    readonly anchoredExternalIds: ReadonlySet<string>;
+    readonly beforeCanonical: ReadonlyMap<string, readonly string[]>;
+}
+
+function placeExternalActivityAroundCanonicalUsers(
+    canonical: readonly ChatDisplayMessage[],
+    runtime: readonly ChatDisplayMessage[]
+): ExternalAnchorPlacement {
+    const externalGroups = Map.groupBy(
+        runtime.filter(
+            (message) => message.role === "assistant" && externalRuntimeMessage(message)
+        ),
+        (message) => message.providerRunId as string
+    );
+    const beforeCanonical = new Map<string, string[]>();
+    const afterCanonical = new Map<string, string[]>();
+    const anchoredExternalIds = new Set<string>();
+    const claimedCanonicalUsers = new Set<string>();
+    for (const [providerRunId, messages] of externalGroups) {
+        let chunkStart = 0;
+        let previousAnchorId: string | undefined;
+        for (const [index, message] of messages.entries()) {
+            const exactAnchorId = message.precedingUserMessageIdAnchor;
+            const textAnchor = message.precedingUserTextAnchor;
+            if (exactAnchorId === undefined && textAnchor === undefined) continue;
+            const matchingUsers = canonical.filter(
+                (candidate) =>
+                    candidate.role === "user" &&
+                    !claimedCanonicalUsers.has(candidate.id) &&
+                    (exactAnchorId === undefined
+                        ? chatDisplayMessageText(candidate) === textAnchor
+                        : candidate.id === exactAnchorId)
+            );
+            const canonicalUser =
+                exactAnchorId === undefined
+                    ? (matchingUsers.find(
+                          (candidate) => candidate.providerRunId === providerRunId
+                      ) ??
+                      matchingUsers.find(
+                          (candidate) => candidate.providerRunId === undefined
+                      ))
+                    : matchingUsers[0];
+            if (canonicalUser === undefined) continue;
+            claimedCanonicalUsers.add(canonicalUser.id);
+            const chunkIds = messages.slice(chunkStart, index).map(({ id }) => id);
+            if (previousAnchorId === undefined) {
+                beforeCanonical.set(canonicalUser.id, [
+                    ...(beforeCanonical.get(canonicalUser.id) ?? []),
+                    ...chunkIds,
+                ]);
+            } else {
+                afterCanonical.set(previousAnchorId, [
+                    ...(afterCanonical.get(previousAnchorId) ?? []),
+                    ...chunkIds,
+                ]);
+            }
+            for (const id of chunkIds) anchoredExternalIds.add(id);
+            previousAnchorId = canonicalUser.id;
+            chunkStart = index;
+        }
+        if (previousAnchorId !== undefined) {
+            const tailIds = messages.slice(chunkStart).map(({ id }) => id);
+            afterCanonical.set(previousAnchorId, [
+                ...(afterCanonical.get(previousAnchorId) ?? []),
+                ...tailIds,
+            ]);
+            for (const id of tailIds) anchoredExternalIds.add(id);
+        }
+    }
+    return { afterCanonical, anchoredExternalIds, beforeCanonical };
+}
+
+function mergeExternalActivityIntoCanonical(
+    canonicalMessages: readonly ChatDisplayMessage[],
+    runtimeMessages: readonly ChatDisplayMessage[],
+    anchoredExternalIds: ReadonlySet<string>
+): Readonly<{
+    canonical: readonly ChatDisplayMessage[];
+    runtime: readonly ChatDisplayMessage[];
+}> {
+    const canonical = canonicalMessages.map((message) => ({
+        ...message,
+        parts: [...message.parts],
+    }));
+    const assistantIndexesByRun = new Map<string, number[]>();
+    for (const [index, message] of canonical.entries()) {
+        if (message.role !== "assistant" || message.providerRunId === undefined) {
+            continue;
+        }
+        const indexes = assistantIndexesByRun.get(message.providerRunId) ?? [];
+        indexes.push(index);
+        assistantIndexesByRun.set(message.providerRunId, indexes);
+    }
+    const prefixLengths = new Map<number, number>();
+    const claimedCanonicalToolParts = new Set<string>();
+    const removedCanonicalParts = new Map<number, Set<number>>();
+    const runtime: ChatDisplayMessage[] = [];
+    for (const message of runtimeMessages) {
+        if (!externalRuntimeMessage(message) || message.providerRunId === undefined) {
+            runtime.push(message);
+            continue;
+        }
+        const candidateIndexes = assistantIndexesByRun.get(message.providerRunId);
+        if (candidateIndexes === undefined || candidateIndexes.length === 0) {
+            runtime.push(message);
+            continue;
+        }
+        // A resolved steer anchor makes the external segments the causal lanes.
+        // Move canonical duplicates into those lanes so activity cannot cross the user row.
+        if (anchoredExternalIds.has(message.id)) {
+            runtime.push({
+                ...message,
+                parts: message.parts.map((part) =>
+                    mergeCanonicalPartIntoAnchoredExternal(
+                        canonical,
+                        candidateIndexes,
+                        part,
+                        claimedCanonicalToolParts,
+                        removedCanonicalParts
+                    )
+                ),
+            });
+            continue;
+        }
+        const canonicalText = candidateIndexes
+            .flatMap((index) =>
+                (canonical[index]?.parts ?? []).filter(
+                    (_part, partIndex) =>
+                        !removedCanonicalParts.get(index)?.has(partIndex)
+                )
+            )
+            .flatMap((part) => (part.kind === "text" ? [part.text] : []))
+            .join("");
+        const unmatched = message.parts.filter((part) => {
+            if (
+                part.kind === "text" &&
+                part.text !== "" &&
+                canonicalText.includes(part.text)
+            ) {
+                return false;
+            }
+            return !mergeExternalPartIntoCanonical(
+                canonical,
+                candidateIndexes,
+                part,
+                claimedCanonicalToolParts,
+                removedCanonicalParts
+            );
+        });
+        if (unmatched.length === 0) continue;
+        const targetIndex =
+            candidateIndexes.find(
+                (index) => (canonical[index]?.sequence ?? Infinity) >= message.sequence
+            ) ?? candidateIndexes.at(-1);
+        if (targetIndex === undefined) {
+            runtime.push({ ...message, parts: unmatched });
+            continue;
+        }
+        const target = canonical[targetIndex];
+        if (target === undefined) continue;
+        if (message.sequence <= target.sequence) {
+            const prefixLength = prefixLengths.get(targetIndex) ?? 0;
+            canonical[targetIndex] = {
+                ...target,
+                parts: target.parts.toSpliced(prefixLength, 0, ...unmatched),
+            };
+            prefixLengths.set(targetIndex, prefixLength + unmatched.length);
+        } else {
+            canonical[targetIndex] = {
+                ...target,
+                parts: [...target.parts, ...unmatched],
+            };
+        }
+    }
+    return {
+        canonical: canonical.map((message, messageIndex) => ({
+            ...message,
+            parts: message.parts.filter(
+                (_part, partIndex) =>
+                    !removedCanonicalParts.get(messageIndex)?.has(partIndex)
+            ),
+        })),
+        runtime,
+    };
+}
+
 /**
  * Combines canonical history and ephemeral runtime rows without duplicate identities.
  * @param history Canonical provider transcript.
@@ -294,7 +743,7 @@ export function mergeChatMessages(
     hiddenMessageIds: ReadonlySet<string>
 ): readonly ChatDisplayMessage[] {
     const canonicalIds = new Set(history.map(({ id }) => id));
-    const canonical = history.filter((message) => !hiddenMessageIds.has(message.id));
+    let canonical = history.filter((message) => !hiddenMessageIds.has(message.id));
     const canonicalIdempotencyKeys = new Set(
         canonical.flatMap((message) =>
             message.idempotencyKey === undefined ? [] : [message.idempotencyKey]
@@ -307,87 +756,47 @@ export function mergeChatMessages(
                 : []
         )
     );
-    const ephemeral = sortChatDisplayMessages(
-        runtime.filter(
-            (message) =>
-                !canonicalIds.has(message.id) &&
-                !hiddenMessageIds.has(message.id) &&
-                !(
-                    message.role === "user" &&
-                    message.idempotencyKey !== undefined &&
-                    canonicalIdempotencyKeys.has(message.idempotencyKey)
-                ) &&
-                !(
-                    message.role === "assistant" &&
-                    message.providerRunId !== undefined &&
-                    canonicalAssistantProviderRunIds.has(message.providerRunId)
-                )
-        )
-    );
-    const externalGroups = Map.groupBy(
-        ephemeral.filter(
-            (message) =>
+    const runtimeCandidates = runtime.filter(
+        (message) =>
+            !canonicalIds.has(message.id) &&
+            !hiddenMessageIds.has(message.id) &&
+            !(
+                message.role === "user" &&
+                message.idempotencyKey !== undefined &&
+                canonicalIdempotencyKeys.has(message.idempotencyKey)
+            ) &&
+            !(
                 message.role === "assistant" &&
+                !externalRuntimeMessage(message) &&
                 message.providerRunId !== undefined &&
-                message.id.startsWith("external:")
-        ),
-        (message) => message.providerRunId as string
+                canonicalAssistantProviderRunIds.has(message.providerRunId)
+            )
     );
-    const beforeCanonical = new Map<string, ChatDisplayMessage[]>();
-    const afterCanonical = new Map<string, ChatDisplayMessage[]>();
-    const anchoredExternalIds = new Set<string>();
-    const claimedCanonicalUsers = new Set<string>();
-    for (const [providerRunId, messages] of externalGroups) {
-        let chunkStart = 0;
-        let previousAnchorId: string | undefined;
-        for (const [index, message] of messages.entries()) {
-            const anchor = message.precedingUserTextAnchor;
-            if (anchor === undefined) continue;
-            const matchingUsers = canonical.filter(
-                (candidate) =>
-                    candidate.role === "user" &&
-                    !claimedCanonicalUsers.has(candidate.id) &&
-                    chatDisplayMessageText(candidate) === anchor
-            );
-            const canonicalUser =
-                matchingUsers.find(
-                    (candidate) => candidate.providerRunId === providerRunId
-                ) ??
-                matchingUsers.find((candidate) => candidate.providerRunId === undefined);
-            if (canonicalUser === undefined) continue;
-            claimedCanonicalUsers.add(canonicalUser.id);
-            const chunk = messages.slice(chunkStart, index);
-            if (previousAnchorId === undefined) {
-                beforeCanonical.set(canonicalUser.id, [
-                    ...(beforeCanonical.get(canonicalUser.id) ?? []),
-                    ...chunk,
-                ]);
-            } else {
-                afterCanonical.set(previousAnchorId, [
-                    ...(afterCanonical.get(previousAnchorId) ?? []),
-                    ...chunk,
-                ]);
-            }
-            for (const item of chunk) anchoredExternalIds.add(item.id);
-            previousAnchorId = canonicalUser.id;
-            chunkStart = index;
-        }
-        if (previousAnchorId !== undefined) {
-            const tail = messages.slice(chunkStart);
-            afterCanonical.set(previousAnchorId, [
-                ...(afterCanonical.get(previousAnchorId) ?? []),
-                ...tail,
-            ]);
-            for (const item of tail) anchoredExternalIds.add(item.id);
-        }
-    }
+    const orderedRuntimeCandidates = sortChatDisplayMessages(runtimeCandidates);
+    const anchorPlacement = placeExternalActivityAroundCanonicalUsers(
+        canonical,
+        orderedRuntimeCandidates
+    );
+    const mergedActivity = mergeExternalActivityIntoCanonical(
+        canonical,
+        orderedRuntimeCandidates,
+        anchorPlacement.anchoredExternalIds
+    );
+    canonical = [...mergedActivity.canonical];
+    const ephemeral = sortChatDisplayMessages(mergedActivity.runtime);
+    const ephemeralById = new Map(ephemeral.map((message) => [message.id, message]));
+    const placedMessages = (ids: readonly string[] | undefined) =>
+        ids?.flatMap((id) => {
+            const message = ephemeralById.get(id);
+            return message === undefined ? [] : [message];
+        }) ?? [];
     const mergedCanonical = canonical.flatMap((message) => [
-        ...(beforeCanonical.get(message.id) ?? []),
+        ...placedMessages(anchorPlacement.beforeCanonical.get(message.id)),
         message,
-        ...(afterCanonical.get(message.id) ?? []),
+        ...placedMessages(anchorPlacement.afterCanonical.get(message.id)),
     ]);
     const unanchored = ephemeral.filter(
-        (message) => !anchoredExternalIds.has(message.id)
+        (message) => !anchorPlacement.anchoredExternalIds.has(message.id)
     );
     return [...mergedCanonical, ...unanchored];
 }

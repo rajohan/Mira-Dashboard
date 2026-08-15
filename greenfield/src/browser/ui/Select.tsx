@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { cn } from "../lib/classNames.ts";
 import { useFormFieldInvalid } from "./formFieldContext.ts";
 import { Icon } from "./Icon.tsx";
+import { interactiveTapClassName } from "./interactionStyles.ts";
 
 export interface SelectOption<TValue extends string> {
     readonly description?: ReactNode;
@@ -54,6 +55,7 @@ export function Select<TValue extends string>({
                     <ListboxButton
                         aria-label={ariaLabel}
                         className={cn(
+                            interactiveTapClassName,
                             "border-primary-500 bg-primary-950 text-primary-50 relative flex min-h-10 w-full max-w-full min-w-0 items-center rounded-lg border py-2 pr-9 pl-3 text-left shadow-sm transition-colors",
                             "data-hover:border-accent-400 data-focus:border-accent-400 data-focus:ring-accent-400 data-focus:ring-2 data-focus:outline-none",
                             "data-disabled:cursor-not-allowed data-disabled:opacity-60 data-invalid:border-red-500 data-invalid:ring-red-500",

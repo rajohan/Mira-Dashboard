@@ -1,7 +1,5 @@
 import {
-    ChevronDown,
-    CircleAlert,
-    CircleCheck,
+    ChevronRight,
     Eye,
     EyeOff,
     LoaderCircle,
@@ -16,8 +14,11 @@ import { Button } from "../ui/Button.tsx";
 import { ConfirmModal } from "../ui/ConfirmModal.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { IconOnlyButton } from "../ui/IconOnlyButton.tsx";
+import { interactiveTapClassName } from "../ui/interactionStyles.ts";
 import { LoadingDots } from "../ui/LoadingDots.tsx";
 import { Markdown } from "../ui/Markdown.tsx";
+import { ProgressBar } from "../ui/ProgressBar.tsx";
+import { SyntaxHighlightedSource } from "../ui/SyntaxHighlightedSource.tsx";
 import {
     chatAttachmentTypeLabel,
     formatChatAttachmentSize,
@@ -28,7 +29,10 @@ import {
     chatMessageHasVisibleContent,
     visibleChatMessageParts,
 } from "./chatMessageVisibility.ts";
+import { chatToolDiff } from "./chatToolDiff.ts";
+import { ChatToolDiff } from "./ChatToolDiff.tsx";
 import { toolDescription, toolDisplayName } from "./chatToolPresentation.ts";
+import { type ChatToolSourceDetail, chatToolSourceDetails } from "./chatToolSource.ts";
 import type {
     ChatDisplayMessage,
     ChatDisplaySettings,
@@ -37,31 +41,85 @@ import type {
     ChatControlPart,
     ChatToolPart,
 } from "./chatTypes.ts";
+import { ToolScrollRegion } from "./ToolScrollRegion.tsx";
 
 const managedChatMediaUrlPattern =
     /^\/api\/chat\/media\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\?disposition=(?:preview|download)$/u;
-
-function safeDetail(value: unknown): string | undefined {
-    if (value === undefined) return undefined;
-    if (typeof value === "string") return value;
-    try {
-        return JSON.stringify(value, undefined, 2);
-    } catch {
-        return "Detail could not be displayed.";
-    }
-}
+const toolSyntaxHighlightMaximumLength = 256 * 1024;
 
 function ToolDetailSection({
     children,
     label,
-}: Readonly<{ children: ReactNode; label: string }>) {
+    tone,
+}: Readonly<{
+    children: ReactNode;
+    label: string;
+    tone: "danger" | "warning";
+}>) {
     return (
-        <section className="border-primary-700 bg-primary-950/40 rounded-md border px-2 py-1.5">
-            <p className="text-primary-400 mb-1 text-[10px] font-medium tracking-wide uppercase">
+        <section
+            className={cn(
+                "rounded-md border px-2 py-1.5",
+                tone === "danger"
+                    ? "border-red-400/20 bg-black/15"
+                    : "border-amber-400/20 bg-black/15"
+            )}
+        >
+            <p
+                className={cn(
+                    "mb-1 text-[10px] font-medium tracking-wide uppercase opacity-70",
+                    tone === "danger" ? "text-red-100" : "text-amber-100"
+                )}
+            >
                 {label}
             </p>
             {children}
         </section>
+    );
+}
+
+interface ToolSourceRegionProps {
+    readonly ariaLabel: string;
+    readonly details: readonly ChatToolSourceDetail[];
+}
+
+function ToolSourceRegion({ ariaLabel, details }: ToolSourceRegionProps) {
+    return (
+        <ToolScrollRegion
+            ariaLabel={ariaLabel}
+            className="max-h-64 overflow-auto text-[11px] leading-normal"
+            contentRevision={details
+                .map(
+                    (detail) =>
+                        `${detail.language}:${detail.content.length}:${detail.content.slice(-16)}`
+                )
+                .join("|")}
+        >
+            {details.map((detail, index) => (
+                <div
+                    className={cn(index > 0 && "mt-2 border-t border-current/15 pt-2")}
+                    key={`${detail.language}:${index}`}
+                >
+                    {detail.label !== undefined && (
+                        <p className="text-primary-300 mb-1 truncate font-sans text-[10px] font-medium">
+                            {detail.label}
+                        </p>
+                    )}
+                    <pre className="font-mono wrap-anywhere whitespace-pre-wrap [&_.source-viewer-line]:wrap-anywhere [&_.source-viewer-line]:whitespace-pre-wrap">
+                        {detail.language !== "plaintext" &&
+                        detail.content.length <= toolSyntaxHighlightMaximumLength ? (
+                            <SyntaxHighlightedSource
+                                content={detail.content}
+                                language={detail.language}
+                                numbered={false}
+                            />
+                        ) : (
+                            <code data-language="plaintext">{detail.content}</code>
+                        )}
+                    </pre>
+                </div>
+            ))}
+        </ToolScrollRegion>
     );
 }
 
@@ -70,111 +128,129 @@ interface ToolPartProps {
     readonly part: ChatToolPart;
 }
 
-function toolStatusIcon(status: ChatToolPart["status"]) {
-    if (status === "running") return LoaderCircle;
-    if (status === "failed") return CircleAlert;
-    return CircleCheck;
+function toolPartDescription(
+    part: ChatToolPart,
+    diff: ReturnType<typeof chatToolDiff>
+): string | undefined {
+    const description = toolDescription(part);
+    if (description !== undefined || diff === undefined) return description;
+    return diff.files.length === 1 ? diff.files[0] : `${diff.files.length} files changed`;
 }
 
 function ToolPart({ expanded, part }: ToolPartProps) {
-    const forcedOpen = expanded || part.status === "failed";
+    const defaultOpen = expanded;
     const [override, setOverride] =
         useState<Readonly<{ basis: boolean; value: boolean }>>();
-    const open = override?.basis === forcedOpen ? override.value : forcedOpen;
-    const description = toolDescription(part);
-    const input = safeDetail(part.input);
-    const output = safeDetail(part.output);
-    const outputDetails = [...new Set([output, part.error])].filter(
-        (value): value is string => value !== undefined
-    );
+    const open = override?.basis === defaultOpen ? override.value : defaultOpen;
+    const diff = chatToolDiff(part);
+    const detailDescription = toolDescription(part);
+    const description = toolPartDescription(part, diff);
     const label = toolDisplayName(part.name);
+    const inputDetails = chatToolSourceDetails(part.input, {
+        input: part.input,
+        name: part.name,
+        placement: "input",
+    });
+    const outputDetails = [part.output, part.error]
+        .flatMap((value) =>
+            chatToolSourceDetails(value, {
+                input: part.input,
+                name: part.name,
+                placement: "output",
+            })
+        )
+        .filter(
+            (value, index, values) =>
+                values.findIndex(
+                    (candidate) =>
+                        candidate.content === value.content &&
+                        candidate.language === value.language
+                ) === index
+        );
+    const tone = part.status === "failed" ? "danger" : "warning";
     return (
         <section
             aria-label={`${label}, ${part.status}`}
             className={cn(
-                "bg-primary-800 overflow-hidden rounded-lg",
-                part.status === "failed" && "border-red-800/70"
+                "overflow-hidden rounded-lg border text-xs",
+                tone === "danger"
+                    ? "border-red-500/30 bg-red-500/10 text-red-100"
+                    : "border-amber-500/30 bg-amber-500/10 text-amber-100"
             )}
         >
-            <button
+            <Button
                 aria-expanded={open}
-                className="hover:bg-primary-800 focus-visible:ring-accent-400 flex w-full items-center gap-2 px-3 py-2 text-left text-xs outline-none focus-visible:ring-2 focus-visible:ring-inset"
-                onClick={() => setOverride({ basis: forcedOpen, value: !open })}
+                className={cn(
+                    "flex w-full min-w-0 items-start gap-1.5 px-2 py-1.5 text-left text-xs focus-visible:ring-inset",
+                    tone === "danger" ? "hover:bg-red-500/10" : "hover:bg-amber-500/10"
+                )}
+                onClick={() => setOverride({ basis: defaultOpen, value: !open })}
                 type="button"
+                variant="unstyled"
             >
                 <Icon
                     className={cn(
-                        "shrink-0",
-                        part.status === "running" &&
-                            "animate-spin motion-reduce:animate-none"
+                        "shrink-0 transition-transform motion-reduce:transition-none",
+                        open && "rotate-90"
                     )}
-                    icon={toolStatusIcon(part.status)}
+                    icon={ChevronRight}
                     size="sm"
-                    tone={part.status === "failed" ? "danger" : "inherit"}
+                    tone="inherit"
                 />
                 <span className="min-w-0 flex-1">
-                    <span className="block truncate font-medium">{label}</span>
-                    {description !== undefined && (
-                        <span className="text-primary-300 mt-0.5 block truncate text-[11px] font-normal">
+                    <span className="block truncate font-medium tracking-wide uppercase opacity-80">
+                        {label}
+                    </span>
+                    {!open && description !== undefined && (
+                        <span className="mt-1 block truncate text-[11px] font-normal opacity-75">
                             {description}
                         </span>
                     )}
                 </span>
-                <span className="text-primary-400 capitalize">{part.status}</span>
-                <Icon
-                    className={cn(
-                        "transition-transform motion-reduce:transition-none",
-                        open && "rotate-180"
-                    )}
-                    icon={ChevronDown}
-                    size="sm"
-                    tone="inherit"
-                />
-            </button>
+                <span
+                    className="mt-0.5 shrink-0 text-[10px] tracking-wide uppercase opacity-70"
+                    data-tool-status={part.status}
+                >
+                    {part.status}
+                </span>
+            </Button>
             {open && (
-                <div className="border-primary-700 space-y-2 border-t px-3 py-2">
-                    {description !== undefined && (
-                        <ToolDetailSection label="Description">
-                            <p className="text-primary-200 text-xs wrap-break-word">
-                                {description}
-                            </p>
+                <div
+                    className={cn(
+                        "space-y-1.5 border-t px-2 py-1.5",
+                        tone === "danger" ? "border-red-400/20" : "border-amber-400/20"
+                    )}
+                >
+                    {detailDescription !== undefined && (
+                        <ToolDetailSection label="Description" tone={tone}>
+                            <p className="text-xs wrap-break-word">{detailDescription}</p>
                         </ToolDetailSection>
                     )}
-                    <ToolDetailSection label="Tool input">
-                        {input === undefined ? (
-                            <p className="text-primary-400 text-xs">No input.</p>
-                        ) : (
-                            <section
-                                aria-label={`${label} tool input`}
-                                className="text-primary-300 max-h-64 overflow-auto text-xs"
-                                data-virtualizer-scroll-region
-                                // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- Bounded tool input must remain keyboard-scrollable.
-                                tabIndex={0}
-                            >
-                                <pre className="wrap-break-word whitespace-pre-wrap">
-                                    {input}
-                                </pre>
-                            </section>
-                        )}
-                    </ToolDetailSection>
-                    {(part.status !== "running" ||
-                        output !== undefined ||
-                        part.error !== undefined) && (
-                        <ToolDetailSection label="Tool output">
-                            {outputDetails.length === 0 ? (
-                                <p className="text-primary-400 text-xs">No output.</p>
+                    {diff === undefined ? (
+                        <ToolDetailSection label="Tool input" tone={tone}>
+                            {inputDetails.length === 0 ? (
+                                <p className="text-xs opacity-70">No input.</p>
                             ) : (
-                                <section
-                                    aria-label={`${label} tool output`}
-                                    className="text-primary-300 max-h-64 overflow-auto text-xs"
-                                    data-virtualizer-scroll-region
-                                    // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- Bounded tool output must remain keyboard-scrollable.
-                                    tabIndex={0}
-                                >
-                                    <pre className="wrap-break-word whitespace-pre-wrap">
-                                        {outputDetails.join("\n\n")}
-                                    </pre>
-                                </section>
+                                <ToolSourceRegion
+                                    ariaLabel={`${label} tool input`}
+                                    details={inputDetails}
+                                />
+                            )}
+                        </ToolDetailSection>
+                    ) : (
+                        <ChatToolDiff diff={diff} label={label} status={part.status} />
+                    )}
+                    {(part.status !== "running" ||
+                        part.output !== undefined ||
+                        part.error !== undefined) && (
+                        <ToolDetailSection label="Tool output" tone={tone}>
+                            {outputDetails.length === 0 ? (
+                                <p className="text-xs opacity-70">No output.</p>
+                            ) : (
+                                <ToolSourceRegion
+                                    ariaLabel={`${label} tool output`}
+                                    details={outputDetails}
+                                />
                             )}
                         </ToolDetailSection>
                     )}
@@ -224,7 +300,7 @@ function SafeMarkdownAnchor({
         ? { rel: "noopener noreferrer", target: "_blank" }
         : {};
     return (
-        <a href={link.href} {...externalProperties}>
+        <a className={interactiveTapClassName} href={link.href} {...externalProperties}>
             {children}
         </a>
     );
@@ -265,7 +341,10 @@ function MessageAttachment({
         <li className="border-primary-600 bg-primary-800 max-w-full overflow-hidden rounded-lg border">
             {imageUrl !== undefined && (
                 <a
-                    className="focus-visible:ring-accent-400 block rounded-lg outline-none focus-visible:ring-2"
+                    className={cn(
+                        interactiveTapClassName,
+                        "focus-visible:ring-accent-400 block rounded-lg outline-none focus-visible:ring-2"
+                    )}
                     href={imageUrl}
                     rel="noopener noreferrer"
                     target="_blank"
@@ -283,7 +362,10 @@ function MessageAttachment({
                 <span className="min-w-0">
                     {imageUrl === undefined && managedDownloadUrl !== undefined ? (
                         <a
-                            className="text-accent-300 focus-visible:ring-accent-400 block max-w-72 truncate rounded outline-none focus-visible:ring-2"
+                            className={cn(
+                                interactiveTapClassName,
+                                "text-accent-300 focus-visible:ring-accent-400 block max-w-72 truncate rounded outline-none focus-visible:ring-2"
+                            )}
                             download={attachment.name}
                             href={managedDownloadUrl}
                         >
@@ -309,10 +391,11 @@ function MessageAttachment({
                 />
             </div>
             {(attachment.status === "preparing" || attachment.status === "uploading") && (
-                <progress
-                    aria-label={`Upload progress for ${attachment.name}`}
-                    className="accent-accent-400 block h-1.5 w-full"
-                    max={100}
+                <ProgressBar
+                    className="w-full rounded-none"
+                    label={`Upload progress for ${attachment.name}`}
+                    size="sm"
+                    tone="accent"
                     value={attachment.progress ?? 0}
                 />
             )}
@@ -343,6 +426,8 @@ export function ChatMessageBubble({
     const hydrationLabel =
         message.hydration === "error" ? "Retry full message" : "Open full message";
     const visibleParts = visibleChatMessageParts(message, display);
+    const showsThinkingLabel = visibleParts.some((part) => part.kind === "thinking");
+    const showsTool = visibleParts.some((part) => part.kind === "tool");
     const previewAttachment = message.attachments.find(
         (attachment) => attachment.id === previewAttachmentId
     );
@@ -390,6 +475,7 @@ export function ChatMessageBubble({
                 <div
                     className={cn(
                         "max-w-[94%] min-w-0 rounded-2xl px-3 py-2 text-sm sm:max-w-[86%] lg:max-w-[80%]",
+                        !isUser && showsTool && "w-full",
                         isUser
                             ? "bg-accent-500 text-primary-950"
                             : "bg-primary-950 text-primary-100"
@@ -402,7 +488,10 @@ export function ChatMessageBubble({
                             isUser ? "text-primary-950" : "text-primary-300"
                         )}
                     >
-                        <span>{author}</span>
+                        <span className={showsThinkingLabel ? "normal-case" : undefined}>
+                            {author}
+                            {showsThinkingLabel && " (thinking)"}
+                        </span>
                         {message.delivery !== undefined &&
                             message.delivery !== "sent" && (
                                 <span className="capitalize">
@@ -410,16 +499,15 @@ export function ChatMessageBubble({
                                 </span>
                             )}
                         {onHide !== undefined && (
-                            <Button
-                                aria-label="Hide message from this browser"
+                            <IconOnlyButton
                                 className="ml-auto min-h-7 px-1.5"
+                                icon={EyeOff}
+                                label="Hide message from this browser"
                                 onClick={() => setHideConfirmationOpen(true)}
                                 size="sm"
                                 title="Hide locally"
                                 variant="ghost"
-                            >
-                                <Icon icon={EyeOff} size="sm" tone="inherit" />
-                            </Button>
+                            />
                         )}
                         {readAloudAvailable && (
                             <IconOnlyButton
@@ -484,15 +572,17 @@ export function ChatMessageBubble({
                             if (part.kind === "thinking") {
                                 return (
                                     <aside
-                                        className="bg-primary-800 text-primary-200 rounded-lg p-2.5 text-xs italic"
+                                        className="border-primary-700 bg-primary-800 text-primary-200 rounded-lg border p-2.5"
                                         key={`thinking:${index}`}
                                     >
-                                        <p className="mb-1 font-medium not-italic">
-                                            {part.status === "running"
-                                                ? "Thinking…"
-                                                : "Thinking"}
-                                        </p>
-                                        <p className="whitespace-pre-wrap">{part.text}</p>
+                                        <Markdown
+                                            components={{
+                                                a: SafeMarkdownAnchor,
+                                                img: BlockedMarkdownImage,
+                                            }}
+                                            className="prose-p:text-primary-200 prose-headings:text-primary-100 prose-code:text-primary-100"
+                                            source={part.text}
+                                        />
                                     </aside>
                                 );
                             }
@@ -501,7 +591,7 @@ export function ChatMessageBubble({
                                     return (
                                         <output
                                             aria-label={part.text}
-                                            className="bg-primary-800 text-primary-200 block rounded-lg px-3 py-2 text-xs"
+                                            className="bg-primary-800 text-primary-100 block rounded-lg px-3 py-2.5 text-sm font-medium [&_.loading-state-dots]:ml-0.5 [&_.loading-state-dots]:text-lg [&_.loading-state-dots]:leading-none"
                                             key={`control:${index}`}
                                         >
                                             {part.activity === "running" ? (

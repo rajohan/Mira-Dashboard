@@ -25,6 +25,7 @@ import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Card } from "../ui/Card.tsx";
 import { ConfirmModal } from "../ui/ConfirmModal.tsx";
+import { FormField } from "../ui/FormField.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { IconOnlyButton } from "../ui/IconOnlyButton.tsx";
@@ -207,12 +208,10 @@ export function TerminalWorkspace({
 
                 {startAvailable && (
                     <div className="border-primary-700 mt-4 grid gap-3 border-t pt-4 sm:grid-cols-[minmax(12rem,0.7fr)_minmax(14rem,1.3fr)_auto] sm:items-end">
-                        <div className="min-w-0">
-                            <Text as="span" className="mb-1 block" size="sm">
-                                Starting folder
-                            </Text>
+                        <FormField className="min-w-0" label="Starting folder">
                             <Select
                                 ariaLabel="Terminal starting root"
+                                className="mt-1"
                                 onChange={(rootId) => {
                                     const root = runtime.roots.find(
                                         (candidate) => candidate.id === rootId
@@ -227,15 +226,20 @@ export function TerminalWorkspace({
                                 options={rootOptions}
                                 value={location.rootId}
                             />
-                        </div>
-                        <label className="min-w-0" htmlFor="terminal-starting-path">
-                            <Text as="span" className="mb-1 block" size="sm">
-                                Folder or subfolder
-                            </Text>
+                        </FormField>
+                        <FormField
+                            className="min-w-0"
+                            error={
+                                validLocation
+                                    ? undefined
+                                    : "Use a folder path that starts with / and does not contain . or .. segments."
+                            }
+                            label="Folder or subfolder"
+                        >
                             <Input
                                 aria-label="Terminal starting folder or subfolder"
                                 autoComplete="off"
-                                id="terminal-starting-path"
+                                className="mt-1"
                                 invalid={!validLocation}
                                 onChange={(event) =>
                                     onLocation({
@@ -243,11 +247,11 @@ export function TerminalWorkspace({
                                         path: event.currentTarget.value,
                                     })
                                 }
-                                placeholder="Example: /projects/dashboard"
+                                placeholder="/projects/dashboard"
                                 spellCheck={false}
                                 value={location.path}
                             />
-                        </label>
+                        </FormField>
                         <Button
                             busy={startBusy}
                             busyLabel="Starting terminal…"
@@ -296,7 +300,7 @@ export function TerminalWorkspace({
                                     );
                                 }
                             }}
-                            placeholder="Example: error"
+                            placeholder="error"
                             type="search"
                             value={searchQuery}
                         />

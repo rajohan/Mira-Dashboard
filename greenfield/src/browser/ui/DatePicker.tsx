@@ -14,6 +14,7 @@ import type { CSSProperties } from "react";
 import { cn } from "../lib/classNames.ts";
 import { Fieldset } from "./Fieldset.tsx";
 import { Icon } from "./Icon.tsx";
+import { interactiveTapClassName } from "./interactionStyles.ts";
 
 export interface DatePickerProps {
     readonly ariaDescribedBy?: string;
@@ -44,15 +45,18 @@ const calendarClassNames = {
     ),
     [UI.DayButton]: cn(
         defaultClassNames[UI.DayButton],
-        "hover:enabled:bg-primary-700! focus-visible:ring-accent-400 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+        interactiveTapClassName,
+        "hover:enabled:bg-primary-700! focus-visible:ring-accent-400 transition-colors focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed"
     ),
     [UI.NextMonthButton]: cn(
         defaultClassNames[UI.NextMonthButton],
-        "text-primary-300 hover:bg-primary-700! hover:text-primary-50! focus-visible:ring-accent-400 rounded-md transition-colors focus-visible:ring-2 focus-visible:outline-none"
+        interactiveTapClassName,
+        "text-primary-300 hover:bg-primary-700! hover:text-primary-50! focus-visible:ring-accent-400 rounded-md transition-colors focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed"
     ),
     [UI.PreviousMonthButton]: cn(
         defaultClassNames[UI.PreviousMonthButton],
-        "text-primary-300 hover:bg-primary-700! hover:text-primary-50! focus-visible:ring-accent-400 rounded-md transition-colors focus-visible:ring-2 focus-visible:outline-none"
+        interactiveTapClassName,
+        "text-primary-300 hover:bg-primary-700! hover:text-primary-50! focus-visible:ring-accent-400 rounded-md transition-colors focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed"
     ),
     [UI.Weekday]: cn(defaultClassNames[UI.Weekday], "text-primary-300"),
 };
@@ -115,6 +119,7 @@ export function DatePicker({
                                 aria-invalid={resolvedInvalid ? true : undefined}
                                 aria-label={`Choose ${ariaLabel ?? label}, selected ${formattedDate}`}
                                 className={cn(
+                                    interactiveTapClassName,
                                     "border-primary-500 bg-primary-950 text-primary-50 flex min-h-10 w-full min-w-0 items-center gap-2 rounded-lg border px-3 py-2 text-left shadow-sm transition-colors",
                                     "data-hover:border-accent-400 data-focus:border-accent-400 data-focus:ring-accent-400 data-focus:ring-2 data-focus:outline-none",
                                     "data-disabled:cursor-not-allowed data-disabled:opacity-60 data-invalid:border-red-500 data-invalid:ring-red-500"

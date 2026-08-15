@@ -229,6 +229,242 @@ describe("persistent Gateway chat provider", () => {
         ]);
     });
 
+    test("reconstructs a completed run on late open and after restart without a live subscription", async () => {
+        const completedTranscript = {
+            messages: [
+                {
+                    __openclaw: { id: "late-user", seq: 1 },
+                    content: "Inspect the durable transcript.",
+                    role: "user",
+                    timestamp: 1_800_000_000_000,
+                },
+                {
+                    __openclaw: { id: "late-thinking-1", seq: 2 },
+                    content: [{ text: "Inspecting first.", type: "text" }],
+                    openclawStreamFallback: {
+                        itemId: "thinking-item-1",
+                        replacementText: "Inspecting first.",
+                        source: "segment",
+                    },
+                    role: "assistant",
+                    timestamp: 1_800_000_000_001,
+                },
+                {
+                    __openclaw: { id: "late-tool-call-1", seq: 3 },
+                    content: [
+                        {
+                            args: { command: "first" },
+                            id: "provider-call-1",
+                            name: "bash",
+                            type: "toolCall",
+                        },
+                    ],
+                    role: "assistant",
+                    stopReason: "toolUse",
+                    timestamp: 1_800_000_000_002,
+                },
+                {
+                    __openclaw: { id: "late-tool-result-1", seq: 4 },
+                    content: [
+                        {
+                            content: [{ text: "first output", type: "text" }],
+                            id: "provider-call-1",
+                            name: "bash",
+                            type: "toolResult",
+                        },
+                    ],
+                    role: "toolResult",
+                    toolCallId: "provider-call-1",
+                    toolName: "bash",
+                    timestamp: 1_800_000_000_003,
+                },
+                {
+                    __openclaw: { id: "late-thinking-2", seq: 5 },
+                    content: [{ text: "Inspecting again.", type: "text" }],
+                    openclawStreamFallback: {
+                        itemId: "thinking-item-2",
+                        replacementText: "Inspecting again.",
+                        source: "segment",
+                    },
+                    role: "assistant",
+                    timestamp: 1_800_000_000_004,
+                },
+                {
+                    __openclaw: { id: "late-tool-call-2", seq: 6 },
+                    content: [
+                        {
+                            args: { command: "second" },
+                            id: "provider-call-2",
+                            name: "bash",
+                            type: "toolCall",
+                        },
+                    ],
+                    role: "assistant",
+                    stopReason: "toolUse",
+                    timestamp: 1_800_000_000_005,
+                },
+                {
+                    __openclaw: { id: "late-tool-result-2", seq: 7 },
+                    content: [
+                        {
+                            content: [{ text: "second output", type: "text" }],
+                            id: "provider-call-2",
+                            name: "bash",
+                            type: "toolResult",
+                        },
+                    ],
+                    role: "toolResult",
+                    toolCallId: "provider-call-2",
+                    toolName: "bash",
+                    timestamp: 1_800_000_000_006,
+                },
+                {
+                    __openclaw: { id: "late-final", seq: 8 },
+                    content: [{ text: "Finished.", type: "text" }],
+                    role: "assistant",
+                    stopReason: "stop",
+                    timestamp: 1_800_000_000_007,
+                },
+            ],
+            offset: 0,
+            sessionId: "durable-session-1",
+            sessionKey,
+        } as const;
+        const readAfterProcessStart = async () => {
+            const harness = createHarness({ "chat.history": completedTranscript });
+            const history = await harness.provider.history({
+                limit: completedTranscript.messages.length,
+                maxChars: 64 * 1024,
+                offset: 0,
+                sessionKey,
+            });
+            return { history, requests: harness.requests };
+        };
+
+        // No provider or browser subscription exists while the run is produced.
+        const lateOpen = await readAfterProcessStart();
+        const afterRestart = await readAfterProcessStart();
+
+        expect(afterRestart.history).toEqual(lateOpen.history);
+        expect(lateOpen.requests.map(({ method }) => method)).toEqual(["chat.history"]);
+        expect(afterRestart.requests.map(({ method }) => method)).toEqual([
+            "chat.history",
+        ]);
+        expect(
+            lateOpen.history.messages.map(({ content, role, stopReason }) => ({
+                content,
+                role,
+                ...(stopReason === undefined ? {} : { stopReason }),
+            }))
+        ).toEqual([
+            {
+                content: {
+                    kind: "complete",
+                    parts: [
+                        {
+                            id: "1",
+                            kind: "text",
+                            text: "Inspect the durable transcript.",
+                        },
+                    ],
+                },
+                role: "user",
+            },
+            {
+                content: {
+                    kind: "complete",
+                    parts: [{ id: "1", kind: "thinking", text: "Inspecting first." }],
+                },
+                role: "assistant",
+            },
+            {
+                content: {
+                    kind: "complete",
+                    parts: [
+                        {
+                            callId: "provider-call-1",
+                            id: "1",
+                            input: '{"command":"first"}',
+                            isError: false,
+                            kind: "tool",
+                            name: "bash",
+                            phase: "started",
+                        },
+                    ],
+                },
+                role: "assistant",
+                stopReason: "toolUse",
+            },
+            {
+                content: {
+                    kind: "complete",
+                    parts: [
+                        {
+                            callId: "provider-call-1",
+                            id: "1",
+                            isError: false,
+                            kind: "tool",
+                            name: "bash",
+                            output: "first output",
+                            phase: "succeeded",
+                        },
+                    ],
+                },
+                role: "tool",
+            },
+            {
+                content: {
+                    kind: "complete",
+                    parts: [{ id: "1", kind: "thinking", text: "Inspecting again." }],
+                },
+                role: "assistant",
+            },
+            {
+                content: {
+                    kind: "complete",
+                    parts: [
+                        {
+                            callId: "provider-call-2",
+                            id: "1",
+                            input: '{"command":"second"}',
+                            isError: false,
+                            kind: "tool",
+                            name: "bash",
+                            phase: "started",
+                        },
+                    ],
+                },
+                role: "assistant",
+                stopReason: "toolUse",
+            },
+            {
+                content: {
+                    kind: "complete",
+                    parts: [
+                        {
+                            callId: "provider-call-2",
+                            id: "1",
+                            isError: false,
+                            kind: "tool",
+                            name: "bash",
+                            output: "second output",
+                            phase: "succeeded",
+                        },
+                    ],
+                },
+                role: "tool",
+            },
+            {
+                content: {
+                    kind: "complete",
+                    parts: [{ id: "1", kind: "text", text: "Finished." }],
+                },
+                role: "assistant",
+                stopReason: "stop",
+            },
+        ]);
+    });
+
     test("projects history into bounded local media and sanitized diagnostics", async () => {
         const harness = createHarness({
             "chat.history": {

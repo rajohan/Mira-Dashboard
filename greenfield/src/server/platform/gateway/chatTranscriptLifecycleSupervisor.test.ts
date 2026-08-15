@@ -10,6 +10,50 @@ async function flush(): Promise<void> {
 }
 
 describe("chat transcript lifecycle supervisor", () => {
+    test("does not treat ordinary session activity as a transcript boundary", async () => {
+        const boundaries: number[] = [];
+        const lifecycle = createChatTranscriptLifecycleCoordinator({
+            beginTranscriptControl: async () => {},
+            failTranscriptControl: async () => {},
+            listReconcilingTranscripts: () => [],
+            markTranscriptTransportBoundary: async (occurredAtMs) => {
+                boundaries.push(occurredAtMs ?? -1);
+                return [];
+            },
+            observeTranscriptLifecycleEvent: async () => [],
+            observeTranscriptSnapshot: async () => [],
+            readTranscriptState: (sessionKey) => ({
+                currentGeneration: 1,
+                sessionKey,
+                status: "ready",
+            }),
+            reconcileTranscript: async () => [],
+            settleUnchangedTranscriptControl: async () => {},
+        });
+        let listener: PersistentGatewayListener | undefined;
+        const supervisor = createChatTranscriptLifecycleSupervisor({
+            lifecycle,
+            nowMs: () => 1000,
+            transport: {
+                subscribe(next) {
+                    listener = next;
+                    return () => {};
+                },
+            },
+        });
+        await supervisor.ready;
+
+        listener!.onEvent?.({
+            connectionGeneration: 1,
+            frame: { event: "sessions.changed", type: "event" },
+            receivedAtMs: 1100,
+        });
+        await flush();
+
+        expect(boundaries).toEqual([1000]);
+        await supervisor.stop();
+    });
+
     test("coalesces lossy boundaries while preserving exact lifecycle events", async () => {
         const boundaries: number[] = [];
         const lifecycleEvents: string[] = [];

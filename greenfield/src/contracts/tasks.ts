@@ -10,6 +10,7 @@ import {
     type TaskProgressUpdate,
     type TaskSummary,
     canonicalizeTaskStrings,
+    freezeTaskStrings,
     taskAssigneeIdSchema,
     taskAssigneeIds,
     taskAutomationProfileInputSchema,
@@ -18,6 +19,7 @@ import {
     taskIdSchema,
     taskLabelArraySchema,
     taskLabelInputSchema,
+    taskLabelSchema,
     taskPriorities,
     taskPrioritySchema,
     taskProgressMarkdownSchema,
@@ -26,6 +28,7 @@ import {
     taskStatuses,
     taskStatusSchema,
     taskSummarySchema,
+    taskStringsAreSorted,
     taskTextIsTrimmed,
     taskTitleSchema,
     taskVersionSchema,
@@ -42,6 +45,9 @@ export const taskProgressPageDefault = 20;
 
 /** Hard progress-row budget for one list response. */
 export const taskProgressPageMaximum = 50;
+
+/** Hard budget for the reusable task-label suggestion catalog. */
+export const taskLabelSuggestionMaximum = 200;
 
 const taskTimestampSchema = timestampMillisecondsSchema("Task timestamp is invalid");
 const taskPageLimitSchema = v.pipe(
@@ -167,6 +173,26 @@ export const listTasksResultSchema = v.pipe(
     listTasksResultObjectSchema,
     v.check(taskPageCursorIsConsistent, "Task page cursor is inconsistent")
 );
+
+/** Empty authenticated request for the persisted task-label catalog. */
+export const listTaskLabelsInputSchema = v.strictObject({});
+
+const taskLabelSuggestionListSchema = v.pipe(
+    v.array(taskLabelSchema, "Task label suggestions are invalid"),
+    v.maxLength(
+        taskLabelSuggestionMaximum,
+        "Task label suggestions are outside their budget"
+    ),
+    v.check(hasUniqueArrayItems<string>, "Task label suggestions must be unique"),
+    v.check(taskStringsAreSorted, "Task label suggestions must use canonical order"),
+    v.transform(freezeTaskStrings)
+);
+
+/** Bounded canonical catalog of distinct labels persisted across all tasks. */
+export const listTaskLabelsResultSchema = v.strictObject({
+    labels: taskLabelSuggestionListSchema,
+    truncated: v.boolean("Task label suggestion truncation state is invalid"),
+});
 
 /** Exact task lookup request. */
 export const getTaskInputSchema = v.strictObject({ id: taskIdSchema });
@@ -377,6 +403,19 @@ export const taskProcedureContracts = [
     {
         access: taskReadAccess,
         domain: "tasks",
+        errors: ["FORBIDDEN", "UNAUTHORIZED"],
+        input: listTaskLabelsInputSchema,
+        inputSchemaId: "tasks.listLabels.input",
+        kind: "query",
+        name: "tasks.listLabels",
+        output: listTaskLabelsResultSchema,
+        outputSchemaId: "tasks.listLabels.output",
+        summary: "Lists a bounded canonical catalog of distinct persisted task labels.",
+        transport: taskQueryTransport,
+    },
+    {
+        access: taskReadAccess,
+        domain: "tasks",
         errors: ["FORBIDDEN", "NOT_FOUND", "UNAUTHORIZED"],
         input: getTaskInputSchema,
         inputSchemaId: "tasks.get.input",
@@ -518,6 +557,8 @@ export type DeleteTaskProgressResult = v.InferOutput<
 >;
 export type DeleteTaskResult = v.InferOutput<typeof taskDeletionResultSchema>;
 export type GetTaskInput = v.InferOutput<typeof getTaskInputSchema>;
+export type ListTaskLabelsInput = v.InferOutput<typeof listTaskLabelsInputSchema>;
+export type ListTaskLabelsResult = v.InferOutput<typeof listTaskLabelsResultSchema>;
 export type ListTaskProgressInput = v.InferOutput<typeof listTaskProgressInputSchema>;
 export type ListTaskProgressResult = v.InferOutput<typeof listTaskProgressResultSchema>;
 export type ListTasksInput = v.InferOutput<typeof listTasksInputSchema>;

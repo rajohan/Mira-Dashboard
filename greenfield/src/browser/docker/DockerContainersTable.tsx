@@ -12,11 +12,13 @@ import {
 import { useState } from "react";
 
 import type { DockerContainer } from "../../contracts/docker.ts";
+import { cn } from "../lib/classNames.ts";
 import { formatByteCount, formatPercent } from "../lib/formatMeasurements.ts";
+import { ActionLink } from "../ui/ActionLink.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
-import { buttonClassNames } from "../ui/buttonStyles.ts";
 import { Card } from "../ui/Card.tsx";
+import { dashboardDataTableClassNames } from "../ui/dataTableStyles.ts";
 import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { SearchInput } from "../ui/SearchInput.tsx";
@@ -54,15 +56,16 @@ function SortHeader({ field, label, onSort, sort }: SortHeaderProps) {
             className="text-primary-300 border-primary-700 bg-primary-950 border-b px-3 py-2 text-left text-xs font-semibold tracking-wide uppercase"
             scope="col"
         >
-            <button
+            <Button
                 aria-label={"Sort by " + label + " " + nextDirection}
-                className="hover:text-primary-50 focus-visible:ring-accent-300 inline-flex items-center gap-1 rounded-sm outline-none focus-visible:ring-2"
+                className="hover:text-primary-50 focus-visible:ring-accent-300 inline-flex items-center gap-1 rounded-sm"
                 onClick={() => onSort(field)}
                 type="button"
+                variant="unstyled"
             >
                 {label}
                 <Icon icon={SortIcon} size="sm" tone="inherit" />
-            </button>
+            </Button>
         </th>
     );
 }
@@ -93,7 +96,7 @@ function containerCanRestart(container: DockerContainer): boolean {
 
 function TableLabel({ children }: { readonly children: string }) {
     return (
-        <span aria-hidden="true" className="dashboard-data-table-label text-primary-400">
+        <span aria-hidden="true" className={dashboardDataTableClassNames.label}>
             {children}
         </span>
     );
@@ -154,16 +157,22 @@ export function DockerContainersTable({
                     </Text>
                 </div>
             ) : (
-                <div className="dashboard-data-table-query-container w-full max-w-full min-w-0 p-5">
+                <div className={cn(dashboardDataTableClassNames.queryContainer, "p-5")}>
                     <section
                         aria-label="Docker containers"
-                        className="dashboard-data-table-container border-primary-700 w-full max-w-full min-w-0 overflow-x-auto overscroll-x-contain rounded-lg border"
+                        className={cn(
+                            dashboardDataTableClassNames.scrollContainer,
+                            "overflow-x-auto overscroll-x-contain"
+                        )}
                     >
                         <table
                             aria-label="Docker containers"
-                            className="dashboard-data-table w-full min-w-320 border-separate border-spacing-0"
+                            className={cn(
+                                dashboardDataTableClassNames.table,
+                                "min-w-320"
+                            )}
                         >
-                            <thead className="dashboard-data-table-head bg-primary-950 sticky top-0 z-20 shadow-sm">
+                            <thead className={dashboardDataTableClassNames.head}>
                                 <tr>
                                     <SortHeader
                                         field="name"
@@ -215,15 +224,19 @@ export function DockerContainersTable({
                                     </th>
                                 </tr>
                             </thead>
-                            <tbody className="dashboard-data-table-body">
+                            <tbody className={dashboardDataTableClassNames.body}>
                                 {visibleContainers.map((container) => (
                                     <tr
-                                        className="dashboard-data-table-row border-primary-700 border-b text-sm"
+                                        className={dashboardDataTableClassNames.row}
                                         key={container.id}
                                     >
-                                        <td className="dashboard-data-table-cell min-w-0 p-3">
+                                        <td className={dashboardDataTableClassNames.cell}>
                                             <TableLabel>Container</TableLabel>
-                                            <div className="dashboard-data-table-value min-w-0">
+                                            <div
+                                                className={
+                                                    dashboardDataTableClassNames.value
+                                                }
+                                            >
                                                 <div className="text-primary-50 font-medium wrap-anywhere">
                                                     {container.name}
                                                 </div>
@@ -245,9 +258,13 @@ export function DockerContainersTable({
                                                 </code>
                                             </div>
                                         </td>
-                                        <td className="dashboard-data-table-cell min-w-0 p-3">
+                                        <td className={dashboardDataTableClassNames.cell}>
                                             <TableLabel>State</TableLabel>
-                                            <span className="dashboard-data-table-value">
+                                            <span
+                                                className={
+                                                    dashboardDataTableClassNames.value
+                                                }
+                                            >
                                                 <Badge
                                                     variant={dockerContainerStateVariant(
                                                         container.state
@@ -260,9 +277,13 @@ export function DockerContainersTable({
                                                 </span>
                                             </span>
                                         </td>
-                                        <td className="dashboard-data-table-cell min-w-0 p-3">
+                                        <td className={dashboardDataTableClassNames.cell}>
                                             <TableLabel>Health</TableLabel>
-                                            <span className="dashboard-data-table-value">
+                                            <span
+                                                className={
+                                                    dashboardDataTableClassNames.value
+                                                }
+                                            >
                                                 <Badge
                                                     variant={dockerContainerHealthVariant(
                                                         container.health
@@ -274,9 +295,14 @@ export function DockerContainersTable({
                                                 </Badge>
                                             </span>
                                         </td>
-                                        <td className="dashboard-data-table-cell min-w-0 p-3">
+                                        <td className={dashboardDataTableClassNames.cell}>
                                             <TableLabel>CPU</TableLabel>
-                                            <span className="dashboard-data-table-value text-primary-200 tabular-nums">
+                                            <span
+                                                className={cn(
+                                                    dashboardDataTableClassNames.value,
+                                                    "text-primary-200 tabular-nums"
+                                                )}
+                                            >
                                                 {container.stats === undefined
                                                     ? "Unavailable"
                                                     : formatPercent(
@@ -284,15 +310,25 @@ export function DockerContainersTable({
                                                       )}
                                             </span>
                                         </td>
-                                        <td className="dashboard-data-table-cell min-w-0 p-3">
+                                        <td className={dashboardDataTableClassNames.cell}>
                                             <TableLabel>Memory</TableLabel>
-                                            <span className="dashboard-data-table-value text-primary-200 tabular-nums">
+                                            <span
+                                                className={cn(
+                                                    dashboardDataTableClassNames.value,
+                                                    "text-primary-200 tabular-nums"
+                                                )}
+                                            >
                                                 {formatDockerMemory(container)}
                                             </span>
                                         </td>
-                                        <td className="dashboard-data-table-cell min-w-0 p-3">
+                                        <td className={dashboardDataTableClassNames.cell}>
                                             <TableLabel>I/O and processes</TableLabel>
-                                            <span className="dashboard-data-table-value text-primary-300 block text-xs tabular-nums">
+                                            <span
+                                                className={cn(
+                                                    dashboardDataTableClassNames.value,
+                                                    "text-primary-300 block text-xs tabular-nums"
+                                                )}
+                                            >
                                                 {container.stats === undefined ? (
                                                     "Unavailable"
                                                 ) : (
@@ -329,9 +365,14 @@ export function DockerContainersTable({
                                                 )}
                                             </span>
                                         </td>
-                                        <td className="dashboard-data-table-cell min-w-0 p-3">
+                                        <td className={dashboardDataTableClassNames.cell}>
                                             <TableLabel>Ports</TableLabel>
-                                            <div className="dashboard-data-table-value text-primary-300 text-xs">
+                                            <div
+                                                className={cn(
+                                                    dashboardDataTableClassNames.value,
+                                                    "text-primary-300 text-xs"
+                                                )}
+                                            >
                                                 {container.ports.length === 0 ? (
                                                     "None published"
                                                 ) : (
@@ -350,9 +391,14 @@ export function DockerContainersTable({
                                                 )}
                                             </div>
                                         </td>
-                                        <td className="dashboard-data-table-cell min-w-0 p-3">
+                                        <td className={dashboardDataTableClassNames.cell}>
                                             <TableLabel>Actions</TableLabel>
-                                            <div className="dashboard-data-table-value flex min-w-52 flex-wrap gap-2">
+                                            <div
+                                                className={cn(
+                                                    dashboardDataTableClassNames.value,
+                                                    "flex min-w-52 flex-wrap gap-2"
+                                                )}
+                                            >
                                                 <Button
                                                     aria-label={
                                                         "Show details for " +
@@ -381,28 +427,25 @@ export function DockerContainersTable({
                                                 </Button>
                                                 {!controlsDisabled &&
                                                 container.state === "running" ? (
-                                                    <a
+                                                    <ActionLink
                                                         aria-label={
                                                             "Open console for " +
                                                             container.name
                                                         }
-                                                        className={buttonClassNames({
-                                                            size: "sm",
-                                                            variant: "secondary",
-                                                        })}
-                                                        href={
-                                                            "/terminal?dockerContainerId=" +
-                                                            encodeURIComponent(
-                                                                container.id
-                                                            )
-                                                        }
+                                                        search={{
+                                                            dockerContainerId:
+                                                                container.id,
+                                                        }}
+                                                        size="sm"
+                                                        to="/terminal"
+                                                        variant="secondary"
                                                     >
                                                         <Icon
                                                             icon={SquareTerminal}
                                                             size="sm"
                                                         />
                                                         Console
-                                                    </a>
+                                                    </ActionLink>
                                                 ) : null}
                                                 <Button
                                                     aria-label={"Start " + container.name}

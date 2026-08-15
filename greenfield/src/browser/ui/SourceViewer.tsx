@@ -2,6 +2,12 @@ import { type ReactElement, useState } from "react";
 
 import { Badge } from "./Badge.tsx";
 import { CopyTextButton } from "./CopyTextButton.tsx";
+import {
+    sourceViewerLineClassName,
+    sourceViewerLinesClassName,
+    sourceViewerNumberedLinesClassName,
+    sourceViewerSurfaceClassName,
+} from "./sourceViewerStyles.ts";
 import { Switch } from "./Switch.tsx";
 import { SyntaxHighlightedSource } from "./SyntaxHighlightedSource.tsx";
 import { supportsSyntaxHighlightedSourceLanguage } from "./syntaxHighlightedSourceLanguage.ts";
@@ -54,11 +60,14 @@ function PlainSource({ content, language, numbered }: PlainSourceProps) {
     const lines = content.split("\n");
     return (
         <code
-            className="source-viewer-lines source-viewer-lines-numbered"
+            className={`${sourceViewerLinesClassName} ${sourceViewerNumberedLinesClassName}`}
             data-language={language}
         >
             {lines.map((line, index) => (
-                <span className="source-viewer-line" key={`source-line-${index + 1}`}>
+                <span
+                    className={sourceViewerLineClassName(true)}
+                    key={`source-line-${index + 1}`}
+                >
                     {line}
                     {index < lines.length - 1 ? "\n" : null}
                 </span>
@@ -97,11 +106,7 @@ function SourceSurfaceFrame({
             tabIndex={0}
         >
             <pre
-                className={`source-viewer-source min-h-full min-w-full bg-transparent py-4 font-mono text-sm leading-6 tab-4 ${
-                    wrapLongLines
-                        ? "source-viewer-source-wrapped"
-                        : "source-viewer-source-unwrapped"
-                }`}
+                className={sourceViewerSurfaceClassName(wrapLongLines)}
                 data-testid="source-viewer-source"
             >
                 {source}

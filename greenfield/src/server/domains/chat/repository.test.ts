@@ -17,6 +17,7 @@ import {
     chatSendInputMaximumBytes,
 } from "../../../contracts/chatModel.ts";
 import { utf8ByteLength } from "../../../shared/encoding.ts";
+import { chatExternalRuntimeSnapshots } from "../../database/schema/chatExternalRuntimeSnapshots.ts";
 import { realtimeEvents } from "../../database/schema/realtime.ts";
 import { testImmediateDatabaseWriteAdmission } from "../../test/support/databaseWriteAdmission.ts";
 import { openFreshMigratedDatabase } from "../../test/support/freshDatabase.ts";
@@ -26,7 +27,11 @@ import {
     ChatProviderSequenceGapError,
     ChatTranscriptUnavailableError,
 } from "./errors.ts";
-import { chatTerminalRetentionMilliseconds, createChatRepository } from "./repository.ts";
+import {
+    chatTerminalRetentionMilliseconds,
+    createChatRepository,
+    type ChatExternalRuntimeSnapshotWrite,
+} from "./repository.ts";
 import { createChatTranscriptLifecycleCoordinator } from "./transcriptLifecycle.ts";
 
 const actor = {
@@ -43,6 +48,71 @@ function input(overrides: Partial<ChatSendInput> = {}): ChatSendInput {
         message: "hello",
         sessionKey: "agent:main:main",
         ...overrides,
+    };
+}
+
+type ExternalRuntimeSnapshotEntry =
+    ChatExternalRuntimeSnapshotWrite["payload"]["entries"][number];
+
+function externalRuntimeSnapshotEntry(
+    overrides: Readonly<{
+        lastProviderSequence?: number;
+        observationEpoch?: number;
+        observedAtMs?: number;
+        providerRunId?: string;
+        sessionKey?: string;
+        text?: string;
+        updatedAtMs?: number;
+    }> = {}
+): ExternalRuntimeSnapshotEntry {
+    const text = overrides.text ?? "Provider-origin activity";
+    return {
+        lastProviderSequence: overrides.lastProviderSequence ?? 12,
+        observationKind: "live",
+        run: {
+            continuity: "complete",
+            hasUnprojectedActivity: false,
+            lifecycle: "active",
+            observationEpoch: overrides.observationEpoch ?? 7,
+            observedAtMs: overrides.observedAtMs ?? 1000,
+            parts: [
+                {
+                    kind: "assistant",
+                    occurredAtMs: overrides.updatedAtMs ?? 1100,
+                    sequence: 1,
+                    text,
+                },
+            ],
+            projectionTruncated: false,
+            providerRunId: overrides.providerRunId ?? "provider-external",
+            sessionKey: overrides.sessionKey ?? "agent:main:main",
+            source: "provider-runtime",
+            text,
+            updatedAtMs: overrides.updatedAtMs ?? 1100,
+        },
+    };
+}
+
+function externalRuntimeSnapshotWrite(
+    overrides: Readonly<{
+        observationEpoch?: number;
+        payload?: ChatExternalRuntimeSnapshotWrite["payload"];
+        sessionKey?: string;
+        transcriptGeneration?: number;
+        updatedAtMs?: number;
+    }> = {}
+): ChatExternalRuntimeSnapshotWrite {
+    const observationEpoch = overrides.observationEpoch ?? 7;
+    const sessionKey = overrides.sessionKey ?? "agent:main:main";
+    return {
+        observationEpoch,
+        payload: overrides.payload ?? {
+            entries: [externalRuntimeSnapshotEntry({ observationEpoch, sessionKey })],
+            truncated: false,
+        },
+        sessionKey,
+        transcriptGeneration: overrides.transcriptGeneration ?? 1,
+        updatedAtMs: overrides.updatedAtMs ?? 1200,
     };
 }
 
@@ -474,6 +544,390 @@ describe("durable chat repository", () => {
                 coalesced,
             ]);
             expect(duplicateAppend.insertedCount).toBe(0);
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("persists only current-generation external snapshots across repository recreation", async () => {
+        const database = await openFreshMigratedDatabase();
+        const beforeRestart = createChatRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission,
+            "main",
+            () => 1200
+        );
+        const snapshot = externalRuntimeSnapshotWrite();
+        try {
+            expect(
+                await beforeRestart.replaceExternalRuntimeSnapshot(snapshot)
+            ).toBeTrue();
+            expect(
+                await beforeRestart.replaceExternalRuntimeSnapshot({
+                    ...snapshot,
+                    transcriptGeneration: 2,
+                    updatedAtMs: 1300,
+                })
+            ).toBeFalse();
+
+            const afterRestart = createChatRepository(
+                database.orm,
+                testImmediateDatabaseWriteAdmission,
+                "main",
+                () => 1400
+            );
+            expect(afterRestart.listExternalRuntimeSnapshots()).toEqual([
+                {
+                    observationEpoch: snapshot.observationEpoch,
+                    payload: snapshot.payload,
+                    sessionKey: snapshot.sessionKey,
+                    transcriptGeneration: snapshot.transcriptGeneration,
+                    updatedAtMs: snapshot.updatedAtMs,
+                },
+            ]);
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("atomically marks only changed external snapshot puts and tombstones", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createChatRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission,
+            "main",
+            () => 1200
+        );
+        const snapshot = externalRuntimeSnapshotWrite();
+        const runtimeMarkerCount = () =>
+            database.orm
+                .select()
+                .from(realtimeEvents)
+                .where(eq(realtimeEvents.topic, "chat.runtime"))
+                .all().length;
+        try {
+            const beforePut = runtimeMarkerCount();
+            expect(await repository.replaceExternalRuntimeSnapshot(snapshot)).toBeTrue();
+            expect(repository.listExternalRuntimeSnapshots()).toHaveLength(1);
+            expect(runtimeMarkerCount()).toBe(beforePut + 1);
+
+            expect(await repository.replaceExternalRuntimeSnapshot(snapshot)).toBeFalse();
+            expect(runtimeMarkerCount()).toBe(beforePut + 1);
+
+            const tombstone = {
+                ...snapshot,
+                observationEpoch: snapshot.observationEpoch + 1,
+                payload: { entries: [], truncated: false },
+                updatedAtMs: snapshot.updatedAtMs + 1,
+            };
+            expect(await repository.replaceExternalRuntimeSnapshot(tombstone)).toBeTrue();
+            expect(repository.listExternalRuntimeSnapshots()).toEqual([]);
+            expect(repository.readExternalRuntimeObservationEpoch()).toBe(
+                tombstone.observationEpoch
+            );
+            expect(
+                database.orm.select().from(chatExternalRuntimeSnapshots).all()
+            ).toHaveLength(1);
+            expect(runtimeMarkerCount()).toBe(beforePut + 2);
+
+            expect(
+                await repository.replaceExternalRuntimeSnapshot(tombstone)
+            ).toBeFalse();
+            expect(runtimeMarkerCount()).toBe(beforePut + 2);
+
+            expect(
+                await repository.replaceExternalRuntimeSnapshot({
+                    ...snapshot,
+                    updatedAtMs: tombstone.updatedAtMs + 10_000,
+                })
+            ).toBeFalse();
+            expect(repository.listExternalRuntimeSnapshots()).toEqual([]);
+            expect(runtimeMarkerCount()).toBe(beforePut + 2);
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("allows a newer observation to remove the newest of multiple external runs", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createChatRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission,
+            "main",
+            () => 2000
+        );
+        const sessionKey = "agent:main:main";
+        try {
+            expect(
+                await repository.replaceExternalRuntimeSnapshot(
+                    externalRuntimeSnapshotWrite({
+                        observationEpoch: 10,
+                        payload: {
+                            entries: [
+                                externalRuntimeSnapshotEntry({
+                                    observationEpoch: 10,
+                                    providerRunId: "provider-older",
+                                    sessionKey,
+                                    updatedAtMs: 1100,
+                                }),
+                                externalRuntimeSnapshotEntry({
+                                    observationEpoch: 10,
+                                    observedAtMs: 1200,
+                                    providerRunId: "provider-newer",
+                                    sessionKey,
+                                    updatedAtMs: 1900,
+                                }),
+                            ],
+                            truncated: false,
+                        },
+                        sessionKey,
+                        updatedAtMs: 1900,
+                    })
+                )
+            ).toBeTrue();
+            expect(
+                await repository.replaceExternalRuntimeSnapshot(
+                    externalRuntimeSnapshotWrite({
+                        observationEpoch: 11,
+                        payload: {
+                            entries: [
+                                externalRuntimeSnapshotEntry({
+                                    observationEpoch: 10,
+                                    providerRunId: "provider-older",
+                                    sessionKey,
+                                    updatedAtMs: 1100,
+                                }),
+                            ],
+                            truncated: false,
+                        },
+                        sessionKey,
+                        updatedAtMs: 1100,
+                    })
+                )
+            ).toBeTrue();
+            expect(repository.listExternalRuntimeSnapshots()[0]).toMatchObject({
+                observationEpoch: 11,
+                payload: {
+                    entries: [
+                        {
+                            run: { providerRunId: "provider-older" },
+                        },
+                    ],
+                },
+                updatedAtMs: 1100,
+            });
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("enforces the durable provider-origin run budget across session rows", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createChatRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission,
+            "main",
+            () => 3000
+        );
+        const snapshotForSession = (sessionIndex: number, observationEpoch: number) => {
+            const sessionKey = `agent:main:capacity-${sessionIndex}`;
+            return externalRuntimeSnapshotWrite({
+                observationEpoch,
+                payload: {
+                    entries: Array.from({ length: 8 }, (_, runIndex) =>
+                        externalRuntimeSnapshotEntry({
+                            observationEpoch,
+                            providerRunId: `provider-${sessionIndex}-${runIndex}`,
+                            sessionKey,
+                        })
+                    ),
+                    truncated: false,
+                },
+                sessionKey,
+                updatedAtMs: 2000,
+            });
+        };
+        try {
+            for (let index = 0; index < 4; index += 1) {
+                expect(
+                    await repository.replaceExternalRuntimeSnapshot(
+                        snapshotForSession(index, 20 + index)
+                    )
+                ).toBeTrue();
+            }
+            expect(repository.listExternalRuntimeSnapshots()).toHaveLength(4);
+
+            const overflow = externalRuntimeSnapshotWrite({
+                observationEpoch: 24,
+                payload: {
+                    entries: [
+                        externalRuntimeSnapshotEntry({
+                            observationEpoch: 24,
+                            providerRunId: "provider-overflow",
+                            sessionKey: "agent:main:capacity-overflow",
+                        }),
+                    ],
+                    truncated: false,
+                },
+                sessionKey: "agent:main:capacity-overflow",
+                updatedAtMs: 2000,
+            });
+            expect(
+                await rejectionOf(repository.replaceExternalRuntimeSnapshot(overflow))
+            ).toBeInstanceOf(Error);
+
+            const first = snapshotForSession(0, 25);
+            expect(
+                await repository.replaceExternalRuntimeSnapshot({
+                    ...first,
+                    payload: { entries: [], truncated: false },
+                    updatedAtMs: 1000,
+                })
+            ).toBeTrue();
+            expect(await repository.replaceExternalRuntimeSnapshot(overflow)).toBeTrue();
+            expect(repository.listExternalRuntimeSnapshots()).toHaveLength(4);
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("unions external and local provider watermarks by their greatest sequence", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createChatRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission,
+            "main",
+            () => 1200
+        );
+        const sharedProviderRunId = "provider-shared";
+        try {
+            await repository.admit(input(), actor);
+            await repository.beginDispatch(firstRunId);
+            await repository.acknowledgeDispatch(firstRunId, sharedProviderRunId);
+            await repository.appendEvents(firstRunId, [
+                {
+                    kind: "assistant",
+                    mode: "append",
+                    occurredAtMs: 1100,
+                    providerSequenceEnd: 2,
+                    providerSequenceStart: 1,
+                    text: "local",
+                },
+            ]);
+            expect(
+                await repository.replaceExternalRuntimeSnapshot(
+                    externalRuntimeSnapshotWrite({
+                        payload: {
+                            entries: [
+                                externalRuntimeSnapshotEntry({
+                                    lastProviderSequence: 5,
+                                    providerRunId: sharedProviderRunId,
+                                }),
+                                externalRuntimeSnapshotEntry({
+                                    lastProviderSequence: 9,
+                                    providerRunId: "provider-external",
+                                }),
+                            ],
+                            truncated: false,
+                        },
+                    })
+                )
+            ).toBeTrue();
+
+            expect(repository.listProviderRunWatermarks("agent:main:main")).toEqual([
+                {
+                    lastProviderSequence: 9,
+                    providerRunId: "provider-external",
+                },
+                {
+                    lastProviderSequence: 5,
+                    providerRunId: sharedProviderRunId,
+                },
+            ]);
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("ignores stale external snapshot writes by observation epoch then time", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createChatRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission,
+            "main",
+            () => 1200
+        );
+        const current = externalRuntimeSnapshotWrite();
+        const stalePayload = {
+            entries: [externalRuntimeSnapshotEntry({ text: "stale" })],
+            truncated: false,
+        };
+        try {
+            expect(await repository.replaceExternalRuntimeSnapshot(current)).toBeTrue();
+            const markersAfterCurrent = database.orm
+                .select()
+                .from(realtimeEvents)
+                .where(eq(realtimeEvents.topic, "chat.runtime"))
+                .all().length;
+
+            expect(
+                await repository.replaceExternalRuntimeSnapshot({
+                    ...current,
+                    observationEpoch: current.observationEpoch - 1,
+                    payload: stalePayload,
+                    updatedAtMs: current.updatedAtMs + 100,
+                })
+            ).toBeFalse();
+            expect(
+                await repository.replaceExternalRuntimeSnapshot({
+                    ...current,
+                    payload: stalePayload,
+                    updatedAtMs: current.updatedAtMs - 1,
+                })
+            ).toBeFalse();
+            expect(repository.listExternalRuntimeSnapshots()[0]?.payload).toEqual(
+                current.payload
+            );
+            expect(
+                database.orm
+                    .select()
+                    .from(realtimeEvents)
+                    .where(eq(realtimeEvents.topic, "chat.runtime"))
+                    .all()
+            ).toHaveLength(markersAfterCurrent);
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("retires an external snapshot when its transcript generation advances", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createChatRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission,
+            "main",
+            () => 1200
+        );
+        const snapshot = externalRuntimeSnapshotWrite();
+        try {
+            expect(await repository.replaceExternalRuntimeSnapshot(snapshot)).toBeTrue();
+            expect(repository.listExternalRuntimeSnapshots()).toHaveLength(1);
+
+            const changes = await repository.observeTranscriptLifecycleEvent({
+                occurredAtMs: 1300,
+                reason: "reset",
+                sessionId: "provider-session-after-reset",
+                sessionKey: snapshot.sessionKey,
+                updatedAtMs: 1300,
+            });
+            expect(changes).toHaveLength(1);
+            expect(repository.readTranscriptState(snapshot.sessionKey)).toMatchObject({
+                currentGeneration: 2,
+                status: "ready",
+            });
+            expect(repository.listExternalRuntimeSnapshots()).toEqual([]);
+            expect(repository.listProviderRunWatermarks(snapshot.sessionKey)).toEqual([]);
+            expect(await repository.replaceExternalRuntimeSnapshot(snapshot)).toBeFalse();
         } finally {
             database.sqlite.close(true);
         }

@@ -1,6 +1,13 @@
 import { describe, expect, jest, test } from "bun:test";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+    createMemoryHistory,
+    createRootRoute,
+    createRoute,
+    createRouter,
+    RouterProvider,
+} from "@tanstack/react-router";
 import { act } from "react";
 
 import type {
@@ -10,7 +17,9 @@ import type {
     DockerRequestOperationResult,
 } from "../../contracts/docker.ts";
 import type { JobRunSummary } from "../../contracts/jobModel.ts";
+import { parseJobsRouteSearch } from "../jobs/jobRouteSearch.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
+import { parseTerminalRouteSearch } from "../terminal/terminalRouteSearch.ts";
 import type { DockerClient } from "./dockerClient.ts";
 import { dockerOverviewQueryKey } from "./dockerQueries.ts";
 import { DockerRoute } from "./DockerRoute.tsx";
@@ -341,9 +350,31 @@ function renderDocker(client: DockerClient) {
             queries: { refetchOnWindowFocus: false, retry: false },
         },
     });
+    const rootRoute = createRootRoute();
+    const dockerRoute = createRoute({
+        component: () => <DockerRoute client={client} />,
+        getParentRoute: () => rootRoute,
+        path: "/docker",
+    });
+    const jobsRoute = createRoute({
+        component: () => null,
+        getParentRoute: () => rootRoute,
+        path: "/jobs",
+        validateSearch: parseJobsRouteSearch,
+    });
+    const terminalRoute = createRoute({
+        component: () => null,
+        getParentRoute: () => rootRoute,
+        path: "/terminal",
+        validateSearch: parseTerminalRouteSearch,
+    });
+    const router = createRouter({
+        history: createMemoryHistory({ initialEntries: ["/docker"] }),
+        routeTree: rootRoute.addChildren([dockerRoute, jobsRoute, terminalRoute]),
+    });
     const view = render(
         <QueryClientProvider client={queryClient}>
-            <DockerRoute client={client} />
+            <RouterProvider router={router} />
         </QueryClientProvider>
     );
     return {
@@ -416,7 +447,12 @@ describe("DockerRoute", () => {
             );
             expect(
                 screen.getByRole("link", { name: "Open console for alpha-api" })
-            ).toHaveAttribute("href", `/terminal?dockerContainerId=${firstContainerId}`);
+            ).toHaveAttribute(
+                "href",
+                `/terminal?dockerContainerId=${encodeURIComponent(
+                    JSON.stringify(firstContainerId)
+                )}`
+            );
             expect(
                 screen.queryByRole("link", { name: "Open console for zulu-worker" })
             ).toBeNull();

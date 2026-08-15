@@ -1,8 +1,7 @@
-import { afterAll, afterEach, beforeAll, beforeEach, expect } from "bun:test";
+import { afterEach, expect } from "bun:test";
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { PropertySymbol } from "happy-dom";
-import { act } from "react";
 
 interface HappyDomAsyncTaskOwner {
     readonly abort: () => Promise<void>;
@@ -74,30 +73,26 @@ const trackedBrowserSetTimeout = (
 Reflect.set(globalThis, "setTimeout", trackedBrowserSetTimeout);
 Reflect.set(happyDomTimerOwner, "setTimeout", trackedBrowserSetTimeout);
 
-const [matcherModule, animationMocks, testingLibrary] = await Promise.all([
+const [matcherModule, testingLibrary] = await Promise.all([
     import("@testing-library/jest-dom/matchers"),
-    import("jsdom-testing-mocks"),
     import("@testing-library/react"),
 ]);
 const { default: _defaultMatchers, ...matchers } = matcherModule;
 expect.extend(matchers);
 
-const { configMocks, mockAnimationsApi } = animationMocks;
-
-function runReactAct(trigger: () => void): void {
-    act(() => {
-        trigger();
-    });
-}
-
-configMocks({
-    act: runReactAct,
-    afterAll,
-    afterEach,
-    beforeAll,
-    beforeEach,
+// HappyDOM does not implement CSS animation accounting. Headless UI only needs this query
+// boundary, so keep a timer-free shim for the complete shared worker lifetime.
+const noActiveAnimations = (): Animation[] => [];
+Object.defineProperty(Element.prototype, "getAnimations", {
+    configurable: true,
+    value: noActiveAnimations,
+    writable: true,
 });
-mockAnimationsApi();
+Object.defineProperty(Document.prototype, "getAnimations", {
+    configurable: true,
+    value: noActiveAnimations,
+    writable: true,
+});
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 

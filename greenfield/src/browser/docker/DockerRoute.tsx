@@ -31,10 +31,10 @@ import {
 import { useAuthenticatedMutationBoundary } from "../auth/useAuthenticatedMutationBoundary.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { formatByteCount } from "../lib/formatMeasurements.ts";
+import { ActionLink } from "../ui/ActionLink.tsx";
 import { Alert } from "../ui/Alert.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
-import { buttonClassNames } from "../ui/buttonStyles.ts";
 import { Card } from "../ui/Card.tsx";
 import { ConfirmModal } from "../ui/ConfirmModal.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
@@ -299,13 +299,15 @@ function DockerQueuedResult({ onDismiss, result }: DockerQueuedResultProps) {
                     </code>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                    <a
-                        className={buttonClassNames({ size: "sm" })}
-                        href={"/jobs?runId=" + encodeURIComponent(result.jobRunId)}
+                    <ActionLink
+                        search={{ runId: result.jobRunId }}
+                        size="sm"
+                        to="/jobs"
+                        variant="primary"
                     >
                         <Icon icon={ExternalLink} size="sm" />
                         View job
-                    </a>
+                    </ActionLink>
                     <Button onClick={onDismiss} size="sm" variant="ghost">
                         <Icon icon={X} size="sm" />
                         Dismiss
@@ -530,13 +532,10 @@ export function DockerRoute({ client }: DockerRouteProps) {
             <PageHeader
                 actions={
                     <div className="flex flex-wrap gap-2">
-                        <a
-                            className={buttonClassNames({ variant: "secondary" })}
-                            href="/terminal"
-                        >
+                        <ActionLink to="/terminal" variant="secondary">
                             <Icon icon={SquareTerminal} size="sm" />
                             Open terminal
-                        </a>
+                        </ActionLink>
                         <Button
                             busy={refreshBusy}
                             busyLabel="Queueing refresh…"
@@ -594,16 +593,14 @@ export function DockerRoute({ client }: DockerRouteProps) {
                             <Card>
                                 <div className="flex flex-wrap items-center justify-between gap-3">
                                     <Text>Docker snapshot refresh queued.</Text>
-                                    <a
-                                        className={buttonClassNames({ variant: "ghost" })}
-                                        href={
-                                            "/jobs?runId=" +
-                                            encodeURIComponent(refreshRunId)
-                                        }
+                                    <ActionLink
+                                        search={{ runId: refreshRunId }}
+                                        to="/jobs"
+                                        variant="ghost"
                                     >
                                         <Icon icon={ExternalLink} size="sm" />
                                         View refresh job
-                                    </a>
+                                    </ActionLink>
                                 </div>
                             </Card>
                         )}

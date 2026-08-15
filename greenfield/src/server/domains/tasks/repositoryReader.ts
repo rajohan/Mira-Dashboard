@@ -6,6 +6,7 @@ import {
     desc,
     eq,
     exists,
+    getTableColumns,
     inArray,
     lt,
     ne,
@@ -14,19 +15,27 @@ import {
     sql,
     type SQL,
 } from "drizzle-orm";
+import * as v from "valibot";
 
-import { taskMaximumLabels } from "../../../contracts/taskModel.ts";
 import {
+    securityLabelSchema,
+    securityUsernameSchema,
+} from "../../../contracts/security.ts";
+import { taskLabelSchema, taskMaximumLabels } from "../../../contracts/taskModel.ts";
+import {
+    taskLabelSuggestionMaximum,
     taskPageMaximum,
     taskProgressPageMaximum,
     type ListTaskProgressInput,
     type ListTasksInput,
 } from "../../../contracts/tasks.ts";
 import { compareStrings } from "../../../shared/validation.ts";
+import { automationPrincipals } from "../../database/schema/automationPrincipals.ts";
 import { taskAutomationProfiles } from "../../database/schema/taskAutomationProfiles.ts";
 import { taskLabels } from "../../database/schema/taskLabels.ts";
 import { tasks } from "../../database/schema/tasks.ts";
 import { taskUpdates } from "../../database/schema/taskUpdates.ts";
+import { users } from "../../database/schema/users.ts";
 import {
     taskHeartbeatAgentAssignee,
     taskHeartbeatAgentPriorities,
@@ -44,11 +53,37 @@ import type {
     TaskHeartbeatCandidateSnapshot,
     TaskOpenCronLinkRecord,
     TaskPersistenceDatabase,
+    TaskProgressRecord,
     TaskRecord,
     TaskRepositoryReader,
 } from "./repositoryTypes.ts";
 
 const taskHeartbeatCandidateMaximum = 100;
+const taskProgressSelection = {
+    ...getTableColumns(taskUpdates),
+    authorLabel: automationPrincipals.label,
+    authorUsername: users.username,
+};
+
+function parseTaskProgressWithAuthor(
+    row: {
+        readonly authorLabel: string | null;
+        readonly authorUsername: string | null;
+    } & Record<string, unknown>
+): TaskProgressRecord {
+    const { authorLabel, authorUsername, ...progressRow } = row;
+    const progress = parseTaskProgressRecord(progressRow);
+    if (progress.authorKind === "automation") {
+        return {
+            ...progress,
+            authorLabel: v.parse(securityLabelSchema, authorLabel),
+        };
+    }
+    return {
+        ...progress,
+        authorUsername: v.parse(securityUsernameSchema, authorUsername),
+    };
+}
 
 function assertPageLimit(limit: number, maximum: number): void {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > maximum) {
@@ -95,8 +130,17 @@ function taskFilterConditions(
         conditions.push(inArray(tasks.status, [...filters.statuses]));
     }
     if (filters.search !== undefined) {
+        const matchingLabel = database
+            .select({ taskId: taskLabels.taskId })
+            .from(taskLabels)
+            .where(
+                and(
+                    eq(taskLabels.taskId, tasks.id),
+                    sql`instr(lower(${taskLabels.label}), lower(${filters.search})) > 0`
+                )
+            );
         conditions.push(
-            sql`instr(lower(${tasks.title} || char(10) || coalesce(${tasks.bodyMarkdown}, '')), lower(${filters.search})) > 0`
+            sql`instr(lower(${tasks.title} || char(10) || coalesce(${tasks.bodyMarkdown}, '')), lower(${filters.search})) > 0 OR ${exists(matchingLabel)}`
         );
     }
     if (filters.automation !== undefined) {
@@ -201,25 +245,64 @@ export class DrizzleTaskRepositoryReader implements TaskRepositoryReader {
         updateId: string
     ): ReturnType<typeof parseTaskProgressRecord> | undefined {
         const row = this.database
-            .select()
+            .select(taskProgressSelection)
             .from(taskUpdates)
+            .leftJoin(
+                automationPrincipals,
+                and(
+                    eq(taskUpdates.authorKind, "automation"),
+                    eq(taskUpdates.authorId, automationPrincipals.id)
+                )
+            )
+            .leftJoin(
+                users,
+                and(
+                    eq(taskUpdates.authorKind, "user"),
+                    eq(taskUpdates.authorId, users.id)
+                )
+            )
             .where(and(eq(taskUpdates.taskId, taskId), eq(taskUpdates.id, updateId)))
             .get();
-        return row === undefined ? undefined : parseTaskProgressRecord(row);
+        return row === undefined ? undefined : parseTaskProgressWithAuthor(row);
+    }
+
+    public listTaskLabels(): string[] {
+        return this.database
+            .selectDistinct({ label: taskLabels.label })
+            .from(taskLabels)
+            .orderBy(asc(taskLabels.label))
+            .limit(taskLabelSuggestionMaximum + 1)
+            .all()
+            .map(({ label }) => v.parse(taskLabelSchema, label))
+            .toSorted(compareStrings);
     }
 
     public listTaskProgress(input: ListTaskProgressInput) {
         assertPageLimit(input.limit, taskProgressPageMaximum);
         return this.database
-            .select()
+            .select(taskProgressSelection)
             .from(taskUpdates)
+            .leftJoin(
+                automationPrincipals,
+                and(
+                    eq(taskUpdates.authorKind, "automation"),
+                    eq(taskUpdates.authorId, automationPrincipals.id)
+                )
+            )
+            .leftJoin(
+                users,
+                and(
+                    eq(taskUpdates.authorKind, "user"),
+                    eq(taskUpdates.authorId, users.id)
+                )
+            )
             .where(
                 and(eq(taskUpdates.taskId, input.taskId), progressCursorBoundary(input))
             )
             .orderBy(desc(taskUpdates.createdAt), desc(taskUpdates.id))
             .limit(input.limit + 1)
             .all()
-            .map((row) => parseTaskProgressRecord(row));
+            .map((row) => parseTaskProgressWithAuthor(row));
     }
 
     public listOpenTasksByCronJobIds(
@@ -234,6 +317,7 @@ export class DrizzleTaskRepositoryReader implements TaskRepositoryReader {
                 createdAt: tasks.createdAt,
                 cronJobId: taskAutomationProfiles.cronJobId,
                 id: tasks.id,
+                number: tasks.number,
                 priority: tasks.priority,
                 status: tasks.status,
                 title: tasks.title,

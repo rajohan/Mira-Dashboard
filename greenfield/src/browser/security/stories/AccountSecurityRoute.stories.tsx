@@ -85,6 +85,16 @@ const auditEvent = {
         type: "user",
     },
 } as const satisfies SecurityAuditEventSummary;
+const paginatedAuditEvents = Array.from({ length: 100 }, (_, index) => ({
+    ...auditEvent,
+    action: index % 2 === 0 ? "auth.login" : "auth.session.revoke",
+    id: `019fd977-c837-747d-9693-${index.toString(16).padStart(12, "0")}`,
+    metadata:
+        index % 3 === 0
+            ? ({ reason: "invalid_current_password" } as const)
+            : auditEvent.metadata,
+    occurredAtMs: nowMs - index * 1000,
+})) satisfies SecurityAuditEventSummary[];
 const notifications = { notifications: [], readCount: 0, unreadCount: 0 } as const;
 
 function accountSecurityFixtures(
@@ -139,6 +149,32 @@ export const Loading: Story = {
 export const Ready: Story = {
     args: {
         fixtures: accountSecurityFixtures(readySummary),
+        route: "/account-security",
+    },
+};
+
+export const PaginatedAudit: Story = {
+    args: {
+        fixtures: accountSecurityFixtures(readySummary, {
+            queries: {
+                "securityAudit.listEvents": dashboardStoryResolver(async (input) => {
+                    const cursor = (input as { cursor?: unknown }).cursor;
+                    if (cursor === undefined) {
+                        const page = paginatedAuditEvents.slice(0, 50);
+                        const last = page.at(-1);
+                        return {
+                            events: page,
+                            nextCursor:
+                                last === undefined
+                                    ? undefined
+                                    : { id: last.id, occurredAtMs: last.occurredAtMs },
+                        };
+                    }
+                    await new Promise((resolve) => setTimeout(resolve, 1000));
+                    return { events: paginatedAuditEvents.slice(50) };
+                }),
+            },
+        }),
         route: "/account-security",
     },
 };

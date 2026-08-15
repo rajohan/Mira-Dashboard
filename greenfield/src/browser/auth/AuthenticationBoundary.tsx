@@ -4,10 +4,7 @@ import { type ReactNode, useState } from "react";
 
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { dashboardBrowserFailureMessage } from "../api/trpcError.ts";
-import { Button } from "../ui/Button.tsx";
-import { Card } from "../ui/Card.tsx";
-import { Heading } from "../ui/Heading.tsx";
-import { Text } from "../ui/Text.tsx";
+import { PageState } from "../ui/PageState.tsx";
 import { authStatusCacheIdentity, authStatusQueryOptions } from "./authQueries.ts";
 
 /** Authenticated route boundary dependencies. */
@@ -56,21 +53,13 @@ export function AuthenticationBoundary({ children }: AuthenticationBoundaryProps
 
     if (status.isError) {
         return (
-            <Card aria-labelledby="session-check-error" className="max-w-xl" role="alert">
-                <Heading id="session-check-error" level={1} size="panel">
-                    Session check failed
-                </Heading>
-                <Text className="mt-3">
-                    {dashboardBrowserFailureMessage(status.error)}
-                </Text>
-                <Button
-                    busy={status.isFetching}
-                    className="mt-5"
-                    onClick={() => void status.refetch()}
-                >
-                    Try again
-                </Button>
-            </Card>
+            <PageState
+                message={dashboardBrowserFailureMessage(status.error)}
+                onRetry={() => void status.refetch()}
+                retryBusy={status.isFetching}
+                status="error"
+                title="Session check failed"
+            />
         );
     }
     if (!verificationSettled) {

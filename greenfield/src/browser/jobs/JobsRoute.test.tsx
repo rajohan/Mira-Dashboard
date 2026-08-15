@@ -1056,10 +1056,7 @@ describe("Dashboard jobs route", () => {
         await waitFor(() => expect(queryClient.isFetching()).toBe(0));
         const initialHistoryCallCount = historyCalls().length;
         const scheduleInput = screen.getByLabelText("Schedule ID");
-        expect(scheduleInput).toHaveAttribute(
-            "placeholder",
-            "Example: system.worker-smoke"
-        );
+        expect(scheduleInput).toHaveAttribute("placeholder", "system.worker-smoke");
         const applyFilters = screen.getByRole("button", { name: "Apply" });
 
         await user.type(scheduleInput, "INVALID");

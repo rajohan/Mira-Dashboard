@@ -16,7 +16,7 @@ const meta = {
                         autoComplete="username"
                         className="mt-2"
                         defaultValue="operator"
-                        placeholder="Example: operator"
+                        placeholder="operator"
                     />
                 </FormField>
                 <FormField label="Password">
@@ -33,6 +33,7 @@ const meta = {
             </div>
         ),
         description: "Sign in with the local Dashboard operator account.",
+        footer: "Forgotten passwords are reset with the host-local recovery command.",
         icon: ShieldCheck,
         title: "Welcome back",
     },
@@ -61,7 +62,7 @@ export const VerificationStep: Story = {
                         autoComplete="one-time-code"
                         className="mt-2"
                         inputMode="numeric"
-                        placeholder="Example: 123456"
+                        placeholder="123456"
                     />
                 </FormField>
                 <Button fullWidth onClick={fn()}>
@@ -70,6 +71,7 @@ export const VerificationStep: Story = {
             </div>
         ),
         description: "Enter one more verification method to finish signing in.",
+        footer: "A full Dashboard session is created after verification succeeds.",
         icon: KeyRound,
         title: "Verify your identity",
     },

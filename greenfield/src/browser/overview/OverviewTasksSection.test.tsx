@@ -35,6 +35,7 @@ const initialTask = Object.freeze({
     createdAtMs: timestampMs - 20_000,
     id: "019fe300-0000-7000-8000-000000000031",
     labels: ["rewrite"],
+    number: 232,
     priority: "high",
     status: "in-progress",
     title: "Initial active task",
@@ -44,6 +45,7 @@ const initialTask = Object.freeze({
 const updatedTask = Object.freeze({
     ...initialTask,
     id: "019fe300-0000-7000-8000-000000000032",
+    number: 233,
     title: "Realtime active task",
     updatedAtMs: timestampMs + 1000,
 } as const satisfies TaskSummary);

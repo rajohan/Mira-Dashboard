@@ -1,6 +1,15 @@
 import { describe, expect, test } from "bun:test";
 
+import {
+    createMemoryHistory,
+    createRootRoute,
+    createRoute,
+    createRouter,
+    RouterProvider,
+} from "@tanstack/react-router";
+
 import type { DeliveryDeployment } from "../../contracts/delivery.ts";
+import { parseJobsRouteSearch } from "../jobs/jobRouteSearch.ts";
 import { DeliveryJobsPanel } from "./DeliveryJobsPanel.tsx";
 
 const { render, screen } = await import("@testing-library/react");
@@ -13,7 +22,7 @@ const base = {
 } as const;
 
 describe("DeliveryJobsPanel", () => {
-    test("distinguishes completed, partial, and merge-queued production truth", () => {
+    test("distinguishes completed, partial, and merge-queued production truth", async () => {
         const deployments = [
             {
                 ...base,
@@ -34,9 +43,26 @@ describe("DeliveryJobsPanel", () => {
             },
         ] as const satisfies readonly DeliveryDeployment[];
 
-        render(<DeliveryJobsPanel deployments={deployments} />);
+        const rootRoute = createRootRoute();
+        const deliveryRoute = createRoute({
+            component: () => <DeliveryJobsPanel deployments={deployments} />,
+            getParentRoute: () => rootRoute,
+            path: "/delivery",
+        });
+        const jobsRoute = createRoute({
+            component: () => null,
+            getParentRoute: () => rootRoute,
+            path: "/jobs",
+            validateSearch: parseJobsRouteSearch,
+        });
+        const router = createRouter({
+            history: createMemoryHistory({ initialEntries: ["/delivery"] }),
+            routeTree: rootRoute.addChildren([deliveryRoute, jobsRoute]),
+        });
 
-        expect(screen.getByText("Completed")).toBeTruthy();
+        render(<RouterProvider router={router} />);
+
+        expect(await screen.findByText("Completed")).toBeTruthy();
         expect(screen.getByText("Merge queued; deploy not started")).toBeTruthy();
         expect(screen.getByText("Completed with warnings")).toBeTruthy();
         expect(screen.getByText("Deployment did not start.")).toBeTruthy();

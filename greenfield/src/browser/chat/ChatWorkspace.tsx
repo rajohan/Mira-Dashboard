@@ -16,6 +16,7 @@ import { Card } from "../ui/Card.tsx";
 import { ConfirmModal } from "../ui/ConfirmModal.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
+import { IconOnlyButton } from "../ui/IconOnlyButton.tsx";
 import { PageState } from "../ui/PageState.tsx";
 import { Select } from "../ui/Select.tsx";
 import { Text } from "../ui/Text.tsx";
@@ -419,11 +420,12 @@ export function ChatWorkspace({
                 </div>
                 {!activityOpen && (
                     <div className="border-primary-700 absolute top-1/2 right-1 z-30 flex shrink-0 -translate-y-1/2 items-center lg:static lg:translate-y-0 lg:self-stretch lg:border-l lg:p-1">
-                        <Button
+                        <IconOnlyButton
                             aria-controls="chat-activity-panel"
                             aria-expanded={false}
-                            aria-label="Open activity panel"
                             className="focus-visible:ring-accent-400 h-10 min-h-10 min-w-10 flex-none justify-center self-center px-0 focus-visible:ring-1 focus-visible:ring-offset-0"
+                            icon={ListChecks}
+                            label="Open activity panel"
                             onClick={() => {
                                 activityWasToggled.current = true;
                                 setActivityOpen(true);
@@ -432,21 +434,21 @@ export function ChatWorkspace({
                             size="sm"
                             title="Open activity & tasks"
                             variant="ghost"
-                        >
-                            <Icon icon={ListChecks} size="sm" tone="inherit" />
-                        </Button>
+                        />
                     </div>
                 )}
                 {activityOpen && (
-                    <button
+                    <Button
                         aria-label="Close activity panel backdrop"
                         className="fixed inset-0 z-60 bg-black/65 backdrop-blur-sm lg:hidden"
                         onClick={() => {
                             activityWasToggled.current = true;
                             setActivityOpen(false);
                         }}
-                        type="button"
-                    />
+                        variant="unstyled"
+                    >
+                        <span className="sr-only">Close activity panel backdrop</span>
+                    </Button>
                 )}
                 <ChatSidePanel
                     canAskCompanion={canAskCompanion ?? abortableRunIds.length > 0}

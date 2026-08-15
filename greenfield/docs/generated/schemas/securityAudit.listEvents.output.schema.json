@@ -175,6 +175,9 @@
                 "maxItems": 36,
                 "uniqueItems": true
               },
+              "mfaReset": {
+                "type": "boolean"
+              },
               "method": {
                 "enum": [
                   "password",

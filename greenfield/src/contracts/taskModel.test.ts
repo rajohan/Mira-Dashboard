@@ -41,6 +41,7 @@ describe("task model contracts", () => {
                 createdAtMs: 1000,
                 id: taskId,
                 labels: ["P1"],
+                number: 232,
                 priority: "high",
                 status: "in-progress",
                 title: "Implement task board",
@@ -73,7 +74,7 @@ describe("task model contracts", () => {
 
     test("binds progress authors and versioned timestamps", () => {
         const update = {
-            author: { id: userId, kind: "user" as const },
+            author: { id: userId, kind: "user" as const, username: "raymond" },
             createdAtMs: 3000,
             id: updateId,
             messageMarkdown: "Implemented the repository boundary.",
@@ -86,7 +87,23 @@ describe("task model contracts", () => {
         expect(
             v.safeParse(taskProgressUpdateSchema, {
                 ...update,
-                author: { id: "Not A Principal", kind: "automation" },
+                author: {
+                    id: "Not A Principal",
+                    kind: "automation",
+                    label: "Task automation",
+                },
+            }).success
+        ).toBeFalse();
+        expect(
+            v.safeParse(taskProgressUpdateSchema, {
+                ...update,
+                author: { id: "task-automation", kind: "automation" },
+            }).success
+        ).toBeFalse();
+        expect(
+            v.safeParse(taskProgressUpdateSchema, {
+                ...update,
+                author: { id: userId, kind: "user" },
             }).success
         ).toBeFalse();
         expect(

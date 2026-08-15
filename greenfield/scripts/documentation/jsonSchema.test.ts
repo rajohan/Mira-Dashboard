@@ -617,9 +617,22 @@ describe("contract JSON Schema conversion", () => {
             properties: { patch: { minProperties: 1 } },
         });
 
-        const detailDocument = JSON.stringify(
-            convertContractSchema(taskDetailSchema, "test.taskDetail", "output")
+        const detailSchemaDocument = convertContractSchema(
+            taskDetailSchema,
+            "test.taskDetail",
+            "output"
         );
+        expect(detailSchemaDocument).toMatchObject({
+            properties: {
+                number: {
+                    maximum: Number.MAX_SAFE_INTEGER,
+                    minimum: 1,
+                    type: "integer",
+                },
+            },
+            required: expect.arrayContaining(["number"]),
+        });
+        const detailDocument = JSON.stringify(detailSchemaDocument);
         expect(detailDocument).toContain("timestamps not to precede creation");
         const pageDocument = JSON.stringify(
             convertContractSchema(listTasksResultSchema, "test.taskPage", "output")

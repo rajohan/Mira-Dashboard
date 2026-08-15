@@ -8,6 +8,7 @@ import type { DashboardAuthenticatedPath } from "../lib/dashboardRoutes.ts";
 import { MonitoringRouteLayout } from "../monitoring/MonitoringRouteLayout.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { IconOnlyButton } from "../ui/IconOnlyButton.tsx";
+import { interactiveTapClassName } from "../ui/interactionStyles.ts";
 import { NavigationLink } from "../ui/NavigationLink.tsx";
 import { DashboardHeaderControls } from "./DashboardHeaderControls.tsx";
 import { dashboardNavigationItems } from "./dashboardNavigation.ts";
@@ -35,7 +36,7 @@ interface NavigationProps {
 
 function Navigation({ currentPath, onNavigate }: NavigationProps) {
     return (
-        <nav aria-label="Main navigation" className="flex-1 p-2">
+        <nav aria-label="Main navigation" className="min-h-0 flex-1 overflow-y-auto p-2">
             {dashboardNavigationItems.map((item) => {
                 const active =
                     currentPath === item.to ||
@@ -89,7 +90,7 @@ function SidebarContent({ currentPath, onClose, onNavigate }: SidebarContentProp
                 )}
             </div>
             <Navigation currentPath={currentPath} onNavigate={onNavigate} />
-            <div className="border-primary-700 text-primary-400 border-t p-4 text-xs">
+            <div className="border-primary-700 text-primary-400 shrink-0 border-t p-4 text-xs">
                 Secure operator workspace
             </div>
         </>
@@ -107,8 +108,10 @@ export function DashboardShell() {
 
     if (location.pathname === "/login") {
         return (
-            <main className="bg-primary-950 text-primary-50 flex h-full min-h-screen items-center justify-center overflow-y-auto px-4 py-10">
-                <Outlet />
+            <main className="bg-primary-900 text-primary-50 flex h-full min-h-screen overflow-y-auto p-4">
+                <div className="my-auto w-full">
+                    <Outlet />
+                </div>
             </main>
         );
     }
@@ -119,7 +122,10 @@ export function DashboardShell() {
     return (
         <div className="bg-primary-900 text-primary-50 flex h-full overflow-hidden">
             <a
-                className="bg-accent-500 text-primary-950 fixed top-3 left-3 z-60 -translate-y-24 rounded-lg px-3 py-2 font-semibold transition-transform focus:translate-y-0"
+                className={cn(
+                    interactiveTapClassName,
+                    "bg-accent-500 text-primary-950 fixed top-3 left-3 z-60 -translate-y-24 rounded-lg px-3 py-2 font-semibold transition-transform focus:translate-y-0"
+                )}
                 href="#dashboard-content"
             >
                 Skip to content

@@ -15,7 +15,6 @@ import { Icon } from "../ui/Icon.tsx";
 import { AutomationCapabilityPicker } from "./AutomationCapabilityPicker.tsx";
 import { AutomationCredentialPanel } from "./AutomationCredentialPanel.tsx";
 import { refreshSecurityQueries } from "./securityQueries.ts";
-import { OneTimeSecretPanel } from "./SecurityUi.tsx";
 
 interface AutomationPrincipalCardProps {
     readonly principal: AutomationPrincipalSummary;
@@ -74,7 +73,6 @@ export function AutomationPrincipalCard({ principal }: AutomationPrincipalCardPr
     const client = useDashboardTrpcClient();
     const queryClient = useQueryClient();
     const [disableConfirmationOpen, setDisableConfirmationOpen] = useState(false);
-    const [issuedToken, setIssuedToken] = useState<string>();
 
     async function replaceCapabilities(capabilities: ApplicationCapability[]) {
         await action.run(async () => {
@@ -129,15 +127,6 @@ export function AutomationPrincipalCard({ principal }: AutomationPrincipalCardPr
                 )}
             </div>
             <Alert className="mt-4" message={action.error} />
-            {issuedToken !== undefined && (
-                <OneTimeSecretPanel
-                    id={`automation-token-${principal.id}`}
-                    onDismiss={() => setIssuedToken(undefined)}
-                    title="New access token"
-                >
-                    {issuedToken}
-                </OneTimeSecretPanel>
-            )}
             <AutomationCapabilityEditor
                 busy={action.busy}
                 disabled={principal.disabled}
@@ -151,10 +140,7 @@ export function AutomationPrincipalCard({ principal }: AutomationPrincipalCardPr
                 icon={KeyRound}
                 title="Manage access tokens"
             >
-                <AutomationCredentialPanel
-                    onIssuedToken={setIssuedToken}
-                    principal={principal}
-                />
+                <AutomationCredentialPanel principal={principal} />
             </ExpandableCard>
             <ConfirmModal
                 busy={action.busy}

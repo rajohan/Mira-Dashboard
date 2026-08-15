@@ -776,6 +776,7 @@ Recommended layout:
       server/
         openClawHeartbeat.js
         productionDelivery.js
+        resetDashboardPassword.js
       browser/
       migrations/
       docs/generated/
@@ -816,6 +817,14 @@ and `report` modes and reads `openclaw-heartbeat.token` from its fixed private c
 owns the live authority at `agents.entries.ops.heartbeat.prompt`; Dashboard build, publication,
 retention, ordinary activation, and service restart never install or reset either that config value
 or the external credential.
+
+Every release also contains `server/resetDashboardPassword.js` as a manifest-required ancillary
+executable. It is not a managed process role or systemd service. The host-only
+`auth:reset-password` package command starts that executable from `releases/current` with the Bun
+binary from `runtimes/bun/current`, an empty environment except for `NODE_ENV=production`, and the
+fixed production project root. The executable resolves the immutable active release, validates
+its release/runtime identity, and opens only the protected production state owned by that project.
+The operator supplies the password only through a TTY prompt with echo disabled.
 
 Heartbeat cutover is a manual one-time external transition after Greenfield is active and ready:
 

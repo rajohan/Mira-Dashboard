@@ -1,4 +1,4 @@
-import { Save, Sparkles } from "lucide-react";
+import { Plus, Save } from "lucide-react";
 
 import type { TaskDetail } from "../../contracts/taskModel.ts";
 import { dashboardBrowserFailureMessage } from "../api/trpcError.ts";
@@ -11,6 +11,7 @@ import { TaskEditorFields } from "./TaskEditorFields.tsx";
 import { useTaskEditorController } from "./useTaskEditorController.ts";
 
 interface TaskEditorFormProps {
+    readonly availableLabels?: readonly string[];
     readonly onCancel: () => void;
     readonly onSaved: (task: TaskDetail) => void;
     readonly task?: TaskDetail;
@@ -20,7 +21,12 @@ interface TaskEditorFormProps {
  * Renders the shared TanStack Form editor for task creation and content updates.
  * @returns A contract-validated task editor.
  */
-export function TaskEditorForm({ onCancel, onSaved, task }: TaskEditorFormProps) {
+export function TaskEditorForm({
+    availableLabels = [],
+    onCancel,
+    onSaved,
+    task,
+}: TaskEditorFormProps) {
     const { busy, failure, form, submit } = useTaskEditorController({
         onSaved,
         task,
@@ -35,10 +41,20 @@ export function TaskEditorForm({ onCancel, onSaved, task }: TaskEditorFormProps)
                     failure === null ? undefined : dashboardBrowserFailureMessage(failure)
                 }
             />
-            <TaskEditorFields busy={busy} creating={creating} form={form} />
+            <TaskEditorFields
+                availableLabels={availableLabels}
+                busy={busy}
+                creating={creating}
+                form={form}
+            />
             <TaskAutomationFields busy={busy} form={form} />
-            <div className="mt-5 flex justify-end gap-2">
-                <Button disabled={busy} onClick={onCancel} variant="secondary">
+            <div className="mt-5 grid grid-cols-1 gap-2 pt-2 sm:flex sm:justify-end">
+                <Button
+                    className="w-full sm:w-auto"
+                    disabled={busy}
+                    onClick={onCancel}
+                    variant="secondary"
+                >
                     Cancel
                 </Button>
                 <form.Subscribe
@@ -48,11 +64,12 @@ export function TaskEditorForm({ onCancel, onSaved, task }: TaskEditorFormProps)
                         <Button
                             busy={busy || isSubmitting}
                             busyLabel={creating ? "Creating…" : "Saving…"}
+                            className="w-full sm:w-auto"
                             disabled={!canSubmit}
                             type="submit"
                         >
                             <Icon
-                                icon={creating ? Sparkles : Save}
+                                icon={creating ? Plus : Save}
                                 size="sm"
                                 tone="inherit"
                             />

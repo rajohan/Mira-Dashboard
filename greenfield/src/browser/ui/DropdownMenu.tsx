@@ -5,6 +5,7 @@ import {
     MenuItems as HeadlessMenuItems,
 } from "@headlessui/react";
 import { EllipsisVertical, type LucideIcon } from "lucide-react";
+import { useRef } from "react";
 
 import { cn } from "../lib/classNames.ts";
 import { Button } from "./Button.tsx";
@@ -18,7 +19,7 @@ export interface DropdownMenuAction {
     readonly icon?: LucideIcon;
     readonly id: string;
     readonly label: string;
-    readonly onSelect: () => void;
+    readonly onSelect: (trigger: HTMLButtonElement) => void;
     readonly tone?: DropdownMenuActionTone;
 }
 
@@ -43,12 +44,15 @@ export function DropdownMenu({
     triggerIcon = EllipsisVertical,
     triggerLabel,
 }: DropdownMenuProps) {
+    const triggerRef = useRef<HTMLButtonElement>(null);
+
     return (
         <HeadlessMenu as="div" className={cn("relative inline-flex", className)}>
             <HeadlessMenuButton
                 aria-label={triggerLabel}
                 as={Button}
                 disabled={disabled}
+                ref={triggerRef}
                 size="sm"
                 title={triggerLabel}
                 variant="ghost"
@@ -69,17 +73,20 @@ export function DropdownMenu({
 
                     return (
                         <HeadlessMenuItem disabled={action.disabled} key={action.id}>
-                            <button
+                            <Button
                                 className={cn(
-                                    "group flex w-full min-w-0 items-start gap-3 rounded-md px-3 py-2 text-left text-sm transition-colors outline-none select-none",
-                                    "disabled:cursor-not-allowed disabled:opacity-50",
+                                    "group flex w-full min-w-0 items-start gap-3 rounded-md px-3 py-2 text-left text-sm transition-colors select-none disabled:opacity-50",
                                     danger
                                         ? "text-red-300 data-focus:bg-red-950/50 data-focus:text-red-100"
                                         : "text-primary-200 data-focus:bg-primary-700 data-focus:text-primary-50"
                                 )}
                                 disabled={action.disabled}
-                                onClick={action.onSelect}
+                                onClick={() => {
+                                    const trigger = triggerRef.current;
+                                    if (trigger !== null) action.onSelect(trigger);
+                                }}
                                 type="button"
+                                variant="unstyled"
                             >
                                 {action.icon !== undefined && (
                                     <Icon
@@ -106,7 +113,7 @@ export function DropdownMenu({
                                         </span>
                                     )}
                                 </span>
-                            </button>
+                            </Button>
                         </HeadlessMenuItem>
                     );
                 })}

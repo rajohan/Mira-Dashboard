@@ -339,11 +339,17 @@ if (mode === "open-approved-collection") {
             let descendantPid = 0;
             for (let attempt = 0; attempt < 100; attempt += 1) {
                 try {
-                    descendantPid = Number(await readFile(descendantPidPath, "utf8"));
-                    break;
+                    const candidatePid = Number(
+                        await readFile(descendantPidPath, "utf8")
+                    );
+                    if (Number.isSafeInteger(candidatePid) && candidatePid > 1) {
+                        descendantPid = candidatePid;
+                        break;
+                    }
                 } catch {
-                    await Bun.sleep(10);
+                    // The descendant creates its PID file asynchronously; retry below.
                 }
+                await Bun.sleep(10);
             }
             expect(Number.isSafeInteger(descendantPid)).toBe(true);
             expect(descendantPid).toBeGreaterThan(1);

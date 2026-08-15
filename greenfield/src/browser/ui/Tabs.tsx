@@ -2,6 +2,7 @@ import { Tab, TabGroup, TabList, TabPanel, TabPanels } from "@headlessui/react";
 import { useId, type ReactNode } from "react";
 
 import { cn } from "../lib/classNames.ts";
+import { interactiveTapClassName } from "./interactionStyles.ts";
 
 export interface TabDefinition<TValue extends string> {
     readonly disabled?: boolean;
@@ -70,14 +71,15 @@ export function Tabs<TValue extends string>({
                     }
                     aria-label={ariaLabel}
                     className={cn(
-                        "border-primary-700 bg-primary-900 max-w-full min-w-0 gap-1 rounded-lg border p-1",
+                        "border-primary-700 bg-primary-800/80 max-w-full min-w-0 gap-1 rounded-lg border p-1 shadow-sm shadow-black/10",
                         vertical ? "flex flex-col" : "flex w-full flex-wrap"
                     )}
                 >
                     {tabs.map((tab) => (
                         <Tab
                             className={cn(
-                                "text-primary-300 min-h-10 min-w-0 cursor-pointer rounded-md px-3 py-2 text-sm font-medium whitespace-nowrap transition-colors",
+                                interactiveTapClassName,
+                                "text-primary-300 min-h-10 min-w-0 rounded-md px-3 py-2 text-sm font-medium whitespace-nowrap transition-colors",
                                 "not-data-selected:not-data-disabled:data-hover:bg-primary-800 not-data-selected:not-data-disabled:data-hover:text-primary-50 hover:not-data-selected:not-data-disabled:bg-primary-800 hover:not-data-selected:not-data-disabled:text-primary-50",
                                 "data-selected:bg-accent-500 data-selected:text-primary-950",
                                 "data-focus:ring-accent-300 data-focus:ring-2 data-focus:outline-none data-focus:ring-inset",

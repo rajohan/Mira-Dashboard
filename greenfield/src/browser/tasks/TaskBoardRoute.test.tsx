@@ -6,6 +6,10 @@ import * as v from "valibot";
 
 import type { AuthStatus } from "../../contracts/auth.ts";
 import type {
+    GetOpenClawCronResult,
+    ListOpenClawCronResult,
+} from "../../contracts/openClawCron.ts";
+import type {
     TaskDetail,
     TaskProgressUpdate,
     TaskSummary,
@@ -25,13 +29,14 @@ import {
     createDashboardBrowserCollections,
     type DashboardBrowserCollections,
 } from "../data/dashboardCollections.ts";
+import { formatDashboardDateTimeToMinute } from "../lib/formatDateTime.ts";
 import { createDashboardRouter } from "../router.tsx";
 import type { DashboardWebAuthnClient } from "../security/webauthn/webauthnClient.ts";
 import { emptyNotificationListResult } from "../test/notifications.ts";
 import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
 import { taskQueryKey } from "./taskQueries.ts";
 
-const { render, screen } = await import("@testing-library/react");
+const { render, screen, waitFor, within } = await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
 const userEvent = userEventModule.default;
 
@@ -60,12 +65,66 @@ const initialTask: TaskDetail = Object.freeze({
     createdAtMs: timestampMs,
     id: "019fd984-63e8-7404-a7da-80c6f243794f",
     labels: ["phase-three", "tasks"],
+    number: 232,
     priority: "high",
     status: "in-progress",
     title: "Build task domain",
     updatedAtMs: timestampMs,
     version: 1,
 });
+
+function cronDetail(id: string, enabled = true): GetOpenClawCronResult {
+    return {
+        freshness: { kind: "fresh", observedAtMs: timestampMs },
+        job: {
+            agentIdTruncated: false,
+            createdAtMs: timestampMs - 86_400_000,
+            deliveryMode: "unspecified",
+            descriptionTruncated: false,
+            enabled,
+            id,
+            name: "Nightly report job",
+            nameTruncated: false,
+            payload: {
+                kind: "agent-turn",
+                message: "Generate the nightly report",
+                model: "openai/gpt-5.6-sol",
+                thinking: "high",
+                truncated: false,
+            },
+            schedule: { everyMs: 86_400_000, kind: "every", truncated: false },
+            sessionTarget: "isolated",
+            source: "openclaw",
+            state: {
+                lastRunAtMs: timestampMs - 60_000,
+                lastRunStatus: "ok",
+                nextRunAtMs: timestampMs + 86_400_000,
+            },
+            synchronization: { state: "confirmed" },
+            updatedAtMs: timestampMs,
+            wakeMode: "now",
+        },
+    };
+}
+
+function cronInventoryPage(
+    jobs: readonly GetOpenClawCronResult["job"][],
+    offset: number,
+    total: number
+): ListOpenClawCronResult {
+    const nextOffset = offset + jobs.length;
+    const hasMore = nextOffset < total;
+    return {
+        freshness: { kind: "fresh", observedAtMs: timestampMs },
+        hasMore,
+        jobs: [...jobs],
+        limit: 100,
+        ...(hasMore ? { nextOffset } : {}),
+        offset,
+        snapshotRevision: `sha256:${"A".repeat(43)}`,
+        total,
+    };
+}
 const unexpectedWebAuthnClient: DashboardWebAuthnClient = Object.freeze({
     authenticate: () => Promise.reject(new TypeError("Unexpected authentication")),
     register: () => Promise.reject(new TypeError("Unexpected registration")),
@@ -79,6 +138,9 @@ interface TransportCall {
 
 class TaskTransport implements DashboardTrpcTransport {
     readonly calls: TransportCall[] = [];
+    readonly cronDetails = new Map<string, GetOpenClawCronResult>();
+    readonly labelSuggestions = ["archived-label", "phase-three", "tasks"];
+    cronInventoryPages: ListOpenClawCronResult[] = [];
     taskListQueryResponse: Promise<unknown> | undefined;
     tasks: TaskDetail[] = [initialTask];
     updates: TaskProgressUpdate[] = [];
@@ -96,7 +158,11 @@ class TaskTransport implements DashboardTrpcTransport {
                     return Promise.reject(new TypeError("Task is missing"));
                 }
                 const update: TaskProgressUpdate = {
-                    author: { id: operatorUserId, kind: "user" },
+                    author: {
+                        id: operatorUserId,
+                        kind: "user",
+                        username: "operator",
+                    },
                     createdAtMs: timestampMs + 10,
                     id: "019fd986-b3d4-7861-b7ce-e42eb18e7af8",
                     messageMarkdown: parsed.messageMarkdown,
@@ -127,6 +193,7 @@ class TaskTransport implements DashboardTrpcTransport {
                     createdAtMs: timestampMs + 1,
                     id: "019fd985-a9c4-7586-8706-c11563dd5e5d",
                     labels: parsed.labels ?? [],
+                    number: 233,
                     priority: parsed.priority ?? "medium",
                     status: parsed.status ?? "todo",
                     title: parsed.title,
@@ -162,6 +229,32 @@ class TaskTransport implements DashboardTrpcTransport {
             case "notifications.list": {
                 return Promise.resolve(emptyNotificationListResult);
             }
+            case "openClawCron.get": {
+                const id =
+                    typeof input === "object" && input !== null && "id" in input
+                        ? input.id
+                        : undefined;
+                const detail =
+                    typeof id === "string" ? this.cronDetails.get(id) : undefined;
+                return detail === undefined
+                    ? Promise.reject(new TypeError("OpenClaw cron job is missing"))
+                    : Promise.resolve(detail);
+            }
+            case "openClawCron.list": {
+                const offset =
+                    typeof input === "object" && input !== null && "offset" in input
+                        ? input.offset
+                        : undefined;
+                const page =
+                    typeof offset === "number"
+                        ? this.cronInventoryPages.find(
+                              (candidate) => candidate.offset === offset
+                          )
+                        : undefined;
+                return page === undefined
+                    ? Promise.reject(new TypeError("OpenClaw cron inventory is missing"))
+                    : Promise.resolve(page);
+            }
             case "tasks.get": {
                 const id =
                     typeof input === "object" && input !== null && "id" in input
@@ -177,6 +270,12 @@ class TaskTransport implements DashboardTrpcTransport {
                     ({ bodyMarkdown: _bodyMarkdown, ...task }) => task
                 );
                 return Promise.resolve({ tasks: summaries });
+            }
+            case "tasks.listLabels": {
+                return Promise.resolve({
+                    labels: this.labelSuggestions,
+                    truncated: false,
+                });
             }
             case "tasks.listUpdates": {
                 const taskId =
@@ -248,9 +347,40 @@ describe("Dashboard task route", () => {
             screen.getByRole("button", { name: "Filter tasks by automation" })
         ).toBeTruthy();
         expect(screen.getByRole("button", { name: "New task" })).toBeTruthy();
-        expect(screen.getByText(/Updates automatically from task events/u)).toBeTruthy();
+        expect(screen.queryByText("Work management")).toBeNull();
+        expect(screen.queryByText(/Updates automatically from task events/u)).toBeNull();
         expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
         expect(screen.getByText("Build task domain")).toBeTruthy();
+        expect(
+            transport.calls.some((call) => call.path === "openClawCron.list")
+        ).toBeFalse();
+    });
+
+    test("keeps search focused while the filtered task list is loading", async () => {
+        const transport = new TaskTransport();
+        renderTaskRoute(transport);
+        const user = userEvent.setup();
+
+        await screen.findByText("Build task domain");
+        const filteredListRequest = Promise.withResolvers<unknown>();
+        transport.taskListQueryResponse = filteredListRequest.promise;
+        const search = screen.getByRole("searchbox", { name: "Search tasks" });
+
+        await user.type(search, "p");
+        await waitFor(() =>
+            expect(transport.calls).toContainEqual({
+                input: { filters: { search: "p" }, limit: 100 },
+                kind: "query",
+                path: "tasks.list",
+            })
+        );
+        expect(search).not.toBeDisabled();
+        expect(search).toHaveFocus();
+
+        await act(async () => {
+            filteredListRequest.resolve({ tasks: [] });
+            await filteredListRequest.promise;
+        });
     });
 
     test("retains explicit retry for an initial list failure", async () => {
@@ -284,40 +414,80 @@ describe("Dashboard task route", () => {
         expect(await screen.findByRole("dialog", { name: "New task" })).toBeTruthy();
         expect(screen.getByLabelText("Title")).toHaveAttribute(
             "placeholder",
-            "Example: Review database backups"
+            "Task title"
         );
-        expect(screen.getByLabelText("Description")).toHaveAttribute(
+        expect(screen.getByLabelText("Description (optional)")).toHaveAttribute(
             "placeholder",
-            "Example: Check the latest backup report and resolve any warnings."
+            "Task description"
         );
-        await user.click(screen.getByRole("button", { name: /Automation/u }));
         await user.click(screen.getByRole("checkbox", { name: "Attach automation" }));
         expect(screen.getByLabelText("Cron job id")).toHaveAttribute(
             "placeholder",
-            "Example: morning-report"
+            "morning-report"
         );
         expect(screen.getByLabelText("Schedule summary")).toHaveAttribute(
             "placeholder",
-            "Example: Every weekday at 08:00"
+            "Every weekday at 08:00"
         );
         expect(screen.getByLabelText("Model")).toHaveAttribute(
             "placeholder",
-            "Example: openai/gpt-5.6"
+            "openai/gpt-5.6"
         );
-        expect(screen.getByLabelText("Thinking")).toHaveAttribute(
-            "placeholder",
-            "Example: high"
-        );
+        expect(screen.getByLabelText("Thinking")).toHaveAttribute("placeholder", "high");
         expect(screen.getByLabelText("Session target")).toHaveAttribute(
             "placeholder",
-            "Example: agent:main:main"
+            "agent:main:main"
         );
         await user.type(screen.getByLabelText("Title"), "Draft task");
         expect(screen.getByLabelText<HTMLInputElement>("Title").value).toBe("Draft task");
     });
 
+    test("suggests persisted labels outside the current task page", async () => {
+        const transport = new TaskTransport();
+        renderTaskRoute(transport);
+        const user = userEvent.setup();
+
+        await screen.findByText("Build task domain");
+        await waitFor(() =>
+            expect(transport.calls).toContainEqual({
+                input: {},
+                kind: "query",
+                path: "tasks.listLabels",
+            })
+        );
+        await user.click(screen.getByRole("button", { name: "New task" }));
+        const dialog = await screen.findByRole("dialog", { name: "New task" });
+        await user.click(
+            within(dialog).getByRole("button", {
+                name: /Additional details \(optional\)/u,
+            })
+        );
+        const suggestionsButton = within(dialog).getByRole("button", {
+            name: "Show existing labels",
+        });
+        await waitFor(() => expect(suggestionsButton).not.toBeDisabled());
+        await user.click(suggestionsButton);
+
+        expect(
+            await screen.findByRole("option", { name: "archived-label" })
+        ).toBeTruthy();
+    });
+
     test("links an automated task to its exact OpenClaw cron selection", async () => {
         const transport = new TaskTransport();
+        const retainedCron = cronDetail("nightly-report", false);
+        transport.cronInventoryPages = [
+            cronInventoryPage([cronDetail("unrelated-job").job], 0, 2),
+            cronInventoryPage([retainedCron.job], 1, 2),
+        ];
+        transport.cronDetails.set("nightly-report", {
+            ...retainedCron,
+            freshness: {
+                kind: "last-known-good",
+                observedAtMs: timestampMs - 10_000,
+                staleSinceMs: timestampMs - 5000,
+            },
+        });
         transport.tasks = [
             {
                 ...initialTask,
@@ -333,10 +503,28 @@ describe("Dashboard task route", () => {
         const user = userEvent.setup();
 
         await screen.findByRole("heading", { level: 1, name: "Tasks" });
-        await user.click(
-            screen.getByRole("button", { name: "Open task: Build task domain" })
+        expect(await screen.findByText("Disabled")).toBeTruthy();
+        expect(screen.getByText("Recurring")).toBeTruthy();
+        await waitFor(() =>
+            expect(
+                transport.calls
+                    .filter((call) => call.path === "openClawCron.list")
+                    .map((call) => call.input)
+            ).toEqual([
+                expect.objectContaining({ offset: 0 }),
+                expect.objectContaining({ offset: 1 }),
+            ])
         );
-        const link = await screen.findByRole<HTMLAnchorElement>("link", {
+        await user.click(
+            screen.getByRole("button", {
+                name: "Open task #232: Build task domain",
+            })
+        );
+        const dialog = await screen.findByRole("dialog", {
+            name: "#232: Build task domain",
+        });
+        const detail = within(dialog);
+        const link = await detail.findByRole<HTMLAnchorElement>("link", {
             name: "Open OpenClaw cron job nightly-report",
         });
         const destination = new URL(link.href);
@@ -345,6 +533,16 @@ describe("Dashboard task route", () => {
             cronJobId: "nightly-report",
             source: "openclaw",
         });
+        expect(await detail.findByText("Disabled")).toBeTruthy();
+        expect(detail.getByText("Recurring")).toBeTruthy();
+        expect(detail.getByText("Nightly report job")).toBeTruthy();
+        expect(detail.getByText("Every 1 day")).toBeTruthy();
+        expect(detail.getByText("openai/gpt-5.6-sol · high")).toBeTruthy();
+        expect(
+            detail.getByText(
+                "The latest refresh failed, so the last available OpenClaw status is shown."
+            )
+        ).toBeTruthy();
     });
 
     test("renders the legacy-shaped board and creates a contract-valid task", async () => {
@@ -360,7 +558,10 @@ describe("Dashboard task route", () => {
 
         await user.click(screen.getByRole("button", { name: "New task" }));
         await user.type(screen.getByLabelText("Title"), "Browser-created task");
-        await user.type(screen.getByLabelText("Labels"), "tasks");
+        await user.click(
+            screen.getByRole("button", { name: /Additional details \(optional\)/u })
+        );
+        await user.type(screen.getByLabelText("Labels"), "tasks ");
         await act(async () => {
             screen.getByRole("button", { name: "Create task" }).click();
             for (let attempt = 0; attempt < 50; attempt += 1) {
@@ -395,7 +596,10 @@ describe("Dashboard task route", () => {
         expect(queryClient.isFetching({ queryKey: taskQueryKey })).toBe(0);
         expect(queryClient.isMutating()).toBe(0);
         expect(screen.getByRole("heading", { level: 2, name: "Progress" })).toBeTruthy();
-        expect(screen.getAllByText("Browser-created task")).toHaveLength(2);
+        expect(
+            screen.getByRole("dialog", { name: "#233: Browser-created task" })
+        ).toBeTruthy();
+        expect(screen.getByText("Browser-created task")).toBeTruthy();
     });
 
     test("adds progress and deletes a task through refreshed versioned state", async () => {
@@ -405,7 +609,9 @@ describe("Dashboard task route", () => {
 
         await screen.findByRole("heading", { level: 1, name: "Tasks" });
         await user.click(
-            screen.getByRole("button", { name: "Open task: Build task domain" })
+            screen.getByRole("button", {
+                name: "Open task #232: Build task domain",
+            })
         );
         expect(
             await screen.findByRole("heading", { level: 2, name: "Progress" })
@@ -429,6 +635,11 @@ describe("Dashboard task route", () => {
             await new Promise((resolve) => setTimeout(resolve, 0));
         });
         expect(screen.getByText("Task browser flow verified")).toBeTruthy();
+        expect(
+            screen.getByTitle(`Audit identity: user:${operatorUserId}`)
+        ).toHaveTextContent(
+            `@operator · ${formatDashboardDateTimeToMinute(timestampMs + 10)}`
+        );
 
         await user.click(screen.getByRole("button", { name: "Delete" }));
         await act(async () => {

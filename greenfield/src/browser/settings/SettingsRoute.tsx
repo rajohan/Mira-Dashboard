@@ -25,7 +25,6 @@ export function SettingsRoute() {
     return (
         <Tabs
             ariaLabel="Settings views"
-            description="Choose Dashboard account security or the bounded OpenClaw configuration editor."
             onChange={selectView}
             tabs={[
                 {

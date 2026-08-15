@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/tanstack-react";
+import { Bot } from "lucide-react";
 import { expect, fn, userEvent, within } from "storybook/test";
 
 import { OneTimeSecretPanel, SecuritySection } from "../SecurityUi.tsx";
@@ -19,6 +20,7 @@ const meta = {
         <SecuritySection
             description="Create automation accounts and manage their access tokens."
             id="automation-security-heading"
+            icon={Bot}
             title="Automation security"
         >
             <OneTimeSecretPanel {...properties} />

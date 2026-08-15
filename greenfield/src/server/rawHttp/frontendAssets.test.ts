@@ -148,6 +148,9 @@ describe("frontend release assets", () => {
         expect(index.headers.get("content-security-policy")).toContain(
             "frame-ancestors 'none'"
         );
+        expect(index.headers.get("content-security-policy")).toContain(
+            "img-src 'self' data: https://d3r1u9brut0jdf.cloudfront.net"
+        );
         expect(index.headers.get("x-content-type-options")).toBe("nosniff");
         expect(head.status).toBe(200);
         expect(await head.text()).toBe("");

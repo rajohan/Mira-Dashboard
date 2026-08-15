@@ -14,6 +14,7 @@ import { databaseOverviewQueryOptions } from "../database/databaseQueries.ts";
 import { dockerClient } from "../docker/dockerClient.ts";
 import { dockerOverviewQueryOptions } from "../docker/dockerQueries.ts";
 import { jobRunStateBadgeVariant, jobRunStateLabel } from "../jobs/jobRunPresentation.ts";
+import type { DashboardRoutePath } from "../lib/dashboardRoutes.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { formatByteCount, formatPercent } from "../lib/formatMeasurements.ts";
 import { logClient } from "../logs/logClient.ts";
@@ -21,9 +22,9 @@ import {
     logMaintenanceQueryOptions,
     logSourcesQueryOptions,
 } from "../logs/logQueries.ts";
+import { ActionLink } from "../ui/ActionLink.tsx";
 import { Alert } from "../ui/Alert.tsx";
 import { Badge } from "../ui/Badge.tsx";
-import { buttonClassNames } from "../ui/buttonStyles.ts";
 import { Card } from "../ui/Card.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
@@ -33,18 +34,18 @@ import { Text } from "../ui/Text.tsx";
 interface DomainCardProps {
     readonly children: ReactNode;
     readonly description: string;
-    readonly href: string;
     readonly icon: LucideIcon;
     readonly linkLabel: string;
+    readonly to: DashboardRoutePath;
     readonly title: string;
 }
 
 function DomainCard({
     children,
     description,
-    href,
     icon,
     linkLabel,
+    to,
     title,
 }: DomainCardProps) {
     return (
@@ -59,12 +60,9 @@ function DomainCard({
                         {description}
                     </Text>
                 </div>
-                <a
-                    className={buttonClassNames({ size: "sm", variant: "ghost" })}
-                    href={href}
-                >
+                <ActionLink size="sm" to={to} variant="ghost">
                     {linkLabel}
-                </a>
+                </ActionLink>
             </div>
             <div className="mt-5">{children}</div>
         </Card>
@@ -314,9 +312,9 @@ export function OverviewDomainSection() {
             <div className="mt-5 grid gap-5 lg:grid-cols-3">
                 <DomainCard
                     description="Engine inventory, Compose updates, storage, and controls."
-                    href="/docker"
                     icon={Boxes}
                     linkLabel="View Docker"
+                    to="/docker"
                     title="Docker"
                 >
                     {backgroundWarning(docker.error, docker.data !== undefined)}
@@ -335,9 +333,9 @@ export function OverviewDomainSection() {
                 </DomainCard>
                 <DomainCard
                     description="SQLite and PostgreSQL health, maintenance, and backups."
-                    href="/database"
                     icon={Database}
                     linkLabel="View databases"
+                    to="/database"
                     title="Databases"
                 >
                     {backgroundWarning(database.error, database.data !== undefined)}
@@ -356,9 +354,9 @@ export function OverviewDomainSection() {
                 </DomainCard>
                 <DomainCard
                     description="Named, bounded Dashboard, host, and OpenClaw log sources."
-                    href="/logs"
                     icon={FileText}
                     linkLabel="View logs"
+                    to="/logs"
                     title="Logs"
                 >
                     {backgroundWarning(logs.error, logs.data !== undefined)}

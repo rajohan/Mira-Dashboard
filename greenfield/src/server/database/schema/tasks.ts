@@ -1,5 +1,12 @@
 import { sql } from "drizzle-orm";
-import { check, index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import {
+    check,
+    index,
+    integer,
+    sqliteTable,
+    text,
+    uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 
 import {
     taskAssigneeIds,
@@ -22,7 +29,8 @@ export const tasks = sqliteTable(
         assignee: text("assignee", { enum: taskAssigneeIds }),
         bodyMarkdown: text("body_markdown"),
         createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-        id: text("id").notNull().primaryKey(),
+        id: text("id").notNull(),
+        number: integer("number").primaryKey({ autoIncrement: true }),
         priority: text("priority", { enum: taskPriorities }).notNull(),
         status: text("status", { enum: taskStatuses }).notNull(),
         title: text("title").notNull(),
@@ -39,6 +47,7 @@ export const tasks = sqliteTable(
             sql`${table.bodyMarkdown} IS NULL OR (${boundedNonBlankTextCheck(table.bodyMarkdown, taskBodyMaximumLength)})`
         ),
         check("tasks_id_check", uuidV7TextCheck(table.id)),
+        check("tasks_number_check", sql`${table.number} BETWEEN 1 AND 9007199254740991`),
         check(
             "tasks_priority_check",
             sql`${table.priority} IN ('low', 'medium', 'high')`
@@ -72,5 +81,6 @@ export const tasks = sqliteTable(
             table.updatedAt,
             table.id
         ),
+        uniqueIndex("tasks_id_unique").on(table.id),
     ]
 );

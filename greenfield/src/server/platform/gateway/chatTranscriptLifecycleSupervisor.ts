@@ -154,7 +154,12 @@ export function createChatTranscriptLifecycleSupervisor(
         onEvent({ connectionGeneration, frame, receivedAtMs }) {
             if (stopped || frame.event !== "sessions.changed") return;
             const lifecycle = frame.sessionLifecycle;
-            if (lifecycle === undefined || lifecycle.sessionKey === undefined) {
+            // Ordinary session activity also emits `sessions.changed`, including
+            // user steers inside an active run. Only an explicit lifecycle payload
+            // can establish a transcript boundary; transport loss is fenced by
+            // `onEventGap`/`onState` below.
+            if (lifecycle === undefined) return;
+            if (lifecycle.sessionKey === undefined) {
                 queueAllBoundary({ connectionGeneration, occurredAtMs: receivedAtMs });
                 return;
             }

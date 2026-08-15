@@ -736,6 +736,7 @@ const overviewTask = Object.freeze({
     createdAtMs: timestampMs - 3000,
     id: "019fe300-0000-7000-8000-000000000031",
     labels: ["rewrite"],
+    number: 232,
     priority: "high",
     status: "in-progress",
     title: "Complete the core operations overview",

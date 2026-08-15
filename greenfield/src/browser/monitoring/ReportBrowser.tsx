@@ -17,6 +17,7 @@ import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Card } from "../ui/Card.tsx";
 import { ConfirmModal } from "../ui/ConfirmModal.tsx";
+import { ExpandableCard } from "../ui/ExpandableCard.tsx";
 import { Form } from "../ui/Form.tsx";
 import { FormField } from "../ui/FormField.tsx";
 import { Heading } from "../ui/Heading.tsx";
@@ -67,7 +68,7 @@ interface ReportListItemProps {
 
 function ReportListItem({ onSelect, report, selected }: ReportListItemProps) {
     return (
-        <button
+        <Button
             aria-current={selected ? "true" : undefined}
             className={cn(
                 "border-primary-700 bg-primary-900/45 hover:border-primary-500 w-full rounded-lg border px-3 py-2 text-left transition",
@@ -75,6 +76,7 @@ function ReportListItem({ onSelect, report, selected }: ReportListItemProps) {
             )}
             onClick={() => onSelect(report.id)}
             type="button"
+            variant="unstyled"
         >
             <span className="flex min-w-0 items-start justify-between gap-2">
                 <span className="min-w-0">
@@ -95,7 +97,7 @@ function ReportListItem({ onSelect, report, selected }: ReportListItemProps) {
             >
                 {formatDashboardDateTime(report.occurredAtMs)}
             </time>
-        </button>
+        </Button>
     );
 }
 
@@ -177,14 +179,11 @@ function ReportDetailPanel({ id, onDeleted }: ReportDetailPanelProps) {
             )}
             <Markdown className="mt-6" source={detail.bodyMarkdown} />
             {Object.keys(detail.metadata).length > 0 && (
-                <details className="border-primary-700 mt-6 rounded-lg border p-3">
-                    <summary className="text-primary-200 cursor-pointer text-sm font-medium">
-                        Report metadata
-                    </summary>
-                    <pre className="bg-primary-950 text-primary-300 mt-3 max-h-80 overflow-auto rounded-lg p-3 text-xs">
+                <ExpandableCard className="mt-6" compact title="Report metadata">
+                    <pre className="bg-primary-950 text-primary-300 max-h-80 overflow-auto rounded-lg p-3 text-xs">
                         {JSON.stringify(detail.metadata, undefined, 2)}
                     </pre>
-                </details>
+                </ExpandableCard>
             )}
             <ConfirmModal
                 busy={deletion.isPending}
@@ -307,7 +306,7 @@ export function ReportBrowser() {
                         className="mt-2"
                         maxLength={100}
                         onChange={(event) => setKindDraft(event.currentTarget.value)}
-                        placeholder="Example: heartbeat"
+                        placeholder="heartbeat"
                         value={kindDraft}
                     />
                 </FormField>
@@ -316,7 +315,7 @@ export function ReportBrowser() {
                         className="mt-2"
                         maxLength={200}
                         onChange={(event) => setSourceDraft(event.currentTarget.value)}
-                        placeholder="Example: openclaw"
+                        placeholder="openclaw"
                         value={sourceDraft}
                     />
                 </FormField>

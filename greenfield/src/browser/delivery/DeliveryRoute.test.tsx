@@ -1,6 +1,13 @@
 import { describe, expect, jest, test } from "bun:test";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+    createMemoryHistory,
+    createRootRoute,
+    createRoute,
+    createRouter,
+    RouterProvider,
+} from "@tanstack/react-router";
 
 import type {
     DeliveryDeploymentsResult,
@@ -11,6 +18,7 @@ import type {
     DeliveryRequestOperationResult,
 } from "../../contracts/delivery.ts";
 import { DashboardRealtimeProvider } from "../api/realtimeContext.tsx";
+import { parseJobsRouteSearch } from "../jobs/jobRouteSearch.ts";
 import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
 import type { DeliveryClient } from "./deliveryClient.ts";
 import { DeliveryRoute } from "./DeliveryRoute.tsx";
@@ -229,10 +237,26 @@ function renderDelivery(client: DeliveryClient) {
             queries: { refetchOnWindowFocus: false, retry: false },
         },
     });
+    const rootRoute = createRootRoute();
+    const deliveryRoute = createRoute({
+        component: () => <DeliveryRoute client={client} />,
+        getParentRoute: () => rootRoute,
+        path: "/delivery",
+    });
+    const jobsRoute = createRoute({
+        component: () => null,
+        getParentRoute: () => rootRoute,
+        path: "/jobs",
+        validateSearch: parseJobsRouteSearch,
+    });
+    const router = createRouter({
+        history: createMemoryHistory({ initialEntries: ["/delivery"] }),
+        routeTree: rootRoute.addChildren([deliveryRoute, jobsRoute]),
+    });
     const view = render(
         <DashboardRealtimeProvider client={noOpDashboardRealtimeClient}>
             <QueryClientProvider client={queryClient}>
-                <DeliveryRoute client={client} />
+                <RouterProvider router={router} />
             </QueryClientProvider>
         </DashboardRealtimeProvider>
     );

@@ -3,8 +3,8 @@ import { ExternalLink as ExternalLinkIcon } from "lucide-react";
 import type { DeliveryDeployment } from "../../contracts/delivery.ts";
 import type { DeliveryOperationWarningCode } from "../../shared/deliveryOperationWarnings.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
+import { ActionLink } from "../ui/ActionLink.tsx";
 import { Badge } from "../ui/Badge.tsx";
-import { buttonClassNames } from "../ui/buttonStyles.ts";
 import { Card } from "../ui/Card.tsx";
 import { ExternalLink } from "../ui/ExternalLink.tsx";
 import { Icon } from "../ui/Icon.tsx";
@@ -134,19 +134,15 @@ export function DeliveryJobsPanel({ deployments }: DeliveryJobsPanelProps) {
                                         {formatDashboardDateTime(deployment.updatedAtMs)}
                                     </Text>
                                 </div>
-                                <a
-                                    className={buttonClassNames({
-                                        size: "sm",
-                                        variant: "secondary",
-                                    })}
-                                    href={
-                                        "/jobs?runId=" +
-                                        encodeURIComponent(deployment.jobRunId)
-                                    }
+                                <ActionLink
+                                    search={{ runId: deployment.jobRunId }}
+                                    size="sm"
+                                    to="/jobs"
+                                    variant="secondary"
                                 >
                                     <Icon icon={ExternalLinkIcon} size="sm" />
                                     View job
-                                </a>
+                                </ActionLink>
                             </div>
                         </Card>
                     </li>

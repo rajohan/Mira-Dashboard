@@ -5,8 +5,8 @@ import {
     useQueryClient,
 } from "@tanstack/react-query";
 import { Bot, Plus, RefreshCw } from "lucide-react";
-import { useState } from "react";
 
+import type { AuthStatus } from "../../contracts/auth.ts";
 import {
     createAutomationPrincipalInputSchema,
     type AutomationPrincipalCursor,
@@ -15,6 +15,7 @@ import {
 import type { ApplicationCapability } from "../../contracts/security.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { dashboardBrowserFailureMessage } from "../api/trpcError.ts";
+import { authStatusQueryKey } from "../auth/authQueries.ts";
 import { useExclusiveDashboardAction } from "../hooks/useExclusiveDashboardAction.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -28,12 +29,13 @@ import { Input } from "../ui/Input.tsx";
 import { LoadingState } from "../ui/LoadingState.tsx";
 import { AutomationCapabilityPicker } from "./AutomationCapabilityPicker.tsx";
 import { AutomationPrincipalCard } from "./AutomationPrincipalCard.tsx";
+import { useAutomationTokenPresenter } from "./automationTokenPresentationContextValue.ts";
 import { revealIssuedAutomationToken } from "./issuedAutomationToken.ts";
 import {
     automationPrincipalsQueryKey,
     refreshSecurityQueries,
 } from "./securityQueries.ts";
-import { OneTimeSecretPanel, SecuritySection } from "./SecurityUi.tsx";
+import { SecuritySection } from "./SecurityUi.tsx";
 
 /**
  * Renders cursor-paginated automation identities and one-time credential issuance.
@@ -41,9 +43,9 @@ import { OneTimeSecretPanel, SecuritySection } from "./SecurityUi.tsx";
  */
 export function AutomationSecuritySection() {
     const action = useExclusiveDashboardAction();
+    const automationTokenPresenter = useAutomationTokenPresenter();
     const client = useDashboardTrpcClient();
     const queryClient = useQueryClient();
-    const [issuedToken, setIssuedToken] = useState<string>();
     const principals = useInfiniteQuery(
         infiniteQueryOptions({
             initialPageParam: undefined as AutomationPrincipalCursor | undefined,
@@ -70,13 +72,23 @@ export function AutomationSecuritySection() {
         },
         onSubmit: async ({ formApi, value }) => {
             const result = await action.run(async () => {
+                const authentication =
+                    queryClient.getQueryData<AuthStatus>(authStatusQueryKey);
+                if (authentication?.state !== "authenticated") {
+                    throw new TypeError(
+                        "Authenticated automation-token owner unavailable"
+                    );
+                }
+                const ownerUserId = authentication.user.id;
                 const created = await client.mutation(
                     "automationSecurity.createPrincipal",
                     value
                 );
                 await revealIssuedAutomationToken(
                     created.token,
-                    (token) => setIssuedToken(token),
+                    (token) => {
+                        automationTokenPresenter.present(ownerUserId, token);
+                    },
                     () => refreshSecurityQueries(queryClient)
                 );
             });
@@ -91,18 +103,10 @@ export function AutomationSecuritySection() {
         <SecuritySection
             description="Create automation accounts and give each one only the permissions it needs. New access tokens are shown once."
             id="automation-security-heading"
+            icon={Bot}
             title="Automation access"
         >
             <Alert className="mb-4" message={action.error} />
-            {issuedToken !== undefined && (
-                <OneTimeSecretPanel
-                    id="new-principal-token"
-                    onDismiss={() => setIssuedToken(undefined)}
-                    title="New access token"
-                >
-                    {issuedToken}
-                </OneTimeSecretPanel>
-            )}
             <Form
                 className="border-primary-700 rounded-xl border p-4"
                 onSubmit={() => void principalForm.handleSubmit()}
@@ -125,7 +129,7 @@ export function AutomationSecuritySection() {
                                     onChange={(event) =>
                                         field.handleChange(event.currentTarget.value)
                                     }
-                                    placeholder="Example: openclaw-heartbeat"
+                                    placeholder="openclaw-heartbeat"
                                     required
                                     spellCheck={false}
                                     value={field.state.value}
@@ -147,7 +151,7 @@ export function AutomationSecuritySection() {
                                     onChange={(event) =>
                                         field.handleChange(event.currentTarget.value)
                                     }
-                                    placeholder="Example: OpenClaw heartbeat"
+                                    placeholder="OpenClaw heartbeat"
                                     required
                                     value={field.state.value}
                                 />
@@ -168,7 +172,7 @@ export function AutomationSecuritySection() {
                                     onChange={(event) =>
                                         field.handleChange(event.currentTarget.value)
                                     }
-                                    placeholder="Example: Daily heartbeat"
+                                    placeholder="Daily heartbeat"
                                     required
                                     value={field.state.value}
                                 />
@@ -192,7 +196,7 @@ export function AutomationSecuritySection() {
                         <Button
                             busy={action.busy || isSubmitting}
                             busyLabel="Creating…"
-                            className="mt-4"
+                            className="mt-4 w-full sm:w-auto"
                             disabled={!canSubmit}
                             type="submit"
                         >
