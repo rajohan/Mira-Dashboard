@@ -185,17 +185,6 @@ function SecurityAuditTable({
         }
     }
 
-    if (rows.length < minimumVirtualizedAuditRows) {
-        return (
-            <DataTable
-                columnWidths={auditColumnWidths}
-                label="Security audit events"
-                table={table}
-                tableClassName={auditTableClassName}
-            />
-        );
-    }
-
     let footer: ReactNode;
     if (loadingMore) {
         footer = (
@@ -215,6 +204,26 @@ function SecurityAuditTable({
                     Try again
                 </Button>
             </div>
+        );
+    } else if (hasMore && rows.length < minimumVirtualizedAuditRows) {
+        footer = (
+            <div className="p-3">
+                <Button onClick={onLoadMore} size="sm" variant="secondary">
+                    Load older events
+                </Button>
+            </div>
+        );
+    }
+
+    if (rows.length < minimumVirtualizedAuditRows) {
+        return (
+            <DataTable
+                columnWidths={auditColumnWidths}
+                footer={footer}
+                label="Security audit events"
+                table={table}
+                tableClassName={auditTableClassName}
+            />
         );
     }
 

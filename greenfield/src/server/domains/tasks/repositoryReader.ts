@@ -140,7 +140,10 @@ function taskFilterConditions(
                 )
             );
         conditions.push(
-            sql`instr(lower(${tasks.title} || char(10) || coalesce(${tasks.bodyMarkdown}, '')), lower(${filters.search})) > 0 OR ${exists(matchingLabel)}`
+            or(
+                sql`instr(lower(${tasks.title} || char(10) || coalesce(${tasks.bodyMarkdown}, '')), lower(${filters.search})) > 0`,
+                exists(matchingLabel)
+            )!
         );
     }
     if (filters.automation !== undefined) {

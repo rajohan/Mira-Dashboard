@@ -198,7 +198,7 @@ export const PaginatedAudit: Story = {
                 "securityAudit.listEvents": dashboardStoryResolver((input, callIndex) => {
                     const cursor = (input as { cursor?: unknown }).cursor;
                     if (cursor === undefined) {
-                        const page = paginatedAuditEvents.slice(0, 50);
+                        const page = paginatedAuditEvents.slice(0, 20);
                         const last = page.at(-1);
                         return {
                             events: page,
@@ -209,6 +209,17 @@ export const PaginatedAudit: Story = {
                         };
                     }
                     if (callIndex === 1) {
+                        const page = paginatedAuditEvents.slice(20, 50);
+                        const last = page.at(-1);
+                        return {
+                            events: page,
+                            nextCursor:
+                                last === undefined
+                                    ? undefined
+                                    : { id: last.id, occurredAtMs: last.occurredAtMs },
+                        };
+                    }
+                    if (callIndex === 2) {
                         throw new TypeError("Safe older-audit failure");
                     }
                     return { events: paginatedAuditEvents.slice(50) };
@@ -219,7 +230,15 @@ export const PaginatedAudit: Story = {
     },
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement);
-        const auditRegion = await canvas.findByRole("region", {
+        await userEvent.click(
+            await canvas.findByRole("button", { name: "Load older events" })
+        );
+        await waitFor(async () => {
+            await expect(
+                canvas.getByRole("region", { name: "Security audit events" })
+            ).toHaveAttribute("data-virtualized", "true");
+        });
+        const auditRegion = canvas.getByRole("region", {
             name: "Security audit events",
         });
         await waitFor(async () => {

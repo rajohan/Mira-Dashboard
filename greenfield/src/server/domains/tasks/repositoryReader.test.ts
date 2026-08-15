@@ -68,10 +68,12 @@ describe("task repository cron projection", () => {
         }
     });
 
-    test("matches case-insensitive search against task labels", async () => {
+    test("groups case-insensitive label search with other list boundaries", async () => {
         const database = await openFreshMigratedDatabase();
         const labelMatchId = uuid(400);
         const unrelatedId = uuid(401);
+        const filteredLabelMatchId = uuid(402);
+        const cursorLabelMatchId = uuid(403);
         try {
             database.orm
                 .insert(tasks)
@@ -92,6 +94,22 @@ describe("task repository cron projection", () => {
                         title: "Review worker",
                         updatedAt: new Date(1000),
                     },
+                    {
+                        createdAt: new Date(1000),
+                        id: filteredLabelMatchId,
+                        priority: "medium",
+                        status: "done",
+                        title: "Archive release",
+                        updatedAt: new Date(1000),
+                    },
+                    {
+                        createdAt: new Date(1000),
+                        id: cursorLabelMatchId,
+                        priority: "medium",
+                        status: "todo",
+                        title: "Prepare release",
+                        updatedAt: new Date(3000),
+                    },
                 ])
                 .run();
             database.orm
@@ -99,6 +117,8 @@ describe("task repository cron projection", () => {
                 .values([
                     { label: "Production-Ops", taskId: labelMatchId },
                     { label: "backend", taskId: unrelatedId },
+                    { label: "deployment-only", taskId: filteredLabelMatchId },
+                    { label: "deployment-only", taskId: cursorLabelMatchId },
                 ])
                 .run();
             const repository = createTaskRepository(
@@ -111,6 +131,18 @@ describe("task repository cron projection", () => {
                     .listTasks({ filters: { search: "DUCTION-o" }, limit: 10 })
                     .map(({ task }) => task.id)
             ).toEqual([labelMatchId]);
+            expect(
+                repository
+                    .listTasks({
+                        cursor: { id: labelMatchId, updatedAtMs: 2000 },
+                        filters: {
+                            search: "DEPLOYMENT-ONLY",
+                            statuses: ["todo"],
+                        },
+                        limit: 10,
+                    })
+                    .map(({ task }) => task.id)
+            ).toEqual([]);
         } finally {
             database.sqlite.close(true);
         }
