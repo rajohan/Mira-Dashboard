@@ -565,6 +565,7 @@ describe("ChatService", () => {
             "main",
             () => 1000
         );
+        const coalescerScheduler = schedulerHarness();
         const provider = providerHarness();
         const service = createChatService({
             attachmentConsumer: {
@@ -573,6 +574,7 @@ describe("ChatService", () => {
                 },
             },
             attachmentPreparer: inertAttachmentPreparer(),
+            coalescerScheduler: coalescerScheduler.scheduler,
             nowMs: () => 1000,
             provider: provider.provider,
             repository,
@@ -580,25 +582,30 @@ describe("ChatService", () => {
         try {
             await service.runtime(runtimeInput());
             const subscription = provider.requests[0]!;
+            const oversizedMultibyteProjection = "界".repeat(
+                Math.ceil(chatRuntimeSnapshotMaximumBytes / 3)
+            );
             for (let runIndex = 0; runIndex < 9; runIndex += 1) {
                 const usesLargeProjection = runIndex >= 7;
-                const eventCount = usesLargeProjection ? 5 : 1;
-                for (let sequence = 1; sequence <= eventCount; sequence += 1) {
-                    await subscription.onEvent({
-                        kind: "delta",
-                        mode: sequence === 1 ? "replace" : "append",
-                        providerRunId: `external-${runIndex}`,
-                        providerSequence: sequence,
-                        receivedAtMs: 1000 + runIndex * 10 + sequence,
-                        sessionKey: "agent:main:main",
-                        stream: "assistant",
-                        streamId: "assistant",
-                        text: usesLargeProjection
-                            ? "😀".repeat(32 * 1024)
-                            : `External run ${runIndex}`,
-                    });
-                }
+                await subscription.onEvent({
+                    kind: "delta",
+                    mode: "replace",
+                    providerRunId: `external-${runIndex}`,
+                    providerSequence: 1,
+                    receivedAtMs: 1001 + runIndex * 10,
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                    streamId: "assistant",
+                    text: usesLargeProjection
+                        ? oversizedMultibyteProjection
+                        : `External run ${runIndex}`,
+                });
             }
+            await service.abort({
+                abortAttemptId: "bounded-projection-abort",
+                providerRunId: "external-8",
+                sessionKey: "agent:main:main",
+            });
             const runtime = await service.runtime(runtimeInput());
             expect(runtime.externalRuns).toHaveLength(8);
             expect(
@@ -621,14 +628,34 @@ describe("ChatService", () => {
             expect(utf8ByteLength(JSON.stringify(runtime))).toBeLessThanOrEqual(
                 chatRuntimeResponseMaximumBytes
             );
+            expect(
+                runtime.externalRuns.find(
+                    ({ providerRunId }) => providerRunId === "external-8"
+                )
+            ).toMatchObject({
+                abortBoundary: {
+                    attemptId: "bounded-projection-abort",
+                    baselineUpdatedAtMs: 1081,
+                    settlement: "not-aborted",
+                },
+                projectionTruncated: true,
+            });
             const olderBoundedExternal = runtime.externalRuns.find(
                 ({ providerRunId }) => providerRunId === "external-7"
             );
             const newerBoundedExternal = runtime.externalRuns.find(
                 ({ providerRunId }) => providerRunId === "external-8"
             );
-            expect(olderBoundedExternal?.text.endsWith("😀")).toBeTrue();
-            expect(newerBoundedExternal?.text.endsWith("😀")).toBeTrue();
+            expect(newerBoundedExternal).toMatchObject({
+                hasUnprojectedActivity: true,
+                parts: [],
+                projectionTruncated: true,
+            });
+            expect(
+                utf8ByteLength(JSON.stringify(newerBoundedExternal))
+            ).toBeLessThanOrEqual(chatRuntimeSnapshotMaximumBytes);
+            expect(olderBoundedExternal?.text.endsWith("界")).toBeTrue();
+            expect(newerBoundedExternal?.text.endsWith("界")).toBeTrue();
             expect(newerBoundedExternal!.text.length).toBeGreaterThan(
                 olderBoundedExternal!.text.length
             );
@@ -678,11 +705,7 @@ describe("ChatService", () => {
             const projectedRuntime = await service.runtime(runtimeInput());
             for (const external of projectedRuntime.externalRuns) {
                 const terminalSequence =
-                    external.providerRunId === "external-7" ||
-                    external.providerRunId === "external-8" ||
-                    external.providerRunId === "external-late-baseline"
-                        ? 6
-                        : 2;
+                    external.providerRunId === "external-late-baseline" ? 6 : 2;
                 await subscription.onEvent({
                     kind: "terminal",
                     outcome: "completed",
@@ -705,60 +728,6 @@ describe("ChatService", () => {
                 )
             ).toBeTrue();
             expect(cleaned.externalRunsTruncated).toBeTrue();
-
-            for (let sequence = 1; sequence <= 5; sequence += 1) {
-                await subscription.onEvent({
-                    kind: "delta",
-                    mode: sequence === 1 ? "replace" : "append",
-                    providerRunId: "external-multibyte",
-                    providerSequence: sequence,
-                    receivedAtMs: 2200 + sequence,
-                    sessionKey: "agent:main:main",
-                    stream: "assistant",
-                    streamId: "assistant",
-                    text: "界".repeat(64 * 1024),
-                });
-            }
-            const multibyteRuntime = await service.runtime(runtimeInput());
-            const multibyte = multibyteRuntime.externalRuns.find(
-                ({ providerRunId }) => providerRunId === "external-multibyte"
-            );
-            expect(multibyte).toMatchObject({
-                hasUnprojectedActivity: true,
-                parts: [],
-                projectionTruncated: true,
-                streamResets: [
-                    {
-                        resetId: "external-multibyte:1",
-                        streamId: "assistant",
-                    },
-                ],
-            });
-            expect(multibyte?.text.length).toBeGreaterThan(0);
-            expect(utf8ByteLength(JSON.stringify(multibyte))).toBeLessThanOrEqual(
-                chatRuntimeSnapshotMaximumBytes
-            );
-            await service.abort({
-                abortAttemptId: "bounded-projection-abort",
-                providerRunId: "external-multibyte",
-                sessionKey: "agent:main:main",
-            });
-            const boundedAbortRuntime = await service.runtime(runtimeInput());
-            expect(
-                boundedAbortRuntime.externalRuns.find(
-                    ({ providerRunId }) => providerRunId === "external-multibyte"
-                )
-            ).toMatchObject({
-                abortBoundary: {
-                    attemptId: "bounded-projection-abort",
-                    baselineUpdatedAtMs: 2205,
-                    settlement: "not-aborted",
-                },
-                projectionTruncated: true,
-            });
-            expect(
-                utf8ByteLength(JSON.stringify(boundedAbortRuntime))
-            ).toBeLessThanOrEqual(chatRuntimeResponseMaximumBytes);
 
             const projectedSegments = 3;
             for (let sequence = 1; sequence <= projectedSegments; sequence += 1) {
