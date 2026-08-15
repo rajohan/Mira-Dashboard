@@ -121,15 +121,21 @@ export async function publishAuthenticationStatus(
  * current at the serialized write point.
  * @returns Whether the guarded status was published.
  */
+interface AuthenticationStatusPublicationOptions {
+    readonly bypassPublicationHold?: boolean;
+}
+
 export async function publishAuthenticationStatusIfCurrent(
     queryClient: QueryClient,
     status: AuthStatus,
-    isCurrent: () => boolean
+    isCurrent: () => boolean,
+    options: AuthenticationStatusPublicationOptions = {}
 ): Promise<boolean> {
+    const { bypassPublicationHold = false } = options;
     return runAuthenticationStatusTransition(queryClient, async () => {
         if (!isCurrent()) return false;
         const hold = authenticationStatusHolds.get(queryClient);
-        if (hold !== undefined) {
+        if (!bypassPublicationHold && hold !== undefined) {
             hold.dirty = true;
             return true;
         }

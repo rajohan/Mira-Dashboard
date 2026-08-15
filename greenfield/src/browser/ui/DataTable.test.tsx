@@ -129,7 +129,8 @@ describe("Dashboard data table and virtualizer", () => {
             "w-full",
             "min-w-0",
             "max-w-full",
-            "overflow-x-hidden",
+            "overflow-x-auto",
+            "@max-[66rem]:overflow-x-hidden",
             "rounded-lg",
             "border"
         );
@@ -167,7 +168,8 @@ describe("Dashboard data table and virtualizer", () => {
         expect(scrollRegion).toHaveAttribute("tabindex", "0");
         expect(scrollRegion).toHaveClass(
             "max-h-128",
-            "overflow-x-hidden",
+            "overflow-x-auto",
+            "@max-[66rem]:overflow-x-hidden",
             "overflow-y-auto",
             "[-webkit-overflow-scrolling:touch]",
             "focus-visible:ring-2"

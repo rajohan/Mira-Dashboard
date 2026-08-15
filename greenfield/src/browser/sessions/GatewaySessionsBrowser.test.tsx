@@ -231,6 +231,9 @@ describe("Gateway sessions browser", () => {
         try {
             const trigger = await requestPrimaryReset(user);
             const dialog = screen.getByRole("dialog", { name: "Reset session?" });
+            expect(dialog).toHaveTextContent(
+                `Exact session key: ${gatewayPrimarySessionKey}`
+            );
             await user.click(
                 within(dialog).getByRole("button", { name: "Reset session" })
             );
@@ -726,7 +729,14 @@ describe("Gateway sessions browser", () => {
         const rendered = renderBrowser(client);
 
         try {
-            expect(await screen.findByText("Truncated")).toBeTruthy();
+            const mobileSessions = await screen.findByRole("list", {
+                name: "Current OpenClaw sessions",
+            });
+            const mobileSession = within(mobileSessions).getByRole("listitem", {
+                name: `${incompleteSession.displayName} session`,
+            });
+            expect(within(mobileSession).getByText("Truncated")).toBeTruthy();
+            expect(within(mobileSession).getByText(incompleteSession.key)).toBeTruthy();
             expect(
                 screen.getByText(
                     "Some details were not shown: channel, model, modelProvider"

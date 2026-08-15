@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 
 import { createMemoryHistory } from "@tanstack/react-router";
 import type { TRPCRequestOptions } from "@trpc/client";
@@ -37,7 +37,10 @@ import {
 import { createDashboardRouter } from "../router.tsx";
 import { emptyNotificationListResult } from "../test/notifications.ts";
 import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
-import { createSecurityVerificationCoordinator } from "./securityVerificationCoordinator.ts";
+import {
+    createSecurityVerificationCoordinator,
+    type SecurityVerificationCoordinator,
+} from "./securityVerificationCoordinator.ts";
 import type { DashboardWebAuthnClient } from "./webauthn/webauthnClient.ts";
 
 const { act, fireEvent, render, screen, waitFor, within } =
@@ -206,6 +209,7 @@ interface TransportCall {
 class SecurityTransport implements DashboardTrpcTransport {
     auditEvents: SecurityAuditEventSummary[] = [];
     authStatus: AuthStatus = authenticatedStatus;
+    authStatusQueryHandler: (() => Promise<AuthStatus>) | undefined;
     readonly calls: TransportCall[] = [];
     credentials = new Map<string, AutomationCredentialSummary[]>();
     mutationHandler: (
@@ -241,7 +245,9 @@ class SecurityTransport implements DashboardTrpcTransport {
                 return Promise.resolve({ sessions: this.sessions });
             }
             case "auth.status": {
-                return Promise.resolve(this.authStatus);
+                return (
+                    this.authStatusQueryHandler?.() ?? Promise.resolve(this.authStatus)
+                );
             }
             case "notifications.list": {
                 return Promise.resolve(emptyNotificationListResult);
@@ -333,7 +339,8 @@ function renderAccountSecurity(
     transformCollections: (
         collections: DashboardBrowserCollections
     ) => DashboardBrowserCollections = (collections) => collections,
-    securityVerificationEnabled = false
+    securityVerificationEnabled = false,
+    onSecurityVerification?: (coordinator: SecurityVerificationCoordinator) => void
 ) {
     const queryClient = createDashboardQueryClient();
     queryClients.push(queryClient);
@@ -346,6 +353,9 @@ function renderAccountSecurity(
               return status === undefined ? undefined : authStatusCacheIdentity(status);
           })
         : undefined;
+    if (securityVerification !== undefined) {
+        onSecurityVerification?.(securityVerification);
+    }
     const trpcClient = createDashboardTrpcClient(transport, { securityVerification });
     const collections = transformCollections(
         createDashboardBrowserCollections(queryClient, trpcClient)
@@ -1081,10 +1091,31 @@ describe("Dashboard account security route", () => {
         expect(screen.queryByText(codes[0]!)).toBeNull();
     });
 
-    test("holds recently verified WebAuthn enrollment through response-driven step-up", async () => {
+    test("holds WebAuthn enrollment through step-up and reconciles a newer generation", async () => {
         const transport = new SecurityTransport(enabledSummary);
         const registration = Promise.withResolvers<WebAuthnRegistrationResponse>();
         const registrationStarted = Promise.withResolvers<void>();
+        const staleQueryReconciliation = Promise.withResolvers<AuthStatus>();
+        const stalePublicationReconciliation = Promise.withResolvers<AuthStatus>();
+        const currentReconciliation = Promise.withResolvers<AuthStatus>();
+        const reconciliationResponses = [
+            staleQueryReconciliation,
+            stalePublicationReconciliation,
+            currentReconciliation,
+        ] as const;
+        const secondReconciliationStarted = Promise.withResolvers<void>();
+        const thirdReconciliationStarted = Promise.withResolvers<void>();
+        const latestSession = Object.freeze({
+            ...rotatedSession,
+            id: "d".repeat(32),
+        });
+        const latestAuthenticatedStatus = Object.freeze({
+            ...authenticatedStatus,
+            session: latestSession,
+        }) satisfies AuthStatus;
+        let reconciliationRequestCount = 0;
+        let securityVerification: SecurityVerificationCoordinator | undefined;
+        let stepUpAttempts = 0;
         const registrationInputs: WebAuthnRegistrationOptions[] = [];
         const webAuthnClient: DashboardWebAuthnClient = Object.freeze({
             authenticate: () =>
@@ -1108,10 +1139,17 @@ describe("Dashboard account security route", () => {
         transport.mutationHandler = (path, input) => {
             if (path === "accountSecurity.stepUpTotp") {
                 expect(input).toEqual({ code: "123456" });
-                transport.authStatus = rotatedAuthenticatedStatus;
+                stepUpAttempts += 1;
+                transport.authStatus =
+                    stepUpAttempts < 3
+                        ? rotatedAuthenticatedStatus
+                        : latestAuthenticatedStatus;
                 return Promise.resolve({
                     method: "totp",
-                    session: { ...rotatedSession, authMethod: "totp" },
+                    session: {
+                        ...(stepUpAttempts < 3 ? rotatedSession : latestSession),
+                        authMethod: "totp",
+                    },
                     verifiedAtMs: timestampMs,
                 });
             }
@@ -1147,15 +1185,35 @@ describe("Dashboard account security route", () => {
             transport,
             webAuthnClient,
             (collections) => collections,
-            true
+            true,
+            (coordinator) => {
+                securityVerification = coordinator;
+            }
         );
         const userActions = userEvent.setup();
         const addSecurityKeyButton = await screen.findByRole("button", {
             name: "Add security key",
         });
+        if (securityVerification === undefined) {
+            throw new TypeError("Missing security verification coordinator");
+        }
+        const coordinator = securityVerification;
+        transport.authStatusQueryHandler = () => {
+            const requestIndex = reconciliationRequestCount;
+            const response = reconciliationResponses[requestIndex];
+            reconciliationRequestCount += 1;
+            if (requestIndex === 1) secondReconciliationStarted.resolve();
+            if (requestIndex === 2) thirdReconciliationStarted.resolve();
+            return (
+                response?.promise ??
+                Promise.reject(new TypeError("Unexpected auth status reconciliation"))
+            );
+        };
 
         await userActions.click(addSecurityKeyButton);
-        await userActions.type(screen.getByLabelText("Name"), credential.label);
+        fireEvent.change(screen.getByLabelText("Name"), {
+            target: { value: credential.label },
+        });
         await userActions.click(screen.getByRole("button", { name: "Continue" }));
 
         const verificationDialog = await screen.findByRole("dialog", {
@@ -1186,12 +1244,130 @@ describe("Dashboard account security route", () => {
         });
 
         expect(await screen.findByText(credential.label)).toBeTruthy();
-        await waitFor(() =>
-            expect(queryClient.getQueryData<AuthStatus>(authStatusQueryKey)).toEqual(
-                rotatedAuthenticatedStatus
-            )
+        await waitFor(() => expect(reconciliationRequestCount).toBe(1));
+        const staleGeneration = coordinator.getSnapshot().generation;
+        expect(coordinator.getSnapshot()).toMatchObject({
+            phase: "reconciling",
+            protectedInteraction: true,
+        });
+        async function submitTotpProof(generation: number): Promise<void> {
+            const dialog = await screen.findByRole("dialog", {
+                name: "Verify your session",
+            });
+            await userActions.click(
+                within(dialog).getByRole("button", {
+                    name: "Use authenticator app",
+                })
+            );
+            fireEvent.change(within(dialog).getByLabelText("Authenticator code"), {
+                target: { value: "123456" },
+            });
+            await userActions.click(
+                within(dialog).getByRole("button", {
+                    name: "Verify authenticator",
+                })
+            );
+            await waitFor(() =>
+                expect(coordinator.getSnapshot()).toMatchObject({
+                    generation,
+                    phase: "reconciling",
+                })
+            );
+        }
+
+        act(() => {
+            expect(coordinator.abortActiveFlow()).toBeTrue();
+            expect(coordinator.promptProactively("step_up_required")).toBeTrue();
+        });
+        expect(coordinator.getSnapshot()).toMatchObject({
+            generation: staleGeneration + 1,
+            phase: "prompting",
+            protectedInteraction: false,
+        });
+        await submitTotpProof(staleGeneration + 1);
+        expect(reconciliationRequestCount).toBe(1);
+
+        await act(async () => {
+            staleQueryReconciliation.resolve({ state: "anonymous" });
+            await secondReconciliationStarted.promise;
+        });
+        expect(reconciliationRequestCount).toBe(2);
+        expect(queryClient.getQueryData<AuthStatus>(authStatusQueryKey)).toEqual(
+            authenticatedStatus
         );
+        expect(coordinator.getSnapshot()).toMatchObject({
+            generation: staleGeneration + 1,
+            phase: "reconciling",
+        });
+        const publicationCancellationStarted = Promise.withResolvers<void>();
+        const publicationCancellationGate = Promise.withResolvers<void>();
+        const originalCancelQueries = queryClient.cancelQueries.bind(queryClient);
+        let blockNextAuthenticationPublication = true;
+        const cancelQueries = spyOn(queryClient, "cancelQueries").mockImplementation(
+            async (filters, options) => {
+                if (blockNextAuthenticationPublication) {
+                    blockNextAuthenticationPublication = false;
+                    expect(filters).toEqual({
+                        exact: true,
+                        queryKey: authStatusQueryKey,
+                    });
+                    await originalCancelQueries(filters, options);
+                    publicationCancellationStarted.resolve();
+                    await publicationCancellationGate.promise;
+                    return;
+                }
+                return originalCancelQueries(filters, options);
+            }
+        );
+        try {
+            await act(async () => {
+                stalePublicationReconciliation.resolve(rotatedAuthenticatedStatus);
+                await publicationCancellationStarted.promise;
+            });
+            expect(coordinator.getSnapshot()).toMatchObject({
+                generation: staleGeneration + 1,
+                phase: "cache-reset",
+            });
+
+            act(() => {
+                expect(coordinator.abortActiveFlow()).toBeTrue();
+                expect(coordinator.promptProactively("step_up_required")).toBeTrue();
+            });
+            expect(coordinator.getSnapshot()).toMatchObject({
+                generation: staleGeneration + 2,
+                phase: "prompting",
+            });
+            await submitTotpProof(staleGeneration + 2);
+            expect(reconciliationRequestCount).toBe(2);
+
+            await act(async () => {
+                publicationCancellationGate.resolve();
+                await thirdReconciliationStarted.promise;
+            });
+            expect(reconciliationRequestCount).toBe(3);
+            expect(queryClient.getQueryData<AuthStatus>(authStatusQueryKey)).toEqual(
+                authenticatedStatus
+            );
+            expect(coordinator.getSnapshot()).toMatchObject({
+                generation: staleGeneration + 2,
+                phase: "reconciling",
+            });
+        } finally {
+            publicationCancellationGate.resolve();
+            cancelQueries.mockRestore();
+        }
+
+        const currentFlowCompletion = coordinator.waitForCacheReset();
+        await act(async () => {
+            currentReconciliation.resolve(latestAuthenticatedStatus);
+            expect(await currentFlowCompletion).toBe("completed");
+        });
+        expect(queryClient.getQueryData<AuthStatus>(authStatusQueryKey)).toEqual(
+            latestAuthenticatedStatus
+        );
+        expect(coordinator.getSnapshot().phase).toBe("idle");
         expect(beginAttempts).toBe(2);
+        expect(stepUpAttempts).toBe(3);
         expect(registrationInputs).toEqual([registrationOptions]);
     });
 

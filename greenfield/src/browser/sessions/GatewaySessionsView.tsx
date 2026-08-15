@@ -94,10 +94,7 @@ export function GatewaySessionsView({
     const confirmation =
         pendingAction === undefined
             ? undefined
-            : gatewaySessionConfirmationCopy(
-                  pendingAction.action,
-                  pendingAction.session.displayName
-              );
+            : gatewaySessionConfirmationCopy(pendingAction.action, pendingAction.session);
     const stale = snapshot.source.freshness === "stale" || backgroundUnavailable;
     let reconciliationError: string | undefined;
     if (reconciliationState === "refreshing") {

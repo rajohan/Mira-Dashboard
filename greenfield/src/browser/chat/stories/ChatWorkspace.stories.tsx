@@ -2,7 +2,13 @@ import type { Meta, StoryObj } from "@storybook/tanstack-react";
 import { type ComponentProps, useState } from "react";
 import { expect, fireEvent, fn, userEvent, waitFor, within } from "storybook/test";
 
-import type { ChatDisplayMessage, ChatWorkspaceView } from "../chatTypes.ts";
+import type {
+    ChatDisplayMessage,
+    ChatMessagePart,
+    ChatToolPart,
+    ChatWorkspaceView,
+} from "../chatTypes.ts";
+import { mergeChatMessages } from "../chatViewProjection.ts";
 import { ChatWorkspace } from "../ChatWorkspace.tsx";
 
 const sessionKey = "agent:main:main";
@@ -176,6 +182,155 @@ function view(overrides: Partial<ChatWorkspaceView> = {}): ChatWorkspaceView {
         sessions: visibleSessions,
         ...overrides,
     };
+}
+
+function projectionCoverageMessage(
+    id: string,
+    role: ChatDisplayMessage["role"],
+    sequence: number,
+    parts: readonly ChatMessagePart[],
+    overrides: Partial<ChatDisplayMessage> = {}
+): ChatDisplayMessage {
+    return {
+        attachments: [],
+        id,
+        parts,
+        role,
+        sequence,
+        sessionKey,
+        ...overrides,
+    };
+}
+
+function projectionCoverageExternal(
+    id: string,
+    providerRunId: string,
+    sequence: number,
+    parts: readonly ChatMessagePart[],
+    overrides: Partial<ChatDisplayMessage> = {}
+): ChatDisplayMessage {
+    return projectionCoverageMessage(
+        `external:${providerRunId}:${id}`,
+        "assistant",
+        sequence,
+        parts,
+        { providerRunId, ...overrides }
+    );
+}
+
+function projectionCoverageTool(
+    callId: string,
+    overrides: Partial<ChatToolPart> = {}
+): ChatToolPart {
+    return {
+        callId,
+        kind: "tool",
+        name: "shell",
+        status: "completed",
+        ...overrides,
+    };
+}
+
+async function expectChatProjectionCoverageMatrix(): Promise<void> {
+    const providerRunId = "provider:storybook-projection-coverage";
+    const synthetic = { callIdSource: "synthetic" as const };
+
+    const unanchoredCanonical = projectionCoverageMessage(
+        "canonical:unanchored",
+        "assistant",
+        10,
+        [
+            { kind: "thinking", status: "complete", text: "Plan" },
+            projectionCoverageTool("unanchored-tool", { status: "running" }),
+            { activity: "complete", kind: "control", text: "Done", tone: "muted" },
+            { kind: "text", text: "Answer" },
+        ],
+        { providerRunId }
+    );
+    const unanchoredRuntime = projectionCoverageExternal("unanchored", providerRunId, 9, [
+        { kind: "thinking", status: "running", text: "Plan expanded" },
+        projectionCoverageTool("unanchored-tool", {
+            output: "done",
+            status: "completed",
+        }),
+        { activity: "running", kind: "control", text: "Done", tone: "warning" },
+        { kind: "text", text: "Answer" },
+        { kind: "text", text: "Live prefix" },
+    ]);
+    const unanchored = mergeChatMessages(
+        [unanchoredCanonical],
+        [unanchoredRuntime],
+        new Set()
+    );
+    await expect(unanchored[0]?.parts).toMatchObject([
+        { kind: "text", text: "Live prefix" },
+        { kind: "thinking", status: "complete", text: "Plan expanded" },
+        { kind: "tool", output: "done", status: "completed" },
+        { activity: "complete", kind: "control", tone: "warning" },
+        { kind: "text", text: "Answer" },
+    ]);
+
+    const steer = projectionCoverageMessage("coverage-steer", "user", 2, [
+        { kind: "text", text: "Adjust the run" },
+    ]);
+    const anchoredCanonical = projectionCoverageMessage(
+        "canonical:anchored",
+        "assistant",
+        8,
+        [
+            { kind: "thinking", status: "complete", text: "BeforeAfter" },
+            projectionCoverageTool("history-tool", {
+                ...synthetic,
+                input: { command: "continue" },
+                output: "done",
+            }),
+            {
+                activity: "complete",
+                kind: "control",
+                text: "Finished",
+                tone: "muted",
+            },
+            { kind: "text", text: "Canonical longer" },
+        ],
+        { providerRunId }
+    );
+    const beforeAnchor = projectionCoverageExternal("before-anchor", providerRunId, 1, [
+        { kind: "thinking", status: "running", text: "Before" },
+    ]);
+    const afterAnchor = projectionCoverageExternal(
+        "after-anchor",
+        providerRunId,
+        3,
+        [
+            { kind: "thinking", status: "running", text: "After" },
+            projectionCoverageTool("runtime-tool", {
+                ...synthetic,
+                input: { command: "continue" },
+            }),
+            {
+                activity: "running",
+                kind: "control",
+                text: "Finished",
+                tone: "warning",
+            },
+            { kind: "text", text: "Canonical" },
+            { kind: "text", text: " longer" },
+            { kind: "text", text: "Unmatched anchored detail" },
+        ],
+        { precedingUserMessageIdAnchor: steer.id }
+    );
+    const anchored = mergeChatMessages(
+        [steer, anchoredCanonical],
+        [afterAnchor, beforeAnchor],
+        new Set()
+    );
+    await expect(anchored.map(({ id }) => id)).toEqual([
+        beforeAnchor.id,
+        steer.id,
+        afterAnchor.id,
+        anchoredCanonical.id,
+    ]);
+    await expect(anchored.at(-1)?.parts).toEqual([]);
 }
 
 function InteractiveChatWorkspace(
@@ -1313,6 +1468,7 @@ export const ToolDiffCoverageMatrix: Story = {
         }),
     },
     play: async ({ canvasElement }) => {
+        await expectChatProjectionCoverageMatrix();
         await expect(canvasElement.querySelectorAll("[data-tool-status]")).toHaveLength(
             35
         );

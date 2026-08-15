@@ -25,7 +25,7 @@ import {
     authStatusCacheIdentity,
     authStatusQueryKey,
     holdAuthenticationStatusPublication,
-    publishAuthenticationStatus,
+    publishAuthenticationStatusIfCurrent,
 } from "../auth/authQueries.ts";
 import type { DashboardRouter } from "../router.tsx";
 import { Alert } from "../ui/Alert.tsx";
@@ -296,7 +296,8 @@ export function GlobalSecurityVerification({
     });
     const publicationHolds = useRef(new Map<number, AuthenticationPublicationRelease>());
     const reconciliationStatus = useRef(new Map<number, AuthStatus>());
-    const reconciliationInFlight = useRef(false);
+    const reconciliationInFlight = useRef<number | undefined>(undefined);
+    const queuedReconciliation = useRef<(() => Promise<void>) | undefined>(undefined);
     const dismissedVerificationFingerprint = useRef<string | undefined>(undefined);
     const [codeSelection, setCodeSelection] = useState<
         GenerationValue<"recovery" | "totp"> | undefined
@@ -414,8 +415,19 @@ export function GlobalSecurityVerification({
     }
 
     async function reconcileAuthenticationStatus(generation: number): Promise<void> {
-        if (reconciliationInFlight.current) return;
-        reconciliationInFlight.current = true;
+        if (reconciliationInFlight.current !== undefined) {
+            const currentSnapshot = coordinator.getSnapshot();
+            if (
+                reconciliationInFlight.current !== generation &&
+                currentSnapshot.generation === generation &&
+                currentSnapshot.phase === "reconciling"
+            ) {
+                queuedReconciliation.current = () =>
+                    reconcileAuthenticationStatus(generation);
+            }
+            return;
+        }
+        reconciliationInFlight.current = generation;
         setReconciliationBusy(true);
         setReconciliationFailureState(undefined);
         try {
@@ -439,7 +451,28 @@ export function GlobalSecurityVerification({
             ) {
                 return;
             }
-            await publishAuthenticationStatus(queryClient, status);
+            const statusPublished = await publishAuthenticationStatusIfCurrent(
+                queryClient,
+                status,
+                () => {
+                    const publicationSnapshot = coordinator.getSnapshot();
+                    return (
+                        publicationSnapshot.generation === generation &&
+                        publicationSnapshot.phase === "cache-reset"
+                    );
+                },
+                { bypassPublicationHold: true }
+            );
+            const publicationSnapshot = coordinator.getSnapshot();
+            if (
+                !statusPublished ||
+                publicationSnapshot.generation !== generation ||
+                publicationSnapshot.phase !== "cache-reset"
+            ) {
+                reconciliationStatus.current.delete(generation);
+                await releasePublicationHold(generation, false);
+                return;
+            }
             const completion = await coordinator.waitForCacheReset();
             if (completion !== "completed") {
                 await releasePublicationHold(generation, false);
@@ -459,8 +492,14 @@ export function GlobalSecurityVerification({
                 });
             }
         } finally {
-            reconciliationInFlight.current = false;
-            setReconciliationBusy(false);
+            reconciliationInFlight.current = undefined;
+            const reconcileQueuedGeneration = queuedReconciliation.current;
+            queuedReconciliation.current = undefined;
+            if (reconcileQueuedGeneration === undefined) {
+                setReconciliationBusy(false);
+            } else {
+                void reconcileQueuedGeneration();
+            }
         }
     }
 

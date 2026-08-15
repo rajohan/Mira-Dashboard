@@ -109,7 +109,8 @@ describe("Gateway sessions view", () => {
         );
         expect(table.parentElement).toHaveClass(
             "dashboard-data-table-container",
-            "overflow-x-hidden",
+            "overflow-x-auto",
+            "@max-[66rem]:overflow-x-hidden",
             "hidden",
             "@min-[66rem]:block"
         );

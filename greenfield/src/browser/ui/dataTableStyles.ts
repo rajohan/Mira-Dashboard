@@ -7,7 +7,7 @@ export const dashboardDataTableClassNames = Object.freeze({
         "dashboard-data-table-query-container @container w-full max-w-full min-w-0",
     row: "dashboard-data-table-row border-primary-700 border-b text-sm [&:last-child>td]:border-b-0 @max-[66rem]:block @max-[66rem]:w-full @max-[66rem]:last:border-b-0",
     scrollContainer:
-        "dashboard-data-table-container border-primary-700 w-full max-w-full min-w-0 overflow-x-hidden rounded-lg border @max-[66rem]:border-0",
+        "dashboard-data-table-container border-primary-700 w-full max-w-full min-w-0 overflow-x-auto rounded-lg border @max-[66rem]:overflow-x-hidden @max-[66rem]:border-0",
     spacerCell:
         "dashboard-data-table-spacer-cell border-0 p-0 @max-[66rem]:block @max-[66rem]:w-full",
     spacerRow:

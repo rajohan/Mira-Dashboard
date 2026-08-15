@@ -157,9 +157,17 @@ function GatewaySessionMobileCard({
                         </Badge>
                         {session.hasActiveRun && <Badge variant="success">Running</Badge>}
                     </div>
-                    <p className="text-primary-100 mt-2 line-clamp-2 text-sm font-medium wrap-break-word">
-                        {session.displayName}
-                    </p>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <p className="text-primary-100 line-clamp-2 min-w-0 flex-1 text-sm font-medium wrap-break-word">
+                            {session.displayName}
+                        </p>
+                        {session.displayNameTruncated === true && (
+                            <Badge variant="warning">Truncated</Badge>
+                        )}
+                    </div>
+                    <Text className="mt-1 font-mono wrap-anywhere" size="sm" tone="muted">
+                        {session.key}
+                    </Text>
                 </div>
                 <div className="shrink-0">
                     <SessionActionMenu

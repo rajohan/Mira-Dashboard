@@ -704,7 +704,8 @@ describe("DatabaseRoute", () => {
             });
             expect(databases).toHaveClass(
                 "dashboard-data-table-container",
-                "overflow-x-hidden"
+                "overflow-x-auto",
+                "@max-[66rem]:overflow-x-hidden"
             );
             expect(within(databases).getByText("mira_app")).toBeVisible();
             expect(within(databases).getByText("1,234")).toBeVisible();

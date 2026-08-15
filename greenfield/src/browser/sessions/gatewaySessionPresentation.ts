@@ -191,14 +191,14 @@ export interface GatewaySessionConfirmationCopy {
 /** @returns Exact confirmation copy for one explicit upstream control. */
 export function gatewaySessionConfirmationCopy(
     action: GatewaySessionAction,
-    displayName: string
+    session: Pick<GatewaySession, "displayName" | "key">
 ): GatewaySessionConfirmationCopy {
     switch (action) {
         case "compact": {
             return {
                 confirmLabel: "Compact session",
                 danger: false,
-                description: `Compact older context for “${displayName}”? This keeps the session but reduces how much previous conversation it carries forward.`,
+                description: `Compact older context for “${session.displayName}”? This keeps the session but reduces how much previous conversation it carries forward. Exact session key: ${session.key}`,
                 title: "Compact session?",
             };
         }
@@ -206,7 +206,7 @@ export function gatewaySessionConfirmationCopy(
             return {
                 confirmLabel: "Reset session",
                 danger: true,
-                description: `Reset “${displayName}”? Its active context will be replaced before the next run.`,
+                description: `Reset “${session.displayName}”? Its active context will be replaced before the next run. Exact session key: ${session.key}`,
                 title: "Reset session?",
             };
         }
@@ -214,7 +214,7 @@ export function gatewaySessionConfirmationCopy(
             return {
                 confirmLabel: "Delete session",
                 danger: true,
-                description: `Delete “${displayName}” and its OpenClaw transcript? This cannot be undone from the Dashboard.`,
+                description: `Delete “${session.displayName}” and its OpenClaw transcript? This cannot be undone from the Dashboard. Exact session key: ${session.key}`,
                 title: "Delete session?",
             };
         }
