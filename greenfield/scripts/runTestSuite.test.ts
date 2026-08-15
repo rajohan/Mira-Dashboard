@@ -410,14 +410,14 @@ describe("batched Bun and browser runner", () => {
             browserTimings
         );
         expect(bunPlans.flatMap(({ testFiles }) => testFiles)).toHaveLength(508);
-        expect(browserPlans.flatMap(({ testFiles }) => testFiles)).toHaveLength(185);
+        expect(browserPlans.flatMap(({ testFiles }) => testFiles)).toHaveLength(188);
         expect(new Set(bunPlans.flatMap(({ testFiles }) => testFiles)).size).toBe(508);
         expect(new Set(browserPlans.flatMap(({ testFiles }) => testFiles)).size).toBe(
-            185
+            188
         );
         expect(Math.max(...bunPlans.map(({ testFiles }) => testFiles.length))).toBe(170);
         expect(Math.max(...browserPlans.map(({ testFiles }) => testFiles.length))).toBe(
-            62
+            63
         );
     });
 

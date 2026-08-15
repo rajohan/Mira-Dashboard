@@ -381,6 +381,9 @@ describe("Dashboard task route", () => {
             filteredListRequest.resolve({ tasks: [] });
             await filteredListRequest.promise;
         });
+        expect(
+            await screen.findByRole("heading", { name: "No matching tasks" })
+        ).toBeTruthy();
     });
 
     test("retains explicit retry for an initial list failure", async () => {

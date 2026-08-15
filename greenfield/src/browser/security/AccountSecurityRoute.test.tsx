@@ -40,7 +40,8 @@ import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
 import { createSecurityVerificationCoordinator } from "./securityVerificationCoordinator.ts";
 import type { DashboardWebAuthnClient } from "./webauthn/webauthnClient.ts";
 
-const { act, render, screen, waitFor, within } = await import("@testing-library/react");
+const { act, fireEvent, render, screen, waitFor, within } =
+    await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
 const userEvent = userEventModule.default;
 
@@ -391,9 +392,10 @@ async function waitForDialogExit(): Promise<void> {
     expect(screen.queryByRole("dialog", { hidden: true })).toBeNull();
 }
 
-async function submitGlobalTotpProofAndWaitForToken(
+async function submitGlobalProofAndWaitForToken(
     queryClient: ReturnType<typeof createDashboardQueryClient>,
-    operationReplayed: Promise<void>
+    operationReplayed: Promise<void>,
+    submitButtonName: "Use recovery code" | "Verify authenticator" | "Verify password"
 ): Promise<void> {
     const refreshCompletion = Promise.withResolvers<void>();
     let replayed = false;
@@ -426,7 +428,7 @@ async function submitGlobalTotpProofAndWaitForToken(
     });
     await act(async () => {
         try {
-            screen.getByRole("button", { name: "Verify authenticator" }).click();
+            screen.getByRole("button", { name: submitButtonName }).click();
             await replayReadiness;
             await refreshCompletion.promise;
         } finally {
@@ -514,6 +516,7 @@ describe("Dashboard account security route", () => {
             recentAuth: { mfa: staleVerification, password: staleVerification },
         };
         const paths: string[] = [];
+        let totpProofAttempts = 0;
         transport.mutationHandler = (path, input) => {
             paths.push(path);
             switch (path) {
@@ -527,6 +530,15 @@ describe("Dashboard account security route", () => {
                 }
                 case "accountSecurity.stepUpTotp": {
                     expect(input).toEqual({ code: "123456" });
+                    totpProofAttempts += 1;
+                    if (totpProofAttempts === 1) {
+                        throw Object.assign(
+                            new Error("Safe authenticator proof failure"),
+                            {
+                                data: { code: "UNAUTHORIZED" },
+                            }
+                        );
+                    }
                     return Promise.resolve({
                         method: "totp",
                         session: { ...currentSession, authMethod: "totp" },
@@ -596,11 +608,11 @@ describe("Dashboard account security route", () => {
         const passwordVerificationDialog = screen.getByRole("dialog", {
             name: "Verify current password",
         });
-        await userActions.type(
+        fireEvent.change(
             within(passwordVerificationDialog).getByLabelText(
                 "Password to confirm your identity"
             ),
-            "password proof"
+            { target: { value: "password proof" } }
         );
         await userActions.click(
             within(passwordVerificationDialog).getByRole("button", {
@@ -619,9 +631,33 @@ describe("Dashboard account security route", () => {
                 name: "Use authenticator app",
             })
         );
-        await userActions.type(
+        fireEvent.change(
             within(mfaVerificationDialog).getByLabelText("Authenticator code"),
-            "123456"
+            { target: { value: "123456" } }
+        );
+        await userActions.click(
+            within(mfaVerificationDialog).getByRole("button", {
+                name: "Verify authenticator",
+            })
+        );
+        expect(
+            await within(mfaVerificationDialog).findByText(
+                "The credentials or session are no longer valid."
+            )
+        ).toBeTruthy();
+        await userActions.click(
+            within(mfaVerificationDialog).getByRole("button", {
+                name: "Choose another method",
+            })
+        );
+        await userActions.click(
+            within(mfaVerificationDialog).getByRole("button", {
+                name: "Use authenticator app",
+            })
+        );
+        fireEvent.change(
+            within(mfaVerificationDialog).getByLabelText("Authenticator code"),
+            { target: { value: "123456" } }
         );
         await userActions.click(
             within(mfaVerificationDialog).getByRole("button", {
@@ -640,10 +676,9 @@ describe("Dashboard account security route", () => {
                 name: "Use recovery code",
             })
         );
-        await userActions.type(
-            within(mfaVerificationDialog).getByLabelText("Recovery code"),
-            recoveryCodes()[0]!
-        );
+        fireEvent.change(within(mfaVerificationDialog).getByLabelText("Recovery code"), {
+            target: { value: recoveryCodes()[0]! },
+        });
         await userActions.click(
             within(mfaVerificationDialog).getByRole("button", {
                 name: "Use recovery code",
@@ -731,6 +766,7 @@ describe("Dashboard account security route", () => {
 
         expect(paths).toEqual([
             "accountSecurity.reauthenticatePassword",
+            "accountSecurity.stepUpTotp",
             "accountSecurity.stepUpTotp",
             "accountSecurity.stepUpRecovery",
             "accountSecurity.beginWebAuthnStepUp",
@@ -1173,6 +1209,15 @@ describe("Dashboard account security route", () => {
                     expect(input).toEqual({});
                     return Promise.resolve({ recoveryCodes: codes });
                 }
+                case "accountSecurity.disableMfa": {
+                    expect(input).toEqual({ password: "current password" });
+                    transport.summary = disabledSummary;
+                    return Promise.resolve({
+                        disabled: true,
+                        revokedSessions: 1,
+                        session: currentSession,
+                    });
+                }
                 default: {
                     return Promise.reject(new TypeError(`Unexpected mutation: ${path}`));
                 }
@@ -1218,6 +1263,29 @@ describe("Dashboard account security route", () => {
         );
         await waitForDialogExit();
         expect(screen.queryByText(codes[0]!)).toBeNull();
+
+        await userActions.click(screen.getByRole("button", { name: "Disable" }));
+        let disableDialog = screen.getByRole("dialog", {
+            name: "Disable two-step login",
+        });
+        await userActions.click(
+            within(disableDialog).getByRole("button", { name: "Cancel" })
+        );
+        await waitForDialogExit();
+
+        await userActions.click(screen.getByRole("button", { name: "Disable" }));
+        disableDialog = screen.getByRole("dialog", { name: "Disable two-step login" });
+        fireEvent.change(within(disableDialog).getByLabelText("Current password"), {
+            target: { value: "current password" },
+        });
+        await userActions.click(
+            within(disableDialog).getByRole("button", { name: "Turn off MFA" })
+        );
+        await waitForDialogExit();
+        await screen.findByText("Not enabled");
+        expect(
+            transport.calls.filter((call) => call.path === "accountSecurity.disableMfa")
+        ).toHaveLength(1);
     });
 
     test("confirms destructive automation actions before mutation", async () => {
@@ -1427,17 +1495,63 @@ describe("Dashboard account security route", () => {
 
     test("preserves a created automation token through stale-auth step-up and session rotation", async () => {
         const transport = new SecurityTransport();
+        transport.summary = {
+            ...enabledSummary,
+            mfa: {
+                ...enabledSummary.mfa,
+                methods: ["recovery", "totp", "webauthn"],
+                webAuthnCredentials: [
+                    {
+                        backedUp: false,
+                        createdAtMs: timestampMs,
+                        deviceType: "singleDevice",
+                        id: "019fd978-1e89-7819-b845-0c843bec6937",
+                        label: "Security key",
+                        transports: ["usb"],
+                        usable: true,
+                    },
+                ],
+            },
+        };
+        const webAuthnInputs: WebAuthnAuthenticationOptions[] = [];
+        const webAuthnClient: DashboardWebAuthnClient = Object.freeze({
+            authenticate: (options: WebAuthnAuthenticationOptions) => {
+                webAuthnInputs.push(options);
+                return Promise.resolve(authenticationResponse);
+            },
+            register: () => Promise.reject(new TypeError("Unexpected registration")),
+        });
         const token = `${automationCredential.prefix}.${"d".repeat(64)}`;
         const operationReplayed = Promise.withResolvers<void>();
         let createAttempts = 0;
         transport.mutationHandler = (path, input) => {
             if (path === "accountSecurity.stepUpTotp") {
                 expect(input).toEqual({ code: "123456" });
+                throw Object.assign(new Error("Safe authenticator proof failure"), {
+                    data: { code: "UNAUTHORIZED" },
+                });
+            }
+            if (path === "accountSecurity.stepUpRecovery") {
+                expect(input).toEqual({ code: recoveryCodes()[0] });
                 transport.authStatus = rotatedAuthenticatedStatus;
                 return Promise.resolve({
-                    method: "totp",
-                    session: { ...rotatedSession, authMethod: "totp" },
+                    method: "recovery",
+                    recoveryCodesRemaining: 9,
+                    session: { ...rotatedSession, authMethod: "recovery" },
                     verifiedAtMs: timestampMs,
+                });
+            }
+            if (path === "accountSecurity.beginWebAuthnStepUp") {
+                expect(input).toEqual({});
+                return Promise.resolve({
+                    expiresAtMs: timestampMs + 60_000,
+                    options: authenticationOptions,
+                });
+            }
+            if (path === "accountSecurity.stepUpWebAuthn") {
+                expect(input).toEqual({ response: authenticationResponse });
+                throw Object.assign(new Error("Safe security-key proof failure"), {
+                    data: { code: "UNAUTHORIZED" },
                 });
             }
             expect(path).toBe("automationSecurity.createPrincipal");
@@ -1464,7 +1578,7 @@ describe("Dashboard account security route", () => {
         };
         const queryClient = renderAccountSecurity(
             transport,
-            unexpectedWebAuthnClient,
+            webAuthnClient,
             (collections) => collections,
             true
         );
@@ -1499,13 +1613,47 @@ describe("Dashboard account security route", () => {
                 name: "Use authenticator app",
             })
         );
-        await userActions.type(
+        fireEvent.change(
             within(verificationDialog).getByLabelText("Authenticator code"),
-            "123456"
+            { target: { value: "123456" } }
         );
-        await submitGlobalTotpProofAndWaitForToken(
+        await userActions.click(
+            within(verificationDialog).getByRole("button", {
+                name: "Verify authenticator",
+            })
+        );
+        expect(
+            await within(verificationDialog).findByText(
+                "The credentials or session are no longer valid."
+            )
+        ).toBeTruthy();
+        await userActions.click(
+            within(verificationDialog).getByRole("button", {
+                name: "Choose another method",
+            })
+        );
+        await userActions.click(
+            within(verificationDialog).getByRole("button", {
+                name: "Use security key",
+            })
+        );
+        expect(
+            await within(verificationDialog).findByText(
+                "The credentials or session are no longer valid."
+            )
+        ).toBeTruthy();
+        await userActions.click(
+            within(verificationDialog).getByRole("button", {
+                name: "Use recovery code",
+            })
+        );
+        fireEvent.change(within(verificationDialog).getByLabelText("Recovery code"), {
+            target: { value: recoveryCodes()[0] },
+        });
+        await submitGlobalProofAndWaitForToken(
             queryClient,
-            operationReplayed.promise
+            operationReplayed.promise,
+            "Use recovery code"
         );
 
         const tokenDialog = await screen.findByRole("dialog", {
@@ -1516,6 +1664,7 @@ describe("Dashboard account security route", () => {
             rotatedAuthenticatedStatus
         );
         expect(createAttempts).toBe(2);
+        expect(webAuthnInputs).toEqual([authenticationOptions]);
         expect(cachedData(queryClient)).not.toContain(token);
         await userActions.click(
             within(tokenDialog).getByRole("button", { name: "Dismiss" })
@@ -1526,7 +1675,7 @@ describe("Dashboard account security route", () => {
     }, 15_000);
 
     test("preserves a rotated automation token through stale-auth step-up and session rotation", async () => {
-        const transport = new SecurityTransport();
+        const transport = new SecurityTransport(disabledSummary);
         const replacementLabel = "August rotation";
         const replacementCredential = Object.freeze({
             ...automationCredential,
@@ -1542,12 +1691,11 @@ describe("Dashboard account security route", () => {
         transport.principals = [automationPrincipal];
         transport.credentials.set(automationPrincipal.id, [automationCredential]);
         transport.mutationHandler = (path, input) => {
-            if (path === "accountSecurity.stepUpTotp") {
-                expect(input).toEqual({ code: "123456" });
+            if (path === "accountSecurity.reauthenticatePassword") {
+                expect(input).toEqual({ password: "current password" });
                 transport.authStatus = rotatedAuthenticatedStatus;
                 return Promise.resolve({
-                    method: "totp",
-                    session: { ...rotatedSession, authMethod: "totp" },
+                    session: rotatedSession,
                     verifiedAtMs: timestampMs,
                 });
             }
@@ -1601,20 +1749,15 @@ describe("Dashboard account security route", () => {
         );
 
         const verificationDialog = await screen.findByRole("dialog", {
-            name: "Verify your session",
+            name: "Verify current password",
         });
-        await userActions.click(
-            within(verificationDialog).getByRole("button", {
-                name: "Use authenticator app",
-            })
-        );
-        await userActions.type(
-            within(verificationDialog).getByLabelText("Authenticator code"),
-            "123456"
-        );
-        await submitGlobalTotpProofAndWaitForToken(
+        fireEvent.change(within(verificationDialog).getByLabelText("Current password"), {
+            target: { value: "current password" },
+        });
+        await submitGlobalProofAndWaitForToken(
             queryClient,
-            operationReplayed.promise
+            operationReplayed.promise,
+            "Verify password"
         );
 
         const tokenDialog = await screen.findByRole("dialog", {
