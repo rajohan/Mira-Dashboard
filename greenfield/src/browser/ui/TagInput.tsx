@@ -82,7 +82,7 @@ export function TagInput({
 
         if (event.key === "Enter" && activeSuggestion !== null) return;
 
-        if (event.key === " " || event.key === "Enter") {
+        if (event.key === "Enter") {
             event.preventDefault();
             commitDraft(event.currentTarget.value);
             return;
@@ -206,7 +206,7 @@ export function TagInput({
                                     disabled
                                     value=""
                                 >
-                                    Press Space or Enter to create “{draft.trim()}”
+                                    Press Enter to create “{draft.trim()}”
                                 </ComboboxOption>
                             ) : (
                                 availableSuggestions.map((suggestion) => (

@@ -22,7 +22,7 @@ function ControlledTagInput({
     return (
         <div className="w-full max-w-md">
             <FormField
-                description="Press Space or Enter after each label."
+                description="Press Enter after each label."
                 disabled={properties.disabled}
                 error={properties.invalid ? "Review the task labels." : undefined}
                 label="Labels"
@@ -77,12 +77,19 @@ export const Default: Story = {
         const canvas = within(canvasElement);
         const input = canvas.getByRole("combobox", { name: "Labels" });
 
-        await userEvent.type(input, "urgent ");
-        await expect(canvas.getByRole("button", { name: "Remove urgent" })).toBeVisible();
+        await userEvent.type(input, "urgent review");
+        await expect(
+            canvas.queryByRole("button", { name: "Remove urgent" })
+        ).not.toBeInTheDocument();
+        await expect(input).toHaveValue("urgent review");
+        await userEvent.keyboard("{Enter}");
+        await expect(
+            canvas.getByRole("button", { name: "Remove urgent review" })
+        ).toBeVisible();
         await expect(args.onChange).toHaveBeenLastCalledWith([
             "frontend",
             "needs review",
-            "urgent",
+            "urgent review",
         ]);
 
         await userEvent.click(

@@ -1431,7 +1431,8 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
 
     async #persistExternalRuntimeSnapshot(
         sessionKey: string,
-        drainDirtySessions = true
+        drainDirtySessions = true,
+        minimumUpdatedAtMs = 0
     ): Promise<void> {
         if (drainDirtySessions) {
             for (const reducedSessionKey of this.#externalCapacityReductionSessions) {
@@ -1444,7 +1445,7 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
         const runs = [...(this.#externalRuns.get(sessionKey)?.values() ?? [])].toSorted(
             compareExternalRuns
         );
-        const updatedAtMs =
+        const snapshotUpdatedAtMs =
             runs.length === 0
                 ? this.#nowMs()
                 : Math.max(
@@ -1454,6 +1455,7 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
                           run.abortBoundary?.attemptedAtMs ?? 0,
                       ])
                   );
+        const updatedAtMs = Math.max(minimumUpdatedAtMs, snapshotUpdatedAtMs);
         let persisted = false;
         try {
             const metadata = this.#externalObservationKinds.get(sessionKey);
@@ -2786,7 +2788,11 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
             settlement: "pending" as const,
         };
         this.#storeExternalRun(
-            boundExternalRunProjection({ ...externalRun, abortBoundary })
+            boundExternalRunProjection({
+                ...externalRun,
+                abortBoundary,
+                updatedAtMs: this.#nextExternalSnapshotUpdatedAtMs(input.sessionKey),
+            })
         );
         await this.#persistExternalRuntimeSnapshot(input.sessionKey);
         const currentBoundaryRun = (): ChatExternalRun | undefined => {
@@ -2813,8 +2819,15 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
             );
             const current = currentBoundaryRun();
             if (acknowledgement.aborted && current !== undefined) {
+                const tombstoneUpdatedAtMs = this.#nextExternalSnapshotUpdatedAtMs(
+                    input.sessionKey
+                );
                 this.#deleteExternalRun(input.sessionKey, input.providerRunId);
-                await this.#persistExternalRuntimeSnapshot(input.sessionKey);
+                await this.#persistExternalRuntimeSnapshot(
+                    input.sessionKey,
+                    true,
+                    tombstoneUpdatedAtMs
+                );
                 if (!this.#externalRuns.has(input.sessionKey)) {
                     await this.#closeExternalCoalescer(input.sessionKey);
                 }
@@ -2826,6 +2839,9 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
                             ...abortBoundary,
                             settlement: "not-aborted",
                         },
+                        updatedAtMs: this.#nextExternalSnapshotUpdatedAtMs(
+                            input.sessionKey
+                        ),
                     })
                 );
                 await this.#persistExternalRuntimeSnapshot(input.sessionKey);
@@ -2846,6 +2862,9 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
                                 ...abortBoundary,
                                 settlement: "unknown",
                             },
+                            updatedAtMs: this.#nextExternalSnapshotUpdatedAtMs(
+                                input.sessionKey
+                            ),
                         })
                     );
                     await this.#persistExternalRuntimeSnapshot(input.sessionKey);
@@ -2855,7 +2874,14 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
             const current = currentBoundaryRun();
             if (current !== undefined) {
                 const { abortBoundary: _failedBoundary, ...withoutBoundary } = current;
-                this.#storeExternalRun(boundExternalRunProjection(withoutBoundary));
+                this.#storeExternalRun(
+                    boundExternalRunProjection({
+                        ...withoutBoundary,
+                        updatedAtMs: this.#nextExternalSnapshotUpdatedAtMs(
+                            input.sessionKey
+                        ),
+                    })
+                );
                 await this.#persistExternalRuntimeSnapshot(input.sessionKey);
             }
             throw this.#serviceFailure(error);

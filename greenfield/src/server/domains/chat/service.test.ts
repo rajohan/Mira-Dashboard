@@ -837,6 +837,7 @@ describe("ChatService", () => {
                 },
             },
             attachmentPreparer: inertAttachmentPreparer(),
+            nowMs: () => 1000,
             provider: provider.provider,
             repository,
         });
@@ -881,6 +882,7 @@ describe("ChatService", () => {
                     "external-exact-stop"
                 )
             ).toBeUndefined();
+            expect(repository.listExternalRuntimeSnapshots()).toEqual([]);
 
             await provider.requests[0]!.onEvent({
                 kind: "delta",
@@ -907,6 +909,28 @@ describe("ChatService", () => {
             expect(
                 notAbortedRuntime.externalRuns.map(({ providerRunId }) => providerRunId)
             ).toContain("external-not-aborted");
+            const notAbortedRun = notAbortedRuntime.externalRuns.find(
+                ({ providerRunId }) => providerRunId === "external-not-aborted"
+            );
+            const notAbortedSnapshot = repository.listExternalRuntimeSnapshots()[0];
+            expect(notAbortedSnapshot?.payload.entries[0]?.run).toMatchObject({
+                abortBoundary: {
+                    attemptId: "abort-external-not-aborted",
+                    settlement: "not-aborted",
+                },
+                providerRunId: "external-not-aborted",
+                updatedAtMs: notAbortedRun?.updatedAtMs,
+            });
+            expect(notAbortedSnapshot?.updatedAtMs).toBe(notAbortedRun?.updatedAtMs);
+
+            expect(
+                await service.abort({
+                    abortAttemptId: "abort-external-not-aborted",
+                    providerRunId: "external-not-aborted",
+                    sessionKey: "agent:main:main",
+                })
+            ).toMatchObject({ aborted: false });
+            expect(abortRequests).toHaveLength(2);
         } finally {
             await service.dispose();
             database.sqlite.close(true);
@@ -932,9 +956,9 @@ describe("ChatService", () => {
             abort: async () => {
                 abortCalls += 1;
                 if (abortCalls === 1) firstAbortDispatched.resolve();
-                return abortCalls === 1
-                    ? firstAbort.promise
-                    : { aborted: false, ok: true, runIds: [] };
+                if (abortCalls === 1) return firstAbort.promise;
+                if (abortCalls === 3) throw new ChatProviderUnavailableError();
+                return { aborted: false, ok: true, runIds: [] };
             },
         });
         const service = createChatService({
@@ -982,6 +1006,7 @@ describe("ChatService", () => {
             await firstAbortDispatched.promise;
             expect(abortCalls).toBe(1);
             const pendingAbortRuntime = await service.runtime(runtimeInput());
+            const pendingAbortRun = pendingAbortRuntime.externalRuns[0];
             expect(pendingAbortRuntime.externalRuns[0]).toMatchObject({
                 abortBoundary: {
                     attemptId: "abort-attempt-one",
@@ -989,8 +1014,12 @@ describe("ChatService", () => {
                     baselineUpdatedAtMs: 1002,
                     settlement: "pending",
                 },
-                updatedAtMs: 1002,
             });
+            expect(pendingAbortRun?.updatedAtMs).toBeGreaterThan(1002);
+            const pendingSnapshot = repository.listExternalRuntimeSnapshots()[0];
+            expect(pendingSnapshot?.payload.entries[0]?.run).toEqual(pendingAbortRun);
+            expect(pendingSnapshot?.updatedAtMs).toBe(pendingAbortRun?.updatedAtMs);
+            const abortObservationEpoch = pendingSnapshot?.observationEpoch;
             expect(
                 service.abort({
                     abortAttemptId: "abort-attempt-one",
@@ -1013,6 +1042,7 @@ describe("ChatService", () => {
             )) as ChatServiceError;
             expect(firstFailure.reason).toBe("unknown-outcome");
             const unknownAbortRuntime = await service.runtime(runtimeInput());
+            const unknownAbortRun = unknownAbortRuntime.externalRuns[0];
             expect(unknownAbortRuntime.externalRuns[0]).toMatchObject({
                 abortBoundary: {
                     attemptId: "abort-attempt-one",
@@ -1020,8 +1050,14 @@ describe("ChatService", () => {
                     baselineUpdatedAtMs: 1002,
                     settlement: "unknown",
                 },
-                updatedAtMs: 1002,
             });
+            expect(unknownAbortRun?.updatedAtMs).toBeGreaterThan(
+                pendingAbortRun?.updatedAtMs ?? 0
+            );
+            const unknownSnapshot = repository.listExternalRuntimeSnapshots()[0];
+            expect(unknownSnapshot?.payload.entries[0]?.run).toEqual(unknownAbortRun);
+            expect(unknownSnapshot?.updatedAtMs).toBe(unknownAbortRun?.updatedAtMs);
+            expect(unknownSnapshot?.observationEpoch).toBe(abortObservationEpoch);
             const replayFailure = (await captureFailure(() =>
                 service.abort({
                     abortAttemptId: "abort-attempt-one",
@@ -1051,6 +1087,7 @@ describe("ChatService", () => {
                 text: " after abort",
             });
             const advancedAbortRuntime = await service.runtime(runtimeInput());
+            const advancedAbortRun = advancedAbortRuntime.externalRuns[0];
             expect(advancedAbortRuntime.externalRuns[0]).toMatchObject({
                 abortBoundary: {
                     attemptId: "abort-attempt-one",
@@ -1058,8 +1095,13 @@ describe("ChatService", () => {
                     baselineUpdatedAtMs: 1002,
                     settlement: "unknown",
                 },
-                updatedAtMs: 1003,
             });
+            expect(advancedAbortRun?.updatedAtMs).toBeGreaterThanOrEqual(
+                unknownAbortRun?.updatedAtMs ?? 0
+            );
+            expect(advancedAbortRun?.observationEpoch).toBeGreaterThan(
+                unknownAbortRun?.observationEpoch ?? 0
+            );
             expect(
                 await service.abort({
                     abortAttemptId: "abort-attempt-two",
@@ -1077,10 +1119,51 @@ describe("ChatService", () => {
                 abortBoundary: {
                     attemptId: "abort-attempt-two",
                     baselineObservationEpoch: 3,
-                    baselineUpdatedAtMs: 1003,
+                    baselineUpdatedAtMs: advancedAbortRun?.updatedAtMs,
                     settlement: "not-aborted",
                 },
             });
+            const rejectedAbortRun = rejectedAbortRuntime.externalRuns[0];
+            const rejectedSnapshot = repository.listExternalRuntimeSnapshots()[0];
+            expect(rejectedSnapshot?.payload.entries[0]?.run).toEqual(rejectedAbortRun);
+            expect(rejectedSnapshot?.updatedAtMs).toBe(rejectedAbortRun?.updatedAtMs);
+
+            await subscription.onEvent({
+                kind: "delta",
+                mode: "append",
+                providerRunId: "external-abort-fence",
+                providerSequence: 4,
+                receivedAtMs: 1004,
+                sessionKey: "agent:main:main",
+                stream: "assistant",
+                text: " before definitive failure",
+            });
+            const beforeDefinitiveFailureRuntime = await service.runtime(runtimeInput());
+            const beforeDefinitiveFailure =
+                beforeDefinitiveFailureRuntime.externalRuns[0];
+            const definitiveFailure = await captureFailure(() =>
+                service.abort({
+                    abortAttemptId: "abort-attempt-three",
+                    providerRunId: "external-abort-fence",
+                    sessionKey: "agent:main:main",
+                })
+            );
+            expect(definitiveFailure).toBeInstanceOf(ChatServiceError);
+            expect(abortCalls).toBe(3);
+            const afterDefinitiveFailureRuntime = await service.runtime(runtimeInput());
+            const afterDefinitiveFailure = afterDefinitiveFailureRuntime.externalRuns[0];
+            expect(afterDefinitiveFailure?.abortBoundary).toBeUndefined();
+            expect(afterDefinitiveFailure?.updatedAtMs).toBeGreaterThan(
+                beforeDefinitiveFailure?.updatedAtMs ?? 0
+            );
+            const definitiveFailureSnapshot =
+                repository.listExternalRuntimeSnapshots()[0];
+            expect(definitiveFailureSnapshot?.payload.entries[0]?.run).toEqual(
+                afterDefinitiveFailure
+            );
+            expect(definitiveFailureSnapshot?.updatedAtMs).toBe(
+                afterDefinitiveFailure?.updatedAtMs
+            );
         } finally {
             await service.dispose();
             database.sqlite.close(true);

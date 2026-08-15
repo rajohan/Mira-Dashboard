@@ -124,13 +124,15 @@ export function MfaManagementSection({ summary }: MfaManagementSectionProps) {
             const recentVerification = currentSummary.mfa.enabled
                 ? currentSummary.recentAuth.mfa
                 : currentSummary.recentAuth.password;
-            if (recentVerification.recent) return true;
             if (securityVerification === undefined) return true;
 
             const controller = new AbortController();
             const lease = securityVerification.prepareProtectedInteraction(
                 "step_up_required",
-                { signal: controller.signal }
+                {
+                    proofAlreadyRecent: recentVerification.recent,
+                    signal: controller.signal,
+                }
             );
             if (lease === undefined) return false;
             preparedEnrollment.current = { controller, lease };

@@ -168,6 +168,50 @@ describe("security verification coordinator", () => {
         expect(coordinator.abortActiveFlow()).toBeFalse();
     });
 
+    test("holds later proof replay for an interaction whose proof was already recent", async () => {
+        const coordinator = createSecurityVerificationCoordinator(() => "session:one");
+        const interaction = coordinator.prepareProtectedInteraction("step_up_required", {
+            proofAlreadyRecent: true,
+        });
+
+        expect(await interaction?.outcome).toBe("verified");
+        expect(coordinator.getSnapshot()).toMatchObject({
+            pendingInteractionCount: 1,
+            phase: "idle",
+            protectedInteraction: true,
+        });
+        expect(coordinator.promptProactively("step_up_required")).toBeTrue();
+        expect(coordinator.beginProof()).toBeTrue();
+        const replay = coordinator.completeProof();
+        let replayFinished = false;
+        void replay.then(() => (replayFinished = true));
+        await Promise.resolve();
+        expect(replayFinished).toBeFalse();
+        expect(coordinator.request("step_up_required")).toBeUndefined();
+
+        interaction?.releaseAfterAttempt();
+        expect(await replay).toBeTrue();
+        expect(coordinator.getSnapshot()).toMatchObject({
+            pendingInteractionCount: 0,
+            phase: "reconciling",
+            protectedInteraction: true,
+        });
+        expect(coordinator.abortActiveFlow()).toBeTrue();
+
+        const staleInteraction = coordinator.prepareProtectedInteraction(
+            "step_up_required",
+            { proofAlreadyRecent: true }
+        );
+        expect(await staleInteraction?.outcome).toBe("verified");
+        coordinator.setAuthenticationIdentity("session:two");
+        expect(coordinator.getSnapshot()).toMatchObject({
+            authenticationIdentity: "session:two",
+            pendingInteractionCount: 0,
+            protectedInteraction: false,
+        });
+        staleInteraction?.releaseAfterAttempt();
+    });
+
     test("supports proactive proof while rejecting other identities", async () => {
         const authentication: { identity?: string } = {};
         const coordinator = createSecurityVerificationCoordinator(

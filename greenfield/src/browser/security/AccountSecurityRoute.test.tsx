@@ -392,7 +392,7 @@ async function waitForDialogExit(): Promise<void> {
     expect(screen.queryByRole("dialog", { hidden: true })).toBeNull();
 }
 
-async function submitGlobalProofAndWaitForToken(
+async function submitGlobalProofAndWaitForRefresh(
     queryClient: ReturnType<typeof createDashboardQueryClient>,
     operationReplayed: Promise<void>,
     submitButtonName: "Use recovery code" | "Verify authenticator" | "Verify password"
@@ -436,7 +436,6 @@ async function submitGlobalProofAndWaitForToken(
         }
     });
     expect(settled).toBeTrue();
-    expect(screen.getByRole("dialog", { name: "Save access token now" })).toBeTruthy();
 }
 
 afterEach(async () => {
@@ -1082,15 +1081,18 @@ describe("Dashboard account security route", () => {
         expect(screen.queryByText(codes[0]!)).toBeNull();
     });
 
-    test("enrolls a WebAuthn credential through the injected browser boundary", async () => {
+    test("holds recently verified WebAuthn enrollment through response-driven step-up", async () => {
         const transport = new SecurityTransport(enabledSummary);
+        const registration = Promise.withResolvers<WebAuthnRegistrationResponse>();
+        const registrationStarted = Promise.withResolvers<void>();
         const registrationInputs: WebAuthnRegistrationOptions[] = [];
         const webAuthnClient: DashboardWebAuthnClient = Object.freeze({
             authenticate: () =>
                 Promise.reject(new TypeError("Unexpected authentication")),
             register: (options: WebAuthnRegistrationOptions) => {
                 registrationInputs.push(options);
-                return Promise.resolve(registrationResponse);
+                registrationStarted.resolve();
+                return registration.promise;
             },
         });
         const credential = {
@@ -1102,9 +1104,25 @@ describe("Dashboard account security route", () => {
             transports: ["usb" as const],
             usable: true,
         } satisfies WebAuthnCredentialSummary;
+        let beginAttempts = 0;
         transport.mutationHandler = (path, input) => {
+            if (path === "accountSecurity.stepUpTotp") {
+                expect(input).toEqual({ code: "123456" });
+                transport.authStatus = rotatedAuthenticatedStatus;
+                return Promise.resolve({
+                    method: "totp",
+                    session: { ...rotatedSession, authMethod: "totp" },
+                    verifiedAtMs: timestampMs,
+                });
+            }
             if (path === "accountSecurity.beginWebAuthnEnrollment") {
                 expect(input).toEqual({});
+                beginAttempts += 1;
+                if (beginAttempts === 1) {
+                    throw Object.assign(new Error("Step-up required"), {
+                        data: { code: "FORBIDDEN", reason: "step_up_required" },
+                    });
+                }
                 return Promise.resolve({
                     expiresAtMs: timestampMs + 60_000,
                     options: registrationOptions,
@@ -1125,7 +1143,12 @@ describe("Dashboard account security route", () => {
             };
             return Promise.resolve({ credential, enabledNow: false });
         };
-        renderAccountSecurity(transport, webAuthnClient);
+        const queryClient = renderAccountSecurity(
+            transport,
+            webAuthnClient,
+            (collections) => collections,
+            true
+        );
         const userActions = userEvent.setup();
         const addSecurityKeyButton = await screen.findByRole("button", {
             name: "Add security key",
@@ -1135,7 +1158,40 @@ describe("Dashboard account security route", () => {
         await userActions.type(screen.getByLabelText("Name"), credential.label);
         await userActions.click(screen.getByRole("button", { name: "Continue" }));
 
+        const verificationDialog = await screen.findByRole("dialog", {
+            name: "Verify your session",
+        });
+        await userActions.click(
+            within(verificationDialog).getByRole("button", {
+                name: "Use authenticator app",
+            })
+        );
+        fireEvent.change(
+            within(verificationDialog).getByLabelText("Authenticator code"),
+            { target: { value: "123456" } }
+        );
+        await act(async () => {
+            within(verificationDialog)
+                .getByRole("button", { name: "Verify authenticator" })
+                .click();
+            await registrationStarted.promise;
+        });
+        expect(
+            screen.getByRole("dialog", { hidden: true, name: "Add security key" })
+        ).toBeTruthy();
+
+        await act(async () => {
+            registration.resolve(registrationResponse);
+            await Promise.resolve();
+        });
+
         expect(await screen.findByText(credential.label)).toBeTruthy();
+        await waitFor(() =>
+            expect(queryClient.getQueryData<AuthStatus>(authStatusQueryKey)).toEqual(
+                rotatedAuthenticatedStatus
+            )
+        );
+        expect(beginAttempts).toBe(2);
         expect(registrationInputs).toEqual([registrationOptions]);
     });
 
@@ -1650,7 +1706,7 @@ describe("Dashboard account security route", () => {
         fireEvent.change(within(verificationDialog).getByLabelText("Recovery code"), {
             target: { value: recoveryCodes()[0] },
         });
-        await submitGlobalProofAndWaitForToken(
+        await submitGlobalProofAndWaitForRefresh(
             queryClient,
             operationReplayed.promise,
             "Use recovery code"
@@ -1754,7 +1810,7 @@ describe("Dashboard account security route", () => {
         fireEvent.change(within(verificationDialog).getByLabelText("Current password"), {
             target: { value: "current password" },
         });
-        await submitGlobalProofAndWaitForToken(
+        await submitGlobalProofAndWaitForRefresh(
             queryClient,
             operationReplayed.promise,
             "Verify password"

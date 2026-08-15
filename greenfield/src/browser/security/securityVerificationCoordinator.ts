@@ -32,6 +32,10 @@ export interface SecurityVerificationRequestOptions {
     readonly signal?: AbortSignal;
 }
 
+export interface SecurityVerificationProtectedInteractionOptions extends SecurityVerificationRequestOptions {
+    readonly proofAlreadyRecent?: boolean;
+}
+
 /** Exact transport waiter retained through its one allowed replay attempt. */
 export interface SecurityVerificationWaiterLease {
     readonly outcome: Promise<"cancelled" | "verified">;
@@ -46,6 +50,14 @@ interface VerificationWaiter {
     readonly outcome: PromiseWithResolvers<"cancelled" | "verified">;
     released: boolean;
     settled: boolean;
+}
+
+interface VerifiedInteractionHold {
+    readonly abort: () => void;
+    readonly id: symbol;
+    readonly identity: string;
+    readonly signal: AbortSignal | undefined;
+    released: boolean;
 }
 
 type SecurityVerificationFlowCompletion = "cancelled" | "completed";
@@ -66,6 +78,7 @@ export class SecurityVerificationCoordinator {
     readonly #getAuthenticationIdentity: () => string | undefined;
     readonly #listeners = new Set<() => void>();
     readonly #pendingOperationCompletions = new Set<Promise<void>>();
+    readonly #verifiedInteractionHolds = new Map<symbol, VerifiedInteractionHold>();
     readonly #waiters = new Map<symbol, VerificationWaiter>();
     #authenticationIdentity: string | undefined;
     #cacheResetIdentity: string | undefined;
@@ -134,6 +147,9 @@ export class SecurityVerificationCoordinator {
         ) {
             this.#cancelFlow();
         }
+        for (const hold of this.#verifiedInteractionHolds.values()) {
+            if (hold.identity !== identity) this.#releaseVerifiedInteractionHold(hold);
+        }
         this.#authenticationIdentity = identity;
         this.#publishSnapshot();
     }
@@ -161,9 +177,57 @@ export class SecurityVerificationCoordinator {
      */
     prepareProtectedInteraction(
         reason: ContractAuthenticationErrorReason,
-        { identity, signal }: SecurityVerificationRequestOptions = {}
+        {
+            identity,
+            proofAlreadyRecent = false,
+            signal,
+        }: SecurityVerificationProtectedInteractionOptions = {}
     ): SecurityVerificationWaiterLease | undefined {
+        this.#refreshAuthenticationIdentity();
+        if (proofAlreadyRecent && this.#phase === "idle") {
+            return this.#holdVerifiedInteraction({ identity, signal });
+        }
         return this.#requestWaiter(reason, "interaction", { identity, signal });
+    }
+
+    #holdVerifiedInteraction({
+        identity,
+        signal,
+    }: SecurityVerificationRequestOptions): SecurityVerificationWaiterLease | undefined {
+        const operationIdentity = authenticatedOperationForSignal(signal)?.identity;
+        if (
+            identity !== undefined &&
+            operationIdentity !== undefined &&
+            identity !== operationIdentity
+        ) {
+            return undefined;
+        }
+        const boundIdentity =
+            identity ?? operationIdentity ?? this.#authenticationIdentity;
+        if (
+            boundIdentity === undefined ||
+            (this.#authenticationIdentity !== undefined &&
+                boundIdentity !== this.#authenticationIdentity)
+        ) {
+            return undefined;
+        }
+        if (signal?.aborted === true) return this.#cancelledLease();
+
+        const id = Symbol("security-verification-interaction-hold");
+        const hold: VerifiedInteractionHold = {
+            abort: () => this.#releaseVerifiedInteractionHold(hold),
+            id,
+            identity: boundIdentity,
+            released: false,
+            signal,
+        };
+        this.#verifiedInteractionHolds.set(id, hold);
+        signal?.addEventListener("abort", hold.abort, { once: true });
+        this.#publishSnapshot();
+        return Object.freeze({
+            outcome: Promise.resolve("verified" as const),
+            releaseAfterAttempt: () => this.#releaseVerifiedInteractionHold(hold),
+        });
     }
 
     #requestWaiter(
@@ -202,7 +266,7 @@ export class SecurityVerificationCoordinator {
         } else if (
             this.#phase === "replaying" &&
             kind === "request" &&
-            this.#interactionWaiterCount() > 0
+            this.#protectedInteractionCount() > 0
         ) {
             // A long-running protected interaction may hold reconciliation after its
             // proof. A later server rejection must fail closed instead of borrowing
@@ -356,6 +420,7 @@ export class SecurityVerificationCoordinator {
     #beginFlow(reason: ContractAuthenticationErrorReason, identity: string): void {
         this.#generation += 1;
         this.#identity = identity;
+        this.#protectedInteraction = this.#verifiedInteractionHolds.size > 0;
         this.#reason = reason;
         this.#phase = "prompting";
         this.#flowCompletion =
@@ -404,15 +469,17 @@ export class SecurityVerificationCoordinator {
     }
 
     #createSnapshot(): SecurityVerificationSnapshot {
+        const pendingInteractionCount = this.#protectedInteractionCount();
         return Object.freeze({
             authenticationIdentity: this.#authenticationIdentity,
             generation: this.#generation,
             identity: this.#identity,
-            pendingInteractionCount: this.#interactionWaiterCount(),
+            pendingInteractionCount,
             pendingRequestCount: this.#requestWaiterCount(),
             phase: this.#phase,
             presenterClaimed: this.#presenterClaimed,
-            protectedInteraction: this.#protectedInteraction,
+            protectedInteraction:
+                this.#protectedInteraction || this.#verifiedInteractionHolds.size > 0,
             reason: this.#reason,
         });
     }
@@ -423,6 +490,10 @@ export class SecurityVerificationCoordinator {
             if (waiter.kind === "interaction") count += 1;
         }
         return count;
+    }
+
+    #protectedInteractionCount(): number {
+        return this.#interactionWaiterCount() + this.#verifiedInteractionHolds.size;
     }
 
     #requestWaiterCount(): number {
@@ -458,6 +529,17 @@ export class SecurityVerificationCoordinator {
         waiter.released = true;
         if (this.#waiters.get(waiter.id) === waiter) {
             this.#waiters.delete(waiter.id);
+        }
+        this.#publishSnapshot();
+        this.#wakeReplayDrain();
+    }
+
+    #releaseVerifiedInteractionHold(hold: VerifiedInteractionHold): void {
+        if (hold.released) return;
+        hold.released = true;
+        hold.signal?.removeEventListener("abort", hold.abort);
+        if (this.#verifiedInteractionHolds.get(hold.id) === hold) {
+            this.#verifiedInteractionHolds.delete(hold.id);
         }
         this.#publishSnapshot();
         this.#wakeReplayDrain();
@@ -505,6 +587,7 @@ export class SecurityVerificationCoordinator {
         while (this.#generation === generation && this.#phase === "replaying") {
             if (
                 this.#waiters.size === 0 &&
+                this.#verifiedInteractionHolds.size === 0 &&
                 this.#pendingOperationCompletions.size === 0
             ) {
                 this.#phase = "reconciling";
