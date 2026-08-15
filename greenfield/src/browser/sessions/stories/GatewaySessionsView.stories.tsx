@@ -115,6 +115,7 @@ export const FreshCurrentSessions: Story = {
             name: "Current OpenClaw sessions",
         });
         await expect(table).toBeVisible();
+        await expect(canvas.getByText("Tokens (known only)")).toBeVisible();
         await expect(canvas.getByText("48k / 272k")).toBeVisible();
         await userEvent.click(canvas.getByRole("button", { name: "CRON" }));
         await expect(within(table).getByText("Daily summary")).toBeVisible();

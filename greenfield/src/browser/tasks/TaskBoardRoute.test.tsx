@@ -564,7 +564,8 @@ describe("Dashboard task route", () => {
         await user.click(
             screen.getByRole("button", { name: /Additional details \(optional\)/u })
         );
-        await user.type(screen.getByLabelText("Labels"), "tasks ");
+        expect(screen.getByText("Press Enter to add a label.")).toBeTruthy();
+        await user.type(screen.getByLabelText("Labels"), "tasks{Enter}");
         await act(async () => {
             screen.getByRole("button", { name: "Create task" }).click();
             for (let attempt = 0; attempt < 50; attempt += 1) {
@@ -595,7 +596,7 @@ describe("Dashboard task route", () => {
             transport.calls.find(
                 (call) => call.kind === "mutation" && call.path === "tasks.create"
             )?.input
-        ).toMatchObject({ assignee: "mira-2026" });
+        ).toMatchObject({ assignee: "mira-2026", labels: ["tasks"] });
         expect(queryClient.isFetching({ queryKey: taskQueryKey })).toBe(0);
         expect(queryClient.isMutating()).toBe(0);
         expect(screen.getByRole("heading", { level: 2, name: "Progress" })).toBeTruthy();

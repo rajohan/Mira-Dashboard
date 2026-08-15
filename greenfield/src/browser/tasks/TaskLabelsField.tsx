@@ -27,7 +27,7 @@ export function TaskLabelsField({
         <form.Field name="labelsText">
             {(field) => (
                 <FormField
-                    description="Press Space or Enter to add a label."
+                    description="Press Enter to add a label."
                     disabled={busy}
                     error={firstFormFieldError(field.state.meta.errors)}
                     label="Labels (optional)"

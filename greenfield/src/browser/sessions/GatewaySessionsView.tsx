@@ -220,6 +220,9 @@ export function GatewaySessionsView({
                     <div className="border-primary-700 bg-primary-800/80 rounded-lg border p-3 text-center shadow-sm shadow-black/10">
                         <dt className="text-primary-400 text-xs font-medium uppercase">
                             Tokens
+                            {snapshot.stats.tokenTotalState === "partial"
+                                ? " (known only)"
+                                : ""}
                         </dt>
                         <dd className="text-primary-50 mt-1 text-2xl font-semibold">
                             {snapshot.stats.tokenTotalState === "overflow"
