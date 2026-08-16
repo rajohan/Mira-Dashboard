@@ -505,6 +505,7 @@
         "src/shared/configRedaction.test.ts": 3,
         "src/test/integration/runtime/runtimeCandidate.test.ts": 3,
         "src/contracts/gatewayConnection.test.ts": 2,
+        "scripts/checkTailwindConfig.test.ts": 1,
         "src/server/rawHttp/pendingLoginCookie.test.ts": 1,
         "src/shared/encoding.test.ts": 1,
         "src/shared/json.test.ts": 1,

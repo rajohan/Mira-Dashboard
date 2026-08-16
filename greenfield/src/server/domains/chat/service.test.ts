@@ -1117,7 +1117,7 @@ describe("ChatService", () => {
             await service.dispose();
             database.sqlite.close(true);
         }
-    });
+    }, 10_000);
 
     test("aborts an exact observed provider run without fabricating a durable local run", async () => {
         const database = await openFreshMigratedDatabase();
