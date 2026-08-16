@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/tanstack-react";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, userEvent, waitFor, within } from "storybook/test";
 
 import type { AccountSecuritySummary } from "../../../contracts/accountSecurity.ts";
 import type {
@@ -157,14 +157,24 @@ async function openOpenClawSettings(canvasElement: HTMLElement) {
     const canvas = within(canvasElement);
     await userEvent.click(await canvas.findByRole("tab", { name: "OpenClaw settings" }));
     await expect(
-        await canvas.findByRole("textbox", { name: "Primary model" })
+        await canvas.findByRole("button", { name: "Restart OpenClaw Gateway" })
     ).toBeVisible();
     return canvas;
 }
 
-async function submitModelChange(canvasElement: HTMLElement) {
+async function openModelSettings(canvasElement: HTMLElement) {
     const canvas = await openOpenClawSettings(canvasElement);
-    const primary = canvas.getByRole("textbox", { name: "Primary model" });
+    const section = canvas.getByRole("button", { name: "Model Configuration" });
+    await userEvent.click(section);
+    await expect(section).toHaveAttribute("aria-expanded", "true");
+    const primary = await canvas.findByRole("textbox", { name: "Default model" });
+    await waitFor(() => expect(primary).toBeVisible());
+    return canvas;
+}
+
+async function submitModelChange(canvasElement: HTMLElement) {
+    const canvas = await openModelSettings(canvasElement);
+    const primary = canvas.getByRole("textbox", { name: "Default model" });
     await userEvent.clear(primary);
     await userEvent.type(primary, "openai/gpt-5.6-terra");
     await userEvent.click(canvas.getByRole("button", { name: "Save model settings" }));
@@ -211,13 +221,13 @@ export const PartialStale: Story = {
         route: "/settings",
     },
     play: async ({ canvasElement }) => {
-        const canvas = await openOpenClawSettings(canvasElement);
+        const canvas = await openModelSettings(canvasElement);
         await expect(
             await canvas.findByText(
                 /Current OpenClaw configuration could not be refreshed/iu
             )
         ).toBeVisible();
-        const primaryModel = canvas.getByRole("textbox", { name: "Primary model" });
+        const primaryModel = canvas.getByRole("textbox", { name: "Default model" });
         await expect(primaryModel).toHaveValue("openai/gpt-5.6-sol");
         await expect(primaryModel).toBeDisabled();
     },
@@ -308,15 +318,13 @@ export const RestartRecovery: Story = {
     },
     play: async ({ canvasElement }) => {
         const canvas = await openOpenClawSettings(canvasElement);
-        const originalConfirm = globalThis.confirm;
-        globalThis.confirm = () => true;
-        try {
-            await userEvent.click(
-                canvas.getByRole("button", { name: "Restart OpenClaw Gateway" })
-            );
-        } finally {
-            globalThis.confirm = originalConfirm;
-        }
+        await userEvent.click(
+            canvas.getByRole("button", { name: "Restart OpenClaw Gateway" })
+        );
+        const page = within(canvasElement.ownerDocument.body);
+        await userEvent.click(
+            await page.findByRole("button", { name: "Restart Gateway" })
+        );
         await expect(
             await canvas.findByText(
                 /could not confirm whether the Gateway restart completed/iu

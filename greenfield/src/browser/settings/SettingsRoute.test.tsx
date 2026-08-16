@@ -437,7 +437,7 @@ describe("Dashboard Settings route", () => {
         const modelSection = await screen.findByRole(
             "button",
             { name: "Model Configuration" },
-            { timeout: 3_000 }
+            { timeout: 3000 }
         );
         expect(modelSection).toHaveAttribute("aria-expanded", "false");
         expect(screen.queryByRole("textbox", { name: "Default model" })).toBeNull();

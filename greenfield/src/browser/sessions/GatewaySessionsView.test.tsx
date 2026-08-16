@@ -207,7 +207,7 @@ describe("Gateway sessions view", () => {
             "true"
         );
         expect(within(filter).getByRole("button", { name: "CRON" })).toHaveClass(
-            "bg-accent-500"
+            "bg-accent-700"
         );
         const table = screen.getByRole("table", { name: "Current OpenClaw sessions" });
         expect(within(table).getByText("Daily cron")).toBeTruthy();
