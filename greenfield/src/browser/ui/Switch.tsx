@@ -12,6 +12,7 @@ interface SwitchProps {
     readonly disabled?: boolean;
     readonly error?: ReactNode;
     readonly form?: string;
+    readonly hideLabel?: boolean;
     readonly invalid?: boolean;
     readonly label: ReactNode;
     readonly name?: string;
@@ -30,6 +31,7 @@ export function Switch({
     disabled = false,
     error,
     form,
+    hideLabel = false,
     invalid,
     label,
     name,
@@ -47,8 +49,12 @@ export function Switch({
             )}
             disabled={disabled}
         >
-            <div className="min-w-0 flex-1">
-                <Label className="text-primary-200 block cursor-pointer text-sm font-medium wrap-break-word data-disabled:cursor-not-allowed data-disabled:opacity-60">
+            <div className={cn("min-w-0 flex-1", hideLabel && "sr-only")}>
+                <Label
+                    className={cn(
+                        "text-primary-200 block cursor-pointer text-sm font-medium wrap-break-word data-disabled:cursor-not-allowed data-disabled:opacity-60"
+                    )}
+                >
                     {label}
                 </Label>
                 {description !== undefined && (

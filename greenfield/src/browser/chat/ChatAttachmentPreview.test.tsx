@@ -55,9 +55,7 @@ describe("chat attachment preview", () => {
                     screen.getByRole("heading", { name: "Release notes" })
                 ).toBeVisible()
             );
-            expect(screen.getByRole("note")).toHaveTextContent(
-                "[Image blocked: secret]"
-            );
+            expect(screen.getByRole("note")).toHaveTextContent("[Image blocked: secret]");
             expect(fetchMock).toHaveBeenCalledTimes(1);
         } finally {
             fetchMock.mockRestore();

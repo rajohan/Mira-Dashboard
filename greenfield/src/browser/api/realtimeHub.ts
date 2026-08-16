@@ -78,12 +78,7 @@ export function createDashboardRealtimeHub(
     }
 
     function scheduleReconnect(): void {
-        if (
-            reconnectTimer !== undefined ||
-            listeners.size === 0 ||
-            disposed ||
-            paused
-        ) {
+        if (reconnectTimer !== undefined || listeners.size === 0 || disposed || paused) {
             return;
         }
         reconnectTimer = scheduler.setTimeout(() => {

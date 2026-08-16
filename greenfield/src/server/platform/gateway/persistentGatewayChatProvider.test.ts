@@ -140,8 +140,7 @@ describe("persistent Gateway chat provider", () => {
                     {
                         __openclaw: {
                             id: "a54e8555-865c-4ae9-88be-0d020fa3e7ee",
-                            idempotencyKey:
-                                "cc3d2a76-f5cc-49df-9ed2-48b8a01294d6:user",
+                            idempotencyKey: "cc3d2a76-f5cc-49df-9ed2-48b8a01294d6:user",
                             media: [
                                 {
                                     contentType: "image/jpeg",
@@ -152,8 +151,7 @@ describe("persistent Gateway chat provider", () => {
                             ],
                         },
                         content: "her er bilde",
-                        idempotencyKey:
-                            "cc3d2a76-f5cc-49df-9ed2-48b8a01294d6:user",
+                        idempotencyKey: "cc3d2a76-f5cc-49df-9ed2-48b8a01294d6:user",
                         role: "user",
                     },
                 ],
@@ -789,8 +787,7 @@ describe("persistent Gateway chat provider", () => {
     });
 
     test("recovers a trusted delivery-mirror outbound file without exposing its generated name", async () => {
-        const generatedName =
-            "2026-08-16---04f0d34e-6407-4c26-922d-60bdd998c904.md";
+        const generatedName = "2026-08-16---04f0d34e-6407-4c26-922d-60bdd998c904.md";
         const harness = createHarness({
             "chat.history": {
                 hasMore: false,

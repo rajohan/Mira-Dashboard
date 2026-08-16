@@ -588,9 +588,7 @@ describe("chat browser", () => {
                 await screen.findByRole("button", { name: "Stop response" })
             );
             await waitFor(() =>
-                expect(
-                    screen.queryByRole("button", { name: "Stop response" })
-                ).toBeNull()
+                expect(screen.queryByRole("button", { name: "Stop response" })).toBeNull()
             );
             expect(
                 view.mutation.mock.calls.find((call) => call[0] === "chat.abort")?.[1]

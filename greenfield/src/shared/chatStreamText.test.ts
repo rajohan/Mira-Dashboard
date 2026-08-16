@@ -10,9 +10,7 @@ test("converges cumulative and incremental chat stream text", () => {
     );
     expect(mergeChatStreamText("abc", "bc")).toBe("abc");
     expect(mergeChatStreamText("abc", "def")).toBe("abcdef");
-    expect(mergeChatStreamText("Fikset og", "ikset og aktivt")).toBe(
-        "Fikset og aktivt"
-    );
+    expect(mergeChatStreamText("Fikset og", "ikset og aktivt")).toBe("Fikset og aktivt");
     expect(mergeChatStreamText("OpenClaw-snapshots", "snapshots flettes")).toBe(
         "OpenClaw-snapshots flettes"
     );

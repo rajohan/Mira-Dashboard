@@ -679,10 +679,7 @@ describe("Dashboard local-history media composition", () => {
                 uploadSpoolRoot,
             ].map((directory) => mkdir(directory, { mode: 0o700, recursive: true }))
         );
-        await Promise.all([
-            chmod(openClawRoot, 0o700),
-            chmod(openClawMediaRoot, 0o700),
-        ]);
+        await Promise.all([chmod(openClawRoot, 0o700), chmod(openClawMediaRoot, 0o700)]);
         await writeFile(path.join(openClawRoot, "openclaw.json"), "{}\n", {
             mode: 0o600,
         });

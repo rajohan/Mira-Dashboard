@@ -186,9 +186,7 @@ describe("chat runtime store", () => {
         expect(store.state.sessions[sessionKey]?.needsReconciliation).toBe(false);
         store.apply(event(4, { kind: "interrupted" }));
         expect(store.state.sessions[sessionKey]?.needsReconciliation).toBe(true);
-        expect(store.state.sessions[sessionKey]?.runs["run-1"]?.phase).toBe(
-            "unresolved"
-        );
+        expect(store.state.sessions[sessionKey]?.runs["run-1"]?.phase).toBe("unresolved");
         store.markReconciled(sessionKey, 4);
         expect(store.state.sessions[sessionKey]?.needsReconciliation).toBe(true);
     });

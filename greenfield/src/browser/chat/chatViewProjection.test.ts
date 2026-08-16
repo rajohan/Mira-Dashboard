@@ -156,11 +156,7 @@ test("projects thinking, tools, and final text as separate semantic surfaces", (
         "provider-message",
         "provider-message",
     ]);
-    expect(surfaces.map(({ timestampMs }) => timestampMs)).toEqual([
-        1000,
-        1000,
-        1000,
-    ]);
+    expect(surfaces.map(({ timestampMs }) => timestampMs)).toEqual([1000, 1000, 1000]);
 });
 
 function chatAttachmentPart(

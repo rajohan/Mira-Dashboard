@@ -154,7 +154,10 @@ describe("chat history service", () => {
             fakeProvider([
                 {
                     hasMore: false,
-                    messages: [attachmentMessage, message("newest", "y".repeat(256 * 1024))],
+                    messages: [
+                        attachmentMessage,
+                        message("newest", "y".repeat(256 * 1024)),
+                    ],
                 },
             ])
         );

@@ -3,8 +3,8 @@ import { useEffect, useState } from "react";
 
 import { buttonClassNames } from "../ui/buttonStyles.ts";
 import { Icon } from "../ui/Icon.tsx";
-import { Modal } from "../ui/Modal.tsx";
 import { Markdown } from "../ui/Markdown.tsx";
+import { Modal } from "../ui/Modal.tsx";
 import {
     chatAttachmentIcon,
     formatChatAttachmentSize,
@@ -309,14 +309,16 @@ export function ChatAttachmentPreview({
                             Loading text preview…
                         </output>
                     )}
-                    {remoteTextPreview.status === "ready" && (
-                        attachment.mediaType === "text/markdown" ? (
+                    {remoteTextPreview.status === "ready" &&
+                        (attachment.mediaType === "text/markdown" ? (
                             <Markdown
                                 className="border-primary-600 bg-primary-950 max-h-[min(55vh,32rem)] overflow-auto rounded-lg border p-4"
                                 components={{
                                     a: ({ children }) => <span>{children}</span>,
                                     img: ({ alt }) => (
-                                        <span role="note">[Image blocked{alt ? `: ${alt}` : ""}]</span>
+                                        <span role="note">
+                                            [Image blocked{alt ? `: ${alt}` : ""}]
+                                        </span>
                                     ),
                                 }}
                                 source={remoteTextPreview.text}
@@ -325,8 +327,7 @@ export function ChatAttachmentPreview({
                             <pre className="border-primary-600 bg-primary-950 text-primary-200 max-h-[min(55vh,32rem)] overflow-auto rounded-lg border p-3 text-xs wrap-break-word whitespace-pre-wrap">
                                 {remoteTextPreview.text}
                             </pre>
-                        )
-                    )}
+                        ))}
                     {remoteTextPreview.status === "error" && (
                         <p className="text-sm text-red-300" role="alert">
                             {remoteTextPreview.message}

@@ -113,9 +113,9 @@ describe("chat runtime projection", () => {
             store
         );
 
-        expect(Object.keys(store.state.sessions[sessionKey]?.externalRuns ?? {})).toEqual([
-            "active-run",
-        ]);
+        expect(Object.keys(store.state.sessions[sessionKey]?.externalRuns ?? {})).toEqual(
+            ["active-run"]
+        );
     });
 
     test("settles an identical catch-up read without repeatedly invalidating static truncation", async () => {

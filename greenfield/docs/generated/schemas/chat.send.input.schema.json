@@ -27,15 +27,6 @@
       "maxLength": 262144,
       "pattern": "^[^\\u0000]*$"
     },
-    "queueMode": {
-      "enum": [
-        "collect",
-        "followup",
-        "interrupt",
-        "steer"
-      ],
-      "type": "string"
-    },
     "sessionKey": {
       "type": "string",
       "maxLength": 512,

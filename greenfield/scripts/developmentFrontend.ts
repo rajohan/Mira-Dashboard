@@ -20,13 +20,18 @@ export interface DevelopmentFrontendRuntime {
     stop(closeActiveConnections?: boolean): Promise<void>;
 }
 
+interface DevelopmentFrontendDependencies {
+    readonly dashboardRoute?: Bun.HTMLBundle;
+}
+
 /**
  * Starts Bun's full-stack HTML server and the reviewed loopback API proxy.
  * @param configuration Validated listener, HMR, origin, and backend configuration.
  * @returns The active frontend and optional remote-proxy lifecycle.
  */
 export async function startDevelopmentFrontend(
-    configuration: DevelopmentFrontendConfiguration
+    configuration: DevelopmentFrontendConfiguration,
+    dependencies: DevelopmentFrontendDependencies = {}
 ): Promise<DevelopmentFrontendRuntime> {
     const backendRequest = (
         request: Request,
@@ -46,7 +51,7 @@ export async function startDevelopmentFrontend(
             "/api/*": backendRequest,
             "/trpc": backendRequest,
             "/trpc/*": backendRequest,
-            "/*": dashboard,
+            "/*": dependencies.dashboardRoute ?? dashboard,
         },
         websocket: developmentWebSocketHandler(configuration),
     });

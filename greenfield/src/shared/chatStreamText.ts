@@ -15,10 +15,7 @@ export function mergeChatStreamText(previous: string, next: string): string {
     const prefixLengths = new Uint32Array(candidate.length);
     for (let index = 1; index < candidate.length; index += 1) {
         let prefixLength = prefixLengths[index - 1] ?? 0;
-        while (
-            prefixLength > 0 &&
-            candidate[index] !== candidate[prefixLength]
-        ) {
+        while (prefixLength > 0 && candidate[index] !== candidate[prefixLength]) {
             prefixLength = prefixLengths[prefixLength - 1] ?? 0;
         }
         if (candidate[index] === candidate[prefixLength]) prefixLength += 1;

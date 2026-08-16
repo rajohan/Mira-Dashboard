@@ -103,9 +103,7 @@ describe("descriptor workspace file reader", () => {
         });
         expect(await resolveReference(Path.join(root, "docs"))).toBeUndefined();
         expect(await resolveReference("/etc/passwd")).toBeUndefined();
-        expect(
-            await resolveReference(`${root}/docs/../docs/guide.md`)
-        ).toBeUndefined();
+        expect(await resolveReference(`${root}/docs/../docs/guide.md`)).toBeUndefined();
     });
 
     test("lists stable visible regular entries without exposing symlinks or hard links", async () => {

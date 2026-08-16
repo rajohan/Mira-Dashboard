@@ -229,22 +229,17 @@ describe("external chat activity merge", () => {
             [{ kind: "text", text: "Second steer" }],
             { providerRunId: "second-steer:user" }
         );
-        const canonical = message(
-            "canonical-after-steers",
-            "assistant",
-            10,
-            [
-                {
-                    callId: "history-tool",
-                    callIdSource: "synthetic",
-                    kind: "tool",
-                    name: "search",
-                    output: "found",
-                    status: "completed",
-                },
-                { kind: "text", text: "Canonical answer" },
-            ]
-        );
+        const canonical = message("canonical-after-steers", "assistant", 10, [
+            {
+                callId: "history-tool",
+                callIdSource: "synthetic",
+                kind: "tool",
+                name: "search",
+                output: "found",
+                status: "completed",
+            },
+            { kind: "text", text: "Canonical answer" },
+        ]);
         const leading = external("leading", providerRunId, 1, [
             { kind: "text", text: "Leading activity" },
         ]);

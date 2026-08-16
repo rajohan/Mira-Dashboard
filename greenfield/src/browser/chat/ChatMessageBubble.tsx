@@ -25,8 +25,8 @@ import {
     formatChatAttachmentSize,
 } from "./chatAttachmentPresentation.ts";
 import { ChatAttachmentPreview } from "./ChatAttachmentPreview.tsx";
-import { safeChatMarkdownLink } from "./chatMarkdownPolicy.ts";
 import { remarkChatLocalFileReferences } from "./chatLocalFileMarkdown.ts";
+import { safeChatMarkdownLink } from "./chatMarkdownPolicy.ts";
 import {
     chatMessageHasVisibleContent,
     visibleChatMessageParts,
@@ -506,7 +506,7 @@ export function ChatMessageBubble({
                                 className={cn(
                                     "ml-auto min-h-7 px-1.5",
                                     isUser &&
-                                        "text-white data-hover:text-white hover:text-white"
+                                        "text-white hover:text-white data-hover:text-white"
                                 )}
                                 icon={EyeOff}
                                 label="Hide message from this browser"
@@ -599,7 +599,9 @@ export function ChatMessageBubble({
                                                 img: BlockedMarkdownImage,
                                             }}
                                             className="prose-p:text-primary-200 prose-headings:text-primary-100 prose-code:text-primary-100"
-                                            remarkPlugins={[remarkChatLocalFileReferences]}
+                                            remarkPlugins={[
+                                                remarkChatLocalFileReferences,
+                                            ]}
                                             source={part.text}
                                         />
                                     </aside>

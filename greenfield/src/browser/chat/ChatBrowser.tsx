@@ -23,7 +23,6 @@ import type {
     OpenClawTaskSummary,
 } from "../../contracts/openClawTasks.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
-import { workspaceFileClient } from "../files/workspaceFileClient.ts";
 import {
     classifyDashboardBrowserFailure,
     dashboardBrowserFailureMessage,
@@ -34,6 +33,7 @@ import {
     AuthenticatedMutationExpiredError,
     useAuthenticatedMutationBoundary,
 } from "../auth/useAuthenticatedMutationBoundary.ts";
+import { workspaceFileClient } from "../files/workspaceFileClient.ts";
 import {
     gatewaySessionQueryKey,
     gatewaySessionQueryOptions,

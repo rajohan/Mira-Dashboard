@@ -65,7 +65,6 @@ describe("cache realtime invalidation", () => {
 
         try {
             expect(realtimeClient.input).toEqual({
-                lastEventId: "0",
                 topics: [cacheRealtimeTopic],
             });
             expect(realtimeClient.activeSubscriptionCount).toBe(1);

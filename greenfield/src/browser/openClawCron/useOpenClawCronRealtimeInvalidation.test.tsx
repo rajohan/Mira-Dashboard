@@ -50,7 +50,6 @@ describe("OpenClaw scheduled jobs realtime invalidation", () => {
 
         try {
             expect(realtimeClient.input).toEqual({
-                lastEventId: "0",
                 topics: [gatewayRealtimeTopics.cron],
             });
             expect(realtimeClient.activeSubscriptionCount).toBe(1);

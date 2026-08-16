@@ -42,7 +42,6 @@ describe("task realtime invalidation", () => {
             );
 
             expect(realtimeClient.input).toEqual({
-                lastEventId: "0",
                 topics: [taskRealtimeTopic],
             });
             expect(realtimeClient.activeSubscriptionCount).toBe(1);

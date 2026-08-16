@@ -454,9 +454,8 @@ function placeExternalActivityAroundCanonicalUsers(
                                   identity !== undefined &&
                                   (normalizeChatProviderUserIdentity(identity) ??
                                       identity) ===
-                                      (normalizeChatProviderUserIdentity(
-                                          exactAnchorId
-                                      ) ?? exactAnchorId)
+                                      (normalizeChatProviderUserIdentity(exactAnchorId) ??
+                                          exactAnchorId)
                           ))
             );
             const canonicalUser =

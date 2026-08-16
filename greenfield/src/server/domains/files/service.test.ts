@@ -319,10 +319,10 @@ describe("workspace files service", () => {
             fileName: "guide.md",
             previewKind: "text",
         });
-        await expect(
+        expect(
             service.prepareReference(actor, { reference: "/etc/passwd" })
         ).rejects.toMatchObject({ reason: "not-found" });
-        await expect(
+        expect(
             service.readContent(otherActor, ticket.ticketId, undefined)
         ).rejects.toMatchObject({ reason: "not-found" });
     });

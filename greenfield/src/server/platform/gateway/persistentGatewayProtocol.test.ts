@@ -255,6 +255,15 @@ describe("persistent Gateway protocol-v4 boundary", () => {
             assertPersistentGatewayOpenClawSettingsReadParameters("skills.status", {
                 agentId: "main",
             })
+        ).not.toThrow();
+        expect(() =>
+            assertPersistentGatewayOpenClawSettingsReadParameters("skills.status", {})
+        ).toThrow(TypeError);
+        expect(() =>
+            assertPersistentGatewayOpenClawSettingsReadParameters("skills.status", {
+                agentId: "main",
+                workspace: "/private/path",
+            })
         ).toThrow(TypeError);
         const skillUpdate = { enabled: false, skillKey: "imagegen" };
         expect(() =>
@@ -737,11 +746,16 @@ describe("persistent Gateway protocol-v4 boundary", () => {
                     },
                 },
             }),
-            parameters({ session: { reset: { idleMinutes: 60, mode: "idle" } } }),
+            parameters({
+                session: {
+                    reset: { atHour: null, idleMinutes: 60, mode: "idle" },
+                },
+            }),
             parameters({ channels: { discord: { enabled: false } } }),
             parameters({ tools: { agentToAgent: { enabled: false } } }),
             parameters({ tools: { elevated: { enabled: true } } }),
             parameters({ tools: { exec: { ask: "always", security: "deny" } } }),
+            parameters({ tools: { exec: { mode: "full" } } }),
             parameters({ tools: { profile: null } }),
             parameters({ tools: { sessions: { visibility: null } } }),
             parameters({ tools: { web: { fetch: { enabled: true } } } }),
@@ -825,7 +839,6 @@ describe("persistent Gateway protocol-v4 boundary", () => {
                 { agents: { defaults: { heartbeat: { every: "3600s" } } } },
                 fallbackPath
             ),
-            parameters({ session: { reset: { idleMinutes: 60 } } }),
             parameters({ session: { reset: { idleMinutes: 60, mode: "daily" } } }),
             parameters({
                 session: { reset: { idleMinutes: 60, mode: "idle", extra: true } },

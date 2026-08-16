@@ -221,16 +221,21 @@ export const prepareWorkspaceFileContentInputSchema = v.strictObject({
     resourceId: workspaceFileResourceIdSchema,
 });
 
-/** One provider-authored absolute reference resolved only inside reviewed roots. */
+/**
+ * Checks one provider-authored absolute reference before root-scoped resolution.
+ * @param value Candidate provider reference.
+ * @returns Whether the reference uses canonical outer whitespace and safe characters.
+ */
+export function workspaceFileReferenceIsCanonical(value: string): boolean {
+    return value === value.trim() && hasNoUnicodeControlOrFormat(value);
+}
+
 export const prepareWorkspaceFileReferenceInputSchema = v.strictObject({
     reference: v.pipe(
         v.string("Workspace file reference is invalid"),
         v.minLength(1, "Workspace file reference is invalid"),
         v.maxLength(4096, "Workspace file reference is invalid"),
-        v.check(
-            (value) => value === value.trim() && hasNoUnicodeControlOrFormat(value),
-            "Workspace file reference is invalid"
-        )
+        v.check(workspaceFileReferenceIsCanonical, "Workspace file reference is invalid")
     ),
 });
 

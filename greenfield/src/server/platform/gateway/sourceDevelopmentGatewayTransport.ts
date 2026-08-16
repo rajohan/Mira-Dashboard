@@ -172,7 +172,10 @@ function checkedNow(nowMs: () => number): number {
 }
 
 function simulatorDirectory(stateRoot: string): string {
-    const directory = path.join(assertMarkedDevelopmentStateRoot(stateRoot), simulatorDirectoryName);
+    const directory = path.join(
+        assertMarkedDevelopmentStateRoot(stateRoot),
+        simulatorDirectoryName
+    );
     mkdirSync(directory, { mode: 0o700, recursive: true });
     if (realpathSync(directory) !== directory) {
         throw new Error("Development Gateway simulator directory is invalid");
@@ -185,12 +188,14 @@ function simulatorDirectory(stateRoot: string): string {
  * exact chat session. Ordinary development remains mutation-free.
  * @returns A revocable write capability scoped to the requested development session.
  */
-export function createSourceDevelopmentChatWriteCapability(input: Readonly<{
-    expiresAtMs: number;
-    nowMs?: number;
-    sessionKey: string;
-    stateRoot: string;
-}>): SourceDevelopmentChatWriteCapability {
+export function createSourceDevelopmentChatWriteCapability(
+    input: Readonly<{
+        expiresAtMs: number;
+        nowMs?: number;
+        sessionKey: string;
+        stateRoot: string;
+    }>
+): SourceDevelopmentChatWriteCapability {
     const now = input.nowMs ?? Date.now();
     const capability = v.parse(chatWriteCapabilitySchema, {
         expiresAtMs: input.expiresAtMs,
@@ -229,11 +234,13 @@ export function createSourceDevelopmentChatWriteCapability(input: Readonly<{
     });
 }
 
-function chatWriteIsAuthorized(input: Readonly<{
-    capabilityPath: string;
-    nowMs: () => number;
-    parameters: Readonly<Record<string, unknown>>;
-}>): boolean {
+function chatWriteIsAuthorized(
+    input: Readonly<{
+        capabilityPath: string;
+        nowMs: () => number;
+        parameters: Readonly<Record<string, unknown>>;
+    }>
+): boolean {
     let descriptor: number;
     try {
         descriptor = openSync(

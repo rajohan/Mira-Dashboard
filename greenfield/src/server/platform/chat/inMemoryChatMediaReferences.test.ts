@@ -61,8 +61,7 @@ describe("in-memory chat media references", () => {
             sourceSlot: "session-message:0",
         });
         const outbound = references.registerLocal({
-            candidate:
-                "media://outbound/notes---04f0d34e-6407-4c26-922d-60bdd998c904.md",
+            candidate: "media://outbound/notes---04f0d34e-6407-4c26-922d-60bdd998c904.md",
             messageId: "message-outbound",
             sessionKey: "agent:main:main",
             sourceSlot: "delivery-mirror-outbound:0",
@@ -88,10 +87,7 @@ describe("in-memory chat media references", () => {
         });
         expect(references.resolve(outbound!.attachmentId)?.source).toEqual({
             kind: "openclaw-local-history",
-            segments: [
-                "outbound",
-                "notes---04f0d34e-6407-4c26-922d-60bdd998c904.md",
-            ],
+            segments: ["outbound", "notes---04f0d34e-6407-4c26-922d-60bdd998c904.md"],
         });
         expect(references.resolve(relative!.attachmentId)).toEqual({
             attachmentId: relative!.attachmentId,

@@ -78,11 +78,7 @@ export function chatAbortControlsAreEnabled(
         sourceFresh: boolean;
     }>
 ): boolean {
-    return (
-        input.connection === "connected" &&
-        input.sourceFresh &&
-        !input.actionBusy
-    );
+    return input.connection === "connected" && input.sourceFresh && !input.actionBusy;
 }
 
 /**

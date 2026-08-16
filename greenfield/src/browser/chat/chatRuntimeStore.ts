@@ -1698,9 +1698,7 @@ export function chatRuntimePlans(
         .filter((run) => run.phase === "active" && run.plan !== undefined)
         .map((run) => run.plan as ChatActivePlanView);
     const externalPlans = Object.values(session.externalRuns).flatMap((run) =>
-        run.lifecycle !== "active" || run.plan === undefined
-            ? []
-            : [run.plan]
+        run.lifecycle !== "active" || run.plan === undefined ? [] : [run.plan]
     );
     return [...localPlans, ...externalPlans];
 }

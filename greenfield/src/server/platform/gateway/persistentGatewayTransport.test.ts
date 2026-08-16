@@ -1684,7 +1684,9 @@ describe("persistent native Gateway transport", () => {
                 baseHash: "a".repeat(64),
                 note: "Updated from Mira Dashboard settings",
                 raw: JSON.stringify({
-                    session: { reset: { idleMinutes: 60, mode: "idle" } },
+                    session: {
+                        reset: { atHour: null, idleMinutes: 60, mode: "idle" },
+                    },
                 }),
             },
             { beforeDispatch: () => Promise.resolve() }
@@ -1836,7 +1838,9 @@ describe("persistent native Gateway transport", () => {
                 baseHash: "a".repeat(64),
                 note: "Updated from Mira Dashboard settings",
                 raw: JSON.stringify({
-                    session: { reset: { idleMinutes: 60, mode: "idle" } },
+                    session: {
+                        reset: { atHour: null, idleMinutes: 60, mode: "idle" },
+                    },
                 }),
             },
             {
@@ -1894,7 +1898,9 @@ describe("persistent native Gateway transport", () => {
                 baseHash: "a".repeat(64),
                 note: "Updated from Mira Dashboard settings",
                 raw: JSON.stringify({
-                    session: { reset: { idleMinutes: 60, mode: "idle" } },
+                    session: {
+                        reset: { atHour: null, idleMinutes: 60, mode: "idle" },
+                    },
                 }),
             },
             { beforeDispatch: () => authorization.promise }
@@ -1928,7 +1934,9 @@ describe("persistent native Gateway transport", () => {
                 baseHash: "a".repeat(64),
                 note: "Updated from Mira Dashboard settings",
                 raw: JSON.stringify({
-                    session: { reset: { idleMinutes: 60, mode: "idle" } },
+                    session: {
+                        reset: { atHour: null, idleMinutes: 60, mode: "idle" },
+                    },
                 }),
             },
             {
@@ -2480,7 +2488,9 @@ describe("persistent native Gateway transport", () => {
                 baseHash: "a".repeat(64),
                 note: "Updated from Mira Dashboard settings",
                 raw: JSON.stringify({
-                    session: { reset: { idleMinutes: 60, mode: "idle" } },
+                    session: {
+                        reset: { atHour: null, idleMinutes: 60, mode: "idle" },
+                    },
                 }),
             },
             { beforeDispatch: () => Promise.resolve() }

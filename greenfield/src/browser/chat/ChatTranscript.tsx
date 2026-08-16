@@ -8,8 +8,8 @@ import { Icon } from "../ui/Icon.tsx";
 import { LoadingState } from "../ui/LoadingState.tsx";
 import { Virtualizer, type VirtualizerItemsAppendedEvent } from "../ui/Virtualizer.tsx";
 import { ChatMessageBubble } from "./ChatMessageBubble.tsx";
-import { activeStreamingTextMessageIds } from "./chatReadAloudProjection.ts";
 import { visibleChatTranscriptMessages } from "./chatMessageVisibility.ts";
+import { activeStreamingTextMessageIds } from "./chatReadAloudProjection.ts";
 import {
     activeCompactionMaximumAgeMs,
     completedCompactionMaximumAgeMs,
@@ -394,7 +394,9 @@ export function ChatTranscript({
                                         >
                                             <ChatMessageBubble
                                                 activeRunIds={
-                                                    streamingTextMessageIds.has(message.id)
+                                                    streamingTextMessageIds.has(
+                                                        message.id
+                                                    )
                                                         ? activeRunIds
                                                         : []
                                                 }

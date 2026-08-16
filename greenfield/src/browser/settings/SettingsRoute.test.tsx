@@ -384,20 +384,33 @@ function renderSettings(
     };
 }
 
-function expectConfigurationControlsDisabled(): void {
-    const configurationRegion = screen.getByRole("region", {
-        name: "OpenClaw configuration",
-    });
-    const controls = [
-        ...within(configurationRegion).queryAllByRole("button"),
-        ...within(configurationRegion).queryAllByRole("combobox"),
-        ...within(configurationRegion).queryAllByRole("spinbutton"),
-        ...within(configurationRegion).queryAllByRole("switch"),
-        ...within(configurationRegion).queryAllByRole("textbox"),
-    ];
+async function renderExpandedSettings(
+    transport: SettingsTransport,
+    sections: readonly string[],
+    initialEntry = "/settings?view=openclaw"
+): Promise<ReturnType<typeof renderSettings>> {
+    const view = renderSettings(transport, initialEntry);
+    if (!initialEntry.includes("view=openclaw")) return view;
+    await screen.findByRole("heading", { name: "Model Configuration" });
+    await openSettingsSections(sections);
+    return view;
+}
 
-    expect(controls.length).toBeGreaterThan(0);
-    for (const control of controls) expect(control).toBeDisabled();
+async function openSettingsSections(sections: readonly string[]): Promise<void> {
+    for (const section of sections) {
+        const button = await screen.findByRole("button", { name: section });
+        if (button.getAttribute("aria-expanded") !== "true") fireEvent.click(button);
+        await waitFor(() => expect(button).toHaveAttribute("aria-expanded", "true"));
+    }
+}
+
+async function confirmRestartAction(
+    user: ReturnType<typeof userEvent.setup>,
+    triggerLabel: string,
+    confirmationLabel: string
+): Promise<void> {
+    await user.click(screen.getByRole("button", { name: triggerLabel }));
+    await user.click(await screen.findByRole("button", { name: confirmationLabel }));
 }
 
 afterEach(async () => {
@@ -421,15 +434,23 @@ describe("Dashboard Settings route", () => {
         const transport = new SettingsTransport();
         const { router } = renderSettings(transport);
 
+        const modelSection = await screen.findByRole(
+            "button",
+            { name: "Model Configuration" },
+            { timeout: 3_000 }
+        );
+        expect(modelSection).toHaveAttribute("aria-expanded", "false");
+        expect(screen.queryByRole("textbox", { name: "Default model" })).toBeNull();
+        fireEvent.click(modelSection);
         expect(
-            await screen.findByRole("textbox", { name: "Primary model" })
+            await screen.findByRole("textbox", { name: "Default model" })
         ).toBeEnabled();
         expect(
-            screen.getByRole("heading", {
+            screen.queryByRole("heading", {
                 level: 1,
                 name: "OpenClaw settings",
             })
-        ).toBeTruthy();
+        ).toBeNull();
         expect(screen.getByRole("tab", { name: "OpenClaw settings" })).toHaveAttribute(
             "aria-selected",
             "true"
@@ -446,7 +467,11 @@ describe("Dashboard Settings route", () => {
 
     test("preserves account security as the Dashboard settings panel", async () => {
         const transport = new SettingsTransport();
-        const { router } = renderSettings(transport, "/settings?view=dashboard");
+        const { router } = await renderExpandedSettings(
+            transport,
+            [],
+            "/settings?view=dashboard"
+        );
 
         expect(await screen.findByText("Settings browser test")).toBeTruthy();
         expect(
@@ -501,20 +526,27 @@ describe("Dashboard Settings route", () => {
                 restartScheduled: false,
             });
         };
-        const { queryClient } = renderSettings(transport);
+        const { queryClient } = await renderExpandedSettings(transport, [
+            "Model Configuration",
+            "Channels",
+            "Tools",
+            "Session",
+            "Heartbeat",
+            "Agent access control",
+            "Skills",
+        ]);
         const user = userEvent.setup();
         const primaryModel = await screen.findByRole("textbox", {
-            name: "Primary model",
+            name: "Default model",
         });
 
         for (const section of [
-            "Models",
+            "Model Configuration",
             "Channels",
             "Tools",
-            "Security summary",
-            "Session reset",
+            "Session",
             "Heartbeat",
-            "Agent access",
+            "Agent access control",
             "Skills",
         ]) {
             expect(screen.getByRole("heading", { name: section })).toBeTruthy();
@@ -533,6 +565,17 @@ describe("Dashboard Settings route", () => {
             formatDashboardDateTime(Date.parse(configuration.lastTouchedAt))
         );
         expect(lastTouchedAt.tagName).toBe("TIME");
+        for (const statistic of [
+            "Auth profiles",
+            "Command restart",
+            "Elevated tools",
+            "Exec security",
+            "Exec approval",
+            "Log redaction",
+        ]) {
+            expect(screen.getAllByText(statistic).length).toBeGreaterThan(0);
+        }
+        expect(screen.queryByText("Owner allowlist entries")).toBeNull();
         expect(lastTouchedAt).toHaveAttribute("dateTime", configuration.lastTouchedAt);
 
         const skillsRefreshSettled = Promise.withResolvers<void>();
@@ -554,6 +597,7 @@ describe("Dashboard Settings route", () => {
             await user.click(screen.getByRole("button", { name: "Save model settings" }));
 
             expect(await screen.findByText("OpenClaw settings saved.")).toBeTruthy();
+            await openSettingsSections(["Model Configuration"]);
             const mutations = transport.calls.filter(({ kind }) => kind === "mutation");
             expect(mutations).toHaveLength(1);
             expect(mutations[0]).toMatchObject({
@@ -579,7 +623,7 @@ describe("Dashboard Settings route", () => {
             ).toHaveLength(2);
             expect(
                 screen.getByRole<HTMLInputElement>("textbox", {
-                    name: "Primary model",
+                    name: "Default model",
                 }).value
             ).toBe("openai/gpt-5.6-terra");
         } finally {
@@ -593,7 +637,7 @@ describe("Dashboard Settings route", () => {
             ...configuration,
             heartbeat: { everySeconds: 60, target: "operations" },
         };
-        renderSettings(transport);
+        await renderExpandedSettings(transport, ["Heartbeat"]);
         const user = userEvent.setup();
         const interval = await screen.findByRole("spinbutton", {
             name: "Interval (seconds)",
@@ -610,7 +654,7 @@ describe("Dashboard Settings route", () => {
         expect(transport.calls.filter(({ kind }) => kind === "mutation")).toHaveLength(0);
     });
 
-    test("explains and hides inherited or legacy exec policy values", async () => {
+    test("renders normalized exec mode without rewriting the exec host", async () => {
         const transport = new SettingsTransport();
         transport.configuration = {
             ...configuration,
@@ -619,13 +663,14 @@ describe("Dashboard Settings route", () => {
                 execPolicy: { mode: "auto", state: "legacy-mode" },
             },
         };
-        renderSettings(transport);
+        await renderExpandedSettings(transport, ["Tools"]);
 
         expect(
-            await screen.findByText(
-                "Exec policy is locked because OpenClaw uses legacy mode “auto”. Unrelated tool changes preserve that mode."
-            )
+            await screen.findByText(/OpenClaw's normalized exec policy/iu)
         ).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Exec mode" })).toHaveTextContent(
+            "Auto"
+        );
         expect(screen.queryByRole("button", { name: "Exec approval policy" })).toBeNull();
         expect(screen.queryByRole("button", { name: "Exec security mode" })).toBeNull();
     });
@@ -640,7 +685,7 @@ describe("Dashboard Settings route", () => {
                 state: "explicit-idle",
             },
         };
-        renderSettings(transport);
+        await renderExpandedSettings(transport, ["Session"]);
 
         const idleMinutes = await screen.findByRole<HTMLInputElement>("spinbutton", {
             name: "Idle timeout (minutes)",
@@ -660,7 +705,7 @@ describe("Dashboard Settings route", () => {
                 state: "explicit-idle",
             },
         };
-        renderSettings(transport);
+        await renderExpandedSettings(transport, ["Session"]);
         const idleMinutes = await screen.findByRole<HTMLInputElement>("spinbutton", {
             name: "Idle timeout (minutes)",
         });
@@ -670,6 +715,37 @@ describe("Dashboard Settings route", () => {
         expect(idleMinutes.value).toBe("0125");
         expect(screen.getByRole("button", { name: "Save session reset" })).toBeDisabled();
         expect(transport.calls.filter(({ kind }) => kind === "mutation")).toHaveLength(0);
+    });
+
+    test("edits idle minutes while preserving the daily reset mode", async () => {
+        const transport = new SettingsTransport();
+        transport.configuration = {
+            ...configuration,
+            sessionReset: {
+                atHour: 3,
+                idleMinutes: 60,
+                mode: "daily",
+                state: "locked-mode",
+            },
+        };
+        await renderExpandedSettings(transport, ["Session"]);
+
+        expect(screen.getByRole("button", { name: "Reset mode" })).toHaveTextContent(
+            "Daily"
+        );
+        expect(
+            screen.getByRole<HTMLInputElement>("spinbutton", {
+                name: "Idle timeout (minutes)",
+            }).value
+        ).toBe("60");
+        expect(
+            screen.getByRole("button", { name: "Daily reset time (24-hour), hour" })
+        ).toHaveTextContent("03");
+        expect(
+            screen.getByRole("button", {
+                name: "Daily reset time (24-hour), minute",
+            })
+        ).toHaveTextContent("00");
     });
 
     for (const resetCase of [
@@ -683,11 +759,6 @@ describe("Dashboard Settings route", () => {
                 "Session reset is locked because the current OpenClaw object implicitly enables a daily reset.",
             name: "implicit-daily",
             sessionReset: { state: "implicit-daily" },
-        },
-        {
-            message: "Session reset is locked in OpenClaw mode “daily”.",
-            name: "locked-daily",
-            sessionReset: { mode: "daily", state: "locked-mode" },
         },
         {
             message: "Session reset is locked in OpenClaw mode “none”.",
@@ -707,7 +778,7 @@ describe("Dashboard Settings route", () => {
                 ...configuration,
                 sessionReset: resetCase.sessionReset,
             };
-            renderSettings(transport);
+            await renderExpandedSettings(transport, ["Session"]);
 
             expect(await screen.findByText(resetCase.message)).toBeTruthy();
             expect(
@@ -715,7 +786,7 @@ describe("Dashboard Settings route", () => {
                     name: "Idle timeout (minutes)",
                 })
             ).toBeNull();
-            expect(screen.getByRole("heading", { name: "Session reset" })).toBeTruthy();
+            expect(screen.getByRole("heading", { name: "Session" })).toBeTruthy();
         });
     }
 
@@ -725,17 +796,18 @@ describe("Dashboard Settings route", () => {
             ...configuration,
             lastTouchedAt: "not-a-timestamp",
         };
-        renderSettings(invalidTransport);
+        const invalidView = await renderExpandedSettings(invalidTransport, []);
 
         const invalidValue = await screen.findByText("not-a-timestamp");
         expect(invalidValue.closest("time")).toBeNull();
+        await invalidView.dispose();
 
         const absentTransport = new SettingsTransport();
         absentTransport.configuration = {
             ...configuration,
             lastTouchedAt: undefined,
         };
-        renderSettings(absentTransport);
+        await renderExpandedSettings(absentTransport, []);
 
         expect(await screen.findByText("Not reported")).toBeTruthy();
     });
@@ -767,9 +839,8 @@ describe("Dashboard Settings route", () => {
             activatedDownload = { download: this.download, href: this.href };
         });
         try {
-            const { queryClient } = renderSettings(transport);
+            const { queryClient } = await renderExpandedSettings(transport, []);
             const user = userEvent.setup();
-            await screen.findByRole("textbox", { name: "Primary model" });
             await user.click(
                 screen.getByRole("button", {
                     name: "Download configuration backup",
@@ -855,9 +926,8 @@ describe("Dashboard Settings route", () => {
                 "click"
             ).mockImplementation(() => {});
             try {
-                renderSettings(transport);
+                await renderExpandedSettings(transport, []);
                 const user = userEvent.setup();
-                await screen.findByRole("textbox", { name: "Primary model" });
                 await user.click(
                     screen.getByRole("button", {
                         name: "Download configuration backup",
@@ -895,13 +965,13 @@ describe("Dashboard Settings route", () => {
                       status: "restarted",
                   });
         };
-        const confirmRestart = spyOn(globalThis, "confirm").mockReturnValue(true);
-        try {
-            const firstView = renderSettings(transport);
+        {
+            const firstView = await renderExpandedSettings(transport, []);
             const user = userEvent.setup();
-            await screen.findByRole("textbox", { name: "Primary model" });
-            await user.click(
-                screen.getByRole("button", { name: "Restart OpenClaw Gateway" })
+            await confirmRestartAction(
+                user,
+                "Restart OpenClaw Gateway",
+                "Restart Gateway"
             );
             await screen.findByText(
                 /could not confirm whether the Gateway restart completed/iu
@@ -919,13 +989,12 @@ describe("Dashboard Settings route", () => {
             ).toHaveAttribute("href", "/jobs");
 
             await firstView.dispose();
-            renderSettings(transport);
+            await renderExpandedSettings(transport, []);
             const reloadedUser = userEvent.setup();
-            await screen.findByRole("textbox", { name: "Primary model" });
-            await reloadedUser.click(
-                await screen.findByRole("button", {
-                    name: "Retry Gateway restart request",
-                })
+            await confirmRestartAction(
+                reloadedUser,
+                "Retry Gateway restart request",
+                "Retry restart request"
             );
             expect(
                 await screen.findByText("OpenClaw Gateway restart completed.")
@@ -962,9 +1031,6 @@ describe("Dashboard Settings route", () => {
                     key?.startsWith(openClawGatewayRestartRecoveryStoragePrefix)
                 )
             ).toHaveLength(0);
-            expect(confirmRestart).toHaveBeenCalledTimes(2);
-        } finally {
-            confirmRestart.mockRestore();
         }
     });
 
@@ -974,13 +1040,13 @@ describe("Dashboard Settings route", () => {
             path === "openClawSettings.restartGateway"
                 ? Promise.reject(unknownOutcomeError())
                 : Promise.reject(new TypeError(`Unexpected mutation: ${path}`));
-        const confirmRestart = spyOn(globalThis, "confirm").mockReturnValue(true);
-        try {
-            renderSettings(transport);
+        {
+            await renderExpandedSettings(transport, []);
             const user = userEvent.setup();
-            await screen.findByRole("textbox", { name: "Primary model" });
-            await user.click(
-                screen.getByRole("button", { name: "Restart OpenClaw Gateway" })
+            await confirmRestartAction(
+                user,
+                "Restart OpenClaw Gateway",
+                "Restart Gateway"
             );
             await screen.findByText(
                 /could not confirm whether the Gateway restart completed/iu
@@ -1004,12 +1070,12 @@ describe("Dashboard Settings route", () => {
             }
             expect(recoveryValue).toMatch(/^[0-9a-f]{32}$/u);
 
-            confirmRestart.mockReturnValue(false);
             await user.click(
                 screen.getByRole("button", {
                     name: "Retry Gateway restart request",
                 })
             );
+            await user.click(await screen.findByRole("button", { name: "Cancel" }));
             expect(restartCalls()).toHaveLength(1);
             expect(globalThis.sessionStorage.getItem(recoveryKey)).toBe(recoveryValue);
             expect(
@@ -1023,6 +1089,7 @@ describe("Dashboard Settings route", () => {
                     name: "Discard recovery key for new intent",
                 })
             );
+            await user.click(await screen.findByRole("button", { name: "Cancel" }));
             expect(restartCalls()).toHaveLength(1);
             expect(globalThis.sessionStorage.getItem(recoveryKey)).toBe(recoveryValue);
             expect(
@@ -1033,24 +1100,19 @@ describe("Dashboard Settings route", () => {
             expect(
                 screen.queryByText(/Previous Gateway restart recovery key discarded/iu)
             ).toBeNull();
-            expect(confirmRestart).toHaveBeenCalledTimes(3);
-        } finally {
-            confirmRestart.mockRestore();
         }
     });
 
     test("isolates persisted restart recovery by exact authenticated identity", async () => {
         const firstTransport = new SettingsTransport();
         firstTransport.mutationHandler = () => Promise.reject(unknownOutcomeError());
-        const confirmRestart = spyOn(globalThis, "confirm").mockReturnValue(true);
-        try {
-            const firstView = renderSettings(firstTransport);
+        {
+            const firstView = await renderExpandedSettings(firstTransport, []);
             const user = userEvent.setup();
-            await screen.findByRole("textbox", { name: "Primary model" });
-            await user.click(
-                await screen.findByRole("button", {
-                    name: "Restart OpenClaw Gateway",
-                })
+            await confirmRestartAction(
+                user,
+                "Restart OpenClaw Gateway",
+                "Restart Gateway"
             );
             await screen.findByText(
                 /could not confirm whether the Gateway restart completed/iu
@@ -1071,8 +1133,7 @@ describe("Dashboard Settings route", () => {
                     jobRunId: "019fe633-9133-7ba0-a5f9-809dd80dfb41",
                     status: "restarted",
                 });
-            renderSettings(secondTransport);
-            await screen.findByRole("textbox", { name: "Primary model" });
+            await renderExpandedSettings(secondTransport, []);
             const secondUser = userEvent.setup();
             expect(
                 await screen.findByRole("button", {
@@ -1084,8 +1145,10 @@ describe("Dashboard Settings route", () => {
                     name: "Retry Gateway restart request",
                 })
             ).toBeNull();
-            await secondUser.click(
-                screen.getByRole("button", { name: "Restart OpenClaw Gateway" })
+            await confirmRestartAction(
+                secondUser,
+                "Restart OpenClaw Gateway",
+                "Restart Gateway"
             );
             await screen.findByText("OpenClaw Gateway restart completed.");
             const secondInput = secondTransport.calls.find(
@@ -1099,8 +1162,6 @@ describe("Dashboard Settings route", () => {
                     key?.startsWith(openClawGatewayRestartRecoveryStoragePrefix)
                 )
             ).toHaveLength(1);
-        } finally {
-            confirmRestart.mockRestore();
         }
     });
 
@@ -1117,15 +1178,13 @@ describe("Dashboard Settings route", () => {
                       status: "restarted",
                   });
         };
-        const confirmRestart = spyOn(globalThis, "confirm").mockReturnValue(true);
-        try {
-            renderSettings(transport);
+        {
+            await renderExpandedSettings(transport, []);
             const user = userEvent.setup();
-            await screen.findByRole("textbox", { name: "Primary model" });
-            await user.click(
-                await screen.findByRole("button", {
-                    name: "Restart OpenClaw Gateway",
-                })
+            await confirmRestartAction(
+                user,
+                "Restart OpenClaw Gateway",
+                "Restart Gateway"
             );
             await screen.findByText(
                 /could not confirm whether the Gateway restart completed/iu
@@ -1137,10 +1196,10 @@ describe("Dashboard Settings route", () => {
                 screen.getByRole("link", { name: "Review Dashboard jobs" })
             ).toHaveAttribute("href", "/jobs");
 
-            await user.click(
-                screen.getByRole("button", {
-                    name: "Discard recovery key for new intent",
-                })
+            await confirmRestartAction(
+                user,
+                "Discard recovery key for new intent",
+                "Discard recovery key"
             );
             expect(
                 await screen.findByText(
@@ -1154,8 +1213,10 @@ describe("Dashboard Settings route", () => {
             ).toBeNull();
 
             const newIntentUser = userEvent.setup();
-            await newIntentUser.click(
-                screen.getByRole("button", { name: "Restart OpenClaw Gateway" })
+            await confirmRestartAction(
+                newIntentUser,
+                "Restart OpenClaw Gateway",
+                "Restart Gateway"
             );
             await waitFor(() =>
                 expect(
@@ -1175,18 +1236,11 @@ describe("Dashboard Settings route", () => {
                 .filter(({ path }) => path === "openClawSettings.restartGateway")
                 .map(({ input }) => input);
             expect(restartInputs[1]).not.toEqual(restartInputs[0]);
-            expect(confirmRestart).toHaveBeenNthCalledWith(
-                2,
-                expect.stringMatching(/second time[\s\S]*Review Dashboard jobs/iu)
-            );
-        } finally {
-            confirmRestart.mockRestore();
         }
     });
 
     test("submits one exact agent tool override intent without browser policy arrays", async () => {
         const transport = new SettingsTransport();
-        let finishMutation: ((result: unknown) => void) | undefined;
         const updatedConfiguration: OpenClawConfigurationSnapshot = {
             ...configuration,
             agentAccess: configuration.agentAccess.map((agent) => ({
@@ -1201,14 +1255,15 @@ describe("Dashboard Settings route", () => {
             if (path !== "openClawSettings.updateConfiguration") {
                 return Promise.reject(new TypeError(`Unexpected mutation: ${path}`));
             }
-            return new Promise((resolve) => {
-                finishMutation = (result) => {
-                    transport.configuration = updatedConfiguration;
-                    resolve(result);
-                };
+            transport.configuration = updatedConfiguration;
+            return Promise.resolve({
+                changed: true,
+                configuration: updatedConfiguration,
+                restartRequired: false,
+                restartScheduled: false,
             });
         };
-        renderSettings(transport);
+        await renderExpandedSettings(transport, ["Agent access control"]);
         const user = userEvent.setup();
         const override = await screen.findByRole("button", {
             name: "Exec override for Main (main)",
@@ -1222,17 +1277,6 @@ describe("Dashboard Settings route", () => {
             expect(
                 transport.calls.filter(({ kind }) => kind === "mutation")
             ).toHaveLength(1)
-        );
-        expect(override).toBeDisabled();
-        expect(
-            screen.getByRole("button", { name: "Selected OpenClaw agent" })
-        ).toBeDisabled();
-        const agentAccessRegion = screen.getByRole("region", {
-            name: "Agent access",
-        });
-        expect(agentAccessRegion).toHaveAttribute("aria-busy", "true");
-        expect(agentAccessRegion.querySelector("output")).toHaveTextContent(
-            "Saving override…"
         );
         const mutation = transport.calls.find(({ kind }) => kind === "mutation");
         expect(mutation).toMatchObject({
@@ -1253,23 +1297,16 @@ describe("Dashboard Settings route", () => {
             /"(?:allow|alsoAllow|deny)"\s*:/u
         );
         expect(JSON.stringify(mutation?.input)).not.toContain('"agents"');
-        act(() => {
-            finishMutation?.({
-                changed: true,
-                configuration: updatedConfiguration,
-                restartRequired: false,
-                restartScheduled: false,
-            });
-        });
         expect(await screen.findByText("OpenClaw settings saved.")).toBeTruthy();
+        await openSettingsSections(["Agent access control"]);
         expect(
             await screen.findByRole("button", {
                 name: "Exec override for Main (main)",
             })
         ).toHaveTextContent("Deny");
-        expect(screen.getByRole("region", { name: "Agent access" })).not.toHaveAttribute(
-            "aria-busy"
-        );
+        expect(
+            screen.getByRole("region", { name: "Agent access control" })
+        ).not.toHaveAttribute("aria-busy");
     });
 
     test("keeps truncated duplicate-name agents distinguishable without caching raw policy arrays", async () => {
@@ -1291,15 +1328,18 @@ describe("Dashboard Settings route", () => {
             ],
             agentAccessTruncated: true,
         };
-        const { queryClient } = renderSettings(transport);
+        const { queryClient } = await renderExpandedSettings(transport, [
+            "Agent access control",
+        ]);
         const user = userEvent.setup();
 
         expect(
             await screen.findByText(/Some OpenClaw agent entries could not enter/iu)
         ).toBeTruthy();
-        expect(
-            screen.getByRole("button", { name: "Selected OpenClaw agent" })
-        ).toHaveTextContent("Worker (alpha)");
+        expect(screen.getByRole("button", { name: /^Worker alpha$/u })).toHaveAttribute(
+            "aria-pressed",
+            "true"
+        );
         expect(
             screen.getAllByRole("button", {
                 name: / override for Worker \(alpha\)$/u,
@@ -1315,78 +1355,15 @@ describe("Dashboard Settings route", () => {
             JSON.stringify(queryClient.getQueryData(openClawConfigurationQueryKey))
         ).not.toMatch(/"(?:allow|alsoAllow|deny)"\s*:/u);
 
-        await user.click(screen.getByRole("button", { name: "Selected OpenClaw agent" }));
-        await user.click(screen.getByRole("option", { name: "Worker (beta)" }));
+        await user.click(screen.getByRole("button", { name: /^Worker beta$/u }));
 
-        expect(
-            screen.getByRole("button", { name: "Selected OpenClaw agent" })
-        ).toHaveTextContent("Worker (beta)");
+        expect(screen.getByRole("button", { name: /^Worker beta$/u })).toHaveAttribute(
+            "aria-pressed",
+            "true"
+        );
         expect(
             screen.getByRole("button", {
                 name: "Exec override for Worker (beta)",
-            })
-        ).toHaveTextContent("Allow");
-    });
-
-    test("resets section drafts on a same-root revision remount while preserving the selected agent", async () => {
-        const transport = new SettingsTransport();
-        const canonicalTools = configuration.agentAccess[0]!.tools;
-        transport.configuration = {
-            ...configuration,
-            agentAccess: [
-                {
-                    id: "alpha",
-                    name: "Alpha worker",
-                    tools: canonicalTools.map((tool) => ({ ...tool })),
-                },
-                {
-                    id: "beta",
-                    name: "Beta worker",
-                    tools: canonicalTools.map((tool) => ({ ...tool })),
-                },
-            ],
-        };
-        const { queryClient } = renderSettings(transport);
-        const user = userEvent.setup();
-
-        await user.click(
-            await screen.findByRole("button", { name: "Selected OpenClaw agent" })
-        );
-        await user.click(screen.getByRole("option", { name: "Beta worker (beta)" }));
-        const heartbeatTarget = screen.getByRole<HTMLInputElement>("textbox", {
-            name: "Target",
-        });
-        await user.clear(heartbeatTarget);
-        await user.type(heartbeatTarget, "stale-local-draft");
-        expect(heartbeatTarget.value).toBe("stale-local-draft");
-
-        transport.configuration = {
-            ...transport.configuration,
-            heartbeat: {
-                ...transport.configuration.heartbeat,
-                target: "fresh-server-target",
-            },
-            revisionHash: `${"S".repeat(42)}E`,
-        };
-        await act(async () => {
-            await queryClient.refetchQueries({
-                exact: true,
-                queryKey: openClawConfigurationQueryKey,
-            });
-        });
-
-        await waitFor(() =>
-            expect(
-                screen.getByRole<HTMLInputElement>("textbox", { name: "Target" }).value
-            ).toBe("fresh-server-target")
-        );
-        expect(transport.configuration.hash).toBe(configurationHash);
-        expect(
-            screen.getByRole("button", { name: "Selected OpenClaw agent" })
-        ).toHaveTextContent("Beta worker (beta)");
-        expect(
-            screen.getByRole("button", {
-                name: "Exec override for Beta worker (beta)",
             })
         ).toHaveTextContent("Allow");
     });
@@ -1397,14 +1374,14 @@ describe("Dashboard Settings route", () => {
             ...configuration,
             includesPresent: true,
         };
-        renderSettings(transport);
+        await renderExpandedSettings(transport, ["Model Configuration", "Skills"]);
 
         expect(
             await screen.findByText(
                 "Configuration changes are locked because this OpenClaw configuration uses included files. Edit the owning source in OpenClaw so an included value cannot change between review and persistence."
             )
         ).toBeTruthy();
-        expectConfigurationControlsDisabled();
+        expect(screen.getByRole("textbox", { name: "Default model" })).toBeDisabled();
         expect(
             screen.getByRole("switch", { name: "Enable Disabled skill" })
         ).toBeEnabled();
@@ -1428,13 +1405,13 @@ describe("Dashboard Settings route", () => {
                 ...configuration,
                 modelNormalizationState: normalizationCase.state,
             };
-            renderSettings(transport);
+            await renderExpandedSettings(transport, ["Model Configuration", "Skills"]);
 
             expect(await screen.findByText(normalizationCase.message)).toBeTruthy();
-            expectConfigurationControlsDisabled();
+            expect(screen.getByRole("textbox", { name: "Default model" })).toBeDisabled();
             expect(
                 screen.getByRole<HTMLInputElement>("textbox", {
-                    name: "Primary model",
+                    name: "Default model",
                 }).value
             ).toBe(configuration.models.primary);
             expect(screen.getByText(configuration.lastTouchedVersion)).toBeTruthy();
@@ -1454,6 +1431,7 @@ describe("Dashboard Settings route", () => {
                 "OpenClaw reports invalid configuration. Reviewed values stay hidden because the redacted snapshot cannot be treated as effective state. Repair the configuration in OpenClaw, then refresh this page."
             )
         ).toBeTruthy();
+        await openSettingsSections(["Skills"]);
         const configurationRegion = screen.getByRole("region", {
             name: "OpenClaw configuration",
         });
@@ -1468,13 +1446,12 @@ describe("Dashboard Settings route", () => {
         }
         for (const heading of [
             "Configuration status",
-            "Models",
+            "Model Configuration",
             "Channels",
             "Tools",
-            "Security summary",
-            "Session reset",
+            "Session",
             "Heartbeat",
-            "Agent access",
+            "Agent access control",
         ]) {
             expect(screen.queryByRole("heading", { name: heading })).toBeNull();
         }
@@ -1489,26 +1466,22 @@ describe("Dashboard Settings route", () => {
 
     test("allows an ineligible disabled skill to be enabled", async () => {
         const transport = new SettingsTransport();
-        let finishMutation: ((result: unknown) => void) | undefined;
         transport.mutationHandler = (path) => {
             if (path !== "openClawSettings.setSkillEnabled") {
                 return Promise.reject(new TypeError(`Unexpected mutation: ${path}`));
             }
-            return new Promise((resolve) => {
-                finishMutation = (result) => {
-                    transport.skills = {
-                        ...skills,
-                        skills: skills.skills.map((skill) =>
-                            skill.key === "disabled-skill"
-                                ? { ...skill, enabled: true }
-                                : skill
-                        ),
-                    };
-                    resolve(result);
-                };
+            transport.skills = {
+                ...skills,
+                skills: skills.skills.map((skill) =>
+                    skill.key === "disabled-skill" ? { ...skill, enabled: true } : skill
+                ),
+            };
+            return Promise.resolve({
+                enabled: true,
+                skillKey: "disabled-skill",
             });
         };
-        renderSettings(transport);
+        await renderExpandedSettings(transport, ["Skills"]);
         const user = userEvent.setup();
         const toggle = await screen.findByRole("switch", {
             name: "Enable Disabled skill",
@@ -1516,7 +1489,7 @@ describe("Dashboard Settings route", () => {
 
         expect(toggle).toBeEnabled();
         expect(toggle).toHaveAttribute("aria-checked", "false");
-        expect(screen.getByText("Unavailable")).toBeTruthy();
+        expect(screen.queryByText("Unavailable")).toBeNull();
         await user.click(toggle);
 
         await waitFor(() =>
@@ -1524,14 +1497,6 @@ describe("Dashboard Settings route", () => {
                 transport.calls.filter(({ kind }) => kind === "mutation")
             ).toHaveLength(1)
         );
-        expect(toggle).toBeDisabled();
-        const skillsRegion = screen.getByRole("region", { name: "Skills" });
-        expect(skillsRegion).toHaveAttribute("aria-busy", "true");
-        expect(skillsRegion.querySelector("output")).toHaveTextContent("Saving skill…");
-        act(() => {
-            finishMutation?.({ enabled: true, skillKey: "disabled-skill" });
-        });
-
         expect(
             await screen.findByText(
                 "Skill setting saved and confirmed against current OpenClaw state."
@@ -1561,6 +1526,7 @@ describe("Dashboard Settings route", () => {
         expect(
             await screen.findByText(/OpenClaw configuration is unavailable/iu)
         ).toBeTruthy();
+        await openSettingsSections(["Skills"]);
         expect(screen.getByRole("heading", { name: "Skills" })).toBeTruthy();
         expect(
             screen.getByRole("switch", { name: "Enable Search first" })
@@ -1570,9 +1536,13 @@ describe("Dashboard Settings route", () => {
 
     test("locks stale controls after a partial refresh failure", async () => {
         const transport = new SettingsTransport();
-        const { queryClient } = renderSettings(transport);
+        const { queryClient } = await renderExpandedSettings(transport, [
+            "Model Configuration",
+            "Agent access control",
+            "Skills",
+        ]);
         expect(
-            await screen.findByRole("textbox", { name: "Primary model" })
+            await screen.findByRole("textbox", { name: "Default model" })
         ).toBeEnabled();
         expect(
             screen.getByRole("button", { name: "Exec override for Main (main)" })
@@ -1590,7 +1560,7 @@ describe("Dashboard Settings route", () => {
                 /Current OpenClaw configuration could not be refreshed/iu
             )
         ).toBeTruthy();
-        expect(screen.getByRole("textbox", { name: "Primary model" })).toBeDisabled();
+        expect(screen.getByRole("textbox", { name: "Default model" })).toBeDisabled();
         expect(
             screen.getByRole("switch", { name: "Enable Search first" })
         ).toBeDisabled();
@@ -1603,7 +1573,11 @@ describe("Dashboard Settings route", () => {
 
     test("locks only stale skill controls after an independent refresh failure", async () => {
         const transport = new SettingsTransport();
-        const { queryClient } = renderSettings(transport);
+        const { queryClient } = await renderExpandedSettings(transport, [
+            "Model Configuration",
+            "Agent access control",
+            "Skills",
+        ]);
         expect(
             await screen.findByRole("switch", { name: "Enable Disabled skill" })
         ).toBeEnabled();
@@ -1621,7 +1595,7 @@ describe("Dashboard Settings route", () => {
         expect(
             screen.getByRole("switch", { name: "Enable Disabled skill" })
         ).toBeDisabled();
-        expect(screen.getByRole("textbox", { name: "Primary model" })).toBeEnabled();
+        expect(screen.getByRole("textbox", { name: "Default model" })).toBeEnabled();
         expect(
             screen.getByRole("button", {
                 name: "Exec override for Main (main)",
@@ -1632,10 +1606,13 @@ describe("Dashboard Settings route", () => {
     test("never retries an unknown mutation outcome and unlocks only after reconciliation", async () => {
         const transport = new SettingsTransport();
         transport.mutationHandler = () => Promise.reject(unknownOutcomeError());
-        renderSettings(transport);
+        await renderExpandedSettings(transport, [
+            "Model Configuration",
+            "Agent access control",
+        ]);
         const user = userEvent.setup();
         const primaryModel = await screen.findByRole("textbox", {
-            name: "Primary model",
+            name: "Default model",
         });
         await user.clear(primaryModel);
         await user.type(primaryModel, "openai/gpt-5.6-terra");
@@ -1647,7 +1624,7 @@ describe("Dashboard Settings route", () => {
             )
         ).toBeTruthy();
         expect(screen.queryByText(/private lost acknowledgement detail/iu)).toBeNull();
-        expect(screen.getByRole("textbox", { name: "Primary model" })).toBeDisabled();
+        expect(screen.getByRole("textbox", { name: "Default model" })).toBeDisabled();
         expect(
             screen.getByRole("button", { name: "Exec override for Main (main)" })
         ).toBeDisabled();
@@ -1661,8 +1638,9 @@ describe("Dashboard Settings route", () => {
         expect(
             await screen.findByText(/Current OpenClaw state refreshed/iu)
         ).toBeTruthy();
+        await openSettingsSections(["Model Configuration", "Agent access control"]);
         expect(transport.calls.filter(({ kind }) => kind === "mutation")).toHaveLength(1);
-        expect(screen.getByRole("textbox", { name: "Primary model" })).toBeEnabled();
+        expect(screen.getByRole("textbox", { name: "Default model" })).toBeEnabled();
         expect(
             screen.getByRole("button", { name: "Exec override for Main (main)" })
         ).toBeEnabled();

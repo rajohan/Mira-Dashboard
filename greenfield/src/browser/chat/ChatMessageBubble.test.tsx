@@ -832,12 +832,8 @@ describe("chat message bubble", () => {
         await user.click(
             screen.getByRole("button", { name: "Open preview of photo.png" })
         );
-        expect(
-            screen.getByRole("dialog", { name: "photo.png" })
-        ).toBeVisible();
-        expect(
-            screen.getByRole("img", { name: "Preview of photo.png" })
-        ).toHaveAttribute(
+        expect(screen.getByRole("dialog", { name: "photo.png" })).toBeVisible();
+        expect(screen.getByRole("img", { name: "Preview of photo.png" })).toHaveAttribute(
             "src",
             "/api/chat/media/019fe633-9133-4ba0-8b80-809dd80dfb40?disposition=preview"
         );

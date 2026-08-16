@@ -665,8 +665,7 @@ function localHistoryMediaType(value: unknown, fileName: string): string {
     const extension = fileName.match(/\.([^.]+)$/u)?.[1]?.toLowerCase();
     return extension === undefined
         ? "application/octet-stream"
-        : (localHistoryMediaTypeByExtension.get(extension) ??
-              "application/octet-stream");
+        : (localHistoryMediaTypeByExtension.get(extension) ?? "application/octet-stream");
 }
 
 const deliveryMirrorOutboundFilePattern =
@@ -1030,7 +1029,10 @@ function projectMessageParts(
         if (raw === undefined) return undefined;
         const outbound = deliveryMirrorTextMedia(message, rawRole, raw);
         if (outbound !== undefined) {
-            if (structuredMedia.length + directiveMedia.length >= localHistoryMediaMaximum) {
+            if (
+                structuredMedia.length + directiveMedia.length >=
+                localHistoryMediaMaximum
+            ) {
                 directiveOverflow = true;
             } else {
                 directiveMedia.push(outbound.fact);

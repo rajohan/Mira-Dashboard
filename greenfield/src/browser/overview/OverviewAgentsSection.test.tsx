@@ -328,7 +328,6 @@ describe("OverviewAgentsSection", () => {
             ])
         );
         expect(harness.realtimeClient.input).toEqual({
-            lastEventId: "0",
             topics: [
                 agentRealtimeTopic,
                 gatewayRealtimeTopics.connection,

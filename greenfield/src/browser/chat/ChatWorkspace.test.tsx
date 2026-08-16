@@ -115,9 +115,7 @@ describe("chat workspace", () => {
         expect(modelSelect).not.toHaveTextContent("openai/");
         await user.click(modelSelect);
         expect(screen.getByText("OpenAI")).toBeVisible();
-        expect(
-            screen.getAllByRole("option", { name: "gpt-5.6-sol" })
-        ).toHaveLength(1);
+        expect(screen.getAllByRole("option", { name: "gpt-5.6-sol" })).toHaveLength(1);
         await user.click(screen.getByRole("option", { name: "gpt-5.6-terra" }));
         expect(onSendSettingsChange).toHaveBeenLastCalledWith({
             fastMode: "auto",

@@ -1356,10 +1356,7 @@ export async function createDashboardServer(
                 ...(openClawMediaFileRoot === undefined
                     ? {}
                     : {
-                          localMediaRoot: path.join(
-                              openClawMediaFileRoot.path,
-                              "media"
-                          ),
+                          localMediaRoot: path.join(openClawMediaFileRoot.path, "media"),
                       }),
             });
             chatService = createChatService({

@@ -90,11 +90,16 @@ const upstreamAgentToolPolicyListSchema = v.pipe(
     v.array(upstreamControlSafeTextSchema(256)),
     v.maxLength(upstreamAgentToolPolicyMaximum)
 );
+const upstreamHeartbeatSchema = v.object({
+    every: v.optional(upstreamControlSafeTextSchema(128)),
+    target: v.optional(upstreamControlSafeTextSchema(1024)),
+});
 const upstreamAgentEntriesSchema = v.pipe(
     v.record(
         v.string(),
         v.object({
             default: v.optional(v.boolean()),
+            heartbeat: v.optional(upstreamHeartbeatSchema),
             name: v.optional(upstreamControlSafeTextSchema(1024)),
             tools: v.optional(
                 v.object({
@@ -125,11 +130,10 @@ const upstreamConfigurationSchema = v.object({
         v.object({
             defaults: v.optional(
                 v.object({
-                    heartbeat: v.optional(
-                        v.object({
-                            every: v.optional(upstreamControlSafeTextSchema(128)),
-                            target: v.optional(upstreamControlSafeTextSchema(1024)),
-                        })
+                    heartbeat: v.optional(upstreamHeartbeatSchema),
+                    imageModel: v.optional(upstreamModelSchema),
+                    mediaModels: v.optional(
+                        v.object({ image: v.optional(upstreamModelSchema) })
                     ),
                     model: v.optional(upstreamModelSchema),
                 })
@@ -508,7 +512,16 @@ function projectSessionReset(
     if (reset === undefined) return { state: "inherited-none" };
     if (reset.mode === undefined) return { state: "implicit-daily" };
     if (reset.mode !== "idle") {
-        return { mode: reset.mode, state: "locked-mode" };
+        return {
+            ...(reset.mode === "daily" && reset.atHour !== undefined
+                ? { atHour: reset.atHour }
+                : {}),
+            ...(reset.idleMinutes !== undefined && reset.idleMinutes <= 10_080
+                ? { idleMinutes: reset.idleMinutes }
+                : {}),
+            mode: reset.mode,
+            state: "locked-mode",
+        };
     }
     if (reset.idleMinutes === undefined || reset.idleMinutes > 10_080) {
         return { state: "partial-idle" };
@@ -902,7 +915,11 @@ function projectAgentAccess(
             },
         ];
     });
-    const sorted = projected.toSorted((left, right) => compareStrings(left.id, right.id));
+    const sorted = projected.toSorted((left, right) => {
+        if (left.id === "main") return right.id === "main" ? 0 : -1;
+        if (right.id === "main") return 1;
+        return compareStrings(left.id, right.id);
+    });
     const agents = sorted.slice(0, openClawAgentAccessMaximum);
     return {
         agents,
@@ -922,9 +939,13 @@ function agentToolUpdateIsAdmitted(
     const defaults = Object.entries(entries).filter(
         ([, entry]) => entry.default === true
     );
+    const configuredOwner =
+        defaults.length === 1
+            ? defaults[0]
+            : Object.entries(entries).find(([agentId]) => agentId === "main");
     if (
-        defaults.length !== 1 ||
-        !v.safeParse(openClawAgentIdSchema, defaults[0]?.[0], {
+        configuredOwner === undefined ||
+        !v.safeParse(openClawAgentIdSchema, configuredOwner[0], {
             abortEarly: true,
         }).success
     ) {
@@ -936,6 +957,27 @@ function agentToolUpdateIsAdmitted(
             .find(({ id }) => id === update.agentId)
             ?.tools.find(({ id }) => id === update.toolId)?.editable === true
     );
+}
+
+function configuredHeartbeat(
+    agents: v.InferOutput<typeof upstreamConfigurationSchema>["agents"]
+): Readonly<{
+    heartbeat?: v.InferOutput<typeof upstreamHeartbeatSchema>;
+    ownerAgentId?: string;
+}> {
+    if (agents?.defaults?.heartbeat !== undefined) {
+        return { heartbeat: agents.defaults.heartbeat };
+    }
+    const candidates = Object.entries(agents?.entries ?? {}).filter(
+        ([, entry]) => entry.heartbeat !== undefined
+    );
+    const selected =
+        candidates.find(([id]) => id === "ops") ??
+        candidates.find(([, entry]) => entry.default === true) ??
+        (candidates.length === 1 ? candidates[0] : undefined);
+    return selected === undefined
+        ? {}
+        : { heartbeat: selected[1].heartbeat, ownerAgentId: selected[0] };
 }
 
 function projectConfiguration(
@@ -952,9 +994,16 @@ function projectConfiguration(
     const rawModel = upstream.agents?.defaults?.model;
     const primary = typeof rawModel === "string" ? rawModel : rawModel?.primary;
     const fallbacks = typeof rawModel === "string" ? [] : (rawModel?.fallbacks ?? []);
-    const heartbeatTarget = optionalNonBlankUpstreamText(
-        upstream.agents?.defaults?.heartbeat?.target
-    );
+    const rawImageModel = upstream.agents?.defaults?.imageModel;
+    const imageModel =
+        typeof rawImageModel === "string" ? rawImageModel : rawImageModel?.primary;
+    const rawImageGenerationModel = upstream.agents?.defaults?.mediaModels?.image;
+    const imageGenerationModel =
+        typeof rawImageGenerationModel === "string"
+            ? rawImageGenerationModel
+            : rawImageGenerationModel?.primary;
+    const { heartbeat } = configuredHeartbeat(upstream.agents);
+    const heartbeatTarget = optionalNonBlankUpstreamText(heartbeat?.target);
     let channelsTruncated = rawChannelsTruncated;
     const allChannels = Object.entries(upstream.channels ?? {})
         .flatMap(([id, channel]) => {
@@ -978,13 +1027,10 @@ function projectConfiguration(
             channelsTruncated,
             hash,
             heartbeat: {
-                ...(upstream.agents?.defaults?.heartbeat?.every === undefined
+                ...(heartbeat?.every === undefined
                     ? {}
                     : {
-                          everySeconds: heartbeatSeconds(
-                              upstream.agents.defaults.heartbeat.every,
-                              reason
-                          ),
+                          everySeconds: heartbeatSeconds(heartbeat.every, reason),
                       }),
                 ...(heartbeatTarget === undefined ? {} : { target: heartbeatTarget }),
             },
@@ -1006,6 +1052,8 @@ function projectConfiguration(
                   }),
             models: {
                 fallbacks,
+                ...(imageGenerationModel === undefined ? {} : { imageGenerationModel }),
+                ...(imageModel === undefined ? {} : { imageModel }),
                 ...(primary === undefined ? {} : { primary }),
             },
             modelNormalizationState,
@@ -1110,6 +1158,24 @@ function projectSkills(
     });
 }
 
+function configuredSkillsAgentId(
+    entries: v.InferOutput<typeof upstreamAgentEntriesSchema> | undefined
+): string {
+    const configured = Object.entries(entries ?? {});
+    const defaults = configured.filter(([, entry]) => entry.default === true);
+    let selected = defaults.length === 1 ? defaults[0] : undefined;
+    if (selected === undefined) {
+        selected = configured.find(([agentId]) => agentId === "main");
+    }
+    if (selected === undefined && configured.length === 1) {
+        selected = configured[0];
+    }
+    if (selected === undefined) {
+        throw new OpenClawSettingsProviderError("data-invalid");
+    }
+    return selected[0];
+}
+
 function updatedAgentToolPolicyList(
     values: readonly string[],
     toolId: ReviewedAgentToolId,
@@ -1192,11 +1258,12 @@ function buildPatch(
             break;
         }
         case "heartbeat": {
+            const heartbeatConfiguration = configuredHeartbeat(upstream.agents);
             const currentEverySeconds = heartbeatSeconds(
-                upstream.agents?.defaults?.heartbeat?.every
+                heartbeatConfiguration.heartbeat?.every
             );
             const currentTarget = optionalNonBlankUpstreamText(
-                upstream.agents?.defaults?.heartbeat?.target
+                heartbeatConfiguration.heartbeat?.target
             );
             const target = update.target ?? undefined;
             const everyChanged = currentEverySeconds !== update.everySeconds;
@@ -1204,16 +1271,22 @@ function buildPatch(
             if (!everyChanged && !targetChanged) {
                 throw new OpenClawSettingsProviderError("data-invalid");
             }
-            patch = {
-                agents: {
-                    defaults: {
-                        heartbeat: {
-                            ...(everyChanged ? { every: `${update.everySeconds}s` } : {}),
-                            ...(targetChanged ? { target: update.target } : {}),
-                        },
-                    },
-                },
+            const heartbeatPatch = {
+                ...(everyChanged ? { every: `${update.everySeconds}s` } : {}),
+                ...(targetChanged ? { target: update.target } : {}),
             };
+            patch =
+                heartbeatConfiguration.ownerAgentId === undefined
+                    ? { agents: { defaults: { heartbeat: heartbeatPatch } } }
+                    : {
+                          agents: {
+                              entries: {
+                                  [heartbeatConfiguration.ownerAgentId]: {
+                                      heartbeat: heartbeatPatch,
+                                  },
+                              },
+                          },
+                      };
             matches = (configuration) =>
                 (!everyChanged ||
                     configuration.heartbeat.everySeconds === update.everySeconds) &&
@@ -1269,22 +1342,28 @@ function buildPatch(
         case "session-reset": {
             const current = projectSessionReset(upstream.session?.reset);
             if (
-                current.state !== "explicit-idle" ||
+                !("idleMinutes" in current) ||
                 current.idleMinutes === update.idleMinutes
             ) {
                 throw new OpenClawSettingsProviderError("data-invalid");
             }
             patch = {
                 session: {
-                    reset: { idleMinutes: update.idleMinutes, mode: "idle" },
+                    reset: {
+                        atHour: update.mode === "daily" ? (update.atHour ?? 0) : null,
+                        idleMinutes: update.idleMinutes,
+                        mode: update.mode,
+                    },
                 },
             };
             matches = (configuration) =>
-                isDeepStrictEqual(configuration.sessionReset, {
-                    idleMinutes: update.idleMinutes,
-                    mode: "idle",
-                    state: "explicit-idle",
-                });
+                "idleMinutes" in configuration.sessionReset &&
+                configuration.sessionReset.idleMinutes === update.idleMinutes &&
+                "mode" in configuration.sessionReset &&
+                configuration.sessionReset.mode === update.mode &&
+                (update.mode !== "daily" ||
+                    ("atHour" in configuration.sessionReset &&
+                        configuration.sessionReset.atHour === (update.atHour ?? 0)));
             break;
         }
         case "tools": {
@@ -1317,15 +1396,21 @@ function buildPatch(
             }
             if (execChanged) {
                 if (
-                    current.execPolicy.state !== "explicit" ||
-                    update.settings.execPolicy.state !== "explicit"
+                    current.execPolicy.state === "legacy-mode" &&
+                    update.settings.execPolicy.state === "legacy-mode"
                 ) {
+                    toolsPatch.exec = { mode: update.settings.execPolicy.mode };
+                } else if (
+                    current.execPolicy.state === "explicit" &&
+                    update.settings.execPolicy.state === "explicit"
+                ) {
+                    toolsPatch.exec = {
+                        ask: update.settings.execPolicy.ask,
+                        security: update.settings.execPolicy.security,
+                    };
+                } else {
                     throw new OpenClawSettingsProviderError("data-invalid");
                 }
-                toolsPatch.exec = {
-                    ask: update.settings.execPolicy.ask,
-                    security: update.settings.execPolicy.security,
-                };
             }
             if (profileChanged) {
                 toolsPatch.profile = update.settings.profile ?? null;
@@ -1483,6 +1568,7 @@ export function createPersistentGatewayOpenClawSettingsProvider(
 
     async function loadSkills(
         signal: AbortSignal | undefined,
+        agentId: string,
         configuredEntries:
             | v.InferOutput<typeof upstreamConfiguredSkillEntriesSchema>
             | undefined
@@ -1490,7 +1576,7 @@ export function createPersistentGatewayOpenClawSettingsProvider(
         const bytes = createByteObservation(openClawSkillsUpstreamMaximumBytes);
         const payload = await transport.requestOpenClawSettingsRead(
             "skills.status",
-            {},
+            { agentId },
             requestOptions(
                 signal,
                 persistentGatewayOpenClawSettingsReadTimeoutMs,
@@ -1551,6 +1637,7 @@ export function createPersistentGatewayOpenClawSettingsProvider(
             const configuration = await loadConfiguration(request.signal);
             return await loadSkills(
                 request.signal,
+                configuredSkillsAgentId(configuration.upstream.agents?.entries),
                 configuration.upstream.skills?.entries
             );
         });
@@ -1705,7 +1792,11 @@ export function createPersistentGatewayOpenClawSettingsProvider(
             ) {
                 throw new OpenClawSettingsProviderError("data-invalid");
             }
-            const skills = await loadSkills(signal, current.upstream.skills?.entries);
+            const skills = await loadSkills(
+                signal,
+                configuredSkillsAgentId(current.upstream.agents?.entries),
+                current.upstream.skills?.entries
+            );
             const installedSkill = skills.skills.find(
                 ({ key }) => key === input.skillKey
             );

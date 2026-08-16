@@ -674,6 +674,9 @@ const gatewayChatSessionPatchParamsSchema = v.strictObject({
 });
 
 const gatewayOpenClawSettingsEmptyParamsSchema = v.strictObject({});
+const gatewayOpenClawSkillsStatusParamsSchema = v.strictObject({
+    agentId: chatAgentIdSchema,
+});
 const gatewayOpenClawSkillUpdateParamsSchema = v.strictObject({
     enabled: v.boolean("OpenClaw skill enabled state is invalid"),
     skillKey: openClawSkillKeySchema,
@@ -822,8 +825,11 @@ const gatewayOpenClawModelsPatchSchema = v.strictObject({
 const gatewayOpenClawSessionResetPatchSchema = v.strictObject({
     session: v.strictObject({
         reset: v.strictObject({
+            atHour: v.nullable(
+                v.pipe(v.number(), v.safeInteger(), v.minValue(0), v.maxValue(23))
+            ),
             idleMinutes: v.pipe(positiveSafeIntegerSchema, v.maxValue(10_080)),
-            mode: v.literal("idle"),
+            mode: v.picklist(["daily", "idle", "none"]),
         }),
     }),
 });
@@ -869,10 +875,15 @@ const gatewayOpenClawToolsLeavesSchema = v.pipe(
         agentToAgent: v.optional(v.strictObject({ enabled: v.boolean() })),
         elevated: v.optional(v.strictObject({ enabled: v.boolean() })),
         exec: v.optional(
-            v.strictObject({
-                ask: v.picklist(["off", "on-miss", "always"]),
-                security: v.picklist(["allowlist", "deny", "full"]),
-            })
+            v.union([
+                v.strictObject({
+                    ask: v.picklist(["off", "on-miss", "always"]),
+                    security: v.picklist(["allowlist", "deny", "full"]),
+                }),
+                v.strictObject({
+                    mode: v.picklist(["deny", "allowlist", "ask", "auto", "full"]),
+                }),
+            ])
         ),
         profile: v.optional(gatewayOpenClawSettingsNullableTextSchema(64)),
         sessions: v.optional(
@@ -1423,10 +1434,14 @@ export function assertPersistentGatewayAdminParameters(
 }
 
 export function assertPersistentGatewayOpenClawSettingsReadParameters(
-    _method: PersistentGatewayOpenClawSettingsReadMethod,
+    method: PersistentGatewayOpenClawSettingsReadMethod,
     parameters: unknown
 ): asserts parameters is Readonly<Record<string, unknown>> {
-    if (!v.safeParse(gatewayOpenClawSettingsEmptyParamsSchema, parameters).success) {
+    const schema =
+        method === "skills.status"
+            ? gatewayOpenClawSkillsStatusParamsSchema
+            : gatewayOpenClawSettingsEmptyParamsSchema;
+    if (!v.safeParse(schema, parameters).success) {
         throw new TypeError("Persistent Gateway request parameters are invalid");
     }
 }

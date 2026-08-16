@@ -837,6 +837,12 @@ describe("source-development Gateway transport", () => {
             id: "cron-1",
             mode: "force",
         });
+        await transport.requestAdmin("cron.scratch.get", { id: "cron-1" });
+        await transport.requestAdmin("cron.scratch.set", {
+            content: "reviewed scratch",
+            expectedRevision: 0,
+            id: "cron-1",
+        });
         await transport.requestAdmin("cron.update", {
             expectedConfigRevision: "revision-1",
             id: "cron-1",
@@ -851,6 +857,7 @@ describe("source-development Gateway transport", () => {
             key: "agent:main:main",
         });
         await transport.requestAdmin("sessions.patch", {
+            agentId: "main",
             expectedSessionId: "session-1",
             key: "agent:main:main",
             thinkingLevel: "high",

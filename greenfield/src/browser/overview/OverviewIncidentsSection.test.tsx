@@ -189,7 +189,6 @@ describe("OverviewIncidentsSection", () => {
             path: "incidents.list",
         });
         expect(harness.realtimeClient.input).toEqual({
-            lastEventId: "0",
             topics: [monitoringRealtimeTopics.incidents],
         });
 

@@ -354,6 +354,272 @@
                 {
                   "type": "object",
                   "properties": {
+                    "attachments": {
+                      "type": "array",
+                      "items": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "maxLength": 256,
+                                "minLength": 1,
+                                "pattern": "\\S",
+                                "allOf": [
+                                  {
+                                    "pattern": "^[^\\u0000]*$"
+                                  },
+                                  {
+                                    "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                                  }
+                                ]
+                              },
+                              "kind": {
+                                "const": "text"
+                              },
+                              "text": {
+                                "type": "string",
+                                "maxLength": 262144,
+                                "pattern": "^[^\\u0000]*$"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "kind",
+                              "text"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "maxLength": 256,
+                                "minLength": 1,
+                                "pattern": "\\S",
+                                "allOf": [
+                                  {
+                                    "pattern": "^[^\\u0000]*$"
+                                  },
+                                  {
+                                    "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                                  }
+                                ]
+                              },
+                              "kind": {
+                                "const": "thinking"
+                              },
+                              "text": {
+                                "type": "string",
+                                "maxLength": 262144,
+                                "pattern": "^[^\\u0000]*$"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "kind",
+                              "text"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "callId": {
+                                "type": "string",
+                                "maxLength": 256,
+                                "minLength": 1,
+                                "pattern": "\\S",
+                                "allOf": [
+                                  {
+                                    "pattern": "^[^\\u0000]*$"
+                                  },
+                                  {
+                                    "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                                  }
+                                ]
+                              },
+                              "callIdSource": {
+                                "const": "synthetic"
+                              },
+                              "id": {
+                                "type": "string",
+                                "maxLength": 256,
+                                "minLength": 1,
+                                "pattern": "\\S",
+                                "allOf": [
+                                  {
+                                    "pattern": "^[^\\u0000]*$"
+                                  },
+                                  {
+                                    "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                                  }
+                                ]
+                              },
+                              "input": {
+                                "type": "string",
+                                "maxLength": 32768,
+                                "pattern": "^[^\\u0000]*$"
+                              },
+                              "isError": {
+                                "type": "boolean"
+                              },
+                              "kind": {
+                                "const": "tool"
+                              },
+                              "name": {
+                                "type": "string",
+                                "maxLength": 200,
+                                "minLength": 1,
+                                "pattern": "\\S",
+                                "allOf": [
+                                  {
+                                    "pattern": "^[^\\u0000]*$"
+                                  },
+                                  {
+                                    "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                                  }
+                                ]
+                              },
+                              "nameSource": {
+                                "const": "synthetic"
+                              },
+                              "output": {
+                                "type": "string",
+                                "maxLength": 32768,
+                                "pattern": "^[^\\u0000]*$"
+                              },
+                              "phase": {
+                                "enum": [
+                                  "started",
+                                  "running",
+                                  "succeeded",
+                                  "failed"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "callId",
+                              "id",
+                              "isError",
+                              "kind",
+                              "name",
+                              "phase"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "downloadUrl": {
+                                "type": "string",
+                                "pattern": "^\\/api\\/chat\\/media\\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\\?disposition=download$"
+                              },
+                              "fileName": {
+                                "type": "string",
+                                "maxLength": 255,
+                                "minLength": 1,
+                                "pattern": "\\S",
+                                "allOf": [
+                                  {
+                                    "pattern": "^[^\\u0000]*$"
+                                  },
+                                  {
+                                    "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                                  }
+                                ]
+                              },
+                              "id": {
+                                "type": "string",
+                                "maxLength": 256,
+                                "minLength": 1,
+                                "pattern": "\\S",
+                                "allOf": [
+                                  {
+                                    "pattern": "^[^\\u0000]*$"
+                                  },
+                                  {
+                                    "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                                  }
+                                ]
+                              },
+                              "kind": {
+                                "const": "attachment"
+                              },
+                              "mediaType": {
+                                "type": "string",
+                                "maxLength": 127
+                              },
+                              "renderPolicy": {
+                                "enum": [
+                                  "bounded-text",
+                                  "download-only",
+                                  "inline-image"
+                                ],
+                                "type": "string"
+                              },
+                              "sizeBytes": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "url": {
+                                "type": "string",
+                                "pattern": "^\\/api\\/chat\\/media\\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\\?disposition=(?:preview|download)$"
+                              }
+                            },
+                            "required": [
+                              "fileName",
+                              "id",
+                              "kind",
+                              "mediaType",
+                              "renderPolicy",
+                              "url"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "maxLength": 256,
+                                "minLength": 1,
+                                "pattern": "\\S",
+                                "allOf": [
+                                  {
+                                    "pattern": "^[^\\u0000]*$"
+                                  },
+                                  {
+                                    "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                                  }
+                                ]
+                              },
+                              "kind": {
+                                "const": "control"
+                              },
+                              "text": {
+                                "type": "string",
+                                "maxLength": 32768,
+                                "pattern": "^[^\\u0000]*$"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "kind",
+                              "text"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ],
+                        "$comment": "Live Valibot validation additionally requires chat tool phase, failure state, and failed output to agree. Live Valibot validation additionally binds each chat attachment render policy to its exact managed-media URL disposition."
+                      },
+                      "maxItems": 10,
+                      "$comment": "Live Valibot validation additionally requires hydration and projected-user attachment collections to contain attachment parts only."
+                    },
                     "kind": {
                       "const": "user"
                     },
@@ -1613,6 +1879,272 @@
                 {
                   "type": "object",
                   "properties": {
+                    "attachments": {
+                      "type": "array",
+                      "items": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "maxLength": 256,
+                                "minLength": 1,
+                                "pattern": "\\S",
+                                "allOf": [
+                                  {
+                                    "pattern": "^[^\\u0000]*$"
+                                  },
+                                  {
+                                    "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                                  }
+                                ]
+                              },
+                              "kind": {
+                                "const": "text"
+                              },
+                              "text": {
+                                "type": "string",
+                                "maxLength": 262144,
+                                "pattern": "^[^\\u0000]*$"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "kind",
+                              "text"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "maxLength": 256,
+                                "minLength": 1,
+                                "pattern": "\\S",
+                                "allOf": [
+                                  {
+                                    "pattern": "^[^\\u0000]*$"
+                                  },
+                                  {
+                                    "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                                  }
+                                ]
+                              },
+                              "kind": {
+                                "const": "thinking"
+                              },
+                              "text": {
+                                "type": "string",
+                                "maxLength": 262144,
+                                "pattern": "^[^\\u0000]*$"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "kind",
+                              "text"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "callId": {
+                                "type": "string",
+                                "maxLength": 256,
+                                "minLength": 1,
+                                "pattern": "\\S",
+                                "allOf": [
+                                  {
+                                    "pattern": "^[^\\u0000]*$"
+                                  },
+                                  {
+                                    "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                                  }
+                                ]
+                              },
+                              "callIdSource": {
+                                "const": "synthetic"
+                              },
+                              "id": {
+                                "type": "string",
+                                "maxLength": 256,
+                                "minLength": 1,
+                                "pattern": "\\S",
+                                "allOf": [
+                                  {
+                                    "pattern": "^[^\\u0000]*$"
+                                  },
+                                  {
+                                    "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                                  }
+                                ]
+                              },
+                              "input": {
+                                "type": "string",
+                                "maxLength": 32768,
+                                "pattern": "^[^\\u0000]*$"
+                              },
+                              "isError": {
+                                "type": "boolean"
+                              },
+                              "kind": {
+                                "const": "tool"
+                              },
+                              "name": {
+                                "type": "string",
+                                "maxLength": 200,
+                                "minLength": 1,
+                                "pattern": "\\S",
+                                "allOf": [
+                                  {
+                                    "pattern": "^[^\\u0000]*$"
+                                  },
+                                  {
+                                    "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                                  }
+                                ]
+                              },
+                              "nameSource": {
+                                "const": "synthetic"
+                              },
+                              "output": {
+                                "type": "string",
+                                "maxLength": 32768,
+                                "pattern": "^[^\\u0000]*$"
+                              },
+                              "phase": {
+                                "enum": [
+                                  "started",
+                                  "running",
+                                  "succeeded",
+                                  "failed"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "callId",
+                              "id",
+                              "isError",
+                              "kind",
+                              "name",
+                              "phase"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "downloadUrl": {
+                                "type": "string",
+                                "pattern": "^\\/api\\/chat\\/media\\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\\?disposition=download$"
+                              },
+                              "fileName": {
+                                "type": "string",
+                                "maxLength": 255,
+                                "minLength": 1,
+                                "pattern": "\\S",
+                                "allOf": [
+                                  {
+                                    "pattern": "^[^\\u0000]*$"
+                                  },
+                                  {
+                                    "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                                  }
+                                ]
+                              },
+                              "id": {
+                                "type": "string",
+                                "maxLength": 256,
+                                "minLength": 1,
+                                "pattern": "\\S",
+                                "allOf": [
+                                  {
+                                    "pattern": "^[^\\u0000]*$"
+                                  },
+                                  {
+                                    "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                                  }
+                                ]
+                              },
+                              "kind": {
+                                "const": "attachment"
+                              },
+                              "mediaType": {
+                                "type": "string",
+                                "maxLength": 127
+                              },
+                              "renderPolicy": {
+                                "enum": [
+                                  "bounded-text",
+                                  "download-only",
+                                  "inline-image"
+                                ],
+                                "type": "string"
+                              },
+                              "sizeBytes": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "url": {
+                                "type": "string",
+                                "pattern": "^\\/api\\/chat\\/media\\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\\?disposition=(?:preview|download)$"
+                              }
+                            },
+                            "required": [
+                              "fileName",
+                              "id",
+                              "kind",
+                              "mediaType",
+                              "renderPolicy",
+                              "url"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "maxLength": 256,
+                                "minLength": 1,
+                                "pattern": "\\S",
+                                "allOf": [
+                                  {
+                                    "pattern": "^[^\\u0000]*$"
+                                  },
+                                  {
+                                    "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                                  }
+                                ]
+                              },
+                              "kind": {
+                                "const": "control"
+                              },
+                              "text": {
+                                "type": "string",
+                                "maxLength": 32768,
+                                "pattern": "^[^\\u0000]*$"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "kind",
+                              "text"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ],
+                        "$comment": "Live Valibot validation additionally requires chat tool phase, failure state, and failed output to agree. Live Valibot validation additionally binds each chat attachment render policy to its exact managed-media URL disposition."
+                      },
+                      "maxItems": 10,
+                      "$comment": "Live Valibot validation additionally requires hydration and projected-user attachment collections to contain attachment parts only."
+                    },
                     "kind": {
                       "const": "user"
                     },

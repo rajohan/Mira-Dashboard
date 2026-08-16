@@ -87,6 +87,7 @@ import {
 import {
     chatMessageAttachmentDispositionIsConsistent,
     chatMessageFitsHydrationBudget,
+    chatMessagePartsAreAttachments,
     chatMessagePartsHaveUniqueIds,
     chatMessagePartToolStateIsConsistent,
     chatExternalRunFitsBudget,
@@ -150,6 +151,7 @@ import {
 import {
     workspaceFileContentTicketIsConsistent,
     workspaceFileNameIsSafe,
+    workspaceFileReferenceIsCanonical,
 } from "../../src/contracts/files.ts";
 import { gatewayConnectionSnapshotIsConsistent } from "../../src/contracts/gatewayConnection.ts";
 import {
@@ -232,6 +234,8 @@ import {
     openClawCronPageIsConsistent,
     openClawCronRunOutcomeIsConsistent,
     openClawCronRunPageIsConsistent,
+    openClawCronScratchPatchIsSeparate,
+    openClawCronScratchRevisionIsConsistent,
     openClawCronUpdatePatchIsNonempty,
 } from "../../src/contracts/openClawCron.ts";
 import {
@@ -576,6 +580,10 @@ const runtimeCheckComments = new Map<unknown, string>([
         "Live Valibot validation additionally rejects traversal names and path separators and limits the literal child name to 255 UTF-8 bytes.",
     ],
     [
+        workspaceFileReferenceIsCanonical,
+        "Live Valibot validation additionally requires provider-authored workspace file references to use canonical outer whitespace and exclude Unicode control or format characters.",
+    ],
+    [
         logSourcesHaveUniqueIds,
         "Live Valibot validation additionally requires every named log source ID to be unique.",
     ],
@@ -732,6 +740,10 @@ const runtimeCheckComments = new Map<unknown, string>([
         "Live Valibot validation additionally requires every part ID in one chat message to be unique.",
     ],
     [
+        chatMessagePartsAreAttachments,
+        "Live Valibot validation additionally requires hydration and projected-user attachment collections to contain attachment parts only.",
+    ],
+    [
         chatMessageFitsHydrationBudget,
         "Live Valibot validation additionally limits each serialized chat message to its reviewed hydration UTF-8 byte budget.",
     ],
@@ -818,6 +830,14 @@ const runtimeCheckComments = new Map<unknown, string>([
     [
         openClawCronUpdatePatchIsNonempty,
         "Live Valibot validation additionally requires at least one reviewed OpenClaw cron field to change.",
+    ],
+    [
+        openClawCronScratchPatchIsSeparate,
+        "Live Valibot validation additionally requires OpenClaw cron scratch changes to be isolated from configuration-field changes.",
+    ],
+    [
+        openClawCronScratchRevisionIsConsistent,
+        "Live Valibot validation additionally requires an expected scratch revision exactly when the patch changes scratch.",
     ],
     [
         openClawAgentAccessHasStableUniqueOrder,

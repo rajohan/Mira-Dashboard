@@ -285,9 +285,7 @@ describe("chat realtime invalidation", () => {
                 await Promise.resolve();
             });
             expect(invalidate).toHaveBeenCalledTimes(3);
-            expect(
-                invalidate.mock.calls.map(([filters]) => filters?.queryKey)
-            ).toEqual([
+            expect(invalidate.mock.calls.map(([filters]) => filters?.queryKey)).toEqual([
                 chatHistoryQueryKey(sessionKey),
                 chatHistoryQueryKey(sessionKey),
                 chatHistoryQueryKey(sessionKey),

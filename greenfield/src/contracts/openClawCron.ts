@@ -812,28 +812,43 @@ export function openClawCronUpdatePatchIsNonempty(
 ): boolean {
     return Object.values(patch).some((value) => value !== undefined);
 }
+export function openClawCronScratchPatchIsSeparate(
+    patch: UpdateOpenClawCronPatch
+): boolean {
+    return (
+        patch.scratch === undefined ||
+        Object.keys(patch).every((field) => field === "scratch")
+    );
+}
 export const updateOpenClawCronPatchSchema = v.pipe(
     updateOpenClawCronPatchObjectSchema,
     v.check(openClawCronUpdatePatchIsNonempty, "OpenClaw cron update is empty"),
     v.check(
-        (patch) =>
-            patch.scratch === undefined ||
-            Object.keys(patch).every((field) => field === "scratch"),
+        openClawCronScratchPatchIsSeparate,
         "OpenClaw scratch must be updated separately"
     )
 );
+const updateOpenClawCronInputObjectSchema = v.strictObject({
+    expectedConfigRevision: openClawCronConfigRevisionSchema,
+    expectedScratchRevision: v.optional(
+        nonnegativeSafeIntegerSchema("OpenClaw cron scratch revision is invalid")
+    ),
+    id: openClawCronJobIdSchema,
+    patch: updateOpenClawCronPatchSchema,
+});
+type UpdateOpenClawCronInputCandidate = v.InferOutput<
+    typeof updateOpenClawCronInputObjectSchema
+>;
+export function openClawCronScratchRevisionIsConsistent({
+    expectedScratchRevision,
+    patch,
+}: UpdateOpenClawCronInputCandidate): boolean {
+    return (patch.scratch === undefined) === (expectedScratchRevision === undefined);
+}
 export const updateOpenClawCronInputSchema = v.pipe(
-    v.strictObject({
-        expectedConfigRevision: openClawCronConfigRevisionSchema,
-        expectedScratchRevision: v.optional(
-            nonnegativeSafeIntegerSchema("OpenClaw cron scratch revision is invalid")
-        ),
-        id: openClawCronJobIdSchema,
-        patch: updateOpenClawCronPatchSchema,
-    }),
+    updateOpenClawCronInputObjectSchema,
     v.check(
-        ({ expectedScratchRevision, patch }) =>
-            (patch.scratch === undefined) === (expectedScratchRevision === undefined),
+        openClawCronScratchRevisionIsConsistent,
         "OpenClaw cron scratch revision is required"
     )
 );

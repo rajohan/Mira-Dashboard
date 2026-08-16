@@ -67,9 +67,9 @@ describe("chat transcript", () => {
             ...message("latest-stream", 2),
             providerRunId,
         };
-        expect(
-            [...activeStreamingTextMessageIds([earlier, latest], [providerRunId])]
-        ).toEqual(["latest-stream"]);
+        expect([
+            ...activeStreamingTextMessageIds([earlier, latest], [providerRunId]),
+        ]).toEqual(["latest-stream"]);
     });
 
     test("projects one trailing activity row for the current active run", () => {

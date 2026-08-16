@@ -264,6 +264,10 @@ export const chatMessagePartSchema = v.pipe(
 );
 export type ChatMessagePart = v.InferOutput<typeof chatMessagePartSchema>;
 
+export function chatMessagePartsAreAttachments(parts: ChatMessagePart[]): boolean {
+    return parts.every((part) => part.kind === "attachment");
+}
+
 export function chatMessagePartsHaveUniqueIds(
     parts: v.InferOutput<typeof chatMessagePartSchema>[]
 ): boolean {
@@ -287,7 +291,7 @@ export const chatMessageContentSchema = v.variant("kind", [
                 v.array(chatMessagePartSchema),
                 v.maxLength(10),
                 v.check(
-                    (parts) => parts.every((part) => part.kind === "attachment"),
+                    chatMessagePartsAreAttachments,
                     "Hydration attachments are invalid"
                 )
             )
@@ -639,7 +643,7 @@ const chatRuntimeProjectionPartVariantSchema = v.variant("kind", [
                 v.array(chatMessagePartSchema, "Chat user attachments are invalid"),
                 v.maxLength(10, "Chat user attachment count is outside its budget"),
                 v.check(
-                    (parts) => parts.every((part) => part.kind === "attachment"),
+                    chatMessagePartsAreAttachments,
                     "Chat user projection contains a non-attachment part"
                 )
             )

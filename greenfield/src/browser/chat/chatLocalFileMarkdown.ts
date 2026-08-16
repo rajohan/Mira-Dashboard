@@ -1,19 +1,23 @@
-import type { Link, PhrasingContent, Root, Text } from "mdast";
-
 import { chatLocalFileReference } from "./chatMarkdownPolicy.ts";
 
-type ParentNode = Readonly<{ children?: readonly MarkdownNode[]; type: string }>;
-type MarkdownNode = ParentNode & { value?: string };
+type MarkdownNode = {
+    children?: readonly MarkdownNode[];
+    type: string;
+    url?: string;
+    value?: string;
+};
+type LinkNode = MarkdownNode & { type: "link"; url: string };
+type TextNode = MarkdownNode & { type: "text"; value: string };
 
 const localReferenceCandidatePattern = /\/(?:home|opt|srv|var\/lib)\/[^\s<>"'`]+/gu;
 const trailingPunctuationPattern = /[),.;!?]+$/u;
 
-function linkNode(value: string, children: readonly PhrasingContent[]): Link {
+function linkNode(value: string, children: readonly MarkdownNode[]): LinkNode {
     return { children: [...children], type: "link", url: value };
 }
 
-function transformText(node: Text): readonly PhrasingContent[] | undefined {
-    const output: PhrasingContent[] = [];
+function transformText(node: TextNode): readonly MarkdownNode[] | undefined {
+    const output: MarkdownNode[] = [];
     let offset = 0;
     for (const match of node.value.matchAll(localReferenceCandidatePattern)) {
         const start = match.index;
@@ -41,7 +45,7 @@ function walk(node: MarkdownNode): void {
     for (let index = 0; index < children.length; index += 1) {
         const child = children[index]!;
         if (child.type === "text" && typeof child.value === "string") {
-            const replacement = transformText(child as Text);
+            const replacement = transformText(child as TextNode);
             if (replacement !== undefined) {
                 children.splice(index, 1, ...(replacement as MarkdownNode[]));
                 index += replacement.length - 1;
@@ -52,11 +56,7 @@ function walk(node: MarkdownNode): void {
             typeof child.value === "string" &&
             chatLocalFileReference(child.value) !== undefined
         ) {
-            children.splice(
-                index,
-                1,
-                linkNode(child.value, [child as PhrasingContent]) as MarkdownNode
-            );
+            children.splice(index, 1, linkNode(child.value, [child]));
             continue;
         }
         walk(child);
@@ -66,5 +66,5 @@ function walk(node: MarkdownNode): void {
 
 /** @returns A remark transformer that linkifies reviewed-root candidates only. */
 export function remarkChatLocalFileReferences() {
-    return (tree: Root): void => walk(tree);
+    return (tree: MarkdownNode): void => walk(tree);
 }

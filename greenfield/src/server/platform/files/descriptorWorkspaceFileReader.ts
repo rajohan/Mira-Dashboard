@@ -1143,7 +1143,7 @@ export function createDescriptorWorkspaceFileReader(
             requireAvailable();
             abortIfRequested(signal);
             if (!Path.isAbsolute(reference) || Path.normalize(reference) !== reference) {
-                return undefined;
+                return;
             }
             for (const root of roots.values()) {
                 const relative = Path.relative(root.path, reference);
@@ -1161,7 +1161,7 @@ export function createDescriptorWorkspaceFileReader(
                     segments.some((segment) => !isValidSegment(segment)) ||
                     !manifestAllows(root, segments)
                 ) {
-                    return undefined;
+                    return;
                 }
                 const locator = { rootId: root.id, segments };
                 const opened = await openLocator(locator, roots);
@@ -1171,7 +1171,7 @@ export function createDescriptorWorkspaceFileReader(
                     await opened.close();
                 }
             }
-            return undefined;
+            return;
         },
         roots() {
             requireAvailable();
