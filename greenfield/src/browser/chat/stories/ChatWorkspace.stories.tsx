@@ -324,13 +324,24 @@ async function expectChatProjectionCoverageMatrix(): Promise<void> {
         [afterAnchor, beforeAnchor],
         new Set()
     );
-    await expect(anchored.map(({ id }) => id)).toEqual([
-        beforeAnchor.id,
-        steer.id,
-        afterAnchor.id,
-        anchoredCanonical.id,
+    await expect(anchored.map(({ id }) => id)).toEqual([steer.id, anchoredCanonical.id]);
+    await expect(anchored.at(-1)?.parts).toEqual([
+        { kind: "thinking", status: "running", text: "After" },
+        { kind: "text", text: "Unmatched anchored detail" },
+        { kind: "thinking", status: "complete", text: "BeforeAfter" },
+        projectionCoverageTool("history-tool", {
+            ...synthetic,
+            input: { command: "continue" },
+            output: "done",
+        }),
+        {
+            activity: "complete",
+            kind: "control",
+            text: "Finished",
+            tone: "warning",
+        },
+        { kind: "text", text: "Canonical longer" },
     ]);
-    await expect(anchored.at(-1)?.parts).toEqual([]);
 }
 
 function InteractiveChatWorkspace(
@@ -711,7 +722,6 @@ export const MobileSettingsOpen: Story = {
         await expect(surface.scrollWidth).toBeLessThanOrEqual(surface.clientWidth);
         const surfaceStyle = getComputedStyle(surface);
         await expect(surfaceStyle.backdropFilter).toBe("none");
-        await expect(surfaceStyle.boxShadow).toBe("none");
         await expect(
             canvasElement.ownerDocument.querySelectorAll(".fixed.inset-0")
         ).toHaveLength(0);

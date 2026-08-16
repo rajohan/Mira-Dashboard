@@ -688,7 +688,7 @@ export function ChatMessageBubble({
                         <time
                             className={cn(
                                 "mt-2 block text-[11px]",
-                                isUser ? "text-white/75" : "text-primary-400"
+                                isUser ? "text-white" : "text-primary-400"
                             )}
                             dateTime={new Date(message.timestampMs).toISOString()}
                         >

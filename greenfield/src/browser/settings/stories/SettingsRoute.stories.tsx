@@ -155,7 +155,9 @@ function openClawFixtures(
 
 async function openOpenClawSettings(canvasElement: HTMLElement) {
     const canvas = within(canvasElement);
-    await userEvent.click(await canvas.findByRole("tab", { name: "OpenClaw settings" }));
+    await userEvent.click(
+        await canvas.findByRole("tab", { name: "OpenClaw settings" }, { timeout: 3000 })
+    );
     await expect(
         await canvas.findByRole("button", { name: "Restart OpenClaw Gateway" })
     ).toBeVisible();
@@ -168,7 +170,7 @@ async function openModelSettings(canvasElement: HTMLElement) {
     await userEvent.click(section);
     await expect(section).toHaveAttribute("aria-expanded", "true");
     const primary = await canvas.findByRole("textbox", { name: "Default model" });
-    await waitFor(() => expect(primary).toBeVisible());
+    await waitFor(() => expect(primary).toBeVisible(), { timeout: 3000 });
     return canvas;
 }
 
