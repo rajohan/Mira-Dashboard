@@ -9,7 +9,10 @@ import {
     createChatRuntimeStore,
     type ChatRuntimeStore,
 } from "./chatRuntimeStore.ts";
-import { useChatRuntimeProjection } from "./useChatRuntimeProjection.ts";
+import {
+    applyChatRuntimeBatch,
+    useChatRuntimeProjection,
+} from "./useChatRuntimeProjection.ts";
 
 const { act, render, waitFor } = await import("@testing-library/react");
 const runId = "019fe633-9133-7ba0-8b80-809dd80dfb39";
@@ -68,6 +71,53 @@ function page(sessionKey: string, cursor: string, sequence: number, hasMore: boo
 }
 
 describe("chat runtime projection", () => {
+    test("installs only active external runs into the live transcript store", () => {
+        const sessionKey = "agent:main:main";
+        const store = createChatRuntimeStore();
+        const externalRun = {
+            continuity: "complete" as const,
+            hasUnprojectedActivity: false,
+            observationEpoch: 1,
+            observedAtMs: 1_800_000_000_000,
+            parts: [],
+            projectionTruncated: false,
+            sessionKey,
+            source: "provider-runtime" as const,
+            text: "",
+            updatedAtMs: 1_800_000_000_000,
+        };
+
+        applyChatRuntimeBatch(
+            {
+                cursor: "0",
+                events: [],
+                externalRuns: [
+                    {
+                        ...externalRun,
+                        lifecycle: "terminal-pending-history",
+                        providerRunId: "terminal-run",
+                    },
+                    {
+                        ...externalRun,
+                        lifecycle: "active",
+                        providerRunId: "active-run",
+                    },
+                ],
+                externalRunsTruncated: false,
+                hasMore: false,
+                resetRequired: true,
+                runs: [],
+                sessionKey,
+                transcriptGeneration: 1,
+            },
+            store
+        );
+
+        expect(Object.keys(store.state.sessions[sessionKey]?.externalRuns ?? {})).toEqual([
+            "active-run",
+        ]);
+    });
+
     test("settles an identical catch-up read without repeatedly invalidating static truncation", async () => {
         const sessionKey = "agent:main:main";
         const store = createChatRuntimeStore();
@@ -278,7 +328,7 @@ describe("chat runtime projection", () => {
         }
     });
 
-    test("retains richer activity through repeated empty reconnect inventories", async () => {
+    test("retires activity omitted by an authoritative inventory", async () => {
         const sessionKey = "agent:main:main";
         const store = createChatRuntimeStore();
         let invocation = 0;
@@ -329,23 +379,11 @@ describe("chat runtime projection", () => {
                 queryKey: chatRuntimeQueryKey(sessionKey),
             });
             await waitFor(() => expect(query).toHaveBeenCalledTimes(2));
-            expect(chatRuntimeMessages(store.state, sessionKey)).toHaveLength(1);
+            expect(chatRuntimeMessages(store.state, sessionKey)).toHaveLength(0);
             expect(
                 store.state.sessions[sessionKey]?.externalRuns["provider-run-1"]
-                    ?.omissionCount
-            ).toBe(1);
-
-            await queryClient.invalidateQueries({
-                exact: true,
-                queryKey: chatRuntimeQueryKey(sessionKey),
-            });
-            await waitFor(() => expect(query).toHaveBeenCalledTimes(3));
-            expect(chatRuntimeMessages(store.state, sessionKey)).toHaveLength(1);
-            expect(
-                store.state.sessions[sessionKey]?.externalRuns["provider-run-1"]
-                    ?.omissionCount
-            ).toBe(2);
-            expect(query).toHaveBeenCalledTimes(3);
+            ).toBeUndefined();
+            expect(query).toHaveBeenCalledTimes(2);
         } finally {
             rendered.unmount();
             queryClient.clear();

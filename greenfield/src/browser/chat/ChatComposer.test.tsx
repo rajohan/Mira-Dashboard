@@ -9,7 +9,6 @@ const userEvent = userEventModule.default;
 
 function renderComposer(overrides: Partial<Parameters<typeof ChatComposer>[0]> = {}) {
     const properties: Parameters<typeof ChatComposer>[0] = {
-        abortableRunIds: [],
         attachments: [],
         canSend: true,
         draft: "",
@@ -83,18 +82,15 @@ describe("chat composer", () => {
         ).toBe(false);
     });
 
-    test("keeps concurrent stop controls independent from the draft", async () => {
+    test("keeps the session stop control independent from the draft", async () => {
         const onAbort = jest.fn();
         const { rendered } = renderComposer({
-            abortableRunIds: ["run-1", "run-2"],
+            abortableRunId: "run-2",
             draft: "Keep this draft",
             onAbort,
         });
         const user = userEvent.setup();
-        await user.click(
-            screen.getByRole("button", { name: "Stop responses, 2 active" })
-        );
-        await user.click(screen.getByRole("button", { name: "Stop response 2" }));
+        await user.click(screen.getByRole("button", { name: "Stop response" }));
         expect(onAbort).toHaveBeenCalledWith("run-2");
         expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue(
             "Keep this draft"
@@ -104,7 +100,7 @@ describe("chat composer", () => {
 
     test("keeps the icon toolbar on one ordered message-action row", () => {
         const { rendered } = renderComposer({
-            abortableRunIds: ["run-1"],
+            abortableRunId: "run-1",
             settingsControl: <button aria-label="Chat settings" type="button" />,
             voiceInput: { available: true, elapsedMs: 0, phase: "idle" },
             onCancelVoiceInput: jest.fn(),
@@ -121,7 +117,7 @@ describe("chat composer", () => {
             "Insert emoji",
             "Start voice input",
             "Attach files",
-            "Stop response 1",
+            "Stop response",
             "Send message",
         ]);
         expect(within(toolbar).queryByText("Attach")).toBeNull();

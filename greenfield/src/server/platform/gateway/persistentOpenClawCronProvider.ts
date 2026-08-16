@@ -56,7 +56,14 @@ export type PersistentOpenClawCronTransport = Pick<
     "request" | "requestAdmin" | "snapshot"
 >;
 
-type ProviderOperation = "get" | "list" | "list-runs" | "remove" | "run" | "update";
+type ProviderOperation =
+    | "get"
+    | "list"
+    | "list-runs"
+    | "remove"
+    | "run"
+    | "set-scratch"
+    | "update";
 
 interface ProcessIdentity {
     readonly connectionGeneration: number;
@@ -407,6 +414,25 @@ const upstreamRunAcknowledgementSchema = v.union([
         reason: v.picklist(["already-running", "invalid-spec", "not-due"]),
     }),
 ]);
+const upstreamScratchSchema = v.strictObject({
+    content: upstreamBoundedTextSchema(
+        upstreamPayloadMaximumLength,
+        "OpenClaw cron scratch is invalid"
+    ),
+    revision: upstreamSafeIntegerSchema,
+    updatedAtMs: v.optional(openClawCronTimestampSchema),
+});
+const upstreamScratchGetSchema = v.strictObject({
+    currentRevision: upstreamSafeIntegerSchema,
+    maxBytes: v.pipe(v.number(), v.safeInteger(), v.minValue(1)),
+    scratch: v.nullable(upstreamScratchSchema),
+});
+const upstreamScratchSetSchema = v.strictObject({
+    currentRevision: upstreamSafeIntegerSchema,
+    maxBytes: v.pipe(v.number(), v.safeInteger(), v.minValue(1)),
+    ok: v.literal(true),
+    scratch: upstreamScratchSchema,
+});
 
 const upstreamUpdatePayloadSchema = v.variant("kind", [
     v.strictObject({
@@ -687,6 +713,25 @@ export function createPersistentOpenClawCronProvider(
 ): OpenClawCronProvider {
     let processIdentity: ProcessIdentity | undefined;
 
+    async function withScratch(
+        job: OpenClawCronProviderJob,
+        signal?: AbortSignal
+    ): Promise<OpenClawCronProviderJob> {
+        if (job.payload.kind !== "heartbeat") return job;
+        const raw = await transport.requestAdmin(
+            "cron.scratch.get",
+            { id: job.id },
+            requestOptions(signal, persistentOpenClawCronReadTimeoutMs)
+        );
+        const response = parseBoundary(upstreamScratchGetSchema, raw);
+        return Object.freeze({
+            ...job,
+            scratch:
+                response.scratch ??
+                Object.freeze({ content: "", revision: response.currentRevision }),
+        });
+    }
+
     function currentProcessInstanceId(): string | undefined {
         const snapshot = transport.snapshot;
         if (!snapshotHasIdentity(snapshot, processIdentity)) {
@@ -755,7 +800,7 @@ export function createPersistentOpenClawCronProvider(
                 }
                 throw error;
             }
-            const job = parseJob(response);
+            const job = await withScratch(parseJob(response), input.signal);
             if (job.id !== id) throw new OpenClawCronProviderError("invalid-data");
             currentProcessInstanceId();
             return job;
@@ -800,12 +845,18 @@ export function createPersistentOpenClawCronProvider(
                     }
                 )
             );
-            return parseListPage(
+            const page = parseListPage(
                 response,
                 parsed.limit,
                 parsed.offset,
                 responseBytes ?? Number.NaN
             );
+            return Object.freeze({
+                ...page,
+                jobs: Object.freeze(
+                    await Promise.all(page.jobs.map((job) => withScratch(job, signal)))
+                ),
+            });
         });
     }
 
@@ -924,6 +975,34 @@ export function createPersistentOpenClawCronProvider(
         });
     }
 
+    async function setScratch(
+        input: Parameters<OpenClawCronProvider["setScratch"]>[0]
+    ): Promise<Readonly<{ revision: number }>> {
+        const id = parseBoundary(openClawCronJobIdSchema, input.id);
+        const expectedRevision = parseBoundary(
+            upstreamSafeIntegerSchema,
+            input.expectedRevision
+        );
+        const content = parseBoundary(
+            upstreamBoundedTextSchema(
+                upstreamPayloadMaximumLength,
+                "OpenClaw cron scratch is invalid"
+            ),
+            input.content
+        );
+        return await providerOperation("set-scratch", input.signal, async () => {
+            const raw = await transport.requestAdmin(
+                "cron.scratch.set",
+                { content, expectedRevision, id },
+                requestOptions(input.signal, persistentOpenClawCronMutationTimeoutMs)
+            );
+            const response = mutationAcknowledgement(() =>
+                parseBoundary(upstreamScratchSetSchema, raw)
+            );
+            return Object.freeze({ revision: response.scratch.revision });
+        });
+    }
+
     return Object.freeze({
         currentProcessInstanceId,
         get,
@@ -931,6 +1010,7 @@ export function createPersistentOpenClawCronProvider(
         listRuns,
         remove,
         run,
+        setScratch,
         update,
     });
 }

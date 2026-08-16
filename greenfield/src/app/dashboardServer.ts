@@ -8,6 +8,7 @@ import {
     chatHistoryPageMaximum,
     chatHistoryRetainedPageMaximum,
 } from "../contracts/chatModel.ts";
+import { gatewaySessionProjectionMaximum } from "../contracts/gatewaySessions.ts";
 import { serviceActionIds } from "../contracts/serviceActions.ts";
 import { createAgentRepository } from "../server/domains/agents/repository.ts";
 import { createAgentService } from "../server/domains/agents/service.ts";
@@ -182,6 +183,10 @@ import {
     resolveDashboardProjectLayout,
 } from "../server/platform/filesystem/projectLayout.ts";
 import {
+    createChatSessionActivitySupervisor,
+    type ChatSessionActivitySupervisor,
+} from "../server/platform/gateway/chatSessionActivitySupervisor.ts";
+import {
     createChatTranscriptLifecycleSupervisor,
     type ChatTranscriptLifecycleSupervisor,
 } from "../server/platform/gateway/chatTranscriptLifecycleSupervisor.ts";
@@ -306,6 +311,8 @@ export interface DashboardServerOptions extends Omit<
     readonly now?: () => Date;
     /** Exact read-only OpenClaw configuration manifest; never passed to a writer. */
     readonly openClawFileRoot?: WorkspaceFileRootConfiguration;
+    /** Optional separate read-only OpenClaw root used only for transcript-authorized media. */
+    readonly openClawMediaFileRoot?: WorkspaceFileRootConfiguration;
     readonly recentAuthenticationWindowMs?: number;
     readonly sessionIdleDurationMs?: number;
     /** Verified immutable release used to require a matching fresh worker. */
@@ -504,6 +511,7 @@ const unavailableOpenClawCronProvider: OpenClawCronProvider = Object.freeze({
     listRuns: () => Promise.reject(new OpenClawCronProviderError("unavailable")),
     remove: () => Promise.reject(new OpenClawCronProviderError("unavailable")),
     run: () => Promise.reject(new OpenClawCronProviderError("unavailable")),
+    setScratch: () => Promise.reject(new OpenClawCronProviderError("unavailable")),
     update: () => Promise.reject(new OpenClawCronProviderError("unavailable")),
 });
 
@@ -614,6 +622,7 @@ export async function createDashboardServer(
         | undefined;
     let chatService: ChatService | undefined;
     let chatMaintenance: DashboardChatRuntimeMaintenance | undefined;
+    let chatSessionActivitySupervisor: ChatSessionActivitySupervisor | undefined;
     let chatTranscriptLifecycleSupervisor: ChatTranscriptLifecycleSupervisor | undefined;
     let openClawTasksService: OpenClawTasksService | undefined;
     let openClawCronHeartbeatReader: OpenClawCronHeartbeatReader | undefined;
@@ -641,6 +650,7 @@ export async function createDashboardServer(
             }
         };
         await disposeIndependently(() => chatMaintenance?.stop());
+        await disposeIndependently(() => chatSessionActivitySupervisor?.stop());
         await disposeIndependently(() => chatTranscriptLifecycleSupervisor?.stop());
         await disposeIndependently(() => openClawTasksSupervisor?.stop());
         await disposeIndependently(() => workspaceFilesService?.dispose());
@@ -1275,6 +1285,10 @@ export async function createDashboardServer(
             chatRepository === undefined
                 ? undefined
                 : createChatTranscriptLifecycleCoordinator(chatRepository);
+        const gatewaySessionsProvider =
+            persistentGatewayTransport === undefined
+                ? unavailableGatewaySessionsProvider
+                : createPersistentGatewaySessionsProvider(persistentGatewayTransport);
         const gatewaySessionsService = createGatewaySessionsService({
             controlAudit: createGatewaySessionControlAudit({
                 ...(domainNow === undefined ? {} : { now: domainNow }),
@@ -1305,10 +1319,7 @@ export async function createDashboardServer(
                 ),
             }),
             ...(domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }),
-            provider:
-                persistentGatewayTransport === undefined
-                    ? unavailableGatewaySessionsProvider
-                    : createPersistentGatewaySessionsProvider(persistentGatewayTransport),
+            provider: gatewaySessionsProvider,
             ...(chatTranscriptLifecycle === undefined
                 ? {}
                 : { transcriptLifecycle: chatTranscriptLifecycle }),
@@ -1336,20 +1347,37 @@ export async function createDashboardServer(
                 throw new Error("Chat transcript lifecycle composition is unavailable");
             }
             chatAttachmentStore = createInMemoryChatAttachmentStore();
+            const openClawMediaFileRoot =
+                options.openClawMediaFileRoot ?? options.openClawFileRoot;
             chatMediaReferences = createInMemoryChatMediaReferences({
                 ...(domainNow === undefined
                     ? {}
                     : { nowMs: () => domainNow().getTime() }),
-                ...(options.openClawFileRoot === undefined
+                ...(openClawMediaFileRoot === undefined
                     ? {}
                     : {
                           localMediaRoot: path.join(
-                              options.openClawFileRoot.path,
+                              openClawMediaFileRoot.path,
                               "media"
                           ),
                       }),
             });
             chatService = createChatService({
+                activeProviderRunIds: async (sessionKey, signal) => {
+                    const snapshot = await gatewaySessionsProvider.listCurrentSessions({
+                        limit: gatewaySessionProjectionMaximum,
+                        ...(signal === undefined ? {} : { signal }),
+                    });
+                    if (snapshot.truncated) return;
+                    const session = snapshot.sessions.find(
+                        ({ key }) => key === sessionKey
+                    );
+                    if (session === undefined) return;
+                    if (session.activeRunIds !== undefined) {
+                        return session.activeRunIds;
+                    }
+                    return session.hasActiveRun ? undefined : [];
+                },
                 attachmentConsumer: chatAttachmentStore,
                 attachmentPreparer: chatAttachmentStore,
                 ...(domainNow === undefined
@@ -1381,6 +1409,18 @@ export async function createDashboardServer(
                         failure: new Error(
                             "Chat transcript lifecycle reconciliation failed"
                         ),
+                        outcome: "server-error",
+                    }),
+                transport: persistentGatewayTransport,
+            });
+            chatSessionActivitySupervisor = createChatSessionActivitySupervisor({
+                chat: chatService,
+                mediaReferences: chatMediaReferences,
+                onFailure: () =>
+                    options.applicationRuntime.logger.warn({
+                        component: "chat-session-activity",
+                        event: "chat.session_activity.reconciliation_failed",
+                        failure: new Error("Chat session activity reconciliation failed"),
                         outcome: "server-error",
                     }),
                 transport: persistentGatewayTransport,
@@ -1422,10 +1462,10 @@ export async function createDashboardServer(
             });
             openClawTasksSupervisor.start();
 
-            if (options.openClawFileRoot !== undefined) {
+            if (openClawMediaFileRoot !== undefined) {
                 openClawLocalHistoryMediaFetcher =
                     createDescriptorOpenClawLocalHistoryMediaFetcher({
-                        openClawRoot: options.openClawFileRoot,
+                        openClawRoot: openClawMediaFileRoot,
                     });
             }
             if (

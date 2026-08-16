@@ -89,7 +89,6 @@ describe("Dashboard realtime hub", () => {
 
         expect(first.unsubscribeCount).toBe(1);
         expect(combined.input).toEqual({
-            lastEventId: "0",
             topics: [monitoringRealtimeTopics.reports, taskRealtimeTopic],
         });
         combined.observer.onData(change("11", taskRealtimeTopic));
@@ -111,7 +110,18 @@ describe("Dashboard realtime hub", () => {
 
     test("broadcasts resync and failures while disposing idempotently", () => {
         const client = new ControlledRealtimeClient();
-        const hub = createDashboardRealtimeHub(client);
+        const scheduled: (() => void)[] = [];
+        const hub = createDashboardRealtimeHub(client, {
+            clearTimeout(handle) {
+                const callback = handle as () => void;
+                const index = scheduled.indexOf(callback);
+                if (index !== -1) scheduled.splice(index, 1);
+            },
+            setTimeout(callback) {
+                scheduled.push(callback);
+                return callback;
+            },
+        });
         const outputs: RealtimeStreamOutput[] = [];
         const failures: Error[] = [];
         hub.subscribe([taskRealtimeTopic], {
@@ -132,16 +142,22 @@ describe("Dashboard realtime hub", () => {
         subscription.observer.onError?.(failure);
         expect(outputs).toEqual([resync]);
         expect(failures).toEqual([failure]);
+        expect(scheduled).toHaveLength(1);
+        scheduled.shift()?.();
+        expect(client.subscriptions[1]?.input).toEqual({
+            lastEventId: "20",
+            topics: [taskRealtimeTopic],
+        });
         hub.pause();
         expect(subscription.unsubscribeCount).toBe(1);
         hub.resume();
-        expect(client.subscriptions[1]?.input).toEqual({
+        expect(client.subscriptions[2]?.input).toEqual({
             lastEventId: "20",
             topics: [taskRealtimeTopic],
         });
         hub.dispose();
         hub.dispose();
-        expect(client.subscriptions[1]?.unsubscribeCount).toBe(1);
+        expect(client.subscriptions[2]?.unsubscribeCount).toBe(1);
         expect(() => hub.subscribe([taskRealtimeTopic], { onData: () => {} })).toThrow(
             "Dashboard realtime hub is disposed"
         );

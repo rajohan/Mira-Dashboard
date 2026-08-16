@@ -36,6 +36,7 @@ interface OpenRoot extends WorkspaceFileRootPolicy {
     readonly fd: number;
     readonly manifest?: CompiledManifest;
     readonly ownerId: bigint;
+    readonly path: string;
 }
 
 interface OpenNode {
@@ -894,6 +895,7 @@ export function createDescriptorWorkspaceFileReader(
                 label: configuration.label,
                 ...(manifest === undefined ? {} : { manifest }),
                 ownerId,
+                path: rootPath,
                 writable: configuration.writable,
             } satisfies OpenRoot;
             if (!rootNodeIsSafe(root, stat)) {
@@ -1136,6 +1138,40 @@ export function createDescriptorWorkspaceFileReader(
             } finally {
                 await opened.close();
             }
+        },
+        async resolveReference(reference, signal) {
+            requireAvailable();
+            abortIfRequested(signal);
+            if (!Path.isAbsolute(reference) || Path.normalize(reference) !== reference) {
+                return undefined;
+            }
+            for (const root of roots.values()) {
+                const relative = Path.relative(root.path, reference);
+                if (
+                    relative === "" ||
+                    Path.isAbsolute(relative) ||
+                    relative === ".." ||
+                    relative.startsWith(`..${Path.sep}`)
+                ) {
+                    continue;
+                }
+                const segments = relative.split(Path.sep);
+                if (
+                    segments.length > 256 ||
+                    segments.some((segment) => !isValidSegment(segment)) ||
+                    !manifestAllows(root, segments)
+                ) {
+                    return undefined;
+                }
+                const locator = { rootId: root.id, segments };
+                const opened = await openLocator(locator, roots);
+                try {
+                    return opened.stat.isFile() ? locator : undefined;
+                } finally {
+                    await opened.close();
+                }
+            }
+            return undefined;
         },
         roots() {
             requireAvailable();

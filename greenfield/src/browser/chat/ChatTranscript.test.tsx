@@ -1,6 +1,7 @@
 import { describe, expect, jest, spyOn, test } from "bun:test";
 
 import { visibleChatTranscriptMessages } from "./chatMessageVisibility.ts";
+import { activeStreamingTextMessageIds } from "./chatReadAloudProjection.ts";
 import { ChatTranscript } from "./ChatTranscript.tsx";
 import {
     activeCompactionMaximumAgeMs,
@@ -56,17 +57,34 @@ async function flushAnimationFrames(): Promise<void> {
 }
 
 describe("chat transcript", () => {
-    test("projects one default activity row before the first assistant part", () => {
+    test("marks only the latest text in an active run as streaming for TTS", () => {
+        const providerRunId = "provider-steered-run";
+        const earlier = {
+            ...message("earlier-final", 1),
+            providerRunId,
+        };
+        const latest = {
+            ...message("latest-stream", 2),
+            providerRunId,
+        };
+        expect(
+            [...activeStreamingTextMessageIds([earlier, latest], [providerRunId])]
+        ).toEqual(["latest-stream"]);
+    });
+
+    test("projects one trailing activity row for the current active run", () => {
+        const older = message("older", 1);
         const projected = projectChatTranscriptMessages(
-            [],
-            ["provider-empty"],
+            [older],
+            ["provider-stale", "provider-current"],
             sessionKey,
             Date.now()
         );
 
         expect(projected).toEqual([
+            older,
             expect.objectContaining({
-                id: "activity:provider-empty:thinking",
+                id: "activity:provider-current:thinking",
                 parts: [
                     {
                         activity: "running",
@@ -75,6 +93,7 @@ describe("chat transcript", () => {
                         tone: "muted",
                     },
                 ],
+                sequence: Number.MAX_SAFE_INTEGER,
             }),
         ]);
     });
@@ -194,7 +213,7 @@ describe("chat transcript", () => {
         const projected = projectChatTranscriptMessages(
             [
                 compaction("fresh-complete", "complete", nowMs - 1000),
-                compaction("stale-complete", "complete", nowMs - 6000),
+                compaction("stale-complete", "complete", nowMs - 16_000),
                 compaction("stale-active", "running", nowMs - 300_001),
             ],
             [],

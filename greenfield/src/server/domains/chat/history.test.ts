@@ -126,6 +126,47 @@ describe("chat history service", () => {
         expect(output.truncated).toBeTrue();
     });
 
+    test("keeps authorized attachment descriptors when an older row needs hydration", async () => {
+        const attachmentMessage: ChatMessage = {
+            content: {
+                kind: "complete",
+                parts: [
+                    { id: "text", kind: "text", text: "her er bilde" },
+                    {
+                        downloadUrl:
+                            "/api/chat/media/019fe633-9133-4ba0-8b80-809dd80dfb40?disposition=download",
+                        fileName: "photo.jpg",
+                        id: "image",
+                        kind: "attachment",
+                        mediaType: "image/jpeg",
+                        renderPolicy: "inline-image",
+                        sizeBytes: 7861,
+                        url: "/api/chat/media/019fe633-9133-4ba0-8b80-809dd80dfb40?disposition=preview",
+                    },
+                    { id: "large", kind: "text", text: "x".repeat(256 * 1024) },
+                ],
+            },
+            id: "with-attachment",
+            role: "user",
+            source: "gateway-history",
+        };
+        const service = new ChatHistoryService(
+            fakeProvider([
+                {
+                    hasMore: false,
+                    messages: [attachmentMessage, message("newest", "y".repeat(256 * 1024))],
+                },
+            ])
+        );
+
+        const output = await service.history({ cursor: "0", limit: 2, sessionKey });
+
+        expect(output.messages[0]?.content).toMatchObject({
+            attachments: [expect.objectContaining({ fileName: "photo.jpg" })],
+            kind: "hydration-required",
+        });
+    });
+
     test("observes only the newest-page in-flight snapshot and promotes aliases", async () => {
         const observations: unknown[] = [];
         const service = new ChatHistoryService(

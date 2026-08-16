@@ -1,9 +1,10 @@
+import { useNavigate } from "@tanstack/react-router";
 import {
     ArrowDown,
     ArrowUp,
     ArrowUpDown,
+    Boxes,
     FileText,
-    Info,
     Play,
     RotateCw,
     Square,
@@ -14,11 +15,11 @@ import { useState } from "react";
 import type { DockerContainer } from "../../contracts/docker.ts";
 import { cn } from "../lib/classNames.ts";
 import { formatByteCount, formatPercent } from "../lib/formatMeasurements.ts";
-import { ActionLink } from "../ui/ActionLink.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Card } from "../ui/Card.tsx";
 import { dashboardDataTableClassNames } from "../ui/dataTableStyles.ts";
+import { DropdownMenu } from "../ui/DropdownMenu.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { SearchInput } from "../ui/SearchInput.tsx";
@@ -28,14 +29,16 @@ import {
     type DockerContainerSortField,
     defaultDockerContainerSort,
     dockerContainerHealthVariant,
+    dockerContainerIsActive,
     dockerContainerMatchesSearch,
     dockerContainerStateVariant,
-    formatDockerMemory,
+    formatDockerContainerRuntime,
     formatDockerPort,
     sortDockerContainers,
 } from "./dockerPresentation.ts";
 
 type ContainerOperation = "container-restart" | "container-start" | "container-stop";
+type StackOperation = "stack-restart" | "stack-start" | "stack-stop";
 
 interface SortHeaderProps {
     readonly field: DockerContainerSortField;
@@ -74,24 +77,293 @@ interface DockerContainersTableProps {
     readonly busy: boolean;
     readonly containers: readonly DockerContainer[];
     readonly controlsDisabled: boolean;
+    readonly observedAtMs: number;
     readonly onOpenDetails: (container: DockerContainer) => void;
     readonly onOpenLogs: (container: DockerContainer) => void;
     readonly onRequestOperation: (
         operation: ContainerOperation,
         container: DockerContainer
     ) => void;
+    readonly onRequestStackOperation: (operation: StackOperation) => void;
 }
 
 function containerCanStart(container: DockerContainer): boolean {
-    return !["paused", "restarting", "running"].includes(container.state);
+    return ["created", "exited"].includes(container.state);
 }
 
 function containerCanStop(container: DockerContainer): boolean {
-    return ["paused", "restarting", "running"].includes(container.state);
+    return dockerContainerIsActive(container);
 }
 
 function containerCanRestart(container: DockerContainer): boolean {
-    return ["paused", "restarting", "running"].includes(container.state);
+    return dockerContainerIsActive(container);
+}
+
+interface ContainerActionMenuProps {
+    readonly busy: DockerContainersTableProps["busy"];
+    readonly container: DockerContainer;
+    readonly controlsDisabled: DockerContainersTableProps["controlsDisabled"];
+    readonly onOpenConsole: (container: DockerContainer) => void;
+    readonly onOpenLogs: DockerContainersTableProps["onOpenLogs"];
+    readonly onRequestOperation: DockerContainersTableProps["onRequestOperation"];
+}
+
+function ContainerActionMenu({
+    busy,
+    container,
+    controlsDisabled,
+    onOpenConsole,
+    onOpenLogs,
+    onRequestOperation,
+}: ContainerActionMenuProps) {
+    const lifecycleAction = containerCanStop(container)
+        ? {
+              description: "Stop this container.",
+              disabled: controlsDisabled || busy,
+              icon: Square,
+              id: "stop",
+              label: "Stop",
+              onSelect: (trigger: HTMLButtonElement) => {
+                  trigger.focus();
+                  onRequestOperation("container-stop", container);
+              },
+              tone: "danger" as const,
+          }
+        : {
+              description: "Start this container.",
+              disabled: controlsDisabled || busy || !containerCanStart(container),
+              icon: Play,
+              id: "start",
+              label: "Start",
+              onSelect: (trigger: HTMLButtonElement) => {
+                  trigger.focus();
+                  onRequestOperation("container-start", container);
+              },
+          };
+
+    return (
+        <DropdownMenu
+            actions={[
+                {
+                    description: "Read a bounded redacted tail of the container logs.",
+                    disabled: controlsDisabled,
+                    icon: FileText,
+                    id: "logs",
+                    label: "Logs",
+                    onSelect: (trigger) => {
+                        trigger.focus();
+                        onOpenLogs(container);
+                    },
+                },
+                {
+                    description: "Open an interactive /bin/sh session in Terminal.",
+                    disabled: controlsDisabled || container.state !== "running",
+                    icon: SquareTerminal,
+                    id: "console",
+                    label: "Console",
+                    onSelect: () => onOpenConsole(container),
+                },
+                lifecycleAction,
+                {
+                    description: "Restart this container.",
+                    disabled: controlsDisabled || busy || !containerCanRestart(container),
+                    icon: RotateCw,
+                    id: "restart",
+                    label: "Restart",
+                    onSelect: (trigger) => {
+                        trigger.focus();
+                        onRequestOperation("container-restart", container);
+                    },
+                    tone: "danger",
+                },
+            ]}
+            triggerLabel={`Actions for ${container.name}`}
+        />
+    );
+}
+
+interface StackActionMenuProps {
+    readonly busy: boolean;
+    readonly controlsDisabled: boolean;
+    readonly onRequestStackOperation: (operation: StackOperation) => void;
+}
+
+function StackActionMenu({
+    busy,
+    controlsDisabled,
+    onRequestStackOperation,
+}: StackActionMenuProps) {
+    const disabled = controlsDisabled || busy;
+    return (
+        <DropdownMenu
+            actions={[
+                {
+                    description: "Start the discovered root Compose stack.",
+                    disabled,
+                    icon: Play,
+                    id: "stack-start",
+                    label: "Start stack",
+                    onSelect: (trigger) => {
+                        trigger.focus();
+                        onRequestStackOperation("stack-start");
+                    },
+                },
+                {
+                    description: "Stop the discovered root Compose stack.",
+                    disabled,
+                    icon: Square,
+                    id: "stack-stop",
+                    label: "Stop stack",
+                    onSelect: (trigger) => {
+                        trigger.focus();
+                        onRequestStackOperation("stack-stop");
+                    },
+                    tone: "danger",
+                },
+                {
+                    description: "Restart the discovered root Compose stack.",
+                    disabled,
+                    icon: RotateCw,
+                    id: "stack-restart",
+                    label: "Restart stack",
+                    onSelect: (trigger) => {
+                        trigger.focus();
+                        onRequestStackOperation("stack-restart");
+                    },
+                    tone: "danger",
+                },
+            ]}
+            disabled={disabled}
+            triggerLabel="Docker stack actions"
+        />
+    );
+}
+
+function ContainerIdentity({ container }: { readonly container: DockerContainer }) {
+    return (
+        <div className="min-w-0">
+            <div className="text-primary-50 font-medium wrap-anywhere">
+                {container.name}
+            </div>
+            <div className="text-primary-400 mt-1 text-xs wrap-anywhere">
+                {container.image}
+            </div>
+            {(container.project !== undefined || container.service !== undefined) && (
+                <div className="text-primary-400 mt-1 flex flex-wrap gap-2 text-xs">
+                    {container.service !== undefined && (
+                        <span>service: {container.service}</span>
+                    )}
+                    {container.project !== undefined && (
+                        <span>project: {container.project}</span>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
+
+interface DockerContainerMobileCardProps extends ContainerActionMenuProps {
+    readonly observedAtMs: DockerContainersTableProps["observedAtMs"];
+    readonly onOpenDetails: DockerContainersTableProps["onOpenDetails"];
+}
+
+function DockerContainerMobileCard({
+    busy,
+    container,
+    controlsDisabled,
+    observedAtMs,
+    onOpenConsole,
+    onOpenDetails,
+    onOpenLogs,
+    onRequestOperation,
+}: DockerContainerMobileCardProps) {
+    return (
+        <li
+            aria-label={`${container.name} container`}
+            className="border-primary-700 bg-primary-950/40 relative rounded-lg border p-3 shadow-sm shadow-black/10"
+        >
+            <button
+                aria-label={`Open details for ${container.name}`}
+                className="hover:bg-primary-800/50 focus-visible:ring-accent-400 absolute inset-0 z-0 cursor-pointer rounded-lg transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset"
+                onClick={() => onOpenDetails(container)}
+                type="button"
+            />
+            <div className="pointer-events-none relative z-10">
+                <div className="flex items-start justify-between gap-3">
+                    <ContainerIdentity container={container} />
+                    <div className="pointer-events-auto shrink-0">
+                        <ContainerActionMenu
+                            busy={busy}
+                            container={container}
+                            controlsDisabled={controlsDisabled}
+                            onOpenConsole={onOpenConsole}
+                            onOpenLogs={onOpenLogs}
+                            onRequestOperation={onRequestOperation}
+                        />
+                    </div>
+                </div>
+
+                <dl className="text-primary-400 mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-xs">
+                    <div className="min-w-0">
+                        <dt className="text-primary-400">State</dt>
+                        <dd className="mt-1">
+                            <Badge variant={dockerContainerStateVariant(container.state)}>
+                                {container.state}
+                            </Badge>
+                            <span className="mt-1 block tabular-nums">
+                                {formatDockerContainerRuntime(container, observedAtMs)}
+                            </span>
+                        </dd>
+                    </div>
+                    <div className="min-w-0">
+                        <dt className="text-primary-400">Health</dt>
+                        <dd className="mt-1">
+                            <Badge
+                                variant={dockerContainerHealthVariant(container.health)}
+                            >
+                                {container.health === "none"
+                                    ? "No health check"
+                                    : container.health}
+                            </Badge>
+                            <span className="mt-1 block tabular-nums">
+                                {container.restartCount} restarts
+                            </span>
+                        </dd>
+                    </div>
+                    <div>
+                        <dt className="text-primary-400">CPU</dt>
+                        <dd className="text-primary-200 mt-1 tabular-nums">
+                            {container.stats === undefined
+                                ? "Unavailable"
+                                : formatPercent(container.stats.cpuPercent)}
+                        </dd>
+                    </div>
+                    <div>
+                        <dt className="text-primary-400">Memory</dt>
+                        <dd className="text-primary-200 mt-1 tabular-nums">
+                            {container.stats === undefined
+                                ? "Unavailable"
+                                : formatByteCount(container.stats.memoryUsedBytes)}
+                        </dd>
+                    </div>
+                </dl>
+
+                {container.ports.length > 0 && (
+                    <div className="text-primary-400 mt-3 text-xs wrap-anywhere">
+                        <span className="text-primary-400">Ports: </span>
+                        {container.ports.map(formatDockerPort).join(", ")}
+                    </div>
+                )}
+            </div>
+        </li>
+    );
+}
+
+function containerRowTargetIsInteractive(target: EventTarget | null): boolean {
+    return (
+        target instanceof Element &&
+        target.closest("a, button, input, select, textarea") !== null
+    );
 }
 
 function TableLabel({ children }: { readonly children: string }) {
@@ -107,10 +379,13 @@ export function DockerContainersTable({
     busy,
     containers,
     controlsDisabled,
+    observedAtMs,
     onOpenDetails,
     onOpenLogs,
     onRequestOperation,
+    onRequestStackOperation,
 }: DockerContainersTableProps) {
+    const navigate = useNavigate({ from: "/docker" });
     const [search, setSearch] = useState("");
     const [sort, setSort] = useState<DockerContainerSort>(defaultDockerContainerSort);
     const visibleContainers = sortDockerContainers(
@@ -128,25 +403,42 @@ export function DockerContainersTable({
         }));
     }
 
+    function openConsole(container: DockerContainer): void {
+        void navigate({
+            search: { dockerContainerId: container.id },
+            to: "/terminal",
+        });
+    }
+
     return (
         <Card aria-labelledby="docker-containers-heading" className="min-w-0 p-0">
-            <div className="border-primary-700 flex flex-col gap-4 border-b p-5 sm:flex-row sm:items-end sm:justify-between">
-                <div>
-                    <Heading id="docker-containers-heading" level={2}>
-                        Containers
-                    </Heading>
+            <div className="border-primary-700 grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 gap-y-4 border-b p-5 xl:grid-cols-[minmax(0,1fr)_24rem_auto] xl:items-end">
+                <div className="min-w-0">
+                    <div className="flex min-w-0 items-center gap-2">
+                        <Icon icon={Boxes} tone="accent" />
+                        <Heading id="docker-containers-heading" level={2}>
+                            Containers
+                        </Heading>
+                    </div>
                     <Text className="mt-1" tone="muted">
                         Engine state, health, live statistics, published ports, and exact
                         container controls.
                     </Text>
                 </div>
                 <SearchInput
-                    className="w-full sm:max-w-sm"
+                    className="col-span-2 row-start-2 w-full xl:col-span-1 xl:col-start-2 xl:row-start-1 xl:w-96"
                     label="Search Docker containers"
                     onChange={setSearch}
-                    placeholder="Name, image, service, state, or port"
+                    placeholder="Search containers"
                     value={search}
                 />
+                <div className="col-start-2 row-start-1 xl:col-start-3 xl:self-end xl:pb-1">
+                    <StackActionMenu
+                        busy={busy}
+                        controlsDisabled={controlsDisabled}
+                        onRequestStackOperation={onRequestStackOperation}
+                    />
+                </div>
             </div>
             {visibleContainers.length === 0 ? (
                 <div className="p-8 text-center">
@@ -157,19 +449,42 @@ export function DockerContainersTable({
                     </Text>
                 </div>
             ) : (
-                <div className={cn(dashboardDataTableClassNames.queryContainer, "p-5")}>
+                <div
+                    className={cn(
+                        dashboardDataTableClassNames.queryContainer,
+                        "p-3 sm:p-5"
+                    )}
+                >
+                    <ul
+                        aria-label="Docker containers"
+                        className="space-y-3 @min-[66rem]:hidden"
+                    >
+                        {visibleContainers.map((container) => (
+                            <DockerContainerMobileCard
+                                busy={busy}
+                                container={container}
+                                controlsDisabled={controlsDisabled}
+                                key={container.id}
+                                observedAtMs={observedAtMs}
+                                onOpenConsole={openConsole}
+                                onOpenDetails={onOpenDetails}
+                                onOpenLogs={onOpenLogs}
+                                onRequestOperation={onRequestOperation}
+                            />
+                        ))}
+                    </ul>
                     <section
                         aria-label="Docker containers"
                         className={cn(
                             dashboardDataTableClassNames.scrollContainer,
-                            "overflow-x-auto overscroll-x-contain"
+                            "hidden overflow-x-auto overscroll-x-contain @min-[66rem]:block"
                         )}
                     >
                         <table
                             aria-label="Docker containers"
                             className={cn(
                                 dashboardDataTableClassNames.table,
-                                "min-w-320"
+                                "min-w-288"
                             )}
                         >
                             <thead className={dashboardDataTableClassNames.head}>
@@ -217,7 +532,7 @@ export function DockerContainersTable({
                                         Ports
                                     </th>
                                     <th
-                                        className="text-primary-300 border-primary-700 bg-primary-950 border-b px-3 py-2 text-left text-xs font-semibold tracking-wide uppercase"
+                                        className="text-primary-300 border-primary-700 bg-primary-950 border-b px-3 py-2 text-center text-xs font-semibold tracking-wide uppercase"
                                         scope="col"
                                     >
                                         Actions
@@ -227,8 +542,34 @@ export function DockerContainersTable({
                             <tbody className={dashboardDataTableClassNames.body}>
                                 {visibleContainers.map((container) => (
                                     <tr
-                                        className={dashboardDataTableClassNames.row}
+                                        aria-label={`Open details for ${container.name}`}
+                                        className={cn(
+                                            dashboardDataTableClassNames.row,
+                                            "hover:bg-primary-700/30 focus-visible:bg-primary-700/30 focus-visible:ring-accent-400 cursor-pointer transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset"
+                                        )}
                                         key={container.id}
+                                        onClick={(event) => {
+                                            if (
+                                                containerRowTargetIsInteractive(
+                                                    event.target
+                                                )
+                                            ) {
+                                                return;
+                                            }
+                                            event.currentTarget.focus();
+                                            onOpenDetails(container);
+                                        }}
+                                        onKeyDown={(event) => {
+                                            if (
+                                                event.target !== event.currentTarget ||
+                                                ![" ", "Enter"].includes(event.key)
+                                            ) {
+                                                return;
+                                            }
+                                            event.preventDefault();
+                                            onOpenDetails(container);
+                                        }}
+                                        tabIndex={0}
                                     >
                                         <td className={dashboardDataTableClassNames.cell}>
                                             <TableLabel>Container</TableLabel>
@@ -237,25 +578,9 @@ export function DockerContainersTable({
                                                     dashboardDataTableClassNames.value
                                                 }
                                             >
-                                                <div className="text-primary-50 font-medium wrap-anywhere">
-                                                    {container.name}
-                                                </div>
-                                                <div className="text-primary-400 mt-1 text-xs wrap-anywhere">
-                                                    {container.image}
-                                                </div>
-                                                {(container.project !== undefined ||
-                                                    container.service !== undefined) && (
-                                                    <div className="text-primary-400 mt-1 text-xs wrap-anywhere">
-                                                        {container.project} /{" "}
-                                                        {container.service}
-                                                    </div>
-                                                )}
-                                                <code
-                                                    className="text-primary-400 mt-1 block text-xs wrap-anywhere"
-                                                    title={container.id}
-                                                >
-                                                    {container.id.slice(0, 12)}
-                                                </code>
+                                                <ContainerIdentity
+                                                    container={container}
+                                                />
                                             </div>
                                         </td>
                                         <td className={dashboardDataTableClassNames.cell}>
@@ -273,7 +598,10 @@ export function DockerContainersTable({
                                                     {container.state}
                                                 </Badge>
                                                 <span className="text-primary-400 mt-2 block text-xs tabular-nums">
-                                                    {container.restartCount} restarts
+                                                    {formatDockerContainerRuntime(
+                                                        container,
+                                                        observedAtMs
+                                                    )}
                                                 </span>
                                             </span>
                                         </td>
@@ -293,6 +621,9 @@ export function DockerContainersTable({
                                                         ? "No health check"
                                                         : container.health}
                                                 </Badge>
+                                                <span className="text-primary-400 mt-2 block text-xs tabular-nums">
+                                                    restarts: {container.restartCount}
+                                                </span>
                                             </span>
                                         </td>
                                         <td className={dashboardDataTableClassNames.cell}>
@@ -318,7 +649,11 @@ export function DockerContainersTable({
                                                     "text-primary-200 tabular-nums"
                                                 )}
                                             >
-                                                {formatDockerMemory(container)}
+                                                {container.stats === undefined
+                                                    ? "Unavailable"
+                                                    : formatByteCount(
+                                                          container.stats.memoryUsedBytes
+                                                      )}
                                             </span>
                                         </td>
                                         <td className={dashboardDataTableClassNames.cell}>
@@ -396,116 +731,19 @@ export function DockerContainersTable({
                                             <div
                                                 className={cn(
                                                     dashboardDataTableClassNames.value,
-                                                    "flex min-w-52 flex-wrap gap-2"
+                                                    "flex justify-center"
                                                 )}
                                             >
-                                                <Button
-                                                    aria-label={
-                                                        "Show details for " +
-                                                        container.name
+                                                <ContainerActionMenu
+                                                    busy={busy}
+                                                    container={container}
+                                                    controlsDisabled={controlsDisabled}
+                                                    onOpenConsole={openConsole}
+                                                    onOpenLogs={onOpenLogs}
+                                                    onRequestOperation={
+                                                        onRequestOperation
                                                     }
-                                                    onClick={() =>
-                                                        onOpenDetails(container)
-                                                    }
-                                                    size="sm"
-                                                    variant="secondary"
-                                                >
-                                                    <Icon icon={Info} size="sm" />
-                                                    Details
-                                                </Button>
-                                                <Button
-                                                    aria-label={
-                                                        "Show logs for " + container.name
-                                                    }
-                                                    disabled={controlsDisabled}
-                                                    onClick={() => onOpenLogs(container)}
-                                                    size="sm"
-                                                    variant="secondary"
-                                                >
-                                                    <Icon icon={FileText} size="sm" />
-                                                    Logs
-                                                </Button>
-                                                {!controlsDisabled &&
-                                                container.state === "running" ? (
-                                                    <ActionLink
-                                                        aria-label={
-                                                            "Open console for " +
-                                                            container.name
-                                                        }
-                                                        search={{
-                                                            dockerContainerId:
-                                                                container.id,
-                                                        }}
-                                                        size="sm"
-                                                        to="/terminal"
-                                                        variant="secondary"
-                                                    >
-                                                        <Icon
-                                                            icon={SquareTerminal}
-                                                            size="sm"
-                                                        />
-                                                        Console
-                                                    </ActionLink>
-                                                ) : null}
-                                                <Button
-                                                    aria-label={"Start " + container.name}
-                                                    disabled={
-                                                        controlsDisabled ||
-                                                        busy ||
-                                                        !containerCanStart(container)
-                                                    }
-                                                    onClick={() =>
-                                                        onRequestOperation(
-                                                            "container-start",
-                                                            container
-                                                        )
-                                                    }
-                                                    size="sm"
-                                                    variant="secondary"
-                                                >
-                                                    <Icon icon={Play} size="sm" />
-                                                    Start
-                                                </Button>
-                                                <Button
-                                                    aria-label={"Stop " + container.name}
-                                                    disabled={
-                                                        controlsDisabled ||
-                                                        busy ||
-                                                        !containerCanStop(container)
-                                                    }
-                                                    onClick={() =>
-                                                        onRequestOperation(
-                                                            "container-stop",
-                                                            container
-                                                        )
-                                                    }
-                                                    size="sm"
-                                                    variant="secondary"
-                                                >
-                                                    <Icon icon={Square} size="sm" />
-                                                    Stop
-                                                </Button>
-                                                <Button
-                                                    aria-label={
-                                                        "Restart " + container.name
-                                                    }
-                                                    disabled={
-                                                        controlsDisabled ||
-                                                        busy ||
-                                                        !containerCanRestart(container)
-                                                    }
-                                                    onClick={() =>
-                                                        onRequestOperation(
-                                                            "container-restart",
-                                                            container
-                                                        )
-                                                    }
-                                                    size="sm"
-                                                    variant="secondary"
-                                                >
-                                                    <Icon icon={RotateCw} size="sm" />
-                                                    Restart
-                                                </Button>
+                                                />
                                             </div>
                                         </td>
                                     </tr>

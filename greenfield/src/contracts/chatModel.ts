@@ -28,6 +28,19 @@ export const chatRuntimePageMinimum = 128;
 export const chatRuntimePageMaximum = 256;
 /** A larger same-session backlog is replaced by one authoritative snapshot response. */
 export const chatRuntimeCatchUpMaximumEvents = 256;
+
+/**
+ * Normalizes OpenClaw's user-carrier suffix to Dashboard's canonical send identity.
+ * @param value Candidate identity from canonical history or provider runtime.
+ * @returns Canonical idempotency identity, or undefined for an unsupported value.
+ */
+export function normalizeChatProviderUserIdentity(value: unknown): string | undefined {
+    const direct = v.safeParse(jobIdempotencyKeySchema, value);
+    if (direct.success) return direct.output;
+    if (typeof value !== "string" || !value.endsWith(":user")) return undefined;
+    const base = v.safeParse(jobIdempotencyKeySchema, value.slice(0, -":user".length));
+    return base.success ? base.output : undefined;
+}
 export const chatRuntimeCatchUpMaximumPages = 2;
 export const chatRuntimeResponseMaximumBytes = 1024 * 1024;
 /** Leaves room for the bounded provider-origin projection added by ChatService. */
@@ -249,6 +262,7 @@ export const chatMessagePartSchema = v.pipe(
         "Chat attachment render policy and URL disposition disagree"
     )
 );
+export type ChatMessagePart = v.InferOutput<typeof chatMessagePartSchema>;
 
 export function chatMessagePartsHaveUniqueIds(
     parts: v.InferOutput<typeof chatMessagePartSchema>[]
@@ -268,6 +282,16 @@ export const chatMessageContentSchema = v.variant("kind", [
         parts: chatMessagePartsSchema,
     }),
     v.strictObject({
+        attachments: v.optional(
+            v.pipe(
+                v.array(chatMessagePartSchema),
+                v.maxLength(10),
+                v.check(
+                    (parts) => parts.every((part) => part.kind === "attachment"),
+                    "Hydration attachments are invalid"
+                )
+            )
+        ),
         kind: v.literal("hydration-required"),
         preview: v.optional(chatPreviewTextSchema),
         reason: v.picklist(["provider-omitted", "response-budget"]),
@@ -610,6 +634,16 @@ const chatRuntimeProjectionPartVariantSchema = v.variant("kind", [
         type: boundedControlSafeTextSchema(128, "Chat item type is invalid"),
     }),
     v.strictObject({
+        attachments: v.optional(
+            v.pipe(
+                v.array(chatMessagePartSchema, "Chat user attachments are invalid"),
+                v.maxLength(10, "Chat user attachment count is outside its budget"),
+                v.check(
+                    (parts) => parts.every((part) => part.kind === "attachment"),
+                    "Chat user projection contains a non-attachment part"
+                )
+            )
+        ),
         kind: v.literal("user"),
         messageId: v.optional(chatMessageIdSchema),
         occurredAtMs: v.optional(

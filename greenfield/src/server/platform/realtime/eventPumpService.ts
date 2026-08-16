@@ -60,7 +60,7 @@ interface NormalizedRuntimeOptions {
 }
 
 export interface RealtimeEventStreamOptions {
-    readonly afterId: string;
+    readonly afterId?: string;
     readonly signal?: AbortSignal;
     readonly topics?: readonly string[];
 }

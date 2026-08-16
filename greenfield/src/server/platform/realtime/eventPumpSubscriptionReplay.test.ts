@@ -11,6 +11,37 @@ import {
 } from "./testSupport/eventPump.ts";
 
 describe("realtime event pump", () => {
+    test("attaches a cursorless fresh subscription at the current tail", async () => {
+        const database = await openFreshMigratedDatabase();
+        const pump = new RealtimeEventPump({
+            store: createRealtimeEventStore(database.orm),
+        });
+        const abortController = new AbortController();
+
+        try {
+            insertEvent(database, { occurredAtMs: 1000 });
+            insertEvent(database, { occurredAtMs: 2000 });
+            const subscription = pump.subscribe({ signal: abortController.signal });
+            const firstDelivery = subscription.next();
+            await waitForCondition(
+                () => pump.metricsSnapshot().activeSubscribers === 1,
+                "fresh subscriber did not attach"
+            );
+
+            insertEvent(database, { occurredAtMs: 3000 });
+            pump.wake();
+            expect(pump.poll()).toBe("active");
+            expect(await firstDelivery).toMatchObject({
+                done: false,
+                value: { id: "3", kind: "change" },
+            });
+        } finally {
+            abortController.abort();
+            pump.close();
+            database.sqlite.close(true);
+        }
+    });
+
     test("revalidates retention in the same snapshot as every replay batch", async () => {
         let batchReads = 0;
         const store: RealtimeEventStore = {

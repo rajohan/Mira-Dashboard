@@ -5,6 +5,7 @@ import type {
     ChatMessageGetOutput,
     ChatModelsListOutput,
 } from "../../contracts/chat.ts";
+import { normalizeChatProviderUserIdentity } from "../../contracts/chatModel.ts";
 import {
     gatewayPrimarySessionKey,
     type GatewaySession,
@@ -27,6 +28,15 @@ function unique(values: readonly (string | undefined)[]): readonly string[] {
     return [...new Set(values.filter((value): value is string => value !== undefined))];
 }
 
+function canonicalModel(
+    model: string | undefined,
+    inventory: readonly string[]
+): string | undefined {
+    if (model === undefined || model.includes("/")) return model;
+    const matches = inventory.filter((candidate) => candidate.endsWith(`/${model}`));
+    return matches.length === 1 ? matches[0] : model;
+}
+
 function sessionThinkingOptions(session: GatewaySession): readonly string[] {
     return unique([
         session.thinkingLevel,
@@ -47,31 +57,35 @@ export function projectChatSessions(
     modelInventory: ChatModelsListOutput | undefined
 ): readonly ChatSessionOption[] {
     const globalModels = modelInventory?.models.map(({ id }) => id) ?? [];
-    return snapshot.sessions.map((session) => ({
-        activeRunCount: session.activeRunIds?.length ?? (session.hasActiveRun ? 1 : 0),
-        ...(session.contextTokens === undefined
-            ? {}
-            : { contextTokens: session.contextTokens }),
-        displayName: session.displayName,
-        ...(session.fastMode === undefined ? {} : { fastMode: session.fastMode }),
-        isDefault: session.key === gatewayPrimarySessionKey,
-        key: session.key,
-        ...(session.model === undefined ? {} : { model: session.model }),
-        modelOptions: unique([session.model, ...globalModels]),
-        speed:
-            session.fastMode === true || session.effectiveFastMode === true
-                ? "fast"
-                : "standard",
-        thinking: session.thinkingLevel ?? session.thinkingDefault ?? "default",
-        thinkingOptions: sessionThinkingOptions(session),
-        ...(session.totalTokens === undefined
-            ? {}
-            : { totalTokens: session.totalTokens }),
-        totalTokensFresh: session.totalTokensFresh,
-        ...(session.updatedAtMs === undefined
-            ? {}
-            : { updatedAtMs: session.updatedAtMs }),
-    }));
+    return snapshot.sessions.map((session) => {
+        const model = canonicalModel(session.model, globalModels);
+        return {
+            activeRunCount:
+                session.activeRunIds?.length ?? (session.hasActiveRun ? 1 : 0),
+            ...(session.contextTokens === undefined
+                ? {}
+                : { contextTokens: session.contextTokens }),
+            displayName: session.displayName,
+            ...(session.fastMode === undefined ? {} : { fastMode: session.fastMode }),
+            isDefault: session.key === gatewayPrimarySessionKey,
+            key: session.key,
+            ...(model === undefined ? {} : { model }),
+            modelOptions: unique([model, ...globalModels]),
+            speed:
+                session.fastMode === true || session.effectiveFastMode === true
+                    ? "fast"
+                    : "standard",
+            thinking: session.thinkingLevel ?? session.thinkingDefault ?? "default",
+            thinkingOptions: sessionThinkingOptions(session),
+            ...(session.totalTokens === undefined
+                ? {}
+                : { totalTokens: session.totalTokens }),
+            totalTokensFresh: session.totalTokensFresh,
+            ...(session.updatedAtMs === undefined
+                ? {}
+                : { updatedAtMs: session.updatedAtMs }),
+        };
+    });
 }
 
 export interface ChatHydrationProjection {
@@ -400,152 +414,11 @@ function mergeExternalPartIntoCanonical(
     return false;
 }
 
-function markCanonicalPartRemoved(
-    removedCanonicalParts: Map<number, Set<number>>,
-    messageIndex: number,
-    partIndex: number
-): void {
-    const removed = removedCanonicalParts.get(messageIndex) ?? new Set<number>();
-    removed.add(partIndex);
-    removedCanonicalParts.set(messageIndex, removed);
-}
-
-function mergeCanonicalPartIntoAnchoredExternal(
-    canonical: ChatDisplayMessage[],
-    candidateIndexes: readonly number[],
-    externalPart: ChatMessagePart,
-    claimedCanonicalToolParts: Set<string>,
-    removedCanonicalParts: Map<number, Set<number>>
-): ChatMessagePart {
-    for (const messageIndex of candidateIndexes) {
-        const message = canonical[messageIndex];
-        if (message === undefined) continue;
-        const partIndex = message.parts.findIndex((part, candidatePartIndex) => {
-            if (removedCanonicalParts.get(messageIndex)?.has(candidatePartIndex)) {
-                return false;
-            }
-            if (part.kind !== externalPart.kind) return false;
-            if (part.kind === "tool" && externalPart.kind === "tool") {
-                return (
-                    !claimedCanonicalToolParts.has(
-                        `${messageIndex}:${candidatePartIndex}`
-                    ) && toolPartsShareIdentity(part, externalPart)
-                );
-            }
-            if (part.kind === "thinking" && externalPart.kind === "thinking") {
-                return (
-                    (part.sourceKey !== undefined &&
-                        part.sourceKey === externalPart.sourceKey) ||
-                    part.text.startsWith(externalPart.text) ||
-                    externalPart.text.startsWith(part.text)
-                );
-            }
-            if (part.kind === "control" && externalPart.kind === "control") {
-                return (
-                    part.text === externalPart.text ||
-                    (part.activity !== undefined &&
-                        part.activity === externalPart.activity)
-                );
-            }
-            if (part.kind === "text" && externalPart.kind === "text") {
-                return (
-                    (part.sourceKey !== undefined &&
-                        part.sourceKey === externalPart.sourceKey) ||
-                    part.text === externalPart.text ||
-                    externalPart.text.startsWith(part.text) ||
-                    part.text.startsWith(externalPart.text)
-                );
-            }
-            return false;
-        });
-        if (partIndex === -1) continue;
-        const canonicalPart = message.parts[partIndex];
-        if (canonicalPart === undefined) return externalPart;
-        if (canonicalPart.kind === "tool" && externalPart.kind === "tool") {
-            claimedCanonicalToolParts.add(`${messageIndex}:${partIndex}`);
-            markCanonicalPartRemoved(removedCanonicalParts, messageIndex, partIndex);
-            return mergeChatToolPart(canonicalPart, externalPart);
-        }
-        if (canonicalPart.kind === "thinking" && externalPart.kind === "thinking") {
-            const sameSource =
-                canonicalPart.sourceKey !== undefined &&
-                canonicalPart.sourceKey === externalPart.sourceKey;
-            if (sameSource || externalPart.text.startsWith(canonicalPart.text)) {
-                markCanonicalPartRemoved(removedCanonicalParts, messageIndex, partIndex);
-                return {
-                    ...canonicalPart,
-                    ...externalPart,
-                    status:
-                        canonicalPart.status === "complete" ||
-                        externalPart.status === "complete"
-                            ? "complete"
-                            : "running",
-                    text:
-                        externalPart.text.length > canonicalPart.text.length
-                            ? externalPart.text
-                            : canonicalPart.text,
-                };
-            }
-            if (canonicalPart.text.startsWith(externalPart.text)) {
-                canonical[messageIndex] = {
-                    ...message,
-                    parts: message.parts.with(partIndex, {
-                        ...canonicalPart,
-                        text: canonicalPart.text.slice(externalPart.text.length),
-                    }),
-                };
-            }
-            return externalPart;
-        }
-        if (canonicalPart.kind === "control" && externalPart.kind === "control") {
-            markCanonicalPartRemoved(removedCanonicalParts, messageIndex, partIndex);
-            return {
-                ...canonicalPart,
-                ...externalPart,
-                ...(canonicalPart.activity === "complete"
-                    ? { activity: "complete" as const }
-                    : {}),
-            };
-        }
-        if (canonicalPart.kind === "text" && externalPart.kind === "text") {
-            const sameSource =
-                canonicalPart.sourceKey !== undefined &&
-                canonicalPart.sourceKey === externalPart.sourceKey;
-            if (
-                sameSource ||
-                canonicalPart.text === externalPart.text ||
-                externalPart.text.startsWith(canonicalPart.text)
-            ) {
-                markCanonicalPartRemoved(removedCanonicalParts, messageIndex, partIndex);
-                return {
-                    ...canonicalPart,
-                    ...externalPart,
-                    text:
-                        externalPart.text.length > canonicalPart.text.length
-                            ? externalPart.text
-                            : canonicalPart.text,
-                };
-            }
-            if (canonicalPart.text.startsWith(externalPart.text)) {
-                canonical[messageIndex] = {
-                    ...message,
-                    parts: message.parts.with(partIndex, {
-                        ...canonicalPart,
-                        text: canonicalPart.text.slice(externalPart.text.length),
-                    }),
-                };
-                return externalPart;
-            }
-        }
-        return externalPart;
-    }
-    return externalPart;
-}
-
 interface ExternalAnchorPlacement {
     readonly afterCanonical: ReadonlyMap<string, readonly string[]>;
     readonly anchoredExternalIds: ReadonlySet<string>;
     readonly beforeCanonical: ReadonlyMap<string, readonly string[]>;
+    readonly providerRunIdByCanonicalUser: ReadonlyMap<string, string>;
 }
 
 function placeExternalActivityAroundCanonicalUsers(
@@ -562,6 +435,7 @@ function placeExternalActivityAroundCanonicalUsers(
     const afterCanonical = new Map<string, string[]>();
     const anchoredExternalIds = new Set<string>();
     const claimedCanonicalUsers = new Set<string>();
+    const providerRunIdByCanonicalUser = new Map<string, string>();
     for (const [providerRunId, messages] of externalGroups) {
         let chunkStart = 0;
         let previousAnchorId: string | undefined;
@@ -575,7 +449,15 @@ function placeExternalActivityAroundCanonicalUsers(
                     !claimedCanonicalUsers.has(candidate.id) &&
                     (exactAnchorId === undefined
                         ? chatDisplayMessageText(candidate) === textAnchor
-                        : candidate.id === exactAnchorId)
+                        : [candidate.id, candidate.idempotencyKey].some(
+                              (identity) =>
+                                  identity !== undefined &&
+                                  (normalizeChatProviderUserIdentity(identity) ??
+                                      identity) ===
+                                      (normalizeChatProviderUserIdentity(
+                                          exactAnchorId
+                                      ) ?? exactAnchorId)
+                          ))
             );
             const canonicalUser =
                 exactAnchorId === undefined
@@ -588,6 +470,7 @@ function placeExternalActivityAroundCanonicalUsers(
                     : matchingUsers[0];
             if (canonicalUser === undefined) continue;
             claimedCanonicalUsers.add(canonicalUser.id);
+            providerRunIdByCanonicalUser.set(canonicalUser.id, providerRunId);
             const chunkIds = messages.slice(chunkStart, index).map(({ id }) => id);
             if (previousAnchorId === undefined) {
                 beforeCanonical.set(canonicalUser.id, [
@@ -613,13 +496,18 @@ function placeExternalActivityAroundCanonicalUsers(
             for (const id of tailIds) anchoredExternalIds.add(id);
         }
     }
-    return { afterCanonical, anchoredExternalIds, beforeCanonical };
+    return {
+        afterCanonical,
+        anchoredExternalIds,
+        beforeCanonical,
+        providerRunIdByCanonicalUser,
+    };
 }
 
 function mergeExternalActivityIntoCanonical(
     canonicalMessages: readonly ChatDisplayMessage[],
     runtimeMessages: readonly ChatDisplayMessage[],
-    anchoredExternalIds: ReadonlySet<string>
+    providerRunIdByCanonicalUser: ReadonlyMap<string, string>
 ): Readonly<{
     canonical: readonly ChatDisplayMessage[];
     runtime: readonly ChatDisplayMessage[];
@@ -629,13 +517,19 @@ function mergeExternalActivityIntoCanonical(
         parts: [...message.parts],
     }));
     const assistantIndexesByRun = new Map<string, number[]>();
+    let currentProviderRunId: string | undefined;
     for (const [index, message] of canonical.entries()) {
-        if (message.role !== "assistant" || message.providerRunId === undefined) {
+        if (message.role === "user") {
+            currentProviderRunId =
+                providerRunIdByCanonicalUser.get(message.id) ?? message.providerRunId;
             continue;
         }
-        const indexes = assistantIndexesByRun.get(message.providerRunId) ?? [];
+        if (message.role !== "assistant") continue;
+        const providerRunId = message.providerRunId ?? currentProviderRunId;
+        if (providerRunId === undefined) continue;
+        const indexes = assistantIndexesByRun.get(providerRunId) ?? [];
         indexes.push(index);
-        assistantIndexesByRun.set(message.providerRunId, indexes);
+        assistantIndexesByRun.set(providerRunId, indexes);
     }
     const prefixLengths = new Map<number, number>();
     const claimedCanonicalToolParts = new Set<string>();
@@ -649,23 +543,6 @@ function mergeExternalActivityIntoCanonical(
         const candidateIndexes = assistantIndexesByRun.get(message.providerRunId);
         if (candidateIndexes === undefined || candidateIndexes.length === 0) {
             runtime.push(message);
-            continue;
-        }
-        // A resolved steer anchor makes the external segments the causal lanes.
-        // Move canonical duplicates into those lanes so activity cannot cross the user row.
-        if (anchoredExternalIds.has(message.id)) {
-            runtime.push({
-                ...message,
-                parts: message.parts.map((part) =>
-                    mergeCanonicalPartIntoAnchoredExternal(
-                        canonical,
-                        candidateIndexes,
-                        part,
-                        claimedCanonicalToolParts,
-                        removedCanonicalParts
-                    )
-                ),
-            });
             continue;
         }
         const canonicalText = candidateIndexes
@@ -746,7 +623,12 @@ export function mergeChatMessages(
     let canonical = history.filter((message) => !hiddenMessageIds.has(message.id));
     const canonicalIdempotencyKeys = new Set(
         canonical.flatMap((message) =>
-            message.idempotencyKey === undefined ? [] : [message.idempotencyKey]
+            message.idempotencyKey === undefined
+                ? []
+                : [
+                      normalizeChatProviderUserIdentity(message.idempotencyKey) ??
+                          message.idempotencyKey,
+                  ]
         )
     );
     const canonicalAssistantProviderRunIds = new Set(
@@ -756,14 +638,40 @@ export function mergeChatMessages(
                 : []
         )
     );
-    const runtimeCandidates = runtime.filter(
-        (message) =>
+    const canonicalClientRunIds = new Set(
+        canonical.flatMap((message) =>
+            message.clientRunId === undefined ? [] : [message.clientRunId]
+        )
+    );
+    const seenRuntimeUserIdentities = new Set<string>();
+    const runtimeCandidates = runtime.filter((message) => {
+        const runtimeUserIdentity =
+            message.role === "user" && message.idempotencyKey !== undefined
+                ? (normalizeChatProviderUserIdentity(message.idempotencyKey) ??
+                  message.idempotencyKey)
+                : undefined;
+        if (
+            runtimeUserIdentity !== undefined &&
+            (canonicalIds.has(runtimeUserIdentity) ||
+                canonicalIdempotencyKeys.has(runtimeUserIdentity) ||
+                seenRuntimeUserIdentities.has(runtimeUserIdentity))
+        ) {
+            return false;
+        }
+        if (runtimeUserIdentity !== undefined) {
+            seenRuntimeUserIdentities.add(runtimeUserIdentity);
+        }
+        return (
             !canonicalIds.has(message.id) &&
             !hiddenMessageIds.has(message.id) &&
             !(
+                message.clientRunId !== undefined &&
+                canonicalClientRunIds.has(message.clientRunId)
+            ) &&
+            !(
                 message.role === "user" &&
-                message.idempotencyKey !== undefined &&
-                canonicalIdempotencyKeys.has(message.idempotencyKey)
+                runtimeUserIdentity !== undefined &&
+                canonicalIdempotencyKeys.has(runtimeUserIdentity)
             ) &&
             !(
                 message.role === "assistant" &&
@@ -771,7 +679,8 @@ export function mergeChatMessages(
                 message.providerRunId !== undefined &&
                 canonicalAssistantProviderRunIds.has(message.providerRunId)
             )
-    );
+        );
+    });
     const orderedRuntimeCandidates = sortChatDisplayMessages(runtimeCandidates);
     const anchorPlacement = placeExternalActivityAroundCanonicalUsers(
         canonical,
@@ -780,7 +689,7 @@ export function mergeChatMessages(
     const mergedActivity = mergeExternalActivityIntoCanonical(
         canonical,
         orderedRuntimeCandidates,
-        anchorPlacement.anchoredExternalIds
+        anchorPlacement.providerRunIdByCanonicalUser
     );
     canonical = [...mergedActivity.canonical];
     const ephemeral = sortChatDisplayMessages(mergedActivity.runtime);
@@ -798,5 +707,53 @@ export function mergeChatMessages(
     const unanchored = ephemeral.filter(
         (message) => !anchorPlacement.anchoredExternalIds.has(message.id)
     );
-    return [...mergedCanonical, ...unanchored];
+    const ordered = [...mergedCanonical];
+    for (const message of unanchored) {
+        const occurredAtMs = message.timestampMs;
+        if (occurredAtMs === undefined) {
+            ordered.push(message);
+            continue;
+        }
+        const insertionIndex = ordered.findIndex(
+            (candidate) =>
+                candidate.timestampMs !== undefined &&
+                candidate.timestampMs > occurredAtMs
+        );
+        if (insertionIndex === -1) {
+            ordered.push(message);
+        } else {
+            ordered.splice(insertionIndex, 0, message);
+        }
+    }
+    return ordered;
+}
+
+type ChatSurfaceKind = ChatMessagePart["kind"];
+
+/**
+ * Splits normalized part kinds into independent presentation bubbles.
+ * @param messages Provider-neutral transcript messages from the backend projection.
+ * @returns Stable single-kind surfaces in the original message order.
+ */
+export function projectChatMessageSurfaces(
+    messages: readonly ChatDisplayMessage[]
+): readonly ChatDisplayMessage[] {
+    return messages.flatMap((message) => {
+        if (message.parts.length < 2) return [message];
+        const groups: Array<{ kind: ChatSurfaceKind; parts: ChatMessagePart[] }> = [];
+        for (const part of message.parts) {
+            const current = groups.at(-1);
+            if (current?.kind === part.kind) current.parts.push(part);
+            else groups.push({ kind: part.kind, parts: [part] });
+        }
+        if (groups.length < 2) return [message];
+        return groups.map((group, index) => ({
+            ...message,
+            attachments: index === 0 ? message.attachments : [],
+            ...(index === groups.length - 1 ? {} : { hydration: undefined }),
+            id: `${message.id}:surface:${index + 1}`,
+            parts: group.parts,
+            sourceMessageId: message.sourceMessageId ?? message.id,
+        }));
+    });
 }

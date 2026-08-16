@@ -39,7 +39,7 @@ describe("realtime transport contracts", () => {
         ).toEqual(realtimeStreamCapabilities);
     });
 
-    test("defaults the initial cursor and preserves unique registered topics", () => {
+    test("leaves a fresh subscription cursorless and preserves unique topics", () => {
         const input = v.parse(realtimeStreamInputSchema, {
             topics: [
                 monitoringRealtimeTopics.reports,
@@ -48,7 +48,6 @@ describe("realtime transport contracts", () => {
         });
 
         expect(input).toEqual({
-            lastEventId: "0",
             topics: [
                 monitoringRealtimeTopics.reports,
                 monitoringRealtimeTopics.notifications,

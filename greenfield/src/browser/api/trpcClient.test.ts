@@ -219,12 +219,14 @@ describe("Dashboard browser tRPC client", () => {
             createRecordingTransport({ tasks: [] }, taskCalls)
         );
 
-        expect(await chatClient.query("chat.listModels", {})).toEqual({ models: [] });
+        expect(await chatClient.query("chat.listModels", { agentId: "main" })).toEqual({
+            models: [],
+        });
         expect(await taskClient.query("openClawTasks.list", { limit: 100 })).toEqual({
             tasks: [],
         });
         expect(chatCalls).toEqual([
-            { input: {}, kind: "query", path: "chat.listModels" },
+            { input: { agentId: "main" }, kind: "query", path: "chat.listModels" },
         ]);
         expect(taskCalls).toEqual([
             { input: { limit: 100 }, kind: "query", path: "openClawTasks.list" },

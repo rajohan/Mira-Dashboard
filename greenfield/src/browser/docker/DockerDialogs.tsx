@@ -24,6 +24,7 @@ import {
 interface DockerContainerDetailsDialogProps {
     readonly container?: DockerContainer;
     readonly onClose: () => void;
+    readonly open: boolean;
 }
 
 function optionalDockerTimestamp(value: number | undefined, empty: string): string {
@@ -34,21 +35,23 @@ function optionalDockerTimestamp(value: number | undefined, empty: string): stri
 export function DockerContainerDetailsDialog({
     container,
     onClose,
+    open,
 }: DockerContainerDetailsDialogProps) {
-    const stats = container?.stats;
+    const resolvedContainer = container;
+    const stats = resolvedContainer?.stats;
     return (
         <Modal
             description="Bounded Engine details without commands, environment, raw labels, or host mount sources."
             onClose={onClose}
-            open={container !== undefined}
+            open={open}
             size="lg"
             title={
-                container === undefined
+                resolvedContainer === undefined
                     ? "Container details"
-                    : container.name + " details"
+                    : resolvedContainer.name + " details"
             }
         >
-            {container !== undefined && (
+            {resolvedContainer !== undefined && (
                 <div className="space-y-6">
                     <section aria-label="Container identity">
                         <Heading level={3} size="subsection">
@@ -58,20 +61,22 @@ export function DockerContainerDetailsDialog({
                             <div>
                                 <dt className="text-primary-400">Image</dt>
                                 <dd className="text-primary-100 mt-1 font-mono wrap-anywhere">
-                                    {container.image}
+                                    {resolvedContainer.image}
                                 </dd>
                             </div>
                             <div>
                                 <dt className="text-primary-400">Compose identity</dt>
                                 <dd className="text-primary-100 mt-1 wrap-anywhere">
-                                    {container.project === undefined
+                                    {resolvedContainer.project === undefined
                                         ? "Not Compose managed"
-                                        : container.project + " / " + container.service}
+                                        : resolvedContainer.project +
+                                          " / " +
+                                          resolvedContainer.service}
                                 </dd>
                             </div>
                         </dl>
                         <code className="text-primary-400 mt-3 block text-xs wrap-anywhere">
-                            {container.id}
+                            {resolvedContainer.id}
                         </code>
                     </section>
 
@@ -80,29 +85,37 @@ export function DockerContainerDetailsDialog({
                             Lifecycle and status
                         </Heading>
                         <div className="mt-3 flex flex-wrap gap-2">
-                            <Badge variant={dockerContainerStateVariant(container.state)}>
-                                {container.state}
+                            <Badge
+                                variant={dockerContainerStateVariant(
+                                    resolvedContainer.state
+                                )}
+                            >
+                                {resolvedContainer.state}
                             </Badge>
                             <Badge
-                                variant={dockerContainerHealthVariant(container.health)}
+                                variant={dockerContainerHealthVariant(
+                                    resolvedContainer.health
+                                )}
                             >
-                                {container.health === "none"
+                                {resolvedContainer.health === "none"
                                     ? "No health check"
-                                    : container.health}
+                                    : resolvedContainer.health}
                             </Badge>
                         </div>
                         <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
                             <div>
                                 <dt className="text-primary-400">Created</dt>
                                 <dd className="text-primary-100 mt-1">
-                                    {formatDashboardDateTime(container.createdAtMs)}
+                                    {formatDashboardDateTime(
+                                        resolvedContainer.createdAtMs
+                                    )}
                                 </dd>
                             </div>
                             <div>
                                 <dt className="text-primary-400">Started</dt>
                                 <dd className="text-primary-100 mt-1">
                                     {optionalDockerTimestamp(
-                                        container.startedAtMs,
+                                        resolvedContainer.startedAtMs,
                                         "Not started"
                                     )}
                                 </dd>
@@ -111,7 +124,7 @@ export function DockerContainerDetailsDialog({
                                 <dt className="text-primary-400">Finished</dt>
                                 <dd className="text-primary-100 mt-1">
                                     {optionalDockerTimestamp(
-                                        container.finishedAtMs,
+                                        resolvedContainer.finishedAtMs,
                                         "Not finished"
                                     )}
                                 </dd>
@@ -119,7 +132,7 @@ export function DockerContainerDetailsDialog({
                             <div>
                                 <dt className="text-primary-400">Restarts</dt>
                                 <dd className="text-primary-100 mt-1 tabular-nums">
-                                    {container.restartCount}
+                                    {resolvedContainer.restartCount}
                                 </dd>
                             </div>
                         </dl>
@@ -144,7 +157,7 @@ export function DockerContainerDetailsDialog({
                                 <div>
                                     <dt className="text-primary-400">Memory</dt>
                                     <dd className="text-primary-100 mt-1 tabular-nums">
-                                        {formatDockerMemory(container)}
+                                        {formatDockerMemory(resolvedContainer)}
                                     </dd>
                                 </div>
                                 <div>
@@ -175,13 +188,13 @@ export function DockerContainerDetailsDialog({
                         <Heading level={3} size="subsection">
                             Networks
                         </Heading>
-                        {container.networks.length === 0 ? (
+                        {resolvedContainer.networks.length === 0 ? (
                             <Text className="mt-3" tone="muted">
                                 No attached networks were projected.
                             </Text>
                         ) : (
                             <ul className="mt-3 space-y-3">
-                                {container.networks.map((network) => (
+                                {resolvedContainer.networks.map((network) => (
                                     <li
                                         className="border-primary-700 bg-primary-900/35 rounded-lg border p-3"
                                         key={network.name}
@@ -204,13 +217,13 @@ export function DockerContainerDetailsDialog({
                         <Heading level={3} size="subsection">
                             Mounts
                         </Heading>
-                        {container.mounts.length === 0 ? (
+                        {resolvedContainer.mounts.length === 0 ? (
                             <Text className="mt-3" tone="muted">
                                 No container mounts were projected.
                             </Text>
                         ) : (
                             <ul className="mt-3 space-y-3">
-                                {container.mounts.map((mount) => (
+                                {resolvedContainer.mounts.map((mount) => (
                                     <li
                                         className="border-primary-700 bg-primary-900/35 rounded-lg border p-3"
                                         key={`${mount.destination}\0${mount.name ?? ""}\0${mount.type}`}
@@ -465,13 +478,13 @@ export function DockerPrunePreviewDialog({
                         </Button>
                         <Button
                             busy={busy}
-                            busyLabel="Queueing exact prune…"
+                            busyLabel="Queueing prune…"
                             disabled={empty || !sourceCurrent}
                             onClick={onConfirm}
                             variant="danger"
                         >
                             <Icon icon={Trash2} size="sm" />
-                            Queue exact prune
+                            Queue prune
                         </Button>
                     </div>
                 </>

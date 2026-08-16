@@ -664,21 +664,29 @@ describe("Dashboard local-history media composition", () => {
         );
         const stateDirectory = path.join(rootDirectory, "state");
         const workspaceRoot = path.join(rootDirectory, "workspace");
-        const openClawRoot = path.join(rootDirectory, "openclaw");
-        const mediaRoot = path.join(openClawRoot, "media");
+        const openClawRoot = path.join(rootDirectory, "openclaw-isolated-config");
+        const openClawMediaRoot = path.join(rootDirectory, "openclaw-live-media");
+        const mediaRoot = path.join(openClawMediaRoot, "media");
         const productionRoot = path.join(rootDirectory, "production");
         const uploadSpoolRoot = path.join(rootDirectory, "uploads");
         await Promise.all(
             [
                 stateDirectory,
                 workspaceRoot,
+                openClawRoot,
                 mediaRoot,
                 productionRoot,
                 uploadSpoolRoot,
             ].map((directory) => mkdir(directory, { mode: 0o700, recursive: true }))
         );
-        await chmod(openClawRoot, 0o700);
+        await Promise.all([
+            chmod(openClawRoot, 0o700),
+            chmod(openClawMediaRoot, 0o700),
+        ]);
         await writeFile(path.join(openClawRoot, "openclaw.json"), "{}\n", {
+            mode: 0o600,
+        });
+        await writeFile(path.join(openClawMediaRoot, "openclaw.json"), "{}\n", {
             mode: 0o600,
         });
         const mediaBytes = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3, 4]);
@@ -727,12 +735,17 @@ describe("Dashboard local-history media composition", () => {
                 openClawRoot,
                 productionRoot
             );
+            const openClawMediaFileRoot = await resolveReviewedOpenClawFileRoot(
+                openClawMediaRoot,
+                productionRoot
+            );
             server = await createDashboardServer({
                 applicationRuntime,
                 browserOrigin: "https://dashboard.example",
                 gatewayUrl: "ws://127.0.0.1:1",
                 now: () => authenticationTestNow,
                 openClawFileRoot,
+                openClawMediaFileRoot,
                 port: 0,
                 readiness: createReadinessController(),
                 totpSecretCipher: testTotpSecretCipher,
@@ -778,6 +791,7 @@ describe("Dashboard local-history media composition", () => {
                 /^\/api\/chat\/media\/[0-9a-f-]{36}\?disposition=preview$/u
             );
             expect(JSON.stringify(history)).not.toContain(openClawRoot);
+            expect(JSON.stringify(history)).not.toContain(openClawMediaRoot);
 
             const headResponse = await fetch(new URL(attachment.url, server.url), {
                 headers: sessionHeaders,

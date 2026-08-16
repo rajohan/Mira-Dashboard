@@ -682,6 +682,49 @@ describe("chat raw HTTP media boundary", () => {
         references.dispose();
     });
 
+    test("downloads local outbound history media with its original filename and extension", async () => {
+        const store = createInMemoryChatAttachmentStore();
+        const references = createInMemoryChatMediaReferences();
+        references.register({
+            attachmentId,
+            messageId: "message-outbound",
+            sessionKey: "agent:main:main",
+            source: {
+                kind: "openclaw-local-history",
+                segments: [
+                    "outbound",
+                    "attachment-preview-test---b013e0a9-d3c8-41c8-a6db-a54b9008e2d3.md",
+                ],
+            },
+        });
+        const handler = createChatRawHttpHandler({
+            attachmentStore: store,
+            authenticateCredential: authentication(principal()),
+            authorizeMedia: () => true,
+            browserOrigin: origin,
+            mediaFetcher: {
+                fetch: () =>
+                    Promise.resolve(
+                        new Response("# Preview", {
+                            headers: { "content-type": "text/markdown" },
+                        })
+                    ),
+            },
+            mediaReferences: references,
+        });
+        const request = authenticatedRequest(
+            `/api/chat/media/${attachmentId}?disposition=download`
+        );
+
+        const response = await handler(request, new URL(request.url));
+
+        expect(response?.headers.get("content-disposition")).toBe(
+            'attachment; filename="attachment-preview-test.md"'
+        );
+        store.dispose();
+        references.dispose();
+    });
+
     test("refreshes an empty post-restart reference cache before returning 404", async () => {
         const store = createInMemoryChatAttachmentStore();
         const references = createInMemoryChatMediaReferences();

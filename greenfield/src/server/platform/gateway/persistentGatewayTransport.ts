@@ -2309,8 +2309,8 @@ class PersistentGatewayTransportImplementation
         }
         if (boundary.kind === "reconciliation") {
             this.#clearChatSubscriberQueue(subscriber);
+            subscriber.terminalBoundaryQueued = true;
         }
-        subscriber.terminalBoundaryQueued = true;
         subscriber.queue.push(boundary);
         this.#startChatSubscriberDrain(scope, subscriber);
     }
@@ -2358,9 +2358,11 @@ class PersistentGatewayTransportImplementation
                         await subscriber.listener.onEvent?.(item.event);
                         continue;
                     }
-                    await (item.kind === "gap"
-                        ? subscriber.listener.onEventGap?.(item.gap)
-                        : subscriber.listener.onReconciliationRequired?.(item.reason));
+                    if (item.kind === "gap") {
+                        await subscriber.listener.onEventGap?.(item.gap);
+                        continue;
+                    }
+                    await subscriber.listener.onReconciliationRequired?.(item.reason);
                 } catch {
                     if (item.kind !== "reconciliation") {
                         this.#clearChatSubscriberQueue(subscriber);
@@ -2425,14 +2427,13 @@ class PersistentGatewayTransportImplementation
                     runId: frame.payload.runId,
                     sessionKey: frame.payload.sessionKey,
                 });
-                this.#quarantineChatScope(scope, "backpressure");
+                scope.runSequences.set(sequenceKey, frame.payload.seq);
                 for (const subscriber of scope.subscribers.values()) {
                     this.#enqueueChatBoundary(scope, subscriber, {
                         gap,
                         kind: "gap",
                     });
                 }
-                continue;
             }
             // sessions.messages.subscribe is a future-event subscription. A run
             // started outside this process can therefore first be observed after

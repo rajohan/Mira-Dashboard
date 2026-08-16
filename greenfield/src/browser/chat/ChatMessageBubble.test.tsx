@@ -36,7 +36,7 @@ describe("chat message bubble", () => {
                         role: "assistant",
                         sequence: 1,
                         sessionKey: "agent:main:main",
-                        timestampMs: Date.UTC(2026, 7, 14, 20, 15),
+                        timestampMs: new Date(2026, 7, 14, 20, 15).getTime(),
                     }}
                 />
                 <ChatMessageBubble
@@ -71,7 +71,7 @@ describe("chat message bubble", () => {
         expect(running).toBeVisible();
         expect(running).toHaveClass("text-sm", "[&_.loading-state-dots]:text-lg");
         expect(running.textContent).toBe("Thinking...");
-        expect(thinkingMessage!.querySelector("time")).not.toBeNull();
+        expect(within(thinkingMessage!).getByText("14.08.2026 · 20:15")).toBeVisible();
         expect(screen.getByRole("status", { name: "Context compacted" })).toBeVisible();
     });
 
@@ -153,16 +153,63 @@ describe("chat message bubble", () => {
         expect(safeChatMarkdownLink("javascript:alert(1)")).toBeUndefined();
         expect(safeChatMarkdownLink("data:text/plain,bad")).toBeUndefined();
         const protocolRelative = safeChatMarkdownLink("//evil.example/path");
-        expect(protocolRelative).toMatchObject({ external: true });
-        expect(new URL(protocolRelative!.href).hostname).toBe("evil.example");
+        expect(protocolRelative).toMatchObject({ external: true, kind: "url" });
+        if (protocolRelative?.kind !== "url") {
+            throw new TypeError("Protocol-relative URL was not classified as a URL");
+        }
+        expect(new URL(protocolRelative.href).hostname).toBe("evil.example");
         expect(safeChatMarkdownLink("/reports")).toMatchObject({ external: false });
         expect(safeChatMarkdownLink("#part")).toEqual({
             external: false,
             href: "#part",
+            kind: "url",
+        });
+        expect(
+            safeChatMarkdownLink("/home/ubuntu/.openclaw/workspace/AGENTS.md:12")
+        ).toEqual({
+            kind: "workspace-file",
+            reference: "/home/ubuntu/.openclaw/workspace/AGENTS.md",
         });
         expect(safeChatMarkdownLink("mailto:mira@example.com")).toMatchObject({
             external: false,
         });
+    });
+
+    test("linkifies raw, code, and explicit reviewed-root file references", async () => {
+        const user = userEvent.setup();
+        const opened: string[] = [];
+        render(
+            <ChatMessageBubble
+                display={display}
+                message={{
+                    attachments: [],
+                    id: "message-files",
+                    parts: [
+                        {
+                            kind: "text",
+                            text: "Raw /home/ubuntu/.openclaw/workspace/AGENTS.md:12, code `/home/ubuntu/.openclaw/workspace/SOUL.md`, and [named](/home/ubuntu/.openclaw/workspace/USER.md:4).",
+                        },
+                    ],
+                    role: "assistant",
+                    sequence: 1,
+                    sessionKey: "agent:main:main",
+                }}
+                onOpenLocalFile={(reference) => opened.push(reference)}
+            />
+        );
+
+        for (const name of [
+            "/home/ubuntu/.openclaw/workspace/AGENTS.md:12",
+            "/home/ubuntu/.openclaw/workspace/SOUL.md",
+            "named",
+        ]) {
+            await user.click(screen.getByRole("button", { name }));
+        }
+        expect(opened).toEqual([
+            "/home/ubuntu/.openclaw/workspace/AGENTS.md",
+            "/home/ubuntu/.openclaw/workspace/SOUL.md",
+            "/home/ubuntu/.openclaw/workspace/USER.md",
+        ]);
     });
 
     test("keeps failed tools collapsed by default while preserving local and global expansion", async () => {
@@ -730,7 +777,8 @@ describe("chat message bubble", () => {
         expect(hidden).toBe("message-local");
     });
 
-    test("previews only attachments explicitly approved as inline raster images", () => {
+    test("previews approved inline raster images inside the authenticated chat", async () => {
+        const user = userEvent.setup();
         render(
             <ChatMessageBubble
                 display={display}
@@ -780,14 +828,28 @@ describe("chat message bubble", () => {
             "src",
             "/api/chat/media/019fe633-9133-4ba0-8b80-809dd80dfb40?disposition=preview"
         );
-        expect(screen.getByRole("link", { name: "vector.svg" })).toHaveAttribute(
+        expect(screen.queryByRole("link", { name: "photo.png" })).toBeNull();
+        await user.click(
+            screen.getByRole("button", { name: "Open preview of photo.png" })
+        );
+        expect(
+            screen.getByRole("dialog", { name: "photo.png" })
+        ).toBeVisible();
+        expect(
+            screen.getByRole("img", { name: "Preview of photo.png" })
+        ).toHaveAttribute(
+            "src",
+            "/api/chat/media/019fe633-9133-4ba0-8b80-809dd80dfb40?disposition=preview"
+        );
+        await user.click(
+            screen.getByRole("button", { name: "Open preview of vector.svg" })
+        );
+        expect(screen.getByRole("dialog", { name: "vector.svg" })).toBeVisible();
+        expect(screen.getByRole("link", { name: "Download file" })).toHaveAttribute(
             "href",
             "/api/chat/media/019fe633-9133-4ba0-8b80-809dd80dfb41?disposition=download"
         );
-        expect(screen.getByRole("link", { name: "document.html" })).toHaveAttribute(
-            "href",
-            "/api/chat/media/019fe633-9133-4ba0-8b80-809dd80dfb42?disposition=download"
-        );
+        expect(screen.queryByRole("link", { name: "Download document.html" })).toBeNull();
     });
 
     test("uses distinct solid outer and nested assistant surfaces without bubble chrome", () => {
@@ -963,11 +1025,9 @@ describe("chat message bubble", () => {
                     }}
                 />
             );
-            expect(screen.getByRole("link", { name: "notes.txt" })).toHaveAttribute(
-                "href",
-                "/api/chat/media/019fe633-9133-4ba0-8b80-809dd80dfb43?disposition=download"
+            await user.click(
+                screen.getByRole("button", { name: "Open preview of notes.txt" })
             );
-            await user.click(screen.getByRole("button", { name: "Preview notes.txt" }));
             expect(screen.getByRole("link", { name: "Download file" })).toHaveAttribute(
                 "href",
                 "/api/chat/media/019fe633-9133-4ba0-8b80-809dd80dfb43?disposition=download"
@@ -1114,6 +1174,11 @@ describe("chat message bubble", () => {
                     }}
                 />
             </>
+        );
+
+        expect(screen.getByTestId("chat-message-surface-user")).toHaveClass(
+            "bg-accent-700",
+            "text-white"
         );
 
         for (const content of ["bun test", "exitCode=0"]) {

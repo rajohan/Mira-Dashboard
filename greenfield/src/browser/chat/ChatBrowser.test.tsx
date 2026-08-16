@@ -523,6 +523,9 @@ describe("chat browser", () => {
         const user = userEvent.setup();
         try {
             await waitForConnectedComposer();
+            expect(
+                view.query.mock.calls.find((call) => call[0] === "chat.listModels")
+            ).toEqual(["chat.listModels", { agentId: "main" }, expect.anything()]);
             const composer = screen.getByRole("textbox", { name: "Message" });
             await user.type(composer, "Send exactly once");
             await user.click(screen.getByRole("button", { name: "Send message" }));
@@ -582,11 +585,11 @@ describe("chat browser", () => {
         const user = userEvent.setup();
         try {
             await user.click(
-                await screen.findByRole("button", { name: "Stop response 1" })
+                await screen.findByRole("button", { name: "Stop response" })
             );
             await waitFor(() =>
                 expect(
-                    screen.queryByRole("button", { name: "Stop response 1" })
+                    screen.queryByRole("button", { name: "Stop response" })
                 ).toBeNull()
             );
             expect(
@@ -642,7 +645,7 @@ describe("chat browser", () => {
                         ?.externalRuns[providerRunId]?.abortBoundary?.settlement
                 ).toBe("pending")
             );
-            expect(screen.queryByRole("button", { name: "Stop response 1" })).toBeNull();
+            expect(screen.queryByRole("button", { name: "Stop response" })).toBeNull();
 
             settlement = "not-aborted";
             await act(async () => {
@@ -652,7 +655,7 @@ describe("chat browser", () => {
                 });
             });
             expect(
-                await screen.findByRole("button", { name: "Stop response 1" })
+                await screen.findByRole("button", { name: "Stop response" })
             ).toBeEnabled();
             expect(
                 view.mutation.mock.calls.filter((call) => call[0] === "chat.abort")
@@ -711,20 +714,20 @@ describe("chat browser", () => {
                         ?.externalRuns[providerRunId]?.abortBoundary?.settlement
                 ).toBe("unknown")
             );
-            expect(screen.queryByRole("button", { name: "Stop response 1" })).toBeNull();
+            expect(screen.queryByRole("button", { name: "Stop response" })).toBeNull();
 
             runtimeObservationEpoch += 1;
             await refreshRuntime();
-            expect(screen.queryByRole("button", { name: "Stop response 1" })).toBeNull();
+            expect(screen.queryByRole("button", { name: "Stop response" })).toBeNull();
 
             runtimeObservedAtMs += 1;
             await refreshRuntime();
-            expect(screen.queryByRole("button", { name: "Stop response 1" })).toBeNull();
+            expect(screen.queryByRole("button", { name: "Stop response" })).toBeNull();
 
             runtimeUpdatedAtMs += 1;
             await refreshRuntime();
             expect(
-                await screen.findByRole("button", { name: "Stop response 1" })
+                await screen.findByRole("button", { name: "Stop response" })
             ).toBeEnabled();
             expect(
                 view.mutation.mock.calls.filter((call) => call[0] === "chat.abort")
@@ -829,10 +832,10 @@ describe("chat browser", () => {
         const user = userEvent.setup();
         try {
             await user.click(
-                await screen.findByRole("button", { name: "Stop response 1" })
+                await screen.findByRole("button", { name: "Stop response" })
             );
             expect(
-                await screen.findByRole("button", { name: "Stop response 1" })
+                await screen.findByRole("button", { name: "Stop response" })
             ).toBeEnabled();
             expect(await screen.findByText(/did not stop this response/iu)).toBeVisible();
             expect(
@@ -925,7 +928,7 @@ describe("chat browser", () => {
                 (call) => call[0] === "chat.history"
             ).length;
             await user.click(
-                await screen.findByRole("button", { name: "Stop response 1" })
+                await screen.findByRole("button", { name: "Stop response" })
             );
             expect(
                 await screen.findByText(
@@ -933,7 +936,7 @@ describe("chat browser", () => {
                 )
             ).toBeVisible();
             await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
-            expect(screen.queryByRole("button", { name: "Stop response 1" })).toBeNull();
+            expect(screen.queryByRole("button", { name: "Stop response" })).toBeNull();
             expect(
                 view.mutation.mock.calls.filter((call) => call[0] === "chat.abort")
             ).toHaveLength(1);
@@ -952,7 +955,7 @@ describe("chat browser", () => {
             });
 
             await user.click(
-                await screen.findByRole("button", { name: "Stop response 1" })
+                await screen.findByRole("button", { name: "Stop response" })
             );
             expect(await screen.findByText(/did not stop this response/iu)).toBeVisible();
             expect(
@@ -985,7 +988,7 @@ describe("chat browser", () => {
         });
         const user = userEvent.setup();
         try {
-            await screen.findByRole("button", { name: "Stop response 1" });
+            await screen.findByRole("button", { name: "Stop response" });
             await user.type(
                 screen.getByRole("textbox", { name: "Message" }),
                 "Follow the configured provider behavior"
@@ -1034,13 +1037,13 @@ describe("chat browser", () => {
         });
         const user = userEvent.setup();
         try {
-            await screen.findByRole("button", { name: "Stop response 1" });
+            await screen.findByRole("button", { name: "Stop response" });
             void view.queryClient.invalidateQueries({
                 exact: true,
                 queryKey: chatRuntimeQueryKey(gatewayPrimarySessionKey),
             });
             await waitFor(() => expect(runtimeReads).toBe(2));
-            await user.click(screen.getByRole("button", { name: "Stop response 1" }));
+            await user.click(screen.getByRole("button", { name: "Stop response" }));
             await waitFor(() => expect(runtimeReads).toBe(3));
 
             await act(async () => {
@@ -1048,14 +1051,14 @@ describe("chat browser", () => {
                 await preActionRead.promise;
                 await Promise.resolve();
             });
-            expect(screen.queryByRole("button", { name: "Stop response 1" })).toBeNull();
+            expect(screen.queryByRole("button", { name: "Stop response" })).toBeNull();
 
             await act(async () => {
                 postActionRead.resolve(activeRuntimePage(gatewayPrimarySessionKey, 2));
                 await postActionRead.promise;
             });
             expect(
-                await screen.findByRole("button", { name: "Stop response 1" })
+                await screen.findByRole("button", { name: "Stop response" })
             ).toBeEnabled();
             expect(
                 view.mutation.mock.calls.filter((call) => call[0] === "chat.abort")
@@ -1085,13 +1088,13 @@ describe("chat browser", () => {
         const user = userEvent.setup();
         try {
             await user.click(
-                await screen.findByRole("button", { name: "Stop response 1" })
+                await screen.findByRole("button", { name: "Stop response" })
             );
             expect(
                 await screen.findByText("The request could not be completed. Try again.")
             ).toBeVisible();
             expect(screen.queryByText("private abort failure")).toBeNull();
-            expect(screen.getByRole("button", { name: "Stop response 1" })).toBeEnabled();
+            expect(screen.getByRole("button", { name: "Stop response" })).toBeEnabled();
             expect(
                 view.mutation.mock.calls.filter((call) => call[0] === "chat.abort")
             ).toHaveLength(1);
@@ -1388,9 +1391,7 @@ describe("chat browser", () => {
         try {
             await waitForConnectedComposer();
             await user.click(screen.getByRole("button", { name: "Chat settings" }));
-            await user.click(
-                screen.getByRole("button", { name: "Shorten chat history" })
-            );
+            await user.click(screen.getByRole("button", { name: "Compact" }));
             await waitFor(() =>
                 expect(
                     view.mutation.mock.calls.filter(
@@ -1400,12 +1401,10 @@ describe("chat browser", () => {
             );
             await user.click(screen.getByRole("button", { name: "Chat settings" }));
             await waitFor(() =>
-                expect(
-                    screen.getByRole("button", { name: "Shorten chat history" })
-                ).toBeEnabled()
+                expect(screen.getByRole("button", { name: "Compact" })).toBeEnabled()
             );
 
-            await user.click(screen.getByRole("button", { name: "Reset chat history" }));
+            await user.click(screen.getByRole("button", { name: "Reset" }));
             const confirmation = await screen.findByRole("dialog", {
                 name: "Reset this chat?",
             });
@@ -2279,7 +2278,7 @@ describe("chat browser", () => {
         });
         const user = userEvent.setup();
         try {
-            await screen.findByRole("button", { name: "Stop response 1" });
+            await screen.findByRole("button", { name: "Stop response" });
             await revealCompanionControls();
             await user.type(
                 screen.getByRole("textbox", { name: "Ask about this chat" }),
@@ -2614,7 +2613,7 @@ describe("chat browser", () => {
         });
         const user = userEvent.setup();
         try {
-            await screen.findByRole("button", { name: "Stop response 1" });
+            await screen.findByRole("button", { name: "Stop response" });
             await revealCompanionControls();
             const question = screen.getByRole("textbox", {
                 name: "Ask about this chat",

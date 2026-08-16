@@ -124,6 +124,14 @@ export function chatMediaAttachmentMatchesSession(
 }
 
 function normalizedFileUrlPath(candidate: string): string | undefined {
+    const inbound = candidate.match(
+        /^media:\/\/inbound\/([0-9a-f-]{36}\.[a-z\d]{1,16})$/iu
+    );
+    if (inbound !== null) return Path.join("inbound", inbound[1]!);
+    const outbound = candidate.match(
+        /^media:\/\/outbound\/([^/\\\p{Cc}\p{Cf}]{1,255}---[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.[a-z\d]{1,16})$/iu
+    );
+    if (outbound !== null) return Path.join("outbound", outbound[1]!);
     if (!candidate.toLowerCase().startsWith("file:")) return candidate;
     try {
         const url = new URL(candidate);

@@ -550,6 +550,65 @@ describe("persistent OpenClaw cron provider", () => {
         expect(provider.currentProcessInstanceId()).toBe("gateway-process-2");
     });
 
+    test("reads and updates heartbeat scratch on the audited admin lane", async () => {
+        const transport = new TestPersistentOpenClawCronTransport();
+        queue(transport, "system.info", { processInstanceId: "gateway-process-1" });
+        queue(
+            transport,
+            "cron.get",
+            upstreamJob("heartbeat-1", { payload: { kind: "heartbeat" } })
+        );
+        queue(transport, "cron.scratch.get", {
+            currentRevision: 4,
+            maxBytes: 262_144,
+            scratch: {
+                content: "Check services",
+                revision: 4,
+                updatedAtMs: 1_800_000_000_200,
+            },
+        });
+        queue(transport, "cron.scratch.set", {
+            currentRevision: 5,
+            maxBytes: 262_144,
+            ok: true,
+            scratch: {
+                content: "Check services and disk",
+                revision: 5,
+                updatedAtMs: 1_800_000_000_300,
+            },
+        });
+        const provider = createPersistentOpenClawCronProvider(transport);
+
+        expect(await provider.get({ id: "heartbeat-1" })).toMatchObject({
+            scratch: { content: "Check services", revision: 4 },
+        });
+        expect(
+            await provider.setScratch({
+                content: "Check services and disk",
+                expectedRevision: 4,
+                id: "heartbeat-1",
+            })
+        ).toEqual({ revision: 5 });
+        expect(transport.calls.slice(-2)).toEqual([
+            {
+                lane: "admin",
+                method: "cron.scratch.get",
+                options: { timeoutMs: persistentOpenClawCronReadTimeoutMs },
+                parameters: { id: "heartbeat-1" },
+            },
+            {
+                lane: "admin",
+                method: "cron.scratch.set",
+                options: { timeoutMs: persistentOpenClawCronMutationTimeoutMs },
+                parameters: {
+                    content: "Check services and disk",
+                    expectedRevision: 4,
+                    id: "heartbeat-1",
+                },
+            },
+        ]);
+    });
+
     test("returns undefined for the audited get rejection without leaking raw text", async () => {
         const transport = new TestPersistentOpenClawCronTransport();
         queue(transport, "system.info", {

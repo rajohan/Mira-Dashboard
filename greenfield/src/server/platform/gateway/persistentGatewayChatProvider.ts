@@ -14,6 +14,7 @@ import {
 import {
     chatAttachmentLimits,
     chatTextPreviewMaximumBytes,
+    normalizeChatAttachmentMimeType,
 } from "../../../contracts/chatMedia.ts";
 import {
     chatMessageHydrationMaximumBytes,
@@ -24,6 +25,7 @@ import {
     type ChatMessage,
     type ChatPlanStep,
 } from "../../../contracts/chatModel.ts";
+import { gatewaySessionAgentId } from "../../../contracts/gatewaySessions.ts";
 import { jobIdempotencyKeySchema } from "../../../contracts/jobModel.ts";
 import { utf8ByteLength } from "../../../shared/encoding.ts";
 import {
@@ -127,7 +129,7 @@ export interface PersistentGatewayChatMediaReferenceRegistrar {
     ) => PersistentGatewayRegisteredManagedMedia;
 }
 
-const upstreamInFlightRunSchema = v.strictObject({
+const upstreamInFlightRunSchema = v.object({
     plan: v.optional(
         v.object({
             explanation: v.optional(chatPlanExplanationSchema),
@@ -190,8 +192,6 @@ const localHistoryMediaTypeByExtension: ReadonlyMap<string, string> = new Map([
     ["wav", "audio/wav"],
     ["webp", "image/webp"],
 ]);
-const localHistoryMediaTypePattern =
-    /^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$/u;
 const upstreamMessageGetSchema = v.variant("ok", [
     v.object({ message: v.unknown(), ok: v.literal(true) }),
     v.object({
@@ -341,6 +341,20 @@ function canonicalIdempotencyKey(value: unknown): string | undefined {
     return parsed.success ? parsed.output : undefined;
 }
 
+function canonicalHistoryIdempotencyKey(
+    value: unknown,
+    role: "assistant" | "system" | "tool" | "user"
+): string | undefined {
+    const direct = canonicalIdempotencyKey(value);
+    if (direct !== undefined || role !== "user" || typeof value !== "string") {
+        return direct;
+    }
+    const suffix = ":user";
+    return value.endsWith(suffix)
+        ? canonicalIdempotencyKey(value.slice(0, -suffix.length))
+        : undefined;
+}
+
 function safeJsonText(value: unknown, maximum: number): string | undefined {
     try {
         const encoded = typeof value === "string" ? value : JSON.stringify(value);
@@ -466,9 +480,11 @@ async function requestReadMutation(
 }
 
 interface LocalHistoryMediaFact {
+    readonly allowUnknownBoundedTextSize?: boolean;
     readonly candidates: readonly string[];
     readonly contentType?: unknown;
     readonly fileName?: unknown;
+    readonly preferFactFileName?: boolean;
     readonly sizeBytes?: unknown;
     readonly sourceSlot: string;
 }
@@ -644,16 +660,57 @@ function localHistoryMediaType(value: unknown, fileName: string): string {
         ?.split(";", 1)[0]
         ?.trim()
         .toLowerCase();
-    if (declared !== undefined && localHistoryMediaTypePattern.test(declared)) {
-        return declared;
-    }
+    const normalized = normalizeChatAttachmentMimeType(fileName, declared ?? "");
+    if (normalized !== undefined) return normalized;
     const extension = fileName.match(/\.([^.]+)$/u)?.[1]?.toLowerCase();
-    return (
-        (extension === undefined
-            ? undefined
-            : localHistoryMediaTypeByExtension.get(extension)) ??
-        "application/octet-stream"
+    return extension === undefined
+        ? "application/octet-stream"
+        : (localHistoryMediaTypeByExtension.get(extension) ??
+              "application/octet-stream");
+}
+
+const deliveryMirrorOutboundFilePattern =
+    /^([^/\\\p{Cc}\p{Cf}]{1,255})---([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})(\.[a-z\d]{1,16})$/iu;
+
+function deliveryMirrorTextMedia(
+    message: Readonly<Record<string, unknown>>,
+    rawRole: string | undefined,
+    value: string
+): Readonly<{ fact: LocalHistoryMediaFact; text?: string }> | undefined {
+    if (
+        rawRole !== "assistant" ||
+        message.provider !== "openclaw" ||
+        message.model !== "delivery-mirror"
+    ) {
+        return undefined;
+    }
+    const idempotencyKey = boundedControlString(
+        historyMetadata(message).idempotencyKey ?? message.idempotencyKey,
+        256
     );
+    if (idempotencyKey?.includes(":internal-source-reply:") !== true) {
+        return undefined;
+    }
+    const lines = value.split("\n");
+    const generatedName = lines.at(-1)?.trim();
+    if (generatedName === undefined) return undefined;
+    const match = deliveryMirrorOutboundFilePattern.exec(generatedName);
+    if (match === null) return undefined;
+    const fileName = `${match[1]!}${match[3]!}`;
+    if (normalizeChatAttachmentMimeType(fileName, "") === undefined) {
+        return undefined;
+    }
+    const visible = lines.slice(0, -1).join("\n").trim();
+    return Object.freeze({
+        fact: Object.freeze({
+            allowUnknownBoundedTextSize: true,
+            candidates: Object.freeze([`media://outbound/${generatedName}`]),
+            fileName,
+            preferFactFileName: true,
+            sourceSlot: "delivery-mirror-outbound:0",
+        }),
+        ...(visible === "" ? {} : { text: visible }),
+    });
 }
 
 function localHistoryMediaSize(value: unknown): number | undefined {
@@ -741,6 +798,51 @@ function projectedAttachment(
     };
 }
 
+/**
+ * Projects already-sanitized inbound session media through the existing media boundary.
+ * @param attachments Sanitized inbound media facts from the Gateway event.
+ * @param sessionKey Exact owning Gateway session.
+ * @param messageId Internal history identity used by media authorization.
+ * @param registrar Existing bounded local-media reference boundary.
+ * @returns Standard attachment parts safe for the runtime projection.
+ */
+export function projectPersistentGatewaySessionAttachments(
+    attachments: readonly Readonly<{
+        contentType: string;
+        fileName: string;
+        sizeBytes?: number;
+        url: string;
+    }>[],
+    sessionKey: string,
+    messageId: string,
+    registrar: PersistentGatewayChatMediaReferenceRegistrar
+): readonly Extract<ProjectedChatMessagePart, { kind: "attachment" }>[] {
+    return attachments.flatMap((attachment, index) => {
+        let registered: PersistentGatewayRegisteredLocalMedia | undefined;
+        try {
+            registered = registrar.registerLocal({
+                candidate: attachment.url,
+                messageId,
+                sessionKey,
+                sourceSlot: `session-message:${index}`,
+            });
+        } catch {
+            throw new ChatProviderUnavailableError();
+        }
+        if (registered === undefined) return [];
+        return [
+            projectedAttachment(
+                registered.attachmentId,
+                attachment.fileName,
+                localHistoryMediaType(attachment.contentType, attachment.fileName),
+                `session-media:${index + 1}`,
+                attachment.sizeBytes,
+                true
+            ) as Extract<ProjectedChatMessagePart, { kind: "attachment" }>,
+        ];
+    });
+}
+
 function projectAttachmentPart(
     block: Readonly<Record<string, unknown>>,
     partId: string,
@@ -763,6 +865,44 @@ function projectAttachmentPart(
         mediaType,
         partId,
         sizeBytes,
+        true
+    );
+}
+
+function projectManagedContentMediaPart(
+    block: Readonly<Record<string, unknown>>,
+    partId: string,
+    sessionKey: string,
+    messageId: string,
+    registrar: PersistentGatewayChatMediaReferenceRegistrar
+): ProjectedChatMessagePart | undefined {
+    const type = typeof block.type === "string" ? block.type.toLowerCase() : "";
+    if (
+        type !== "image" &&
+        type !== "audio" &&
+        type !== "video" &&
+        type !== "file" &&
+        type !== "document"
+    ) {
+        return undefined;
+    }
+    const urlCandidate = resolveControlAlias([block.url, block.openUrl], 4096);
+    if (urlCandidate === null) throw new ChatProviderUnavailableError();
+    const url = managedMediaUrl(urlCandidate, sessionKey, messageId, registrar);
+    if (url === undefined) return undefined;
+    const fallbackName = type === "document" || type === "file" ? "attachment" : type;
+    const fileName =
+        resolveControlAlias([block.fileName, block.label, block.alt], 255) ??
+        fallbackName;
+    if (fileName === null) throw new ChatProviderUnavailableError();
+    const declaredMimeType = boundedControlString(block.mimeType, 127);
+    const mediaType = localHistoryMediaType(declaredMimeType, fileName);
+    return projectedAttachment(
+        url.slice("/api/chat/media/".length),
+        fileName,
+        mediaType,
+        partId,
+        localHistoryMediaSize(block.sizeBytes),
         true
     );
 }
@@ -844,17 +984,22 @@ function projectLocalHistoryMedia(
         const key = `local:${registered.locatorFingerprint}`;
         if (seen.has(key)) continue;
         seen.add(key);
-        // Local bytes are classified again by the descriptor fetcher. Only a
-        // filename-derived type is reproducible without trusting provider metadata.
-        const mediaType = localHistoryMediaType(undefined, registered.fileName);
+        // Local bytes are classified again by the descriptor fetcher. The trusted
+        // delivery mirror may supply a display name while the registered locator
+        // retains OpenClaw's generated UUID suffix.
+        const fileName =
+            fact.preferFactFileName === true
+                ? (boundedControlString(fact.fileName, 255) ?? registered.fileName)
+                : registered.fileName;
+        const mediaType = localHistoryMediaType(undefined, fileName);
         attachments.push(
             projectedAttachment(
                 registered.attachmentId,
-                registered.fileName,
+                fileName,
                 mediaType,
                 `history-media:${attachments.length + 1}`,
                 localHistoryMediaSize(fact.sizeBytes),
-                true
+                fact.allowUnknownBoundedTextSize !== true
             )
         );
     }
@@ -881,8 +1026,17 @@ function projectMessageParts(
         value: unknown,
         maximum: number
     ): Readonly<{ text?: string }> | undefined => {
-        const raw = boundedString(value, maximum);
+        let raw = boundedString(value, maximum);
         if (raw === undefined) return undefined;
+        const outbound = deliveryMirrorTextMedia(message, rawRole, raw);
+        if (outbound !== undefined) {
+            if (structuredMedia.length + directiveMedia.length >= localHistoryMediaMaximum) {
+                directiveOverflow = true;
+            } else {
+                directiveMedia.push(outbound.fact);
+            }
+            raw = outbound.text ?? "";
+        }
         if (!acceptsDirectiveMedia) {
             return raw.length === 0 ? {} : { text: raw };
         }
@@ -985,6 +1139,17 @@ function projectMessageParts(
         );
         if (attachment !== undefined) {
             parts.push(attachment);
+            continue;
+        }
+        const managedContentMedia = projectManagedContentMediaPart(
+            block,
+            partId,
+            sessionKey,
+            messageId,
+            registrar
+        );
+        if (managedContentMedia !== undefined) {
+            parts.push(managedContentMedia);
             continue;
         }
         const type = typeof block.type === "string" ? block.type.toLowerCase() : "";
@@ -1211,8 +1376,9 @@ function projectHistoryMessage(
             : { kind: "complete" as const, parts },
         createdAtMs: safeInteger(message.timestamp ?? message.createdAtMs),
         id,
-        idempotencyKey: canonicalIdempotencyKey(
-            metadata.idempotencyKey ?? message.idempotencyKey
+        idempotencyKey: canonicalHistoryIdempotencyKey(
+            metadata.idempotencyKey ?? message.idempotencyKey,
+            role
         ),
         model: boundedControlString(message.model, 256),
         provider: boundedControlString(message.provider, 128),
@@ -1385,9 +1551,11 @@ function projectProviderEvent(
             return Object.freeze({
                 ...eventBase(event),
                 kind: "delta",
-                mode: payload.replace === true ? "replace" : "append",
+                mode: payload.replace === true ? "replace" : "merge",
                 stream: "assistant",
-                // Agent snapshots and chat suffixes belong to one assistant lane.
+                // OpenClaw can mirror overlapping assistant text through both
+                // chat and typed agent streams. Merge preserves genuine suffixes
+                // while removing the shared prefix/suffix at that boundary.
                 streamId: "assistant",
                 text: projectChatDeltaText(payload.deltaText)!,
             });
@@ -1523,10 +1691,13 @@ class PersistentGatewayChatProviderImplementation implements ChatProvider {
         request: ChatProviderHistoryRequest,
         signal?: AbortSignal
     ): Promise<ChatProviderHistoryPage> {
+        const agentId = gatewaySessionAgentId(request.sessionKey);
+        if (agentId === undefined) throw new ChatProviderUnavailableError();
         const payload = await requestRead(
             this.#transport,
             "chat.history",
             {
+                agentId,
                 limit: request.limit,
                 maxChars: Math.min(
                     request.maxChars,
@@ -1601,10 +1772,13 @@ class PersistentGatewayChatProviderImplementation implements ChatProvider {
         request: ChatProviderMessageRequest,
         signal?: AbortSignal
     ): Promise<ChatMessageGetOutput> {
+        const agentId = gatewaySessionAgentId(request.sessionKey);
+        if (agentId === undefined) throw new ChatProviderUnavailableError();
         const payload = await requestRead(
             this.#transport,
             "chat.message.get",
             {
+                agentId,
                 maxChars: request.maxChars,
                 messageId: request.messageId,
                 sessionKey: request.sessionKey,
@@ -1661,6 +1835,9 @@ class PersistentGatewayChatProviderImplementation implements ChatProvider {
                     })
                 ),
                 ...(request.fastMode === undefined ? {} : { fastMode: request.fastMode }),
+                ...(request.expectedRunId === undefined
+                    ? {}
+                    : { expectedRunId: request.expectedRunId }),
                 idempotencyKey: request.idempotencyKey,
                 message: request.message,
                 ...(request.queueMode === undefined
@@ -1721,16 +1898,21 @@ class PersistentGatewayChatProviderImplementation implements ChatProvider {
     }
 
     async listModels(
-        _request: Readonly<{
+        request: Readonly<{
+            agentId: string;
             includeProviderCapabilities: true;
-            view: "configured";
+            view: "all";
         }>,
         signal?: AbortSignal
     ): Promise<ChatModelsListOutput> {
         const payload = await requestRead(
             this.#transport,
             "models.list",
-            { includeProviderCapabilities: true, view: "configured" },
+            {
+                agentId: request.agentId,
+                includeProviderCapabilities: true,
+                view: "all",
+            },
             { signal, timeoutMs: persistentGatewayChatReadTimeoutMs }
         );
         const upstream = parseOrUnavailable(upstreamModelsSchema, payload);
@@ -1752,11 +1934,14 @@ class PersistentGatewayChatProviderImplementation implements ChatProvider {
         input: Parameters<ChatProvider["updateSessionSettings"]>[0],
         signal?: AbortSignal
     ): Promise<ChatSessionSettingsOutput> {
+        const agentId = gatewaySessionAgentId(input.sessionKey);
+        if (agentId === undefined) throw new ChatProviderUnavailableError();
         let payload: unknown;
         try {
             payload = await this.#transport.requestAdmin(
                 "sessions.patch",
                 {
+                    agentId,
                     ...(input.expectedSessionId === undefined
                         ? {}
                         : { expectedSessionId: input.expectedSessionId }),
@@ -1886,7 +2071,6 @@ class PersistentGatewayChatProviderImplementation implements ChatProvider {
                     }
                 },
                 onEventGap: (gap) => {
-                    reconciliationBoundary = true;
                     return request.onGap({
                         expectedSequence: gap.expectedSequence,
                         providerRunId: gap.runId,

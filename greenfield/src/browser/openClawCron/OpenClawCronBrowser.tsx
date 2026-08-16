@@ -120,6 +120,12 @@ export function OpenClawCronBrowser({
                             "openClawCron.update",
                             {
                                 expectedConfigRevision: requiredRevision(operation.job),
+                                ...(operation.patch.scratch === undefined
+                                    ? {}
+                                    : {
+                                          expectedScratchRevision:
+                                              operation.job.scratch?.revision,
+                                      }),
                                 id: operation.job.id,
                                 patch: operation.patch,
                             },

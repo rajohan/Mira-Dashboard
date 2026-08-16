@@ -1905,6 +1905,47 @@ export function createChatRepository(
                         }
                         continue;
                     }
+                    const externalSnapshot = transaction
+                        .select({ sessionKey: chatExternalRuntimeSnapshots.sessionKey })
+                        .from(chatExternalRuntimeSnapshots)
+                        .where(
+                            and(
+                                eq(
+                                    chatExternalRuntimeSnapshots.gatewayScope,
+                                    gatewayScope
+                                ),
+                                eq(
+                                    chatExternalRuntimeSnapshots.sessionKey,
+                                    row.sessionKey
+                                ),
+                                eq(
+                                    chatExternalRuntimeSnapshots.transcriptGeneration,
+                                    row.currentGeneration
+                                )
+                            )
+                        )
+                        .get();
+                    if (externalSnapshot !== undefined) {
+                        updateTranscriptGeneration(
+                            transaction,
+                            row,
+                            {
+                                lastBoundaryAction: "transport",
+                                observedAt: toDate(
+                                    Math.max(
+                                        row.observedAt === null
+                                            ? 0
+                                            : getTime(row.observedAt),
+                                        occurredAtMs
+                                    )
+                                ),
+                            },
+                            at
+                        );
+                        historyChanged = true;
+                        runtimeChanged = true;
+                        continue;
+                    }
                     changes.push(
                         advanceTranscriptGeneration(transaction, row, {
                             action: "transport",

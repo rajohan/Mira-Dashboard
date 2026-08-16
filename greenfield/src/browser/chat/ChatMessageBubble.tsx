@@ -10,6 +10,7 @@ import {
 import { type ReactNode, useState } from "react";
 
 import { cn } from "../lib/classNames.ts";
+import { formatDashboardDateTimeToMinute } from "../lib/formatDateTime.ts";
 import { Button } from "../ui/Button.tsx";
 import { ConfirmModal } from "../ui/ConfirmModal.tsx";
 import { Icon } from "../ui/Icon.tsx";
@@ -25,6 +26,7 @@ import {
 } from "./chatAttachmentPresentation.ts";
 import { ChatAttachmentPreview } from "./ChatAttachmentPreview.tsx";
 import { safeChatMarkdownLink } from "./chatMarkdownPolicy.ts";
+import { remarkChatLocalFileReferences } from "./chatLocalFileMarkdown.ts";
 import {
     chatMessageHasVisibleContent,
     visibleChatMessageParts,
@@ -268,6 +270,7 @@ interface ChatMessageBubbleProps {
     readonly onDynamicContentLoad?: () => void;
     readonly onHide?: (messageId: string) => void;
     readonly onHydrate?: (messageId: string) => void;
+    readonly onOpenLocalFile?: (reference: string) => void;
     readonly onReadAloud?: (messageId: string, text: string) => void;
     readonly onStopReadAloud?: () => void;
     readonly readAloud?: ChatReadAloudView;
@@ -293,9 +296,25 @@ function controlToneClass(tone: ChatControlPart["tone"]): string {
 function SafeMarkdownAnchor({
     children,
     href,
-}: Readonly<{ children?: ReactNode; href?: string }>) {
+    onOpenLocalFile,
+}: Readonly<{
+    children?: ReactNode;
+    href?: string;
+    onOpenLocalFile?: (reference: string) => void;
+}>) {
     const link = safeChatMarkdownLink(href);
     if (link === undefined) return <span>{children}</span>;
+    if (link.kind === "workspace-file") {
+        return (
+            <button
+                className={cn(interactiveTapClassName, "cursor-pointer underline")}
+                onClick={() => onOpenLocalFile?.(link.reference)}
+                type="button"
+            >
+                {children}
+            </button>
+        );
+    }
     const externalProperties = link.external
         ? { rel: "noopener noreferrer", target: "_blank" }
         : {};
@@ -327,28 +346,22 @@ function MessageAttachment({
         previewCandidate.endsWith("?disposition=preview")
             ? previewCandidate
             : undefined;
-    const managedDownloadUrl =
-        attachment.downloadUrl !== undefined &&
-        managedChatMediaUrlPattern.test(attachment.downloadUrl) &&
-        attachment.downloadUrl.endsWith("?disposition=download")
-            ? attachment.downloadUrl
-            : undefined;
     const imageUrl =
         managedPreviewUrl !== undefined && attachment.renderPolicy === "inline-image"
             ? managedPreviewUrl
             : undefined;
     return (
-        <li className="border-primary-600 bg-primary-800 max-w-full overflow-hidden rounded-lg border">
-            {imageUrl !== undefined && (
-                <a
-                    className={cn(
-                        interactiveTapClassName,
-                        "focus-visible:ring-accent-400 block rounded-lg outline-none focus-visible:ring-2"
-                    )}
-                    href={imageUrl}
-                    rel="noopener noreferrer"
-                    target="_blank"
-                >
+        <li className="border-primary-600 bg-primary-800 hover:border-accent-500 hover:bg-primary-700 focus-within:border-accent-400 relative max-w-full overflow-hidden rounded-lg border transition-colors">
+            <button
+                aria-label={`Open preview of ${attachment.name}`}
+                className={cn(
+                    interactiveTapClassName,
+                    "focus-visible:ring-accent-400 block w-full cursor-pointer rounded-lg text-left outline-none focus-visible:ring-2"
+                )}
+                onClick={() => onPreview(attachment.id)}
+                type="button"
+            >
+                {imageUrl !== undefined && (
                     <img
                         alt={attachment.name}
                         className="max-h-56 max-w-full object-contain"
@@ -356,40 +369,26 @@ function MessageAttachment({
                         onLoad={onDynamicContentLoad}
                         src={imageUrl}
                     />
-                </a>
-            )}
-            <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 p-2">
-                <span className="min-w-0">
-                    {imageUrl === undefined && managedDownloadUrl !== undefined ? (
-                        <a
-                            className={cn(
-                                interactiveTapClassName,
-                                "text-accent-300 focus-visible:ring-accent-400 block max-w-72 truncate rounded outline-none focus-visible:ring-2"
-                            )}
-                            download={attachment.name}
-                            href={managedDownloadUrl}
-                        >
-                            {attachment.name}
-                        </a>
-                    ) : (
-                        <span className="text-primary-100 block max-w-72 truncate">
-                            {attachment.name}
-                        </span>
-                    )}
+                )}
+                <span className="block min-w-0 p-2 pr-11">
+                    <span className="text-primary-100 block max-w-72 truncate">
+                        {attachment.name}
+                    </span>
                     <span className="text-primary-400 mt-0.5 block text-xs">
-                        {chatAttachmentTypeLabel(attachment.mediaType)} ·{" "}
-                        {formatChatAttachmentSize(attachment.sizeBytes)}
+                        {chatAttachmentTypeLabel(attachment.mediaType)}
+                        {attachment.sizeBytes > 0
+                            ? ` · ${formatChatAttachmentSize(attachment.sizeBytes)}`
+                            : ""}
                         {attachment.status === undefined ? "" : ` · ${attachment.status}`}
                     </span>
                 </span>
-                <IconOnlyButton
-                    icon={Eye}
-                    label={`Preview ${attachment.name}`}
-                    onClick={() => onPreview(attachment.id)}
-                    size="sm"
-                    variant="ghost"
-                />
-            </div>
+            </button>
+            <span
+                aria-hidden="true"
+                className="text-primary-300 pointer-events-none absolute top-1/2 right-3 -translate-y-1/2"
+            >
+                <Icon icon={Eye} size="sm" />
+            </span>
             {(attachment.status === "preparing" || attachment.status === "uploading") && (
                 <ProgressBar
                     className="w-full rounded-none"
@@ -415,6 +414,7 @@ export function ChatMessageBubble({
     onDynamicContentLoad,
     onHide,
     onHydrate,
+    onOpenLocalFile,
     onReadAloud,
     onStopReadAloud,
     readAloud,
@@ -471,13 +471,16 @@ export function ChatMessageBubble({
                 aria-label={`${author} message`}
                 className={cn("flex", isUser ? "justify-end" : "justify-start")}
                 data-message-id={message.id}
+                data-part-kinds={[...new Set(visibleParts.map(({ kind }) => kind))].join(
+                    ","
+                )}
             >
                 <div
                     className={cn(
                         "max-w-[94%] min-w-0 rounded-2xl px-3 py-2 text-sm sm:max-w-[86%] lg:max-w-[80%]",
                         !isUser && showsTool && "w-full",
                         isUser
-                            ? "bg-accent-500 text-primary-950"
+                            ? "bg-accent-700 text-white"
                             : "bg-primary-950 text-primary-100"
                     )}
                     data-testid={`chat-message-surface-${message.role}`}
@@ -485,7 +488,7 @@ export function ChatMessageBubble({
                     <header
                         className={cn(
                             "mb-1 flex items-center gap-2 text-[11px] tracking-wide uppercase",
-                            isUser ? "text-primary-950" : "text-primary-300"
+                            isUser ? "text-white" : "text-primary-300"
                         )}
                     >
                         <span className={showsThinkingLabel ? "normal-case" : undefined}>
@@ -500,7 +503,11 @@ export function ChatMessageBubble({
                             )}
                         {onHide !== undefined && (
                             <IconOnlyButton
-                                className="ml-auto min-h-7 px-1.5"
+                                className={cn(
+                                    "ml-auto min-h-7 px-1.5",
+                                    isUser &&
+                                        "text-white data-hover:text-white hover:text-white"
+                                )}
                                 icon={EyeOff}
                                 label="Hide message from this browser"
                                 onClick={() => setHideConfirmationOpen(true)}
@@ -556,15 +563,21 @@ export function ChatMessageBubble({
                                 return (
                                     <Markdown
                                         components={{
-                                            a: SafeMarkdownAnchor,
+                                            a: (properties) => (
+                                                <SafeMarkdownAnchor
+                                                    {...properties}
+                                                    onOpenLocalFile={onOpenLocalFile}
+                                                />
+                                            ),
                                             img: BlockedMarkdownImage,
                                         }}
                                         className={
                                             isUser
-                                                ? "prose-a:text-primary-950 prose-blockquote:text-primary-950 prose-code:text-primary-950 prose-headings:text-primary-950 prose-li:text-primary-950 prose-p:text-primary-950 prose-strong:text-primary-950"
+                                                ? "prose-a:text-white prose-blockquote:text-white prose-code:text-white prose-headings:text-white prose-li:text-white prose-p:text-white prose-strong:text-white"
                                                 : undefined
                                         }
                                         key={`text:${index}`}
+                                        remarkPlugins={[remarkChatLocalFileReferences]}
                                         source={part.text}
                                     />
                                 );
@@ -577,10 +590,16 @@ export function ChatMessageBubble({
                                     >
                                         <Markdown
                                             components={{
-                                                a: SafeMarkdownAnchor,
+                                                a: (properties) => (
+                                                    <SafeMarkdownAnchor
+                                                        {...properties}
+                                                        onOpenLocalFile={onOpenLocalFile}
+                                                    />
+                                                ),
                                                 img: BlockedMarkdownImage,
                                             }}
                                             className="prose-p:text-primary-200 prose-headings:text-primary-100 prose-code:text-primary-100"
+                                            remarkPlugins={[remarkChatLocalFileReferences]}
                                             source={part.text}
                                         />
                                     </aside>
@@ -633,7 +652,9 @@ export function ChatMessageBubble({
                             <Button
                                 busy={message.hydration === "loading"}
                                 busyLabel="Loading full message…"
-                                onClick={() => onHydrate(message.id)}
+                                onClick={() =>
+                                    onHydrate(message.sourceMessageId ?? message.id)
+                                }
                                 size="sm"
                                 variant="secondary"
                             >
@@ -665,14 +686,11 @@ export function ChatMessageBubble({
                         <time
                             className={cn(
                                 "mt-2 block text-[11px]",
-                                isUser ? "text-primary-950" : "text-primary-400"
+                                isUser ? "text-white/75" : "text-primary-400"
                             )}
                             dateTime={new Date(message.timestampMs).toISOString()}
                         >
-                            {new Intl.DateTimeFormat("en-GB", {
-                                hour: "2-digit",
-                                minute: "2-digit",
-                            }).format(message.timestampMs)}
+                            {formatDashboardDateTimeToMinute(message.timestampMs)}
                         </time>
                     )}
                 </div>
@@ -683,7 +701,7 @@ export function ChatMessageBubble({
                     description="This hides the selected message only in this browser. It does not delete or change the OpenClaw chat history."
                     onCancel={() => setHideConfirmationOpen(false)}
                     onConfirm={() => {
-                        onHide(message.id);
+                        onHide(message.sourceMessageId ?? message.id);
                         setHideConfirmationOpen(false);
                     }}
                     open={hideConfirmationOpen}

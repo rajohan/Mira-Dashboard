@@ -221,6 +221,19 @@ export const prepareWorkspaceFileContentInputSchema = v.strictObject({
     resourceId: workspaceFileResourceIdSchema,
 });
 
+/** One provider-authored absolute reference resolved only inside reviewed roots. */
+export const prepareWorkspaceFileReferenceInputSchema = v.strictObject({
+    reference: v.pipe(
+        v.string("Workspace file reference is invalid"),
+        v.minLength(1, "Workspace file reference is invalid"),
+        v.maxLength(4096, "Workspace file reference is invalid"),
+        v.check(
+            (value) => value === value.trim() && hasNoUnicodeControlOrFormat(value),
+            "Workspace file reference is invalid"
+        )
+    ),
+});
+
 /** Explicit recent-auth request for an uncached raw view of one masked config. */
 export const prepareWorkspaceFileRevealInputSchema = v.strictObject({
     resourceId: workspaceFileResourceIdSchema,
@@ -352,6 +365,9 @@ export type ListWorkspaceFilesOutput = v.InferOutput<
 export type PrepareWorkspaceFileContentInput = v.InferOutput<
     typeof prepareWorkspaceFileContentInputSchema
 >;
+export type PrepareWorkspaceFileReferenceInput = v.InferOutput<
+    typeof prepareWorkspaceFileReferenceInputSchema
+>;
 export type PrepareWorkspaceFileRevealInput = v.InferOutput<
     typeof prepareWorkspaceFileRevealInputSchema
 >;
@@ -452,6 +468,27 @@ export const workspaceFileProcedureContracts = [
         outputSchemaId: "files.prepareContent.output",
         summary:
             "Issues a short-lived actor-bound full representation or bounded-prefix URL.",
+        transport: queryTransport,
+    },
+    {
+        access: fileReadAccess,
+        domain: "files",
+        errors: [
+            "BAD_REQUEST",
+            "CONFLICT",
+            "FORBIDDEN",
+            "NOT_FOUND",
+            "SERVICE_UNAVAILABLE",
+            "UNAUTHORIZED",
+        ],
+        input: prepareWorkspaceFileReferenceInputSchema,
+        inputSchemaId: "files.prepareReference.input",
+        kind: "query",
+        name: "files.prepareReference",
+        output: workspaceFileContentTicketSchema,
+        outputSchemaId: "files.prepareReference.output",
+        summary:
+            "Resolves a local reference within a reviewed root and issues an actor-bound preview URL.",
         transport: queryTransport,
     },
     {

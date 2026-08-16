@@ -329,7 +329,7 @@ describe("monitoring browser routes", () => {
             name: "Reports",
         });
         expect(reportsNavigation).not.toHaveAttribute("aria-current");
-        expect(reportsNavigation).toHaveClass("bg-accent-500/90");
+        expect(reportsNavigation).toHaveClass("bg-accent-700", "text-white");
 
         await act(async () => {
             incidentsTab.dispatchEvent(
@@ -596,7 +596,7 @@ describe("monitoring browser routes", () => {
             name: "Reports",
         });
         expect(reportsNavigation).not.toHaveAttribute("aria-current");
-        expect(reportsNavigation).toHaveClass("bg-accent-500/90");
+        expect(reportsNavigation).toHaveClass("bg-accent-700", "text-white");
         expect(screen.getByText("Incidents", { selector: "header p" })).toBeTruthy();
         expect(
             transport.calls.find(({ path }) => path === "incidents.get")?.input

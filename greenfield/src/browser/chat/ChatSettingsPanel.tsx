@@ -38,6 +38,22 @@ interface ChatSettingsPanelProps {
     readonly session: ChatSessionOption;
 }
 
+function modelProviderLabel(model: string): string {
+    const provider = model.split("/", 1)[0] ?? "other";
+    if (provider.toLowerCase() === "openai") return "OpenAI";
+    if (provider.toLowerCase() === "synthetic") return "Synthetic";
+    return provider.charAt(0).toUpperCase() + provider.slice(1);
+}
+
+function canonicalSelectedModel(
+    model: string | undefined,
+    inventory: readonly string[]
+): string | undefined {
+    if (model === undefined || model.includes("/")) return model;
+    const matches = inventory.filter((candidate) => candidate.endsWith(`/${model}`));
+    return matches.length === 1 ? matches[0] : model;
+}
+
 function DisplayToggle({
     description,
     disabled = false,
@@ -59,8 +75,8 @@ function DisplayToggle({
             className={cn(
                 "focus-visible:ring-accent-300 flex w-full min-w-0 items-center gap-2.5 rounded-lg border px-2.5 py-2 text-left transition-colors disabled:opacity-45",
                 pressed
-                    ? "border-accent-400 bg-primary-900"
-                    : "border-primary-500 bg-primary-800 hover:border-primary-400 hover:bg-primary-900"
+                    ? "border-accent-400 bg-primary-900 data-hover:bg-primary-800 hover:bg-primary-800"
+                    : "border-primary-500 bg-primary-800 data-hover:border-primary-400 data-hover:bg-primary-900 hover:border-primary-400 hover:bg-primary-900"
             )}
             disabled={disabled}
             onClick={onToggle}
@@ -104,8 +120,13 @@ export function ChatSettingsPanel({
     send,
     session,
 }: ChatSettingsPanelProps) {
+    const selectedModel = canonicalSelectedModel(send.model, session.modelOptions);
     const modelOptions = [
-        ...new Set([send.model, session.model, ...session.modelOptions].filter(Boolean)),
+        ...new Set(
+            [selectedModel, session.model, ...session.modelOptions]
+                .map((model) => canonicalSelectedModel(model, session.modelOptions))
+                .filter(Boolean)
+        ),
     ] as string[];
     const thinkingOptions = [
         ...new Set(
@@ -127,7 +148,7 @@ export function ChatSettingsPanel({
                     <PopoverPanel
                         anchor={{ gap: 10, padding: 12, to: "top start" }}
                         aria-label="Chat settings"
-                        className="border-primary-400 bg-primary-700 z-50 max-h-[calc(100dvh-1.5rem)] w-[min(23rem,calc(100vw-1.5rem))] overflow-y-auto overscroll-contain rounded-xl border p-3 text-sm outline-none"
+                        className="border-primary-600 bg-primary-950 z-50 max-h-[calc(100dvh-1.5rem)] w-[min(23rem,calc(100vw-1.5rem))] overflow-y-auto overscroll-contain rounded-xl border p-3 text-sm shadow-xl shadow-black/35 outline-none"
                         data-testid="chat-settings-surface"
                         role="dialog"
                     >
@@ -160,7 +181,7 @@ export function ChatSettingsPanel({
                             >
                                 Response
                             </p>
-                            <FormField label="Model">
+                            <FormField className="space-y-1.5" label="Model">
                                 <Select
                                     ariaLabel="Chat model"
                                     disabled={busy || modelOptions.length === 0}
@@ -168,10 +189,11 @@ export function ChatSettingsPanel({
                                         onSendSettingsChange({ ...send, model })
                                     }
                                     options={modelOptions.map((model) => ({
+                                        group: modelProviderLabel(model),
                                         label: chatModelDisplayName(model),
                                         value: model,
                                     }))}
-                                    value={send.model ?? modelOptions[0] ?? ""}
+                                    value={selectedModel ?? modelOptions[0] ?? ""}
                                 />
                             </FormField>
                             {modelInventoryError !== undefined && (
@@ -196,7 +218,7 @@ export function ChatSettingsPanel({
                                 </div>
                             )}
                             <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
-                                <FormField label="Thinking">
+                                <FormField className="space-y-1.5" label="Thinking">
                                     <Select
                                         ariaLabel="Thinking level"
                                         disabled={busy || thinkingOptions.length === 0}
@@ -210,7 +232,7 @@ export function ChatSettingsPanel({
                                         value={send.thinking ?? thinkingOptions[0] ?? ""}
                                     />
                                 </FormField>
-                                <FormField label="Speed">
+                                <FormField className="space-y-1.5" label="Speed">
                                     <Select
                                         ariaLabel="Response speed"
                                         disabled={busy}
@@ -239,7 +261,7 @@ export function ChatSettingsPanel({
                                 className="text-primary-300 text-xs font-medium tracking-wide uppercase"
                                 id="chat-display-settings-heading"
                             >
-                                Display in this browser
+                                Display
                             </p>
                             <DisplayToggle
                                 description="Show thinking and working updates"
@@ -294,30 +316,30 @@ export function ChatSettingsPanel({
                             />
                         </section>
 
-                        <div className="border-primary-700 mt-3 grid grid-cols-1 gap-2 border-t pt-3 sm:grid-cols-2">
+                        <div className="border-primary-700 mt-3 flex justify-end gap-2 border-t pt-3">
                             <Button
-                                className="w-full min-w-0 justify-center"
                                 disabled={busy}
                                 onClick={() => {
                                     onCompact();
                                     close();
                                 }}
+                                size="sm"
                                 variant="secondary"
                             >
                                 <Icon icon={Sparkles} size="sm" tone="inherit" />
-                                Shorten chat history
+                                Compact
                             </Button>
                             <Button
-                                className="w-full min-w-0 justify-center"
                                 disabled={busy}
                                 onClick={() => {
                                     onReset();
                                     close();
                                 }}
+                                size="sm"
                                 variant="danger"
                             >
                                 <Icon icon={RotateCcw} size="sm" tone="inherit" />
-                                Reset chat history
+                                Reset
                             </Button>
                         </div>
                     </PopoverPanel>

@@ -413,7 +413,7 @@ async function expectMobileWorkspaceGeometry(canvasElement: HTMLElement): Promis
         "Insert emoji",
         "Start voice input",
         "Attach files",
-        "Stop response 1",
+        "Stop response",
         "Send message",
     ]) {
         const control = within(toolbar).getByRole("button", { name: label });
@@ -498,7 +498,7 @@ async function expectStatusRowGeometry(
 
 const meta = {
     args: {
-        abortableRunIds: ["019fe633-9133-7ba0-8b80-809dd80dfb39"],
+        abortableRunId: "019fe633-9133-7ba0-8b80-809dd80dfb39",
         attachments: [],
         canSend: true,
         displaySettings: {
@@ -610,7 +610,6 @@ export const SlashSuggestions: Story = {
 
 export const CompletedReadAloud: Story = {
     args: {
-        abortableRunIds: [],
         activeRunIds: [],
         view: view({
             activePlans: [],
@@ -648,7 +647,7 @@ export const CompletedReadAloud: Story = {
 
 export const StreamingReadAloudSuppressed: Story = {
     args: {
-        abortableRunIds: ["streaming-read-aloud"],
+        abortableRunId: "streaming-read-aloud",
         activeRunIds: ["streaming-read-aloud"],
         view: view({
             activePlans: [],
@@ -693,7 +692,7 @@ export const TranscribingVoiceInput: Story = {
 
 export const MultipleActiveRunsMobile: Story = {
     args: {
-        abortableRunIds: ["run-one", "run-two", "run-three"],
+        abortableRunId: "run-three",
         voiceInput: { available: true, elapsedMs: 0, phase: "idle" },
     },
     globals: { viewport: { isRotated: false, value: "mobile1" } },
@@ -846,7 +845,6 @@ export const LongCompanionMobile: Story = {
 
 export const Empty: Story = {
     args: {
-        abortableRunIds: [],
         canSend: false,
         draft: "",
         view: view({
@@ -1193,7 +1191,6 @@ export const AttachmentPickerOpenMobile: Story = {
 
 export const TallAssistantBubbleMobile: Story = {
     args: {
-        abortableRunIds: [],
         view: view({
             activePlans: [],
             messages: [
@@ -1235,7 +1232,6 @@ export const TallAssistantBubbleMobile: Story = {
 
 export const ToolFailure: Story = {
     args: {
-        abortableRunIds: [],
         view: view({
             activePlans: [],
             messages: [
@@ -1259,7 +1255,6 @@ export const ToolFailure: Story = {
 
 export const ApplyPatchDiff: Story = {
     args: {
-        abortableRunIds: [],
         displaySettings: {
             keepThinkingAfterFinal: false,
             showThinking: true,
@@ -1310,7 +1305,6 @@ ${applyPatchStoryAdditions}`,
 
 export const ToolDiffCoverageMatrix: Story = {
     args: {
-        abortableRunIds: [],
         displaySettings: expandedToolDisplaySettings,
         view: view({
             activePlans: [],
@@ -1508,7 +1502,6 @@ function toolDiffFallbackCoverageMessage(): ChatDisplayMessage {
 
 export const BrowserStructuredOutput: Story = {
     args: {
-        abortableRunIds: [],
         displaySettings: {
             keepThinkingAfterFinal: false,
             showThinking: true,
@@ -1559,7 +1552,6 @@ export const BrowserStructuredOutput: Story = {
 
 export const ShellSourceOutput: Story = {
     args: {
-        abortableRunIds: [],
         displaySettings: {
             keepThinkingAfterFinal: false,
             showThinking: true,

@@ -126,6 +126,8 @@ export interface ChatDisplayMessage {
     readonly runId?: string;
     readonly sequence: number;
     readonly sessionKey: string;
+    /** Canonical identity when one message is shown as multiple semantic surfaces. */
+    readonly sourceMessageId?: string;
     readonly timestampMs?: number;
 }
 

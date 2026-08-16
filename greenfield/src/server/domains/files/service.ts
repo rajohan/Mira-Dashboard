@@ -8,6 +8,7 @@ import {
     listWorkspaceFilesInputSchema,
     listWorkspaceFilesOutputSchema,
     prepareWorkspaceFileContentInputSchema,
+    prepareWorkspaceFileReferenceInputSchema,
     prepareWorkspaceFileRevealInputSchema,
     prepareWorkspaceFileUploadInputSchema,
     prepareWorkspaceFileWriteInputSchema,
@@ -20,6 +21,7 @@ import {
     type ListWorkspaceFilesInput,
     type ListWorkspaceFilesOutput,
     type PrepareWorkspaceFileContentInput,
+    type PrepareWorkspaceFileReferenceInput,
     type PrepareWorkspaceFileRevealInput,
     type PrepareWorkspaceFileUploadInput,
     type PrepareWorkspaceFileWriteInput,
@@ -120,6 +122,11 @@ export interface WorkspaceFilesService {
     readonly prepareReveal: (
         actor: WorkspaceFileActor,
         input: PrepareWorkspaceFileRevealInput,
+        signal?: AbortSignal
+    ) => Promise<WorkspaceFileContentTicket>;
+    readonly prepareReference: (
+        actor: WorkspaceFileActor,
+        input: PrepareWorkspaceFileReferenceInput,
         signal?: AbortSignal
     ) => Promise<WorkspaceFileContentTicket>;
     readonly prepareUpload: (
@@ -1215,6 +1222,29 @@ export function createWorkspaceFilesService(
                 actor,
                 input.resourceId,
                 input.disposition,
+                "default",
+                signal
+            );
+        },
+        async prepareReference(actor, rawInput, signal) {
+            const input = v.parse(prepareWorkspaceFileReferenceInputSchema, rawInput);
+            let locator: WorkspaceFileLocator | undefined;
+            try {
+                locator = await dependencies.reader.resolveReference?.(
+                    input.reference,
+                    signal
+                );
+            } catch (error) {
+                throw workspaceFileError(error);
+            }
+            if (locator === undefined) throw new WorkspaceFileError("not-found");
+            const now = checkedNow();
+            reserveCapacity(2, now);
+            const resource = createResource(actorKey(actor), locator, "file", now);
+            return createContentTicket(
+                actor,
+                resource.id,
+                "preview",
                 "default",
                 signal
             );

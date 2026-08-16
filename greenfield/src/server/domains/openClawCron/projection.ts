@@ -442,6 +442,20 @@ export function projectOpenClawCronJob(
         nameTruncated: name.truncated,
         payload: projectPayload(job.payload),
         schedule: projectSchedule(job.schedule),
+        ...(job.scratch === undefined
+            ? {}
+            : {
+                  scratch: {
+                      content: job.scratch.content.slice(
+                          0,
+                          openClawCronPayloadTextMaximumLength
+                      ),
+                      revision: job.scratch.revision,
+                      truncated:
+                          job.scratch.content.length >
+                          openClawCronPayloadTextMaximumLength,
+                  },
+              }),
         sessionTarget,
         source: "openclaw",
         state: {

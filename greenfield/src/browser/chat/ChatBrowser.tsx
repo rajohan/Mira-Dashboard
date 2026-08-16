@@ -12,7 +12,10 @@ import type {
     ChatCompanionStateOutput,
     ChatHistoryOutput,
 } from "../../contracts/chat.ts";
-import type { ListGatewaySessionsResult } from "../../contracts/gatewaySessions.ts";
+import {
+    gatewaySessionAgentId,
+    type ListGatewaySessionsResult,
+} from "../../contracts/gatewaySessions.ts";
 import type {
     OpenClawTaskCancelOutput,
     OpenClawTaskGetOutput,
@@ -20,6 +23,7 @@ import type {
     OpenClawTaskSummary,
 } from "../../contracts/openClawTasks.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
+import { workspaceFileClient } from "../files/workspaceFileClient.ts";
 import {
     classifyDashboardBrowserFailure,
     dashboardBrowserFailureMessage,
@@ -108,6 +112,7 @@ import type {
 import {
     mergeChatMessages,
     projectChatHistory,
+    projectChatMessageSurfaces,
     projectChatSessions,
 } from "./chatViewProjection.ts";
 import { ChatWorkspace } from "./ChatWorkspace.tsx";
@@ -275,16 +280,26 @@ export function ChatBrowser({
     const runtimeStore = useChatRuntimeStore();
     const runtimeState = useStore(runtimeStore, (state) => state);
     const sessionsQuery = useQuery(gatewaySessionQueryOptions(client));
-    const modelsQuery = useQuery(chatModelsQueryOptions(client));
+    const sessionsWithoutModels =
+        sessionsQuery.data === undefined
+            ? []
+            : projectChatSessions(sessionsQuery.data, undefined);
+    const inventoryCanResolveMissingRequest =
+        sessionsQuery.data?.source.freshness === "fresh" &&
+        !sessionsQuery.data.projectionTruncated;
+    const preliminarySessionKey = resolveChatSessionKey(
+        requestedSessionKey,
+        sessionsWithoutModels,
+        inventoryCanResolveMissingRequest
+    );
+    const selectedAgentId = gatewaySessionAgentId(preliminarySessionKey) ?? "";
+    const modelsQuery = useQuery(chatModelsQueryOptions(client, selectedAgentId));
     const sessions =
         sessionsQuery.data === undefined
             ? []
             : projectChatSessions(sessionsQuery.data, modelsQuery.data);
-    const inventoryCanResolveMissingRequest =
-        sessionsQuery.data?.source.freshness === "fresh" &&
-        !sessionsQuery.data.projectionTruncated;
     const selectedSessionKey = resolveChatSessionKey(
-        requestedSessionKey,
+        preliminarySessionKey,
         sessions,
         inventoryCanResolveMissingRequest
     );
@@ -491,7 +506,9 @@ export function ChatBrowser({
     const runtimeMessages = chatRuntimeMessages(runtimeState, selectedSessionKey);
     const hidden =
         hiddenMessages[selectedSessionKey] ?? readHiddenMessageIds(selectedSessionKey);
-    const messages = mergeChatMessages(historyMessages, runtimeMessages, hidden);
+    const messages = projectChatMessageSurfaces(
+        mergeChatMessages(historyMessages, runtimeMessages, hidden)
+    );
 
     useEffect(() => {
         const canonicalMessages = projectChatHistory(
@@ -592,7 +609,6 @@ export function ChatBrowser({
                 : [controlId];
         }),
     ];
-
     const taskCancelGatedIds = authoritativeTasks.flatMap((task) =>
         chatTaskCancelIsGated(taskCancelGates[task.id]) ? [task.id] : []
     );
@@ -620,9 +636,9 @@ export function ChatBrowser({
     const stopControlsEnabled = chatAbortControlsAreEnabled({
         actionBusy,
         connection,
-        needsReconciliation: runtimeSession?.needsReconciliation === true,
         sourceFresh,
     });
+    const abortableRunId = stopControlsEnabled ? activeRunIds.at(-1) : undefined;
 
     function updateDraft(
         sessionKey: string,
@@ -928,6 +944,31 @@ export function ChatBrowser({
                 };
             });
             runtimeStore.dismissSend(selectedSessionKey, identity.clientRunId);
+        }
+    }
+
+    async function openLocalFile(reference: string): Promise<void> {
+        setActionError(undefined);
+        const previewWindow = globalThis.open("about:blank", "_blank");
+        try {
+            const ticket = await mutationBoundary.run((signal) =>
+                workspaceFileClient(client).query(
+                    "files.prepareReference",
+                    { reference },
+                    { signal }
+                )
+            );
+            if (previewWindow === null) {
+                globalThis.location.assign(ticket.url);
+                return;
+            }
+            previewWindow.opener = null;
+            previewWindow.location.replace(ticket.url);
+        } catch (error) {
+            previewWindow?.close();
+            if (mutationBoundary.completionIsCurrent()) {
+                setActionError(dashboardBrowserFailureMessage(error));
+            }
         }
     }
 
@@ -2234,7 +2275,7 @@ export function ChatBrowser({
     return (
         <ChatWorkspace
             activeRunIds={allActiveRunIds}
-            abortableRunIds={stopControlsEnabled ? activeRunIds : []}
+            abortableRunId={abortableRunId}
             actionBusy={actionBusy}
             attachmentError={currentDraft.attachmentError}
             attachments={currentDraft.attachments}
@@ -2313,6 +2354,7 @@ export function ChatBrowser({
                         : []),
                 ]);
             }}
+            onOpenLocalFile={(reference) => void openLocalFile(reference)}
             onLoadOlder={() => {
                 if (
                     (historyQuery.data?.pages.length ?? 0) < chatHistoryBrowserPageMaximum

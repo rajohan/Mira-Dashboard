@@ -82,6 +82,16 @@ export const gatewaySessionKeySchema = boundedControlSafeTextSchema(
     "Gateway session key is invalid"
 );
 
+/**
+ * Resolves the explicit OpenClaw owner encoded by an agent session key.
+ * @param sessionKey Canonical `agent:<agentId>:...` session identity.
+ * @returns The bounded agent id, or undefined for a non-agent/invalid key.
+ */
+export function gatewaySessionAgentId(sessionKey: string): string | undefined {
+    const match = /^agent:([^:]{1,128}):/.exec(sessionKey);
+    return match?.[1];
+}
+
 const gatewaySessionLabelSchema = boundedControlSafeTextSchema(
     gatewaySessionDisplayNameMaximum,
     "Gateway session label is invalid"

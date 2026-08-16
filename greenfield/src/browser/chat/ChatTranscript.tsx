@@ -8,6 +8,7 @@ import { Icon } from "../ui/Icon.tsx";
 import { LoadingState } from "../ui/LoadingState.tsx";
 import { Virtualizer, type VirtualizerItemsAppendedEvent } from "../ui/Virtualizer.tsx";
 import { ChatMessageBubble } from "./ChatMessageBubble.tsx";
+import { activeStreamingTextMessageIds } from "./chatReadAloudProjection.ts";
 import { visibleChatTranscriptMessages } from "./chatMessageVisibility.ts";
 import {
     activeCompactionMaximumAgeMs,
@@ -112,6 +113,7 @@ interface ChatTranscriptProps {
     readonly onHideMessage: (messageId: string) => void;
     readonly onHydrateMessage: (messageId: string) => void;
     readonly onLoadOlder: () => void;
+    readonly onOpenLocalFile?: (reference: string) => void;
     readonly onReadAloud?: (messageId: string, text: string) => void;
     readonly onReturnToLatest?: () => void;
     readonly onStopReadAloud?: () => void;
@@ -168,6 +170,7 @@ export function ChatTranscript({
     onHideMessage,
     onHydrateMessage,
     onLoadOlder,
+    onOpenLocalFile,
     onReadAloud,
     onReturnToLatest,
     onStopReadAloud,
@@ -197,6 +200,10 @@ export function ChatTranscript({
         transcriptMessages,
         display,
         readAloud
+    );
+    const streamingTextMessageIds = activeStreamingTextMessageIds(
+        visibleMessages,
+        activeRunIds
     );
     const stopReadAloud = useEffectEvent(() => onStopReadAloud?.());
     const stopActiveReadAloud = useEffectEvent(() => {
@@ -386,7 +393,11 @@ export function ChatTranscript({
                                             }}
                                         >
                                             <ChatMessageBubble
-                                                activeRunIds={activeRunIds}
+                                                activeRunIds={
+                                                    streamingTextMessageIds.has(message.id)
+                                                        ? activeRunIds
+                                                        : []
+                                                }
                                                 display={display}
                                                 message={message}
                                                 onDismissReadAloudError={
@@ -398,6 +409,7 @@ export function ChatTranscript({
                                                 }
                                                 onHide={onHideMessage}
                                                 onHydrate={onHydrateMessage}
+                                                onOpenLocalFile={onOpenLocalFile}
                                                 onReadAloud={onReadAloud}
                                                 onStopReadAloud={onStopReadAloud}
                                                 readAloud={readAloud}

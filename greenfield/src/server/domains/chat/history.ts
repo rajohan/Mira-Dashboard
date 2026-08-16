@@ -94,9 +94,16 @@ function previewText(message: ChatMessage): string | undefined {
 
 function hydrationPlaceholder(message: ChatMessage, includePreview = true): ChatMessage {
     const preview = includePreview ? previewText(message) : undefined;
+    const attachments =
+        message.content.kind === "complete"
+            ? message.content.parts.filter((part) => part.kind === "attachment")
+            : message.content.attachments;
     return v.parse(chatMessageSchema, {
         ...message,
         content: {
+            ...(attachments === undefined || attachments.length === 0
+                ? {}
+                : { attachments }),
             kind: "hydration-required",
             ...(preview === undefined ? {} : { preview }),
             reason: "response-budget",

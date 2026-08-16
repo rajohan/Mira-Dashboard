@@ -55,11 +55,13 @@ import {
     chatHistoryProviderPageMaximum,
     chatHistoryResponseMaximumBytes,
     chatMessageTextMaximumCodeUnits,
+    normalizeChatProviderUserIdentity,
     chatRunEventMaximum,
     chatRuntimeProjectionPartsMaximum,
     chatRuntimeResponseMaximumBytes,
     type ChatExternalRun,
     type ChatMessage,
+    type ChatMessagePart,
     type ChatRuntimeProjectionPart,
 } from "../../../contracts/chatModel.ts";
 import { mergeChatStreamText } from "../../../shared/chatStreamText.ts";
@@ -175,6 +177,10 @@ const defaultRecoveryScheduler: ChatRecoveryScheduler = Object.freeze({
 });
 
 export interface ChatServiceOptions {
+    readonly activeProviderRunIds?: (
+        sessionKey: string,
+        signal?: AbortSignal
+    ) => Promise<readonly string[] | undefined>;
     readonly attachmentConsumer: ChatAttachmentTicketConsumer;
     readonly attachmentPreparer: ChatAttachmentTicketPreparer;
     readonly coalescerScheduler?: ChatCoalescerScheduler;
@@ -219,11 +225,25 @@ export interface ChatService {
         input: ChatModelsListInput,
         signal?: AbortSignal
     ) => Promise<ChatModelsListOutput>;
+    readonly observeProviderUserMessage: (
+        message: Readonly<{
+            attachments?: readonly Extract<ChatMessagePart, { kind: "attachment" }>[];
+            messageId: string;
+            providerRunIds: readonly string[];
+            receivedAtMs: number;
+            sessionKey: string;
+            text: string;
+        }>
+    ) => Promise<void>;
     readonly prepareAttachmentTicket: (
         input: ChatAttachmentTicketPrepareInput,
         actorId: string,
         signal?: AbortSignal
     ) => Promise<ChatAttachmentTicketPrepareOutput>;
+    readonly reconcileProviderSessionActivity: (
+        sessionKey: string,
+        signal?: AbortSignal
+    ) => Promise<void>;
     readonly recover: (signal?: AbortSignal) => Promise<void>;
     readonly runtime: (
         input: ChatRuntimeInput,
@@ -243,12 +263,12 @@ export interface ChatService {
 }
 
 function providerEventRunId(event: ChatProviderEvent): string {
-    return event.kind === "user-echo"
-        ? (event.providerRunId ?? event.idempotencyKey)
-        : event.providerRunId;
+    return event.providerRunId;
 }
 
-function providerEventDraft(event: ChatProviderEvent): ChatRuntimeEventDraft {
+type ChatProviderRuntimeEvent = Exclude<ChatProviderEvent, { kind: "user" }>;
+
+function providerEventDraft(event: ChatProviderRuntimeEvent): ChatRuntimeEventDraft {
     switch (event.kind) {
         case "compaction": {
             return {
@@ -334,8 +354,7 @@ function providerEventDraft(event: ChatProviderEvent): ChatRuntimeEventDraft {
                     : { stopReason: event.stopReason }),
             };
         }
-        case "noop":
-        case "user-echo": {
+        case "noop": {
             return {
                 kind: "provider-noop",
                 occurredAtMs: event.receivedAtMs,
@@ -371,12 +390,56 @@ function messageMatchesRun(
     );
 }
 
+function messageHasFinalText(message: ChatMessage): boolean {
+    return (
+        message.role === "assistant" &&
+        message.content.kind === "complete" &&
+        message.content.parts.some((part) => part.kind === "text" && part.text.length > 0)
+    );
+}
+
+function findFinalHistoryMessage(
+    messages: readonly ChatMessage[],
+    localRunId: string,
+    providerRunId: string | undefined,
+    idempotencyKey: string
+): ChatMessage | undefined {
+    let directlyMatchedFinal: ChatMessage | undefined;
+    for (const message of messages) {
+        if (
+            messageHasFinalText(message) &&
+            messageMatchesRun(message, localRunId, providerRunId, idempotencyKey)
+        ) {
+            directlyMatchedFinal = message;
+        }
+    }
+    if (directlyMatchedFinal !== undefined) return directlyMatchedFinal;
+
+    const admissionIndex = messages.findIndex(
+        (message) => message.role === "user" && message.idempotencyKey === idempotencyKey
+    );
+    if (admissionIndex === -1) return undefined;
+
+    let causalFinal: ChatMessage | undefined;
+    for (let index = admissionIndex + 1; index < messages.length; index += 1) {
+        const message = messages[index]!;
+        if (message.role === "user") break;
+        if (messageHasFinalText(message)) causalFinal = message;
+    }
+    return causalFinal;
+}
+
 function compareExternalRuns(left: ChatExternalRun, right: ChatExternalRun): number {
     return (
         left.updatedAtMs - right.updatedAtMs ||
         left.sessionKey.localeCompare(right.sessionKey) ||
         left.providerRunId.localeCompare(right.providerRunId)
     );
+}
+
+interface ActiveProviderRun {
+    readonly providerRunId: string;
+    readonly updatedAtMs: number;
 }
 
 function externalAbortBoundaryFields(
@@ -645,12 +708,12 @@ function historyUserText(message: ChatMessage): string | undefined {
 function externalHistoryUserCandidates(
     run: ChatExternalRun,
     messages: readonly ChatMessage[],
-    externalRunCount: number
+    activeExternalRunCount: number
 ): readonly ChatMessage[] {
     const exact = messages.filter(
         (message) => message.role === "user" && message.runId === run.providerRunId
     );
-    if (exact.length > 0 || externalRunCount !== 1) return exact;
+    if (exact.length > 0 || activeExternalRunCount !== 1) return exact;
 
     const activityTimes = [
         run.observedAtMs,
@@ -702,7 +765,7 @@ function mergeExternalHistoryUserAnchors(
     parts: readonly ChatRuntimeProjectionPart[];
     projectionTruncated: boolean;
 }> {
-    const parts: readonly ChatRuntimeProjectionPart[] =
+    const originalParts: readonly ChatRuntimeProjectionPart[] =
         run.parts ??
         (run.text === ""
             ? []
@@ -716,36 +779,77 @@ function mergeExternalHistoryUserAnchors(
                       text: run.text,
                   },
               ]);
+    const canonicalUsers = messages.flatMap((message) => {
+        const text = historyUserText(message);
+        if (text === undefined || message.createdAtMs === undefined) return [];
+        return [
+            {
+                identity:
+                    normalizeChatProviderUserIdentity(message.idempotencyKey) ??
+                    message.idempotencyKey ??
+                    normalizeChatProviderUserIdentity(message.id) ??
+                    message.id,
+                identities: [message.id, message.idempotencyKey].filter(
+                    (identity): identity is string => identity !== undefined
+                ),
+                message,
+                text,
+            },
+        ];
+    });
+    const canonicalUserByIdentity = new Map(
+        canonicalUsers.flatMap((user) =>
+            user.identities.map((identity) => [identity, user] as const)
+        )
+    );
+    let normalizedExistingIdentity = false;
+    const seenUserIdentities = new Set<string>();
+    const parts = originalParts.flatMap((part) => {
+        if (part.kind !== "user" || part.messageId === undefined) return [part];
+        const canonical = canonicalUserByIdentity.get(part.messageId);
+        const identity =
+            canonical?.identity ??
+            normalizeChatProviderUserIdentity(part.messageId) ??
+            part.messageId;
+        if (seenUserIdentities.has(identity)) {
+            normalizedExistingIdentity = true;
+            return [];
+        }
+        seenUserIdentities.add(identity);
+        if (canonical === undefined || identity === part.messageId) return [part];
+        normalizedExistingIdentity = true;
+        return [
+            {
+                ...part,
+                messageId: identity,
+                occurredAtMs: canonical.message.createdAtMs,
+                text: canonical.text,
+            },
+        ];
+    });
     const existingMessageIds = new Set(
         parts.flatMap((part) =>
             part.kind === "user" && part.messageId !== undefined ? [part.messageId] : []
         )
     );
-    const anchors = messages.flatMap((message, historyIndex) => {
-        const text = historyUserText(message);
-        if (
-            text === undefined ||
-            message.createdAtMs === undefined ||
-            existingMessageIds.has(message.id)
-        ) {
-            return [];
-        }
-        existingMessageIds.add(message.id);
+    const anchors = canonicalUsers.flatMap((canonical, historyIndex) => {
+        if (existingMessageIds.has(canonical.identity)) return [];
+        existingMessageIds.add(canonical.identity);
         return [
             {
                 historyIndex,
                 part: {
                     kind: "user" as const,
-                    messageId: message.id,
-                    occurredAtMs: message.createdAtMs,
+                    messageId: canonical.identity,
+                    occurredAtMs: canonical.message.createdAtMs,
                     sequence: 1,
-                    text,
+                    text: canonical.text,
                 },
-                providerOrder: message.sequence ?? Number.MAX_SAFE_INTEGER,
+                providerOrder: canonical.message.sequence ?? Number.MAX_SAFE_INTEGER,
             },
         ];
     });
-    if (anchors.length === 0) {
+    if (anchors.length === 0 && !normalizedExistingIdentity) {
         return {
             changed: false,
             parts,
@@ -779,6 +883,25 @@ function mergeExternalHistoryUserAnchors(
         parts: normalized.parts,
         projectionTruncated: run.projectionTruncated || normalized.partsExceeded,
     };
+}
+
+function historyConfirmsExternalTerminal(
+    run: ChatExternalRun,
+    messages: readonly ChatMessage[],
+    externalRunCount: number
+): boolean {
+    const userCandidates = externalHistoryUserCandidates(run, messages, externalRunCount);
+    if (userCandidates.length === 0) return false;
+    const candidateIds = new Set(userCandidates.map(({ id }) => id));
+    let anchored = false;
+    for (const message of messages) {
+        if (message.role === "user" && candidateIds.has(message.id)) {
+            anchored = true;
+            continue;
+        }
+        if (anchored && message.role === "assistant") return true;
+    }
+    return false;
 }
 
 function updateExternalStreamPart(
@@ -1099,6 +1222,12 @@ function budgetExternalRuns(
 }
 
 class ChatServiceImplementation implements ChatService, ChatHistoryObservationPort {
+    readonly #activeProviderRunIds:
+        | ((
+              sessionKey: string,
+              signal?: AbortSignal
+          ) => Promise<readonly string[] | undefined>)
+        | undefined;
     readonly #abortAcknowledgedRuns = new Set<string>();
     readonly #abortOperations = new Map<string, ChatAbortOperation>();
     readonly #attachmentConsumer: ChatAttachmentTicketConsumer;
@@ -1145,6 +1274,7 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
     #externalObservationEpoch = 0;
 
     public constructor(options: ChatServiceOptions) {
+        this.#activeProviderRunIds = options.activeProviderRunIds;
         this.#attachmentConsumer = options.attachmentConsumer;
         this.#attachmentPreparer = options.attachmentPreparer;
         this.#coalescerScheduler = options.coalescerScheduler;
@@ -1350,6 +1480,27 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
         if (runs.size === 0) this.#externalRuns.delete(sessionKey);
         this.#externalDirtySessions.add(sessionKey);
         return true;
+    }
+
+    #discardEmptyHistoryPlaceholders(
+        sessionKey: string,
+        liveProviderRunId: string
+    ): boolean {
+        const runs = this.#externalRuns.get(sessionKey);
+        if (runs === undefined) return false;
+        let changed = false;
+        for (const [providerRunId, run] of runs) {
+            if (
+                providerRunId !== liveProviderRunId &&
+                run.lifecycle === "active" &&
+                run.source === "provider-in-flight" &&
+                run.text === "" &&
+                (run.parts?.every(({ kind }) => kind === "user") ?? true)
+            ) {
+                changed = this.#deleteExternalRun(sessionKey, providerRunId) || changed;
+            }
+        }
+        return changed;
     }
 
     #recordExternalObservationKind(
@@ -1568,11 +1719,89 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
         }
     }
 
+    async #handleProviderUserEvent(
+        message: Extract<ChatProviderEvent, { kind: "user" }>,
+        observation: ChatProviderObservationBoundary,
+        reconcileBeforeStore = true
+    ): Promise<void> {
+        if (reconcileBeforeStore && this.#externalRuns.has(message.sessionKey)) {
+            await this.#reconcileExternalSnapshotSession(message.sessionKey);
+        }
+        if (
+            this.#repository.findByProviderCorrelation(
+                message.sessionKey,
+                message.providerRunId
+            ) !== undefined
+        ) {
+            return;
+        }
+        const previous = this.#externalRuns
+            .get(message.sessionKey)
+            ?.get(message.providerRunId);
+        if (
+            previous?.parts?.some(
+                (part) =>
+                    part.kind === "user" && part.messageId === message.idempotencyKey
+            ) === true
+        ) {
+            return;
+        }
+        const previousParts = previous?.parts ?? [];
+        const parts = [
+            ...previousParts,
+            {
+                ...(message.attachments === undefined
+                    ? {}
+                    : { attachments: [...message.attachments] }),
+                kind: "user" as const,
+                messageId: message.idempotencyKey,
+                occurredAtMs: message.receivedAtMs,
+                sequence:
+                    Math.max(0, ...previousParts.map(({ sequence }) => sequence)) + 1,
+                text: message.text,
+            },
+        ];
+        this.#storeExternalRun(
+            boundExternalRunProjection({
+                ...externalAbortBoundaryFields(previous),
+                continuity: previous?.continuity ?? "complete",
+                hasUnprojectedActivity: previous?.hasUnprojectedActivity ?? false,
+                lifecycle: previous?.lifecycle ?? "active",
+                observationEpoch: Math.max(
+                    previous?.observationEpoch ?? 0,
+                    observation.epoch
+                ),
+                observedAtMs: Math.max(
+                    previous?.observedAtMs ?? 0,
+                    observation.observedAtMs
+                ),
+                parts,
+                ...(previous?.plan === undefined ? {} : { plan: previous.plan }),
+                projectionTruncated: previous?.projectionTruncated ?? false,
+                providerRunId: message.providerRunId,
+                sessionKey: message.sessionKey,
+                source: previous?.source ?? "provider-runtime",
+                ...(previous?.streamResets === undefined
+                    ? {}
+                    : { streamResets: previous.streamResets }),
+                text: previous?.text ?? "",
+                updatedAtMs: Math.max(previous?.updatedAtMs ?? 0, message.receivedAtMs),
+            })
+        );
+        await this.#repository.signalRuntimeChanged(new Date(message.receivedAtMs));
+        void this.#persistExternalRuntimeSnapshot(message.sessionKey).catch((error) => {
+            this.#reportAsyncFailure(error);
+        });
+    }
+
     async #projectExternalEvent(
-        event: ChatProviderEvent,
+        event: ChatProviderRuntimeEvent,
         observation: ChatProviderObservationBoundary
     ): Promise<void> {
         const providerRunId = providerEventRunId(event);
+        if (event.kind !== "terminal") {
+            this.#discardEmptyHistoryPlaceholders(event.sessionKey, providerRunId);
+        }
         const runs = this.#externalRuns.get(event.sessionKey);
         const previous = runs?.get(providerRunId);
         if (
@@ -1848,6 +2077,10 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
         observation: ChatProviderObservationBoundary
     ): Promise<void> {
         if (this.#disposed) return;
+        if (event.kind === "user") {
+            await this.#handleProviderUserEvent(event, observation);
+            return;
+        }
         const providerRunId = providerEventRunId(event);
         const run = this.#repository.findByProviderCorrelation(
             event.sessionKey,
@@ -1997,7 +2230,7 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
         }
         await this.#repository.signalHistoryChanged();
         const external = this.#externalRuns.get(sessionKey);
-        if (external !== undefined) {
+        if (reason === "backpressure" && external !== undefined) {
             await this.#flushExternalCoalescer(sessionKey);
             for (const [providerRunId, run] of external) {
                 external.set(providerRunId, {
@@ -2080,13 +2313,11 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
             this.#reportAsyncFailure(error);
             return false;
         }
-        const finalMessage = history.messages.find((message) =>
-            messageMatchesRun(
-                message,
-                localRunId,
-                intent.run.providerRunId,
-                intent.request.idempotencyKey
-            )
+        const finalMessage = findFinalHistoryMessage(
+            history.messages,
+            localRunId,
+            intent.run.providerRunId,
+            intent.request.idempotencyKey
         );
         if (finalMessage !== undefined) {
             const providerRunId = finalMessage.runId;
@@ -2307,6 +2538,35 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
         );
         if (local !== undefined) return;
         const previous = this.#externalRuns.get(sessionKey)?.get(inFlightRun.runId);
+        const activeLiveRun = [
+            ...(this.#externalRuns.get(sessionKey)?.values() ?? []),
+        ].find(
+            (run) =>
+                run.providerRunId !== inFlightRun.runId &&
+                run.lifecycle === "active" &&
+                run.source === "provider-runtime"
+        );
+        if (
+            previous === undefined &&
+            activeLiveRun !== undefined &&
+            inFlightRun.text === ""
+        ) {
+            this.#storeExternalRun(
+                boundExternalRunProjection({
+                    ...activeLiveRun,
+                    observationEpoch: Math.max(
+                        activeLiveRun.observationEpoch,
+                        observation.epoch
+                    ),
+                    observedAtMs: Math.max(
+                        activeLiveRun.observedAtMs,
+                        observation.observedAtMs
+                    ),
+                })
+            );
+            await this.#persistExternalRuntimeSnapshot(sessionKey);
+            return;
+        }
         if (
             previous !== undefined &&
             (!externalObservationIsStrictlyNewer(previous, observation) ||
@@ -2404,14 +2664,27 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
         let changed = false;
         let retired = false;
         const userMessages = messages.filter(({ role }) => role === "user");
+        const activeExternalRunCount = [...runs.values()].filter(
+            ({ lifecycle }) => lifecycle === "active"
+        ).length;
         for (const [providerRunId, run] of runs) {
+            const historyMayRetireRun =
+                run.lifecycle === "terminal-pending-history" ||
+                run.source === "provider-in-flight";
+            const terminalConfirmed =
+                run.lifecycle === "terminal-pending-history" &&
+                historyConfirmsExternalTerminal(run, messages, runs.size);
             if (
-                finalIdentities.has(providerRunId) &&
+                historyMayRetireRun &&
+                (finalIdentities.has(providerRunId) || terminalConfirmed) &&
                 !externalRunRemainsInFlightAtObservation(run, observation)
             ) {
+                retired = this.#deleteExternalRun(sessionKey, providerRunId) || retired;
+                changed = retired || changed;
                 continue;
             }
             if (
+                run.lifecycle !== "active" ||
                 !externalObservationIsCurrentOrNewer(run, observation) ||
                 (run.abortBoundary !== undefined &&
                     (observation.epoch <= run.abortBoundary.baselineObservationEpoch ||
@@ -2422,7 +2695,7 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
             const candidates = externalHistoryUserCandidates(
                 run,
                 userMessages,
-                runs.size
+                activeExternalRunCount
             );
             const merged = mergeExternalHistoryUserAnchors(run, candidates);
             if (!merged.changed) continue;
@@ -2442,6 +2715,13 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
         }
         for (const providerRunId of finalIdentities) {
             const run = runs.get(providerRunId);
+            if (
+                run !== undefined &&
+                run.source === "provider-runtime" &&
+                run.lifecycle === "active"
+            ) {
+                continue;
+            }
             if (
                 run !== undefined &&
                 (externalRunRemainsInFlightAtObservation(run, observation) ||
@@ -2606,6 +2886,52 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
         }
         let acknowledgement;
         try {
+            const activeExternalRun = [
+                ...(this.#externalRuns.get(input.sessionKey)?.values() ?? []),
+            ]
+                .filter(({ lifecycle }) => lifecycle === "active")
+                .toSorted(compareExternalRuns)
+                .at(-1);
+            const activeLocalRun = this.#repository
+                .listRecoverableRuns()
+                .filter(
+                    ({ id, sessionKey }) =>
+                        id !== input.clientRunId && sessionKey === input.sessionKey
+                )
+                .toSorted(
+                    (left, right) =>
+                        left.updatedAtMs - right.updatedAtMs ||
+                        left.id.localeCompare(right.id)
+                )
+                .at(-1);
+            const activeLocalIntent =
+                activeLocalRun === undefined
+                    ? undefined
+                    : this.#repository.readIntent(activeLocalRun.id);
+            const localProviderRun: ActiveProviderRun | undefined =
+                activeLocalRun === undefined || activeLocalIntent === undefined
+                    ? undefined
+                    : {
+                          providerRunId:
+                              activeLocalRun.providerRunId ??
+                              activeLocalIntent.request.idempotencyKey,
+                          updatedAtMs: activeLocalRun.updatedAtMs,
+                      };
+            const externalProviderRun: ActiveProviderRun | undefined =
+                activeExternalRun === undefined
+                    ? undefined
+                    : {
+                          providerRunId: activeExternalRun.providerRunId,
+                          updatedAtMs: activeExternalRun.updatedAtMs,
+                      };
+            let activeProviderRun = externalProviderRun;
+            if (
+                localProviderRun !== undefined &&
+                (activeProviderRun === undefined ||
+                    localProviderRun.updatedAtMs >= activeProviderRun.updatedAtMs)
+            ) {
+                activeProviderRun = localProviderRun;
+            }
             acknowledgement = await this.#provider.send(
                 {
                     attachments: reservation?.attachments ?? [],
@@ -2614,9 +2940,12 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
                         : { fastMode: input.settings.fastMode }),
                     idempotencyKey: input.idempotencyKey,
                     message: input.message,
-                    ...(input.queueMode === undefined
+                    ...(activeProviderRun === undefined
                         ? {}
-                        : { queueMode: input.queueMode }),
+                        : {
+                              expectedRunId: activeProviderRun.providerRunId,
+                              queueMode: "steer" as const,
+                          }),
                     sessionKey: input.sessionKey,
                     ...(input.settings?.thinkingLevel === undefined
                         ? {}
@@ -2937,12 +3266,16 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
         rawInput: ChatModelsListInput,
         signal?: AbortSignal
     ): Promise<ChatModelsListOutput> {
-        v.parse(chatModelsListInputSchema, rawInput);
+        const input = v.parse(chatModelsListInputSchema, rawInput);
         try {
             return v.parse(
                 chatModelsListOutputSchema,
                 await this.#provider.listModels(
-                    { includeProviderCapabilities: true, view: "configured" },
+                    {
+                        agentId: input.agentId,
+                        includeProviderCapabilities: true,
+                        view: "all",
+                    },
                     signal
                 )
             );
@@ -3145,13 +3478,11 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
                 candidates.length > 0 &&
                 candidates.every((candidate) => {
                     if (!candidate.dispatchAttempted) return false;
-                    const final = history.messages.some((message) =>
-                        messageMatchesRun(
-                            message,
-                            candidate.run.id,
-                            candidate.run.providerRunId,
-                            candidate.request.idempotencyKey
-                        )
+                    const final = findFinalHistoryMessage(
+                        history.messages,
+                        candidate.run.id,
+                        candidate.run.providerRunId,
+                        candidate.request.idempotencyKey
                     );
                     const inFlight = history.inFlightRun;
                     return (
@@ -3188,11 +3519,117 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
         sessionKey: string,
         signal?: AbortSignal
     ): Promise<void> {
-        if (!this.#externalRuns.has(sessionKey)) return;
         const observation = this.#beginExternalObservation(this.#nowMs());
+        const activeProviderRunIds = await this.#activeProviderRunIds?.(
+            sessionKey,
+            signal
+        );
+        if (activeProviderRunIds !== undefined) {
+            await this.#observeActiveProviderRunIds(
+                sessionKey,
+                activeProviderRunIds,
+                observation
+            );
+        }
         const history = await this.#readReconciliationHistory(sessionKey, signal);
         await this.observeInFlightRun(sessionKey, history.inFlightRun, observation);
         await this.observeHistoryMessages(sessionKey, history.messages, observation);
+    }
+
+    async #observeActiveProviderRunIds(
+        sessionKey: string,
+        activeProviderRunIds: readonly string[],
+        observation: ChatProviderObservationBoundary
+    ): Promise<void> {
+        const runs = this.#externalRuns.get(sessionKey);
+        if (runs === undefined) return;
+        const active = new Set(activeProviderRunIds);
+        let changed = false;
+        for (const [providerRunId, run] of runs) {
+            if (
+                run.lifecycle !== "active" ||
+                active.has(providerRunId) ||
+                !externalObservationIsCurrentOrNewer(run, observation)
+            ) {
+                continue;
+            }
+            this.#storeExternalRun(
+                boundExternalRunProjection({
+                    ...run,
+                    lifecycle: "terminal-pending-history",
+                    observationEpoch: Math.max(run.observationEpoch, observation.epoch),
+                    observedAtMs: Math.max(run.observedAtMs, observation.observedAtMs),
+                    updatedAtMs: this.#nextExternalSnapshotUpdatedAtMs(sessionKey),
+                })
+            );
+            changed = true;
+        }
+        if (!changed) return;
+        await this.#flushExternalCoalescer(sessionKey);
+        await this.#persistExternalRuntimeSnapshot(sessionKey);
+    }
+
+    /**
+     * Reconciles one provider-owned session after Gateway accepts an external
+     * send or steer. The provider history remains authoritative; callers supply
+     * only the already validated session identity, never message payloads.
+     * @param sessionKey Canonical Gateway session identity.
+     * @param signal Optional cancellation for the bounded provider read.
+     */
+    public async reconcileProviderSessionActivity(
+        sessionKey: string,
+        signal?: AbortSignal
+    ): Promise<void> {
+        if (this.#disposed) throw new ChatServiceError("provider-unavailable");
+        try {
+            await this.#watchSession(sessionKey, false);
+            await this.#reconcileExternalSnapshotSession(sessionKey, signal);
+        } catch (error) {
+            throw this.#serviceFailure(error);
+        }
+    }
+
+    public async observeProviderUserMessage(
+        message: Readonly<{
+            attachments?: readonly Extract<ChatMessagePart, { kind: "attachment" }>[];
+            messageId: string;
+            providerRunIds: readonly string[];
+            receivedAtMs: number;
+            sessionKey: string;
+            text: string;
+        }>
+    ): Promise<void> {
+        if (this.#disposed) throw new ChatServiceError("provider-unavailable");
+        try {
+            const providerRunId =
+                [...(this.#externalRuns.get(message.sessionKey)?.values() ?? [])]
+                    .filter(
+                        (run) =>
+                            run.lifecycle === "active" &&
+                            run.source === "provider-runtime" &&
+                            message.providerRunIds.includes(run.providerRunId)
+                    )
+                    .toSorted(compareExternalRuns)
+                    .at(-1)?.providerRunId ?? message.providerRunIds.at(-1);
+            if (providerRunId === undefined) return;
+            await this.#handleProviderUserEvent(
+                {
+                    ...(message.attachments === undefined
+                        ? {}
+                        : { attachments: message.attachments }),
+                    idempotencyKey: message.messageId,
+                    kind: "user",
+                    providerRunId,
+                    receivedAtMs: message.receivedAtMs,
+                    sessionKey: message.sessionKey,
+                    text: message.text,
+                },
+                this.#beginExternalObservation(message.receivedAtMs),
+                false
+            );
+        } catch (error) {
+            throw this.#serviceFailure(error);
+        }
     }
 
     public async recover(signal?: AbortSignal): Promise<void> {

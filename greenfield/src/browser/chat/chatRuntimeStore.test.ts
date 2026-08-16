@@ -82,6 +82,48 @@ function providerAnchorPart(key: string) {
 }
 
 describe("chat runtime store", () => {
+    test("renders a provider user event before any following provider activity", () => {
+        const store = createChatRuntimeStore();
+        store.installExternalRuns(sessionKey, [
+            projectChatExternalRun({
+                continuity: "complete",
+                lifecycle: "active",
+                hasUnprojectedActivity: false,
+                observationEpoch: 1,
+                observedAtMs: occurredAtMs,
+                parts: [
+                    {
+                        kind: "user",
+                        messageId: "provider-user-message",
+                        occurredAtMs,
+                        sequence: 1,
+                        text: "**Immediate** [link](https://example.com)",
+                    },
+                ],
+                projectionTruncated: false,
+                providerRunId: "provider-user-fast-path",
+                sessionKey,
+                source: "provider-runtime",
+                text: "",
+                updatedAtMs: occurredAtMs,
+            }),
+        ]);
+
+        expect(chatRuntimeMessages(store.state, sessionKey)).toEqual([
+            expect.objectContaining({
+                idempotencyKey: "provider-user-message",
+                parts: [
+                    {
+                        kind: "text",
+                        text: "**Immediate** [link](https://example.com)",
+                    },
+                ],
+                role: "user",
+                timestampMs: occurredAtMs,
+            }),
+        ]);
+    });
+
     test("starts conservatively before inventory or realtime proof arrives", () => {
         expect(createChatRuntimeStore().state.connection).toBe("reconnecting");
     });
@@ -144,6 +186,9 @@ describe("chat runtime store", () => {
         expect(store.state.sessions[sessionKey]?.needsReconciliation).toBe(false);
         store.apply(event(4, { kind: "interrupted" }));
         expect(store.state.sessions[sessionKey]?.needsReconciliation).toBe(true);
+        expect(store.state.sessions[sessionKey]?.runs["run-1"]?.phase).toBe(
+            "unresolved"
+        );
         store.markReconciled(sessionKey, 4);
         expect(store.state.sessions[sessionKey]?.needsReconciliation).toBe(true);
     });
@@ -254,7 +299,7 @@ describe("chat runtime store", () => {
         });
     });
 
-    test("keeps optimistic and settled rows until canonical history explicitly carries them", () => {
+    test("retires optimistic and live rows through canonical admission identities", () => {
         const store = createChatRuntimeStore();
         store.enqueue({
             attachments: [attachment()],
@@ -267,6 +312,26 @@ describe("chat runtime store", () => {
         });
         store.apply(event(1, { clientRunId: "client-1", kind: "started" }));
         store.apply(event(2, { kind: "final", text: "Final answer" }));
+        const activeRun = store.state.sessions[sessionKey]?.runs["run-1"];
+        if (activeRun === undefined) throw new Error("Expected runtime run");
+        store.installSnapshots(
+            sessionKey,
+            [
+                {
+                    lastSequence: activeRun.lastSequence,
+                    message: {
+                        ...activeRun.message,
+                        providerRunId: "provider-run-1",
+                    },
+                    phase: activeRun.phase,
+                    projectionTruncated: activeRun.projectionTruncated,
+                    reconciliation: activeRun.reconciliation,
+                    runId: "run-1",
+                },
+            ],
+            2,
+            false
+        );
 
         const beforeHistory = chatRuntimeMessages(store.state, sessionKey);
         expect(beforeHistory.map((message) => message.id)).toEqual([
@@ -279,14 +344,16 @@ describe("chat runtime store", () => {
         store.reconcileHistory(sessionKey, {
             clientRunIds: ["client-1"],
             idempotencyKeys: [],
-            runIds: ["run-1"],
+            providerRunIds: ["provider-run-1"],
+            runIds: [],
             throughCursor: 2,
         });
         expect(chatRuntimeMessages(store.state, sessionKey)).toEqual([]);
         store.reconcileHistory(sessionKey, {
             clientRunIds: ["client-1"],
             idempotencyKeys: [],
-            runIds: ["run-1"],
+            providerRunIds: ["provider-run-1"],
+            runIds: [],
             throughCursor: 2,
         });
         expect(chatRuntimeMessages(store.state, sessionKey)).toEqual([]);
@@ -654,13 +721,9 @@ describe("chat runtime store", () => {
 
         store.installExternalRuns(sessionKey, []);
         expect(
-            store.state.sessions[sessionKey]?.externalRuns["provider-1"]?.omissionCount
-        ).toBe(1);
-        store.installExternalRuns(sessionKey, []);
-        expect(
-            store.state.sessions[sessionKey]?.externalRuns["provider-1"]?.omissionCount
-        ).toBe(2);
-        expect(chatRuntimeMessages(store.state, sessionKey)).not.toEqual([]);
+            store.state.sessions[sessionKey]?.externalRuns["provider-1"]
+        ).toBeUndefined();
+        expect(chatRuntimeMessages(store.state, sessionKey)).toEqual([]);
         expect(chatRuntimePlans(store.state, sessionKey)).toEqual([]);
     });
 
@@ -1571,7 +1634,7 @@ describe("chat runtime store", () => {
         ]);
     });
 
-    test("retains an omitted external diagnostic tail across authoritative polls", () => {
+    test("retires an omitted external diagnostic tail from an authoritative poll", () => {
         const store = createChatRuntimeStore();
         const projection = projectChatExternalRun({
             continuity: "complete",
@@ -1598,16 +1661,8 @@ describe("chat runtime store", () => {
         store.installExternalRuns(sessionKey, []);
         expect(
             store.state.sessions[sessionKey]?.externalRuns["provider-terminal-lag"]
-                ?.omissionCount
-        ).toBe(1);
-        expect(chatRuntimeMessages(store.state, sessionKey)).not.toHaveLength(0);
-
-        store.installExternalRuns(sessionKey, []);
-        expect(
-            store.state.sessions[sessionKey]?.externalRuns["provider-terminal-lag"]
-                ?.omissionCount
-        ).toBe(2);
-        expect(chatRuntimeMessages(store.state, sessionKey)).not.toEqual([]);
+        ).toBeUndefined();
+        expect(chatRuntimeMessages(store.state, sessionKey)).toEqual([]);
         expect(chatRuntimePlans(store.state, sessionKey)).toEqual([]);
     });
 

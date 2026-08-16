@@ -93,6 +93,7 @@ class FakeProvider implements OpenClawCronProvider {
     removeDeletesBeforeError = false;
     removeError: unknown;
     readonly runCalls: Parameters<OpenClawCronProvider["run"]>[0][] = [];
+    readonly setScratchCalls: Parameters<OpenClawCronProvider["setScratch"]>[0][] = [];
     readonly updateCalls: Parameters<OpenClawCronProvider["update"]>[0][] = [];
     updateError: unknown;
     updateErrorAppliesPatch = false;
@@ -170,6 +171,21 @@ class FakeProvider implements OpenClawCronProvider {
     run(input: Parameters<OpenClawCronProvider["run"]>[0]) {
         this.runCalls.push(input);
         return Promise.resolve({ processInstanceId: "gateway-process-1", ran: true });
+    }
+
+    setScratch(input: Parameters<OpenClawCronProvider["setScratch"]>[0]) {
+        this.setScratchCalls.push(input);
+        if (this.currentJob?.scratch === undefined) {
+            return Promise.reject(new OpenClawCronProviderError("not-found"));
+        }
+        this.currentJob = {
+            ...this.currentJob,
+            scratch: {
+                content: input.content,
+                revision: this.currentJob.scratch.revision + 1,
+            },
+        };
+        return Promise.resolve({ revision: this.currentJob.scratch!.revision });
     }
 
     update(input: Parameters<OpenClawCronProvider["update"]>[0]) {
@@ -1354,6 +1370,35 @@ describe("OpenClaw cron service", () => {
         expect(await intentStore.getActive("nightly-report")).toMatchObject({
             createdBy: operator,
             reason: "Maintenance",
+        });
+    });
+
+    test("updates heartbeat scratch with its independent revision fence", async () => {
+        const { provider, service } = fixture();
+        provider.currentJob = providerJob({
+            payload: { kind: "heartbeat" },
+            scratch: { content: "Check services", revision: 4 },
+        });
+
+        const result = await service.update({
+            expectedConfigRevision: "revision-1",
+            expectedScratchRevision: 4,
+            id: "nightly-report",
+            patch: { scratch: "Check services and disk" },
+        });
+
+        expect(provider.setScratchCalls).toEqual([
+            {
+                content: "Check services and disk",
+                expectedRevision: 4,
+                id: "nightly-report",
+            },
+        ]);
+        expect(provider.updateCalls).toHaveLength(0);
+        expect(result.job.scratch).toEqual({
+            content: "Check services and disk",
+            revision: 5,
+            truncated: false,
         });
     });
 

@@ -18,6 +18,26 @@ const runId = "019fe633-9133-7ba0-8b80-809dd80dfb39";
 const timestampMs = 1_800_000_000_000;
 
 describe("chat contract adapter", () => {
+    test("keeps canonical user admission identity separate from provider run identity", () => {
+        const message: ChatMessage = {
+            content: {
+                kind: "complete",
+                parts: [{ id: "user-text", kind: "text", text: "Send files" }],
+            },
+            id: "provider-user-message",
+            idempotencyKey: "0123456789abcdef0123456789abcdef",
+            role: "user",
+            source: "gateway-history",
+        };
+
+        const projected = projectChatContractMessage(message, sessionKey, 0);
+        expect(projected).toMatchObject({
+            idempotencyKey: "0123456789abcdef0123456789abcdef",
+            role: "user",
+        });
+        expect(projected.providerRunId).toBeUndefined();
+    });
+
     test("projects ordered hydrated parts and managed media", () => {
         const message: ChatMessage = {
             content: {
@@ -293,6 +313,7 @@ describe("chat contract adapter", () => {
                 id: runId,
                 reconciliation: "history-authoritative",
                 reconciledAtMs: timestampMs + 2,
+                providerRunId: "provider-run",
                 sessionKey,
                 state: "completed",
                 stateVersion: 2,
@@ -309,6 +330,7 @@ describe("chat contract adapter", () => {
                     { kind: "tool", status: "completed" },
                     { kind: "text", text: "Final" },
                 ],
+                providerRunId: "provider-run",
             },
             phase: "completed",
             reconciliation: "history-authoritative",
@@ -556,6 +578,19 @@ describe("chat contract adapter", () => {
                 observedAtMs: timestampMs,
                 parts: [
                     {
+                        attachments: [
+                            {
+                                downloadUrl:
+                                    "/api/chat/media/00000000-0000-4000-8000-000000000002?disposition=download",
+                                fileName: "logo.jpg",
+                                id: "session-media:1",
+                                kind: "attachment",
+                                mediaType: "image/jpeg",
+                                renderPolicy: "inline-image",
+                                sizeBytes: 7861,
+                                url: "/api/chat/media/00000000-0000-4000-8000-000000000002?disposition=preview",
+                            },
+                        ],
                         kind: "user",
                         ...(messageId === undefined ? {} : { messageId }),
                         sequence,
@@ -575,6 +610,7 @@ describe("chat contract adapter", () => {
         const beforeReindex = projectAnchor(2, "canonical-steer-message");
         const afterReindex = projectAnchor(7, "canonical-steer-message");
         expect(beforeReindex?.segmentId).toBe("user:canonical-steer-message");
+        expect(beforeReindex?.message.attachments).toHaveLength(1);
         expect(afterReindex?.segmentId).toBe(beforeReindex?.segmentId);
         expect(afterReindex?.message.id).toBe(beforeReindex?.message.id);
         expect(projectAnchor(7)?.segmentId).toBe("user:7");

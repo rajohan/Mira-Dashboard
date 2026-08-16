@@ -26,7 +26,10 @@ import {
     type PersistentGatewayTransport,
 } from "./persistentGatewayTransport.ts";
 import { createPersistentOpenClawCronProvider } from "./persistentOpenClawCronProvider.ts";
-import { createSourceDevelopmentGatewayTransport } from "./sourceDevelopmentGatewayTransport.ts";
+import {
+    createSourceDevelopmentChatWriteCapability,
+    createSourceDevelopmentGatewayTransport,
+} from "./sourceDevelopmentGatewayTransport.ts";
 
 const temporaryRoots: string[] = [];
 
@@ -207,6 +210,68 @@ function asTestRecord(value: unknown): Readonly<Record<string, unknown>> {
 }
 
 describe("source-development Gateway transport", () => {
+    test("delegates chat writes only for one short-lived E2E session capability", async () => {
+        const stateRoot = await developmentStateRoot();
+        const calls: string[] = [];
+        const base = readTransport(calls);
+        const live = Object.freeze({
+            ...base,
+            requestChatWrite(method: "chat.abort" | "chat.send") {
+                calls.push(`REAL-WRITE:${method}`);
+                return Promise.resolve(
+                    method === "chat.send"
+                        ? Object.freeze({ runId: "provider-run-1", status: "started" })
+                        : Object.freeze({
+                              aborted: true,
+                              ok: true,
+                              runIds: ["provider-run-1"],
+                          })
+                );
+            },
+        }) satisfies PersistentGatewayTransport;
+        const transport = createSourceDevelopmentGatewayTransport({
+            nowMs: () => 1_800_000_000_000,
+            readTransport: live,
+            stateRoot,
+        });
+        const capability = createSourceDevelopmentChatWriteCapability({
+            expiresAtMs: 1_800_000_060_000,
+            nowMs: 1_800_000_000_000,
+            sessionKey: "agent:main:chat-e2e-openai",
+            stateRoot,
+        });
+
+        expect(
+            await transport.requestChatWrite("chat.send", {
+                attachments: [],
+                idempotencyKey: "a".repeat(32),
+                message: "browser E2E message",
+                sessionKey: "agent:main:chat-e2e-openai",
+            })
+        ).toEqual({ runId: "provider-run-1", status: "started" });
+        const unauthorized = await captureFailure(() =>
+            transport.requestChatWrite("chat.send", {
+                attachments: [],
+                idempotencyKey: "b".repeat(32),
+                message: "wrong session",
+                sessionKey: "agent:main:main",
+            })
+        );
+        expect(unauthorized).toMatchObject({ code: "UNAVAILABLE" });
+
+        capability.revoke();
+        const revoked = await captureFailure(() =>
+            transport.requestChatWrite("chat.send", {
+                attachments: [],
+                idempotencyKey: "c".repeat(32),
+                message: "revoked session",
+                sessionKey: "agent:main:chat-e2e-openai",
+            })
+        );
+        expect(revoked).toMatchObject({ code: "UNAVAILABLE" });
+        expect(calls.filter((call) => call === "REAL-WRITE:chat.send")).toHaveLength(1);
+    });
+
     test("keeps simulated cron deletion authoritative for service readback and inventory", async () => {
         const stateRoot = await developmentStateRoot();
         const calls: string[] = [];

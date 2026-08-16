@@ -1603,6 +1603,36 @@ describe("durable chat repository", () => {
         }
     });
 
+    test("preserves provider runtime snapshots across a transport boundary", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createChatRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission,
+            "main",
+            () => 1200
+        );
+        const snapshot = externalRuntimeSnapshotWrite();
+        try {
+            expect(await repository.replaceExternalRuntimeSnapshot(snapshot)).toBeTrue();
+            expect(await repository.markTranscriptTransportBoundary(1300)).toEqual([]);
+            expect(repository.readTranscriptState(snapshot.sessionKey)).toMatchObject({
+                currentGeneration: 1,
+                status: "ready",
+            });
+            expect(repository.listExternalRuntimeSnapshots()).toEqual([
+                {
+                    observationEpoch: snapshot.observationEpoch,
+                    payload: snapshot.payload,
+                    sessionKey: snapshot.sessionKey,
+                    transcriptGeneration: snapshot.transcriptGeneration,
+                    updatedAtMs: snapshot.updatedAtMs,
+                },
+            ]);
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
     test("retires pre-restart work when the reset lifecycle event arrives during downtime", async () => {
         const database = await openFreshMigratedDatabase();
         const beforeRestart = createChatRepository(

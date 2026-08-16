@@ -30,7 +30,7 @@ import type { ChatBackgroundTaskView, ChatCompanionView } from "./chatTypes.ts";
 export const chatQueryRoot = ["chat"] as const;
 export const chatHistoryQueryRoot = [...chatQueryRoot, "history"] as const;
 export const chatRuntimeQueryRoot = [...chatQueryRoot, "runtime"] as const;
-export const chatModelsQueryKey = [...chatQueryRoot, "models"] as const;
+export const chatModelsQueryRoot = [...chatQueryRoot, "models"] as const;
 export const chatCompanionQueryRoot = [...chatQueryRoot, "companion"] as const;
 export const openClawTaskQueryRoot = ["openclaw-tasks"] as const;
 export const openClawTaskListQueryRoot = [...openClawTaskQueryRoot, "list"] as const;
@@ -322,10 +322,14 @@ export function chatRuntimeQueryOptions(
  * @param client Validating browser tRPC client.
  * @returns Bounded configured provider model inventory.
  */
-export function chatModelsQueryOptions(client: DashboardTrpcClient) {
+export function chatModelsQueryOptions(client: DashboardTrpcClient, agentId: string) {
     return queryOptions({
-        queryFn: ({ signal }) => client.query("chat.listModels", {}, { signal }),
-        queryKey: chatModelsQueryKey,
+        enabled: agentId !== "",
+        queryFn: ({ signal }) => {
+            if (agentId === "") throw new TypeError("Chat models need an agent owner");
+            return client.query("chat.listModels", { agentId }, { signal });
+        },
+        queryKey: [...chatModelsQueryRoot, agentId],
         staleTime: 60_000,
     });
 }

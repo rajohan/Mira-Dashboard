@@ -7,6 +7,7 @@ import {
     openSync,
     readFileSync,
     realpathSync,
+    unlinkSync,
     writeSync,
 } from "node:fs";
 import path from "node:path";
@@ -37,6 +38,9 @@ const developmentStateMarkerFileName = ".mira-dashboard-development-state.json";
 const simulatorOwner = "mira-dashboard-source-development-v1";
 const simulatorDirectoryName = "development-authority-simulator";
 const gatewayJournalFileName = "gateway-mutations.ndjson";
+const chatWriteCapabilityFileName = "chat-e2e-write-capability.json";
+const chatWriteCapabilityOwner = "mira-dashboard-chat-e2e-v1";
+const chatWriteCapabilityMaximumLifetimeMs = 10 * 60_000;
 const simulatedCronInventoryMaximum = 1000;
 const simulatedCronInventoryMaximumBytes = 32 * 1024 * 1024;
 const simulatedCronMaterializationMaximum = 4;
@@ -46,6 +50,17 @@ const developmentStateMarkerSchema = v.strictObject({
     formatVersion: v.literal(1),
     owner: v.literal(simulatorOwner),
 });
+
+const chatWriteCapabilitySchema = v.strictObject({
+    expiresAtMs: v.pipe(v.number(), v.safeInteger(), v.minValue(0)),
+    formatVersion: v.literal(1),
+    owner: v.literal(chatWriteCapabilityOwner),
+    sessionKey: v.pipe(v.string(), v.minLength(1), v.maxLength(512)),
+});
+
+export interface SourceDevelopmentChatWriteCapability {
+    readonly revoke: () => void;
+}
 
 type SimulatedGatewayMethod =
     | PersistentGatewayAdminMethod
@@ -60,11 +75,12 @@ export interface SourceDevelopmentGatewayTransportOptions {
     readonly stateRoot: string;
 }
 
-/** Exact live Gateway authority retained by ordinary source development. */
+/** Live Gateway reads plus the exact capability-gated chat-write delegation. */
 export type SourceDevelopmentGatewayReadTransport = Pick<
     PersistentGatewayTransport,
     | "request"
     | "requestChatRead"
+    | "requestChatWrite"
     | "requestOpenClawSettingsRead"
     | "requestTaskRead"
     | "snapshot"
@@ -153,6 +169,99 @@ function checkedNow(nowMs: () => number): number {
         throw new Error("Development Gateway simulator clock is invalid");
     }
     return now;
+}
+
+function simulatorDirectory(stateRoot: string): string {
+    const directory = path.join(assertMarkedDevelopmentStateRoot(stateRoot), simulatorDirectoryName);
+    mkdirSync(directory, { mode: 0o700, recursive: true });
+    if (realpathSync(directory) !== directory) {
+        throw new Error("Development Gateway simulator directory is invalid");
+    }
+    return directory;
+}
+
+/**
+ * Grants one short-lived source-development browser probe authority to write to one
+ * exact chat session. Ordinary development remains mutation-free.
+ * @returns A revocable write capability scoped to the requested development session.
+ */
+export function createSourceDevelopmentChatWriteCapability(input: Readonly<{
+    expiresAtMs: number;
+    nowMs?: number;
+    sessionKey: string;
+    stateRoot: string;
+}>): SourceDevelopmentChatWriteCapability {
+    const now = input.nowMs ?? Date.now();
+    const capability = v.parse(chatWriteCapabilitySchema, {
+        expiresAtMs: input.expiresAtMs,
+        formatVersion: 1,
+        owner: chatWriteCapabilityOwner,
+        sessionKey: input.sessionKey,
+    });
+    if (
+        capability.expiresAtMs <= now ||
+        capability.expiresAtMs - now > chatWriteCapabilityMaximumLifetimeMs
+    ) {
+        throw new RangeError("Development chat write capability lifetime is invalid");
+    }
+    const capabilityPath = path.join(
+        simulatorDirectory(input.stateRoot),
+        chatWriteCapabilityFileName
+    );
+    const descriptor = openSync(
+        capabilityPath,
+        constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW | constants.O_WRONLY,
+        0o600
+    );
+    try {
+        writeSync(descriptor, JSON.stringify(capability), undefined, "utf8");
+        fsyncSync(descriptor);
+    } finally {
+        closeSync(descriptor);
+    }
+    let revoked = false;
+    return Object.freeze({
+        revoke(): void {
+            if (revoked) return;
+            revoked = true;
+            unlinkSync(capabilityPath);
+        },
+    });
+}
+
+function chatWriteIsAuthorized(input: Readonly<{
+    capabilityPath: string;
+    nowMs: () => number;
+    parameters: Readonly<Record<string, unknown>>;
+}>): boolean {
+    let descriptor: number;
+    try {
+        descriptor = openSync(
+            input.capabilityPath,
+            constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
+        );
+    } catch {
+        return false;
+    }
+    try {
+        const status = fstatSync(descriptor);
+        if (!status.isFile() || status.nlink !== 1 || (status.mode & 0o077) !== 0) {
+            return false;
+        }
+        const parsed = v.safeParse(
+            chatWriteCapabilitySchema,
+            JSON.parse(readFileSync(descriptor, "utf8"))
+        );
+        return (
+            parsed.success &&
+            parsed.output.expiresAtMs > checkedNow(input.nowMs) &&
+            parsed.output.sessionKey === input.parameters.sessionKey
+        );
+    } catch {
+        return false;
+    } finally {
+        closeSync(descriptor);
+    }
 }
 
 function parameterString(
@@ -660,6 +769,39 @@ function simulatedResponse(
                 runId: `dev-${String(now)}`,
             });
         }
+        case "cron.scratch.get": {
+            const id = parameterString(parameters, "id");
+            return (
+                state.simulatedResponses.get(readKey("cron.scratch.get", { id })) ??
+                Object.freeze({ currentRevision: 0, maxBytes: 64 * 1024, scratch: null })
+            );
+        }
+        case "cron.scratch.set": {
+            const id = parameterString(parameters, "id");
+            const content = parameters.content;
+            const expectedRevision = parameters.expectedRevision;
+            if (
+                typeof content !== "string" ||
+                content.length > 64 * 1024 ||
+                !Number.isSafeInteger(expectedRevision) ||
+                (expectedRevision as number) < 0
+            ) {
+                throw new TypeError("Development cron scratch update is invalid");
+            }
+            const revision = (expectedRevision as number) + 1;
+            const response = Object.freeze({
+                currentRevision: revision,
+                maxBytes: 64 * 1024,
+                ok: true,
+                scratch: Object.freeze({ content, revision, updatedAtMs: now }),
+            });
+            state.simulatedResponses.set(readKey("cron.scratch.get", { id }), {
+                currentRevision: revision,
+                maxBytes: 64 * 1024,
+                scratch: response.scratch,
+            });
+            return response;
+        }
         case "cron.update": {
             const id = parameterString(parameters, "id");
             const patch = asRecord(parameters.patch);
@@ -764,13 +906,9 @@ function observedGatewayRead(
 export function createSourceDevelopmentGatewayTransport(
     options: SourceDevelopmentGatewayTransportOptions
 ): PersistentGatewayTransport {
-    const stateRoot = assertMarkedDevelopmentStateRoot(options.stateRoot);
-    const simulatorDirectory = path.join(stateRoot, simulatorDirectoryName);
-    mkdirSync(simulatorDirectory, { mode: 0o700, recursive: true });
-    if (realpathSync(simulatorDirectory) !== simulatorDirectory) {
-        throw new Error("Development Gateway simulator directory is invalid");
-    }
-    const journalPath = path.join(simulatorDirectory, gatewayJournalFileName);
+    const directory = simulatorDirectory(options.stateRoot);
+    const journalPath = path.join(directory, gatewayJournalFileName);
+    const chatWriteCapabilityPath = path.join(directory, chatWriteCapabilityFileName);
     const nowMs = options.nowMs ?? Date.now;
     const state: SimulatorState = {
         companionExchanges: new Map(),
@@ -846,6 +984,20 @@ export function createSourceDevelopmentGatewayTransport(
         },
         requestChatWrite(method, parameters, requestOptions) {
             assertPersistentGatewayChatWriteParameters(method, parameters);
+            if (
+                (method === "chat.send" || method === "chat.abort") &&
+                chatWriteIsAuthorized({
+                    capabilityPath: chatWriteCapabilityPath,
+                    nowMs,
+                    parameters,
+                })
+            ) {
+                return options.readTransport.requestChatWrite(
+                    method,
+                    parameters,
+                    requestOptions
+                );
+            }
             return dispatch(method, parameters, requestOptions);
         },
         requestOpenClawSettingsRead(method, parameters, requestOptions) {

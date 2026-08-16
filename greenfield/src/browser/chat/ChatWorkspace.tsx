@@ -43,7 +43,7 @@ import type {
 
 interface ChatWorkspaceProps {
     readonly activeRunIds?: readonly string[];
-    readonly abortableRunIds: readonly string[];
+    readonly abortableRunId?: string;
     readonly actionBusy?: boolean;
     readonly attachmentError?: string;
     readonly attachments: readonly ChatDraftAttachment[];
@@ -68,6 +68,7 @@ interface ChatWorkspaceProps {
     readonly onHydrateMessage: (messageId: string) => void;
     readonly onLoadMoreTasks: () => void;
     readonly onLoadOlder: () => void;
+    readonly onOpenLocalFile?: (reference: string) => void;
     readonly onReadAloud?: (messageId: string, text: string) => void;
     readonly onRemoveAttachment: (id: string) => void;
     readonly onResetCompanion: () => void;
@@ -134,7 +135,7 @@ function chatConnectionStatusMessage(
  */
 export function ChatWorkspace({
     activeRunIds,
-    abortableRunIds,
+    abortableRunId,
     actionBusy = false,
     attachmentError,
     attachments,
@@ -159,6 +160,7 @@ export function ChatWorkspace({
     onHydrateMessage,
     onLoadMoreTasks,
     onLoadOlder,
+    onOpenLocalFile,
     onReadAloud,
     onRemoveAttachment,
     onResetCompanion,
@@ -357,7 +359,10 @@ export function ChatWorkspace({
                         data-testid="chat-transcript-pane"
                     >
                         <ChatTranscript
-                            activeRunIds={activeRunIds ?? abortableRunIds}
+                            activeRunIds={
+                                activeRunIds ??
+                                (abortableRunId === undefined ? [] : [abortableRunId])
+                            }
                             display={displaySettings}
                             hasOlder={view.historyHasNextPage}
                             initialLoading={view.historyInitialLoading}
@@ -366,6 +371,7 @@ export function ChatWorkspace({
                             onHideMessage={onHideMessage}
                             onHydrateMessage={onHydrateMessage}
                             onLoadOlder={onLoadOlder}
+                            onOpenLocalFile={onOpenLocalFile}
                             onDismissReadAloudError={onDismissReadAloudError}
                             onReadAloud={onReadAloud}
                             onReturnToLatest={onReturnHistoryToLatest}
@@ -383,7 +389,7 @@ export function ChatWorkspace({
                         />
                     )}
                     <ChatComposer
-                        abortableRunIds={abortableRunIds}
+                        abortableRunId={abortableRunId}
                         attachmentError={attachmentError}
                         attachments={attachments}
                         canSend={canSend}
@@ -451,7 +457,7 @@ export function ChatWorkspace({
                     </Button>
                 )}
                 <ChatSidePanel
-                    canAskCompanion={canAskCompanion ?? abortableRunIds.length > 0}
+                    canAskCompanion={canAskCompanion ?? abortableRunId !== undefined}
                     className={`border-primary-700 fixed inset-2 z-70 rounded-xl border lg:static lg:inset-auto lg:z-auto lg:max-h-none lg:rounded-none lg:border-y-0 lg:border-r-0 ${
                         activityOpen ? "flex" : "hidden"
                     }`}

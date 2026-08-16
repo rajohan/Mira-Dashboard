@@ -24,6 +24,7 @@ import {
     openClawCronQueryKey,
 } from "./openClawCronQueries.ts";
 import {
+    openClawCronPatchJson,
     openClawCronOperationalStatus,
     parseOpenClawCronPatchJson,
 } from "./presentation.ts";
@@ -358,6 +359,34 @@ describe("OpenClaw scheduled jobs browser", () => {
                 enabledBeta
             )
         ).toMatchObject({ success: true });
+    });
+
+    test("shows heartbeat scratch in JSON and emits only its changed field", () => {
+        const heartbeat: OpenClawCronJob = {
+            ...enabledBeta,
+            payload: { kind: "heartbeat" },
+            scratch: {
+                content: "Check services",
+                revision: 4,
+                truncated: false,
+            },
+        };
+
+        expect(JSON.parse(openClawCronPatchJson(heartbeat))).toMatchObject({
+            scratch: "Check services",
+        });
+        expect(
+            parseOpenClawCronPatchJson(
+                JSON.stringify({
+                    ...JSON.parse(openClawCronPatchJson(heartbeat)),
+                    scratch: "Check services and disk",
+                }),
+                heartbeat
+            )
+        ).toEqual({
+            patch: { scratch: "Check services and disk" },
+            success: true,
+        });
     });
 
     test("locks the bounded inventory and loads runs for the enabled-first selection", async () => {

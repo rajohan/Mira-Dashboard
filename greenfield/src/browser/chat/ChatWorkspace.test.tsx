@@ -10,7 +10,6 @@ const sessionKey = "agent:main:main";
 
 function properties(): Parameters<typeof ChatWorkspace>[0] {
     return {
-        abortableRunIds: [],
         attachments: [],
         canSend: true,
         displaySettings: {
@@ -93,7 +92,7 @@ describe("chat workspace", () => {
                 sendSettings={{
                     ...props.sendSettings,
                     fastMode: "auto",
-                    model: "openai/gpt-5.6-sol",
+                    model: "gpt-5.6-sol",
                 }}
                 view={{
                     ...props.view,
@@ -115,6 +114,10 @@ describe("chat workspace", () => {
         expect(modelSelect).toHaveTextContent("gpt-5.6-sol");
         expect(modelSelect).not.toHaveTextContent("openai/");
         await user.click(modelSelect);
+        expect(screen.getByText("OpenAI")).toBeVisible();
+        expect(
+            screen.getAllByRole("option", { name: "gpt-5.6-sol" })
+        ).toHaveLength(1);
         await user.click(screen.getByRole("option", { name: "gpt-5.6-terra" }));
         expect(onSendSettingsChange).toHaveBeenLastCalledWith({
             fastMode: "auto",
@@ -122,6 +125,21 @@ describe("chat workspace", () => {
             speed: "standard",
             thinking: "high",
         });
+    });
+
+    test("uses the compact Display heading and hoverable enabled controls", async () => {
+        const user = userEvent.setup();
+        render(<ChatWorkspace {...properties()} />);
+
+        await user.click(screen.getByRole("button", { name: "Chat settings" }));
+        expect(screen.getByText("Display", { selector: "p" })).toBeVisible();
+        expect(screen.queryByText("Display in this browser")).toBeNull();
+        expect(screen.getByRole("button", { name: /Show thinking/iu })).toHaveClass(
+            "hover:bg-primary-800"
+        );
+        expect(screen.getByRole("button", { name: /Show tools/iu })).toHaveClass(
+            "hover:bg-primary-800"
+        );
     });
 
     test("replaces automatic fast mode only after an explicit speed change", async () => {
@@ -207,7 +225,7 @@ describe("chat workspace", () => {
         expect(props.onResetTranscript).not.toHaveBeenCalled();
 
         await user.click(screen.getByRole("button", { name: "Chat settings" }));
-        await user.click(screen.getByRole("button", { name: "Reset chat history" }));
+        await user.click(screen.getByRole("button", { name: "Reset" }));
         const dialog = screen.getByRole("dialog", { name: "Reset this chat?" });
         expect(within(dialog).getByText(/Hiding one message affects/u)).toBeVisible();
         await user.click(
@@ -236,7 +254,11 @@ describe("chat workspace", () => {
             "Session A draft"
         );
         await user.click(screen.getByRole("button", { name: "Chat settings" }));
-        await user.click(screen.getByRole("button", { name: "Reset chat history" }));
+        await user.click(
+            within(screen.getByTestId("chat-settings-surface")).getByRole("button", {
+                name: "Reset",
+            })
+        );
 
         rendered.rerender(
             <ChatWorkspace
@@ -422,15 +444,18 @@ describe("chat workspace", () => {
         await user.click(screen.getByRole("button", { name: "Open activity panel" }));
         await user.click(screen.getByRole("button", { name: /Chat helper Idle/iu }));
         await user.click(screen.getByRole("button", { name: "Chat settings" }));
+        const settings = within(screen.getByTestId("chat-settings-surface"));
         expect(screen.getByRole("button", { name: /Response speed/iu })).toBeDisabled();
-        expect(
-            screen.getByRole("button", { name: "Shorten chat history" })
-        ).toBeDisabled();
-        expect(screen.getByRole("button", { name: "Reset chat history" })).toBeDisabled();
+        expect(settings.getByRole("button", { name: "Compact" })).toBeDisabled();
+        expect(settings.getByRole("button", { name: "Reset" })).toBeDisabled();
         expect(
             screen.getByRole("textbox", { name: "Ask about this chat" })
         ).toBeDisabled();
-        expect(screen.getByRole("button", { name: "Reset" })).toBeDisabled();
+        expect(
+            screen
+                .getAllByRole("button", { name: "Reset" })
+                .every((button) => button.hasAttribute("disabled"))
+        ).toBeTrue();
         expect(screen.getByRole("button", { name: "Cancel task" })).toBeDisabled();
     });
 
@@ -718,8 +743,8 @@ describe("chat workspace", () => {
         await user.click(screen.getByRole("button", { name: "Chat settings" }));
         expect(document.querySelectorAll(".fixed.inset-0")).toHaveLength(0);
         expect(screen.getByTestId("chat-settings-surface")).toHaveClass(
-            "bg-primary-700",
-            "border-primary-400"
+            "bg-primary-950",
+            "border-primary-600"
         );
     });
 

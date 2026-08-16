@@ -1,3 +1,5 @@
+import { formatDistanceStrict } from "date-fns";
+
 import type {
     DockerContainer,
     DockerContainerPort,
@@ -16,6 +18,30 @@ export const defaultDockerContainerSort: DockerContainerSort = Object.freeze({
     direction: "ascending",
     field: "name",
 });
+
+/** @returns Whether the Engine state represents a live container process. */
+export function dockerContainerIsActive(container: DockerContainer): boolean {
+    return ["paused", "restarting", "running"].includes(container.state);
+}
+
+/**
+ * @param container Validated container lifecycle timestamps.
+ * @param observedAtMs Snapshot clock used to keep retained data deterministic.
+ * @returns Legacy-style runtime copy without duplicating the health state.
+ */
+export function formatDockerContainerRuntime(
+    container: DockerContainer,
+    observedAtMs: number
+): string {
+    if (container.startedAtMs === undefined) return "Runtime unavailable";
+    const active = dockerContainerIsActive(container);
+    const endedAtMs = active ? observedAtMs : (container.finishedAtMs ?? observedAtMs);
+    const duration = formatDistanceStrict(
+        new Date(container.startedAtMs),
+        new Date(Math.max(container.startedAtMs, endedAtMs))
+    );
+    return `${active ? "Up" : "Ran for"} ${duration}`;
+}
 
 type BadgeVariant = "danger" | "default" | "info" | "success" | "warning";
 

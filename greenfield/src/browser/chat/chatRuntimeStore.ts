@@ -166,8 +166,6 @@ export interface ChatExternalRunProjection {
     readonly hasUnprojectedActivity: boolean;
     readonly lifecycle: "active" | "terminal-pending-history";
     readonly message: ChatDisplayMessage;
-    /** Consecutive authoritative inventories that omitted this retained diagnostic tail. */
-    readonly omissionCount?: number;
     readonly observationEpoch: number;
     readonly observedAtMs: number;
     readonly plan?: ChatActivePlanView;
@@ -668,21 +666,27 @@ function mergeExternalSegments(
                 replacedSourceStreams,
                 !incomingIsNewer
             );
-            const unchanged =
-                JSON.stringify(previous.message.parts) === JSON.stringify(parts);
             const lifecycleObservation = parts.some(
                 (part) => part.kind === "control" && part.activity !== undefined
             );
             merged[existingIndex] = {
                 ...previous,
                 ...segment,
+                providerSequence: previous.providerSequence,
                 message: {
                     ...segment.message,
                     parts,
-                    ...((!incomingIsNewer || (unchanged && !lifecycleObservation)) &&
-                    previous.message.timestampMs !== undefined
-                        ? { timestampMs: previous.message.timestampMs }
-                        : {}),
+                    sequence: previous.message.sequence,
+                    ...((incomingIsNewer && lifecycleObservation
+                        ? segment.message.timestampMs
+                        : previous.message.timestampMs) === undefined
+                        ? {}
+                        : {
+                              timestampMs:
+                                  incomingIsNewer && lifecycleObservation
+                                      ? segment.message.timestampMs
+                                      : previous.message.timestampMs,
+                          }),
                 },
             };
             lastIncomingIndex = existingIndex;
@@ -736,29 +740,6 @@ function externalSegments(
             },
         ]
     );
-}
-
-function settledExternalPart(part: ChatMessagePart): ChatMessagePart {
-    if (part.kind === "thinking" && part.status === "running") {
-        return { ...part, status: "complete" };
-    }
-    if (part.kind === "control" && part.activity === "running") {
-        return { ...part, activity: "complete" };
-    }
-    return part;
-}
-
-function settleExternalProjection(
-    projection: ChatExternalRunProjection
-): ChatExternalRunProjection {
-    const segments = externalSegments(projection).map((segment) => ({
-        ...segment,
-        message: {
-            ...segment.message,
-            parts: segment.message.parts.map(settledExternalPart),
-        },
-    }));
-    return withExternalSegments(projection, segments);
 }
 
 function externalControlIdentity(part: ChatMessagePart): string | undefined {
@@ -929,13 +910,14 @@ function applyRunEvent(run: ChatRuntimeRun, event: ChatRuntimeEvent): ChatRuntim
         }
         case "interrupted": {
             parts = [
-                ...parts,
+                ...settleThinkingParts(parts),
                 {
                     kind: "control",
                     text: "The live response was interrupted. Checking chat history…",
                     tone: "warning",
                 },
             ];
+            phase = "unresolved";
             reconciliation = "failed";
             break;
         }
@@ -1301,6 +1283,15 @@ export class ChatRuntimeStore extends Store<ChatRuntimeState> {
             for (const runId of projection.runIds) {
                 delete runs[runId];
             }
+            const providerRunIds = new Set(projection.providerRunIds);
+            for (const [runId, run] of Object.entries(runs)) {
+                if (
+                    run.message.providerRunId !== undefined &&
+                    providerRunIds.has(run.message.providerRunId)
+                ) {
+                    delete runs[runId];
+                }
+            }
             return {
                 ...state,
                 sessions: {
@@ -1494,7 +1485,6 @@ export class ChatRuntimeStore extends Store<ChatRuntimeState> {
                             lifecycle: incomingIsNewer
                                 ? projection.lifecycle
                                 : existing.lifecycle,
-                            omissionCount: 0,
                             observationEpoch: Math.max(
                                 existing.observationEpoch,
                                 projection.observationEpoch
@@ -1518,14 +1508,7 @@ export class ChatRuntimeStore extends Store<ChatRuntimeState> {
             const omitted = Object.fromEntries(
                 Object.entries(session.externalRuns).flatMap(([providerRunId, run]) => {
                     if (installed[providerRunId] !== undefined) return [];
-                    if (truncated) return [[providerRunId, run] as const];
-                    const omissionCount = (run.omissionCount ?? 0) + 1;
-                    return [
-                        [
-                            providerRunId,
-                            { ...settleExternalProjection(run), omissionCount },
-                        ] as const,
-                    ];
+                    return truncated ? [[providerRunId, run] as const] : [];
                 })
             );
             const externalRuns = trimExternalRuns({
@@ -1621,7 +1604,24 @@ export function chatRuntimeMessages(
                             !matchedOptimisticRunIds.has(send.clientRunId) &&
                             send.text === pendingUserText
                     );
-                    if (matchingSend !== undefined) {
+                    if (matchingSend === undefined) {
+                        messages.push({
+                            attachments: [],
+                            id: `external-user:${sessionKey}:${run.providerRunId}:${segment.segmentId}`,
+                            ...(pendingUserMessageId === undefined
+                                ? {}
+                                : { idempotencyKey: pendingUserMessageId }),
+                            parts:
+                                pendingUserText === ""
+                                    ? []
+                                    : [{ kind: "text", text: pendingUserText }],
+                            providerRunId: run.providerRunId,
+                            role: "user",
+                            sequence: segment.providerSequence,
+                            sessionKey,
+                            timestampMs: segment.message.timestampMs,
+                        });
+                    } else {
                         matchedOptimisticRunIds.add(matchingSend.clientRunId);
                         messages.push({
                             ...optimisticMessage(matchingSend),
@@ -1698,9 +1698,7 @@ export function chatRuntimePlans(
         .filter((run) => run.phase === "active" && run.plan !== undefined)
         .map((run) => run.plan as ChatActivePlanView);
     const externalPlans = Object.values(session.externalRuns).flatMap((run) =>
-        run.lifecycle !== "active" ||
-        run.plan === undefined ||
-        (run.omissionCount ?? 0) > 0
+        run.lifecycle !== "active" || run.plan === undefined
             ? []
             : [run.plan]
     );

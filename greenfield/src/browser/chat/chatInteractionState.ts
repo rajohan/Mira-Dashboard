@@ -66,23 +66,22 @@ export function chatAbortIsGated(
 }
 
 /**
- * Gates provider Stop controls while their prerequisites cannot prove a safe dispatch.
- * @param input Current connection, inventory, action, and runtime reconciliation state.
+ * Gates provider Stop controls while shared transport prerequisites are unavailable.
+ * Exact local and provider-run reconciliation gates are applied separately.
+ * @param input Current connection, inventory, and action state.
  * @returns Whether active-run Stop controls may dispatch.
  */
 export function chatAbortControlsAreEnabled(
     input: Readonly<{
         actionBusy: boolean;
         connection: ChatWorkspaceView["connection"];
-        needsReconciliation: boolean;
         sourceFresh: boolean;
     }>
 ): boolean {
     return (
         input.connection === "connected" &&
         input.sourceFresh &&
-        !input.actionBusy &&
-        !input.needsReconciliation
+        !input.actionBusy
     );
 }
 

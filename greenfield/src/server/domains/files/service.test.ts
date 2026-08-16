@@ -262,6 +262,9 @@ function largeDirectoryReader(entryCount: number): WorkspaceFileReader {
         read() {
             return Promise.reject(new WorkspaceFileError("not-found"));
         },
+        resolveReference() {
+            return Promise.resolve(undefined);
+        },
         roots() {
             return [{ id: "workspace", label: "Workspace", writable: true }];
         },
@@ -305,6 +308,25 @@ afterEach(async () => {
 });
 
 describe("workspace files service", () => {
+    test("issues a preview ticket only for a reviewed-root reference", async () => {
+        const { root, service } = fixture();
+        const file = Path.join(root, "guide.md");
+        Fs.writeFileSync(file, "# Guide\n");
+
+        const ticket = await service.prepareReference(actor, { reference: file });
+        expect(ticket).toMatchObject({
+            disposition: "preview",
+            fileName: "guide.md",
+            previewKind: "text",
+        });
+        await expect(
+            service.prepareReference(actor, { reference: "/etc/passwd" })
+        ).rejects.toMatchObject({ reason: "not-found" });
+        await expect(
+            service.readContent(otherActor, ticket.ticketId, undefined)
+        ).rejects.toMatchObject({ reason: "not-found" });
+    });
+
     test("issues actor-bound root and stable bounded page references", async () => {
         const { root, service } = fixture();
         Fs.mkdirSync(Path.join(root, "docs"));

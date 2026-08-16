@@ -5,6 +5,7 @@ import type {
     ListWorkspaceFilesOutput,
     PrepareWorkspaceFileContentInput,
     PrepareWorkspaceFileRevealInput,
+    PrepareWorkspaceFileReferenceInput,
     PrepareWorkspaceFileUploadInput,
     PrepareWorkspaceFileWriteInput,
     WorkspaceFileContentTicket,
@@ -52,6 +53,11 @@ export interface WorkspaceFileClient {
         (
             name: "files.prepareContent",
             input: PrepareWorkspaceFileContentInput,
+            options?: TRPCRequestOptions
+        ): Promise<WorkspaceFileContentTicket>;
+        (
+            name: "files.prepareReference",
+            input: PrepareWorkspaceFileReferenceInput,
             options?: TRPCRequestOptions
         ): Promise<WorkspaceFileContentTicket>;
     };

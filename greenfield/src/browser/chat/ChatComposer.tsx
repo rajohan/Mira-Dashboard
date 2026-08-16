@@ -29,7 +29,7 @@ const attachmentAccept =
     "image/*,audio/*,text/*,application/json,application/pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.zip";
 
 interface ChatComposerProps {
-    readonly abortableRunIds: readonly string[];
+    readonly abortableRunId?: string;
     readonly attachmentError?: string;
     readonly attachments: readonly ChatDraftAttachment[];
     readonly canSend: boolean;
@@ -62,7 +62,7 @@ function voiceElapsedLabel(elapsedMs: number): string {
  * @returns Accessible composer controls.
  */
 export function ChatComposer({
-    abortableRunIds,
+    abortableRunId,
     attachmentError,
     attachments,
     canSend,
@@ -420,7 +420,7 @@ export function ChatComposer({
                                     variant="ghost"
                                 />
                             )}
-                        <ChatStopControls onAbort={onAbort} runIds={abortableRunIds} />
+                        <ChatStopControls onAbort={onAbort} runId={abortableRunId} />
                         {voiceInput?.phase !== "recording" &&
                             voiceInput?.phase !== "transcribing" && (
                                 <IconOnlyButton
