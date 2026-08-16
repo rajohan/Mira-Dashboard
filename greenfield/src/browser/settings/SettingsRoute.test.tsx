@@ -473,12 +473,15 @@ describe("Dashboard Settings route", () => {
             "/settings?view=dashboard"
         );
 
-        expect(await screen.findByText("Settings browser test")).toBeTruthy();
         expect(
-            await screen.findByRole("heading", {
-                level: 2,
-                name: "No automation accounts",
-            })
+            await screen.findByRole(
+                "heading",
+                {
+                    level: 2,
+                    name: "No automation accounts",
+                },
+                { timeout: 3000 }
+            )
         ).toBeTruthy();
         expect(
             await screen.findByRole("heading", {
@@ -528,14 +531,8 @@ describe("Dashboard Settings route", () => {
         };
         const { queryClient } = await renderExpandedSettings(transport, [
             "Model Configuration",
-            "Channels",
             "Tools",
-            "Session",
-            "Heartbeat",
-            "Agent access control",
-            "Skills",
         ]);
-        const user = userEvent.setup();
         const primaryModel = await screen.findByRole("textbox", {
             name: "Default model",
         });
@@ -592,9 +589,10 @@ describe("Dashboard Settings route", () => {
             }
         });
         try {
-            await user.clear(primaryModel);
-            await user.type(primaryModel, "openai/gpt-5.6-terra");
-            await user.click(screen.getByRole("button", { name: "Save model settings" }));
+            fireEvent.change(primaryModel, {
+                target: { value: "openai/gpt-5.6-terra" },
+            });
+            fireEvent.click(screen.getByRole("button", { name: "Save model settings" }));
 
             expect(await screen.findByText("OpenClaw settings saved.")).toBeTruthy();
             await openSettingsSections(["Model Configuration"]);

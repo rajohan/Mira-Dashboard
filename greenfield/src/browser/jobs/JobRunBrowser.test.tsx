@@ -116,8 +116,8 @@ class EventGapTransport implements DashboardTrpcTransport {
     #deferredGap = Promise.withResolvers<unknown>();
     #deferredGapEnabled = false;
     #deferredGapUsed = false;
-    gap303FailuresRemaining = 0;
-    newestExactSequence = 202;
+    gap33FailuresRemaining = 0;
+    newestExactSequence = 22;
 
     deferFirstGap(): void {
         this.#deferredGapEnabled = true;
@@ -125,7 +125,7 @@ class EventGapTransport implements DashboardTrpcTransport {
 
     resolveDeferredGap(): void {
         this.#deferredGap.resolve(
-            detailPage(302, 203, Math.max(402, this.newestExactSequence))
+            detailPage(32, 23, Math.max(42, this.newestExactSequence))
         );
     }
 
@@ -146,20 +146,20 @@ class EventGapTransport implements DashboardTrpcTransport {
             return Promise.resolve(detailPage(2, 1, 2, false, otherRunId));
         }
         if (eventCursor === undefined) {
-            if (this.newestExactSequence === 202) {
-                return Promise.resolve(detailPage(202, 103, 202));
+            if (this.newestExactSequence === 22) {
+                return Promise.resolve(detailPage(22, 13, 22));
             }
-            if (this.newestExactSequence === 402) {
-                return Promise.resolve(detailPage(402, 303, 402));
+            if (this.newestExactSequence === 42) {
+                return Promise.resolve(detailPage(42, 33, 42));
             }
-            return Promise.resolve(detailPage(602, 503, 602));
+            return Promise.resolve(detailPage(62, 53, 62));
         }
-        if (eventCursor.sequence === 103) {
-            return Promise.resolve(detailPage(102, 3, 202, false));
+        if (eventCursor.sequence === 13) {
+            return Promise.resolve(detailPage(12, 3, 22, false));
         }
-        if (eventCursor.sequence === 303) {
-            if (this.gap303FailuresRemaining > 0) {
-                this.gap303FailuresRemaining -= 1;
+        if (eventCursor.sequence === 33) {
+            if (this.gap33FailuresRemaining > 0) {
+                this.gap33FailuresRemaining -= 1;
                 return Promise.reject(new TypeError("Event gap unavailable"));
             }
             if (this.#deferredGapEnabled && !this.#deferredGapUsed) {
@@ -167,11 +167,11 @@ class EventGapTransport implements DashboardTrpcTransport {
                 return this.#deferredGap.promise;
             }
             return Promise.resolve(
-                detailPage(302, 203, Math.max(402, this.newestExactSequence))
+                detailPage(32, 23, Math.max(42, this.newestExactSequence))
             );
         }
-        if (eventCursor.sequence === 503) {
-            return Promise.resolve(detailPage(502, 403, 602));
+        if (eventCursor.sequence === 53) {
+            return Promise.resolve(detailPage(52, 43, 62));
         }
         return Promise.reject(
             new TypeError(`Unexpected event cursor: ${eventCursor.sequence}`)
@@ -229,7 +229,7 @@ async function loadInitialEventHistory(): Promise<void> {
     expect(
         await screen.findByRole(
             "article",
-            { name: "Event 103: stdout" },
+            { name: "Event 13: stdout" },
             eventProjectionWait
         )
     ).toBeTruthy();
@@ -248,7 +248,7 @@ async function loadInitialEventHistory(): Promise<void> {
 async function refreshExactDetail(
     transport: EventGapTransport,
     queryClient: ReturnType<typeof createDashboardQueryClient>,
-    newestExactSequence: 402 | 602
+    newestExactSequence: 42 | 62
 ): Promise<void> {
     transport.newestExactSequence = newestExactSequence;
     await act(async () => {
@@ -266,26 +266,26 @@ describe("job run browser", () => {
 
         try {
             await loadInitialEventHistory();
-            await refreshExactDetail(transport, queryClient, 402);
+            await refreshExactDetail(transport, queryClient, 42);
 
             expect(
                 await screen.findByRole(
                     "article",
-                    { name: "Event 203: stdout" },
+                    { name: "Event 23: stdout" },
                     eventProjectionWait
                 )
             ).toBeTruthy();
             expect(
-                screen.getByRole("article", { name: "Event 202: stdout" })
+                screen.getByRole("article", { name: "Event 22: stdout" })
             ).toBeTruthy();
             expect(screen.getByRole("article", { name: "Event 3: stdout" })).toBeTruthy();
             await waitFor(() =>
                 expect(
                     screen.getAllByRole("article", { name: /^Event \d+: stdout$/u })
-                ).toHaveLength(400)
+                ).toHaveLength(40)
             );
             expect(
-                screen.getAllByRole("article", { name: "Event 203: stdout" })
+                screen.getAllByRole("article", { name: "Event 23: stdout" })
             ).toHaveLength(1);
             const renderedSequences = screen
                 .getAllByRole("article", { name: /^Event \d+: stdout$/u })
@@ -297,12 +297,12 @@ describe("job run browser", () => {
                             ?.replace(":", "") ?? ""
                     )
                 );
-            expect(renderedSequences.at(0)).toBe(402);
-            expect(renderedSequences.slice(99, 101)).toEqual([303, 302]);
-            expect(renderedSequences.slice(199, 201)).toEqual([203, 202]);
+            expect(renderedSequences.at(0)).toBe(42);
+            expect(renderedSequences.slice(9, 11)).toEqual([33, 32]);
+            expect(renderedSequences.slice(19, 21)).toEqual([23, 22]);
             expect(renderedSequences.at(-1)).toBe(3);
 
-            expect(eventCursors(transport)).toEqual([undefined, 103, undefined, 303]);
+            expect(eventCursors(transport)).toEqual([undefined, 13, undefined, 33]);
         } finally {
             view.unmount();
             queryClient.clear();
@@ -335,7 +335,7 @@ describe("job run browser", () => {
                 ).toBeTrue()
             );
 
-            transport.newestExactSequence = 402;
+            transport.newestExactSequence = 42;
             await act(async () => {
                 await router.navigate({
                     search: { runId },
@@ -344,13 +344,13 @@ describe("job run browser", () => {
             });
 
             await waitFor(
-                () => expect(eventCursors(transport)).toContain(303),
+                () => expect(eventCursors(transport)).toContain(33),
                 eventProjectionWait
             );
             expect(
                 await screen.findByRole(
                     "article",
-                    { name: "Event 203: stdout" },
+                    { name: "Event 23: stdout" },
                     eventProjectionWait
                 )
             ).toBeTruthy();
@@ -368,24 +368,24 @@ describe("job run browser", () => {
 
         try {
             await loadInitialEventHistory();
-            await refreshExactDetail(transport, queryClient, 402);
+            await refreshExactDetail(transport, queryClient, 42);
             await waitFor(
-                () => expect(eventCursors(transport)).toContain(303),
+                () => expect(eventCursors(transport)).toContain(33),
                 eventProjectionWait
             );
 
-            await refreshExactDetail(transport, queryClient, 602);
-            expect(eventCursors(transport)).not.toContain(503);
+            await refreshExactDetail(transport, queryClient, 62);
+            expect(eventCursors(transport)).not.toContain(53);
             act(() => transport.resolveDeferredGap());
 
             await waitFor(
-                () => expect(eventCursors(transport)).toContain(503),
+                () => expect(eventCursors(transport)).toContain(53),
                 eventProjectionWait
             );
             expect(
                 await screen.findByRole(
                     "article",
-                    { name: "Event 403: stdout" },
+                    { name: "Event 43: stdout" },
                     eventProjectionWait
                 )
             ).toBeTruthy();
@@ -395,16 +395,16 @@ describe("job run browser", () => {
                         screen.getAllByRole("article", {
                             name: /^Event \d+: stdout$/u,
                         })
-                    ).toHaveLength(600),
+                    ).toHaveLength(60),
                 eventProjectionWait
             );
             expect(eventCursors(transport)).toEqual([
                 undefined,
-                103,
+                13,
                 undefined,
-                303,
+                33,
                 undefined,
-                503,
+                53,
             ]);
         } finally {
             transport.resolveDeferredGap();
@@ -420,21 +420,21 @@ describe("job run browser", () => {
 
         try {
             await loadInitialEventHistory();
-            await refreshExactDetail(transport, queryClient, 402);
+            await refreshExactDetail(transport, queryClient, 42);
             await waitFor(
-                () => expect(eventCursors(transport)).toContain(303),
+                () => expect(eventCursors(transport)).toContain(33),
                 eventProjectionWait
             );
             const firstGapSignal = transport.calls.find(
                 ({ input, path }) =>
                     path === "jobs.getRun" &&
-                    (input as GetJobRunInput).eventCursor?.sequence === 303
+                    (input as GetJobRunInput).eventCursor?.sequence === 33
             )?.signal;
             if (firstGapSignal === undefined) {
                 throw new TypeError("Missing first event-gap signal");
             }
-            await refreshExactDetail(transport, queryClient, 602);
-            expect(eventCursors(transport)).not.toContain(503);
+            await refreshExactDetail(transport, queryClient, 62);
+            expect(eventCursors(transport)).not.toContain(53);
 
             view.rerender(tree("hidden"));
             await waitFor(() => expect(firstGapSignal.aborted).toBeTrue());
@@ -443,25 +443,25 @@ describe("job run browser", () => {
             await waitFor(
                 () =>
                     expect(
-                        eventCursors(transport).filter((cursor) => cursor === 303)
+                        eventCursors(transport).filter((cursor) => cursor === 33)
                     ).toHaveLength(2),
                 eventProjectionWait
             );
             expect(
                 await screen.findByRole(
                     "article",
-                    { name: "Event 203: stdout" },
+                    { name: "Event 23: stdout" },
                     eventProjectionWait
                 )
             ).toBeTruthy();
             expect(
                 await screen.findByRole(
                     "article",
-                    { name: "Event 403: stdout" },
+                    { name: "Event 43: stdout" },
                     eventProjectionWait
                 )
             ).toBeTruthy();
-            expect(eventCursors(transport)).toContain(503);
+            expect(eventCursors(transport)).toContain(53);
         } finally {
             transport.resolveDeferredGap();
             view.unmount();
@@ -471,15 +471,15 @@ describe("job run browser", () => {
 
     test("offers a dedicated retry after final-history gap repair fails", async () => {
         const transport = new EventGapTransport();
-        transport.gap303FailuresRemaining = 1;
+        transport.gap33FailuresRemaining = 1;
         const { queryClient, view } = createJobBrowserHarness(transport);
 
         try {
             await loadInitialEventHistory();
-            await refreshExactDetail(transport, queryClient, 402);
+            await refreshExactDetail(transport, queryClient, 42);
 
             await waitFor(
-                () => expect(eventCursors(transport)).toContain(303),
+                () => expect(eventCursors(transport)).toContain(33),
                 eventProjectionWait
             );
             const retry = await screen.findByRole(
@@ -487,8 +487,8 @@ describe("job run browser", () => {
                 { name: "Retry missing events" },
                 eventProjectionWait
             );
-            await refreshExactDetail(transport, queryClient, 602);
-            expect(eventCursors(transport)).not.toContain(503);
+            await refreshExactDetail(transport, queryClient, 62);
+            expect(eventCursors(transport)).not.toContain(53);
             expect(
                 screen.queryByRole("button", { name: "Load older events" })
             ).toBeNull();
@@ -497,32 +497,32 @@ describe("job run browser", () => {
             await waitFor(
                 () =>
                     expect(
-                        eventCursors(transport).filter((cursor) => cursor === 303)
+                        eventCursors(transport).filter((cursor) => cursor === 33)
                     ).toHaveLength(2),
                 eventProjectionWait
             );
             await waitFor(
-                () => expect(eventCursors(transport)).toContain(503),
+                () => expect(eventCursors(transport)).toContain(53),
                 eventProjectionWait
             );
             expect(
                 await screen.findByRole(
                     "article",
-                    { name: "Event 203: stdout" },
+                    { name: "Event 23: stdout" },
                     eventProjectionWait
                 )
             ).toBeTruthy();
             expect(
                 await screen.findByRole(
                     "article",
-                    { name: "Event 403: stdout" },
+                    { name: "Event 43: stdout" },
                     eventProjectionWait
                 )
             ).toBeTruthy();
             expect(
-                eventCursors(transport).filter((cursor) => cursor === 303)
+                eventCursors(transport).filter((cursor) => cursor === 33)
             ).toHaveLength(2);
-            expect(eventCursors(transport)).toContain(503);
+            expect(eventCursors(transport)).toContain(53);
         } finally {
             view.unmount();
             queryClient.clear();

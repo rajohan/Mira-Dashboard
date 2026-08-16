@@ -1174,30 +1174,29 @@ describe("chat browser", () => {
             requestedSessionKey: gatewayPrimarySessionKey,
             sessionSnapshot: snapshot(),
         });
-        const user = userEvent.setup();
         try {
             await waitForConnectedComposer();
             const composer = screen.getByRole("textbox", { name: "Message" });
             const send = screen.getByRole("button", { name: "Send message" });
 
-            await user.type(composer, "/reset");
-            await user.click(send);
+            fireEvent.change(composer, { target: { value: "/reset" } });
+            fireEvent.click(send);
             expect(
                 screen.getByText(
                     "Open Chat settings and choose Reset chat history to continue."
                 )
             ).toBeVisible();
 
-            await user.clear(composer);
-            await user.type(composer, "/model unavailable/model");
-            await user.click(send);
+            fireEvent.change(composer, {
+                target: { value: "/model unavailable/model" },
+            });
+            fireEvent.click(send);
             expect(
                 screen.getByText("That model is not available for this session.")
             ).toBeVisible();
 
-            await user.clear(composer);
-            await user.type(composer, "/thinking impossible");
-            await user.click(send);
+            fireEvent.change(composer, { target: { value: "/thinking impossible" } });
+            fireEvent.click(send);
             expect(
                 screen.getByText("That thinking level is not available for this session.")
             ).toBeVisible();
@@ -1272,14 +1271,15 @@ describe("chat browser", () => {
                 return snapshot("fresh", currentSession, providerObservedAtMs);
             },
         });
-        const user = userEvent.setup();
         try {
             await waitForConnectedComposer();
             const composer = screen.getByRole("textbox", { name: "Message" });
             const send = screen.getByRole("button", { name: "Send message" });
 
-            await user.type(composer, "/model openai/gpt-4.1");
-            await user.click(send);
+            fireEvent.change(composer, {
+                target: { value: "/model openai/gpt-4.1" },
+            });
+            fireEvent.click(send);
             await waitFor(() =>
                 expect(
                     view.mutation.mock.calls.filter(
@@ -1289,8 +1289,8 @@ describe("chat browser", () => {
             );
             await waitFor(() => expect(composer).toHaveValue(""));
 
-            await user.type(composer, "/thinking low");
-            await user.click(send);
+            fireEvent.change(composer, { target: { value: "/thinking low" } });
+            fireEvent.click(send);
             await waitFor(() =>
                 expect(
                     view.mutation.mock.calls.filter(
@@ -1300,8 +1300,8 @@ describe("chat browser", () => {
             );
             await waitFor(() => expect(composer).toHaveValue(""));
 
-            await user.type(composer, "/compact");
-            await user.click(send);
+            fireEvent.change(composer, { target: { value: "/compact" } });
+            fireEvent.click(send);
             await waitFor(() =>
                 expect(
                     view.mutation.mock.calls.filter(

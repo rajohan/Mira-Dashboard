@@ -5,7 +5,7 @@
         "src/browser/security/AccountSecurityRoute.test.tsx": 13520,
         "src/browser/chat/ChatBrowser.test.tsx": 13380,
         "src/browser/monitoring/MonitoringRoutes.test.tsx": 8523,
-        "src/browser/jobs/JobRunBrowser.test.tsx": 7132,
+        "src/browser/jobs/JobRunBrowser.test.tsx": 4100,
         "src/browser/chat/ChatWorkspace.test.tsx": 4556,
         "src/browser/overview/OverviewRoute.test.tsx": 4006,
         "src/browser/openClawCron/OpenClawCronSection.test.tsx": 3987,
