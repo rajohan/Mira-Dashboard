@@ -419,15 +419,14 @@ describe("chat contract adapter", () => {
                     output: "Found runtime activity",
                     status: "completed",
                 },
-                {
-                    kind: "control",
-                    text: expect.stringContaining("updates were interrupted"),
-                },
             ],
             role: "assistant",
         });
         expect(projection.message.parts).not.toEqual(
             expect.arrayContaining([
+                expect.objectContaining({
+                    text: expect.stringContaining("updates were interrupted"),
+                }),
                 expect.objectContaining({
                     text: expect.stringContaining("started outside the Dashboard"),
                 }),
@@ -439,6 +438,30 @@ describe("chat contract adapter", () => {
             runId: "provider:provider-run-1",
             title: "OpenClaw plan",
         });
+    });
+
+    test("shows an interrupted activity warning only before assistant output exists", () => {
+        const projection = projectChatExternalRun({
+            continuity: "interrupted",
+            hasUnprojectedActivity: true,
+            lifecycle: "active",
+            observationEpoch: 1,
+            observedAtMs: timestampMs,
+            parts: [],
+            projectionTruncated: false,
+            providerRunId: "provider-gap",
+            sessionKey,
+            source: "provider-runtime",
+            text: "",
+            updatedAtMs: timestampMs,
+        });
+
+        expect(projection.message.parts).toEqual([
+            expect.objectContaining({
+                kind: "control",
+                text: expect.stringContaining("updates were interrupted"),
+            }),
+        ]);
     });
 
     test("retains provider thinking while suppressing mirrored items and user echoes", () => {

@@ -888,20 +888,51 @@ function mergeExternalHistoryUserAnchors(
 function historyConfirmsExternalTerminal(
     run: ChatExternalRun,
     messages: readonly ChatMessage[],
-    externalRunCount: number
+    runs: ReadonlyMap<string, ChatExternalRun>
 ): boolean {
-    const userCandidates = externalHistoryUserCandidates(run, messages, externalRunCount);
-    if (userCandidates.length === 0) return false;
-    const candidateIds = new Set(userCandidates.map(({ id }) => id));
-    let anchored = false;
-    for (const message of messages) {
-        if (message.role === "user" && candidateIds.has(message.id)) {
-            anchored = true;
-            continue;
+    const userCandidates = externalHistoryUserCandidates(run, messages, runs.size);
+    if (userCandidates.length > 0) {
+        const candidateIds = new Set(userCandidates.map(({ id }) => id));
+        let anchored = false;
+        for (const message of messages) {
+            if (message.role === "user" && candidateIds.has(message.id)) {
+                anchored = true;
+                continue;
+            }
+            if (anchored && message.role === "assistant") return true;
         }
-        if (anchored && message.role === "assistant") return true;
     }
-    return false;
+    if (!run.projectionTruncated || run.continuity !== "interrupted") return false;
+    const canonicalTimestamp = messages
+        .flatMap((message) =>
+            message.role === "assistant" &&
+            message.createdAtMs !== undefined &&
+            message.createdAtMs <= run.observedAtMs &&
+            run.observedAtMs - message.createdAtMs <=
+                externalHistoryUserAnchorLookbackMilliseconds
+                ? [message.createdAtMs]
+                : []
+        )
+        .toSorted((left, right) => right - left)[0];
+    if (canonicalTimestamp === undefined) return false;
+    const closestRun = [...runs.values()]
+        .filter(
+            (candidate) =>
+                candidate.lifecycle === "terminal-pending-history" &&
+                candidate.projectionTruncated &&
+                candidate.continuity === "interrupted" &&
+                candidate.observedAtMs >= canonicalTimestamp &&
+                candidate.observedAtMs - canonicalTimestamp <=
+                    externalHistoryUserAnchorLookbackMilliseconds
+        )
+        .toSorted(
+            (left, right) =>
+                left.observedAtMs -
+                    canonicalTimestamp -
+                    (right.observedAtMs - canonicalTimestamp) ||
+                left.providerRunId.localeCompare(right.providerRunId)
+        )[0];
+    return closestRun?.providerRunId === run.providerRunId;
 }
 
 function updateExternalStreamPart(
@@ -2673,7 +2704,7 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
                 run.source === "provider-in-flight";
             const terminalConfirmed =
                 run.lifecycle === "terminal-pending-history" &&
-                historyConfirmsExternalTerminal(run, messages, runs.size);
+                historyConfirmsExternalTerminal(run, messages, runs);
             if (
                 historyMayRetireRun &&
                 (finalIdentities.has(providerRunId) || terminalConfirmed) &&

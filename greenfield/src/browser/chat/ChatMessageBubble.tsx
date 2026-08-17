@@ -437,6 +437,37 @@ export function ChatMessageBubble({
         (attachment) => attachment.id === previewAttachmentId
     );
     if (!chatMessageHasVisibleContent(message, display, readAloud)) return null;
+    const activityParts = visibleParts.filter(
+        (
+            part
+        ): part is ChatControlPart & {
+            readonly activity: NonNullable<ChatControlPart["activity"]>;
+        } => part.kind === "control" && part.activity !== undefined
+    );
+    if (activityParts.length > 0 && activityParts.length === visibleParts.length) {
+        return (
+            <article
+                aria-label="OpenClaw activity"
+                className="text-primary-400 px-3 py-0.5 text-sm font-medium"
+                data-message-id={message.id}
+                data-part-kinds="control"
+            >
+                {activityParts.map((part, index) => (
+                    <output
+                        aria-label={part.text}
+                        className="block [&_.loading-state-dots]:ml-0.5 [&_.loading-state-dots]:text-lg [&_.loading-state-dots]:leading-none"
+                        key={`activity:${index}`}
+                    >
+                        {part.activity === "running" ? (
+                            <LoadingDots label={part.text} />
+                        ) : (
+                            part.text
+                        )}
+                    </output>
+                ))}
+            </article>
+        );
+    }
     const messageFinished =
         !message.parts.some(
             (part) =>

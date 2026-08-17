@@ -14,6 +14,7 @@ import {
     projectChatHistory,
     projectChatMessageSurfaces,
     projectChatSessions,
+    runtimeMessagesWithinCanonicalWindow,
 } from "./chatViewProjection.ts";
 
 const sessionKey = "agent:main:main";
@@ -177,6 +178,37 @@ function chatAttachmentPart(
 }
 
 describe("chat view projection", () => {
+    test("withholds only settled runtime groups older than a bounded history window", () => {
+        const row = (id: string, timestampMs: number, providerRunId?: string) => ({
+            attachments: [],
+            id,
+            parts: [{ kind: "text" as const, text: id }],
+            ...(providerRunId === undefined ? {} : { providerRunId }),
+            role: "assistant" as const,
+            sequence: timestampMs,
+            sessionKey,
+            timestampMs,
+        });
+        const runtime = [
+            row("settled-old", 50, "settled"),
+            row("active-old", 40, "active"),
+            row("settled-current", 120, "current"),
+            row("ungrouped-old", 30),
+        ];
+        const history = [row("history-boundary", 100)];
+
+        expect(
+            runtimeMessagesWithinCanonicalWindow(
+                runtime,
+                history,
+                true,
+                new Set(["active"])
+            ).map(({ id }) => id)
+        ).toEqual(["active-old", "settled-current", "ungrouped-old"]);
+        expect(
+            runtimeMessagesWithinCanonicalWindow(runtime, history, false, new Set())
+        ).toBe(runtime);
+    });
     test("retains provider auto fast mode beside its effective speed", () => {
         const observedAtMs = 1_800_000_000_000;
         const session: GatewaySession = {

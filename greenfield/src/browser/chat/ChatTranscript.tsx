@@ -77,6 +77,15 @@ function messageRevision(message: ChatDisplayMessage): number {
     return hash;
 }
 
+function isActivityOnlyMessage(message: ChatDisplayMessage): boolean {
+    return (
+        message.parts.length > 0 &&
+        message.parts.every(
+            (part) => part.kind === "control" && part.activity !== undefined
+        )
+    );
+}
+
 function transcriptLayoutRevision(
     messages: readonly ChatDisplayMessage[],
     display: ChatDisplaySettings,
@@ -111,7 +120,7 @@ interface ChatTranscriptProps {
     readonly messages: readonly ChatDisplayMessage[];
     readonly onDismissReadAloudError?: () => void;
     readonly onHydrateMessage: (messageId: string) => void;
-    readonly onLoadOlder: () => Promise<void> | void;
+    readonly onLoadOlder: () => boolean | Promise<boolean>;
     readonly onOpenLocalFile?: (reference: string) => void;
     readonly onReadAloud?: (messageId: string, text: string) => void;
     readonly onStopReadAloud?: () => void;
@@ -173,7 +182,12 @@ export function ChatTranscript({
     sessionKey,
 }: ChatTranscriptProps) {
     const olderHistoryRequestPending = useRef(false);
+    const olderHistoryCycleActive = useRef(false);
+    const [olderHistoryCompletion, setOlderHistoryCompletion] = useState(0);
+    const [olderHistoryCycleLoading, setOlderHistoryCycleLoading] = useState(false);
     const historyViewport = useRef<HTMLDivElement>(null);
+    const previousHistoryScrollTop = useRef(0);
+    const preserveHistoryAnchor = useRef<(() => void) | null>(null);
     const [notice, setNotice] = useState<ChatTranscriptNotice>(() =>
         emptyTranscriptNotice(sessionKey)
     );
@@ -201,6 +215,12 @@ export function ChatTranscript({
         visibleMessages,
         activeRunIds
     );
+    const layoutRevision = transcriptLayoutRevision(
+        visibleMessages,
+        display,
+        activeRunIds,
+        readAloud
+    );
     const stopReadAloud = useEffectEvent(() => onStopReadAloud?.());
     const stopActiveReadAloud = useEffectEvent(() => {
         if (readAloud?.phase !== "idle") stopReadAloud();
@@ -216,21 +236,36 @@ export function ChatTranscript({
             return;
         }
         olderHistoryRequestPending.current = true;
+        setOlderHistoryCycleLoading(true);
+        preserveHistoryAnchor.current?.();
         try {
-            await onLoadOlder();
+            if (!(await onLoadOlder())) {
+                olderHistoryCycleActive.current = false;
+                setOlderHistoryCycleLoading(false);
+            }
+        } catch {
+            olderHistoryCycleActive.current = false;
+            setOlderHistoryCycleLoading(false);
         } finally {
-            requestAnimationFrame(() => {
-                requestAnimationFrame(() => {
-                    olderHistoryRequestPending.current = false;
-                });
-            });
+            olderHistoryRequestPending.current = false;
+            setOlderHistoryCompletion((current) => current + 1);
         }
     }
-    function handleHistoryScroll(followingLatest: boolean): void {
-        if (!followingLatest) void requestOlderAtTop();
+    const continueOlderHistory = useEffectEvent(() => {
+        void requestOlderAtTop();
+    });
+    function handleHistoryScroll(): void {
+        const scrollTop = historyViewport.current?.scrollTop ?? 0;
+        const movedUp = scrollTop + 1 < previousHistoryScrollTop.current;
+        previousHistoryScrollTop.current = scrollTop;
+        if (!movedUp) return;
+        olderHistoryCycleActive.current = true;
+        void requestOlderAtTop();
     }
     function handleHistoryWheel(deltaY: number): void {
-        if (deltaY < 0) void requestOlderAtTop();
+        if (deltaY >= 0) return;
+        olderHistoryCycleActive.current = true;
+        void requestOlderAtTop();
     }
     function handleItemsAppended({
         itemKeys,
@@ -287,6 +322,26 @@ export function ChatTranscript({
         );
         return () => globalThis.clearTimeout(timeout);
     }, [nextCompactionExpiry, nowMs]);
+    useEffect(() => {
+        if (
+            !olderHistoryCycleActive.current ||
+            olderHistoryRequestPending.current ||
+            historyLoading
+        ) {
+            return;
+        }
+        const viewport = historyViewport.current;
+        if (
+            viewport === null ||
+            !hasOlder ||
+            viewport.scrollTop > olderHistoryLoadThresholdPx
+        ) {
+            olderHistoryCycleActive.current = false;
+            setOlderHistoryCycleLoading(false);
+            return;
+        }
+        continueOlderHistory();
+    }, [hasOlder, historyLoading, layoutRevision, olderHistoryCompletion]);
 
     if (visibleMessages.length === 0 && initialLoading) {
         return (
@@ -311,12 +366,6 @@ export function ChatTranscript({
         currentNotice.newMessageCount === 0
             ? currentNotice.announcement
             : `${currentNotice.newMessageCount} new ${currentNotice.newMessageCount === 1 ? "message" : "messages"}`;
-    const layoutRevision = transcriptLayoutRevision(
-        visibleMessages,
-        display,
-        activeRunIds,
-        readAloud
-    );
     return (
         <section
             aria-label="Chat transcript"
@@ -336,10 +385,10 @@ export function ChatTranscript({
                 }}
                 getItemKey={(index) => visibleMessages[index]?.id ?? `message:${index}`}
                 initialRect={{ height: 560, width: 880 }}
-                overscan={8}
+                overscan={50}
             >
                 {(virtualization) => (
-                    <div className="relative h-full min-h-0">
+                    <div className="relative flex h-full min-h-0 flex-col">
                         {virtualization.followToEnd?.awayFromEnd === true && (
                             <Button
                                 className="border-primary-600 absolute top-2 right-4 z-20 rounded-full border px-3 py-1 text-xs shadow-lg sm:right-5"
@@ -356,21 +405,33 @@ export function ChatTranscript({
                                     : `${currentNotice.newMessageCount} new ${currentNotice.newMessageCount === 1 ? "message" : "messages"}`}
                             </Button>
                         )}
+                        {olderHistoryCycleLoading && (
+                            <output
+                                aria-label="Loading older messages"
+                                className="text-primary-200 flex h-8 shrink-0 items-center justify-center gap-2 text-sm"
+                            >
+                                <Icon
+                                    className="motion-safe:animate-spin"
+                                    icon={LoaderCircle}
+                                    size="sm"
+                                    tone="inherit"
+                                />
+                                Loading older messages…
+                            </output>
+                        )}
                         <div
-                            aria-busy={historyLoading}
+                            aria-busy={historyLoading || olderHistoryCycleLoading}
                             aria-label="Messages"
                             aria-live="off"
-                            className="h-full min-h-0 overflow-x-hidden overflow-y-auto overscroll-contain px-2 py-3 sm:px-3"
+                            className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-2 py-3 sm:px-3"
                             ref={(node) => {
                                 virtualization.scrollContainerRef.current = node;
                                 historyViewport.current = node;
+                                preserveHistoryAnchor.current =
+                                    virtualization.preserveVisibleAnchor;
                             }}
                             role="log"
-                            onScroll={() =>
-                                handleHistoryScroll(
-                                    virtualization.followToEnd?.following !== false
-                                )
-                            }
+                            onScroll={handleHistoryScroll}
                             onWheel={(event) => handleHistoryWheel(event.deltaY)}
                             style={{ overflowAnchor: "none" }}
                             tabIndex={0}
@@ -384,7 +445,13 @@ export function ChatTranscript({
                                     if (message === undefined) return null;
                                     return (
                                         <div
-                                            className="absolute top-0 left-0 w-full pb-3"
+                                            className={`absolute top-0 left-0 w-full ${
+                                                virtualItem.index ===
+                                                    visibleMessages.length - 1 &&
+                                                isActivityOnlyMessage(message)
+                                                    ? "pb-1"
+                                                    : "pb-3"
+                                            }`}
                                             data-index={virtualItem.index}
                                             key={virtualItem.key}
                                             ref={virtualization.measureElement}
@@ -392,22 +459,6 @@ export function ChatTranscript({
                                                 transform: `translateY(${virtualItem.start}px)`,
                                             }}
                                         >
-                                            {virtualItem.index === 0 &&
-                                                historyLoading &&
-                                                olderHistoryRequestPending.current && (
-                                                    <output
-                                                        aria-label="Loading older messages"
-                                                        className="text-primary-200 mb-3 flex items-center justify-center gap-2 text-sm"
-                                                    >
-                                                        <Icon
-                                                            className="motion-safe:animate-spin"
-                                                            icon={LoaderCircle}
-                                                            size="sm"
-                                                            tone="inherit"
-                                                        />
-                                                        Loading older messages…
-                                                    </output>
-                                                )}
                                             <ChatMessageBubble
                                                 activeRunIds={
                                                     streamingTextMessageIds.has(

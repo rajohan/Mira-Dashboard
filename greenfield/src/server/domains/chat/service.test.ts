@@ -2615,6 +2615,81 @@ describe("ChatService", () => {
         }
     });
 
+    test("retires the nearest truncated terminal projection when canonical history has no run identity", async () => {
+        const database = await openFreshMigratedDatabase();
+        const clock = 10_000;
+        const repository = createChatRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission,
+            "main",
+            () => clock
+        );
+        const provider = providerHarness({
+            history: async () => ({
+                hasMore: false,
+                messages: [
+                    {
+                        content: {
+                            kind: "complete" as const,
+                            parts: [
+                                {
+                                    id: "canonical-final-part",
+                                    kind: "text" as const,
+                                    text: "Canonical final",
+                                },
+                            ],
+                        },
+                        createdAtMs: 9990,
+                        id: "canonical-final",
+                        role: "assistant" as const,
+                        source: "gateway-history" as const,
+                    },
+                ],
+            }),
+        });
+        const service = createChatService({
+            attachmentConsumer: {
+                reserve: async () => {
+                    throw new Error("Attachment reservation is not used by this test");
+                },
+            },
+            attachmentPreparer: inertAttachmentPreparer(),
+            nowMs: () => clock,
+            provider: provider.provider,
+            repository,
+        });
+        try {
+            await service.runtime(runtimeInput());
+            const subscription = provider.requests[0]!;
+            await subscription.onGap({
+                expectedSequence: 1,
+                providerRunId: "truncated-terminal",
+                receivedSequence: 2,
+                sessionKey: "agent:main:main",
+            });
+            await subscription.onEvent({
+                kind: "terminal",
+                outcome: "completed",
+                providerRunId: "truncated-terminal",
+                providerSequence: 3,
+                receivedAtMs: clock,
+                sessionKey: "agent:main:main",
+            });
+
+            await service.history({
+                cursor: "0",
+                limit: 50,
+                sessionKey: "agent:main:main",
+            });
+
+            const reconciledRuntime = await service.runtime(runtimeInput());
+            expect(reconciledRuntime.externalRuns).toEqual([]);
+        } finally {
+            await service.dispose();
+            database.sqlite.close(true);
+        }
+    });
+
     test("coalesces external token bursts and flushes boundaries before terminal history", async () => {
         const database = await openFreshMigratedDatabase();
         const repository = createChatRepository(

@@ -111,6 +111,7 @@ import {
     projectChatHistory,
     projectChatMessageSurfaces,
     projectChatSessions,
+    runtimeMessagesWithinCanonicalWindow,
 } from "./chatViewProjection.ts";
 import { ChatWorkspace } from "./ChatWorkspace.tsx";
 import { useChatRealtimeInvalidation } from "./useChatRealtimeInvalidation.ts";
@@ -346,6 +347,8 @@ export function ChatBrowser({
     >({});
     const taskCancelLocks = useRef(new Set<string>());
     const normalizedRequest = useRef<string | null | undefined>(undefined);
+    const olderHistoryLoad = useRef<Promise<boolean> | undefined>(undefined);
+    const [olderHistoryLoading, setOlderHistoryLoading] = useState(false);
 
     useEffect(() => {
         if (selectedSessionKey === requestedSessionKey) {
@@ -497,7 +500,22 @@ export function ChatBrowser({
             : { detail: hydratedMessageQuery.data }),
         ...(hydrationStatus === undefined ? {} : { status: hydrationStatus }),
     });
-    const runtimeMessages = chatRuntimeMessages(runtimeState, selectedSessionKey);
+    const activeRuntimeIdentities = new Set([
+        ...Object.entries(runtimeState.sessions[selectedSessionKey]?.runs ?? {}).flatMap(
+            ([runId, run]) => (run.phase === "active" ? [runId] : [])
+        ),
+        ...Object.entries(
+            runtimeState.sessions[selectedSessionKey]?.externalRuns ?? {}
+        ).flatMap(([providerRunId, run]) =>
+            run.lifecycle === "active" ? [providerRunId] : []
+        ),
+    ]);
+    const runtimeMessages = runtimeMessagesWithinCanonicalWindow(
+        chatRuntimeMessages(runtimeState, selectedSessionKey),
+        historyMessages,
+        historyQuery.hasNextPage,
+        activeRuntimeIdentities
+    );
     const messages = projectChatMessageSurfaces(
         mergeChatMessages(historyMessages, runtimeMessages)
     );
@@ -2237,7 +2255,7 @@ export function ChatBrowser({
         connection,
         historyHasNextPage: historyQuery.hasNextPage,
         historyInitialLoading: historyQuery.isPending && historyQuery.data === undefined,
-        historyLoading: historyQuery.isFetchingNextPage,
+        historyLoading: olderHistoryLoading || historyQuery.isFetchingNextPage,
         messages,
         ...(modelsQuery.error === null
             ? {}
@@ -2329,8 +2347,27 @@ export function ChatBrowser({
             }}
             onOpenLocalFile={(reference) => void openLocalFile(reference)}
             onLoadOlder={async () => {
-                if (!historyQuery.hasNextPage || historyQuery.isFetchingNextPage) return;
-                await historyQuery.fetchNextPage();
+                if (!historyQuery.hasNextPage) return false;
+                if (olderHistoryLoad.current !== undefined) {
+                    return olderHistoryLoad.current;
+                }
+                const operation = (async () => {
+                    setOlderHistoryLoading(true);
+                    try {
+                        await historyQuery.fetchNextPage();
+                        return true;
+                    } finally {
+                        setOlderHistoryLoading(false);
+                    }
+                })();
+                olderHistoryLoad.current = operation;
+                try {
+                    return await operation;
+                } finally {
+                    if (olderHistoryLoad.current === operation) {
+                        olderHistoryLoad.current = undefined;
+                    }
+                }
             }}
             onReadAloud={speech.readAloudAvailable ? speech.startReadAloud : undefined}
             onRemoveAttachment={(id) =>

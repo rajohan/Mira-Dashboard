@@ -83,7 +83,7 @@ describe("chat transcript", () => {
         expect(projected).toEqual([
             older,
             expect.objectContaining({
-                id: "activity:provider-current:thinking",
+                id: "activity:provider-current",
                 parts: [
                     {
                         activity: "running",
@@ -138,7 +138,7 @@ describe("chat transcript", () => {
         expect(projected.map(({ id }) => id)).toEqual([
             tool.id,
             steer.id,
-            "activity:provider-steer:thinking",
+            "activity:provider-steer",
         ]);
         expect(projected.at(-1)?.parts).toEqual([
             expect.objectContaining({ kind: "control", text: "Thinking…" }),
@@ -173,7 +173,7 @@ describe("chat transcript", () => {
 
         expect(projected.map(({ id }) => id)).toEqual([
             runningTool.id,
-            "activity:provider-tool:tool:call-2",
+            "activity:provider-tool",
         ]);
         expect(projected.at(-1)?.parts).toEqual([
             expect.objectContaining({
@@ -415,13 +415,7 @@ describe("chat transcript", () => {
         fireEvent.scroll(log);
         log.scrollTop = 0;
         fireEvent.scroll(log);
-        expect(onLoadOlder).not.toHaveBeenCalled();
-        log.scrollTop = 100;
-        fireEvent.scroll(log);
-        fireEvent.wheel(log, { deltaY: -100 });
-        log.scrollTop = 0;
-        fireEvent.scroll(log);
-        fireEvent.scroll(log);
+        await act(async () => {});
         expect(onLoadOlder).toHaveBeenCalledTimes(1);
         expect(screen.queryByRole("button", { name: "Load older messages" })).toBeNull();
 
@@ -450,6 +444,54 @@ describe("chat transcript", () => {
         fireEvent.wheel(log, { deltaY: -100 });
         log.scrollTop = 0;
         fireEvent.scroll(log);
+        expect(onLoadOlder).toHaveBeenCalledTimes(2);
+        act(() => rendered.unmount());
+    });
+
+    test("continues one top gesture until a visible older row moves the viewport", async () => {
+        const secondPage = Promise.withResolvers<boolean>();
+        let page = 0;
+        const onLoadOlder = jest.fn(() => {
+            page += 1;
+            return page === 1 ? true : secondPage.promise;
+        });
+        const current = message("current", 2);
+        const rendered = render(
+            <ChatTranscript
+                {...properties([current])}
+                hasOlder
+                onLoadOlder={onLoadOlder}
+            />
+        );
+        const log = screen.getByRole("log", { name: "Messages" });
+        Object.defineProperties(log, {
+            clientHeight: { configurable: true, value: 200 },
+            scrollHeight: { configurable: true, value: 1000 },
+            scrollTop: { configurable: true, value: 100, writable: true },
+        });
+
+        await act(async () => {
+            fireEvent.scroll(log);
+            log.scrollTop = 0;
+            fireEvent.scroll(log);
+            await Promise.resolve();
+            await Promise.resolve();
+        });
+        expect(onLoadOlder).toHaveBeenCalledTimes(2);
+
+        rendered.rerender(
+            <ChatTranscript
+                {...properties([message("older", 1), current])}
+                hasOlder
+                onLoadOlder={onLoadOlder}
+            />
+        );
+        await act(async () => {
+            secondPage.resolve(true);
+            await secondPage.promise;
+        });
+        await flushAnimationFrames();
+        expect(log.scrollTop).toBeGreaterThan(32);
         expect(onLoadOlder).toHaveBeenCalledTimes(2);
         act(() => rendered.unmount());
     });

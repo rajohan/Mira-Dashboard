@@ -224,7 +224,12 @@ describe("chat workspace", () => {
         await user.click(screen.getByRole("button", { name: "Chat settings" }));
         await user.click(screen.getByRole("button", { name: "Reset" }));
         const dialog = screen.getByRole("dialog", { name: "Reset this chat?" });
-        expect(within(dialog).getByText(/Hiding one message affects/u)).toBeVisible();
+        expect(
+            within(dialog).getByText(
+                "This permanently clears the entire selected OpenClaw chat history."
+            )
+        ).toBeVisible();
+        expect(within(dialog).queryByText(/affects only this browser/iu)).toBeNull();
         await user.click(
             within(dialog).getByRole("button", {
                 name: "Reset chat history",

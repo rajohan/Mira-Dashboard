@@ -309,6 +309,52 @@ export function projectChatHistory(
     );
 }
 
+/**
+ * Keeps settled runtime groups from preceding a still-bounded canonical history window.
+ * Active and ungrouped runtime rows remain visible regardless of timestamp.
+ * @param runtime Runtime-projected transcript rows.
+ * @param history Current canonical history window.
+ * @param hasOlderHistory Whether the canonical window remains bounded.
+ * @param activeRunIds Runtime identities that must remain visible.
+ * @returns Runtime rows that belong inside the current canonical window.
+ */
+export function runtimeMessagesWithinCanonicalWindow(
+    runtime: readonly ChatDisplayMessage[],
+    history: readonly ChatDisplayMessage[],
+    hasOlderHistory: boolean,
+    activeRunIds: ReadonlySet<string>
+): readonly ChatDisplayMessage[] {
+    if (!hasOlderHistory) return runtime;
+    const boundary = Math.min(
+        ...history.flatMap(({ timestampMs }) =>
+            timestampMs === undefined ? [] : [timestampMs]
+        )
+    );
+    if (!Number.isFinite(boundary)) return runtime;
+    const groups = new Map<string, ChatDisplayMessage[]>();
+    for (const message of runtime) {
+        const identity = message.providerRunId ?? message.runId ?? message.clientRunId;
+        if (identity === undefined) continue;
+        const group = groups.get(identity) ?? [];
+        group.push(message);
+        groups.set(identity, group);
+    }
+    const hidden = new Set<string>();
+    for (const [identity, messages] of groups) {
+        if (activeRunIds.has(identity)) continue;
+        const timestamps = messages.flatMap(({ timestampMs }) =>
+            timestampMs === undefined ? [] : [timestampMs]
+        );
+        if (timestamps.length === messages.length && Math.max(...timestamps) < boundary) {
+            hidden.add(identity);
+        }
+    }
+    return runtime.filter((message) => {
+        const identity = message.providerRunId ?? message.runId ?? message.clientRunId;
+        return identity === undefined || !hidden.has(identity);
+    });
+}
+
 function chatDisplayMessageText(message: ChatDisplayMessage): string {
     return message.parts
         .flatMap((part) => (part.kind === "text" ? [part.text] : []))

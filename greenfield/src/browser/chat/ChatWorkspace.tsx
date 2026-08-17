@@ -66,7 +66,7 @@ interface ChatWorkspaceProps {
     readonly onDismissVoiceInputError?: () => void;
     readonly onHydrateMessage: (messageId: string) => void;
     readonly onLoadMoreTasks: () => void;
-    readonly onLoadOlder: () => Promise<void> | void;
+    readonly onLoadOlder: () => boolean | Promise<boolean>;
     readonly onOpenLocalFile?: (reference: string) => void;
     readonly onReadAloud?: (messageId: string, text: string) => void;
     readonly onRemoveAttachment: (id: string) => void;
@@ -489,7 +489,7 @@ export function ChatWorkspace({
                 busy={providerControlsDisabled}
                 confirmLabel="Reset chat history"
                 danger
-                description="This permanently clears the selected OpenClaw chat history. Hiding one message affects only this browser."
+                description="This permanently clears the entire selected OpenClaw chat history."
                 onCancel={() => setResetTarget(undefined)}
                 onConfirm={() => {
                     if (resetTarget !== undefined) onResetTranscript(resetTarget);

@@ -859,7 +859,11 @@ export function projectChatExternalRun(run: ChatExternalRun): ChatExternalRunPro
             segments.splice(0, segments.length, ...retained);
         }
     }
-    if (run.lifecycle === "active" && run.continuity === "interrupted") {
+    if (
+        run.lifecycle === "active" &&
+        run.continuity === "interrupted" &&
+        run.text.trim() === ""
+    ) {
         const gapPart: ChatMessagePart = {
             kind: "control",
             text: "Some OpenClaw activity may be missing because updates were interrupted.",

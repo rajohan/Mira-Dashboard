@@ -28,7 +28,7 @@ describe("chat message bubble", () => {
                             {
                                 activity: "running",
                                 kind: "control",
-                                text: "Thinking…",
+                                text: "OpenClaw is Thinking…",
                                 tone: "muted",
                             },
                         ],
@@ -59,18 +59,21 @@ describe("chat message bubble", () => {
             </>
         );
 
-        const [thinkingMessage] = screen.getAllByRole("article", {
-            name: "Mira message",
+        const [thinkingActivity] = screen.getAllByRole("article", {
+            name: "OpenClaw activity",
         });
-        expect(within(thinkingMessage!).getByText("Mira")).toBeVisible();
-        expect(within(thinkingMessage!).queryByText("Mira (thinking)")).toBeNull();
-        const running = within(thinkingMessage!).getByRole("status", {
-            name: "Thinking…",
+        expect(within(thinkingActivity!).queryByText("Mira")).toBeNull();
+        const running = within(thinkingActivity!).getByRole("status", {
+            name: "OpenClaw is Thinking…",
         });
         expect(running).toBeVisible();
-        expect(running).toHaveClass("text-sm", "[&_.loading-state-dots]:text-lg");
-        expect(running.textContent).toBe("Thinking...");
-        expect(within(thinkingMessage!).getByText("14.08.2026 · 20:15")).toBeVisible();
+        expect(running).toHaveClass("[&_.loading-state-dots]:text-lg");
+        expect(running).not.toHaveClass("bg-primary-800", "rounded-lg");
+        expect(running.textContent).toBe("OpenClaw is Thinking...");
+        expect(running.querySelector(".whitespace-nowrap")?.textContent).toBe(
+            "Thinking..."
+        );
+        expect(screen.queryByText("14.08.2026 · 20:15")).toBeNull();
         expect(screen.getByRole("status", { name: "Context compacted" })).toBeVisible();
     });
 

@@ -69,13 +69,11 @@ function withActiveChatActivity(
     const latestPart = activitySource?.parts.at(-1);
     const text =
         latestPart?.kind === "tool" ? chatToolActivityText(latestPart) : "Thinking…";
-    const identity =
-        latestPart?.kind === "tool" ? `tool:${latestPart.callId}` : "thinking";
     return [
         ...messages,
         {
             attachments: [],
-            id: `activity:${activeRunId}:${identity}`,
+            id: `activity:${activeRunId}`,
             parts: [
                 {
                     activity: "running",
