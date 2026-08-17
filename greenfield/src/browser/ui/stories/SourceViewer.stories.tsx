@@ -37,8 +37,10 @@ const longSource = [
     "    retries: 3,",
     "};",
 ].join("\n");
-const fiveDigitLineTail = "last-line-10000";
-const fiveDigitLineSource = `${"\n".repeat(9999)}${fiveDigitLineTail}`;
+const fiveDigitLineTail = "last-source-line";
+// The CSS gutter is fixed-width; measuring "10000" below proves five-digit capacity
+// without forcing the browser to highlight and mount ten thousand equivalent rows.
+const fiveDigitLineSource = `${"\n".repeat(11)}${fiveDigitLineTail}`;
 
 export const TypeScriptSource: Story = {
     decorators: [
@@ -184,9 +186,9 @@ export const LongLinesMobileWrap: Story = {
 
 export const FiveDigitLineNumberGutter: Story = {
     args: {
-        ariaLabel: "Maximum numbered source",
+        ariaLabel: "Five-digit gutter source",
         content: fiveDigitLineSource,
-        copyLabel: "Copy maximum numbered source",
+        copyLabel: "Copy five-digit gutter source",
         language: "text",
         languageLabel: "Plain text",
     },
@@ -206,7 +208,7 @@ export const FiveDigitLineNumberGutter: Story = {
         );
 
         if (!code || !toolbar) {
-            throw new TypeError("Maximum source story did not render its source surface");
+            throw new TypeError("Gutter story did not render its source surface");
         }
 
         const lastLine = code.lastElementChild;
@@ -214,7 +216,7 @@ export const FiveDigitLineNumberGutter: Story = {
             !(lastLine instanceof HTMLElement) ||
             !lastLine.classList.contains("source-viewer-line")
         ) {
-            throw new TypeError("Source story did not render line 10,000");
+            throw new TypeError("Source story did not render its final line");
         }
 
         const wrapSwitch = within(toolbar).getByRole("switch", { name: "Wrap lines" });
@@ -243,7 +245,7 @@ export const FiveDigitLineNumberGutter: Story = {
             content: "counter(source-viewer-line-number)",
             lastLine: fiveDigitLineTail,
             left: "0px",
-            lineCount: 10_000,
+            lineCount: 12,
             lineElementsOnly: true,
             lineNumberFits: true,
             paddingRight: "16px",

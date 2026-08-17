@@ -2364,9 +2364,7 @@ export function ChatBrowser({
                 try {
                     return await operation;
                 } finally {
-                    if (olderHistoryLoad.current === operation) {
-                        olderHistoryLoad.current = undefined;
-                    }
+                    olderHistoryLoad.current = undefined;
                 }
             }}
             onReadAloud={speech.readAloudAvailable ? speech.startReadAloud : undefined}

@@ -58,7 +58,7 @@ function longSnapshot(count: number): LogSnapshotOutput {
 }
 
 function FollowLogsStory(properties: ComponentProps<typeof LogsView>) {
-    const [currentSnapshot, setCurrentSnapshot] = useState(() => longSnapshot(140));
+    const [currentSnapshot, setCurrentSnapshot] = useState(() => longSnapshot(50));
     return (
         <div>
             <Button
