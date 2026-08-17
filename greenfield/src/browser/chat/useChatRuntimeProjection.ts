@@ -38,9 +38,7 @@ export function applyChatRuntimeBatch(
     runtimeStore.setConnection("connected");
     const cursor = Number(batch.cursor);
     const snapshots = batch.runs.map(projectChatRuntimeSnapshot);
-    const externalRuns = batch.externalRuns
-        .filter(({ lifecycle }) => lifecycle === "active")
-        .map((run) => projectChatExternalRun(run));
+    const externalRuns = batch.externalRuns.map((run) => projectChatExternalRun(run));
     const newlyOmittedProjectionDetail =
         (batch.externalRunsTruncated &&
             previousSession?.externalRunsTruncated !== true) ||

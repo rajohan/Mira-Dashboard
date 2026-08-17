@@ -71,7 +71,7 @@ function page(sessionKey: string, cursor: string, sequence: number, hasMore: boo
 }
 
 describe("chat runtime projection", () => {
-    test("installs only active external runs into the live transcript store", () => {
+    test("retains terminal external runs until canonical history can replace them", () => {
         const sessionKey = "agent:main:main";
         const store = createChatRuntimeStore();
         const externalRun = {
@@ -95,7 +95,15 @@ describe("chat runtime projection", () => {
                     {
                         ...externalRun,
                         lifecycle: "terminal-pending-history",
+                        parts: [
+                            {
+                                kind: "assistant" as const,
+                                sequence: 1,
+                                text: "Final answer",
+                            },
+                        ],
                         providerRunId: "terminal-run",
+                        text: "Final answer",
                     },
                     {
                         ...externalRun,
@@ -113,9 +121,15 @@ describe("chat runtime projection", () => {
             store
         );
 
-        expect(Object.keys(store.state.sessions[sessionKey]?.externalRuns ?? {})).toEqual(
-            ["active-run"]
-        );
+        expect(store.state.sessions[sessionKey]?.externalRuns).toMatchObject({
+            "active-run": { lifecycle: "active" },
+            "terminal-run": { lifecycle: "terminal-pending-history" },
+        });
+        expect(
+            chatRuntimeMessages(store.state, sessionKey).map(
+                ({ providerRunId }) => providerRunId
+            )
+        ).toEqual(["terminal-run"]);
     });
 
     test("settles an identical catch-up read without repeatedly invalidating static truncation", async () => {

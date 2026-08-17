@@ -38,7 +38,6 @@ function properties(messages: readonly ChatDisplayMessage[]) {
         historyLoading: false,
         initialLoading: false,
         messages,
-        onHideMessage: jest.fn(),
         onHydrateMessage: jest.fn(),
         onLoadOlder: jest.fn(),
         sessionKey,
@@ -391,35 +390,67 @@ describe("chat transcript", () => {
         expect(visibleChatTranscriptMessages(messages, display)).toHaveLength(2);
     });
 
-    test("keeps older-history paging available when filters hide the loaded page", () => {
-        const toolOnly: ChatDisplayMessage = {
-            attachments: [],
-            id: "tool-only-page",
-            parts: [
-                {
-                    callId: "call-1",
-                    kind: "tool",
-                    name: "search",
-                    status: "completed",
-                },
-            ],
-            role: "assistant",
-            sequence: 1,
-            sessionKey,
-        };
+    test("loads one older page at the top and preserves the visible row", async () => {
         const onLoadOlder = jest.fn();
+        const current = message("current", 2);
         const rendered = render(
             <ChatTranscript
-                {...properties([toolOnly])}
-                display={{ ...display, showTools: false }}
+                {...properties([current])}
                 hasOlder
                 onLoadOlder={onLoadOlder}
             />
         );
 
-        fireEvent.click(screen.getByRole("button", { name: "Load older messages" }));
+        const log = screen.getByRole("log", { name: "Messages" });
+        Object.defineProperties(log, {
+            clientHeight: { configurable: true, value: 200 },
+            scrollHeight: { configurable: true, value: 1000 },
+            scrollTop: {
+                configurable: true,
+                value: 0,
+                writable: true,
+            },
+        });
+        log.scrollTop = 100;
+        fireEvent.scroll(log);
+        log.scrollTop = 0;
+        fireEvent.scroll(log);
+        expect(onLoadOlder).not.toHaveBeenCalled();
+        log.scrollTop = 100;
+        fireEvent.scroll(log);
+        fireEvent.wheel(log, { deltaY: -100 });
+        log.scrollTop = 0;
+        fireEvent.scroll(log);
+        fireEvent.scroll(log);
         expect(onLoadOlder).toHaveBeenCalledTimes(1);
-        expect(screen.queryByText("No messages yet")).toBeNull();
+        expect(screen.queryByRole("button", { name: "Load older messages" })).toBeNull();
+
+        rendered.rerender(
+            <ChatTranscript
+                {...properties([current])}
+                hasOlder
+                historyLoading
+                onLoadOlder={onLoadOlder}
+            />
+        );
+        await flushAnimationFrames();
+        expect(log).toHaveAttribute("aria-busy", "true");
+        rendered.rerender(
+            <ChatTranscript
+                {...properties([message("older-visible", 1), current])}
+                hasOlder
+                onLoadOlder={onLoadOlder}
+            />
+        );
+        await flushAnimationFrames();
+        expect(log.scrollTop).toBeGreaterThan(32);
+        fireEvent.scroll(log);
+        expect(onLoadOlder).toHaveBeenCalledTimes(1);
+        expect(log).toHaveAttribute("aria-busy", "false");
+        fireEvent.wheel(log, { deltaY: -100 });
+        log.scrollTop = 0;
+        fireEvent.scroll(log);
+        expect(onLoadOlder).toHaveBeenCalledTimes(2);
         act(() => rendered.unmount());
     });
 

@@ -315,19 +315,6 @@ describe("chat view projection", () => {
         ).toMatchObject({ parts: [{ kind: "text", text: "Full" }] });
     });
 
-    test("keeps local hiding separate from canonical history", () => {
-        const message = {
-            attachments: [],
-            id: "message-1",
-            parts: [{ kind: "text" as const, text: "Visible" }],
-            role: "assistant" as const,
-            sequence: 1,
-            sessionKey,
-        };
-        expect(mergeChatMessages([message], [], new Set([message.id]))).toEqual([]);
-        expect(message.parts[0]?.text).toBe("Visible");
-    });
-
     test("deduplicates overlapping history pages with newest-page identity authoritative", () => {
         const projected = projectChatHistory(
             {
@@ -1000,6 +987,34 @@ describe("chat view projection", () => {
         expect(projected.map(({ id }) => id)).toEqual(["new-session-message"]);
     });
 
+    test("interleaves steered canonical history by provider timestamp", () => {
+        const firstUser = { ...userMessage("user-1"), createdAtMs: 100 };
+        const secondUser = { ...userMessage("user-2"), createdAtMs: 300 };
+        const firstAssistant = {
+            ...completeMessage("assistant-1"),
+            createdAtMs: 200,
+        };
+        const secondAssistant = {
+            ...completeMessage("assistant-2"),
+            createdAtMs: 400,
+        };
+
+        const activeOrder = projectSinglePage([
+            firstUser,
+            secondUser,
+            firstAssistant,
+        ]).map(({ id }) => id);
+        const finalOrder = projectSinglePage([
+            firstUser,
+            secondUser,
+            firstAssistant,
+            secondAssistant,
+        ]).map(({ id }) => id);
+
+        expect(activeOrder).toEqual(["user-1", "assistant-1", "user-2"]);
+        expect(finalOrder).toEqual([...activeOrder, "assistant-2"]);
+    });
+
     test("preserves canonical provider order when timestamps are missing", () => {
         const canonical = [
             {
@@ -1040,9 +1055,12 @@ describe("chat view projection", () => {
                 timestampMs: 1_800_000_000_001,
             },
         ];
-        expect(
-            mergeChatMessages(canonical, runtime, new Set()).map(({ id }) => id)
-        ).toEqual(["message-1", "message-2", "runtime-1", "runtime-2"]);
+        expect(mergeChatMessages(canonical, runtime).map(({ id }) => id)).toEqual([
+            "message-1",
+            "message-2",
+            "runtime-1",
+            "runtime-2",
+        ]);
     });
 
     test("sorts provider groups transitively and independently of input order", () => {
@@ -1116,9 +1134,10 @@ describe("chat view projection", () => {
             },
         ];
 
-        expect(
-            mergeChatMessages(canonical, runtime, new Set()).map(({ id }) => id)
-        ).toEqual(["external:old-run:assistant:1", "new-user"]);
+        expect(mergeChatMessages(canonical, runtime).map(({ id }) => id)).toEqual([
+            "external:old-run:assistant:1",
+            "new-user",
+        ]);
     });
 
     test("orders canonically equivalent distinct ids and run groups deterministically", () => {
@@ -1194,8 +1213,7 @@ describe("chat view projection", () => {
             [
                 external(activityBeforeId, 2),
                 external(activityAfterId, 4, "Continue", "current-steer"),
-            ],
-            new Set()
+            ]
         );
 
         expect(merged.map(({ id }) => id)).toEqual([
@@ -1203,6 +1221,52 @@ describe("chat view projection", () => {
             activityBeforeId,
             "current-steer",
             activityAfterId,
+        ]);
+    });
+
+    test("keeps a reset boundary above the user that triggered the new run", () => {
+        const reset: ChatMessage = {
+            content: {
+                kind: "complete",
+                parts: [{ id: "daily-reset-part", kind: "text", text: "Reset" }],
+            },
+            createdAtMs: 200,
+            id: "daily-reset",
+            role: "system",
+            sequence: 1,
+            source: "gateway-history",
+        };
+        const triggeringUser: ChatMessage = {
+            ...userMessage("triggering-user", "Start the new day"),
+            createdAtMs: 100,
+            idempotencyKey: "triggering-user",
+            sequence: 4,
+        };
+        const runtime = {
+            attachments: [],
+            id: "external:daily-run:segment:thinking",
+            parts: [
+                {
+                    kind: "thinking" as const,
+                    status: "running" as const,
+                    text: "Starting",
+                },
+            ],
+            precedingUserMessageIdAnchor: "triggering-user",
+            precedingUserTextAnchor: "Start the new day",
+            providerRunId: "daily-run",
+            role: "assistant" as const,
+            sequence: 3,
+            sessionKey,
+            timestampMs: 300,
+        };
+        const history = projectSinglePage([reset, triggeringUser]);
+
+        expect(history.map(({ id }) => id)).toEqual([reset.id, triggeringUser.id]);
+        expect(mergeChatMessages(history, [runtime]).map(({ id }) => id)).toEqual([
+            reset.id,
+            triggeringUser.id,
+            runtime.id,
         ]);
     });
 
@@ -1243,8 +1307,7 @@ describe("chat view projection", () => {
             [
                 external(activityBeforeId, 2),
                 external(activityAfterId, 4, "current-steer-not-loaded"),
-            ],
-            new Set()
+            ]
         );
 
         expect(merged.map(({ id }) => id)).toEqual([
@@ -1297,9 +1360,9 @@ describe("chat view projection", () => {
             sequence: 1,
             sessionKey,
         };
-        expect(
-            mergeChatMessages([canonicalUser], runtime, new Set()).map(({ id }) => id)
-        ).toContain("external:provider:segment:tool");
+        expect(mergeChatMessages([canonicalUser], runtime).map(({ id }) => id)).toContain(
+            "external:provider:segment:tool"
+        );
 
         const merged = mergeChatMessages(
             [
@@ -1312,8 +1375,7 @@ describe("chat view projection", () => {
                     sequence: 2,
                 },
             ],
-            runtime,
-            new Set()
+            runtime
         );
         expect(merged.map(({ id }) => id)).toEqual([
             "canonical-user",
@@ -1430,8 +1492,7 @@ describe("chat view projection", () => {
         };
         const afterEcho = mergeChatMessages(
             [canonicalUser, canonicalAssistant],
-            chatRuntimeMessages(store.state, sessionKey),
-            new Set()
+            chatRuntimeMessages(store.state, sessionKey)
         );
 
         expect(afterEcho.map(({ id }) => id)).toEqual([
@@ -1510,11 +1571,7 @@ describe("chat view projection", () => {
             sessionKey,
         };
 
-        const merged = mergeChatMessages(
-            [steer, canonicalAssistant],
-            [before, after],
-            new Set()
-        );
+        const merged = mergeChatMessages([steer, canonicalAssistant], [before, after]);
 
         expect(merged.map(({ id }) => id)).toEqual([steer.id, canonicalAssistant.id]);
         expect(merged[1]?.parts).toEqual([
@@ -1618,8 +1675,7 @@ describe("chat view projection", () => {
         };
         const merged = mergeChatMessages(
             [canonicalUser, canonicalAssistant],
-            chatRuntimeMessages(store.state, sessionKey),
-            new Set()
+            chatRuntimeMessages(store.state, sessionKey)
         );
 
         expect(
@@ -1670,8 +1726,7 @@ describe("chat view projection", () => {
         expect(
             mergeChatMessages(
                 [canonicalUser, canonicalAssistant],
-                [optimisticUser, runtimeAssistant],
-                new Set()
+                [optimisticUser, runtimeAssistant]
             )
         ).toEqual([canonicalUser, canonicalAssistant]);
     });
@@ -1735,8 +1790,7 @@ describe("chat view projection", () => {
 
         const merged = mergeChatMessages(
             [canonicalUser, canonicalAssistant],
-            [livePartial],
-            new Set()
+            [livePartial]
         );
 
         expect(merged.map(({ id }) => id)).toEqual([
@@ -1798,7 +1852,7 @@ describe("chat view projection", () => {
             sessionKey,
         }));
 
-        const merged = mergeChatMessages(canonical, runtime, new Set());
+        const merged = mergeChatMessages(canonical, runtime);
         const tools = merged[0]?.parts.filter((part) => part.kind === "tool");
         expect(tools).toHaveLength(2);
         expect(tools?.map((part) => (part.kind === "tool" ? part.callId : ""))).toEqual([

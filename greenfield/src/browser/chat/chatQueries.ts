@@ -12,7 +12,6 @@ import type {
 } from "../../contracts/chat.ts";
 import {
     chatHistoryPageMaximum,
-    chatHistoryRetainedPageMaximum,
     chatRuntimePageMaximum,
 } from "../../contracts/chatModel.ts";
 import type {
@@ -35,7 +34,6 @@ export const chatCompanionQueryRoot = [...chatQueryRoot, "companion"] as const;
 export const openClawTaskQueryRoot = ["openclaw-tasks"] as const;
 export const openClawTaskListQueryRoot = [...openClawTaskQueryRoot, "list"] as const;
 export const openClawTaskDetailQueryRoot = [...openClawTaskQueryRoot, "detail"] as const;
-export const chatHistoryBrowserPageMaximum = chatHistoryRetainedPageMaximum;
 export const openClawTasksBrowserPageMaximum = 5;
 export type OpenClawTaskListProjection = "active" | "finished";
 
@@ -68,7 +66,7 @@ export function retainLatestPageWindow<TPage>(
 }
 
 /**
- * Drops older pages from a superseded provider transcript and enforces the tab cap.
+ * Drops pages from a superseded provider transcript while retaining explicitly loaded history.
  * @param data Current newest-to-oldest history pages.
  * @returns A single-provider bounded history cache.
  */
@@ -80,16 +78,15 @@ export function retainAuthoritativeHistoryWindow(
     const retainedIndexes = data.pages.flatMap((page, index) =>
         page.sessionId === authority ? [index] : []
     );
-    const boundedIndexes = retainedIndexes.slice(0, chatHistoryBrowserPageMaximum);
     if (
-        boundedIndexes.length === data.pages.length &&
-        boundedIndexes.every((index, position) => index === position)
+        retainedIndexes.length === data.pages.length &&
+        retainedIndexes.every((index, position) => index === position)
     ) {
         return data;
     }
     return {
-        pageParams: boundedIndexes.map((index) => data.pageParams[index]),
-        pages: boundedIndexes.flatMap((index) => {
+        pageParams: retainedIndexes.map((index) => data.pageParams[index]),
+        pages: retainedIndexes.flatMap((index) => {
             const page = data.pages[index];
             return page === undefined ? [] : [page];
         }),

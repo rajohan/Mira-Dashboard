@@ -59,6 +59,11 @@ const boundedTaskBody = (maximum: number) =>
         v.maxLength(maximum),
         v.check((text) => !text.includes("\0"))
     );
+const upstreamTaskResultSchema = v.pipe(
+    v.string(),
+    v.maxLength(256 * 1024),
+    v.check((text) => !text.includes("\0"))
+);
 const optionalBlankTaskIdentity = (maximum: number) =>
     v.optional(v.union([v.literal(""), boundedTaskText(maximum)]));
 const upstreamTimestampSchema = v.union([
@@ -73,20 +78,38 @@ const upstreamTaskStatusSchema = v.picklist([
     "cancelled",
     "timed_out",
 ]);
+const upstreamTaskDeliveryStatusSchema = v.picklist([
+    "pending",
+    "delivered",
+    "session_queued",
+    "failed",
+    "dismissed",
+    "parent_missing",
+    "not_applicable",
+]);
+const upstreamTaskDiffStatSchema = v.strictObject({
+    added: v.pipe(v.number(), v.safeInteger(), v.minValue(0)),
+    files: v.pipe(v.number(), v.safeInteger(), v.minValue(0)),
+    removed: v.pipe(v.number(), v.safeInteger(), v.minValue(0)),
+});
 const upstreamTaskSummarySchema = v.strictObject({
     agentId: v.optional(boundedTaskText(256)),
     childSessionKey: v.optional(boundedTaskText(512)),
     createdAt: v.optional(upstreamTimestampSchema),
+    deliveryStatus: v.optional(upstreamTaskDeliveryStatusSchema),
+    diffStat: v.optional(upstreamTaskDiffStatSchema),
     endedAt: v.optional(upstreamTimestampSchema),
     error: v.optional(boundedTaskBody(4000)),
     flowId: v.optional(boundedTaskText(256)),
     id: boundedTaskText(256),
     kind: v.optional(boundedTaskText(256)),
+    lastActivity: v.optional(boundedTaskBody(200)),
     lastToolName: v.optional(boundedTaskText(200)),
     ownerKey: optionalBlankTaskIdentity(256),
     parentTaskId: v.optional(boundedTaskText(256)),
     progressSummary: v.optional(boundedTaskBody(4000)),
     prompt: v.optional(boundedTaskBody(4000)),
+    result: v.optional(upstreamTaskResultSchema),
     runId: v.optional(boundedTaskText(256)),
     runtime: v.optional(boundedTaskText(256)),
     sessionKey: optionalBlankTaskIdentity(512),
@@ -95,6 +118,7 @@ const upstreamTaskSummarySchema = v.strictObject({
     status: upstreamTaskStatusSchema,
     taskId: v.optional(boundedTaskText(256)),
     terminalSummary: v.optional(boundedTaskBody(4000)),
+    terminalOutcome: v.optional(v.picklist(["succeeded", "blocked"])),
     title: v.optional(boundedTaskText(256)),
     toolUseCount: v.optional(v.pipe(v.number(), v.safeInteger(), v.minValue(0))),
     updatedAt: v.optional(upstreamTimestampSchema),
@@ -202,6 +226,13 @@ function projectTask(
         const timestamp = timestampMs(value[upstreamField]);
         if (timestamp === undefined) throw new OpenClawTaskProviderUnavailableError();
         projected[localField] = timestamp;
+    }
+    if (
+        typeof projected.updatedAtMs === "number" &&
+        typeof projected.endedAtMs === "number" &&
+        projected.updatedAtMs < projected.endedAtMs
+    ) {
+        projected.updatedAtMs = projected.endedAtMs;
     }
     if (includePrompt && value.prompt !== undefined) projected.prompt = value.prompt;
     return includePrompt

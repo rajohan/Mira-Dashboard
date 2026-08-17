@@ -155,6 +155,19 @@ describe("chat runtime store", () => {
         ]);
     });
 
+    test("settles thinking as soon as later assistant output begins", () => {
+        const store = createChatRuntimeStore();
+        store.apply(event(1, { clientRunId: "client-1", kind: "started" }));
+        store.apply(event(2, { kind: "thinking", mode: "replace", text: "Reasoning" }));
+        store.apply(event(3, { kind: "assistant", mode: "replace", text: "Partial" }));
+
+        expect(chatRuntimeMessages(store.state, sessionKey)[0]?.parts).toEqual([
+            { kind: "thinking", status: "complete", text: "Reasoning" },
+            { kind: "text", text: "Partial" },
+        ]);
+        expect(store.state.sessions[sessionKey]?.runs["run-1"]?.phase).toBe("active");
+    });
+
     test("overlap-merges shared agent and chat assistant segments exactly once", () => {
         const store = createChatRuntimeStore();
         store.apply(
@@ -295,6 +308,14 @@ describe("chat runtime store", () => {
             optimisticSends: {},
             runs: {},
         });
+    });
+
+    test("does not present a bounded runtime collection as missing chat history", () => {
+        const store = createChatRuntimeStore();
+        store.installExternalRuns(sessionKey, [], true);
+
+        expect(store.state.sessions[sessionKey]?.externalRunsTruncated).toBeTrue();
+        expect(chatRuntimeMessages(store.state, sessionKey)).toEqual([]);
     });
 
     test("retires optimistic and live rows through canonical admission identities", () => {

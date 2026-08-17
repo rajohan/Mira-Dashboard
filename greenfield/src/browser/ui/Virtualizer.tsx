@@ -60,6 +60,8 @@ export interface VirtualizerFollowToEndState {
     readonly following: boolean;
     /** Re-measures async media or other content whose load is not represented by layoutRevision. */
     readonly notifyDynamicContentChange: () => void;
+    /** Stops sticky end correction before an intentional in-list reposition. */
+    readonly stopFollowing: () => void;
 }
 
 export interface VirtualizerRenderState<TItemElement extends Element> {
@@ -100,7 +102,6 @@ type VirtualizerProps<TItemElement extends Element> = VirtualizerBaseProps<TItem
 
 interface FollowControllerArguments<TItemElement extends Element> {
     readonly count: number;
-    readonly estimateSize: (index: number) => number;
     readonly following: boolean;
     readonly getItemKey: ((index: number) => VirtualizerItemKey) | undefined;
     readonly onFollowStateChange: (following: boolean) => void;
@@ -168,18 +169,6 @@ function tailAddition(
     return current.slice(previous.length);
 }
 
-function purePrependCount(
-    previous: readonly VirtualizerItemKey[],
-    current: readonly VirtualizerItemKey[]
-): number {
-    const prependedCount = current.length - previous.length;
-    return previous.length > 0 &&
-        prependedCount > 0 &&
-        previous.every((key, index) => key === current[index + prependedCount])
-        ? prependedCount
-        : 0;
-}
-
 function remeasureMountedItems<TItemElement extends Element>(
     virtualizer: TanStackVirtualizer<HTMLDivElement, TItemElement>
 ): void {
@@ -195,7 +184,6 @@ function remeasureMountedItems<TItemElement extends Element>(
 
 function useFollowToEndController<TItemElement extends Element>({
     count,
-    estimateSize,
     following,
     getItemKey,
     onFollowStateChange,
@@ -219,6 +207,9 @@ function useFollowToEndController<TItemElement extends Element>({
     const scrollbarGestureMovedUp = useRef(false);
     const middleAutoscrollPending = useRef(false);
     const userScrollIntent = useRef(false);
+    const visibleAnchors = useRef<
+        readonly Readonly<{ key: VirtualizerItemKey; viewportOffset: number }>[]
+    >([]);
     const wasFollowingWhenHidden = useRef(false);
     const followingReference = useRef(following);
     const [atEnd, setAtEnd] = useState(true);
@@ -320,9 +311,30 @@ function useFollowToEndController<TItemElement extends Element>({
         scheduleFollow(true);
     }
 
+    function stopFollowing(): void {
+        userScrollIntent.current = false;
+        cancelScheduledFollow();
+        setFollowState(false);
+        setAtEnd(false);
+    }
+
     const handleScroll = useEffectEvent(() => {
         const element = scrollContainerRef.current;
         if (!enabled || element === null) return;
+        const viewportEnd = element.scrollTop + element.clientHeight;
+        const visibleItems = virtualizer
+            .getVirtualItems()
+            .filter((item) => item.end > element.scrollTop && item.start < viewportEnd);
+        const anchorItems =
+            visibleItems.length > 0
+                ? visibleItems
+                : [virtualizer.getVirtualItemForOffset(element.scrollTop)].filter(
+                      (item) => item !== undefined
+                  );
+        visibleAnchors.current = anchorItems.map((item) => ({
+            key: item.key,
+            viewportOffset: item.start - element.scrollTop,
+        }));
         const threshold = options?.scrollEndThreshold ?? defaultFollowEndThresholdPx;
         const distanceFromEnd =
             element.scrollHeight - element.scrollTop - element.clientHeight;
@@ -432,8 +444,15 @@ function useFollowToEndController<TItemElement extends Element>({
         const keysChanged = !sameKeys(oldKeys, currentKeys);
         const appendedKeys = scopeChanged ? [] : tailAddition(oldKeys, currentKeys);
         const wasFollowing = followingReference.current;
-        const prependedCount =
-            scopeChanged || wasFollowing ? 0 : purePrependCount(oldKeys, currentKeys);
+        const isPrepend =
+            !scopeChanged &&
+            !wasFollowing &&
+            currentKeys.length > oldKeys.length &&
+            oldKeys.every((key) => currentKeys.includes(key));
+        const anchor = isPrepend
+            ? visibleAnchors.current.find(({ key }) => currentKeys.includes(key))
+            : undefined;
+        const anchorIndex = anchor === undefined ? -1 : currentKeys.indexOf(anchor.key);
 
         previousScopeKey.current = options.scopeKey;
         previousLayoutRevision.current = options.layoutRevision;
@@ -453,15 +472,13 @@ function useFollowToEndController<TItemElement extends Element>({
         if (appendedKeys.length > 0) {
             options.onItemsAppended?.({ itemKeys: appendedKeys, wasFollowing });
         }
-        if (prependedCount > 0) {
-            const element = scrollContainerRef.current;
-            let prependedSize = 0;
-            for (let index = 0; index < prependedCount; index += 1) {
-                prependedSize += estimateSize(index);
-            }
-            if (element !== null && prependedSize > 0) {
-                element.scrollTop += prependedSize;
-                previousScrollTop.current = element.scrollTop;
+        if (anchor !== undefined && anchorIndex >= 0 && keysChanged) {
+            const offset = virtualizer.getOffsetForIndex(anchorIndex, "start")?.[0];
+            if (offset !== undefined) {
+                virtualizer.scrollToOffset(offset - anchor.viewportOffset, {
+                    align: "start",
+                });
+                previousScrollTop.current = scrollContainerRef.current?.scrollTop ?? 0;
             }
         }
         if (layoutChanged && !keysChanged) remeasureMountedItems(virtualizer);
@@ -581,6 +598,7 @@ function useFollowToEndController<TItemElement extends Element>({
         follow: followLatest,
         following,
         notifyDynamicContentChange,
+        stopFollowing,
     };
 }
 
@@ -618,7 +636,6 @@ export function Virtualizer<TItemElement extends Element = HTMLElement>({
     });
     const followController = useFollowToEndController({
         count,
-        estimateSize,
         following,
         getItemKey,
         onFollowStateChange: setFollowing,

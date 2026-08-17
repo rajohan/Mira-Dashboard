@@ -72,6 +72,7 @@ function optionalConfiguration(
     target: Record<string, string>,
     environment: Readonly<Record<string, string | undefined>>,
     name:
+        | "ELEVENLABS_API_KEY"
         | "MIRA_DASHBOARD_LOG_LEVEL"
         | "MIRA_DASHBOARD_RECENT_AUTH_MINUTES"
         | "MIRA_DASHBOARD_SESSION_IDLE_MINUTES"
@@ -119,6 +120,7 @@ export async function developmentProcessEnvironments(
         OPENCLAW_GATEWAY_TOKEN: "source-development-no-gateway-credential",
         OPENCLAW_GATEWAY_URL: "ws://127.0.0.1:9/",
     };
+    optionalConfiguration(web, environment, "ELEVENLABS_API_KEY");
     const moltbookAgentName = environment.MOLTBOOK_AGENT_NAME;
     if (moltbookAgentName !== undefined) {
         worker.MOLTBOOK_AGENT_NAME = moltbookAgentName;

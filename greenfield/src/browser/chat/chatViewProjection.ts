@@ -286,13 +286,65 @@ export function projectChatHistory(
             hydration: hydrationState(hydration),
         };
     });
-    return foldHistoryToolResults(projectedMessages);
+    const chronologicalMessages = projectedMessages
+        .map((message, providerIndex) => ({ message, providerIndex }))
+        .toSorted((left, right) => {
+            if (
+                left.message.timestampMs === undefined ||
+                right.message.timestampMs === undefined
+            ) {
+                return left.providerIndex - right.providerIndex;
+            }
+            return (
+                left.message.timestampMs - right.message.timestampMs ||
+                left.providerIndex - right.providerIndex
+            );
+        })
+        .map(({ message }) => message);
+    return foldHistoryToolResults(
+        placeResetBoundariesBeforeTriggeringUsers(
+            projectedMessages,
+            chronologicalMessages
+        )
+    );
 }
 
 function chatDisplayMessageText(message: ChatDisplayMessage): string {
     return message.parts
         .flatMap((part) => (part.kind === "text" ? [part.text] : []))
         .join("");
+}
+
+function isResetBoundaryMessage(message: ChatDisplayMessage): boolean {
+    return (
+        message.role === "control" &&
+        message.parts.length === 1 &&
+        (message.parts[0]?.kind === "control" || message.parts[0]?.kind === "text") &&
+        message.parts[0].text === "Reset"
+    );
+}
+
+function placeResetBoundariesBeforeTriggeringUsers(
+    providerOrdered: readonly ChatDisplayMessage[],
+    chronological: readonly ChatDisplayMessage[]
+): readonly ChatDisplayMessage[] {
+    const ordered = [...chronological];
+    for (const [providerIndex, reset] of providerOrdered.entries()) {
+        if (!isResetBoundaryMessage(reset)) continue;
+        const triggeringUser = providerOrdered
+            .slice(providerIndex + 1)
+            .find(({ role }) => role === "user");
+        if (triggeringUser === undefined) continue;
+        const resetIndex = ordered.findIndex(({ id }) => id === reset.id);
+        if (resetIndex === -1) continue;
+        ordered.splice(resetIndex, 1);
+        const triggeringUserIndex = ordered.findIndex(
+            ({ id }) => id === triggeringUser.id
+        );
+        if (triggeringUserIndex === -1) continue;
+        ordered.splice(triggeringUserIndex, 0, reset);
+    }
+    return ordered;
 }
 
 function externalRuntimeMessage(message: ChatDisplayMessage): boolean {
@@ -610,16 +662,41 @@ function mergeExternalActivityIntoCanonical(
  * Combines canonical history and ephemeral runtime rows without duplicate identities.
  * @param history Canonical provider transcript.
  * @param runtime Ephemeral optimistic and active-run rows.
- * @param hiddenMessageIds Browser-local hidden identities.
  * @returns One chronological visible transcript.
  */
 export function mergeChatMessages(
     history: readonly ChatDisplayMessage[],
-    runtime: readonly ChatDisplayMessage[],
-    hiddenMessageIds: ReadonlySet<string>
+    runtime: readonly ChatDisplayMessage[]
 ): readonly ChatDisplayMessage[] {
-    const canonicalIds = new Set(history.map(({ id }) => id));
-    let canonical = history.filter((message) => !hiddenMessageIds.has(message.id));
+    const canonicalUserIdentities = new Set(
+        history.flatMap((message) =>
+            message.role === "user"
+                ? [message.id, message.idempotencyKey].flatMap((identity) =>
+                      identity === undefined
+                          ? []
+                          : [normalizeChatProviderUserIdentity(identity) ?? identity]
+                  )
+                : []
+        )
+    );
+    const runtimeAuthoritativeProviderRunIds = new Set(
+        runtime.flatMap((message) => {
+            if (message.role !== "user" || message.providerRunId === undefined) return [];
+            const identity = message.idempotencyKey ?? message.id;
+            const normalizedIdentity =
+                normalizeChatProviderUserIdentity(identity) ?? identity;
+            return canonicalUserIdentities.has(normalizedIdentity)
+                ? []
+                : [message.providerRunId];
+        })
+    );
+    let canonical = history.filter(
+        (message) =>
+            message.role !== "assistant" ||
+            message.providerRunId === undefined ||
+            !runtimeAuthoritativeProviderRunIds.has(message.providerRunId)
+    );
+    const canonicalIds = new Set(canonical.map(({ id }) => id));
     const canonicalIdempotencyKeys = new Set(
         canonical.flatMap((message) =>
             message.idempotencyKey === undefined
@@ -662,7 +739,6 @@ export function mergeChatMessages(
         }
         return (
             !canonicalIds.has(message.id) &&
-            !hiddenMessageIds.has(message.id) &&
             !(
                 message.clientRunId !== undefined &&
                 canonicalClientRunIds.has(message.clientRunId)

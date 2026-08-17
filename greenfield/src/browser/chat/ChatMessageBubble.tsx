@@ -1,18 +1,9 @@
-import {
-    ChevronRight,
-    Eye,
-    EyeOff,
-    LoaderCircle,
-    Square,
-    Volume2,
-    X,
-} from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { ChevronRight, Eye, LoaderCircle, Square, Volume2, X } from "lucide-react";
+import { type ReactNode, useRef, useState } from "react";
 
 import { cn } from "../lib/classNames.ts";
 import { formatDashboardDateTimeToMinute } from "../lib/formatDateTime.ts";
 import { Button } from "../ui/Button.tsx";
-import { ConfirmModal } from "../ui/ConfirmModal.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { IconOnlyButton } from "../ui/IconOnlyButton.tsx";
 import { interactiveTapClassName } from "../ui/interactionStyles.ts";
@@ -90,12 +81,6 @@ function ToolSourceRegion({ ariaLabel, details }: ToolSourceRegionProps) {
         <ToolScrollRegion
             ariaLabel={ariaLabel}
             className="max-h-64 overflow-auto text-[11px] leading-normal"
-            contentRevision={details
-                .map(
-                    (detail) =>
-                        `${detail.language}:${detail.content.length}:${detail.content.slice(-16)}`
-                )
-                .join("|")}
         >
             {details.map((detail, index) => (
                 <div
@@ -127,6 +112,7 @@ function ToolSourceRegion({ ariaLabel, details }: ToolSourceRegionProps) {
 
 interface ToolPartProps {
     readonly expanded: boolean;
+    readonly onExpand?: () => void;
     readonly part: ChatToolPart;
 }
 
@@ -139,7 +125,8 @@ function toolPartDescription(
     return diff.files.length === 1 ? diff.files[0] : `${diff.files.length} files changed`;
 }
 
-function ToolPart({ expanded, part }: ToolPartProps) {
+function ToolPart({ expanded, onExpand, part }: ToolPartProps) {
+    const regionRef = useRef<HTMLElement>(null);
     const defaultOpen = expanded;
     const [override, setOverride] =
         useState<Readonly<{ basis: boolean; value: boolean }>>();
@@ -170,6 +157,24 @@ function ToolPart({ expanded, part }: ToolPartProps) {
                 ) === index
         );
     const tone = part.status === "failed" ? "danger" : "warning";
+    function toggle(): void {
+        const nextOpen = !open;
+        if (nextOpen) onExpand?.();
+        setOverride({ basis: defaultOpen, value: nextOpen });
+        if (!nextOpen) return;
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                const region = regionRef.current;
+                const scrollContainer = region?.closest('[role="log"]');
+                if (!(scrollContainer instanceof HTMLElement) || region === null) return;
+                const top =
+                    scrollContainer.scrollTop +
+                    region.getBoundingClientRect().top -
+                    scrollContainer.getBoundingClientRect().top;
+                scrollContainer.scrollTo({ top: Math.max(0, top) });
+            });
+        });
+    }
     return (
         <section
             aria-label={`${label}, ${part.status}`}
@@ -179,6 +184,7 @@ function ToolPart({ expanded, part }: ToolPartProps) {
                     ? "border-red-500/30 bg-red-500/10 text-red-100"
                     : "border-amber-500/30 bg-amber-500/10 text-amber-100"
             )}
+            ref={regionRef}
         >
             <Button
                 aria-expanded={open}
@@ -186,7 +192,7 @@ function ToolPart({ expanded, part }: ToolPartProps) {
                     "flex w-full min-w-0 items-start gap-1.5 px-2 py-1.5 text-left text-xs focus-visible:ring-inset",
                     tone === "danger" ? "hover:bg-red-500/10" : "hover:bg-amber-500/10"
                 )}
-                onClick={() => setOverride({ basis: defaultOpen, value: !open })}
+                onClick={toggle}
                 type="button"
                 variant="unstyled"
             >
@@ -268,8 +274,8 @@ interface ChatMessageBubbleProps {
     readonly message: ChatDisplayMessage;
     readonly onDismissReadAloudError?: () => void;
     readonly onDynamicContentLoad?: () => void;
-    readonly onHide?: (messageId: string) => void;
     readonly onHydrate?: (messageId: string) => void;
+    readonly onToolExpand?: () => void;
     readonly onOpenLocalFile?: (reference: string) => void;
     readonly onReadAloud?: (messageId: string, text: string) => void;
     readonly onStopReadAloud?: () => void;
@@ -412,14 +418,13 @@ export function ChatMessageBubble({
     message,
     onDismissReadAloudError,
     onDynamicContentLoad,
-    onHide,
     onHydrate,
     onOpenLocalFile,
     onReadAloud,
+    onToolExpand,
     onStopReadAloud,
     readAloud,
 }: ChatMessageBubbleProps) {
-    const [hideConfirmationOpen, setHideConfirmationOpen] = useState(false);
     const [previewAttachmentId, setPreviewAttachmentId] = useState<string>();
     const isUser = message.role === "user";
     const author = messageAuthor(message.role);
@@ -432,11 +437,6 @@ export function ChatMessageBubble({
         (attachment) => attachment.id === previewAttachmentId
     );
     if (!chatMessageHasVisibleContent(message, display, readAloud)) return null;
-    const readableText = visibleParts
-        .filter((part) => part.kind === "text")
-        .map((part) => part.text.trim())
-        .filter(Boolean)
-        .join("\n\n");
     const messageFinished =
         !message.parts.some(
             (part) =>
@@ -448,9 +448,19 @@ export function ChatMessageBubble({
             !activeRunIds.includes(message.clientRunId)) &&
         (message.providerRunId === undefined ||
             !activeRunIds.includes(message.providerRunId));
+    const readableText = visibleParts
+        .flatMap((part) => {
+            if (part.kind === "thinking" && part.status === "complete") {
+                return [part.text];
+            }
+            if (part.kind === "text" && messageFinished) return [part.text];
+            return [];
+        })
+        .map((text) => text.trim())
+        .filter(Boolean)
+        .join("\n\n");
     const readAloudAvailable =
         message.role === "assistant" &&
-        messageFinished &&
         readableText !== "" &&
         onReadAloud !== undefined &&
         onStopReadAloud !== undefined &&
@@ -501,34 +511,18 @@ export function ChatMessageBubble({
                                     · {deliveryLabel(message.delivery)}
                                 </span>
                             )}
-                        {onHide !== undefined && (
-                            <IconOnlyButton
-                                className={cn(
-                                    "ml-auto min-h-7 px-1.5",
-                                    isUser &&
-                                        "text-white hover:text-white data-hover:text-white"
-                                )}
-                                icon={EyeOff}
-                                label="Hide message from this browser"
-                                onClick={() => setHideConfirmationOpen(true)}
-                                size="sm"
-                                title="Hide locally"
-                                variant="ghost"
-                            />
-                        )}
                         {readAloudAvailable && (
                             <IconOnlyButton
                                 aria-pressed={
                                     readAloudActive && readAloud.phase === "playing"
                                 }
-                                className={cn(
-                                    "ml-auto min-h-8 min-w-8 px-0",
-                                    onHide !== undefined && "ml-0",
-                                    readAloudActive &&
-                                        readAloud.phase === "loading" &&
-                                        "animate-pulse motion-reduce:animate-none"
-                                )}
+                                className="ml-auto min-h-8 min-w-8 px-0"
                                 icon={readAloudIcon}
+                                iconClassName={
+                                    readAloudActive && readAloud.phase === "loading"
+                                        ? "animate-spin motion-reduce:animate-none"
+                                        : undefined
+                                }
                                 label={readAloudLabel}
                                 onClick={() => {
                                     if (readAloudActive && readAloud.phase !== "idle") {
@@ -639,6 +633,7 @@ export function ChatMessageBubble({
                                 <ToolPart
                                     expanded={display.toolsExpanded}
                                     key={`tool:${part.callId}`}
+                                    onExpand={onToolExpand}
                                     part={part}
                                 />
                             );
@@ -697,19 +692,6 @@ export function ChatMessageBubble({
                     )}
                 </div>
             </article>
-            {onHide !== undefined && (
-                <ConfirmModal
-                    confirmLabel="Hide message"
-                    description="This hides the selected message only in this browser. It does not delete or change the OpenClaw chat history."
-                    onCancel={() => setHideConfirmationOpen(false)}
-                    onConfirm={() => {
-                        onHide(message.sourceMessageId ?? message.id);
-                        setHideConfirmationOpen(false);
-                    }}
-                    open={hideConfirmationOpen}
-                    title="Hide this message locally?"
-                />
-            )}
             <ChatAttachmentPreview
                 attachment={previewAttachment}
                 key={previewAttachment?.id ?? "closed-preview"}

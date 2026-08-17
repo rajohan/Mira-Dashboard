@@ -866,7 +866,12 @@ function applyRunEvent(run: ChatRuntimeRun, event: ChatRuntimeEvent): ChatRuntim
             break;
         }
         case "assistant": {
-            parts = updateTextPart(parts, "text", event.mode, event.text);
+            parts = updateTextPart(
+                settleThinkingParts(parts),
+                "text",
+                event.mode,
+                event.text
+            );
             break;
         }
         case "thinking": {
@@ -874,7 +879,7 @@ function applyRunEvent(run: ChatRuntimeRun, event: ChatRuntimeEvent): ChatRuntim
             break;
         }
         case "tool-started": {
-            parts = updateToolPart(parts, event.callId, () => ({
+            parts = updateToolPart(settleThinkingParts(parts), event.callId, () => ({
                 callId: event.callId,
                 ...(event.input === undefined ? {} : { input: event.input }),
                 kind: "tool",
@@ -1655,31 +1660,7 @@ export function chatRuntimeMessages(
     const optimistic = optimisticSends
         .filter((send) => !matchedOptimisticRunIds.has(send.clientRunId))
         .map((send) => optimisticMessage(send));
-    const externalTruncation: readonly ChatDisplayMessage[] =
-        session.externalRunsTruncated
-            ? [
-                  {
-                      attachments: [],
-                      id: `external:${sessionKey}:bounded-collection`,
-                      parts: [
-                          {
-                              kind: "control",
-                              text: "Some OpenClaw activity was not returned. Refresh chat history to check for updates.",
-                              tone: "warning",
-                          },
-                      ],
-                      role: "control",
-                      sequence: Number.MAX_SAFE_INTEGER,
-                      sessionKey,
-                  },
-              ]
-            : [];
-    return sortChatDisplayMessages([
-        ...optimistic,
-        ...runs,
-        ...externalRows,
-        ...externalTruncation,
-    ]);
+    return sortChatDisplayMessages([...optimistic, ...runs, ...externalRows]);
 }
 
 /**

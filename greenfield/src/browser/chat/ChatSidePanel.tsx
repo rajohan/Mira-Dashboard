@@ -8,14 +8,21 @@ import {
     Square,
     X,
 } from "lucide-react";
-import { type KeyboardEvent, type Ref, useId, useRef, useState } from "react";
+import {
+    type KeyboardEvent,
+    type Ref,
+    useEffect,
+    useId,
+    useLayoutEffect,
+    useRef,
+    useState,
+} from "react";
 
 import { cn } from "../lib/classNames.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
 import { ExpandableCard } from "../ui/ExpandableCard.tsx";
-import { Fieldset } from "../ui/Fieldset.tsx";
 import { Form } from "../ui/Form.tsx";
 import { FormField } from "../ui/FormField.tsx";
 import { Heading } from "../ui/Heading.tsx";
@@ -23,6 +30,7 @@ import { Icon } from "../ui/Icon.tsx";
 import { Input } from "../ui/Input.tsx";
 import { LoadingState } from "../ui/LoadingState.tsx";
 import { Text } from "../ui/Text.tsx";
+import { Virtualizer } from "../ui/Virtualizer.tsx";
 import type {
     ChatActivePlanView,
     ChatBackgroundTaskView,
@@ -67,18 +75,37 @@ function taskStatusLabel(status: ChatBackgroundTaskView["status"]): string {
     return "Timed out";
 }
 
+function estimatedTaskSize(
+    taskId: string | undefined,
+    selectedTaskId: string | undefined
+) {
+    return taskId === selectedTaskId ? 240 : 48;
+}
+
+function estimatedTaskStart(
+    index: number,
+    tasks: readonly ChatBackgroundTaskView[],
+    selectedTaskId: string | undefined
+): number {
+    let start = 0;
+    for (let taskIndex = 0; taskIndex < index; taskIndex += 1) {
+        start += estimatedTaskSize(tasks[taskIndex]?.id, selectedTaskId);
+    }
+    return start;
+}
+
 interface ChatSidePanelProps {
     readonly canAskCompanion: boolean;
     readonly className?: string;
     readonly closeButtonRef?: Ref<HTMLButtonElement>;
     readonly companion: ChatCompanionView;
     readonly companionError?: string;
+    readonly drawerOpen: boolean;
     readonly onAskCompanion: (question: string) => void;
     readonly onCancelTask: (taskId: string) => void;
     readonly onLoadMoreTasks: () => void;
     readonly onClose?: () => void;
     readonly onResetCompanion: () => void;
-    readonly onReturnTasksToLatest?: () => void;
     readonly onRetryCompanion?: () => void;
     readonly onRetryTasks?: () => void;
     readonly onSelectTask: (taskId?: string) => void;
@@ -92,9 +119,22 @@ interface ChatSidePanelProps {
     readonly tasksHasNextPage: boolean;
     readonly tasksLoading: boolean;
     readonly tasksLoadingMore: boolean;
-    readonly tasksWindowLimited?: boolean;
     readonly tasksError?: string;
     readonly id?: string;
+}
+
+interface VirtualizedTaskListProps {
+    readonly onCancelTask: (taskId: string) => void;
+    readonly onLoadMoreTasks: () => void;
+    readonly onSelectTask: (taskId?: string) => void;
+    readonly providerWritesDisabled: boolean;
+    readonly scrollResetKey: boolean;
+    readonly selectedTaskId?: string;
+    readonly taskCancelGatedIds: readonly string[];
+    readonly taskDetailError?: string;
+    readonly tasks: readonly ChatBackgroundTaskView[];
+    readonly tasksHasNextPage: boolean;
+    readonly tasksLoadingMore: boolean;
 }
 
 function companionBadgeVariant(
@@ -218,6 +258,148 @@ function TaskDetail({
     );
 }
 
+function VirtualizedTaskList({
+    onCancelTask,
+    onLoadMoreTasks,
+    onSelectTask,
+    providerWritesDisabled,
+    scrollResetKey,
+    selectedTaskId,
+    taskCancelGatedIds,
+    taskDetailError,
+    tasks,
+    tasksHasNextPage,
+    tasksLoadingMore,
+}: VirtualizedTaskListProps) {
+    const taskDetailIdPrefix = useId();
+    const taskLoadRequest = useRef<number | undefined>(undefined);
+    useEffect(() => {
+        if (tasksLoadingMore || taskLoadRequest.current === undefined) return;
+        if (taskLoadRequest.current !== tasks.length) {
+            taskLoadRequest.current = undefined;
+        }
+    }, [tasks.length, tasksLoadingMore]);
+
+    function loadMoreNearEnd(element: HTMLDivElement): void {
+        if (
+            !tasksHasNextPage ||
+            tasksLoadingMore ||
+            taskLoadRequest.current !== undefined
+        ) {
+            return;
+        }
+        const remaining = element.scrollHeight - element.scrollTop - element.clientHeight;
+        if (remaining > 160) return;
+        taskLoadRequest.current = tasks.length;
+        onLoadMoreTasks();
+    }
+
+    return (
+        <Virtualizer<HTMLLIElement>
+            key={scrollResetKey ? "drawer-open" : "drawer-closed"}
+            count={tasks.length}
+            estimateSize={(index) => estimatedTaskSize(tasks[index]?.id, selectedTaskId)}
+            getItemKey={(index) => tasks[index]?.id ?? `task:${index}`}
+            initialRect={{ height: 480, width: 352 }}
+            overscan={4}
+        >
+            {({ measureElement, scrollContainerRef, totalSize, virtualItems }) => {
+                const visibleTasks =
+                    virtualItems.length > 0
+                        ? virtualItems
+                        : tasks.slice(0, 10).map((task, index) => ({
+                              index,
+                              key: `initial:${task.id}`,
+                              start: estimatedTaskStart(index, tasks, selectedTaskId),
+                          }));
+                const sourceHeight =
+                    virtualItems.length > 0
+                        ? totalSize
+                        : estimatedTaskStart(tasks.length, tasks, selectedTaskId);
+                return (
+                    <div className="relative mt-2 min-h-0 flex-1">
+                        <div
+                            className="h-full min-h-0 overflow-x-hidden overflow-y-auto overscroll-contain"
+                            onScroll={(event) => loadMoreNearEnd(event.currentTarget)}
+                            ref={scrollContainerRef}
+                            // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- The bounded virtual task list must remain keyboard-scrollable.
+                            tabIndex={0}
+                        >
+                            <ul
+                                aria-label="Background tasks"
+                                className="relative min-w-0"
+                                style={{ height: `${sourceHeight}px` }}
+                            >
+                                {visibleTasks.map((virtualItem) => {
+                                    const task = tasks[virtualItem.index];
+                                    if (task === undefined) return null;
+                                    const selected = task.id === selectedTaskId;
+                                    const taskDetailId = `${taskDetailIdPrefix}-${virtualItem.index}`;
+                                    return (
+                                        <li
+                                            className="absolute top-0 right-2 left-0 pb-1"
+                                            data-index={virtualItem.index}
+                                            key={virtualItem.key}
+                                            ref={measureElement}
+                                            style={{
+                                                transform: `translateY(${virtualItem.start}px)`,
+                                            }}
+                                        >
+                                            <ExpandableCard
+                                                compact
+                                                onOpenChange={(open) =>
+                                                    onSelectTask(
+                                                        open ? task.id : undefined
+                                                    )
+                                                }
+                                                open={selected}
+                                                title={task.label}
+                                                trailing={
+                                                    <Badge
+                                                        variant={taskBadgeVariant(
+                                                            task.status
+                                                        )}
+                                                    >
+                                                        {taskStatusLabel(task.status)}
+                                                    </Badge>
+                                                }
+                                            >
+                                                {() => (
+                                                    <TaskDetail
+                                                        cancelBusy={taskCancelGatedIds.includes(
+                                                            task.id
+                                                        )}
+                                                        cancelDisabled={
+                                                            providerWritesDisabled
+                                                        }
+                                                        {...(taskDetailError === undefined
+                                                            ? {}
+                                                            : { error: taskDetailError })}
+                                                        id={taskDetailId}
+                                                        onCancel={() =>
+                                                            onCancelTask(task.id)
+                                                        }
+                                                        task={task}
+                                                    />
+                                                )}
+                                            </ExpandableCard>
+                                        </li>
+                                    );
+                                })}
+                            </ul>
+                        </div>
+                        {tasksLoadingMore && (
+                            <div className="bg-primary-900/90 pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center py-1 backdrop-blur-sm">
+                                <LoadingState label="Loading more tasks…" size="sm" />
+                            </div>
+                        )}
+                    </div>
+                );
+            }}
+        </Virtualizer>
+    );
+}
+
 /**
  * Renders ephemeral plan, companion, and durable background-task detail.
  * @returns The activity side panel.
@@ -228,12 +410,12 @@ export function ChatSidePanel({
     closeButtonRef,
     companion,
     companionError,
+    drawerOpen,
     onAskCompanion,
     onCancelTask,
     onLoadMoreTasks,
     onClose,
     onResetCompanion,
-    onReturnTasksToLatest,
     onRetryCompanion,
     onRetryTasks,
     onSelectTask,
@@ -247,20 +429,20 @@ export function ChatSidePanel({
     tasksHasNextPage,
     tasksLoading,
     tasksLoadingMore,
-    tasksWindowLimited = false,
     tasksError,
     id,
 }: ChatSidePanelProps) {
     const [questions, setQuestions] = useState<Readonly<Record<string, string>>>({});
     const panel = useRef<HTMLElement>(null);
-    const taskDetailIdPrefix = useId();
     const question = questions[sessionKey] ?? "";
     const setQuestion = (value: string) =>
         setQuestions((current) => ({ ...current, [sessionKey]: value }));
     const selectedTask = tasks.find((task) => task.id === selectedTaskId);
     const companionAskBusy = companion.status === "answering";
     const companionResetBusy = companion.status === "resetting";
-
+    useLayoutEffect(() => {
+        if (drawerOpen && panel.current !== null) panel.current.scrollTop = 0;
+    }, [drawerOpen]);
     function ask(): void {
         const nextQuestion = question.trim();
         if (
@@ -354,7 +536,7 @@ export function ChatSidePanel({
                     companionError !== undefined
                 }
                 icon={Bot}
-                title="Chat helper"
+                title="Chat companion"
                 trailing={
                     <Badge variant={companionBadgeVariant(companion.status)}>
                         {companionStatusLabel(companion.status)}
@@ -377,7 +559,7 @@ export function ChatSidePanel({
                             )}
                             {companion.answer !== undefined && (
                                 <output
-                                    aria-label="Chat helper answer"
+                                    aria-label="Chat companion answer"
                                     className="border-primary-600 bg-primary-800 text-primary-100 block min-w-0 rounded-lg border p-2.5 text-sm wrap-break-word whitespace-pre-wrap"
                                 >
                                     {companion.answer}
@@ -413,7 +595,7 @@ export function ChatSidePanel({
                                     size="sm"
                                     variant="secondary"
                                 >
-                                    Try chat helper again
+                                    Try chat companion again
                                 </Button>
                             )}
                         </div>
@@ -432,7 +614,7 @@ export function ChatSidePanel({
                         >
                             <Input
                                 aria-describedby="chat-companion-limit"
-                                aria-label="Ask chat helper"
+                                aria-label="Ask chat companion"
                                 className="mt-1"
                                 disabled={
                                     providerWritesDisabled ||
@@ -448,14 +630,12 @@ export function ChatSidePanel({
                                 value={question}
                             />
                         </FormField>
-                        <Fieldset
-                            className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]"
-                            legend={<span className="sr-only">Chat helper actions</span>}
-                        >
+                        <fieldset className="m-0 grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-2 border-0 p-0">
+                            <legend className="sr-only">Chat companion actions</legend>
                             <Button
                                 busy={companion.status === "answering"}
                                 busyLabel="Asking…"
-                                className="w-full min-w-0 justify-center"
+                                className="w-full min-w-0 justify-center whitespace-nowrap"
                                 disabled={
                                     providerWritesDisabled ||
                                     !canAskCompanion ||
@@ -466,12 +646,12 @@ export function ChatSidePanel({
                                 size="sm"
                                 type="submit"
                             >
-                                Ask chat helper
+                                Ask chat companion
                             </Button>
                             <Button
                                 busy={companion.status === "resetting"}
                                 busyLabel="Resetting…"
-                                className="w-full min-w-0 justify-center"
+                                className="w-full min-w-0 justify-center whitespace-nowrap"
                                 disabled={providerWritesDisabled || companionResetBusy}
                                 onClick={onResetCompanion}
                                 size="sm"
@@ -479,12 +659,12 @@ export function ChatSidePanel({
                             >
                                 Reset
                             </Button>
-                        </Fieldset>
+                        </fieldset>
                     </Form>
                 </div>
             </ExpandableCard>
 
-            <section className="border-primary-700 min-w-0 shrink-0 border-t pt-4">
+            <section className="border-primary-700 flex min-h-0 min-w-0 flex-1 flex-col border-t pt-4">
                 <Heading level={2} size="subsection">
                     Background tasks
                 </Heading>
@@ -515,77 +695,19 @@ export function ChatSidePanel({
                 )}
                 {tasks.length > 0 && (
                     <>
-                        <ul aria-label="Background tasks" className="mt-2 space-y-1">
-                            {tasks.map((task, index) => {
-                                const selected = task.id === selectedTask?.id;
-                                const taskDetailId = `${taskDetailIdPrefix}-${index}`;
-                                return (
-                                    <li key={task.id}>
-                                        <ExpandableCard
-                                            compact
-                                            onOpenChange={(open) =>
-                                                onSelectTask(open ? task.id : undefined)
-                                            }
-                                            open={selected}
-                                            title={task.label}
-                                            trailing={
-                                                <Badge
-                                                    variant={taskBadgeVariant(
-                                                        task.status
-                                                    )}
-                                                >
-                                                    {taskStatusLabel(task.status)}
-                                                </Badge>
-                                            }
-                                        >
-                                            {() => (
-                                                <TaskDetail
-                                                    cancelBusy={taskCancelGatedIds.includes(
-                                                        task.id
-                                                    )}
-                                                    cancelDisabled={
-                                                        providerWritesDisabled
-                                                    }
-                                                    {...(taskDetailError === undefined
-                                                        ? {}
-                                                        : { error: taskDetailError })}
-                                                    id={taskDetailId}
-                                                    onCancel={() => onCancelTask(task.id)}
-                                                    task={task}
-                                                />
-                                            )}
-                                        </ExpandableCard>
-                                    </li>
-                                );
-                            })}
-                        </ul>
-                        {tasksHasNextPage && (
-                            <Button
-                                busy={tasksLoadingMore}
-                                busyLabel="Loading more tasks…"
-                                className="mt-3 w-full"
-                                onClick={onLoadMoreTasks}
-                                size="sm"
-                                variant="secondary"
-                            >
-                                Load more tasks
-                            </Button>
-                        )}
-                        {tasksWindowLimited && (
-                            <div className="text-primary-300 mt-3 text-center text-xs">
-                                <p>Only the most recent tasks are shown here.</p>
-                                {onReturnTasksToLatest !== undefined && (
-                                    <Button
-                                        className="mt-2 w-full"
-                                        onClick={onReturnTasksToLatest}
-                                        size="sm"
-                                        variant="secondary"
-                                    >
-                                        Return to latest tasks
-                                    </Button>
-                                )}
-                            </div>
-                        )}
+                        <VirtualizedTaskList
+                            onCancelTask={onCancelTask}
+                            onLoadMoreTasks={onLoadMoreTasks}
+                            onSelectTask={onSelectTask}
+                            providerWritesDisabled={providerWritesDisabled}
+                            scrollResetKey={drawerOpen}
+                            selectedTaskId={selectedTask?.id}
+                            taskCancelGatedIds={taskCancelGatedIds}
+                            taskDetailError={taskDetailError}
+                            tasks={tasks}
+                            tasksHasNextPage={tasksHasNextPage}
+                            tasksLoadingMore={tasksLoadingMore}
+                        />
                     </>
                 )}
             </section>

@@ -3564,6 +3564,9 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
             );
             changed = true;
         }
+        if (active.size === 0 && this.#externalTruncatedSessions.delete(sessionKey)) {
+            changed = true;
+        }
         if (!changed) return;
         await this.#flushExternalCoalescer(sessionKey);
         await this.#persistExternalRuntimeSnapshot(sessionKey);

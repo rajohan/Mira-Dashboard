@@ -64,17 +64,14 @@ interface ChatWorkspaceProps {
     readonly onDisplaySettingsChange: (settings: ChatDisplaySettings) => void;
     readonly onDismissReadAloudError?: () => void;
     readonly onDismissVoiceInputError?: () => void;
-    readonly onHideMessage: (messageId: string) => void;
     readonly onHydrateMessage: (messageId: string) => void;
     readonly onLoadMoreTasks: () => void;
-    readonly onLoadOlder: () => void;
+    readonly onLoadOlder: () => Promise<void> | void;
     readonly onOpenLocalFile?: (reference: string) => void;
     readonly onReadAloud?: (messageId: string, text: string) => void;
     readonly onRemoveAttachment: (id: string) => void;
     readonly onResetCompanion: () => void;
     readonly onResetTranscript: (sessionKey: string) => void;
-    readonly onReturnHistoryToLatest?: () => void;
-    readonly onReturnTasksToLatest?: () => void;
     readonly onRetryCompanion?: () => void;
     readonly onRetryModels?: () => void;
     readonly onRetryTasks?: () => void;
@@ -156,7 +153,6 @@ export function ChatWorkspace({
     onDisplaySettingsChange,
     onDismissReadAloudError,
     onDismissVoiceInputError,
-    onHideMessage,
     onHydrateMessage,
     onLoadMoreTasks,
     onLoadOlder,
@@ -165,8 +161,6 @@ export function ChatWorkspace({
     onRemoveAttachment,
     onResetCompanion,
     onResetTranscript,
-    onReturnHistoryToLatest,
-    onReturnTasksToLatest,
     onRetryCompanion,
     onRetryModels,
     onRetryTasks,
@@ -246,7 +240,7 @@ export function ChatWorkspace({
             data-connection={view.connection}
             data-testid="chat-workspace"
         >
-            <header className="border-primary-700 border-b p-2 pr-12 sm:p-3 lg:pr-3">
+            <header className="border-primary-700 border-b p-2 sm:p-3">
                 <div className="flex min-w-0 flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
                     <div
                         aria-label="Selected response settings"
@@ -282,7 +276,13 @@ export function ChatWorkspace({
                             {tokenPresentation?.compactLabel}
                         </Badge>
                     </div>
-                    <div className="grid w-full min-w-0 grid-cols-2 gap-1.5 lg:ml-auto lg:w-[min(34rem,52vw)]">
+                    <div
+                        className={`grid w-full min-w-0 gap-1.5 lg:ml-auto lg:w-[min(34rem,52vw)] ${
+                            activityOpen
+                                ? "grid-cols-2"
+                                : "grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]"
+                        }`}
+                    >
                         <div className="min-w-0">
                             <Select
                                 ariaLabel="Agent"
@@ -344,6 +344,23 @@ export function ChatWorkspace({
                                 value={view.selectedSessionKey}
                             />
                         </div>
+                        {!activityOpen && (
+                            <IconOnlyButton
+                                aria-controls="chat-activity-panel"
+                                aria-expanded={false}
+                                className="focus-visible:ring-accent-400 h-10 min-h-10 min-w-10 flex-none justify-center px-0 focus-visible:ring-1 focus-visible:ring-offset-0"
+                                icon={ListChecks}
+                                label="Open activity panel"
+                                onClick={() => {
+                                    activityWasToggled.current = true;
+                                    setActivityOpen(true);
+                                }}
+                                ref={activityTrigger}
+                                size="sm"
+                                title="Open activity & tasks"
+                                variant="ghost"
+                            />
+                        )}
                     </div>
                 </div>
             </header>
@@ -368,17 +385,14 @@ export function ChatWorkspace({
                             initialLoading={view.historyInitialLoading}
                             historyLoading={view.historyLoading}
                             messages={view.messages}
-                            onHideMessage={onHideMessage}
                             onHydrateMessage={onHydrateMessage}
                             onLoadOlder={onLoadOlder}
                             onOpenLocalFile={onOpenLocalFile}
                             onDismissReadAloudError={onDismissReadAloudError}
                             onReadAloud={onReadAloud}
-                            onReturnToLatest={onReturnHistoryToLatest}
                             onStopReadAloud={onStopReadAloud}
                             readAloud={readAloud}
                             sessionKey={view.selectedSessionKey}
-                            windowLimited={view.historyWindowLimited}
                         />
                     </div>
                     {statusMessage !== "" && (
@@ -424,25 +438,6 @@ export function ChatWorkspace({
                         voiceInput={voiceInput}
                     />
                 </div>
-                {!activityOpen && (
-                    <div className="border-primary-700 absolute top-1/2 right-1 z-30 flex shrink-0 -translate-y-1/2 items-center lg:static lg:translate-y-0 lg:self-stretch lg:border-l lg:p-1">
-                        <IconOnlyButton
-                            aria-controls="chat-activity-panel"
-                            aria-expanded={false}
-                            className="focus-visible:ring-accent-400 h-10 min-h-10 min-w-10 flex-none justify-center self-center px-0 focus-visible:ring-1 focus-visible:ring-offset-0"
-                            icon={ListChecks}
-                            label="Open activity panel"
-                            onClick={() => {
-                                activityWasToggled.current = true;
-                                setActivityOpen(true);
-                            }}
-                            ref={activityTrigger}
-                            size="sm"
-                            title="Open activity & tasks"
-                            variant="ghost"
-                        />
-                    </div>
-                )}
                 {activityOpen && (
                     <Button
                         aria-label="Close activity panel backdrop"
@@ -463,6 +458,7 @@ export function ChatWorkspace({
                     }`}
                     closeButtonRef={activityCloseButton}
                     companion={view.companion}
+                    drawerOpen={activityOpen}
                     onAskCompanion={onAskCompanion}
                     onCancelTask={onCancelTask}
                     onClose={() => {
@@ -471,7 +467,6 @@ export function ChatWorkspace({
                     }}
                     onLoadMoreTasks={onLoadMoreTasks}
                     onResetCompanion={onResetCompanion}
-                    onReturnTasksToLatest={onReturnTasksToLatest}
                     onRetryCompanion={onRetryCompanion}
                     onRetryTasks={onRetryTasks}
                     onSelectTask={onSelectTask}
@@ -484,7 +479,6 @@ export function ChatWorkspace({
                     tasksHasNextPage={view.backgroundTasksHasNextPage}
                     tasksLoading={view.backgroundTasksLoading}
                     tasksLoadingMore={view.backgroundTasksLoadingMore}
-                    tasksWindowLimited={view.backgroundTasksWindowLimited}
                     companionError={view.companionError}
                     id="chat-activity-panel"
                     taskDetailError={view.taskDetailError}

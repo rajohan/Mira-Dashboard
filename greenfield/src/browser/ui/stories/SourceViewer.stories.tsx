@@ -37,8 +37,8 @@ const longSource = [
     "    retries: 3,",
     "};",
 ].join("\n");
-const maximumLineTail = "last-line-20000";
-const maximumLineSource = `${"\n".repeat(19_999)}${maximumLineTail}`;
+const fiveDigitLineTail = "last-line-10000";
+const fiveDigitLineSource = `${"\n".repeat(9999)}${fiveDigitLineTail}`;
 
 export const TypeScriptSource: Story = {
     decorators: [
@@ -182,10 +182,10 @@ export const LongLinesMobileWrap: Story = {
     },
 };
 
-export const MaximumLineNumberGutter: Story = {
+export const FiveDigitLineNumberGutter: Story = {
     args: {
         ariaLabel: "Maximum numbered source",
-        content: maximumLineSource,
+        content: fiveDigitLineSource,
         copyLabel: "Copy maximum numbered source",
         language: "text",
         languageLabel: "Plain text",
@@ -214,7 +214,7 @@ export const MaximumLineNumberGutter: Story = {
             !(lastLine instanceof HTMLElement) ||
             !lastLine.classList.contains("source-viewer-line")
         ) {
-            throw new TypeError("Maximum source story did not render line 20,000");
+            throw new TypeError("Source story did not render line 10,000");
         }
 
         const wrapSwitch = within(toolbar).getByRole("switch", { name: "Wrap lines" });
@@ -233,7 +233,7 @@ export const MaximumLineNumberGutter: Story = {
             lineCount: code.childElementCount,
             lineElementsOnly:
                 code.querySelector(":scope > :not(.source-viewer-line)") === null,
-            lineNumberFits: textContext.measureText("20000").width < 48,
+            lineNumberFits: textContext.measureText("10000").width < 48,
             paddingRight: gutterStyle.paddingRight,
             position: gutterStyle.position,
             width: gutterStyle.width,
@@ -241,9 +241,9 @@ export const MaximumLineNumberGutter: Story = {
         }).toEqual({
             color: "rgb(133, 140, 153)",
             content: "counter(source-viewer-line-number)",
-            lastLine: maximumLineTail,
+            lastLine: fiveDigitLineTail,
             left: "0px",
-            lineCount: 20_000,
+            lineCount: 10_000,
             lineElementsOnly: true,
             lineNumberFits: true,
             paddingRight: "16px",

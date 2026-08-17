@@ -8,7 +8,7 @@ const { render, screen, within } = await import("@testing-library/react");
 
 const sessionKey = "agent:main:main";
 const display = {
-    keepThinkingAfterFinal: false,
+    keepThinkingAfterFinal: true,
     showThinking: true,
     showTools: true,
     toolsExpanded: true,

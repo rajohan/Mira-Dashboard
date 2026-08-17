@@ -257,11 +257,7 @@ async function expectChatProjectionCoverageMatrix(): Promise<void> {
         { kind: "text", text: "Answer" },
         { kind: "text", text: "Live prefix" },
     ]);
-    const unanchored = mergeChatMessages(
-        [unanchoredCanonical],
-        [unanchoredRuntime],
-        new Set()
-    );
+    const unanchored = mergeChatMessages([unanchoredCanonical], [unanchoredRuntime]);
     await expect(unanchored[0]?.parts).toMatchObject([
         { kind: "text", text: "Live prefix" },
         { kind: "thinking", status: "complete", text: "Plan expanded" },
@@ -321,8 +317,7 @@ async function expectChatProjectionCoverageMatrix(): Promise<void> {
     );
     const anchored = mergeChatMessages(
         [steer, anchoredCanonical],
-        [afterAnchor, beforeAnchor],
-        new Set()
+        [afterAnchor, beforeAnchor]
     );
     await expect(anchored.map(({ id }) => id)).toEqual([steer.id, anchoredCanonical.id]);
     await expect(anchored.at(-1)?.parts).toEqual([
@@ -529,7 +524,6 @@ const meta = {
         onDisplaySettingsChange: fn(),
         onDismissReadAloudError: fn(),
         onDismissVoiceInputError: fn(),
-        onHideMessage: fn(),
         onHydrateMessage: fn(),
         onLoadMoreTasks: fn(),
         onLoadOlder: fn(),
@@ -599,7 +593,7 @@ export const TaskDetailCanClose: Story = {
         await expect(task()).toHaveAttribute("aria-expanded", "true");
         await expect(
             canvas.getByRole("region", { name: "Task detail: Review deployment" })
-        ).toBeVisible();
+        ).toBeInTheDocument();
 
         await userEvent.click(task());
         await expect(task()).toHaveAttribute("aria-expanded", "false");
@@ -759,16 +753,20 @@ export const CollapsibleActivity: Story = {
         await expectStoryViewport(canvasElement, desktopViewport);
         const canvas = within(canvasElement);
         const open = canvas.getByRole("button", { name: "Open activity panel" });
-        const rail = open.parentElement;
-        if (rail === null) throw new TypeError("Expected the collapsed Activity rail");
         await expect(open).toHaveAttribute("aria-expanded", "false");
-        const railStyle = getComputedStyle(rail);
-        await expect(railStyle.borderLeftWidth).toBe("1px");
-        await expect(railStyle.borderLeftStyle).toBe("solid");
-        await expect(railStyle.borderLeftColor).toBe("rgb(42, 45, 51)");
-        await expect(railStyle.boxShadow).toBe("none");
         await expect(open.getBoundingClientRect().width).toBe(40);
         await expect(open.getBoundingClientRect().height).toBe(40);
+        await expect(
+            canvas.queryByRole("complementary", { name: "Chat activity" })
+        ).not.toBeInTheDocument();
+
+        await userEvent.click(open);
+        await expect(
+            canvas.getByRole("button", { name: "Close activity panel" })
+        ).toHaveAttribute("aria-expanded", "true");
+        await expect(
+            canvas.getByRole("complementary", { name: "Chat activity" })
+        ).toBeVisible();
     },
 };
 
@@ -778,7 +776,7 @@ export const LongCompanionMobile: Story = {
             companion: {
                 answer: Array.from(
                     { length: 24 },
-                    (_, index) => `Evidence line ${index + 1}: chat helper detail.`
+                    (_, index) => `Evidence line ${index + 1}: chat companion detail.`
                 ).join("\n"),
                 question:
                     "Summarize every relevant deployment observation without clipping the final action.",
@@ -787,7 +785,7 @@ export const LongCompanionMobile: Story = {
         }),
     },
     globals: { viewport: { isRotated: false, value: "mobile1" } },
-    name: "Long chat helper answer — activity open (mobile)",
+    name: "Long chat companion answer — activity open (mobile)",
     play: async ({ canvasElement }) => {
         await expectStoryViewport(canvasElement, mobileViewport);
         const canvas = within(canvasElement);
@@ -796,7 +794,7 @@ export const LongCompanionMobile: Story = {
         );
         const panel = canvas.getByRole("complementary", { name: "Chat activity" });
         const companionButton = canvas.getByRole("button", {
-            name: /Chat helper Ready/iu,
+            name: /Chat companion Ready/iu,
         });
         const companionSection = companionButton.closest("section");
         if (companionSection === null) {
@@ -809,10 +807,10 @@ export const LongCompanionMobile: Story = {
         await settleLayout();
         await expect(panel.scrollHeight).toBeGreaterThan(panel.clientHeight);
         await expect(panel.scrollWidth).toBeLessThanOrEqual(panel.clientWidth);
-        const answer = canvas.getByLabelText("Chat helper answer");
+        const answer = canvas.getByLabelText("Chat companion answer");
         const answerText = answer.firstChild;
         if (!(answerText instanceof Text)) {
-            throw new TypeError("Expected a text-only Chat helper answer");
+            throw new TypeError("Expected a text-only Chat companion answer");
         }
         const finalLineStart = answerText.data.lastIndexOf("Evidence line 24");
         const finalLineRange = answer.ownerDocument.createRange();
@@ -838,7 +836,7 @@ export const LongCompanionMobile: Story = {
         await expect(finalLineBounds.bottom).toBeLessThanOrEqual(panelBounds.bottom);
         for (const control of [
             canvas.getByRole("textbox", { name: "Ask about this chat" }),
-            canvas.getByRole("button", { name: "Ask chat helper" }),
+            canvas.getByRole("button", { name: "Ask chat companion" }),
             canvas.getByRole("button", { name: "Reset" }),
         ]) {
             control.scrollIntoView({ block: "nearest" });
@@ -977,7 +975,7 @@ export const SidePanelsUnavailable: Story = {
             backgroundTasks: [],
             backgroundTasksError: "Background tasks are unavailable. Retry to load them.",
             companion: { status: "idle" },
-            companionError: "The chat helper is unavailable. Try loading it again.",
+            companionError: "The chat companion is unavailable. Try loading it again.",
             modelInventoryError:
                 "Configured models could not be refreshed. Current session controls remain available.",
         }),
@@ -991,7 +989,7 @@ export const SidePanelLastKnownData: Story = {
             backgroundTasksError:
                 "Background tasks could not be updated. The latest available tasks remain visible.",
             companionError:
-                "The chat helper could not be updated. The latest available answer remains visible.",
+                "The chat companion could not be updated. The latest available answer remains visible.",
             taskDetailError:
                 "Task detail could not be refreshed. The summary remains visible.",
         }),

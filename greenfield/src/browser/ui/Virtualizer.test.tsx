@@ -112,6 +112,12 @@ function FollowFixture({
                     >
                         Remeasure content
                     </button>
+                    <button
+                        onClick={virtualization.followToEnd?.stopFollowing}
+                        type="button"
+                    >
+                        Stop following
+                    </button>
                     <div
                         aria-label="Virtual messages"
                         ref={virtualization.scrollContainerRef}
@@ -305,6 +311,28 @@ function setControlledResizeObserver(value: typeof ResizeObserver | undefined): 
 }
 
 describe("shared virtualizer follow-to-end controller", () => {
+    test("stops structural end correction before an intentional reposition", async () => {
+        let scrollHeight = 400;
+        const rendered = render(<FollowFixture items={["first", "latest"]} />);
+        const log = screen.getByRole("log", { name: "Virtual messages" });
+        setScrollGeometry(log, { clientHeight: 200, scrollHeight: () => scrollHeight });
+        await flushAnimationFrames();
+
+        fireEvent.click(screen.getByRole("button", { name: "Stop following" }));
+        expect(screen.getByTestId("follow-fixture")).toHaveAttribute(
+            "data-following",
+            "false"
+        );
+        const detachedTop = log.scrollTop;
+        scrollHeight = 600;
+        rendered.rerender(
+            <FollowFixture items={["first", "latest"]} layoutRevision={2} />
+        );
+        await flushAnimationFrames();
+        expect(log.scrollTop).toBe(detachedTop);
+        act(() => rendered.unmount());
+    });
+
     test("renders a short followed list whose content is smaller than its viewport", async () => {
         const rendered = render(<FollowFixture items={["first", "latest"]} />);
         const log = screen.getByRole("log", { name: "Virtual messages" });
@@ -1199,6 +1227,34 @@ describe("shared virtualizer follow-to-end controller", () => {
         expect(screen.getByTestId("follow-fixture")).toHaveAttribute(
             "data-following",
             "true"
+        );
+        act(() => rendered.unmount());
+    });
+
+    test("does not treat runtime-to-canonical key replacement as a history prepend", async () => {
+        const initialItems = Array.from({ length: 10 }, (_, index) => `item-${index}`);
+        const rendered = render(<FollowFixture items={initialItems} />);
+        const log = screen.getByRole("log", { name: "Virtual messages" });
+        setScrollGeometry(log, { clientHeight: 200, scrollHeight: () => 1000 });
+        await flushAnimationFrames();
+
+        fireEvent.wheel(log, { deltaY: -100 });
+        act(() => {
+            log.scrollTop = 400;
+            fireEvent.scroll(log);
+        });
+        rendered.rerender(
+            <FollowFixture
+                items={[...initialItems.slice(1), "canonical-final"]}
+                layoutRevision={2}
+            />
+        );
+        await flushAnimationFrames();
+
+        expect(log.scrollTop).toBe(400);
+        expect(screen.getByTestId("follow-fixture")).toHaveAttribute(
+            "data-following",
+            "false"
         );
         act(() => rendered.unmount());
     });

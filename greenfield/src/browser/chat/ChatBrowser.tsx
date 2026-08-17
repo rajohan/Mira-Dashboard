@@ -52,9 +52,7 @@ import {
     reconcileChatTaskSummary,
 } from "./chatInteractionState.ts";
 import {
-    addHiddenMessageId,
     readChatDisplaySettings,
-    readHiddenMessageIds,
     writeChatDisplaySettings,
 } from "./chatLocalPreferences.ts";
 import {
@@ -78,7 +76,6 @@ import {
     chatCompanionQueryOptions,
     chatHistoryQueryKey,
     chatHistoryQueryOptions,
-    chatHistoryBrowserPageMaximum,
     chatMessageQueryOptions,
     chatModelsQueryOptions,
     chatRuntimeQueryKey,
@@ -311,9 +308,6 @@ export function ChatBrowser({
     const [sendSettings, setSendSettings] = useState<
         Readonly<Record<string, ChatSendSettings>>
     >({});
-    const [hiddenMessages, setHiddenMessages] = useState<
-        Readonly<Record<string, ReadonlySet<string>>>
-    >({});
     const [selectedTasks, setSelectedTasks] = useState<Readonly<Record<string, string>>>(
         {}
     );
@@ -504,10 +498,8 @@ export function ChatBrowser({
         ...(hydrationStatus === undefined ? {} : { status: hydrationStatus }),
     });
     const runtimeMessages = chatRuntimeMessages(runtimeState, selectedSessionKey);
-    const hidden =
-        hiddenMessages[selectedSessionKey] ?? readHiddenMessageIds(selectedSessionKey);
     const messages = projectChatMessageSurfaces(
-        mergeChatMessages(historyMessages, runtimeMessages, hidden)
+        mergeChatMessages(historyMessages, runtimeMessages)
     );
 
     useEffect(() => {
@@ -1730,7 +1722,7 @@ export function ChatBrowser({
                 setCompanionOverride((current) => ({
                     ...current,
                     [sessionKey]: {
-                        error: "Dashboard could not confirm whether the chat helper received the question. It will check automatically; do not submit it again.",
+                        error: "Dashboard could not confirm whether the chat companion received the question. It will check automatically; do not submit it again.",
                         question,
                         status: "answering",
                     },
@@ -1879,7 +1871,7 @@ export function ChatBrowser({
                     [sessionKey]: companionOperationView(
                         companionBeforeReset,
                         "resetting",
-                        "Dashboard could not confirm whether the chat helper was reset. It will check automatically; do not reset it again."
+                        "Dashboard could not confirm whether the chat companion was reset. It will check automatically; do not reset it again."
                     ),
                 }));
                 try {
@@ -2207,8 +2199,12 @@ export function ChatBrowser({
     const finishedTaskPageCount = finishedTasksQuery.data?.pages.length ?? 0;
     const taskQueryFailed =
         activeTasksQuery.error !== null || finishedTasksQuery.error !== null;
-    const taskQueryHasData =
+    const taskQueryHasAnyData =
         activeTasksQuery.data !== undefined || finishedTasksQuery.data !== undefined;
+    const taskQueriesHaveSettled =
+        activeTasksQuery.data !== undefined && finishedTasksQuery.data !== undefined;
+    const taskQueriesAreFetching =
+        activeTasksQuery.isFetching || finishedTasksQuery.isFetching;
     const activeTasksCanLoadMore =
         activeTasksQuery.hasNextPage &&
         activeTaskPageCount < openClawTasksBrowserPageMaximum;
@@ -2218,42 +2214,30 @@ export function ChatBrowser({
     const view: ChatWorkspaceView = {
         activePlans: chatRuntimePlans(runtimeState, selectedSessionKey),
         backgroundTasks: tasks,
-        ...(taskQueryFailed
+        ...(taskQueryFailed && !taskQueriesAreFetching
             ? {
-                  backgroundTasksError: taskQueryHasData
+                  backgroundTasksError: taskQueryHasAnyData
                       ? "Background tasks could not be updated. The latest available tasks remain visible."
                       : "Background tasks are unavailable. Retry to load them.",
               }
             : {}),
         backgroundTasksHasNextPage: activeTasksCanLoadMore || finishedTasksCanLoadMore,
-        backgroundTasksLoading:
-            !taskQueryHasData &&
-            (activeTasksQuery.isPending || finishedTasksQuery.isPending),
+        backgroundTasksLoading: !taskQueriesHaveSettled && taskQueriesAreFetching,
         backgroundTasksLoadingMore:
             activeTasksQuery.isFetchingNextPage || finishedTasksQuery.isFetchingNextPage,
-        backgroundTasksWindowLimited:
-            (activeTasksQuery.hasNextPage &&
-                activeTaskPageCount >= openClawTasksBrowserPageMaximum) ||
-            (finishedTasksQuery.hasNextPage &&
-                finishedTaskPageCount >= openClawTasksBrowserPageMaximum),
         companion,
         ...(companionQuery.error === null
             ? {}
             : {
                   companionError:
                       companionQuery.data === undefined
-                          ? "The chat helper is unavailable. Try loading it again."
-                          : "The chat helper could not be updated. The latest available answer remains visible.",
+                          ? "The chat companion is unavailable. Try loading it again."
+                          : "The chat companion could not be updated. The latest available answer remains visible.",
               }),
         connection,
-        historyHasNextPage:
-            historyQuery.hasNextPage &&
-            (historyQuery.data?.pages.length ?? 0) < chatHistoryBrowserPageMaximum,
+        historyHasNextPage: historyQuery.hasNextPage,
         historyInitialLoading: historyQuery.isPending && historyQuery.data === undefined,
         historyLoading: historyQuery.isFetchingNextPage,
-        historyWindowLimited:
-            historyQuery.hasNextPage &&
-            (historyQuery.data?.pages.length ?? 0) >= chatHistoryBrowserPageMaximum,
         messages,
         ...(modelsQuery.error === null
             ? {}
@@ -2325,17 +2309,6 @@ export function ChatBrowser({
             }}
             onDismissReadAloudError={speech.dismissReadAloudError}
             onDismissVoiceInputError={speech.dismissVoiceInputError}
-            onHideMessage={(messageId) =>
-                setHiddenMessages((current) => ({
-                    ...current,
-                    [selectedSessionKey]: addHiddenMessageId(
-                        selectedSessionKey,
-                        current[selectedSessionKey] ??
-                            readHiddenMessageIds(selectedSessionKey),
-                        messageId
-                    ),
-                }))
-            }
             onHydrateMessage={(messageId) => {
                 if (
                     hydrationTarget?.messageId === messageId &&
@@ -2355,12 +2328,9 @@ export function ChatBrowser({
                 ]);
             }}
             onOpenLocalFile={(reference) => void openLocalFile(reference)}
-            onLoadOlder={() => {
-                if (
-                    (historyQuery.data?.pages.length ?? 0) < chatHistoryBrowserPageMaximum
-                ) {
-                    void historyQuery.fetchNextPage();
-                }
+            onLoadOlder={async () => {
+                if (!historyQuery.hasNextPage || historyQuery.isFetchingNextPage) return;
+                await historyQuery.fetchNextPage();
             }}
             onReadAloud={speech.readAloudAvailable ? speech.startReadAloud : undefined}
             onRemoveAttachment={(id) =>
@@ -2375,25 +2345,6 @@ export function ChatBrowser({
             }
             onResetCompanion={() => void resetCompanion()}
             onResetTranscript={(sessionKey) => void resetTranscript(sessionKey)}
-            onReturnHistoryToLatest={() => {
-                queryClient.setQueryData<InfiniteData<ChatHistoryOutput>>(
-                    chatHistoryQueryKey(selectedSessionKey),
-                    (current) => retainLatestPageWindow(current, 1)
-                );
-                void historyQuery.refetch();
-            }}
-            onReturnTasksToLatest={() => {
-                for (const projection of ["active", "finished"] as const) {
-                    queryClient.setQueryData<InfiniteData<OpenClawTaskListOutput>>(
-                        openClawTaskListQueryKey(selectedSessionKey, projection),
-                        (current) => retainLatestPageWindow(current, 1)
-                    );
-                }
-                void Promise.all([
-                    activeTasksQuery.refetch(),
-                    finishedTasksQuery.refetch(),
-                ]);
-            }}
             onRetryCompanion={() => {
                 const gate = companionGates[selectedSessionKey];
                 if (gate === undefined) {

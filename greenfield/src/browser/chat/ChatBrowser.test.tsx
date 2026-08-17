@@ -327,7 +327,7 @@ async function revealCompanionControls(): Promise<void> {
         name: "Open activity panel",
     });
     if (activityTrigger !== null) await user.click(activityTrigger);
-    const companion = await screen.findByRole("button", { name: /Chat helper/iu });
+    const companion = await screen.findByRole("button", { name: /Chat companion/iu });
     if (companion.getAttribute("aria-expanded") !== "true") {
         await user.click(companion);
     }
@@ -1902,7 +1902,7 @@ describe("chat browser", () => {
         }
     });
 
-    test("loads each unfinished task ledger once and hides the button at the end", async () => {
+    test("loads each unfinished task ledger once near the virtual task-list end", async () => {
         const view = harness({
             query: (name, input) => {
                 if (name !== "openClawTasks.list") return;
@@ -1943,22 +1943,22 @@ describe("chat browser", () => {
             requestedSessionKey: gatewayPrimarySessionKey,
             sessionSnapshot: snapshot(),
         });
-        const user = userEvent.setup();
         const taskListReads = () =>
             view.query.mock.calls.filter((call) => call[0] === "openClawTasks.list");
         try {
-            const loadMore = await screen.findByRole("button", {
-                name: "Load more tasks",
+            const taskList = await screen.findByRole("list", {
+                name: "Background tasks",
             });
+            const taskScroller = taskList.parentElement!;
             expect(taskListReads()).toHaveLength(2);
+            Object.defineProperties(taskScroller, {
+                clientHeight: { configurable: true, value: 400 },
+                scrollHeight: { configurable: true, value: 1000 },
+                scrollTop: { configurable: true, value: 400, writable: true },
+            });
+            taskScroller.scrollTop = 441;
+            fireEvent.scroll(taskScroller);
 
-            await user.click(loadMore);
-
-            await waitFor(() =>
-                expect(
-                    screen.queryByRole("button", { name: "Load more tasks" })
-                ).toBeNull()
-            );
             expect(await screen.findByText("Older finished task")).toBeVisible();
             expect(taskListReads()).toHaveLength(4);
             expect(
@@ -1973,6 +1973,56 @@ describe("chat browser", () => {
             await Promise.resolve();
             expect(taskListReads()).toHaveLength(4);
         } finally {
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            view.rendered.unmount();
+            view.queryClient.clear();
+        }
+    });
+
+    test("waits for the finished task ledger before declaring the session empty", async () => {
+        const finished = Promise.withResolvers<{
+            tasks: readonly OpenClawTaskSummary[];
+        }>();
+        const view = harness({
+            query: (name, input) => {
+                if (name !== "openClawTasks.list") return;
+                const statuses =
+                    typeof input === "object" &&
+                    input !== null &&
+                    Array.isArray((input as Readonly<Record<string, unknown>>).statuses)
+                        ? ((input as Readonly<Record<string, unknown>>)
+                              .statuses as readonly unknown[])
+                        : [];
+                return statuses.includes("running")
+                    ? Promise.resolve({ tasks: [] })
+                    : finished.promise;
+            },
+            requestedSessionKey: gatewayPrimarySessionKey,
+            sessionSnapshot: snapshot(),
+        });
+        try {
+            expect(
+                await screen.findByLabelText("Loading background tasks…")
+            ).toBeVisible();
+            expect(
+                screen.queryByText("No background tasks for this session.")
+            ).toBeNull();
+
+            finished.resolve({
+                tasks: [
+                    {
+                        id: "finished-after-active-ledger",
+                        status: "completed",
+                        title: "Finished after active ledger",
+                    },
+                ],
+            });
+            expect(await screen.findByText("Finished after active ledger")).toBeVisible();
+            expect(
+                screen.queryByText("No background tasks for this session.")
+            ).toBeNull();
+        } finally {
+            finished.resolve({ tasks: [] });
             await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
             view.rendered.unmount();
             view.queryClient.clear();
@@ -2282,7 +2332,7 @@ describe("chat browser", () => {
                 screen.getByRole("textbox", { name: "Ask about this chat" }),
                 "What changed?"
             );
-            await user.click(screen.getByRole("button", { name: "Ask chat helper" }));
+            await user.click(screen.getByRole("button", { name: "Ask chat companion" }));
             await waitFor(() =>
                 expect(screen.getByRole("button", { name: "Asking…" })).toBeDisabled()
             );
@@ -2316,7 +2366,7 @@ describe("chat browser", () => {
             expect(
                 screen.getByRole("textbox", { name: "Ask about this chat" })
             ).toBeDisabled();
-            await user.click(screen.getByRole("button", { name: "Ask chat helper" }));
+            await user.click(screen.getByRole("button", { name: "Ask chat companion" }));
             expect(
                 view.mutation.mock.calls.filter((call) => call[0] === "chat.companionAsk")
             ).toHaveLength(1);
@@ -2358,7 +2408,7 @@ describe("chat browser", () => {
                 screen.getByRole("textbox", { name: "Ask about this chat" }),
                 "What changed?"
             );
-            await user.click(screen.getByRole("button", { name: "Ask chat helper" }));
+            await user.click(screen.getByRole("button", { name: "Ask chat companion" }));
             await waitFor(() =>
                 expect(
                     view.mutation.mock.calls.filter(
@@ -2404,7 +2454,7 @@ describe("chat browser", () => {
             await user.dblClick(screen.getByRole("button", { name: "Reset" }));
             expect(
                 await screen.findByText(
-                    /could not confirm whether the chat helper was reset/iu
+                    /could not confirm whether the chat companion was reset/iu
                 )
             ).toBeVisible();
             expect(screen.getByRole("button", { name: "Resetting…" })).toBeDisabled();
@@ -2426,7 +2476,7 @@ describe("chat browser", () => {
             );
             expect(
                 screen.queryByText(
-                    /could not confirm whether the chat helper was reset/iu
+                    /could not confirm whether the chat companion was reset/iu
                 )
             ).toBeNull();
         } finally {
@@ -2617,10 +2667,12 @@ describe("chat browser", () => {
                 name: "Ask about this chat",
             });
             await user.type(question, "Do not duplicate");
-            await user.dblClick(screen.getByRole("button", { name: "Ask chat helper" }));
+            await user.dblClick(
+                screen.getByRole("button", { name: "Ask chat companion" })
+            );
             expect(
                 await screen.findByText(
-                    /could not confirm whether the chat helper received the question/iu
+                    /could not confirm whether the chat companion received the question/iu
                 )
             ).toBeVisible();
             expect(question).toBeDisabled();

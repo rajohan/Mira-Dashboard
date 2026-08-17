@@ -2,7 +2,7 @@ import { describe, expect, jest, test } from "bun:test";
 
 import { ChatWorkspace } from "./ChatWorkspace.tsx";
 
-const { act, render, screen, within } = await import("@testing-library/react");
+const { act, fireEvent, render, screen, within } = await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
 const userEvent = userEventModule.default;
 
@@ -26,7 +26,6 @@ function properties(): Parameters<typeof ChatWorkspace>[0] {
         onChangeDraft: jest.fn(),
         onCompact: jest.fn(),
         onDisplaySettingsChange: jest.fn(),
-        onHideMessage: jest.fn(),
         onHydrateMessage: jest.fn(),
         onLoadMoreTasks: jest.fn(),
         onLoadOlder: jest.fn(),
@@ -246,7 +245,7 @@ describe("chat workspace", () => {
         };
         const rendered = render(<ChatWorkspace {...props} canAskCompanion />);
         await user.click(screen.getByRole("button", { name: "Open activity panel" }));
-        await user.click(screen.getByRole("button", { name: /Chat helper Idle/iu }));
+        await user.click(screen.getByRole("button", { name: /Chat companion Idle/iu }));
         await user.type(
             screen.getByRole("textbox", { name: "Ask about this chat" }),
             "Session A draft"
@@ -270,7 +269,7 @@ describe("chat workspace", () => {
             />
         );
         expect(
-            rendered.container.querySelector('input[aria-label="Ask chat helper"]')
+            rendered.container.querySelector('input[aria-label="Ask chat companion"]')
         ).toHaveValue("");
         const dialog = screen.getByRole("dialog", { name: "Reset this chat?" });
         await user.click(
@@ -364,8 +363,7 @@ describe("chat workspace", () => {
         expect(screen.queryByText(/No background tasks/iu)).toBeNull();
     });
 
-    test("loads the next bounded background-task page on demand", async () => {
-        const user = userEvent.setup();
+    test("loads the next bounded background-task page near the panel bottom", () => {
         const props = properties();
         render(
             <ChatWorkspace
@@ -383,42 +381,20 @@ describe("chat workspace", () => {
                 }}
             />
         );
-        await user.click(screen.getByRole("button", { name: "Load more tasks" }));
+        const taskScroller = screen.getByRole("list", {
+            name: "Background tasks",
+        }).parentElement!;
+        Object.defineProperties(taskScroller, {
+            clientHeight: { configurable: true, value: 400 },
+            scrollHeight: { configurable: true, value: 1000 },
+            scrollTop: { configurable: true, value: 400, writable: true },
+        });
+        fireEvent.scroll(taskScroller);
+        expect(props.onLoadMoreTasks).not.toHaveBeenCalled();
+        taskScroller.scrollTop = 441;
+        fireEvent.scroll(taskScroller);
         expect(props.onLoadMoreTasks).toHaveBeenCalledTimes(1);
-    });
-
-    test("labels capped history and task windows and returns to latest", async () => {
-        const user = userEvent.setup();
-        const props = properties();
-        const onReturnHistoryToLatest = jest.fn();
-        const onReturnTasksToLatest = jest.fn();
-        render(
-            <ChatWorkspace
-                {...props}
-                onReturnHistoryToLatest={onReturnHistoryToLatest}
-                onReturnTasksToLatest={onReturnTasksToLatest}
-                view={{
-                    ...props.view,
-                    backgroundTasks: [
-                        { id: "task-1", label: "Known task", status: "running" },
-                    ],
-                    backgroundTasksWindowLimited: true,
-                    historyWindowLimited: true,
-                }}
-            />
-        );
-        expect(
-            screen.getByText("Older history is capped to this browser window.")
-        ).toBeVisible();
-        expect(
-            screen.getByText("Only the most recent tasks are shown here.")
-        ).toBeVisible();
-        await user.click(
-            screen.getByRole("button", { name: "Return to latest history" })
-        );
-        await user.click(screen.getByRole("button", { name: "Return to latest tasks" }));
-        expect(onReturnHistoryToLatest).toHaveBeenCalledTimes(1);
-        expect(onReturnTasksToLatest).toHaveBeenCalledTimes(1);
+        expect(screen.queryByRole("button", { name: "Load more tasks" })).toBeNull();
     });
 
     test("disables every provider write while the source is stale or disconnected", async () => {
@@ -440,7 +416,7 @@ describe("chat workspace", () => {
             />
         );
         await user.click(screen.getByRole("button", { name: "Open activity panel" }));
-        await user.click(screen.getByRole("button", { name: /Chat helper Idle/iu }));
+        await user.click(screen.getByRole("button", { name: /Chat companion Idle/iu }));
         await user.click(screen.getByRole("button", { name: "Chat settings" }));
         const settings = within(screen.getByTestId("chat-settings-surface"));
         expect(screen.getByRole("button", { name: /Response speed/iu })).toBeDisabled();
@@ -658,7 +634,17 @@ describe("chat workspace", () => {
     test("keeps settings in message tools and activity on a separate edge drawer", async () => {
         const user = userEvent.setup();
         const props = properties();
-        const rendered = render(<ChatWorkspace {...props} />);
+        const rendered = render(
+            <ChatWorkspace
+                {...props}
+                view={{
+                    ...props.view,
+                    backgroundTasks: [
+                        { id: "task-1", label: "Known task", status: "completed" },
+                    ],
+                }}
+            />
+        );
         const pageHeader = rendered.container.querySelector("header")!;
         const toolbar = screen.getByTestId("chat-composer-toolbar");
         expect(
@@ -677,17 +663,11 @@ describe("chat workspace", () => {
         expect(open).toHaveAttribute("aria-expanded", "false");
         expect(open.textContent).toBe("");
         expect(open.parentElement).toHaveClass(
-            "border-primary-700",
-            "top-1/2",
-            "-translate-y-1/2",
-            "items-center",
-            "lg:self-stretch",
-            "lg:border-l"
+            "grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]"
         );
         expect(open).toHaveClass(
             "h-10",
             "flex-none",
-            "self-center",
             "focus-visible:ring-1",
             "focus-visible:ring-offset-0"
         );
@@ -704,11 +684,41 @@ describe("chat workspace", () => {
             "border-primary-700",
             "border"
         );
+        expect(screen.getByText("Background tasks").closest("section")).toHaveClass(
+            "min-h-0",
+            "flex-1",
+            "flex-col"
+        );
         const close = screen.getByRole("button", { name: "Close activity panel" });
         expect(close).toHaveAttribute("aria-expanded", "true");
         expect(close).toHaveClass("focus-visible:ring-1", "focus-visible:ring-offset-0");
+        await user.click(screen.getByRole("button", { name: "Chat companion Idle" }));
+        const helperActions = screen.getByRole("group", {
+            name: "Chat companion actions",
+        });
+        expect(helperActions).toHaveClass("grid-cols-[minmax(0,1fr)_auto]");
+        expect(
+            within(helperActions).getByRole("button", { name: "Ask chat companion" })
+        ).toHaveClass("whitespace-nowrap");
+        expect(within(helperActions).getByRole("button", { name: "Reset" })).toHaveClass(
+            "whitespace-nowrap"
+        );
+        panel.scrollTop = 80;
+        const taskScroller = screen.getByRole("list", {
+            name: "Background tasks",
+        }).parentElement!;
+        taskScroller.scrollTop = 120;
         await user.click(close);
-        expect(screen.getByRole("button", { name: "Open activity panel" })).toBeVisible();
+        const reopen = screen.getByRole("button", { name: "Open activity panel" });
+        expect(reopen).toBeVisible();
+        await user.click(reopen);
+        expect(
+            screen.getByRole("complementary", { name: "Chat activity" }).scrollTop
+        ).toBe(0);
+        expect(
+            screen.getByRole("list", { name: "Background tasks" }).parentElement
+                ?.scrollTop
+        ).toBe(0);
     });
 
     test("uses border-only settings and places populated-view errors above the composer", async () => {

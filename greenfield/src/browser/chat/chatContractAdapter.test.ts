@@ -374,7 +374,7 @@ describe("chat contract adapter", () => {
                 settlement: "unknown",
             },
             continuity: "interrupted",
-            hasUnprojectedActivity: false,
+            hasUnprojectedActivity: true,
             lifecycle: "active",
             observationEpoch: 7,
             observedAtMs: timestampMs,
@@ -399,7 +399,7 @@ describe("chat contract adapter", () => {
                 phase: "update",
                 steps: [{ status: "in_progress", text: "Inspect provider state" }],
             },
-            projectionTruncated: false,
+            projectionTruncated: true,
             providerRunId: "provider-run-1",
             sessionKey,
             source: "provider-runtime",
@@ -542,6 +542,13 @@ describe("chat contract adapter", () => {
         });
 
         expect(projection.lifecycle).toBe("terminal-pending-history");
+        expect(
+            projection.message.parts.some(
+                (part) =>
+                    part.kind === "control" &&
+                    part.text.includes("activity details could not be shown")
+            )
+        ).toBeFalse();
         expect(projection.segments).toMatchObject([
             {
                 message: {
@@ -642,6 +649,36 @@ describe("chat contract adapter", () => {
         });
     });
 
+    test("settles provider thinking when later assistant output has begun", () => {
+        const projection = projectChatExternalRun({
+            continuity: "complete",
+            lifecycle: "active" as const,
+            hasUnprojectedActivity: false,
+            observationEpoch: 2,
+            observedAtMs: timestampMs,
+            parts: [
+                { kind: "thinking", sequence: 1, text: "Finished reasoning" },
+                { kind: "assistant", sequence: 2, text: "Partial final" },
+            ],
+            projectionTruncated: false,
+            providerRunId: "provider-thinking-transition",
+            sessionKey,
+            source: "provider-runtime",
+            text: "Partial final",
+            updatedAtMs: timestampMs,
+        });
+
+        expect(projection.message.parts).toEqual([
+            expect.objectContaining({
+                kind: "thinking",
+                status: "complete",
+                text: "Finished reasoning",
+            }),
+            expect.objectContaining({ kind: "text", text: "Partial final" }),
+        ]);
+        expect(projection.lifecycle).toBe("active");
+    });
+
     test("keeps truncated assistant text authoritative and folds synthetic tool lifecycle", () => {
         const projection = projectChatExternalRun({
             continuity: "complete",
@@ -696,13 +733,9 @@ describe("chat contract adapter", () => {
                 output: "found",
                 status: "completed",
             },
-            {
-                kind: "control",
-                text: "Some OpenClaw activity details could not be shown.",
-                tone: "warning",
-            },
         ]);
         expect(JSON.stringify(projection)).not.toContain("stale tail");
+        expect(JSON.stringify(projection)).not.toContain("activity details");
     });
 
     test("treats truncated projections as explicit placeholders, not empty transcripts", () => {

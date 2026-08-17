@@ -859,17 +859,10 @@ export function projectChatExternalRun(run: ChatExternalRun): ChatExternalRunPro
             segments.splice(0, segments.length, ...retained);
         }
     }
-    if (
-        run.continuity === "interrupted" ||
-        run.projectionTruncated ||
-        run.hasUnprojectedActivity
-    ) {
+    if (run.lifecycle === "active" && run.continuity === "interrupted") {
         const gapPart: ChatMessagePart = {
             kind: "control",
-            text:
-                run.continuity === "interrupted"
-                    ? "Some OpenClaw activity may be missing because updates were interrupted."
-                    : "Some OpenClaw activity details could not be shown.",
+            text: "Some OpenClaw activity may be missing because updates were interrupted.",
             tone: "warning",
         };
         const lastContentIndex = segments.findLastIndex(
@@ -897,6 +890,24 @@ export function projectChatExternalRun(run: ChatExternalRun): ChatExternalRunPro
                 };
             }
         }
+    }
+    let followingOutput = false;
+    for (let index = segments.length - 1; index >= 0; index -= 1) {
+        const segment = segments[index];
+        if (segment === undefined) continue;
+        const nextParts = [...segment.message.parts];
+        for (let partIndex = nextParts.length - 1; partIndex >= 0; partIndex -= 1) {
+            const part = nextParts[partIndex];
+            if (part?.kind === "thinking" && followingOutput) {
+                nextParts[partIndex] = { ...part, status: "complete" };
+            } else if (part?.kind === "text" || part?.kind === "tool") {
+                followingOutput = true;
+            }
+        }
+        segments[index] = {
+            ...segment,
+            message: { ...segment.message, parts: nextParts },
+        };
     }
     const parts = segments.flatMap((segment) => segment.message.parts);
     return {

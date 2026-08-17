@@ -3,7 +3,6 @@ import { describe, expect, jest, test } from "bun:test";
 import type { DashboardTrpcClient } from "../api/trpcClient.ts";
 import {
     chatHistoryQueryOptions,
-    chatHistoryBrowserPageMaximum,
     chatMessageQueryOptions,
     chatRuntimeQueryOptions,
     mergeOpenClawTaskPages,
@@ -260,11 +259,11 @@ describe("chat queries", () => {
                 truncated: index < 6,
             })),
         });
-        expect(history?.pages).toHaveLength(chatHistoryBrowserPageMaximum);
+        expect(history?.pages).toHaveLength(6);
         expect(history?.pages.every(({ sessionId }) => sessionId === "current")).toBe(
             true
         );
-        expect(history?.pageParams).toEqual(["0", "1", "3", "4", "5"]);
+        expect(history?.pageParams).toEqual(["0", "1", "3", "4", "5", "6"]);
     });
 
     test("preserves authoritative snapshots without chasing deltas on reset", async () => {

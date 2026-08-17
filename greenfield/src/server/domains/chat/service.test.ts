@@ -3420,6 +3420,66 @@ describe("ChatService", () => {
         }
     });
 
+    test("clears a retained activity-gap warning after inventory confirms no active provider runs", async () => {
+        const database = await openFreshMigratedDatabase();
+        let clock = 1000;
+        let activeProviderRunIds: readonly string[] = ["inventory-active-run"];
+        const provider = providerHarness({
+            history: async () => ({ hasMore: false, messages: [] }),
+        });
+        const repository = createChatRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission,
+            "main",
+            () => clock
+        );
+        const service = createChatService({
+            activeProviderRunIds: async () => activeProviderRunIds,
+            attachmentConsumer: {
+                reserve: async () => {
+                    throw new Error("Attachment reservation is not used by this test");
+                },
+            },
+            attachmentPreparer: inertAttachmentPreparer(),
+            nowMs: () => clock,
+            provider: provider.provider,
+            repository,
+        });
+        try {
+            await service.runtime(runtimeInput());
+            for (let index = 0; index < 9; index += 1) {
+                await provider.requests[0]!.onEvent({
+                    kind: "delta",
+                    mode: "replace",
+                    providerRunId:
+                        index === 8 ? "inventory-active-run" : `older-run-${index}`,
+                    providerSequence: 1,
+                    receivedAtMs: clock + index,
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                    text: `Thinking ${index}`,
+                });
+            }
+            const truncatedRuntime = await service.runtime(runtimeInput());
+            expect(truncatedRuntime.externalRunsTruncated).toBeTrue();
+
+            activeProviderRunIds = [];
+            clock += 20;
+            await service.reconcileProviderSessionActivity("agent:main:main");
+
+            const runtime = await service.runtime(runtimeInput());
+            expect(runtime.externalRunsTruncated).toBeFalse();
+            expect(
+                runtime.externalRuns.every(
+                    ({ lifecycle }) => lifecycle === "terminal-pending-history"
+                )
+            ).toBeTrue();
+        } finally {
+            await service.dispose();
+            database.sqlite.close(true);
+        }
+    });
+
     test("correlates only causally adjacent unscoped history users to one external run", async () => {
         const database = await openFreshMigratedDatabase();
         let clock = 1_000_000;

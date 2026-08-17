@@ -4,8 +4,7 @@ import { safeChatMarkdownLink } from "./chatMarkdownPolicy.ts";
 import { ChatMessageBubble } from "./ChatMessageBubble.tsx";
 import { toolDisplayName } from "./chatToolPresentation.ts";
 
-const { fireEvent, render, screen, waitFor, within } =
-    await import("@testing-library/react");
+const { render, screen, waitFor, within } = await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
 const userEvent = userEventModule.default;
 
@@ -263,6 +262,64 @@ describe("chat message bubble", () => {
         expect(toggle).toHaveAttribute("aria-expanded", "true");
     });
 
+    test("scrolls an expanded tool call to the top of the chat viewport", async () => {
+        const user = userEvent.setup();
+        const onToolExpand = jest.fn();
+        const rendered = render(
+            <div aria-label="Messages" role="log">
+                <ChatMessageBubble
+                    display={display}
+                    message={{
+                        attachments: [],
+                        id: "message-scroll-tool",
+                        parts: [
+                            {
+                                callId: "call-scroll",
+                                input: "bun test",
+                                kind: "tool",
+                                name: "functions.exec_command",
+                                output: "pass",
+                                status: "completed",
+                            },
+                        ],
+                        role: "assistant",
+                        sequence: 1,
+                        sessionKey: "agent:main:main",
+                    }}
+                    onToolExpand={onToolExpand}
+                />
+            </div>
+        );
+        const messages = screen.getByRole("log", { name: "Messages" });
+        const tool = screen.getByRole("region", { name: "Bash, completed" });
+        const scrollTo = jest.fn();
+        Object.defineProperties(messages, {
+            getBoundingClientRect: {
+                configurable: true,
+                value: () => ({ top: 40 }),
+            },
+            scrollTo: { configurable: true, value: scrollTo },
+            scrollTop: { configurable: true, value: 120, writable: true },
+        });
+        Object.defineProperty(tool, "getBoundingClientRect", {
+            configurable: true,
+            value: () => ({ top: 240 }),
+        });
+
+        const toggle = within(tool).getByRole("button", { name: /bash completed/iu });
+        await user.click(toggle);
+        expect(onToolExpand).toHaveBeenCalledTimes(1);
+        await waitFor(() => expect(scrollTo).toHaveBeenCalledWith({ top: 320 }));
+        expect(messages.style.paddingBottom).toBe("");
+        expect(toggle).toHaveFocus();
+
+        await user.click(toggle);
+        expect(scrollTo).toHaveBeenCalledTimes(1);
+        expect(onToolExpand).toHaveBeenCalledTimes(1);
+        expect(messages.style.paddingBottom).toBe("");
+        rendered.unmount();
+    });
+
     test("groups tool description, input, and output in one completed bubble", async () => {
         const user = userEvent.setup();
         render(
@@ -327,17 +384,9 @@ describe("chat message bubble", () => {
         expect(inputRegion).toHaveAttribute("tabindex", "0");
         expect(outputRegion).toHaveAttribute("data-virtualizer-scroll-region");
         expect(outputRegion).toHaveAttribute("tabindex", "0");
-        Object.defineProperties(inputRegion, {
-            clientHeight: { configurable: true, value: 100 },
-            scrollHeight: { configurable: true, value: 500 },
-            scrollTop: { configurable: true, value: 0, writable: true },
-        });
-        fireEvent.scroll(inputRegion);
-        const toBottom = within(tool).getByRole("button", {
-            name: "Bash tool input: scroll to bottom",
-        });
-        await user.click(toBottom);
-        expect(inputRegion.scrollTop).toBe(500);
+        expect(
+            within(tool).queryByRole("button", { name: /scroll to bottom/iu })
+        ).toBeNull();
         expect(toggle.querySelector(".lucide-chevron-right")).toHaveClass("rotate-90");
         expect(within(tool).queryByText("running")).toBeNull();
     });
@@ -747,36 +796,6 @@ describe("chat message bubble", () => {
         expect(screen.queryByText("No visible message content.")).toBeNull();
     });
 
-    test("local hide invokes only the browser-owned callback", async () => {
-        const user = userEvent.setup();
-        let hidden = "";
-        render(
-            <ChatMessageBubble
-                display={display}
-                message={{
-                    attachments: [],
-                    id: "message-local",
-                    parts: [{ kind: "text", text: "Keep provider history" }],
-                    role: "assistant",
-                    sequence: 1,
-                    sessionKey: "agent:main:main",
-                }}
-                onHide={(messageId) => {
-                    hidden = messageId;
-                }}
-            />
-        );
-        await user.click(
-            screen.getByRole("button", { name: "Hide message from this browser" })
-        );
-        expect(hidden).toBe("");
-        expect(
-            screen.getByRole("heading", { name: "Hide this message locally?" })
-        ).toBeVisible();
-        await user.click(screen.getByRole("button", { name: "Hide message" }));
-        expect(hidden).toBe("message-local");
-    });
-
     test("previews approved inline raster images inside the authenticated chat", async () => {
         const user = userEvent.setup();
         render(
@@ -877,7 +896,7 @@ describe("chat message bubble", () => {
         );
     });
 
-    test("reads only finished assistant final text and exposes playing stop state", async () => {
+    test("reads finished assistant thinking and final text and exposes playing stop state", async () => {
         const onReadAloud = jest.fn();
         const onStopReadAloud = jest.fn();
         const user = userEvent.setup();
@@ -888,7 +907,7 @@ describe("chat message bubble", () => {
                 {
                     kind: "thinking" as const,
                     status: "complete" as const,
-                    text: "Do not narrate this",
+                    text: "Narrate this reasoning",
                 },
                 {
                     callId: "tool-complete",
@@ -905,7 +924,7 @@ describe("chat message bubble", () => {
         };
         const rendered = render(
             <ChatMessageBubble
-                display={display}
+                display={{ ...display, keepThinkingAfterFinal: true }}
                 message={message}
                 onReadAloud={onReadAloud}
                 onStopReadAloud={onStopReadAloud}
@@ -915,8 +934,24 @@ describe("chat message bubble", () => {
         await user.click(screen.getByRole("button", { name: "Read Mira message aloud" }));
         expect(onReadAloud).toHaveBeenCalledWith(
             "read-message",
-            "Narrate only this final answer."
+            "Narrate this reasoning\n\nNarrate only this final answer."
         );
+
+        rendered.rerender(
+            <ChatMessageBubble
+                display={{ ...display, keepThinkingAfterFinal: true }}
+                message={message}
+                onReadAloud={onReadAloud}
+                onStopReadAloud={onStopReadAloud}
+                readAloud={{
+                    activeMessageId: "read-message",
+                    phase: "loading",
+                }}
+            />
+        );
+        expect(
+            screen.getByRole("button", { name: "Cancel read aloud" })
+        ).toContainElement(document.querySelector(".lucide-loader-circle.animate-spin"));
 
         rendered.rerender(
             <ChatMessageBubble
@@ -934,6 +969,75 @@ describe("chat message bubble", () => {
         expect(stop).toHaveAttribute("aria-pressed", "true");
         await user.click(stop);
         expect(onStopReadAloud).toHaveBeenCalledTimes(1);
+    });
+
+    test("offers read aloud for a completed thinking-only bubble", async () => {
+        const onReadAloud = jest.fn();
+        const user = userEvent.setup();
+        render(
+            <ChatMessageBubble
+                display={{ ...display, keepThinkingAfterFinal: true }}
+                message={{
+                    attachments: [],
+                    id: "completed-thinking",
+                    parts: [
+                        {
+                            kind: "thinking",
+                            status: "complete",
+                            text: "Completed reasoning",
+                        },
+                    ],
+                    role: "assistant",
+                    sequence: 1,
+                    sessionKey: "agent:main:main",
+                }}
+                onReadAloud={onReadAloud}
+                onStopReadAloud={jest.fn()}
+                readAloud={{ phase: "idle" }}
+            />
+        );
+
+        await user.click(screen.getByRole("button", { name: "Read Mira message aloud" }));
+        expect(onReadAloud).toHaveBeenCalledWith(
+            "completed-thinking",
+            "Completed reasoning"
+        );
+    });
+
+    test("offers completed thinking during an active run without reading partial final text", async () => {
+        const onReadAloud = jest.fn();
+        const user = userEvent.setup();
+        render(
+            <ChatMessageBubble
+                activeRunIds={["active-run"]}
+                display={{ ...display, keepThinkingAfterFinal: true }}
+                message={{
+                    attachments: [],
+                    id: "active-completed-thinking",
+                    parts: [
+                        {
+                            kind: "thinking",
+                            status: "complete",
+                            text: "Finished reasoning",
+                        },
+                        { kind: "text", text: "Partial final" },
+                    ],
+                    role: "assistant",
+                    runId: "active-run",
+                    sequence: 1,
+                    sessionKey: "agent:main:main",
+                }}
+                onReadAloud={onReadAloud}
+                onStopReadAloud={jest.fn()}
+                readAloud={{ phase: "idle" }}
+            />
+        );
+
+        await user.click(screen.getByRole("button", { name: "Read Mira message aloud" }));
+        expect(onReadAloud).toHaveBeenCalledWith(
+            "active-completed-thinking",
+            "Finished reasoning"
+        );
     });
 
     test("does not offer read aloud for text-only streaming runs", () => {

@@ -15,12 +15,12 @@ export function ChatStopControls({ onAbort, runId }: ChatStopControlsProps) {
     if (runId === undefined) return null;
     return (
         <IconOnlyButton
-            className="min-h-10 min-w-10 px-0 sm:min-h-9 sm:min-w-9"
+            className="min-h-10 min-w-10 bg-red-500/10 px-0 text-red-400 hover:bg-red-500/20 hover:text-red-300 active:bg-red-500/25 data-active:bg-red-500/25 data-hover:bg-red-500/20 data-hover:text-red-300 sm:min-h-9 sm:min-w-9"
             icon={Square}
             label="Stop response"
             onClick={() => onAbort(runId)}
             size="sm"
-            variant="secondary"
+            variant="ghost"
         />
     );
 }

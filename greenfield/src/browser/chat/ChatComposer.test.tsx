@@ -90,7 +90,15 @@ describe("chat composer", () => {
             onAbort,
         });
         const user = userEvent.setup();
-        await user.click(screen.getByRole("button", { name: "Stop response" }));
+        const stop = screen.getByRole("button", { name: "Stop response" });
+        expect(stop).toHaveClass(
+            "bg-red-500/10",
+            "text-red-400",
+            "hover:bg-red-500/20",
+            "data-hover:bg-red-500/20",
+            "data-active:bg-red-500/25"
+        );
+        await user.click(stop);
         expect(onAbort).toHaveBeenCalledWith("run-2");
         expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue(
             "Keep this draft"
