@@ -390,11 +390,15 @@ function messageMatchesRun(
     );
 }
 
-function messageHasFinalText(message: ChatMessage): boolean {
+function messageHasFinalContent(message: ChatMessage): boolean {
     return (
         message.role === "assistant" &&
         message.content.kind === "complete" &&
-        message.content.parts.some((part) => part.kind === "text" && part.text.length > 0)
+        message.content.parts.some(
+            (part) =>
+                part.kind === "attachment" ||
+                (part.kind === "text" && part.text.length > 0)
+        )
     );
 }
 
@@ -407,7 +411,7 @@ function findFinalHistoryMessage(
     let directlyMatchedFinal: ChatMessage | undefined;
     for (const message of messages) {
         if (
-            messageHasFinalText(message) &&
+            messageHasFinalContent(message) &&
             messageMatchesRun(message, localRunId, providerRunId, idempotencyKey)
         ) {
             directlyMatchedFinal = message;
@@ -424,7 +428,7 @@ function findFinalHistoryMessage(
     for (let index = admissionIndex + 1; index < messages.length; index += 1) {
         const message = messages[index]!;
         if (message.role === "user") break;
-        if (messageHasFinalText(message)) causalFinal = message;
+        if (messageHasFinalContent(message)) causalFinal = message;
     }
     return causalFinal;
 }

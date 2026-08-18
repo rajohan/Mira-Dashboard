@@ -1162,6 +1162,7 @@ function configuredSkillsAgentId(
     entries: v.InferOutput<typeof upstreamAgentEntriesSchema> | undefined
 ): string {
     const configured = Object.entries(entries ?? {});
+    if (configured.length === 0) return "main";
     const defaults = configured.filter(([, entry]) => entry.default === true);
     let selected = defaults.length === 1 ? defaults[0] : undefined;
     if (selected === undefined) {
@@ -1342,8 +1343,12 @@ function buildPatch(
         case "session-reset": {
             const current = projectSessionReset(upstream.session?.reset);
             if (
-                !("idleMinutes" in current) ||
-                current.idleMinutes === update.idleMinutes
+                "idleMinutes" in current &&
+                current.idleMinutes === update.idleMinutes &&
+                "mode" in current &&
+                current.mode === update.mode &&
+                (update.mode !== "daily" ||
+                    ("atHour" in current && current.atHour === (update.atHour ?? 0)))
             ) {
                 throw new OpenClawSettingsProviderError("data-invalid");
             }

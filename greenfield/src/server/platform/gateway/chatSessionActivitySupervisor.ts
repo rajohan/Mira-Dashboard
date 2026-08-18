@@ -65,7 +65,13 @@ export function createChatSessionActivitySupervisor(
                         const sessionKey = pending.values().next().value;
                         if (sessionKey === undefined) return true;
                         pending.delete(sessionKey);
-                        await options.chat.reconcileProviderSessionActivity(sessionKey);
+                        try {
+                            await options.chat.reconcileProviderSessionActivity(
+                                sessionKey
+                            );
+                        } catch (error) {
+                            report(error);
+                        }
                     }
                     return true;
                 })
@@ -85,7 +91,11 @@ export function createChatSessionActivitySupervisor(
                         if (entry === undefined) return true;
                         const [messageId, message] = entry;
                         pendingUserMessages.delete(messageId);
-                        await options.chat.observeProviderUserMessage(message);
+                        try {
+                            await options.chat.observeProviderUserMessage(message);
+                        } catch (error) {
+                            report(error);
+                        }
                     }
                     return true;
                 })

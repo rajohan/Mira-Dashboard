@@ -2426,6 +2426,25 @@ describe("persistent Gateway chat provider", () => {
         });
     });
 
+    test("bounds the expanded available model inventory", async () => {
+        const harness = createHarness({
+            "models.list": {
+                models: Array.from({ length: 300 }, (_, index) => ({
+                    id: `model-${index.toString().padStart(3, "0")}`,
+                    name: `Model ${index}`,
+                    provider: "fixture",
+                })),
+            },
+        });
+        const result = await harness.provider.listModels({
+            agentId: "main",
+            includeProviderCapabilities: true,
+            view: "all",
+        });
+        expect(result.models).toHaveLength(256);
+        expect(result.models.at(-1)?.id).toBe("fixture/model-255");
+    });
+
     test("returns only settings values read back from the Gateway", async () => {
         const harness = createHarness({
             "sessions.patch": {

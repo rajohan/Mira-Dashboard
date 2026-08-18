@@ -355,9 +355,12 @@ describe("ChatService", () => {
                             kind: "complete",
                             parts: [
                                 {
+                                    fileName: "result.png",
                                     id: "history-final-part",
-                                    kind: "text",
-                                    text: "Finished once",
+                                    kind: "attachment",
+                                    mediaType: "image/png",
+                                    renderPolicy: "download-only",
+                                    url: "/api/chat/media/history-final-part?disposition=download",
                                 },
                             ],
                         },

@@ -48,6 +48,10 @@ function persistedMessage(sessionKey = "agent:main:main") {
 }
 
 function persistedUserMessage(sessionKey = "agent:main:main") {
+    const messageId =
+        sessionKey === "agent:main:main"
+            ? "message-user-1"
+            : `message-user-${sessionKey}`;
     return {
         connectionGeneration: 1,
         frame: {
@@ -63,8 +67,8 @@ function persistedUserMessage(sessionKey = "agent:main:main") {
                             url: "media://inbound/b2ea3e92-1844-42d3-a512-d0c48e560657.jpg",
                         },
                     ],
-                    idempotencyKey: "message-user-1",
-                    messageId: "message-user-1",
+                    idempotencyKey: messageId,
+                    messageId,
                     providerRunIds: ["provider-run-1"],
                     text: "Visible immediately",
                 },
@@ -167,5 +171,43 @@ describe("chat session activity supervisor", () => {
         expect(observedUsers).toEqual(["message-user-1"]);
         await supervisor.stop();
         expect(unsubscribed).toBe(1);
+    });
+
+    test("continues both drains after one queued item rejects", async () => {
+        const reconciled: string[] = [];
+        const observedUsers: string[] = [];
+        const failures: unknown[] = [];
+        let listener: PersistentGatewayListener | undefined;
+        const supervisor = createChatSessionActivitySupervisor({
+            chat: {
+                observeProviderUserMessage: async (message) => {
+                    observedUsers.push(message.messageId);
+                    if (message.messageId === "message-user-1")
+                        throw new Error("user failed");
+                },
+                reconcileProviderSessionActivity: async (sessionKey) => {
+                    reconciled.push(sessionKey);
+                    if (sessionKey === "agent:main:main")
+                        throw new Error("session failed");
+                },
+            },
+            mediaReferences,
+            onFailure: (error) => failures.push(error),
+            transport: {
+                subscribe(next) {
+                    listener = next;
+                    return () => {};
+                },
+            },
+        });
+        listener!.onEvent?.(persistedUserMessage());
+        listener!.onEvent?.(persistedUserMessage("agent:ops:main"));
+        listener!.onEvent?.(persistedMessage("agent:ops:main"));
+        await flush();
+
+        expect(reconciled).toEqual(["agent:main:main", "agent:ops:main"]);
+        expect(observedUsers).toEqual(["message-user-1", "message-user-agent:ops:main"]);
+        expect(failures).toHaveLength(2);
+        await supervisor.stop();
     });
 });

@@ -213,11 +213,28 @@ export function createSourceDevelopmentChatWriteCapability(
         simulatorDirectory(input.stateRoot),
         chatWriteCapabilityFileName
     );
-    const descriptor = openSync(
-        capabilityPath,
-        constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW | constants.O_WRONLY,
-        0o600
-    );
+    let descriptor: number;
+    try {
+        descriptor = openSync(
+            capabilityPath,
+            constants.O_CREAT |
+                constants.O_EXCL |
+                constants.O_NOFOLLOW |
+                constants.O_WRONLY,
+            0o600
+        );
+    } catch (error) {
+        if (!existingChatWriteCapabilityIsExpired(capabilityPath, now)) throw error;
+        unlinkSync(capabilityPath);
+        descriptor = openSync(
+            capabilityPath,
+            constants.O_CREAT |
+                constants.O_EXCL |
+                constants.O_NOFOLLOW |
+                constants.O_WRONLY,
+            0o600
+        );
+    }
     try {
         writeSync(descriptor, JSON.stringify(capability), undefined, "utf8");
         fsyncSync(descriptor);
@@ -232,6 +249,35 @@ export function createSourceDevelopmentChatWriteCapability(
             unlinkSync(capabilityPath);
         },
     });
+}
+
+function existingChatWriteCapabilityIsExpired(
+    capabilityPath: string,
+    nowMs: number
+): boolean {
+    let descriptor: number;
+    try {
+        descriptor = openSync(
+            capabilityPath,
+            constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
+        );
+    } catch {
+        return false;
+    }
+    try {
+        const status = fstatSync(descriptor);
+        if (!status.isFile() || status.nlink !== 1 || (status.mode & 0o077) !== 0)
+            return false;
+        const parsed = v.safeParse(
+            chatWriteCapabilitySchema,
+            JSON.parse(readFileSync(descriptor, "utf8"))
+        );
+        return parsed.success && parsed.output.expiresAtMs <= nowMs;
+    } catch {
+        return false;
+    } finally {
+        closeSync(descriptor);
+    }
 }
 
 function chatWriteIsAuthorized(

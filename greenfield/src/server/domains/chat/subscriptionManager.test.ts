@@ -89,6 +89,16 @@ function managerHarness(
 }
 
 describe("ChatSessionSubscriptionManager", () => {
+    test("maps projected legacy main sessions to the implicit main owner", async () => {
+        const harness = managerHarness();
+        await harness.manager.touch("main");
+        await harness.manager.touch("global");
+        expect(harness.requests).toEqual([
+            expect.objectContaining({ agentId: "main", sessionKey: "main" }),
+            expect.objectContaining({ agentId: "main", sessionKey: "global" }),
+        ]);
+    });
+
     test("shares one lease, retains pinned work, and sweeps idle unpinned leases", async () => {
         const harness = managerHarness({ idleMilliseconds: 100 });
         await harness.manager.touch("agent:main:main");

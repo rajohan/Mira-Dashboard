@@ -1928,7 +1928,8 @@ class PersistentGatewayChatProviderImplementation implements ChatProvider {
                 // accepted thinking-level catalog for an individual model.
                 supportsFastMode: false,
                 thinkingLevels: [],
-            }));
+            }))
+            .slice(0, 256);
         return parseOrUnavailable(chatModelsListOutputSchema, { models });
     }
 

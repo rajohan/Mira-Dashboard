@@ -154,7 +154,10 @@ export class ChatSessionSubscriptionManager {
         if (this.#leases.size >= this.#maximum) {
             throw new ChatSubscriptionCapacityError();
         }
-        const agentId = gatewaySessionAgentId(sessionKey);
+        const agentId =
+            sessionKey === "main" || sessionKey === "global"
+                ? "main"
+                : gatewaySessionAgentId(sessionKey);
         if (agentId === undefined) {
             throw new TypeError("Chat subscription requires a canonical session owner");
         }

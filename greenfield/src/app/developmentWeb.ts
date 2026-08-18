@@ -141,10 +141,15 @@ export async function runDevelopmentWebProcess(
                       if (isolatedOpenClawRoot === undefined) {
                           return defaults.createServer(options);
                       }
-                      const mediaRoot = await defaults.resolveOpenClawFileRoot(
-                          path.join(os.homedir(), ".openclaw"),
-                          path.join(path.dirname(isolatedOpenClawRoot.path), "production")
-                      );
+                      const mediaRoot = await defaults
+                          .resolveOpenClawFileRoot(
+                              path.join(os.homedir(), ".openclaw"),
+                              path.join(
+                                  path.dirname(isolatedOpenClawRoot.path),
+                                  "production"
+                              )
+                          )
+                          .catch((): undefined => {});
                       return defaults.createServer({
                           ...options,
                           openClawMediaFileRoot: mediaRoot,

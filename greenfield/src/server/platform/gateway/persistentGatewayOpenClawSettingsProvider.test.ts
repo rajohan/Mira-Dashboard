@@ -1060,6 +1060,52 @@ describe("persistent Gateway OpenClaw Settings provider", () => {
         expect(fixture.calls[0]?.lane).toBe("read");
     });
 
+    test("allows changing reset mode while retaining the idle timeout", async () => {
+        const acknowledgedConfig = structuredClone(
+            (configGetFixture() as { config: Record<string, unknown> }).config
+        ) as {
+            session: { reset: { atHour: number; idleMinutes: number; mode: string } };
+        };
+        acknowledgedConfig.session.reset = { atHour: 4, idleMinutes: 45, mode: "daily" };
+        const fixture = createFixtureTransport({
+            reads: [{ payload: configGetFixture() }],
+            writes: [
+                {
+                    payload: {
+                        config: acknowledgedConfig,
+                        hash: nextHash,
+                        ok: true,
+                        sentinel: {
+                            payload: { stats: { requiresRestart: false } },
+                            persisted: true,
+                        },
+                    },
+                },
+            ],
+        });
+
+        const result = await createPersistentGatewayOpenClawSettingsProvider(
+            fixture.transport
+        ).updateConfiguration({
+            authorizeDispatch,
+            baseHash: currentHash,
+            baseRevisionHash: currentRevisionHash,
+            confirmation: "apply-reviewed-settings",
+            update: {
+                atHour: 4,
+                idleMinutes: 45,
+                mode: "daily",
+                section: "session-reset",
+            },
+        });
+
+        expect(result.configuration.sessionReset).toMatchObject({
+            atHour: 4,
+            idleMinutes: 45,
+            mode: "daily",
+        });
+    });
+
     test("retains only the ordered bounded channel prefix", async () => {
         const response = structuredClone(configGetFixture()) as {
             config: { channels: Record<string, { enabled?: boolean }> };
@@ -1147,6 +1193,25 @@ describe("persistent Gateway OpenClaw Settings provider", () => {
             main: { name: "Main" },
             ops: { name: "Operations" },
         };
+        const fixture = createFixtureTransport({
+            reads: [{ payload: configuration }, { payload: skillsFixture() }],
+        });
+
+        await createPersistentGatewayOpenClawSettingsProvider(
+            fixture.transport
+        ).listSkills({});
+
+        expect(fixture.calls[1]).toMatchObject({
+            method: "skills.status",
+            parameters: { agentId: "main" },
+        });
+    });
+
+    test("uses the implicit main agent when no agent entries are configured", async () => {
+        const configuration = structuredClone(configGetFixture()) as {
+            config: { agents?: unknown };
+        };
+        delete configuration.config.agents;
         const fixture = createFixtureTransport({
             reads: [{ payload: configuration }, { payload: skillsFixture() }],
         });
