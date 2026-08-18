@@ -1,17 +1,12 @@
-import { createColumnHelper, tableFeatures, useTable } from "@tanstack/react-table";
+import { useState } from "react";
 
 import type { JobRunState, ScheduleSummary } from "../../contracts/jobModel.ts";
 import { cn } from "../lib/classNames.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { Badge } from "../ui/Badge.tsx";
-import { Button } from "../ui/Button.tsx";
-import { DataTable } from "../ui/DataTable.tsx";
+import { StretchedAction } from "../ui/StretchedAction.tsx";
 import { Text } from "../ui/Text.tsx";
-import { Virtualizer, type VirtualizerRenderState } from "../ui/Virtualizer.tsx";
 import { scheduleConfigurationLabel } from "./schedulePresentation.ts";
-
-const minimumVirtualizedRows = 50;
-const scheduleTableFeatures = tableFeatures({});
 
 function runStateVariant(state: JobRunState) {
     if (["failed", "timed-out"].includes(state)) return "danger" as const;
@@ -20,82 +15,13 @@ function runStateVariant(state: JobRunState) {
     return "default" as const;
 }
 
-interface ScheduleTableRow {
-    readonly onSelect: (id: string) => void;
-    readonly schedule: ScheduleSummary;
-    readonly selected: boolean;
+function cardSurface(selected: boolean, hovered: boolean): string {
+    if (selected) {
+        return "border-accent-400 bg-accent-500/20 ring-accent-300/40 ring-1 ring-inset";
+    }
+    if (hovered) return "border-primary-500 bg-primary-800/55";
+    return "border-primary-700 bg-primary-900/40";
 }
-
-const scheduleColumnHelper = createColumnHelper<
-    typeof scheduleTableFeatures,
-    ScheduleTableRow
->();
-
-const scheduleColumns = scheduleColumnHelper.columns([
-    scheduleColumnHelper.accessor((row) => row.schedule.name, {
-        cell: ({ getValue, row }) => (
-            <Button
-                aria-current={row.original.selected ? "true" : undefined}
-                aria-label={`${getValue()}; ${row.original.schedule.id}`}
-                className={cn(
-                    "text-primary-100 hover:text-accent-300 text-left font-medium wrap-break-word",
-                    row.original.selected && "text-accent-300"
-                )}
-                onClick={() => row.original.onSelect(row.original.schedule.id)}
-                variant="unstyled"
-                type="button"
-            >
-                {getValue()}
-            </Button>
-        ),
-        header: "Schedule",
-        id: "name",
-    }),
-    scheduleColumnHelper.accessor((row) => row.schedule.enabled, {
-        cell: ({ getValue }) => (
-            <Badge variant={getValue() ? "success" : "default"}>
-                {getValue() ? "enabled" : "disabled"}
-            </Badge>
-        ),
-        header: "Status",
-        id: "enabled",
-    }),
-    scheduleColumnHelper.accessor((row) => row.schedule.schedule, {
-        cell: ({ getValue }) => (
-            <Text className="font-mono wrap-break-word" size="sm">
-                {scheduleConfigurationLabel(getValue())}
-            </Text>
-        ),
-        header: "Schedule",
-        id: "cadence",
-    }),
-    scheduleColumnHelper.accessor((row) => row.schedule.nextRunAtMs, {
-        cell: ({ getValue }) => {
-            const nextRunAtMs = getValue();
-            return nextRunAtMs === undefined ? (
-                <Text tone="muted">—</Text>
-            ) : (
-                <time dateTime={new Date(nextRunAtMs).toISOString()}>
-                    {formatDashboardDateTime(nextRunAtMs)}
-                </time>
-            );
-        },
-        header: "Next run",
-        id: "nextRunAtMs",
-    }),
-    scheduleColumnHelper.accessor((row) => row.schedule.activeRun?.state, {
-        cell: ({ getValue }) => {
-            const state = getValue();
-            return state === undefined ? (
-                <Text tone="muted">Idle</Text>
-            ) : (
-                <Badge variant={runStateVariant(state)}>{state}</Badge>
-            );
-        },
-        header: "Active run",
-        id: "activeRun",
-    }),
-]);
 
 interface ScheduleTableProps {
     readonly onSelect: (id: string) => void;
@@ -103,37 +29,75 @@ interface ScheduleTableProps {
     readonly selectedId?: string;
 }
 
-/** @returns Selectable, virtualized Dashboard-local schedule directory. */
+/** @returns Compact selectable Dashboard schedule inventory matching the legacy layout. */
 export function ScheduleTable({ onSelect, schedules, selectedId }: ScheduleTableProps) {
-    const table = useTable({
-        columns: scheduleColumns,
-        data: schedules.map((schedule) => ({
-            onSelect,
-            schedule,
-            selected: schedule.id === selectedId,
-        })),
-        features: scheduleTableFeatures,
-        getRowId: ({ schedule }) => schedule.id,
-    });
-    const rows = table.getRowModel().rows;
-    const tableElement = (rowWindow?: VirtualizerRenderState<HTMLTableRowElement>) => (
-        <DataTable
-            label="Dashboard schedules"
-            rowWindow={rowWindow}
-            scrollContainerRef={rowWindow?.scrollContainerRef}
-            table={table}
-            tableClassName="min-w-224"
-        />
-    );
+    const [hoveredId, setHoveredId] = useState<string>();
 
-    if (rows.length < minimumVirtualizedRows) return tableElement();
     return (
-        <Virtualizer<HTMLTableRowElement>
-            count={rows.length}
-            estimateSize={() => 68}
-            getItemKey={(index) => rows[index]?.id ?? `missing-schedule-${index}`}
-        >
-            {(virtualization) => tableElement(virtualization)}
-        </Virtualizer>
+        <ul aria-label="Dashboard schedules" className="grid min-w-0 grid-cols-1 gap-2">
+            {schedules.map((schedule) => {
+                const selected = schedule.id === selectedId;
+                const activeState = schedule.activeRun?.state;
+                return (
+                    <li
+                        className={cn(
+                            "group relative min-w-0 rounded-lg border px-3 py-2 transition-colors",
+                            cardSurface(selected, schedule.id === hoveredId)
+                        )}
+                        key={schedule.id}
+                    >
+                        <StretchedAction
+                            aria-current={selected ? "true" : undefined}
+                            aria-pressed={selected}
+                            className="z-10 focus-visible:ring-inset"
+                            label={`${schedule.name}; ${schedule.id}`}
+                            onClick={() => onSelect(schedule.id)}
+                            onPointerEnter={() => setHoveredId(schedule.id)}
+                            onPointerLeave={() =>
+                                setHoveredId((current) =>
+                                    current === schedule.id ? undefined : current
+                                )
+                            }
+                        />
+                        <div className="flex min-w-0 items-start justify-between gap-2">
+                            <div className="min-w-0">
+                                <p className="text-primary-100 group-focus-within:text-accent-300 group-hover:text-accent-300 truncate text-sm font-medium">
+                                    {schedule.name}
+                                </p>
+                                <Text className="mt-1 truncate" size="sm" tone="muted">
+                                    {schedule.id}
+                                </Text>
+                            </div>
+                            <div className="flex shrink-0 items-center gap-1">
+                                <Badge variant={schedule.enabled ? "success" : "default"}>
+                                    {schedule.enabled ? "Enabled" : "Disabled"}
+                                </Badge>
+                                {activeState !== undefined && (
+                                    <Badge variant={runStateVariant(activeState)}>
+                                        {activeState}
+                                    </Badge>
+                                )}
+                            </div>
+                        </div>
+                        <dl className="text-primary-400 mt-2 grid min-w-0 grid-cols-1 gap-x-2 gap-y-1 text-[11px] sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+                            <div className="flex min-w-0 gap-1">
+                                <dt>Schedule:</dt>
+                                <dd className="min-w-0 truncate font-mono">
+                                    {scheduleConfigurationLabel(schedule.schedule)}
+                                </dd>
+                            </div>
+                            <div className="flex min-w-0 gap-1">
+                                <dt>Next:</dt>
+                                <dd className="min-w-0 truncate">
+                                    {schedule.nextRunAtMs === undefined
+                                        ? "Paused"
+                                        : formatDashboardDateTime(schedule.nextRunAtMs)}
+                                </dd>
+                            </div>
+                        </dl>
+                    </li>
+                );
+            })}
+        </ul>
     );
 }

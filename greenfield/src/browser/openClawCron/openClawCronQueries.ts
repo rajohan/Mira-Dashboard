@@ -276,7 +276,7 @@ export function openClawCronRunsQueryOptions(
                 "openClawCron.listRuns",
                 {
                     id,
-                    limit: 100,
+                    limit: 25,
                     offset: pageParam,
                     sortDir: "desc",
                 },

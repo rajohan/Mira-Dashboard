@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useMutation } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 
 import type {
@@ -8,10 +8,16 @@ import type {
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { dashboardBrowserFailureMessage } from "../api/trpcError.ts";
 import { useAuthenticatedMutationBoundary } from "../auth/useAuthenticatedMutationBoundary.ts";
+import {
+    reportListQueryOptions,
+    uniqueMonitoringRows,
+} from "../monitoring/monitoringQueries.ts";
+import { gatewaySessionQueryOptions } from "../sessions/gatewaySessionQueries.ts";
 import type { OpenClawCronDisableDraft } from "./OpenClawCronDisableDialog.tsx";
 import {
     accumulateOpenClawCronInventoryPages,
     accumulateOpenClawCronRunPages,
+    openClawCronDetailQueryOptions,
     openClawCronListQueryOptions,
     openClawCronQueryKey,
     openClawCronRunsQueryOptions,
@@ -73,6 +79,37 @@ export function OpenClawCronBrowser({
         orderedJobs.some((job) => job.id === (selectedJobId ?? selectedId))
             ? (selectedJobId ?? selectedId)
             : undefined) ?? orderedJobs.at(0)?.id;
+    const selectedJob = orderedJobs.find((job) => job.id === effectiveSelectedId);
+    const heartbeatDetail = useQuery({
+        ...openClawCronDetailQueryOptions(client, effectiveSelectedId ?? ""),
+        enabled:
+            effectiveSelectedId !== undefined &&
+            selectedJob?.payload.kind === "heartbeat",
+    });
+    const heartbeatReportFilters: {
+        kinds: string[];
+        sourceJobIds: string[];
+        sources: string[];
+    } = {
+        kinds: ["heartbeat"],
+        sourceJobIds:
+            selectedJob === undefined
+                ? []
+                : [selectedJob.id, selectedJob.name, "ops-check"],
+        sources: ["openclaw"],
+    };
+    const heartbeatReports = useInfiniteQuery({
+        ...reportListQueryOptions(client, heartbeatReportFilters),
+        enabled: selectedJob?.payload.kind === "heartbeat",
+    });
+    const heartbeatSessions = useQuery({
+        ...gatewaySessionQueryOptions(client),
+        enabled: selectedJob?.payload.kind === "heartbeat",
+    });
+    const heartbeatSession = heartbeatSessions.data?.sessions.find(
+        (session) =>
+            session.key === `agent:${selectedJob?.agentId ?? "main"}:main:heartbeat`
+    );
     const runs = useInfiniteQuery(
         openClawCronRunsQueryOptions(client, effectiveSelectedId)
     );
@@ -159,7 +196,20 @@ export function OpenClawCronBrowser({
                 status: "error" as const,
             };
         }
-        return { result: inventoryAccumulation.result, status: "ready" as const };
+        const detailedHeartbeat = heartbeatDetail.data?.job;
+        return {
+            result:
+                detailedHeartbeat === undefined ||
+                detailedHeartbeat.id !== effectiveSelectedId
+                    ? inventoryAccumulation.result
+                    : {
+                          ...inventoryAccumulation.result,
+                          jobs: inventoryAccumulation.result.jobs.map((job) =>
+                              job.id === detailedHeartbeat.id ? detailedHeartbeat : job
+                          ),
+                      },
+            status: "ready" as const,
+        };
     })();
 
     const paginationWarning =
@@ -173,15 +223,20 @@ export function OpenClawCronBrowser({
     } else if (runs.error !== null) {
         runsError = dashboardBrowserFailureMessage(runs.error);
     }
+    const backgroundError =
+        inventory.data !== undefined && inventory.error !== null
+            ? dashboardBrowserFailureMessage(inventory.error)
+            : paginationWarning;
+    if (runsError === backgroundError) runsError = undefined;
 
     return (
         <OpenClawCronSection
-            backgroundError={
-                inventory.data !== undefined && inventory.error !== null
-                    ? dashboardBrowserFailureMessage(inventory.error)
-                    : paginationWarning
-            }
+            backgroundError={backgroundError}
             jobsLoadingMore={inventory.isFetchingNextPage}
+            heartbeatReports={uniqueMonitoringRows(
+                heartbeatReports.data?.pages.flatMap((page) => page.reports) ?? []
+            )}
+            heartbeatSession={heartbeatSession}
             onDelete={(job) => mutation.mutateAsync({ job, kind: "delete" })}
             onLoadMoreJobs={
                 inventory.hasNextPage && inventoryAccumulation?.stable !== false

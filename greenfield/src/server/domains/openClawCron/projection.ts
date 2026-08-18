@@ -596,6 +596,8 @@ export function projectOpenClawCronRun(
         entry.provider === undefined
             ? undefined
             : safeLabelProjection(entry.provider, "unknown", 128);
+    const runId =
+        entry.runId ?? `${entry.jobId}:${entry.runAtMs ?? entry.ts}:${entry.ts}`;
     return parseProviderProjection(openClawCronRunSchema, {
         completedAtMs: entry.ts,
         deliveryStatus: entry.deliveryStatus ?? "not-requested",
@@ -607,9 +609,7 @@ export function projectOpenClawCronRun(
         ...(provider === undefined ? {} : { provider: provider.text }),
         providerTruncated: provider?.truncated ?? false,
         ...(entry.runAtMs === undefined ? {} : { runAtMs: entry.runAtMs }),
-        ...(entry.runId === undefined
-            ? {}
-            : { runId: safeLabel(entry.runId, "unknown", 256) }),
+        runId: safeLabel(runId, "unknown", 256),
         status: entry.status ?? "unknown",
         ...(summary === undefined ? {} : { summary: summary.text }),
         summaryTruncated: summary?.truncated ?? false,

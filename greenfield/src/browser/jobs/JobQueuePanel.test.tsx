@@ -43,7 +43,9 @@ describe("job queue panel", () => {
         render(
             <JobQueuePanel
                 controlBusy={false}
+                onSelectRun={() => {}}
                 onSetClaimingPaused={onSetClaimingPaused}
+                runs={[]}
                 summary={summary}
             />
         );
@@ -54,6 +56,8 @@ describe("job queue panel", () => {
         expect(screen.getByText(summary.workers[0]!.id)).toBeTruthy();
         expect(screen.queryByText("version 4", { exact: false })).toBeNull();
         expect(screen.getByText("queued job runs")).toBeTruthy();
+        expect(screen.getByText("No queued or running jobs.")).toBeTruthy();
+        expect(screen.getByText("No recent jobs.")).toBeTruthy();
 
         await user.click(
             screen.getByRole("button", {
@@ -68,7 +72,9 @@ describe("job queue panel", () => {
         render(
             <JobQueuePanel
                 controlBusy
+                onSelectRun={() => {}}
                 onSetClaimingPaused={onSetClaimingPaused}
+                runs={[]}
                 summary={{
                     ...summary,
                     control: { ...summary.control, claimingPaused: true },

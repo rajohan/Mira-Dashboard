@@ -609,6 +609,24 @@ describe("persistent OpenClaw cron provider", () => {
         ]);
     });
 
+    test("does not invent an empty heartbeat scratch row when none is configured", async () => {
+        const transport = new TestPersistentOpenClawCronTransport();
+        queue(transport, "system.info", { processInstanceId: "gateway-process-1" });
+        queue(
+            transport,
+            "cron.get",
+            upstreamJob("heartbeat-1", { payload: { kind: "heartbeat" } })
+        );
+        queue(transport, "cron.scratch.get", {
+            currentRevision: 0,
+            maxBytes: 262_144,
+            scratch: null,
+        });
+        const provider = createPersistentOpenClawCronProvider(transport);
+
+        expect(await provider.get({ id: "heartbeat-1" })).not.toHaveProperty("scratch");
+    });
+
     test("returns undefined for the audited get rejection without leaking raw text", async () => {
         const transport = new TestPersistentOpenClawCronTransport();
         queue(transport, "system.info", {

@@ -80,7 +80,17 @@ function readTransport(calls: string[]): PersistentGatewayTransport {
                     : Object.freeze({})
             );
         },
-        requestAdmin: (method) => unavailableWrite(method),
+        requestAdmin(method) {
+            if (method === "cron.scratch.get") {
+                calls.push(`read:${method}`);
+                return Promise.resolve({
+                    currentRevision: 0,
+                    maxBytes: 64 * 1024,
+                    scratch: null,
+                });
+            }
+            return unavailableWrite(method);
+        },
         requestChatRead(method) {
             calls.push(`read:${method}`);
             return Promise.resolve(Object.freeze({ exchanges: Object.freeze([]) }));
@@ -942,7 +952,9 @@ describe("source-development Gateway transport", () => {
             .toSorted();
         expect(journalMethods).toEqual(
             [
-                ...persistentGatewayAdminMethods,
+                ...persistentGatewayAdminMethods.filter(
+                    (method) => method !== "cron.scratch.get"
+                ),
                 ...persistentGatewayChatReadMutationMethods,
                 ...persistentGatewayChatWriteMethods,
                 ...persistentGatewayOpenClawSettingsWriteMethods,

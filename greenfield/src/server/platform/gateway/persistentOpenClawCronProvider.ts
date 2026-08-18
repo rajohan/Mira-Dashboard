@@ -729,9 +729,7 @@ export function createPersistentOpenClawCronProvider(
         const response = parseBoundary(upstreamScratchGetSchema, raw);
         return Object.freeze({
             ...job,
-            scratch:
-                response.scratch ??
-                Object.freeze({ content: "", revision: response.currentRevision }),
+            ...(response.scratch === null ? {} : { scratch: response.scratch }),
         });
     }
 

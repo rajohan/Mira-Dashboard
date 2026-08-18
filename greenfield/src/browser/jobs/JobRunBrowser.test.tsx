@@ -188,9 +188,7 @@ function eventCursors(transport: EventGapTransport): (number | undefined)[] {
 function createJobsTestRouter() {
     const rootRoute = createRootRoute();
     const jobsRoute = createRoute({
-        component: () => (
-            <JobRunBrowser onRequestRunFocus={() => {}} onRunFocusHandled={() => {}} />
-        ),
+        component: () => <JobRunBrowser onRequestRunFocus={() => {}} />,
         getParentRoute: () => rootRoute,
         path: "/jobs",
         validateSearch: parseJobsRouteSearch,

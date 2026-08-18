@@ -1,6 +1,8 @@
 import { CloudCog } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 
+import type { GatewaySession } from "../../contracts/gatewaySessions.ts";
+import type { ReportSummary } from "../../contracts/monitoring.ts";
 import type {
     OpenClawCronJob,
     UpdateOpenClawCronPatch,
@@ -9,7 +11,6 @@ import { isDashboardOperationOutcomeUnknown } from "../api/trpcError.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Heading } from "../ui/Heading.tsx";
-import { Icon } from "../ui/Icon.tsx";
 import { PageState } from "../ui/PageState.tsx";
 import { Text } from "../ui/Text.tsx";
 import { OpenClawCronConfirmationDialog } from "./OpenClawCronConfirmationDialog.tsx";
@@ -38,6 +39,8 @@ export type OpenClawCronSectionState =
 export interface OpenClawCronSectionProps {
     readonly backgroundError?: string;
     readonly jobsLoadingMore?: boolean;
+    readonly heartbeatReports?: readonly ReportSummary[];
+    readonly heartbeatSession?: GatewaySession;
     readonly onDelete: (job: OpenClawCronJob) => Promise<void>;
     readonly onLoadMoreJobs?: () => void;
     readonly onLoadMoreRuns?: () => void;
@@ -99,6 +102,8 @@ function confirmationTitle(confirmation: Confirmation): string {
 export function OpenClawCronSectionView({
     backgroundError,
     jobsLoadingMore = false,
+    heartbeatReports,
+    heartbeatSession,
     onDelete,
     onLoadMoreJobs,
     onLoadMoreRuns,
@@ -278,30 +283,13 @@ export function OpenClawCronSectionView({
 
     return (
         <section aria-labelledby={headingId} className="max-w-full min-w-0">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-                <div
-                    className="max-w-full min-w-0 flex-1"
-                    ref={inventoryHeadingContainerRef}
-                >
-                    <div className="flex items-center gap-2">
-                        <Icon icon={CloudCog} tone="accent" />
-                        <Heading id={headingId} level={2} tabIndex={-1}>
-                            OpenClaw scheduled jobs
-                        </Heading>
-                    </div>
-                    <Text className="mt-2 max-w-3xl" tone="muted">
-                        OpenClaw automations and their run history. These are separate
-                        from Dashboard schedules and background jobs.
-                    </Text>
-                    <Text className="mt-1 max-w-3xl" size="sm" tone="muted">
-                        Showing {result.jobs.length} of {result.total} OpenClaw jobs.
-                    </Text>
-                    <Text className="mt-1 max-w-3xl" size="sm" tone="muted">
-                        Updates automatically every 10 seconds and when OpenClaw reports
-                        changes.
-                    </Text>
-                </div>
-                {reconciliation === "blocked" && (
+            <div ref={inventoryHeadingContainerRef}>
+                <Heading className="sr-only" id={headingId} level={2} tabIndex={-1}>
+                    OpenClaw scheduled jobs
+                </Heading>
+            </div>
+            {reconciliation === "blocked" && (
+                <div className="flex justify-end">
                     <Button
                         className="w-full sm:w-auto"
                         onClick={() => void retryReconciliation()}
@@ -309,13 +297,13 @@ export function OpenClawCronSectionView({
                     >
                         Refresh current status
                     </Button>
-                )}
-            </div>
+                </div>
+            )}
 
-            <Alert className="mt-5" focusOnError={false} message={backgroundError} />
+            <Alert className="my-4" focusOnError={false} message={backgroundError} />
             {result.freshness.kind === "last-known-good" && (
                 <Alert
-                    className="mt-5"
+                    className="mt-4"
                     focusOnError={false}
                     message="The latest refresh failed, so the last available OpenClaw data is shown. Refresh successfully before trying an action."
                     variant="info"
@@ -323,7 +311,7 @@ export function OpenClawCronSectionView({
             )}
 
             {result.jobs.length === 0 ? (
-                <div className="mt-6">
+                <div className="mt-4">
                     <PageState
                         description="OpenClaw returned no scheduled jobs. Dashboard schedules may still exist above this section."
                         headingLevel={3}
@@ -333,18 +321,23 @@ export function OpenClawCronSectionView({
                     />
                 </div>
             ) : (
-                <div className="mt-6 grid max-w-full min-w-0 grid-cols-1 gap-6 2xl:grid-cols-2">
-                    <div className="min-w-0">
-                        <OpenClawCronTable
-                            jobs={orderedJobs}
-                            onSelect={(id) => {
-                                setSelectedId(id);
-                                setActionError(undefined);
-                                const next = orderedJobs.find((job) => job.id === id);
-                                if (next !== undefined) onSelectJob?.(next);
-                            }}
-                            selectedId={selected?.id}
-                        />
+                <div className="grid max-w-full min-w-0 grid-cols-1 gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
+                    <div className="border-primary-700 bg-primary-800/80 flex min-w-0 flex-col rounded-xl border p-2 xl:max-h-[calc(100vh-10rem)]">
+                        <div className="border-primary-700 text-primary-200 border-b px-2 pb-2 text-sm font-semibold">
+                            Schedules
+                        </div>
+                        <div className="min-h-0 flex-1 pt-2 xl:overflow-y-auto">
+                            <OpenClawCronTable
+                                jobs={orderedJobs}
+                                onSelect={(id) => {
+                                    setSelectedId(id);
+                                    setActionError(undefined);
+                                    const next = orderedJobs.find((job) => job.id === id);
+                                    if (next !== undefined) onSelectJob?.(next);
+                                }}
+                                selectedId={selected?.id}
+                            />
+                        </div>
                         {result.hasMore && onLoadMoreJobs !== undefined && (
                             <Button
                                 busy={jobsLoadingMore}
@@ -370,6 +363,8 @@ export function OpenClawCronSectionView({
                                 selected.configRevision !== undefined
                             }
                             job={selected}
+                            heartbeatReports={heartbeatReports}
+                            heartbeatSession={heartbeatSession}
                             onDelete={() => {
                                 setSelectedId(selected.id);
                                 setConfirmation("delete");

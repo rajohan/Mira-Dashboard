@@ -1,18 +1,18 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { CalendarClock } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import type { ScheduleConfiguration } from "../../contracts/jobModel.ts";
-import type { ListSchedulesInput } from "../../contracts/schedules.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { Alert } from "../ui/Alert.tsx";
+import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
-import { FormField } from "../ui/FormField.tsx";
+import { Card } from "../ui/Card.tsx";
+import { ExpandableCard } from "../ui/ExpandableCard.tsx";
 import { Heading } from "../ui/Heading.tsx";
+import { LoadingState } from "../ui/LoadingState.tsx";
 import { PageState } from "../ui/PageState.tsx";
-import { Select, type SelectOption } from "../ui/Select.tsx";
-import { Text } from "../ui/Text.tsx";
 import { jobBrowserFailureMessage } from "./jobBrowserFailure.ts";
 import { useRunScheduleMutation, useUpdateScheduleMutation } from "./jobMutations.ts";
 import {
@@ -22,32 +22,28 @@ import {
     uniqueJobRows,
 } from "./jobQueries.ts";
 import { parseJobsRouteSearch } from "./jobRouteSearch.ts";
-import { JobRunTable } from "./JobRunTable.tsx";
+import { SelectedJobRun } from "./JobRunBrowser.tsx";
+import { jobRunStateBadgeVariant, jobRunStateLabel } from "./jobRunPresentation.ts";
 import { ScheduleDetail } from "./ScheduleDetail.tsx";
 import { ScheduleTable } from "./ScheduleTable.tsx";
-
-type ScheduleEnabledFilter = NonNullable<ListSchedulesInput["enabled"]>;
-
-const scheduleEnabledOptions: readonly SelectOption<ScheduleEnabledFilter>[] =
-    Object.freeze([
-        { label: "All schedules", value: "all" },
-        { label: "Enabled", value: "enabled" },
-        { label: "Disabled", value: "disabled" },
-    ]);
 
 interface SelectedScheduleProps {
     readonly focusRequested: boolean;
     readonly id: string;
     readonly onFocusHandled: (id: string) => void;
+    readonly onRunFocusHandled: (id: string) => void;
     readonly onSelectRun: (id: string) => void;
     readonly selectedRunId?: string;
+    readonly runFocusRequested?: string;
 }
 
 function SelectedSchedule({
     focusRequested,
     id,
     onFocusHandled,
+    onRunFocusHandled,
     onSelectRun,
+    runFocusRequested,
     selectedRunId,
 }: SelectedScheduleProps) {
     const client = useDashboardTrpcClient();
@@ -55,7 +51,33 @@ function SelectedSchedule({
     const history = useInfiniteQuery(scheduleRunListQueryOptions(client, id));
     const update = useUpdateScheduleMutation();
     const run = useRunScheduleMutation();
+    const historySentinelRef = useRef<HTMLDivElement>(null);
+    const fetchNextHistoryPage = history.fetchNextPage;
+    const hasNextHistoryPage = history.hasNextPage;
+    const historyPageLoading = history.isFetchingNextPage;
     const runs = uniqueJobRows(history.data?.pages.flatMap((page) => page.runs) ?? []);
+
+    useEffect(() => {
+        const sentinel = historySentinelRef.current;
+        if (
+            sentinel === null ||
+            !hasNextHistoryPage ||
+            historyPageLoading ||
+            globalThis.IntersectionObserver === undefined
+        ) {
+            return;
+        }
+        const observer = new IntersectionObserver(
+            (entries) => {
+                if (entries.some(({ isIntersecting }) => isIntersecting)) {
+                    void fetchNextHistoryPage();
+                }
+            },
+            { rootMargin: "400px 0px" }
+        );
+        observer.observe(sentinel);
+        return () => observer.disconnect();
+    }, [fetchNextHistoryPage, hasNextHistoryPage, historyPageLoading]);
 
     useEffect(() => {
         if (!focusRequested || detail.data === undefined) return;
@@ -108,22 +130,53 @@ function SelectedSchedule({
                             : jobBrowserFailureMessage(history.error)
                     }
                 />
-                <JobRunTable
-                    label="Schedule job runs"
-                    onSelect={onSelectRun}
-                    runs={runs}
-                    selectedId={selectedRunId}
-                />
-                {history.hasNextPage && (
-                    <Button
-                        busy={history.isFetchingNextPage}
-                        busyLabel="Loading…"
-                        className="mt-4"
-                        onClick={() => void history.fetchNextPage()}
-                        variant="secondary"
-                    >
-                        Load more schedule runs
-                    </Button>
+                <div className="grid min-w-0 grid-cols-1 gap-2">
+                    {runs.map((jobRun) => (
+                        <ExpandableCard
+                            compact
+                            key={jobRun.id}
+                            onOpenChange={(open) => onSelectRun(open ? jobRun.id : "")}
+                            open={jobRun.id === selectedRunId}
+                            title={jobRun.displayName}
+                            trailing={
+                                <Badge variant={jobRunStateBadgeVariant(jobRun.state)}>
+                                    {jobRunStateLabel(jobRun.state)}
+                                </Badge>
+                            }
+                        >
+                            <SelectedJobRun
+                                embedded
+                                focusRequested={jobRun.id === runFocusRequested}
+                                id={jobRun.id}
+                                onFocusHandled={onRunFocusHandled}
+                            />
+                        </ExpandableCard>
+                    ))}
+                    {selectedRunId !== undefined &&
+                        !runs.some(({ id: runId }) => runId === selectedRunId) && (
+                            <ExpandableCard
+                                compact
+                                onOpenChange={(open) =>
+                                    onSelectRun(open ? selectedRunId : "")
+                                }
+                                open
+                                title="Run details"
+                            >
+                                <SelectedJobRun
+                                    embedded
+                                    focusRequested={selectedRunId === runFocusRequested}
+                                    id={selectedRunId}
+                                    onFocusHandled={onRunFocusHandled}
+                                />
+                            </ExpandableCard>
+                        )}
+                </div>
+                {hasNextHistoryPage && (
+                    <div className="mt-4" ref={historySentinelRef}>
+                        {historyPageLoading && (
+                            <LoadingState label="Loading older runs…" size="sm" />
+                        )}
+                    </div>
                 )}
             </>
         );
@@ -178,20 +231,26 @@ function SelectedSchedule({
 }
 
 interface ScheduleBrowserProps {
+    readonly focusRunId?: string;
     readonly onRequestRunFocus: (id: string) => void;
+    readonly onRunFocusHandled: (id: string) => void;
 }
 
 /** @returns Filtered schedule directory, exact editor, and schedule-scoped history. */
-export function ScheduleBrowser({ onRequestRunFocus }: ScheduleBrowserProps) {
+export function ScheduleBrowser({
+    focusRunId,
+    onRequestRunFocus,
+    onRunFocusHandled,
+}: ScheduleBrowserProps) {
     const client = useDashboardTrpcClient();
     const navigate = useNavigate({ from: "/jobs" });
     const search = parseJobsRouteSearch(useSearch({ from: "/jobs" }) as unknown);
-    const [enabled, setEnabled] = useState<ScheduleEnabledFilter>("all");
     const [focusScheduleId, setFocusScheduleId] = useState<string>();
-    const query = useInfiniteQuery(scheduleListQueryOptions(client, enabled));
+    const query = useInfiniteQuery(scheduleListQueryOptions(client, "all"));
     const schedules = uniqueJobRows(
         query.data?.pages.flatMap((page) => page.schedules) ?? []
     );
+    const selectedScheduleId = search.scheduleId;
     const select = (selection: { runId?: string; scheduleId?: string }) => {
         void navigate({
             replace: true,
@@ -212,9 +271,9 @@ export function ScheduleBrowser({ onRequestRunFocus }: ScheduleBrowserProps) {
         });
     };
     const selectRun = (runId: string) => {
-        onRequestRunFocus(runId);
+        if (runId !== "") onRequestRunFocus(runId);
         select({
-            runId,
+            ...(runId === "" ? {} : { runId }),
             ...(search.scheduleId === undefined ? {} : { scheduleId: search.scheduleId }),
         });
     };
@@ -246,7 +305,7 @@ export function ScheduleBrowser({ onRequestRunFocus }: ScheduleBrowserProps) {
                 <ScheduleTable
                     onSelect={selectSchedule}
                     schedules={schedules}
-                    selectedId={search.scheduleId}
+                    selectedId={selectedScheduleId}
                 />
                 {query.hasNextPage && (
                     <Button
@@ -265,56 +324,46 @@ export function ScheduleBrowser({ onRequestRunFocus }: ScheduleBrowserProps) {
 
     return (
         <section aria-label="Dashboard schedule management">
-            <div className="flex flex-wrap items-end justify-between gap-4">
-                <div>
-                    <Heading id="schedules-heading" level={2}>
-                        Dashboard schedules
-                    </Heading>
-                    <Text className="mt-1" tone="muted">
-                        Change when Dashboard jobs run, pause them with a reason, or start
-                        one now.
-                    </Text>
-                </div>
-                <FormField label="Show schedules">
-                    <Select
-                        className="mt-2 min-w-48"
-                        onChange={setEnabled}
-                        options={scheduleEnabledOptions}
-                        value={enabled}
-                    />
-                </FormField>
-            </div>
-            <Alert
-                className="mt-4"
-                focusOnError={false}
-                message={
-                    query.data === undefined || query.error === null
-                        ? undefined
-                        : jobBrowserFailureMessage(query.error)
-                }
-            />
-            <div className="mt-5">{directoryContent}</div>
-            <div className="mt-7">
-                {search.scheduleId === undefined ? (
-                    <PageState
-                        description="Choose a schedule from the table to see and edit it."
-                        status="empty"
-                        title="Select a schedule"
-                    />
-                ) : (
-                    <SelectedSchedule
-                        focusRequested={focusScheduleId === search.scheduleId}
-                        id={search.scheduleId}
-                        key={search.scheduleId}
-                        onFocusHandled={(id) =>
-                            setFocusScheduleId((current) =>
-                                current === id ? undefined : current
-                            )
+            <div className="grid min-w-0 grid-cols-1 gap-3 sm:gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
+                <Card className="min-w-0 p-0 xl:flex xl:max-h-[calc(100vh-10rem)] xl:flex-col xl:overflow-hidden">
+                    <div className="border-primary-700 shrink-0 border-b p-3">
+                        <Heading id="schedules-heading" level={2}>
+                            Dashboard schedules
+                        </Heading>
+                    </div>
+                    <Alert
+                        className="mx-3 mt-3"
+                        focusOnError={false}
+                        message={
+                            query.data === undefined || query.error === null
+                                ? undefined
+                                : jobBrowserFailureMessage(query.error)
                         }
-                        onSelectRun={selectRun}
-                        selectedRunId={search.runId}
                     />
-                )}
+                    <div className="min-h-0 p-2 xl:flex-1 xl:overflow-y-auto">
+                        {directoryContent}
+                    </div>
+                </Card>
+                <div className="min-w-0">
+                    {selectedScheduleId === undefined ? (
+                        <PageState status="empty" title="Select a schedule" />
+                    ) : (
+                        <SelectedSchedule
+                            focusRequested={focusScheduleId === selectedScheduleId}
+                            id={selectedScheduleId}
+                            key={selectedScheduleId}
+                            onFocusHandled={(id) =>
+                                setFocusScheduleId((current) =>
+                                    current === id ? undefined : current
+                                )
+                            }
+                            onRunFocusHandled={onRunFocusHandled}
+                            onSelectRun={selectRun}
+                            runFocusRequested={focusRunId}
+                            selectedRunId={search.runId}
+                        />
+                    )}
+                </div>
             </div>
         </section>
     );

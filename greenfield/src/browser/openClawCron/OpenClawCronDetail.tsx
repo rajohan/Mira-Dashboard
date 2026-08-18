@@ -1,7 +1,9 @@
 import { Pencil, Play, Power, Trash2 } from "lucide-react";
 import type { ReactNode } from "react";
-import { useId } from "react";
+import { useEffect, useId, useRef } from "react";
 
+import type { GatewaySession } from "../../contracts/gatewaySessions.ts";
+import type { ReportSummary } from "../../contracts/monitoring.ts";
 import type { OpenClawCronJob } from "../../contracts/openClawCron.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { Alert } from "../ui/Alert.tsx";
@@ -30,6 +32,8 @@ interface OpenClawCronDetailProps {
     readonly actionError?: string;
     readonly definitionControlsAvailable: boolean;
     readonly job: OpenClawCronJob;
+    readonly heartbeatReports?: readonly ReportSummary[];
+    readonly heartbeatSession?: GatewaySession;
     readonly onDelete: () => void;
     readonly onEdit: () => void;
     readonly onLoadMoreRuns?: () => void;
@@ -65,6 +69,8 @@ export function OpenClawCronDetail({
     actionError,
     definitionControlsAvailable,
     job,
+    heartbeatReports = [],
+    heartbeatSession,
     onDelete,
     onEdit,
     onLoadMoreRuns,
@@ -78,50 +84,108 @@ export function OpenClawCronDetail({
 }: OpenClawCronDetailProps) {
     const headingId = useId();
     const historyHeadingId = useId();
+    const historySentinelRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const sentinel = historySentinelRef.current;
+        if (
+            sentinel === null ||
+            !runs?.hasMore ||
+            onLoadMoreRuns === undefined ||
+            runsLoadingMore ||
+            globalThis.IntersectionObserver === undefined
+        ) {
+            return;
+        }
+        const observer = new IntersectionObserver(
+            (entries) => {
+                if (entries.some(({ isIntersecting }) => isIntersecting)) {
+                    onLoadMoreRuns();
+                }
+            },
+            { rootMargin: "400px 0px" }
+        );
+        observer.observe(sentinel);
+        return () => observer.disconnect();
+    }, [onLoadMoreRuns, runs?.hasMore, runsLoadingMore]);
     const payloadTruncated = "truncated" in job.payload && job.payload.truncated;
     const payloadRedacted =
         "contentRedacted" in job.payload && job.payload.contentRedacted;
     const scheduleTruncated = "truncated" in job.schedule && job.schedule.truncated;
+    const isHeartbeat = job.payload.kind === "heartbeat";
+    const message = (() => {
+        if (job.payload.kind === "agent-turn") return job.payload.message;
+        if (job.payload.kind === "system-event") return job.payload.text;
+        if (job.payload.kind === "heartbeat") return job.scratch?.content;
+        return;
+    })();
+    let configuredModel: string | undefined;
+    if (job.payload.kind === "agent-turn") configuredModel = job.payload.model;
+    else if (isHeartbeat) configuredModel = heartbeatSession?.model;
+    const heartbeatReportForRun = (runAtMs: number): ReportSummary | undefined =>
+        heartbeatReports
+            .filter((report) => Math.abs(report.occurredAtMs - runAtMs) <= 30 * 60_000)
+            .toSorted(
+                (left, right) =>
+                    Math.abs(left.occurredAtMs - runAtMs) -
+                    Math.abs(right.occurredAtMs - runAtMs)
+            )
+            .at(0);
     const delivery = job.delivery;
     const definitionRows: readonly (readonly [string, ReactNode])[] = [
         ["Schedule", openClawCronScheduleLabel(job)],
         ...(job.agentId === undefined ? [] : ([["Agent", job.agentId]] as const)),
         ["Session", openClawCronSessionTargetLabel(job.sessionTarget)],
         ["Task type", openClawCronPayloadLabel(job.payload.kind)],
-        ...(job.scratch === undefined
+        ...(message === undefined
             ? []
             : ([
                   [
-                      "Heartbeat instructions",
-                      job.scratch.truncated
-                          ? "Available in the JSON editor (content shortened)"
-                          : "Available in the JSON editor",
+                      "Message",
+                      <span className="line-clamp-6 whitespace-pre-wrap" key="message">
+                          {message}
+                      </span>,
                   ],
               ] as const)),
+        ...(job.payload.kind === "agent-turn" || isHeartbeat
+            ? ([
+                  ["Model", configuredModel ?? "Default"],
+                  ["Provider", heartbeatSession?.modelProvider ?? "Default"],
+                  [
+                      "Thinking",
+                      job.payload.kind === "agent-turn"
+                          ? (job.payload.thinking ?? "Default")
+                          : "Default",
+                  ],
+                  [
+                      "Timeout",
+                      job.payload.kind === "agent-turn" &&
+                      job.payload.timeoutSeconds !== undefined
+                          ? `${job.payload.timeoutSeconds} seconds`
+                          : "Default",
+                  ],
+              ] as const)
+            : []),
         ...(payloadRedacted ? ([["Task content", "Hidden for security"]] as const) : []),
         ["Delivery", openClawCronDeliveryModeLabel(job.deliveryMode)],
-        ...(delivery === undefined
-            ? []
-            : ([
-                  [
-                      "Delivery target",
-                      delivery.targetConfigured
-                          ? "Configured (hidden for security)"
-                          : "Not configured",
-                  ],
-                  [
-                      "Completion webhook",
-                      delivery.completionDestinationConfigured
-                          ? "Configured (hidden for security)"
-                          : "Not configured",
-                  ],
-                  [
-                      "Failure target",
-                      delivery.failureDestination?.targetConfigured === true
-                          ? "Configured (hidden for security)"
-                          : "Not configured",
-                  ],
-              ] as const)),
+        [
+            "Delivery target",
+            delivery?.targetConfigured === true
+                ? "Configured (hidden for security)"
+                : "Not configured",
+        ],
+        [
+            "Completion webhook",
+            delivery?.completionDestinationConfigured === true
+                ? "Configured (hidden for security)"
+                : "Not configured",
+        ],
+        [
+            "Failure target",
+            delivery?.failureDestination?.targetConfigured === true
+                ? "Configured (hidden for security)"
+                : "Not configured",
+        ],
         ["Start timing", openClawCronWakeModeLabel(job.wakeMode)],
         ["Next run", dateTime(job.state.nextRunAtMs)],
         ["Last run", dateTime(job.state.lastRunAtMs)],
@@ -162,7 +226,7 @@ export function OpenClawCronDetail({
                             className="max-w-full shrink-0 whitespace-nowrap"
                             variant={job.enabled ? "success" : "default"}
                         >
-                            OpenClaw {job.enabled ? "enabled" : "disabled"}
+                            {job.enabled ? "Enabled" : "Disabled"}
                         </Badge>
                         <Badge
                             className="max-w-full shrink-0 whitespace-nowrap"
@@ -274,7 +338,7 @@ export function OpenClawCronDetail({
 
             <Card aria-labelledby={historyHeadingId} className="max-w-full min-w-0">
                 <Heading id={historyHeadingId} level={3}>
-                    OpenClaw run history
+                    Run history
                 </Heading>
                 <Text className="mt-1" tone="muted">
                     These runs belong to OpenClaw and are separate from Dashboard
@@ -322,102 +386,113 @@ export function OpenClawCronDetail({
                         aria-label={`OpenClaw runs for ${job.name}`}
                         className="mt-5 grid max-w-full min-w-0 grid-cols-1 gap-3"
                     >
-                        {runs.runs.map((run, index) => (
-                            <li
-                                className="border-primary-700 bg-primary-900/40 max-w-full min-w-0 rounded-lg border p-3 sm:p-4"
-                                key={run.runId ?? `${run.completedAtMs}-${index}`}
-                            >
-                                <dl className="grid max-w-full min-w-0 grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
-                                    <div className="min-w-0">
-                                        <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
-                                            Completed
-                                        </dt>
-                                        <dd className="text-primary-100 mt-1 text-sm wrap-anywhere">
-                                            {dateTime(run.completedAtMs)}
-                                        </dd>
-                                    </div>
-                                    <div className="min-w-0">
-                                        <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
-                                            Status
-                                        </dt>
-                                        <dd className="mt-1">
-                                            <Badge
-                                                variant={openClawCronRunStatusBadgeVariant(
-                                                    run.status
+                        {runs.runs.map((run, index) => {
+                            const heartbeatReport = isHeartbeat
+                                ? heartbeatReportForRun(run.runAtMs ?? run.completedAtMs)
+                                : undefined;
+                            return (
+                                <li
+                                    className="border-primary-700 bg-primary-900/40 max-w-full min-w-0 rounded-lg border p-3 sm:p-4"
+                                    key={run.runId ?? `${run.completedAtMs}-${index}`}
+                                >
+                                    <dl className="grid max-w-full min-w-0 grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
+                                        <div className="min-w-0">
+                                            <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
+                                                Completed
+                                            </dt>
+                                            <dd className="text-primary-100 mt-1 text-sm wrap-anywhere">
+                                                {dateTime(
+                                                    heartbeatReport?.occurredAtMs ??
+                                                        run.completedAtMs
                                                 )}
-                                            >
-                                                {openClawCronRunStatusLabel(run.status)}
-                                            </Badge>
-                                        </dd>
-                                    </div>
-                                    <div className="min-w-0">
-                                        <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
-                                            Delivery
-                                        </dt>
-                                        <dd className="text-primary-100 mt-1 text-sm wrap-anywhere">
-                                            {openClawCronDeliveryStatusLabel(
-                                                run.deliveryStatus
-                                            )}
-                                        </dd>
-                                    </div>
-                                    <div className="min-w-0">
-                                        <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
-                                            Duration
-                                        </dt>
-                                        <dd className="text-primary-100 mt-1 text-sm wrap-anywhere">
-                                            {run.durationMs === undefined
-                                                ? "—"
-                                                : `${run.durationMs} ms`}
-                                        </dd>
-                                    </div>
-                                    <div className="min-w-0">
-                                        <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
-                                            Model
-                                        </dt>
-                                        <dd className="text-primary-100 mt-1 max-w-full text-sm wrap-anywhere">
-                                            {run.model ?? "—"}
-                                            {run.modelTruncated && " (shortened)"}
-                                        </dd>
-                                    </div>
-                                    <div className="min-w-0">
-                                        <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
-                                            Provider
-                                        </dt>
-                                        <dd className="text-primary-100 mt-1 max-w-full text-sm wrap-anywhere">
-                                            {run.provider ?? "—"}
-                                            {run.providerTruncated && " (shortened)"}
-                                        </dd>
-                                    </div>
-                                    <div className="min-w-0 sm:col-span-2 lg:col-span-3">
-                                        <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
-                                            Summary
-                                        </dt>
-                                        <dd className="text-primary-100 mt-1 max-w-full text-sm wrap-anywhere whitespace-pre-wrap">
-                                            {run.summary ?? run.errorReason ?? "—"}
-                                            {run.summaryTruncated &&
-                                                " (shortened preview)"}
-                                        </dd>
-                                    </div>
-                                </dl>
-                            </li>
-                        ))}
+                                            </dd>
+                                        </div>
+                                        <div className="min-w-0">
+                                            <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
+                                                Status
+                                            </dt>
+                                            <dd className="mt-1">
+                                                <Badge
+                                                    variant={openClawCronRunStatusBadgeVariant(
+                                                        run.status
+                                                    )}
+                                                >
+                                                    {openClawCronRunStatusLabel(
+                                                        run.status
+                                                    )}
+                                                </Badge>
+                                            </dd>
+                                        </div>
+                                        <div className="min-w-0">
+                                            <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
+                                                Delivery
+                                            </dt>
+                                            <dd className="text-primary-100 mt-1 text-sm wrap-anywhere">
+                                                {openClawCronDeliveryStatusLabel(
+                                                    run.deliveryStatus
+                                                )}
+                                            </dd>
+                                        </div>
+                                        <div className="min-w-0">
+                                            <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
+                                                Duration
+                                            </dt>
+                                            <dd className="text-primary-100 mt-1 text-sm wrap-anywhere">
+                                                {run.durationMs === undefined
+                                                    ? "—"
+                                                    : `${run.durationMs} ms`}
+                                            </dd>
+                                        </div>
+                                        <div className="min-w-0">
+                                            <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
+                                                Model
+                                            </dt>
+                                            <dd className="text-primary-100 mt-1 max-w-full text-sm wrap-anywhere">
+                                                {run.model ??
+                                                    heartbeatSession?.model ??
+                                                    "—"}
+                                                {run.model !== undefined &&
+                                                    run.modelTruncated &&
+                                                    " (shortened)"}
+                                            </dd>
+                                        </div>
+                                        <div className="min-w-0">
+                                            <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
+                                                Provider
+                                            </dt>
+                                            <dd className="text-primary-100 mt-1 max-w-full text-sm wrap-anywhere">
+                                                {run.provider ??
+                                                    heartbeatSession?.modelProvider ??
+                                                    "—"}
+                                                {run.provider !== undefined &&
+                                                    run.providerTruncated &&
+                                                    " (shortened)"}
+                                            </dd>
+                                        </div>
+                                        <div className="min-w-0 sm:col-span-2 lg:col-span-3">
+                                            <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
+                                                Summary
+                                            </dt>
+                                            <dd className="text-primary-100 mt-1 max-w-full text-sm wrap-anywhere whitespace-pre-wrap">
+                                                {heartbeatReport?.summary ??
+                                                    heartbeatReport?.title ??
+                                                    run.summary ??
+                                                    run.errorReason ??
+                                                    "—"}
+                                                {run.summaryTruncated &&
+                                                    " (shortened preview)"}
+                                            </dd>
+                                        </div>
+                                    </dl>
+                                </li>
+                            );
+                        })}
                     </ol>
                 )}
                 {runs?.hasMore && onLoadMoreRuns !== undefined && (
-                    <Button
-                        busy={runsLoadingMore}
-                        busyLabel="Loading…"
-                        className="mt-4"
-                        onClick={onLoadMoreRuns}
-                        variant="secondary"
-                    >
-                        Load older OpenClaw runs
-                    </Button>
-                )}
-                {runs?.hasMore && onLoadMoreRuns === undefined && (
-                    <Text className="mt-3" size="sm" tone="muted">
-                        More OpenClaw run history is available.
-                    </Text>
+                    <div className="mt-4" ref={historySentinelRef}>
+                        {runsLoadingMore && <LoadingState label="Loading older runs…" />}
+                    </div>
                 )}
             </Card>
         </div>

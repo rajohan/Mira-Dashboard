@@ -123,6 +123,7 @@ const jobRunColumns = jobRunColumnHelper.columns([
 ]);
 
 export interface JobRunTableProps {
+    readonly compact?: boolean;
     readonly label?: string;
     readonly onSelect: (id: string) => void;
     readonly runs: readonly JobRunSummary[];
@@ -131,6 +132,7 @@ export interface JobRunTableProps {
 
 /** @returns Selectable durable run inventory with bounded virtual rendering. */
 export function JobRunTable({
+    compact = false,
     label = "Job runs",
     onSelect,
     runs,
@@ -164,7 +166,11 @@ export function JobRunTable({
             rowWindow={rowWindow}
             scrollContainerRef={rowWindow?.scrollContainerRef}
             table={table}
-            tableClassName="min-w-256"
+            tableClassName={
+                compact
+                    ? "min-w-0 [&_td:nth-child(n+4)]:hidden [&_th:nth-child(n+4)]:hidden md:min-w-192 md:[&_td:nth-child(n+4)]:table-cell md:[&_th:nth-child(n+4)]:table-cell"
+                    : "min-w-256"
+            }
         />
     );
 

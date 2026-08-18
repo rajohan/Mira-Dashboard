@@ -2,10 +2,7 @@ import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { OpenClawCronBrowser } from "../openClawCron/OpenClawCronBrowser.tsx";
-import { OverviewServiceActionsSection } from "../overview/OverviewServiceActionsSection.tsx";
-import { Button } from "../ui/Button.tsx";
-import { Fieldset } from "../ui/Fieldset.tsx";
-import { PageHeader } from "../ui/PageHeader.tsx";
+import { Tabs } from "../ui/Tabs.tsx";
 import { parseJobsRouteSearch } from "./jobRouteSearch.ts";
 import { JobRunBrowser } from "./JobRunBrowser.tsx";
 import { ScheduleBrowser } from "./ScheduleBrowser.tsx";
@@ -14,19 +11,14 @@ import { useJobRealtimeInvalidation } from "./useJobRealtimeInvalidation.ts";
 function DashboardJobsContent() {
     useJobRealtimeInvalidation();
     const [focusRunId, setFocusRunId] = useState<string>();
-    const handleRunFocus = (id: string) => {
-        setFocusRunId((current) => (current === id ? undefined : current));
-    };
-
     return (
         <div className="space-y-12">
-            <OverviewServiceActionsSection showJobsLink={false} />
-            <JobRunBrowser
+            <JobRunBrowser onRequestRunFocus={setFocusRunId} />
+            <ScheduleBrowser
                 focusRunId={focusRunId}
                 onRequestRunFocus={setFocusRunId}
-                onRunFocusHandled={handleRunFocus}
+                onRunFocusHandled={() => setFocusRunId(undefined)}
             />
-            <ScheduleBrowser onRequestRunFocus={setFocusRunId} />
         </div>
     );
 }
@@ -43,45 +35,39 @@ export function JobsRoute() {
 
     return (
         <div>
-            <PageHeader
-                description="Run fixed Service Actions, view Dashboard background jobs, and manage OpenClaw's own scheduled jobs."
-                eyebrow="Operations"
-                title="Jobs"
+            <h1 className="sr-only">Jobs</h1>
+            <Tabs
+                ariaLabel="Job source"
+                onChange={selectSource}
+                tabs={[
+                    {
+                        label: "Dashboard jobs",
+                        panel: source === "dashboard" ? <DashboardJobsContent /> : null,
+                        value: "dashboard",
+                    },
+                    {
+                        label: "OpenClaw schedules",
+                        panel:
+                            source === "openclaw" ? (
+                                <OpenClawCronBrowser
+                                    onSelectedJobChange={(cronJobId) =>
+                                        void navigate({
+                                            replace: true,
+                                            search: {
+                                                ...search,
+                                                cronJobId,
+                                                source: "openclaw",
+                                            },
+                                        })
+                                    }
+                                    selectedJobId={search.cronJobId}
+                                />
+                            ) : null,
+                        value: "openclaw",
+                    },
+                ]}
+                value={source}
             />
-            <Fieldset
-                className="border-primary-700 mt-6 inline-flex rounded-lg border p-1"
-                legend={<span className="sr-only">Job source</span>}
-            >
-                <Button
-                    aria-pressed={source === "dashboard"}
-                    onClick={() => selectSource("dashboard")}
-                    variant={source === "dashboard" ? "primary" : "ghost"}
-                >
-                    Dashboard jobs
-                </Button>
-                <Button
-                    aria-pressed={source === "openclaw"}
-                    onClick={() => selectSource("openclaw")}
-                    variant={source === "openclaw" ? "primary" : "ghost"}
-                >
-                    OpenClaw schedules
-                </Button>
-            </Fieldset>
-            <div className="mt-8">
-                {source === "dashboard" ? (
-                    <DashboardJobsContent />
-                ) : (
-                    <OpenClawCronBrowser
-                        onSelectedJobChange={(cronJobId) =>
-                            void navigate({
-                                replace: true,
-                                search: { ...search, cronJobId, source: "openclaw" },
-                            })
-                        }
-                        selectedJobId={search.cronJobId}
-                    />
-                )}
-            </div>
         </div>
     );
 }

@@ -230,6 +230,7 @@ export interface JobRunDetailProps {
     readonly cancelBusy: boolean;
     readonly cancelDisabled?: boolean;
     readonly detail: JobRunDetailData;
+    readonly embedded?: boolean;
     readonly focusRequested?: boolean;
     readonly onCancel: (id: string) => void;
     readonly onFocusHandled?: (id: string) => void;
@@ -240,6 +241,7 @@ export function JobRunDetail({
     cancelBusy,
     cancelDisabled = false,
     detail,
+    embedded = false,
     focusRequested = false,
     onCancel,
     onFocusHandled,
@@ -283,7 +285,14 @@ export function JobRunDetail({
     }
 
     return (
-        <Card aria-labelledby={headingId}>
+        <Card
+            aria-labelledby={headingId}
+            className={
+                embedded
+                    ? "rounded-none border-0 bg-transparent p-0 shadow-none"
+                    : undefined
+            }
+        >
             <div className="flex flex-wrap items-start justify-between gap-4">
                 <div className="min-w-0" ref={restoreCancellationFocus}>
                     <div className="flex flex-wrap items-center gap-2">
