@@ -1,4 +1,4 @@
-import { createContext, useContext } from "react";
+import { createContext, use } from "react";
 
 import type { TerminalBrowserProps } from "./TerminalBrowser.tsx";
 
@@ -14,5 +14,5 @@ export const TerminalBrowserDependenciesContext =
 
 /** @returns Production defaults or explicitly injected terminal adapters. */
 export function useTerminalBrowserDependencies(): TerminalBrowserDependencies {
-    return useContext(TerminalBrowserDependenciesContext);
+    return use(TerminalBrowserDependenciesContext);
 }

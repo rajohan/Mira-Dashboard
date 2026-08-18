@@ -1,4 +1,4 @@
-import { createContext, useContext } from "react";
+import { createContext, use } from "react";
 
 export const FormFieldInvalidContext = createContext(false);
 
@@ -7,5 +7,5 @@ export const FormFieldInvalidContext = createContext(false);
  * @returns The inherited invalid state for a shared form control.
  */
 export function useFormFieldInvalid() {
-    return useContext(FormFieldInvalidContext);
+    return use(FormFieldInvalidContext);
 }
