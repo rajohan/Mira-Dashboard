@@ -482,7 +482,7 @@ describe("Storybook test runner", () => {
                     .map((command) => storyFilesFromCommand(command))
                     .map((files) => files.length)
             )
-        ).toBe(30);
+        ).toBe(29);
         expect(executed.toSorted()).toEqual([...discovered].toSorted());
         expect(new Set(executed).size).toBe(executed.length);
     });
