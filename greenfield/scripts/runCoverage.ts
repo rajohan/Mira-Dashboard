@@ -485,7 +485,25 @@ async function mergeCoverageReports(
     reportPaths: readonly string[],
     reportPattern: string
 ): Promise<string> {
-    return mergeCoverageReportFiles([...reportPaths], { pattern: reportPattern });
+    const merged = await mergeCoverageReportFiles([...reportPaths], {
+        pattern: reportPattern,
+    });
+    return normalizeMergedLineCoverage(merged);
+}
+
+/**
+ * Keeps the aggregate aligned with the line-coverage gate shared by every runtime.
+ * Bun emits line/function LCOV while Vitest also emits branch records. Retaining only
+ * Vitest's branch records makes Codecov downgrade otherwise-hit Bun lines to partial
+ * or missing coverage, so a mixed aggregate must not claim comparable branch data.
+ * @param coverage Merged LCOV containing reports from every runtime partition.
+ * @returns LCOV containing only the line and function metrics every runtime emits.
+ */
+export function normalizeMergedLineCoverage(coverage: string): string {
+    return coverage
+        .split("\n")
+        .filter((line) => !/^(?:BRDA|BRF|BRH):/u.test(line))
+        .join("\n");
 }
 
 async function writeCoverageReport(filePath: string, coverage: string): Promise<void> {

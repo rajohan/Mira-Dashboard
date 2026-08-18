@@ -1241,7 +1241,18 @@ export function createWorkspaceFilesService(
             const now = checkedNow();
             reserveCapacity(2, now);
             const resource = createResource(actorKey(actor), locator, "file", now);
-            return createContentTicket(actor, resource.id, "preview", "default", signal);
+            try {
+                return await createContentTicket(
+                    actor,
+                    resource.id,
+                    "preview",
+                    "default",
+                    signal
+                );
+            } catch (error) {
+                deleteResource(resource);
+                throw error;
+            }
         },
         async prepareReveal(actor, rawInput, signal) {
             const input = v.parse(prepareWorkspaceFileRevealInputSchema, rawInput);

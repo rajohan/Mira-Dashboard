@@ -1035,9 +1035,11 @@ describe("persistent OpenClaw cron provider", () => {
             await captureFailure(() => timeoutProvider.remove({ id: "cron-job-1" }))
         ).toEqual(new OpenClawCronProviderError("unavailable"));
 
-        for (const operation of ["remove", "run", "update"] as const) {
+        for (const operation of ["remove", "run", "set-scratch", "update"] as const) {
+            const method =
+                operation === "set-scratch" ? "cron.scratch.set" : `cron.${operation}`;
             const abortTransport = new TestPersistentOpenClawCronTransport();
-            queue(abortTransport, `cron.${operation}`, new PersistentGatewayAbortError());
+            queue(abortTransport, method, new PersistentGatewayAbortError());
             const abortProvider = createPersistentOpenClawCronProvider(abortTransport);
             let work: () => Promise<unknown>;
             if (operation === "remove") {
@@ -1048,6 +1050,13 @@ describe("persistent OpenClaw cron provider", () => {
                         expectedProcessInstanceId: "gateway-process-1",
                         id: "cron-job-1",
                         mode: "force",
+                    });
+            } else if (operation === "set-scratch") {
+                work = () =>
+                    abortProvider.setScratch({
+                        content: "updated scratch",
+                        expectedRevision: 7,
+                        id: "cron-job-1",
                     });
             } else {
                 work = () =>
@@ -1062,11 +1071,7 @@ describe("persistent OpenClaw cron provider", () => {
             );
 
             const unknownTransport = new TestPersistentOpenClawCronTransport();
-            queue(
-                unknownTransport,
-                `cron.${operation}`,
-                new PersistentGatewayUnknownOutcomeError()
-            );
+            queue(unknownTransport, method, new PersistentGatewayUnknownOutcomeError());
             const unknownProvider =
                 createPersistentOpenClawCronProvider(unknownTransport);
             let unknownWork: () => Promise<unknown>;
@@ -1078,6 +1083,13 @@ describe("persistent OpenClaw cron provider", () => {
                         expectedProcessInstanceId: "gateway-process-1",
                         id: "cron-job-1",
                         mode: "force",
+                    });
+            } else if (operation === "set-scratch") {
+                unknownWork = () =>
+                    unknownProvider.setScratch({
+                        content: "updated scratch",
+                        expectedRevision: 7,
+                        id: "cron-job-1",
                     });
             } else {
                 unknownWork = () =>

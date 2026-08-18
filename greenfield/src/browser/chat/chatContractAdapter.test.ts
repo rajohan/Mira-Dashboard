@@ -18,6 +18,39 @@ const runId = "019fe633-9133-7ba0-8b80-809dd80dfb39";
 const timestampMs = 1_800_000_000_000;
 
 describe("chat contract adapter", () => {
+    test("projects bounded hydration attachments with safe transfer defaults", () => {
+        const message: ChatMessage = {
+            content: {
+                attachments: [
+                    {
+                        fileName: "archive.bin",
+                        id: "attachment-1",
+                        kind: "attachment",
+                        mediaType: "application/octet-stream",
+                        renderPolicy: "download-only",
+                        url: "/api/chat/media/attachment-1",
+                    },
+                ],
+                kind: "hydration-required",
+                reason: "response-budget",
+            },
+            id: "hydrated-message",
+            role: "user",
+            source: "gateway-history",
+        };
+
+        expect(projectChatContractMessage(message, sessionKey, 0)).toMatchObject({
+            attachments: [
+                {
+                    downloadUrl: "/api/chat/media/attachment-1",
+                    name: "archive.bin",
+                    sizeBytes: 0,
+                },
+            ],
+            parts: [{ kind: "control", tone: "warning" }],
+        });
+    });
+
     test("keeps canonical user admission identity separate from provider run identity", () => {
         const message: ChatMessage = {
             content: {

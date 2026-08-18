@@ -515,7 +515,10 @@ function mappedProviderFailure(
 ): Error {
     if (error instanceof OpenClawCronProviderError) return error;
     if (error instanceof PersistentGatewayUnknownOutcomeError) {
-        return operation === "remove" || operation === "run" || operation === "update"
+        return operation === "remove" ||
+            operation === "run" ||
+            operation === "set-scratch" ||
+            operation === "update"
             ? new OpenClawCronProviderError("unknown-outcome")
             : new OpenClawCronProviderError("unavailable");
     }

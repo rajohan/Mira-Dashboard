@@ -66,6 +66,7 @@ function fixture(
         readonly getStatus?: WorkspaceFileWriteScheduler["getStatus"];
         readonly includeOpenClaw?: boolean;
         readonly listActiveSpoolIds?: WorkspaceFileWriteScheduler["listActiveSpoolIds"];
+        readonly maximumReferences?: number;
         readonly reader?: WorkspaceFileReader;
         readonly receive?: WorkspaceFileUploadSpool["receive"];
         readonly reconcileEnqueue?: WorkspaceFileWriteScheduler["reconcileEnqueue"];
@@ -198,6 +199,7 @@ function fixture(
     };
     const service = createWorkspaceFilesService({
         generateId: () => uuid(nextId++),
+        maximumReferences: options.maximumReferences,
         nowMs: () => now,
         reader,
         scheduler,
@@ -325,6 +327,21 @@ describe("workspace files service", () => {
         expect(
             service.readContent(otherActor, ticket.ticketId, undefined)
         ).rejects.toMatchObject({ reason: "not-found" });
+    });
+
+    test("releases an absolute-reference resource when ticket creation fails", async () => {
+        const { root, service } = fixture({ maximumReferences: 16 });
+        const file = Path.join(root, "oversized.txt");
+        Fs.writeFileSync(file, "");
+        Fs.truncateSync(file, workspaceFileLimits.maximumDownloadBytes + 1);
+
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+            expect(
+                await captureFailure(() =>
+                    service.prepareReference(actor, { reference: file })
+                )
+            ).toMatchObject({ reason: "too-large" });
+        }
     });
 
     test("issues actor-bound root and stable bounded page references", async () => {

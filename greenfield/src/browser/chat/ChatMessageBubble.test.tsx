@@ -1,6 +1,6 @@
 import { describe, expect, jest, test } from "bun:test";
 
-import { safeChatMarkdownLink } from "./chatMarkdownPolicy.ts";
+import { chatLocalFileReference, safeChatMarkdownLink } from "./chatMarkdownPolicy.ts";
 import { ChatMessageBubble } from "./ChatMessageBubble.tsx";
 import { toolDisplayName } from "./chatToolPresentation.ts";
 
@@ -175,6 +175,15 @@ describe("chat message bubble", () => {
         expect(safeChatMarkdownLink("mailto:mira@example.com")).toMatchObject({
             external: false,
         });
+        expect(
+            safeChatMarkdownLink("file:///home/ubuntu/My%20Project/report.md:7:2")
+        ).toEqual({
+            kind: "workspace-file",
+            reference: "/home/ubuntu/My Project/report.md",
+        });
+        expect(safeChatMarkdownLink("file://%zz")).toBeUndefined();
+        expect(chatLocalFileReference("/tmp/private.txt")).toBeUndefined();
+        expect(safeChatMarkdownLink(undefined)).toBeUndefined();
     });
 
     test("linkifies raw, code, and explicit reviewed-root file references", async () => {
