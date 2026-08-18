@@ -98,7 +98,6 @@ const meta = {
     component: DashboardPageStory,
     parameters: { layout: "fullscreen" },
     render: (args, context) => <DashboardPageStory {...args} key={context.id} />,
-    title: "Pages/Agents",
 } satisfies Meta<typeof DashboardPageStory>;
 
 export default meta;

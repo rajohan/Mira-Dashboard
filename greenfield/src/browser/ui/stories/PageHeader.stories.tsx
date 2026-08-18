@@ -17,7 +17,6 @@ const meta = {
     parameters: {
         layout: "padded",
     },
-    title: "UI/PageHeader",
 } satisfies Meta<typeof PageHeader>;
 
 export default meta;

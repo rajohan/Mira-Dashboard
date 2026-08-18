@@ -41,7 +41,6 @@ const meta = {
     args: { metrics: freshMetrics },
     component: SystemMetricsCards,
     parameters: { layout: "padded" },
-    title: "Overview/SystemMetricsCards",
 } satisfies Meta<typeof SystemMetricsCards>;
 
 export default meta;

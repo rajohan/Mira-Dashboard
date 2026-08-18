@@ -73,7 +73,6 @@ const meta = {
             },
         },
     },
-    title: "Overview/OverviewAgentsCard",
 } satisfies Meta<typeof OverviewAgentsCard>;
 
 export default meta;

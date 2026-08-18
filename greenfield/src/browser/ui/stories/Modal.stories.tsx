@@ -69,7 +69,6 @@ const meta = {
         layout: "fullscreen",
     },
     render: RenderControlledModal,
-    title: "UI/Modal",
 } satisfies Meta<typeof Modal>;
 
 export default meta;

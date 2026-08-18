@@ -26,7 +26,6 @@ const meta = {
         triggerLabel: "Open run actions",
     },
     component: DropdownMenu,
-    title: "UI/DropdownMenu",
 } satisfies Meta<typeof DropdownMenu>;
 
 export default meta;

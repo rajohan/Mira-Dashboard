@@ -53,7 +53,6 @@ const meta = {
     parameters: {
         layout: "padded",
     },
-    title: "Monitoring/MonitoringSelectionList",
 } satisfies Meta<typeof MonitoringSelectionListStory>;
 
 export default meta;

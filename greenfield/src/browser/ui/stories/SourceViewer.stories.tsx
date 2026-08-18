@@ -23,7 +23,6 @@ const meta = {
     },
     component: SourceViewer,
     parameters: { layout: "padded" },
-    title: "UI/SourceViewer",
 } satisfies Meta<typeof SourceViewer>;
 
 export default meta;

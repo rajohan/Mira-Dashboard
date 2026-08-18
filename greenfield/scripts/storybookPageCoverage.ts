@@ -4,7 +4,6 @@ export interface DashboardPageStoryRequirement {
     readonly exports: readonly string[];
     readonly file: string;
     readonly path: DashboardRouteDocumentation["path"];
-    readonly title: `Pages/${string}`;
 }
 
 /** Required material full-page states for every production browser route. */
@@ -19,7 +18,6 @@ export const dashboardPageStoryRequirements = Object.freeze([
         ],
         file: "src/browser/overview/stories/OverviewRoute.stories.tsx",
         path: "/",
-        title: "Pages/Dashboard",
     },
     {
         exports: [
@@ -31,7 +29,6 @@ export const dashboardPageStoryRequirements = Object.freeze([
         ],
         file: "src/browser/security/stories/AccountSecurityRoute.stories.tsx",
         path: "/account-security",
-        title: "Pages/Account security",
     },
     {
         exports: [
@@ -45,13 +42,11 @@ export const dashboardPageStoryRequirements = Object.freeze([
         ],
         file: "src/browser/settings/stories/SettingsRoute.stories.tsx",
         path: "/settings",
-        title: "Pages/Settings",
     },
     {
         exports: ["Loading", "Ready", "EmptyHistory", "InitialError", "BrowserRetained"],
         file: "src/browser/agents/stories/AgentsRoute.stories.tsx",
         path: "/agents",
-        title: "Pages/Agents",
     },
     {
         exports: [
@@ -66,7 +61,6 @@ export const dashboardPageStoryRequirements = Object.freeze([
         ],
         file: "src/browser/chat/stories/ChatRoute.stories.tsx",
         path: "/chat",
-        title: "Pages/Chat",
     },
     {
         exports: [
@@ -80,7 +74,6 @@ export const dashboardPageStoryRequirements = Object.freeze([
         ],
         file: "src/browser/database/stories/DatabaseRoute.stories.tsx",
         path: "/database",
-        title: "Pages/Database",
     },
     {
         exports: [
@@ -95,7 +88,6 @@ export const dashboardPageStoryRequirements = Object.freeze([
         ],
         file: "src/browser/files/stories/FilesRoute.stories.tsx",
         path: "/files",
-        title: "Pages/Files",
     },
     {
         exports: [
@@ -114,7 +106,6 @@ export const dashboardPageStoryRequirements = Object.freeze([
         ],
         file: "src/browser/docker/stories/DockerRoute.stories.tsx",
         path: "/docker",
-        title: "Pages/Docker",
     },
     {
         exports: [
@@ -135,7 +126,6 @@ export const dashboardPageStoryRequirements = Object.freeze([
         ],
         file: "src/browser/delivery/stories/DeliveryRoute.stories.tsx",
         path: "/delivery",
-        title: "Pages/Delivery",
     },
     {
         exports: [
@@ -149,7 +139,6 @@ export const dashboardPageStoryRequirements = Object.freeze([
         ],
         file: "src/browser/monitoring/stories/IncidentsRoute.stories.tsx",
         path: "/incidents",
-        title: "Pages/Incidents",
     },
     {
         exports: [
@@ -168,7 +157,6 @@ export const dashboardPageStoryRequirements = Object.freeze([
         ],
         file: "src/browser/jobs/stories/JobsRoute.stories.tsx",
         path: "/jobs",
-        title: "Pages/Jobs",
     },
     {
         exports: [
@@ -183,7 +171,6 @@ export const dashboardPageStoryRequirements = Object.freeze([
         ],
         file: "src/browser/auth/stories/LoginRoute.stories.tsx",
         path: "/login",
-        title: "Pages/Login",
     },
     {
         exports: [
@@ -201,7 +188,6 @@ export const dashboardPageStoryRequirements = Object.freeze([
         ],
         file: "src/browser/logs/stories/LogsRoute.stories.tsx",
         path: "/logs",
-        title: "Pages/Logs",
     },
     {
         exports: [
@@ -216,7 +202,6 @@ export const dashboardPageStoryRequirements = Object.freeze([
         ],
         file: "src/browser/moltbook/stories/MoltbookRoute.stories.tsx",
         path: "/moltbook",
-        title: "Pages/Moltbook",
     },
     {
         exports: [
@@ -233,7 +218,6 @@ export const dashboardPageStoryRequirements = Object.freeze([
         ],
         file: "src/browser/monitoring/stories/ReportsRoute.stories.tsx",
         path: "/reports",
-        title: "Pages/Reports",
     },
     {
         exports: [
@@ -249,7 +233,6 @@ export const dashboardPageStoryRequirements = Object.freeze([
         ],
         file: "src/browser/sessions/stories/GatewaySessionsRoute.stories.tsx",
         path: "/sessions",
-        title: "Pages/Sessions",
     },
     {
         exports: [
@@ -266,7 +249,6 @@ export const dashboardPageStoryRequirements = Object.freeze([
         ],
         file: "src/browser/tasks/stories/TasksRoute.stories.tsx",
         path: "/tasks",
-        title: "Pages/Tasks",
     },
     {
         exports: [
@@ -282,6 +264,5 @@ export const dashboardPageStoryRequirements = Object.freeze([
         ],
         file: "src/browser/terminal/stories/TerminalRoute.stories.tsx",
         path: "/terminal",
-        title: "Pages/Terminal",
     },
 ] as const satisfies readonly DashboardPageStoryRequirement[]);

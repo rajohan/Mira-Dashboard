@@ -66,7 +66,6 @@ const meta = {
     parameters: {
         layout: "padded",
     },
-    title: "Agents/AgentStatusGrid",
 } satisfies Meta<typeof AgentStatusGrid>;
 
 export default meta;

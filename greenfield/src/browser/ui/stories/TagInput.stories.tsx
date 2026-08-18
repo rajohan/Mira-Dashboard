@@ -65,7 +65,6 @@ const meta = {
     component: TagInput,
     parameters: { layout: "padded" },
     render: RenderControlledTagInput,
-    title: "UI/TagInput",
 } satisfies Meta<typeof TagInput>;
 
 export default meta;

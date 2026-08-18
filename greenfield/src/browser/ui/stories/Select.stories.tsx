@@ -77,7 +77,6 @@ const meta = {
         layout: "padded",
     },
     render: RenderControlledAssigneeSelect,
-    title: "UI/Select",
 } satisfies Meta<typeof Select<Assignee>>;
 
 export default meta;

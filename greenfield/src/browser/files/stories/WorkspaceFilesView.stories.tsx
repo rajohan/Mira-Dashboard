@@ -199,7 +199,6 @@ const meta = {
     },
     component: WorkspaceFilesView,
     parameters: { layout: "padded" },
-    title: "Files/WorkspaceFilesView",
 } satisfies Meta<typeof WorkspaceFilesView>;
 
 export default meta;

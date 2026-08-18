@@ -559,7 +559,6 @@ const meta = {
     ],
     parameters: { layout: "fullscreen" },
     render: InteractiveChatWorkspace,
-    title: "Chat/Workspace",
 } satisfies Meta<typeof ChatWorkspace>;
 
 export default meta;

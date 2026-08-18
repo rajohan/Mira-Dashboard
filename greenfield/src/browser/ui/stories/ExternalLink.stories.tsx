@@ -9,7 +9,6 @@ const meta = {
         href: "https://storybook.js.org/docs",
     },
     component: ExternalLink,
-    title: "UI/ExternalLink",
 } satisfies Meta<typeof ExternalLink>;
 
 export default meta;

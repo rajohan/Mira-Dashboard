@@ -60,7 +60,6 @@ const meta = {
     component: DateTimePicker,
     parameters: { layout: "padded" },
     render: RenderControlledDateTimePicker,
-    title: "UI/DateTimePicker",
 } satisfies Meta<typeof DateTimePicker>;
 
 export default meta;

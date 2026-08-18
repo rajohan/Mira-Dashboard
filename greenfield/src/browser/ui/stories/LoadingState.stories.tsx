@@ -12,7 +12,6 @@ const meta = {
     parameters: {
         layout: "padded",
     },
-    title: "UI/LoadingState",
 } satisfies Meta<typeof LoadingState>;
 
 export default meta;

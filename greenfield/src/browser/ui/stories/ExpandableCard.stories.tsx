@@ -21,7 +21,6 @@ const meta = {
     parameters: {
         layout: "padded",
     },
-    title: "UI/ExpandableCard",
 } satisfies Meta<typeof ExpandableCard>;
 
 export default meta;

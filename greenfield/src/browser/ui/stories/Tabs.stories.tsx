@@ -94,7 +94,6 @@ const meta = {
         layout: "padded",
     },
     render: RenderControlledWorkerTabs,
-    title: "UI/Tabs",
 } satisfies Meta<typeof Tabs<WorkerView>>;
 
 export default meta;

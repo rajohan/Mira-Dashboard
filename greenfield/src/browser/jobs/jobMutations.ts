@@ -383,7 +383,7 @@ export function removeJobRunFromCachedQueries(
     );
     queryClient.removeQueries({ exact: true, queryKey: jobRunDetailQueryKey(id) });
     queryClient.removeQueries({ queryKey: [...jobRunEventHistoryQueryRoot, id] });
-    queryClient.removeQueries({ exact: true, queryKey: jobRunEventGapQueryKey(id) });
+    queryClient.removeQueries({ queryKey: jobRunEventGapQueryKey(id) });
     const removeScheduleReference = (schedule: ScheduleSummary): ScheduleSummary => {
         const {
             activeRun: previousActiveRun,

@@ -289,7 +289,6 @@ const meta = {
     },
     component: OpenClawCronSectionView,
     parameters: { layout: "padded" },
-    title: "Jobs/OpenClawCronSection",
 } satisfies Meta<typeof OpenClawCronSectionView>;
 
 export default meta;

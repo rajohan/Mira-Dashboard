@@ -57,7 +57,6 @@ const meta = {
     },
     component: AutomationCapabilityPicker,
     render: RenderControlledAutomationCapabilityPicker,
-    title: "Security/AutomationCapabilityPicker",
 } satisfies Meta<typeof AutomationCapabilityPicker>;
 
 export default meta;

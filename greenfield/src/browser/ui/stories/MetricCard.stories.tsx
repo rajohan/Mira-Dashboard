@@ -14,7 +14,6 @@ const meta = {
     },
     component: MetricCard,
     parameters: { layout: "padded" },
-    title: "UI/MetricCard",
 } satisfies Meta<typeof MetricCard>;
 
 export default meta;

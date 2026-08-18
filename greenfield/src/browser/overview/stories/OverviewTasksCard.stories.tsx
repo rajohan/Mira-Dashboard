@@ -55,7 +55,6 @@ const meta = {
             },
         },
     },
-    title: "Overview/OverviewTasksCard",
 } satisfies Meta<typeof OverviewTasksCard>;
 
 export default meta;

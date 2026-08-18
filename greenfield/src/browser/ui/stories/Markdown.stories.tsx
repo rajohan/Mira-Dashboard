@@ -26,7 +26,6 @@ const meta = {
     parameters: {
         layout: "padded",
     },
-    title: "UI/Markdown",
 } satisfies Meta<typeof Markdown>;
 
 export default meta;

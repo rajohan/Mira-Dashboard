@@ -6,7 +6,7 @@ import { npmVersion as drizzleOrmVersion } from "drizzle-orm/version";
 import { automationCredentials } from "./automationCredentials.ts";
 import { automationPrincipals } from "./automationPrincipals.ts";
 
-const supportedDrizzleMetadataVersion = "1.0.0-rc.4";
+const supportedDrizzleMetadataVersion = "1.0.0-rc.5";
 
 function assertSupportedDrizzleMetadataVersion(): void {
     if (drizzleOrmVersion !== supportedDrizzleMetadataVersion) {

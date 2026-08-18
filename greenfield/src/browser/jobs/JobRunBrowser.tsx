@@ -1,12 +1,13 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { Filter, RotateCcw } from "lucide-react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import * as v from "valibot";
 
 import {
     jobResourceClasses,
     type JobResourceClass,
+    type JobRunEvent,
     type JobRunState,
     jobRunStates,
     type JobTriggerType,
@@ -14,7 +15,10 @@ import {
     scheduleIdMaximumLength,
     scheduleIdSchema,
 } from "../../contracts/jobModel.ts";
-import type { ListJobRunsInput } from "../../contracts/jobs.ts";
+import type {
+    JobRunDetail as JobRunDetailData,
+    ListJobRunsInput,
+} from "../../contracts/jobs.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -36,7 +40,6 @@ import {
     jobRunDetailQueryOptions,
     type JobRunEventGapRequest,
     type JobRunEventGapResult,
-    jobRunEventGapQueryKey,
     jobRunEventGapQueryOptions,
     jobRunEventHistoryQueryKey,
     jobRunEventHistoryQueryOptions,
@@ -84,6 +87,17 @@ function eventGapIdentity(request: JobRunEventGapRequest): string {
     return `${request.cursor.sequence}:${request.knownSequence}`;
 }
 
+interface JobRunEventProjection {
+    readonly completedGapCount: number;
+    readonly eventGapRequests: readonly JobRunEventGapRequest[];
+    readonly historyEnabled: boolean;
+    readonly observedDetailEvents: readonly JobRunEvent[] | undefined;
+    readonly observedGap: JobRunEventGapResult | undefined;
+    readonly observedHistoryPages: readonly JobRunDetailData[] | undefined;
+    readonly repairedEvents: readonly JobRunEvent[];
+    readonly retiredDetailEvents: readonly JobRunEvent[];
+}
+
 function SelectedJobRun({ focusRequested, id, onFocusHandled }: SelectedJobRunProps) {
     const client = useDashboardTrpcClient();
     const queryClient = useQueryClient();
@@ -95,71 +109,64 @@ function SelectedJobRun({ focusRequested, id, onFocusHandled }: SelectedJobRunPr
     const history = useInfiniteQuery(
         jobRunEventHistoryQueryOptions(client, id, firstEventCursor, historyEnabled)
     );
-    const [eventGapRequests, setEventGapRequests] = useState<
-        readonly JobRunEventGapRequest[]
-    >([]);
-    const cachedEventGap = queryClient.getQueryData<JobRunEventGapResult>(
-        jobRunEventGapQueryKey(id)
-    );
-    const completedEventGapIndex = eventGapRequests.findIndex(
-        (request) =>
-            cachedEventGap !== undefined &&
-            eventGapIdentity(request) === eventGapIdentity(cachedEventGap.request)
-    );
-    const eventGapRequest = eventGapRequests.at(
-        completedEventGapIndex === -1 ? 0 : completedEventGapIndex + 1
+    const [eventProjection, setEventProjection] = useState<JobRunEventProjection>(() => ({
+        completedGapCount: 0,
+        eventGapRequests: [],
+        historyEnabled,
+        observedDetailEvents: detail.data?.events,
+        observedGap: undefined,
+        observedHistoryPages: history.data?.pages,
+        repairedEvents: [],
+        retiredDetailEvents: [],
+    }));
+    const eventGapRequest = eventProjection.eventGapRequests.at(
+        eventProjection.completedGapCount
     );
     const eventGap = useQuery(jobRunEventGapQueryOptions(client, id, eventGapRequest));
-    const refetchEventGap = eventGap.refetch;
-    const previousDetailEvents = useRef(detail.data?.events ?? []);
-    const [retiredDetailEvents, setRetiredDetailEvents] = useState(
-        detail.data?.events.slice(0, 0) ?? []
-    );
     const cancellation = useCancelJobRunMutation();
     const [confirmingCancel, setConfirmingCancel] = useState(false);
-    const loadedEventGapRequest = eventGap.data?.request;
+    const currentEvents = detail.data?.events;
+    const observedHistoryPages = history.data?.pages;
+    if (
+        eventProjection.historyEnabled !== historyEnabled ||
+        eventProjection.observedDetailEvents !== currentEvents ||
+        eventProjection.observedGap !== eventGap.data ||
+        eventProjection.observedHistoryPages !== observedHistoryPages
+    ) {
+        let completedGapCount = eventProjection.completedGapCount;
+        let repairedEvents = eventProjection.repairedEvents;
+        if (
+            eventGapRequest !== undefined &&
+            eventGap.data !== undefined &&
+            eventGapIdentity(eventGap.data.request) === eventGapIdentity(eventGapRequest)
+        ) {
+            repairedEvents = uniqueJobRunEvents([
+                ...repairedEvents,
+                ...eventGap.data.events,
+            ]).toSorted((left, right) => right.sequence - left.sequence);
+            completedGapCount += 1;
+        }
 
-    useEffect(() => {
-        if (eventGapRequest === undefined || eventGap.isFetching) return;
-        const identity = eventGapIdentity(eventGapRequest);
-        const loadedRequest = loadedEventGapRequest;
-        const loadedIdentity =
-            loadedRequest === undefined ? undefined : eventGapIdentity(loadedRequest);
-        if (loadedIdentity === identity) return;
-        if (eventGap.error !== null) return;
-        void refetchEventGap();
-    }, [
-        eventGap.error,
-        eventGap.isFetching,
-        eventGapRequest,
-        loadedEventGapRequest,
-        refetchEventGap,
-    ]);
-
-    useEffect(() => {
-        const currentEvents = detail.data?.events;
-        if (currentEvents === undefined) return;
-        if (historyEnabled) {
+        let retiredDetailEvents = eventProjection.retiredDetailEvents;
+        let eventGapRequests = eventProjection.eventGapRequests;
+        if (historyEnabled && currentEvents !== undefined) {
             const currentSequences = new Set(
                 currentEvents.map(({ sequence }) => sequence)
             );
-            const newlyRetired = previousDetailEvents.current.filter(
-                ({ sequence }) => !currentSequences.has(sequence)
-            );
-            if (newlyRetired.length > 0) {
-                setRetiredDetailEvents((events) =>
-                    uniqueJobRunEvents([...events, ...newlyRetired]).toSorted(
-                        (left, right) => right.sequence - left.sequence
-                    )
-                );
-            }
+            retiredDetailEvents = uniqueJobRunEvents([
+                ...retiredDetailEvents,
+                ...(eventProjection.observedDetailEvents ?? []).filter(
+                    ({ sequence }) => !currentSequences.has(sequence)
+                ),
+            ]).toSorted((left, right) => right.sequence - left.sequence);
+
             const oldestCurrentSequence = currentEvents.at(-1)?.sequence;
             if (oldestCurrentSequence !== undefined) {
                 const knownEvents = [
-                    ...previousDetailEvents.current,
+                    ...(eventProjection.observedDetailEvents ?? []),
                     ...retiredDetailEvents,
-                    ...(eventGap.data?.events ?? []),
-                    ...(history.data?.pages.flatMap((page) => page.events) ?? []),
+                    ...repairedEvents,
+                    ...(observedHistoryPages?.flatMap((page) => page.events) ?? []),
                 ];
                 let knownSequence: number | undefined;
                 for (const event of knownEvents) {
@@ -176,36 +183,28 @@ function SelectedJobRun({ focusRequested, id, onFocusHandled }: SelectedJobRunPr
                         cursor: { sequence: oldestCurrentSequence },
                         knownSequence,
                     } satisfies JobRunEventGapRequest;
-                    setEventGapRequests((current) => {
-                        const identity = eventGapIdentity(request);
-                        if (
-                            current.some(
-                                (candidate) => eventGapIdentity(candidate) === identity
-                            )
-                        ) {
-                            return current;
-                        }
-                        return [...current, request];
-                    });
+                    const identity = eventGapIdentity(request);
+                    if (
+                        !eventGapRequests.some(
+                            (candidate) => eventGapIdentity(candidate) === identity
+                        )
+                    ) {
+                        eventGapRequests = [...eventGapRequests, request];
+                    }
                 }
             }
         }
-        previousDetailEvents.current = currentEvents;
-    }, [
-        detail.data?.events,
-        eventGap.data,
-        history.data?.pages,
-        historyEnabled,
-        retiredDetailEvents,
-    ]);
-
-    useEffect(() => {
-        if (!focusRequested || detail.data === undefined) return;
-        const heading = document.querySelector<HTMLElement>(`#job-run-${id}-heading`);
-        if (heading === null) return;
-        heading.focus();
-        onFocusHandled(id);
-    }, [detail.data, focusRequested, id, onFocusHandled]);
+        setEventProjection({
+            completedGapCount,
+            eventGapRequests,
+            historyEnabled,
+            observedDetailEvents: currentEvents,
+            observedGap: eventGap.data,
+            observedHistoryPages,
+            repairedEvents,
+            retiredDetailEvents,
+        });
+    }
 
     if (detail.isPending && detail.data === undefined) {
         return <PageState label="Loading job run…" status="loading" />;
@@ -227,8 +226,8 @@ function SelectedJobRun({ focusRequested, id, onFocusHandled }: SelectedJobRunPr
     const historyPages = history.data?.pages ?? [];
     const events = uniqueJobRunEvents([
         ...detail.data.events,
-        ...retiredDetailEvents,
-        ...(eventGap.data?.events ?? []),
+        ...eventProjection.retiredDetailEvents,
+        ...eventProjection.repairedEvents,
         ...historyPages.flatMap((page) => page.events),
     ]).toSorted((left, right) => right.sequence - left.sequence);
     const nextEventCursor = historyEnabled
@@ -245,7 +244,9 @@ function SelectedJobRun({ focusRequested, id, onFocusHandled }: SelectedJobRunPr
             <JobRunDetail
                 cancelBusy={cancellation.isPending}
                 detail={{ ...detail.data, events, nextEventCursor }}
+                focusRequested={focusRequested}
                 onCancel={() => setConfirmingCancel(true)}
+                onFocusHandled={onFocusHandled}
             />
             <Alert
                 className="mt-4"

@@ -13,7 +13,6 @@ const meta = {
     parameters: {
         layout: "padded",
     },
-    title: "UI/PageState",
 } satisfies Meta<typeof PageState>;
 
 export default meta;

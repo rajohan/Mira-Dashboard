@@ -49,7 +49,6 @@ const meta = {
     args: { kopia: kopiaFresh, walg: walgFresh },
     component: BackupOverviewSectionView,
     parameters: { layout: "padded" },
-    title: "Overview/BackupOverviewSection",
 } satisfies Meta<typeof BackupOverviewSectionView>;
 
 export default meta;

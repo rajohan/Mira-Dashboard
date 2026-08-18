@@ -10,7 +10,6 @@ const meta = {
         children: null,
     },
     component: Popover,
-    title: "UI/Popover",
 } satisfies Meta<typeof Popover>;
 
 export default meta;

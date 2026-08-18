@@ -266,7 +266,6 @@ async function expectTerminalLayoutGeometry(
 const meta = {
     component: DashboardScrollRestorationStory,
     parameters: { layout: "fullscreen" },
-    title: "Layout/DashboardShell",
 } satisfies Meta<typeof DashboardScrollRestorationStory>;
 
 export default meta;

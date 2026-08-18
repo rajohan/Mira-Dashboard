@@ -101,7 +101,6 @@ const meta = {
         },
         layout: "padded",
     },
-    title: "Tasks/TaskBoard",
 } satisfies Meta<typeof TaskBoard>;
 
 export default meta;

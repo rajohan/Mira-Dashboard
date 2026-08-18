@@ -10,7 +10,6 @@ const meta = {
         value: 40_000,
     },
     component: ProgressBar,
-    title: "UI/ProgressBar",
 } satisfies Meta<typeof ProgressBar>;
 
 export default meta;

@@ -36,7 +36,6 @@ const meta = {
     },
     component: NavigationLink,
     render: RenderNavigationLink,
-    title: "UI/NavigationLink",
 } satisfies Meta<typeof NavigationLink>;
 
 export default meta;

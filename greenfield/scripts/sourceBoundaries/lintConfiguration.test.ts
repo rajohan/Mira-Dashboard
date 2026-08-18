@@ -18,7 +18,7 @@ async function runOxlint(
         [
             executable,
             "--config",
-            ".oxlintrc.json",
+            "oxlint.config.ts",
             "--format",
             "unix",
             "--tsconfig",
@@ -46,8 +46,8 @@ describe("effective source-boundary lint configuration", () => {
         const fixtureRoot = await mkdtemp(path.join(tmpdir(), "mira-oxlint-boundary-"));
         try {
             await copyFile(
-                path.join(repositoryRoot, ".oxlintrc.json"),
-                path.join(fixtureRoot, ".oxlintrc.json")
+                path.join(repositoryRoot, "oxlint.config.ts"),
+                path.join(fixtureRoot, "oxlint.config.ts")
             );
             for (const configurationName of [
                 "tsconfig.json",

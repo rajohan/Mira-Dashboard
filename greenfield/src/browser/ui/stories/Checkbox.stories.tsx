@@ -53,7 +53,6 @@ const meta = {
     },
     component: Checkbox,
     render: RenderControlledCheckbox,
-    title: "UI/Checkbox",
 } satisfies Meta<typeof Checkbox>;
 
 export default meta;

@@ -1,7 +1,7 @@
 import { useInfiniteQuery, infiniteQueryOptions } from "@tanstack/react-query";
 import { createColumnHelper, tableFeatures, useTable } from "@tanstack/react-table";
 import { RefreshCw, ScrollText } from "lucide-react";
-import { useEffect, useRef, type ReactNode, type UIEvent } from "react";
+import { useRef, type ReactNode, type UIEvent } from "react";
 
 import type {
     ListSecurityAuditEventsInput,
@@ -162,11 +162,8 @@ function SecurityAuditTable({
     });
     const rows = table.getRowModel().rows;
 
-    useEffect(() => {
-        if (!loadingMore) loadRequestedRef.current = false;
-    }, [loadingMore]);
-
     function loadMoreNearBottom(event: UIEvent<HTMLElement>): void {
+        if (!loadingMore) loadRequestedRef.current = false;
         if (
             !hasMore ||
             loadMoreError !== undefined ||

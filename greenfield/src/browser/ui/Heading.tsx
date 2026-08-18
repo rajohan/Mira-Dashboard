@@ -1,4 +1,4 @@
-import type { HTMLAttributes, ReactNode } from "react";
+import type { HTMLAttributes, ReactNode, Ref } from "react";
 
 import { cn } from "../lib/classNames.ts";
 
@@ -18,6 +18,7 @@ const defaultHeadingSizes = Object.freeze({
 interface HeadingProps extends Omit<HTMLAttributes<HTMLHeadingElement>, "children"> {
     readonly children: ReactNode;
     readonly level: keyof typeof defaultHeadingSizes;
+    readonly ref?: Ref<HTMLHeadingElement>;
     readonly size?: keyof typeof headingSizes;
 }
 
@@ -29,6 +30,7 @@ export function Heading({
     children,
     className,
     level,
+    ref,
     size = defaultHeadingSizes[level],
     ...properties
 }: HeadingProps) {
@@ -40,21 +42,21 @@ export function Heading({
     switch (level) {
         case 1: {
             return (
-                <h1 {...properties} className={resolvedClassName}>
+                <h1 {...properties} className={resolvedClassName} ref={ref}>
                     {children}
                 </h1>
             );
         }
         case 2: {
             return (
-                <h2 {...properties} className={resolvedClassName}>
+                <h2 {...properties} className={resolvedClassName} ref={ref}>
                     {children}
                 </h2>
             );
         }
         case 3: {
             return (
-                <h3 {...properties} className={resolvedClassName}>
+                <h3 {...properties} className={resolvedClassName} ref={ref}>
                     {children}
                 </h3>
             );

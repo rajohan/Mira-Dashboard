@@ -55,7 +55,6 @@ const meta = {
     component: TimePicker,
     parameters: { layout: "padded" },
     render: RenderControlledTimePicker,
-    title: "UI/TimePicker",
 } satisfies Meta<typeof TimePicker>;
 
 export default meta;

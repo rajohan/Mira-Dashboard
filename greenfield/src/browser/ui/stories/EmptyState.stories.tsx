@@ -14,7 +14,6 @@ const meta = {
     parameters: {
         layout: "padded",
     },
-    title: "UI/EmptyState",
 } satisfies Meta<typeof EmptyState>;
 
 export default meta;

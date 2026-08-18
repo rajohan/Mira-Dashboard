@@ -83,7 +83,6 @@ const meta = {
     component: Combobox,
     parameters: { layout: "padded" },
     render: RenderControlledTimeZoneCombobox,
-    title: "UI/Combobox",
 } satisfies Meta<typeof Combobox<string>>;
 
 export default meta;

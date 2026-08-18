@@ -55,7 +55,6 @@ const meta = {
     parameters: {
         layout: "padded",
     },
-    title: "Jobs/JobQueuePanel",
 } satisfies Meta<typeof JobQueuePanel>;
 
 export default meta;

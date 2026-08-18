@@ -11,7 +11,6 @@ import {
 import {
     type KeyboardEvent,
     type Ref,
-    useEffect,
     useId,
     useLayoutEffect,
     useRef,
@@ -272,23 +271,35 @@ function VirtualizedTaskList({
     tasksLoadingMore,
 }: VirtualizedTaskListProps) {
     const taskDetailIdPrefix = useId();
-    const taskLoadRequest = useRef<number | undefined>(undefined);
-    useEffect(() => {
-        if (tasksLoadingMore || taskLoadRequest.current === undefined) return;
-        taskLoadRequest.current = undefined;
-    }, [tasks.length, tasksLoadingMore]);
-
+    const [taskLoadRequest, setTaskLoadRequest] = useState({
+        loading: tasksLoadingMore,
+        requestedCount: undefined as number | undefined,
+        taskCount: tasks.length,
+    });
+    if (
+        taskLoadRequest.loading !== tasksLoadingMore ||
+        taskLoadRequest.taskCount !== tasks.length
+    ) {
+        setTaskLoadRequest({
+            loading: tasksLoadingMore,
+            requestedCount: tasksLoadingMore ? taskLoadRequest.requestedCount : undefined,
+            taskCount: tasks.length,
+        });
+    }
     function loadMoreNearEnd(element: HTMLDivElement): void {
         if (
             !tasksHasNextPage ||
             tasksLoadingMore ||
-            taskLoadRequest.current !== undefined
+            taskLoadRequest.requestedCount !== undefined
         ) {
             return;
         }
         const remaining = element.scrollHeight - element.scrollTop - element.clientHeight;
         if (remaining > 160) return;
-        taskLoadRequest.current = tasks.length;
+        setTaskLoadRequest((current) => ({
+            ...current,
+            requestedCount: tasks.length,
+        }));
         onLoadMoreTasks();
     }
 

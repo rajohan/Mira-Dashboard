@@ -10,6 +10,5 @@ export default defineConfig({
     dialect: "sqlite",
     out: "./migrations",
     schema: "./src/server/database/schema/drizzleSchema.ts",
-    strict: true,
     verbose: true,
 });

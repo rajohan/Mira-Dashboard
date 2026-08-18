@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/tanstack-react";
 import type { ComponentProps } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 
 import { Alert } from "../Alert.tsx";
@@ -8,17 +8,20 @@ import { Button } from "../Button.tsx";
 
 type AlertProperties = ComponentProps<typeof Alert>;
 
+function focusElement(element: HTMLButtonElement | null): void {
+    element?.focus();
+}
+
 function DismissibleAlert(properties: AlertProperties) {
     const [visible, setVisible] = useState(true);
-    const showButton = useRef<HTMLButtonElement>(null);
-
-    useEffect(() => {
-        if (!visible) showButton.current?.focus();
-    }, [visible]);
 
     if (!visible) {
         return (
-            <Button onClick={() => setVisible(true)} ref={showButton} variant="secondary">
+            <Button
+                onClick={() => setVisible(true)}
+                ref={focusElement}
+                variant="secondary"
+            >
                 Show message
             </Button>
         );
@@ -40,7 +43,6 @@ const meta = {
         message: "The dashboard could not save the requested change.",
     },
     component: Alert,
-    title: "UI/Alert",
 } satisfies Meta<typeof Alert>;
 
 export default meta;

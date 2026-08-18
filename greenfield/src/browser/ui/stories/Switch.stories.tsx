@@ -55,7 +55,6 @@ const meta = {
         layout: "padded",
     },
     render: RenderControlledSwitch,
-    title: "UI/Switch",
 } satisfies Meta<typeof Switch>;
 
 export default meta;

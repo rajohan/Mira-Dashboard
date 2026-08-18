@@ -12,7 +12,11 @@ describe("full-page Storybook coverage", () => {
         );
         for (const requirement of dashboardPageStoryRequirements) {
             const source = await Bun.file(`${projectRoot}/${requirement.file}`).text();
-            expect(source).toContain(`title: "${requirement.title}"`);
+            const metaSource = /const meta = \{([\s\S]*?)\n\} satisfies Meta/u.exec(
+                source
+            )?.[1];
+            expect(metaSource).toBeDefined();
+            expect(metaSource).not.toMatch(/\btitle\s*:/u);
             expect(source).toMatch(/component:\s*DashboardPageStory\b/u);
             expect(source).toMatch(
                 new RegExp(`(?:route=|route:)\\s*["']${requirement.path}["']`, "u")

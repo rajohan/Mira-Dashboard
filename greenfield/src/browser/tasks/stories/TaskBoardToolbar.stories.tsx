@@ -74,7 +74,6 @@ const meta = {
         layout: "padded",
     },
     render: RenderControlledTaskBoardToolbar,
-    title: "Tasks/TaskBoardToolbar",
 } satisfies Meta<typeof TaskBoardToolbar>;
 
 export default meta;
