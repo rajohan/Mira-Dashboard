@@ -74,7 +74,7 @@ jobs:
             - name: Install Chromium
               if: ${{ matrix.partition == 'storybook' }}
               run: |
-                  bunx playwright install-deps chromium
+                  bun node_modules/playwright/cli.js install-deps chromium
                   bun run storybook:install-browser
 
             - name: Test ${{ matrix.partition }} coverage

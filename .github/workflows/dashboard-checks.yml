@@ -211,7 +211,7 @@ jobs:
               if: ${{ matrix.partition == 'storybook' }}
               working-directory: ${{ runner.temp }}/mira-dashboard-greenfield
               run: |
-                  bunx playwright install-deps chromium
+                  bun node_modules/playwright/cli.js install-deps chromium
                   bun run storybook:install-browser
 
             - name: Test ${{ matrix.partition }} coverage
