@@ -22,6 +22,7 @@ import { gatewaySessionQueryKey } from "../sessions/gatewaySessionQueries.ts";
 import { ChatBrowser } from "./ChatBrowser.tsx";
 import {
     chatCompanionQueryKey,
+    chatHistoryQueryKey,
     chatRuntimeQueryKey,
     openClawTaskDetailQueryKey,
     openClawTaskListSessionQueryKey,
@@ -219,6 +220,19 @@ function externalRuntimePage(
     };
 }
 
+function historyUserMessage(id: string, text: string, createdAtMs: number) {
+    return {
+        content: {
+            kind: "complete" as const,
+            parts: [{ id: `${id}:text`, kind: "text" as const, text }],
+        },
+        createdAtMs,
+        id,
+        role: "user" as const,
+        source: "gateway-history" as const,
+    };
+}
+
 function harness(
     options: Readonly<{
         mirrorSelection?: boolean;
@@ -337,6 +351,118 @@ async function revealCompanionControls(): Promise<void> {
 }
 
 describe("chat browser", () => {
+    test("keeps older history loading single-flight and allows the next top gesture", async () => {
+        const firstOlderPage = Promise.withResolvers<unknown>();
+        const secondOlderPage = Promise.withResolvers<unknown>();
+        const historyCursors: string[] = [];
+        const view = harness({
+            query: (name, input) => {
+                if (name !== "chat.history") return;
+                const cursor = String((input as { cursor?: unknown }).cursor);
+                historyCursors.push(cursor);
+                if (cursor === "0") {
+                    return Promise.resolve({
+                        messages: [
+                            historyUserMessage(
+                                "current-message",
+                                "Current message",
+                                observedAtMs
+                            ),
+                        ],
+                        nextCursor: "100",
+                        providerPagesRead: 1,
+                        sessionId: "provider-session-a",
+                        sessionKey: gatewayPrimarySessionKey,
+                        truncated: true,
+                    });
+                }
+                return cursor === "100"
+                    ? firstOlderPage.promise
+                    : secondOlderPage.promise;
+            },
+            requestedSessionKey: gatewayPrimarySessionKey,
+            sessionSnapshot: snapshot(),
+        });
+        try {
+            const log = await screen.findByRole("log", { name: "Messages" });
+            Object.defineProperties(log, {
+                clientHeight: { configurable: true, value: 200 },
+                scrollHeight: { configurable: true, value: 1000 },
+                scrollTop: { configurable: true, value: 100, writable: true },
+            });
+
+            fireEvent.scroll(log);
+            log.scrollTop = 0;
+            fireEvent.scroll(log);
+            fireEvent.scroll(log);
+            await waitFor(() => expect(historyCursors).toEqual(["0", "100"]));
+            expect(log).toHaveAttribute("aria-busy", "true");
+
+            await act(async () => {
+                firstOlderPage.resolve({
+                    messages: [
+                        historyUserMessage(
+                            "older-message",
+                            "Older message",
+                            observedAtMs - 1000
+                        ),
+                    ],
+                    nextCursor: "200",
+                    providerPagesRead: 1,
+                    sessionId: "provider-session-a",
+                    sessionKey: gatewayPrimarySessionKey,
+                    truncated: true,
+                });
+                await firstOlderPage.promise;
+            });
+            await waitFor(() =>
+                expect(
+                    view.queryClient.getQueryData<{
+                        pages: readonly unknown[];
+                    }>(chatHistoryQueryKey(gatewayPrimarySessionKey))?.pages
+                ).toHaveLength(2)
+            );
+            await waitFor(() => expect(log).toHaveAttribute("aria-busy", "false"));
+
+            log.scrollTop = 100;
+            fireEvent.scroll(log);
+            fireEvent.wheel(log, { deltaY: -100 });
+            log.scrollTop = 0;
+            fireEvent.scroll(log);
+            await waitFor(() => expect(historyCursors).toEqual(["0", "100", "200"]));
+            expect(log).toHaveAttribute("aria-busy", "true");
+            await act(async () => {
+                secondOlderPage.resolve({
+                    messages: [],
+                    providerPagesRead: 1,
+                    sessionId: "provider-session-a",
+                    sessionKey: gatewayPrimarySessionKey,
+                    truncated: false,
+                });
+                await secondOlderPage.promise;
+            });
+            await waitFor(() => expect(log).toHaveAttribute("aria-busy", "false"));
+        } finally {
+            firstOlderPage.resolve({
+                messages: [],
+                providerPagesRead: 1,
+                sessionId: "provider-session-a",
+                sessionKey: gatewayPrimarySessionKey,
+                truncated: false,
+            });
+            secondOlderPage.resolve({
+                messages: [],
+                providerPagesRead: 1,
+                sessionId: "provider-session-a",
+                sessionKey: gatewayPrimarySessionKey,
+                truncated: false,
+            });
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            view.rendered.unmount();
+            view.queryClient.clear();
+        }
+    });
+
     test("selects a stable valid default without claiming connected before runtime proof", async () => {
         let resolveRuntime: ((value: unknown) => void) | undefined;
         let runtimeReady = false;

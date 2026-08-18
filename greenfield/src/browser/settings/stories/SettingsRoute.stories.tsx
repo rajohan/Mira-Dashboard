@@ -166,7 +166,11 @@ async function openOpenClawSettings(canvasElement: HTMLElement) {
 
 async function openModelSettings(canvasElement: HTMLElement) {
     const canvas = await openOpenClawSettings(canvasElement);
-    const section = canvas.getByRole("button", { name: "Model Configuration" });
+    const section = await canvas.findByRole(
+        "button",
+        { name: "Model Configuration" },
+        { timeout: 5000 }
+    );
     await userEvent.click(section);
     await expect(section).toHaveAttribute("aria-expanded", "true");
     const primary = await canvas.findByRole("textbox", { name: "Default model" });
