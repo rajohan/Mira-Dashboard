@@ -607,7 +607,7 @@ function mediaResponseHeaders(
             "$1"
         ) ?? `attachment-${reference.attachmentId}`
     ).replaceAll('"', "_");
-    const asciiFileName = downloadFileName.replaceAll(/[^\x20-\x7e]/gu, "_");
+    const asciiFileName = downloadFileName.replaceAll(/[^\u0020-\u007E]/gu, "_");
     const encodedFileName = encodeURIComponent(downloadFileName).replaceAll("'", "%27");
     const contentDisposition = `${inline ? "inline" : "attachment"}; filename="${asciiFileName}"${
         asciiFileName === downloadFileName ? "" : `; filename*=UTF-8''${encodedFileName}`
