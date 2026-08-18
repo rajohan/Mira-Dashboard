@@ -148,7 +148,7 @@ describe("chat realtime invalidation", () => {
         }
     });
 
-    test("keeps runtime refresh independent while a safety history read is slow", async () => {
+    test("waits for safety history reconciliation before refreshing runtime", async () => {
         jest.useFakeTimers();
         const queryClient = createDashboardQueryClient();
         const realtimeClient = new ControlledDashboardRealtimeClient();
@@ -207,8 +207,8 @@ describe("chat realtime invalidation", () => {
                 jest.advanceTimersByTime(30_000);
                 await Promise.resolve();
             });
-            expect(runtimeRead).toBeTrue();
-            expect(chatRuntimeMessages(store.state, sessionKey)).toEqual([]);
+            expect(runtimeRead).toBeFalse();
+            expect(chatRuntimeMessages(store.state, sessionKey)).toHaveLength(1);
 
             await act(async () => {
                 historyGate.resolve();
@@ -216,6 +216,8 @@ describe("chat realtime invalidation", () => {
                 await Promise.resolve();
                 await Promise.resolve();
             });
+            expect(runtimeRead).toBeTrue();
+            expect(chatRuntimeMessages(store.state, sessionKey)).toEqual([]);
             expect(store.state.connection).toBe("reconnecting");
             expect(
                 invalidate.mock.calls.some(

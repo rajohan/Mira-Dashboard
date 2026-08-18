@@ -35,6 +35,7 @@ export function formatDockerContainerRuntime(
 ): string {
     if (container.startedAtMs === undefined) return "Runtime unavailable";
     const active = dockerContainerIsActive(container);
+    if (!active && container.finishedAtMs === undefined) return "Runtime unavailable";
     const endedAtMs = active ? observedAtMs : (container.finishedAtMs ?? observedAtMs);
     const duration = formatDistanceStrict(
         new Date(container.startedAtMs),

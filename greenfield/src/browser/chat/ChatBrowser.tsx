@@ -85,12 +85,10 @@ import {
     openClawTaskListQueryKey,
     openClawTaskListQueryOptions,
     openClawTaskListSessionQueryKey,
-    openClawTasksBrowserPageMaximum,
     projectChatCompanion,
     projectOpenClawTask,
     readChatRuntimeBatch,
     retainAuthoritativeHistoryWindow,
-    retainLatestPageWindow,
 } from "./chatQueries.ts";
 import { resolveChatSessionKey } from "./chatRouteSearch.ts";
 import { useChatRuntimeStore } from "./chatRuntimeContextValue.ts";
@@ -474,16 +472,6 @@ export function ChatBrowser({
             retainAuthoritativeHistoryWindow
         );
     }, [historyQuery.data, queryClient, selectedSessionKey]);
-
-    useEffect(() => {
-        for (const projection of ["active", "finished"] as const) {
-            queryClient.setQueryData<InfiniteData<OpenClawTaskListOutput>>(
-                openClawTaskListQueryKey(selectedSessionKey, projection),
-                (current) =>
-                    retainLatestPageWindow(current, openClawTasksBrowserPageMaximum)
-            );
-        }
-    }, [activeTasksQuery.data, finishedTasksQuery.data, queryClient, selectedSessionKey]);
 
     let hydrationStatus: "error" | "loading" | undefined;
     if (hydratedMessageQuery.isPending && hydrationTarget !== undefined) {
@@ -2213,8 +2201,6 @@ export function ChatBrowser({
         sessionsError: sessionsQuery.error,
         sessionsMissing: sessionsQuery.data === undefined,
     });
-    const activeTaskPageCount = activeTasksQuery.data?.pages.length ?? 0;
-    const finishedTaskPageCount = finishedTasksQuery.data?.pages.length ?? 0;
     const taskQueryFailed =
         activeTasksQuery.error !== null || finishedTasksQuery.error !== null;
     const taskQueryHasAnyData =
@@ -2223,12 +2209,8 @@ export function ChatBrowser({
         activeTasksQuery.data !== undefined && finishedTasksQuery.data !== undefined;
     const taskQueriesAreFetching =
         activeTasksQuery.isFetching || finishedTasksQuery.isFetching;
-    const activeTasksCanLoadMore =
-        activeTasksQuery.hasNextPage &&
-        activeTaskPageCount < openClawTasksBrowserPageMaximum;
-    const finishedTasksCanLoadMore =
-        finishedTasksQuery.hasNextPage &&
-        finishedTaskPageCount < openClawTasksBrowserPageMaximum;
+    const activeTasksCanLoadMore = activeTasksQuery.hasNextPage;
+    const finishedTasksCanLoadMore = finishedTasksQuery.hasNextPage;
     const view: ChatWorkspaceView = {
         activePlans: chatRuntimePlans(runtimeState, selectedSessionKey),
         backgroundTasks: tasks,

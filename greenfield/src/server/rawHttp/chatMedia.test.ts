@@ -725,6 +725,49 @@ describe("chat raw HTTP media boundary", () => {
         references.dispose();
     });
 
+    test("encodes Unicode local-history filenames in download headers", async () => {
+        const store = createInMemoryChatAttachmentStore();
+        const references = createInMemoryChatMediaReferences();
+        references.register({
+            attachmentId,
+            messageId: "message-unicode",
+            sessionKey: "agent:main:main",
+            source: {
+                kind: "openclaw-local-history",
+                segments: [
+                    "outbound",
+                    "rapport-📊---b013e0a9-d3c8-41c8-a6db-a54b9008e2d3.pdf",
+                ],
+            },
+        });
+        const handler = createChatRawHttpHandler({
+            attachmentStore: store,
+            authenticateCredential: authentication(principal()),
+            authorizeMedia: () => true,
+            browserOrigin: origin,
+            mediaFetcher: {
+                fetch: () =>
+                    Promise.resolve(
+                        new Response("report", {
+                            headers: { "content-type": "application/pdf" },
+                        })
+                    ),
+            },
+            mediaReferences: references,
+        });
+        const request = authenticatedRequest(
+            `/api/chat/media/${attachmentId}?disposition=download`
+        );
+
+        const response = await handler(request, new URL(request.url));
+
+        expect(response?.headers.get("content-disposition")).toBe(
+            "attachment; filename=\"rapport-_.pdf\"; filename*=UTF-8''rapport-%F0%9F%93%8A.pdf"
+        );
+        store.dispose();
+        references.dispose();
+    });
+
     test("refreshes an empty post-restart reference cache before returning 404", async () => {
         const store = createInMemoryChatAttachmentStore();
         const references = createInMemoryChatMediaReferences();

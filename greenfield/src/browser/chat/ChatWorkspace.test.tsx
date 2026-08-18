@@ -402,6 +402,55 @@ describe("chat workspace", () => {
         expect(screen.queryByRole("button", { name: "Load more tasks" })).toBeNull();
     });
 
+    test("retries background-task pagination after a failed page keeps the same rows", () => {
+        const props = properties();
+        const task = { id: "task-1", label: "First task", status: "running" as const };
+        const { rerender } = render(
+            <ChatWorkspace
+                {...props}
+                view={{
+                    ...props.view,
+                    backgroundTasks: [task],
+                    backgroundTasksHasNextPage: true,
+                }}
+            />
+        );
+        const taskScroller = screen.getByRole("list", {
+            name: "Background tasks",
+        }).parentElement!;
+        Object.defineProperties(taskScroller, {
+            clientHeight: { configurable: true, value: 400 },
+            scrollHeight: { configurable: true, value: 1000 },
+            scrollTop: { configurable: true, value: 441, writable: true },
+        });
+        fireEvent.scroll(taskScroller);
+        expect(props.onLoadMoreTasks).toHaveBeenCalledTimes(1);
+
+        rerender(
+            <ChatWorkspace
+                {...props}
+                view={{
+                    ...props.view,
+                    backgroundTasks: [task],
+                    backgroundTasksHasNextPage: true,
+                    backgroundTasksLoadingMore: true,
+                }}
+            />
+        );
+        rerender(
+            <ChatWorkspace
+                {...props}
+                view={{
+                    ...props.view,
+                    backgroundTasks: [task],
+                    backgroundTasksHasNextPage: true,
+                }}
+            />
+        );
+        fireEvent.scroll(taskScroller);
+        expect(props.onLoadMoreTasks).toHaveBeenCalledTimes(2);
+    });
+
     test("disables every provider write while the source is stale or disconnected", async () => {
         const user = userEvent.setup();
         const props = properties();

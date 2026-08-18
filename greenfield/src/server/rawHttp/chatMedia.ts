@@ -607,9 +607,14 @@ function mediaResponseHeaders(
             "$1"
         ) ?? `attachment-${reference.attachmentId}`
     ).replaceAll('"', "_");
+    const asciiFileName = downloadFileName.replaceAll(/[^\x20-\x7e]/gu, "_");
+    const encodedFileName = encodeURIComponent(downloadFileName).replaceAll("'", "%27");
+    const contentDisposition = `${inline ? "inline" : "attachment"}; filename="${asciiFileName}"${
+        asciiFileName === downloadFileName ? "" : `; filename*=UTF-8''${encodedFileName}`
+    }`;
     const headers = new Headers({
         "cache-control": "private, no-store",
-        "content-disposition": `${inline ? "inline" : "attachment"}; filename="${downloadFileName}"`,
+        "content-disposition": contentDisposition,
         "content-security-policy": "sandbox; default-src 'none'",
         "content-type": mimeType,
         "referrer-policy": "no-referrer",

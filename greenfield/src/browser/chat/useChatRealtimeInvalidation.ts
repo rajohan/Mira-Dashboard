@@ -40,6 +40,7 @@ export function useChatRealtimeInvalidation(
         let disposed = false;
         const active = new Set<ChatRefreshTarget>();
         const pending = new Set<ChatRefreshTarget>();
+        const drains = new Map<ChatRefreshTarget, Promise<void>>();
         const invalidate = async (targets: ReadonlySet<ChatRefreshTarget>) => {
             const selected = selectedSession.current;
             const invalidations: Promise<unknown>[] = [];
@@ -95,19 +96,28 @@ export function useChatRealtimeInvalidation(
             }
             await Promise.allSettled(invalidations);
         };
-        const drain = async (target: ChatRefreshTarget) => {
-            if (disposed || active.has(target) || !pending.delete(target)) return;
-            active.add(target);
-            try {
-                do {
-                    await invalidate(new Set([target]));
-                } while (!disposed && pending.delete(target));
-            } finally {
-                active.delete(target);
+        const drain = (target: ChatRefreshTarget): Promise<void> => {
+            const existing = drains.get(target);
+            if (existing !== undefined) return existing;
+            if (disposed || !pending.delete(target)) return Promise.resolve();
+            const operation = (async () => {
+                active.add(target);
+                try {
+                    do {
+                        await invalidate(new Set([target]));
+                    } while (!disposed && pending.delete(target));
+                } finally {
+                    active.delete(target);
+                }
+            })();
+            drains.set(target, operation);
+            void operation.finally(() => {
+                drains.delete(target);
                 if (!disposed && pending.has(target)) {
                     queueMicrotask(() => void drain(target));
                 }
-            }
+            });
+            return operation;
         };
         const refresh = (...targets: readonly ChatRefreshTarget[]) => {
             if (disposed) return;
@@ -116,8 +126,12 @@ export function useChatRealtimeInvalidation(
                 if (!active.has(target)) queueMicrotask(() => void drain(target));
             }
         };
-        const refreshAll = () =>
-            refresh("sessions", "runtime", "history", "tasks", "task-details");
+        const refreshAll = () => {
+            refresh("sessions", "history", "tasks", "task-details");
+            queueMicrotask(() => {
+                void drain("history").then(() => refresh("runtime"));
+            });
+        };
         const handleRealtimeFailure = () => {
             runtimeStore.setConnection("disconnected");
             refreshAll();

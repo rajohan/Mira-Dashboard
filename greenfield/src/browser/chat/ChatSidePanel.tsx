@@ -275,9 +275,7 @@ function VirtualizedTaskList({
     const taskLoadRequest = useRef<number | undefined>(undefined);
     useEffect(() => {
         if (tasksLoadingMore || taskLoadRequest.current === undefined) return;
-        if (taskLoadRequest.current !== tasks.length) {
-            taskLoadRequest.current = undefined;
-        }
+        taskLoadRequest.current = undefined;
     }, [tasks.length, tasksLoadingMore]);
 
     function loadMoreNearEnd(element: HTMLDivElement): void {
