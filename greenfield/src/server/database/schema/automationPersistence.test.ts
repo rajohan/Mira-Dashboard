@@ -6,6 +6,8 @@ import { npmVersion as drizzleOrmVersion } from "drizzle-orm/version";
 import { automationCredentials } from "./automationCredentials.ts";
 import { automationPrincipals } from "./automationPrincipals.ts";
 
+// The version module intentionally exposes the normalized RC API version; the
+// exact published build remains pinned by package.json and bun.lock.
 const supportedDrizzleMetadataVersion = "1.0.0-rc.5";
 
 function assertSupportedDrizzleMetadataVersion(): void {
