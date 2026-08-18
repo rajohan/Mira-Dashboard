@@ -63,6 +63,7 @@ import {
     chatExternalRuntimeSnapshotInsertSchema,
     chatExternalRuntimeSnapshotPayloadSchema,
     chatExternalRuntimeSnapshotSelectSchema,
+    parseChatExternalRuntimeSnapshotPayload,
     type ChatExternalRuntimeSnapshotPayload,
     type ChatExternalRuntimeSnapshotRow,
 } from "../../database/validation/chatExternalRuntimeSnapshots.ts";
@@ -1906,7 +1907,9 @@ export function createChatRepository(
                         continue;
                     }
                     const externalSnapshot = transaction
-                        .select({ sessionKey: chatExternalRuntimeSnapshots.sessionKey })
+                        .select({
+                            snapshotJson: chatExternalRuntimeSnapshots.snapshotJson,
+                        })
                         .from(chatExternalRuntimeSnapshots)
                         .where(
                             and(
@@ -1925,7 +1928,12 @@ export function createChatRepository(
                             )
                         )
                         .get();
-                    if (externalSnapshot !== undefined) {
+                    const externalSnapshotHasActiveRun =
+                        externalSnapshot !== undefined &&
+                        parseChatExternalRuntimeSnapshotPayload(
+                            externalSnapshot.snapshotJson
+                        ).entries.some(({ run }) => run.lifecycle === "active");
+                    if (externalSnapshotHasActiveRun) {
                         updateTranscriptGeneration(
                             transaction,
                             row,

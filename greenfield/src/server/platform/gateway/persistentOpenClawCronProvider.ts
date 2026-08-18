@@ -851,11 +851,13 @@ export function createPersistentOpenClawCronProvider(
                 parsed.offset,
                 responseBytes ?? Number.NaN
             );
+            const jobs: OpenClawCronProviderJob[] = [];
+            for (const job of page.jobs) {
+                jobs.push(await withScratch(job, signal));
+            }
             return Object.freeze({
                 ...page,
-                jobs: Object.freeze(
-                    await Promise.all(page.jobs.map((job) => withScratch(job, signal)))
-                ),
+                jobs: Object.freeze(jobs),
             });
         });
     }

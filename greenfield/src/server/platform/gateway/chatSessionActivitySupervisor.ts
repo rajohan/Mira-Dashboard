@@ -89,8 +89,8 @@ export function createChatSessionActivitySupervisor(
                     while (!stopped && pendingUserMessages.size > 0) {
                         const entry = pendingUserMessages.entries().next().value;
                         if (entry === undefined) return true;
-                        const [messageId, message] = entry;
-                        pendingUserMessages.delete(messageId);
+                        const [queueKey, message] = entry;
+                        pendingUserMessages.delete(queueKey);
                         try {
                             await options.chat.observeProviderUserMessage(message);
                         } catch (error) {
@@ -112,22 +112,27 @@ export function createChatSessionActivitySupervisor(
                 const userMessage = frame.sessionMessage?.userMessage;
                 if (
                     userMessage !== undefined &&
-                    (pendingUserMessages.has(userMessage.idempotencyKey) ||
+                    (pendingUserMessages.has(
+                        `${sessionKey}\u0000${userMessage.idempotencyKey}`
+                    ) ||
                         pendingUserMessages.size < pendingUserMessageMaximum)
                 ) {
-                    pendingUserMessages.set(userMessage.idempotencyKey, {
-                        attachments: projectPersistentGatewaySessionAttachments(
-                            userMessage.attachments,
+                    pendingUserMessages.set(
+                        `${sessionKey}\u0000${userMessage.idempotencyKey}`,
+                        {
+                            attachments: projectPersistentGatewaySessionAttachments(
+                                userMessage.attachments,
+                                sessionKey,
+                                userMessage.messageId,
+                                options.mediaReferences
+                            ),
+                            messageId: userMessage.idempotencyKey,
+                            providerRunIds: userMessage.providerRunIds,
+                            receivedAtMs,
                             sessionKey,
-                            userMessage.messageId,
-                            options.mediaReferences
-                        ),
-                        messageId: userMessage.idempotencyKey,
-                        providerRunIds: userMessage.providerRunIds,
-                        receivedAtMs,
-                        sessionKey,
-                        text: userMessage.text,
-                    });
+                            text: userMessage.text,
+                        }
+                    );
                     scheduleUserDrain();
                 }
                 pending.add(sessionKey);

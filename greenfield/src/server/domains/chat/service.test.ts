@@ -3763,7 +3763,7 @@ describe("ChatService", () => {
             const earlyRuntime = await service.runtime(runtimeInput("agent:main:early"));
             expect(earlyRuntime.externalRuns).toHaveLength(1);
             expect(earlyRuntime.externalRuns[0]).toMatchObject({
-                providerRunId: "newest-candidate",
+                providerRunId: "older-candidate",
                 parts: [
                     {
                         kind: "user",

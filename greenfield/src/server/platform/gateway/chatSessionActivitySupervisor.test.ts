@@ -47,11 +47,15 @@ function persistedMessage(sessionKey = "agent:main:main") {
     };
 }
 
-function persistedUserMessage(sessionKey = "agent:main:main") {
+function persistedUserMessage(
+    sessionKey = "agent:main:main",
+    overrideMessageId?: string
+) {
     const messageId =
-        sessionKey === "agent:main:main"
+        overrideMessageId ??
+        (sessionKey === "agent:main:main"
             ? "message-user-1"
-            : `message-user-${sessionKey}`;
+            : `message-user-${sessionKey}`);
     return {
         connectionGeneration: 1,
         frame: {
@@ -208,6 +212,36 @@ describe("chat session activity supervisor", () => {
         expect(reconciled).toEqual(["agent:main:main", "agent:ops:main"]);
         expect(observedUsers).toEqual(["message-user-1", "message-user-agent:ops:main"]);
         expect(failures).toHaveLength(2);
+        await supervisor.stop();
+    });
+
+    test("keeps equal provider message identities queued per session", async () => {
+        const observedUsers: string[] = [];
+        let listener: PersistentGatewayListener | undefined;
+        const supervisor = createChatSessionActivitySupervisor({
+            chat: {
+                observeProviderUserMessage: async (message) => {
+                    observedUsers.push(`${message.sessionKey}:${message.messageId}`);
+                },
+                reconcileProviderSessionActivity: async () => {},
+            },
+            mediaReferences,
+            transport: {
+                subscribe(next) {
+                    listener = next;
+                    return () => {};
+                },
+            },
+        });
+
+        listener!.onEvent?.(persistedUserMessage("agent:main:main", "shared-id"));
+        listener!.onEvent?.(persistedUserMessage("agent:ops:main", "shared-id"));
+        await flush();
+
+        expect(observedUsers).toEqual([
+            "agent:main:main:shared-id",
+            "agent:ops:main:shared-id",
+        ]);
         await supervisor.stop();
     });
 });

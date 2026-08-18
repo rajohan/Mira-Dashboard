@@ -1611,7 +1611,7 @@ export function chatRuntimeMessages(
                     );
                     if (matchingSend === undefined) {
                         messages.push({
-                            attachments: [],
+                            attachments: segment.message.attachments,
                             id: `external-user:${sessionKey}:${run.providerRunId}:${segment.segmentId}`,
                             ...(pendingUserMessageId === undefined
                                 ? {}

@@ -212,7 +212,7 @@ function asTestRecord(value: unknown): Readonly<Record<string, unknown>> {
 describe("source-development Gateway transport", () => {
     test("replaces an expired chat write capability", async () => {
         const stateRoot = await developmentStateRoot();
-        createSourceDevelopmentChatWriteCapability({
+        const expired = createSourceDevelopmentChatWriteCapability({
             expiresAtMs: 1_800_000_001_000,
             nowMs: 1_800_000_000_000,
             sessionKey: "agent:main:expired",
@@ -224,6 +224,15 @@ describe("source-development Gateway transport", () => {
             sessionKey: "agent:main:replacement",
             stateRoot,
         });
+        expired.revoke();
+        expect(() =>
+            createSourceDevelopmentChatWriteCapability({
+                expiresAtMs: 1_800_000_062_000,
+                nowMs: 1_800_000_002_000,
+                sessionKey: "agent:main:blocked-by-replacement",
+                stateRoot,
+            })
+        ).toThrow();
         replacement.revoke();
     });
 

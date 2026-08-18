@@ -2354,8 +2354,8 @@ export function ChatBrowser({
                 const operation = (async () => {
                     setOlderHistoryLoading(true);
                     try {
-                        await historyQuery.fetchNextPage();
-                        return true;
+                        const result = await historyQuery.fetchNextPage();
+                        return !result.isError;
                     } finally {
                         setOlderHistoryLoading(false);
                     }

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
     constants,
     closeSync,
@@ -52,6 +53,7 @@ const developmentStateMarkerSchema = v.strictObject({
 });
 
 const chatWriteCapabilitySchema = v.strictObject({
+    capabilityId: v.pipe(v.string(), v.uuid()),
     expiresAtMs: v.pipe(v.number(), v.safeInteger(), v.minValue(0)),
     formatVersion: v.literal(1),
     owner: v.literal(chatWriteCapabilityOwner),
@@ -198,6 +200,7 @@ export function createSourceDevelopmentChatWriteCapability(
 ): SourceDevelopmentChatWriteCapability {
     const now = input.nowMs ?? Date.now();
     const capability = v.parse(chatWriteCapabilitySchema, {
+        capabilityId: randomUUID(),
         expiresAtMs: input.expiresAtMs,
         formatVersion: 1,
         owner: chatWriteCapabilityOwner,
@@ -246,9 +249,28 @@ export function createSourceDevelopmentChatWriteCapability(
         revoke(): void {
             if (revoked) return;
             revoked = true;
-            unlinkSync(capabilityPath);
+            if (
+                readChatWriteCapability(capabilityPath)?.capabilityId ===
+                capability.capabilityId
+            ) {
+                unlinkSync(capabilityPath);
+            }
         },
     });
+}
+
+function readChatWriteCapability(
+    capabilityPath: string
+): v.InferOutput<typeof chatWriteCapabilitySchema> | undefined {
+    try {
+        const result = v.safeParse(
+            chatWriteCapabilitySchema,
+            JSON.parse(readFileSync(capabilityPath, "utf8"))
+        );
+        return result.success ? result.output : undefined;
+    } catch {
+        return undefined;
+    }
 }
 
 function existingChatWriteCapabilityIsExpired(

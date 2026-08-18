@@ -390,6 +390,28 @@ function messageMatchesRun(
     );
 }
 
+function messageCanBeCausalFinal(
+    message: ChatMessage,
+    localRunId: string,
+    providerRunId: string | undefined,
+    idempotencyKey: string
+): boolean {
+    const correlations = [
+        message.localRunId,
+        message.idempotencyKey,
+        message.runId,
+    ].filter((value): value is string => value !== undefined);
+    return (
+        correlations.length === 0 ||
+        correlations.some(
+            (value) =>
+                value === localRunId ||
+                value === idempotencyKey ||
+                value === providerRunId
+        )
+    );
+}
+
 function messageHasFinalContent(message: ChatMessage): boolean {
     return (
         message.role === "assistant" &&
@@ -428,7 +450,12 @@ function findFinalHistoryMessage(
     for (let index = admissionIndex + 1; index < messages.length; index += 1) {
         const message = messages[index]!;
         if (message.role === "user") break;
-        if (messageHasFinalContent(message)) causalFinal = message;
+        if (
+            messageHasFinalContent(message) &&
+            messageCanBeCausalFinal(message, localRunId, providerRunId, idempotencyKey)
+        ) {
+            causalFinal = message;
+        }
     }
     return causalFinal;
 }
@@ -3648,7 +3675,7 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
                             message.providerRunIds.includes(run.providerRunId)
                     )
                     .toSorted(compareExternalRuns)
-                    .at(-1)?.providerRunId ?? message.providerRunIds.at(-1);
+                    .at(-1)?.providerRunId ?? message.providerRunIds.at(0);
             if (providerRunId === undefined) return;
             await this.#handleProviderUserEvent(
                 {
