@@ -190,6 +190,29 @@ export const Ready: Story = {
         fixtures: accountSecurityFixtures(readySummary),
         route: "/account-security",
     },
+    play: async ({ canvasElement }) => {
+        const canvas = within(canvasElement);
+        await expect(
+            await canvas.findByRole(
+                "heading",
+                { level: 1, name: "Account security" },
+                asyncStoryTimeout
+            )
+        ).toBeInTheDocument();
+        await expect(
+            await canvas.findByText("Current Storybook browser", {}, asyncStoryTimeout)
+        ).toBeVisible();
+        await expect(
+            await canvas.findByText("No automation accounts", {}, asyncStoryTimeout)
+        ).toBeVisible();
+        await expect(
+            await canvas.findByRole(
+                "region",
+                { name: "Security audit events" },
+                asyncStoryTimeout
+            )
+        ).toBeVisible();
+    },
 };
 
 export const PaginatedAudit: Story = {
