@@ -17,6 +17,7 @@ import { authStatusQueryKey } from "../auth/authQueries.ts";
 import { ControlledDashboardRealtimeClient } from "../test/realtime.ts";
 import { OpenClawCronBrowser } from "./OpenClawCronBrowser.tsx";
 import { OpenClawCronDefinitionDialog } from "./OpenClawCronDefinitionDialog.tsx";
+import { OpenClawCronDetail } from "./OpenClawCronDetail.tsx";
 import {
     accumulateOpenClawCronInventoryPages,
     accumulateOpenClawCronRunPages,
@@ -570,6 +571,104 @@ describe("OpenClaw scheduled jobs browser", () => {
             expect(await screen.findByText("Older run")).toBeTruthy();
         } finally {
             globalThis.IntersectionObserver = OriginalIntersectionObserver;
+            rendered.view.unmount();
+            rendered.queryClient.clear();
+        }
+    });
+
+    test("does not observe more run pages while a run-history error is visible", () => {
+        const observe = jest.fn();
+        const OriginalIntersectionObserver = globalThis.IntersectionObserver;
+        globalThis.IntersectionObserver = class {
+            readonly root = null;
+            readonly rootMargin = "0px";
+            readonly scrollMargin = "0px";
+            readonly thresholds = [0];
+            disconnect(): void {}
+            observe = observe;
+            takeRecords(): IntersectionObserverEntry[] {
+                return [];
+            }
+            unobserve(): void {}
+        };
+
+        const view = render(
+            <OpenClawCronDetail
+                actionBusy={false}
+                definitionControlsAvailable
+                job={enabledBeta}
+                onDelete={() => {}}
+                onEdit={() => {}}
+                onLoadMoreRuns={() => {}}
+                onRetryRuns={() => {}}
+                onRun={() => {}}
+                onSetEnabled={() => {}}
+                runs={{
+                    freshness: inventory.freshness,
+                    hasMore: true,
+                    runs: runPage(0, "run-new", "Newest run").runs,
+                    total: 2,
+                }}
+                runsError="Run history is temporarily unavailable."
+            />
+        );
+
+        try {
+            expect(observe).not.toHaveBeenCalled();
+            expect(
+                screen.getByText("Run history is temporarily unavailable.")
+            ).toBeVisible();
+        } finally {
+            globalThis.IntersectionObserver = OriginalIntersectionObserver;
+            view.unmount();
+        }
+    });
+
+    test("merges heartbeat scratch without regressing fresh inventory fields", async () => {
+        const freshHeartbeat: OpenClawCronJob = {
+            ...enabledBeta,
+            configRevision: "fresh-revision",
+            payload: { kind: "heartbeat" },
+            scratch: undefined,
+        };
+        const staleDetail: OpenClawCronJob = {
+            ...freshHeartbeat,
+            configRevision: "stale-revision",
+            enabled: false,
+            scratch: { content: "Check services", revision: 4, truncated: false },
+        };
+        const client = {
+            query(name: string) {
+                if (name === "openClawCron.list") {
+                    return Promise.resolve({
+                        ...inventory,
+                        jobs: [freshHeartbeat],
+                        total: 1,
+                    });
+                }
+                if (name === "openClawCron.get") {
+                    return Promise.resolve({
+                        freshness: {
+                            kind: "last-known-good" as const,
+                            observedAtMs: timestampMs - 1000,
+                            staleSinceMs: timestampMs - 500,
+                        },
+                        job: staleDetail,
+                    });
+                }
+                if (name === "gatewaySessions.list") {
+                    return Promise.resolve({ sessions: [] });
+                }
+                return Promise.resolve(emptyRuns);
+            },
+        } as unknown as DashboardTrpcClient;
+        const rendered = renderBrowser(client);
+
+        try {
+            expect(await screen.findByText("Check services")).toBeVisible();
+            expect(screen.getAllByText("Enabled")).toHaveLength(2);
+            expect(screen.queryByText("Disabled")).not.toBeInTheDocument();
+        } finally {
             rendered.view.unmount();
             rendered.queryClient.clear();
         }

@@ -477,6 +477,17 @@ export function LogsView({
                         </FormField>
                         {searchQuery !== undefined && (
                             <Button
+                                aria-label="Refresh log search"
+                                disabled={refreshing}
+                                onClick={onRefresh}
+                                variant="ghost"
+                            >
+                                <Icon icon={RefreshCw} size="sm" tone="inherit" />
+                                Refresh
+                            </Button>
+                        )}
+                        {searchQuery !== undefined && (
+                            <Button
                                 aria-label="Clear log search"
                                 onClick={() => {
                                     setSearchDraft("");

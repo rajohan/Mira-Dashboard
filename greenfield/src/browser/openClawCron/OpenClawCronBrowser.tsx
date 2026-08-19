@@ -185,7 +185,9 @@ export function OpenClawCronBrowser({
                     : {
                           ...inventoryAccumulation.result,
                           jobs: inventoryAccumulation.result.jobs.map((job) =>
-                              job.id === detailedHeartbeat.id ? detailedHeartbeat : job
+                              job.id === detailedHeartbeat.id
+                                  ? { ...job, scratch: detailedHeartbeat.scratch }
+                                  : job
                           ),
                       },
             status: "ready" as const,

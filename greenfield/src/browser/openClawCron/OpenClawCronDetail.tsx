@@ -92,6 +92,7 @@ export function OpenClawCronDetail({
             !runs?.hasMore ||
             onLoadMoreRuns === undefined ||
             runsLoadingMore ||
+            runsError !== undefined ||
             globalThis.IntersectionObserver === undefined
         ) {
             return;
@@ -109,7 +110,7 @@ export function OpenClawCronDetail({
         );
         observer.observe(sentinel);
         return () => observer.disconnect();
-    }, [onLoadMoreRuns, runs?.hasMore, runsLoadingMore]);
+    }, [onLoadMoreRuns, runs?.hasMore, runsError, runsLoadingMore]);
     const payloadTruncated = "truncated" in job.payload && job.payload.truncated;
     const payloadRedacted =
         "contentRedacted" in job.payload && job.payload.contentRedacted;

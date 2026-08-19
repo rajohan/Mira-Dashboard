@@ -337,6 +337,16 @@ describe("LogsView", () => {
         }
     });
 
+    test("keeps an explicit refresh action while search polling is disabled", async () => {
+        const props = properties();
+        render(<LogsView {...props} searchQuery="request-42" />);
+
+        const user = userEvent.setup();
+        await user.click(screen.getByRole("button", { name: "Refresh log search" }));
+
+        expect(props.onRefresh).toHaveBeenCalledTimes(1);
+    });
+
     test("clears the bounded current buffer without hiding new rows or crossing scopes", async () => {
         const rendered = render(<LogsView {...properties()} />);
         const user = userEvent.setup();

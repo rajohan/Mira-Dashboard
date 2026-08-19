@@ -609,7 +609,7 @@ describe("persistent OpenClaw cron provider", () => {
         ]);
     });
 
-    test("does not invent an empty heartbeat scratch row when none is configured", async () => {
+    test("preserves the revision for an empty heartbeat scratch", async () => {
         const transport = new TestPersistentOpenClawCronTransport();
         queue(transport, "system.info", { processInstanceId: "gateway-process-1" });
         queue(
@@ -624,7 +624,9 @@ describe("persistent OpenClaw cron provider", () => {
         });
         const provider = createPersistentOpenClawCronProvider(transport);
 
-        expect(await provider.get({ id: "heartbeat-1" })).not.toHaveProperty("scratch");
+        expect(await provider.get({ id: "heartbeat-1" })).toMatchObject({
+            scratch: { content: "", revision: 0 },
+        });
     });
 
     test("returns undefined for the audited get rejection without leaking raw text", async () => {
