@@ -178,7 +178,15 @@ export function JobRunTable({
 
     const tableElement = (rowWindow?: VirtualizerRenderState<HTMLTableRowElement>) => (
         <DataTable
-            columnWidths={{ triggerType: "14rem" }}
+            columnWidths={{
+                attemptCount: "8%",
+                displayName: "24%",
+                queuedAtMs: "12%",
+                resourceClass: "10%",
+                state: "9%",
+                triggerType: "25%",
+                updatedAtMs: "12%",
+            }}
             footer={
                 loadingMore ? (
                     <LoadingState
@@ -195,7 +203,7 @@ export function JobRunTable({
             table={table}
             tableClassName={
                 compact
-                    ? "min-w-0 table-fixed [&_td:nth-child(n+4)]:hidden [&_th:nth-child(n+4)]:hidden @min-[66rem]:min-w-192 @min-[66rem]:[&_td:nth-child(n+4)]:table-cell @min-[66rem]:[&_th:nth-child(n+4)]:table-cell"
+                    ? "min-w-0 table-fixed [&_td:nth-child(n+4)]:hidden [&_th:nth-child(n+4)]:hidden @min-[66rem]:min-w-256 @min-[66rem]:[&_td:nth-child(n+4)]:table-cell @min-[66rem]:[&_th:nth-child(n+4)]:table-cell"
                     : "min-w-256 table-fixed"
             }
         />

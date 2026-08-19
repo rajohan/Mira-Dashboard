@@ -73,8 +73,12 @@ describe("job queue panel", () => {
 
         expect(screen.getByRole("table", { name: "Recent jobs" })).toHaveClass(
             "[&_td:nth-child(n+4)]:hidden",
+            "@min-[66rem]:min-w-256",
             "@min-[66rem]:[&_td:nth-child(n+4)]:table-cell"
         );
+        const recentTable = screen.getByRole("table", { name: "Recent jobs" });
+        expect(recentTable.querySelector('col[style="width: 24%;"]')).toBeTruthy();
+        expect(recentTable.querySelector('col[style="width: 25%;"]')).toBeTruthy();
         expect(screen.getByRole("table", { name: "Job workers" })).toHaveClass(
             "[&_td:nth-child(n+4)]:hidden",
             "@min-[66rem]:[&_td:nth-child(n+4)]:table-cell"
