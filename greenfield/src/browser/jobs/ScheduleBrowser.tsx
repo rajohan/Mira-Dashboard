@@ -113,6 +113,24 @@ function SelectedSchedule({
 
     const schedule = detail.data;
     const mutationError = update.error ?? run.error;
+    const selectedRunOutsideHistory = selectedRunId !== undefined &&
+        !runs.some(({ id: runId }) => runId === selectedRunId) && (
+            <div className="mt-2">
+                <ExpandableCard
+                    compact
+                    onOpenChange={(open) => onSelectRun(open ? selectedRunId : "")}
+                    open
+                    title="Run details"
+                >
+                    <SelectedJobRun
+                        embedded
+                        focusRequested={selectedRunId === runFocusRequested}
+                        id={selectedRunId}
+                        onFocusHandled={onRunFocusHandled}
+                    />
+                </ExpandableCard>
+            </div>
+        );
     let historyContent;
     if (history.isPending && history.data === undefined) {
         historyContent = <PageState label="Loading schedule runs…" status="loading" />;
@@ -125,6 +143,20 @@ function SelectedSchedule({
                 status="error"
                 title="Schedule history unavailable"
             />
+        );
+    } else if (runs.length === 0 && !hasNextHistoryPage && history.error === null) {
+        historyContent = (
+            <>
+                <div className="border-primary-700 bg-primary-900/40 rounded-lg border px-4 py-8 text-center">
+                    <Heading level={3} size="subsection">
+                        No job runs
+                    </Heading>
+                    <p className="text-primary-400 mt-1 text-sm">
+                        Runs will appear here after this schedule starts a job.
+                    </p>
+                </div>
+                {selectedRunOutsideHistory}
+            </>
         );
     } else {
         historyContent = (
@@ -249,26 +281,7 @@ function SelectedSchedule({
                         );
                     }}
                 </Virtualizer>
-                {selectedRunId !== undefined &&
-                    !runs.some(({ id: runId }) => runId === selectedRunId) && (
-                        <div className="mt-2">
-                            <ExpandableCard
-                                compact
-                                onOpenChange={(open) =>
-                                    onSelectRun(open ? selectedRunId : "")
-                                }
-                                open
-                                title="Run details"
-                            >
-                                <SelectedJobRun
-                                    embedded
-                                    focusRequested={selectedRunId === runFocusRequested}
-                                    id={selectedRunId}
-                                    onFocusHandled={onRunFocusHandled}
-                                />
-                            </ExpandableCard>
-                        </div>
-                    )}
+                {selectedRunOutsideHistory}
             </>
         );
     }

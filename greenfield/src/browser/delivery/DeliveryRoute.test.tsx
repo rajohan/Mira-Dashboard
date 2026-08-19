@@ -21,7 +21,10 @@ import { DashboardRealtimeProvider } from "../api/realtimeContext.tsx";
 import { parseJobsRouteSearch } from "../jobs/jobRouteSearch.ts";
 import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
 import type { DeliveryClient } from "./deliveryClient.ts";
-import { deliveryPullRequestsQueryKey } from "./deliveryQueries.ts";
+import {
+    deliveryCheckoutQueryKey,
+    deliveryPullRequestsQueryKey,
+} from "./deliveryQueries.ts";
 import { DeliveryRoute } from "./DeliveryRoute.tsx";
 
 const { render, screen, waitFor, within } = await import("@testing-library/react");
@@ -231,13 +234,17 @@ function createClient(overrides: DeliveryClientOverrides = {}) {
     return { client: { mutation, query } satisfies DeliveryClient, mutation, query };
 }
 
-function renderDelivery(client: DeliveryClient) {
+function renderDelivery(
+    client: DeliveryClient,
+    initializeQueryClient?: (queryClient: QueryClient) => void
+) {
     const queryClient = new QueryClient({
         defaultOptions: {
             mutations: { retry: false },
             queries: { refetchOnWindowFocus: false, retry: false },
         },
     });
+    initializeQueryClient?.(queryClient);
     const rootRoute = createRootRoute();
     const deliveryRoute = createRoute({
         component: () => <DeliveryRoute client={client} />,
@@ -449,6 +456,35 @@ describe("DeliveryRoute", () => {
                 within(region).getByRole("button", { name: "Merge only" })
             ).toBeDisabled();
             expect(region.textContent).not.toContain("/secret");
+        } finally {
+            view.unmount();
+        }
+    });
+
+    test("does not present a browser-retained checkout as current", async () => {
+        const query = jest.fn((name: string) => {
+            if (name === "delivery.getProductionCheckout") {
+                return Promise.reject(new Error("private checkout path"));
+            }
+            if (name === "delivery.listPullRequests") {
+                return Promise.resolve(pullRequestsResult);
+            }
+            if (name === "delivery.getPreview") return Promise.resolve(previewResult);
+            if (name === "delivery.getReleases") return Promise.resolve(releasesResult);
+            return Promise.resolve(deploymentsResult);
+        }) as unknown as DeliveryClient["query"];
+        const harness = createClient();
+        const view = renderDelivery({ ...harness.client, query }, (queryClient) => {
+            queryClient.setQueryData(deliveryCheckoutQueryKey, checkoutResult, {
+                updatedAt: 0,
+            });
+        });
+
+        try {
+            const mainCheckout = await screen.findByLabelText("Main checkout");
+            expect(within(mainCheckout).queryByText("Current")).toBeNull();
+            expect(within(mainCheckout).getByText("Checking")).toBeVisible();
+            expect(screen.queryByText("private checkout path")).toBeNull();
         } finally {
             view.unmount();
         }

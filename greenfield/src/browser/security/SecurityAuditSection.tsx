@@ -96,6 +96,7 @@ const auditColumns = auditColumnHelper.columns([
             </div>
         ),
         header: "Event",
+        enableSorting: false,
     }),
     auditColumnHelper.accessor((event) => actorLabel(event.actor), {
         cell: ({ getValue }) => (
@@ -103,6 +104,7 @@ const auditColumns = auditColumnHelper.columns([
         ),
         header: "Who",
         id: "actor",
+        enableSorting: false,
     }),
     auditColumnHelper.accessor((event) => targetLabel(event.target), {
         cell: ({ getValue }) => (
@@ -110,6 +112,7 @@ const auditColumns = auditColumnHelper.columns([
         ),
         header: "Affected item",
         id: "target",
+        enableSorting: false,
     }),
     auditColumnHelper.accessor("occurredAtMs", {
         cell: ({ getValue }) => {
@@ -129,6 +132,7 @@ const auditColumns = auditColumnHelper.columns([
             );
         },
         header: "Time",
+        enableSorting: false,
     }),
     auditColumnHelper.accessor((event) => metadataLabel(event.metadata), {
         cell: ({ getValue }) => (
@@ -136,6 +140,7 @@ const auditColumns = auditColumnHelper.columns([
         ),
         header: "Details",
         id: "metadata",
+        enableSorting: false,
     }),
 ]);
 

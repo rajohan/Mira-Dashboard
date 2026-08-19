@@ -489,6 +489,7 @@ describe("Dashboard account security route", () => {
         expect(await screen.findByText("auth.login")).toBeTruthy();
         expect(screen.getByText("succeeded")).toBeTruthy();
         expect(screen.getByText(/method=password/u)).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Time" })).toBeNull();
     });
 
     test("refreshes password and MFA proofs and changes the password ephemerally", async () => {

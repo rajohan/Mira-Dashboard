@@ -1257,6 +1257,16 @@ describe("Dashboard jobs route", () => {
         await waitFor(() => expect(heading).toHaveFocus());
     });
 
+    test("shows an empty state when a schedule has no run history", async () => {
+        const transport = new JobsRouteTransport();
+        const schedule = scheduleSummary();
+        transport.addScheduleDetail(schedule);
+        await renderJobsRoute(`/jobs?scheduleId=${scheduleId}`, transport);
+
+        expect(await screen.findByRole("heading", { name: "No job runs" })).toBeVisible();
+        expect(screen.queryByLabelText("Schedule run history")).toBeNull();
+    });
+
     test("focuses schedule detail selected from the directory", async () => {
         const transport = new JobsRouteTransport();
         const schedule = scheduleSummary();

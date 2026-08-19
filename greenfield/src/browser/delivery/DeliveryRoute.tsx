@@ -326,7 +326,9 @@ export function DeliveryRoute({ client }: DeliveryRouteProps) {
                     {availableReleases === undefined ? null : (
                         <ProductionReleasesPanel
                             busy={operations.busy}
-                            checkout={availableCheckout?.checkout}
+                            checkout={
+                                checkoutFresh ? availableCheckout?.checkout : undefined
+                            }
                             deployAvailable={deployAvailable}
                             deployReason={deployReason}
                             onDeploy={requestDeploy}
