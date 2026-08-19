@@ -116,6 +116,7 @@ class EventGapTransport implements DashboardTrpcTransport {
     #deferredGap = Promise.withResolvers<unknown>();
     #deferredGapEnabled = false;
     #deferredGapUsed = false;
+    exactFailuresRemaining = 0;
     gap33FailuresRemaining = 0;
     newestExactSequence = 22;
 
@@ -146,6 +147,10 @@ class EventGapTransport implements DashboardTrpcTransport {
             return Promise.resolve(detailPage(2, 1, 2, false, otherRunId));
         }
         if (eventCursor === undefined) {
+            if (this.exactFailuresRemaining > 0) {
+                this.exactFailuresRemaining -= 1;
+                return Promise.reject(new TypeError("Exact detail unavailable"));
+            }
             if (this.newestExactSequence === 22) {
                 return Promise.resolve(detailPage(22, 13, 22));
             }
@@ -523,6 +528,37 @@ describe("job run browser", () => {
                 eventCursors(transport).filter((cursor) => cursor === 33)
             ).toHaveLength(2);
             expect(eventCursors(transport)).toContain(53);
+        } finally {
+            view.unmount();
+            queryClient.clear();
+        }
+    });
+
+    test("keeps event-history retry when its safe message matches detail failure", async () => {
+        const transport = new EventGapTransport();
+        transport.gap33FailuresRemaining = 1;
+        const { queryClient, view } = createJobBrowserHarness(transport);
+
+        try {
+            await loadInitialEventHistory();
+            await refreshExactDetail(transport, queryClient, 42);
+            expect(
+                await screen.findByRole(
+                    "button",
+                    { name: "Retry missing events" },
+                    eventProjectionWait
+                )
+            ).toBeVisible();
+
+            transport.exactFailuresRemaining = 1;
+            await refreshExactDetail(transport, queryClient, 42);
+
+            expect(
+                screen.getByRole("button", { name: "Retry missing events" })
+            ).toBeVisible();
+            expect(
+                screen.getAllByText("The request could not be completed. Try again.")
+            ).toHaveLength(1);
         } finally {
             view.unmount();
             queryClient.clear();

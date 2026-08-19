@@ -5,7 +5,10 @@ import { type ReactNode, useState } from "react";
 
 import type { ReportDetail, ReportSummary } from "../../contracts/monitoring.ts";
 import type { ListReportsInput } from "../../contracts/reports.ts";
-import { mergeLiveHistoryRows } from "../api/liveHistory.ts";
+import {
+    liveHistoryRowIdentity,
+    useAccumulatedLiveHistoryRows,
+} from "../api/liveHistory.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import {
     classifyDashboardBrowserFailure,
@@ -227,10 +230,11 @@ export function ReportBrowser() {
               };
     const query = useInfiniteQuery(reportListQueryOptions(client, filters));
     const liveHead = useQuery(reportLiveHeadQueryOptions(client, filters));
-    const reports = mergeLiveHistoryRows(
+    const reports = useAccumulatedLiveHistoryRows(
         liveHead.data?.reports ?? [],
         uniqueMonitoringRows(query.data?.pages.flatMap((page) => page.reports) ?? []),
-        ({ id }) => id
+        liveHistoryRowIdentity,
+        JSON.stringify(filters ?? null)
     );
     const catalogError = liveHead.error ?? query.error;
     const catalogHasData = liveHead.data !== undefined || query.data !== undefined;

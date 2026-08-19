@@ -4,7 +4,10 @@ import { Filter, RotateCcw, ShieldAlert } from "lucide-react";
 import { type ReactNode, useState } from "react";
 
 import type { ListIncidentsInput } from "../../contracts/incidents.ts";
-import { mergeLiveHistoryRows } from "../api/liveHistory.ts";
+import {
+    liveHistoryRowIdentity,
+    useAccumulatedLiveHistoryRows,
+} from "../api/liveHistory.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { dashboardBrowserFailureMessage } from "../api/trpcError.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
@@ -145,10 +148,11 @@ export function IncidentBrowser() {
               };
     const query = useInfiniteQuery(incidentListQueryOptions(client, filters));
     const liveHead = useQuery(incidentLiveHeadQueryOptions(client, filters));
-    const incidents = mergeLiveHistoryRows(
+    const incidents = useAccumulatedLiveHistoryRows(
         liveHead.data?.incidents ?? [],
         uniqueMonitoringRows(query.data?.pages.flatMap((page) => page.incidents) ?? []),
-        ({ id }) => id
+        liveHistoryRowIdentity,
+        JSON.stringify(filters ?? null)
     );
     const catalogError = liveHead.error ?? query.error;
     const catalogHasData = liveHead.data !== undefined || query.data !== undefined;

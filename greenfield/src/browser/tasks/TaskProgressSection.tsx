@@ -3,7 +3,10 @@ import { Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import type { TaskProgressUpdate } from "../../contracts/taskModel.ts";
-import { mergeLiveHistoryRows } from "../api/liveHistory.ts";
+import {
+    liveHistoryRowIdentity,
+    useAccumulatedLiveHistoryRows,
+} from "../api/liveHistory.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { dashboardBrowserFailureMessage } from "../api/trpcError.ts";
 import { formatDashboardDateTimeToMinute } from "../lib/formatDateTime.ts";
@@ -116,10 +119,11 @@ export function TaskProgressSection({ taskId }: TaskProgressSectionProps) {
     const deleteProgress = useTaskMutation("tasks.deleteProgress");
     const [editingId, setEditingId] = useState<string>();
     const [pendingDelete, setPendingDelete] = useState<TaskProgressUpdate>();
-    const updates = mergeLiveHistoryRows(
+    const updates = useAccumulatedLiveHistoryRows(
         progressLiveHead.data?.updates ?? [],
         progress.data?.pages.flatMap((page) => page.updates) ?? [],
-        ({ id }) => id
+        liveHistoryRowIdentity,
+        taskId
     );
     const failure =
         progressLiveHead.error ??

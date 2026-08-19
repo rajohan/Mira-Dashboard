@@ -279,14 +279,11 @@ function renderDelivery(
 }
 
 describe("DeliveryRoute", () => {
-    test("uses exact preview actions and hides an already completed approval", async () => {
+    test("keeps rebuild for the current preview and hides a completed approval", async () => {
         const group = pullRequestsResult.groups[0];
         const pullRequest = group.members[0];
         const harness = createClient({
-            preview: {
-                ...previewResult,
-                preview: { ...previewResult.preview, headSha: previousSha },
-            },
+            preview: previewResult,
             pullRequests: {
                 ...pullRequestsResult,
                 groups: [
@@ -323,8 +320,8 @@ describe("DeliveryRoute", () => {
                 screen.getByRole("button", { name: "Deploy latest main" })
             ).toBeDisabled();
             expect(
-                screen.queryByRole("button", { name: /^(?:Run|Rebuild) preview$/u })
-            ).toBeNull();
+                screen.getByRole("button", { name: /^(?:Run|Rebuild) preview$/u })
+            ).toBeDisabled();
             expect(
                 screen.getAllByText("Another Delivery action is active.").length
             ).toBeGreaterThanOrEqual(1);

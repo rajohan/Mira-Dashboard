@@ -16,7 +16,8 @@ import type {
 import {
     liveHistoryArchiveQueryKey,
     liveHistoryHeadQueryKey,
-    mergeLiveHistoryRows,
+    liveHistoryRowIdentity,
+    useAccumulatedLiveHistoryRows,
 } from "../api/liveHistory.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { dashboardBrowserFailureMessage } from "../api/trpcError.ts";
@@ -293,10 +294,11 @@ export function SecurityAuditSection() {
             staleTime: 0,
         })
     );
-    const auditEvents = mergeLiveHistoryRows(
+    const auditEvents = useAccumulatedLiveHistoryRows(
         liveHead.data?.events ?? emptyAuditEvents,
         events.data?.pages.flatMap((page) => page.events) ?? emptyAuditEvents,
-        ({ id }) => id
+        liveHistoryRowIdentity,
+        "security-audit"
     );
     const initialError = liveHead.error ?? events.error;
 

@@ -4,7 +4,10 @@ import { CalendarClock } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import type { ScheduleConfiguration } from "../../contracts/jobModel.ts";
-import { mergeLiveHistoryRows } from "../api/liveHistory.ts";
+import {
+    liveHistoryRowIdentity,
+    useAccumulatedLiveHistoryRows,
+} from "../api/liveHistory.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Badge } from "../ui/Badge.tsx";
@@ -64,10 +67,11 @@ function SelectedSchedule({
     const historyPageFailed = history.error !== null;
     const historyError = liveHead.error ?? history.error;
     const historyHasData = liveHead.data !== undefined || history.data !== undefined;
-    const runs = mergeLiveHistoryRows(
+    const runs = useAccumulatedLiveHistoryRows(
         liveHead.data?.runs ?? [],
         uniqueJobRows(history.data?.pages.flatMap((page) => page.runs) ?? []),
-        ({ id: runId }) => runId
+        liveHistoryRowIdentity,
+        id
     );
 
     useEffect(() => {

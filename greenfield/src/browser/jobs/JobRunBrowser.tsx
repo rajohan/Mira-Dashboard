@@ -4,7 +4,10 @@ import { useEffect, useRef, useState } from "react";
 
 import type { JobRunEvent } from "../../contracts/jobModel.ts";
 import type { JobRunDetail as JobRunDetailData } from "../../contracts/jobs.ts";
-import { mergeLiveHistoryRows } from "../api/liveHistory.ts";
+import {
+    liveHistoryRowIdentity,
+    useAccumulatedLiveHistoryRows,
+} from "../api/liveHistory.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -191,6 +194,38 @@ export function SelectedJobRun({
         eventHistoryError === null
             ? undefined
             : jobBrowserFailureMessage(eventHistoryError);
+    const eventHistorySharesPrimaryMessage =
+        eventHistoryErrorMessage !== undefined &&
+        eventHistoryErrorMessage === primaryErrorMessage;
+    const eventHistoryRetry =
+        eventHistoryErrorMessage === undefined ? undefined : (
+            <Button
+                busy={eventGap.isFetching || history.isFetching}
+                busyLabel="Retrying missing events…"
+                onClick={() =>
+                    void Promise.allSettled([eventGap.refetch(), history.refetch()])
+                }
+                size="sm"
+                variant="secondary"
+            >
+                Retry missing events
+            </Button>
+        );
+    let primaryRetry;
+    if (eventHistorySharesPrimaryMessage) {
+        primaryRetry = eventHistoryRetry;
+    } else if (mutationError === null && detail.error !== null) {
+        primaryRetry = (
+            <Button
+                busy={detail.isFetching}
+                onClick={() => void detail.refetch()}
+                size="sm"
+                variant="secondary"
+            >
+                Try again
+            </Button>
+        );
+    }
     const historyPages = history.data?.pages ?? [];
     const events = uniqueJobRunEvents([
         ...detail.data.events,
@@ -205,18 +240,7 @@ export function SelectedJobRun({
     return (
         <div>
             <Alert
-                action={
-                    mutationError === null && detail.error !== null ? (
-                        <Button
-                            busy={detail.isFetching}
-                            onClick={() => void detail.refetch()}
-                            size="sm"
-                            variant="secondary"
-                        >
-                            Try again
-                        </Button>
-                    ) : undefined
-                }
+                action={primaryRetry}
                 className="mb-4"
                 focusOnError={mutationError !== null}
                 message={primaryErrorMessage}
@@ -230,29 +254,11 @@ export function SelectedJobRun({
                 onFocusHandled={onFocusHandled}
             />
             <Alert
-                action={
-                    eventHistoryErrorMessage === undefined ||
-                    eventHistoryErrorMessage === primaryErrorMessage ? undefined : (
-                        <Button
-                            busy={eventGap.isFetching || history.isFetching}
-                            busyLabel="Retrying missing events…"
-                            onClick={() =>
-                                void Promise.allSettled([
-                                    eventGap.refetch(),
-                                    history.refetch(),
-                                ])
-                            }
-                            size="sm"
-                            variant="secondary"
-                        >
-                            Retry missing events
-                        </Button>
-                    )
-                }
+                action={eventHistorySharesPrimaryMessage ? undefined : eventHistoryRetry}
                 className="mt-4"
                 focusOnError={false}
                 message={
-                    eventHistoryErrorMessage === primaryErrorMessage
+                    eventHistorySharesPrimaryMessage
                         ? undefined
                         : eventHistoryErrorMessage
                 }
@@ -316,10 +322,11 @@ export function JobRunBrowser({
     const liveHead = useQuery(jobRunLiveHeadQueryOptions(client, undefined));
     const historySentinelRef = useRef<HTMLDivElement>(null);
     const summaryQuery = useQuery(jobQueueSummaryQueryOptions(client));
-    const runs = mergeLiveHistoryRows(
+    const runs = useAccumulatedLiveHistoryRows(
         liveHead.data?.runs ?? [],
         uniqueJobRows(query.data?.pages.flatMap((page) => page.runs) ?? []),
-        ({ id }) => id
+        liveHistoryRowIdentity,
+        "jobs"
     );
     const summary =
         summaryQuery.data ?? liveHead.data?.summary ?? query.data?.pages[0]?.summary;

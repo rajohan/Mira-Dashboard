@@ -46,6 +46,14 @@ test("keeps synthesized run identities unique for maximum-length job IDs", () =>
     expect(first.runId).not.toBe(second.runId);
 });
 
+test("keeps indistinguishable legacy run identities unique within a source page", () => {
+    const entry = { jobId: "legacy-job", ts: 2000 } as const;
+    const first = projectOpenClawCronRun(entry, 10);
+    const second = projectOpenClawCronRun(entry, 11);
+
+    expect(first.runId).not.toBe(second.runId);
+});
+
 function providerJob(
     overrides: Partial<OpenClawCronProviderJob> = {}
 ): OpenClawCronProviderJob {

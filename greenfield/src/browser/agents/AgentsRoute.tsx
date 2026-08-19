@@ -6,7 +6,10 @@ import type {
     AgentStatusProjection,
     AgentTaskRun,
 } from "../../contracts/agentModel.ts";
-import { mergeLiveHistoryRows } from "../api/liveHistory.ts";
+import {
+    liveHistoryRowIdentity,
+    useAccumulatedLiveHistoryRows,
+} from "../api/liveHistory.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { dashboardBrowserFailureMessage } from "../api/trpcError.ts";
 import { useDashboardBrowserCollections } from "../data/dashboardCollectionsContextValue.ts";
@@ -39,10 +42,11 @@ export function AgentsRoute() {
     const historyLiveHead = useQuery(agentHistoryLiveHeadQueryOptions(client));
     const agents = configuration.data ?? emptyAgents;
     const agentStatuses = statuses.data ?? emptyStatuses;
-    const runs = mergeLiveHistoryRows(
+    const runs = useAccumulatedLiveHistoryRows(
         historyLiveHead.data?.runs ?? [],
         history.data?.pages.flatMap((page) => page.runs) ?? emptyRuns,
-        ({ id }) => id
+        liveHistoryRowIdentity,
+        "agents"
     );
     const error =
         collectionQueries.configuration?.error ??

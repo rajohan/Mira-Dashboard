@@ -102,8 +102,7 @@ function pullRequestOwnsActivePreview(
 function actionIsVisible(
     group: DeliveryPullRequestGroup,
     pullRequest: DeliveryPullRequest,
-    action: DeliveryPullRequestActionCapability,
-    preview: DeliveryPreview | undefined
+    action: DeliveryPullRequestActionCapability
 ): boolean {
     if (action.action === "approve-review") {
         return (
@@ -116,11 +115,7 @@ function actionIsVisible(
         (action.action === "update-branch" || action.action === "reject")
     )
         return false;
-    return !(
-        action.action === "preview-start" &&
-        pullRequestOwnsActivePreview(pullRequest, preview) &&
-        preview?.headSha === pullRequest.headSha
-    );
+    return true;
 }
 
 function actionLabel(
@@ -243,7 +238,7 @@ function PullRequestCard({
     readonly pullRequest: DeliveryPullRequest;
 }) {
     const actions = pullRequest.actions
-        .filter((action) => actionIsVisible(group, pullRequest, action, preview))
+        .filter((action) => actionIsVisible(group, pullRequest, action))
         .toSorted((left, right) => actionOrder[left.action] - actionOrder[right.action])
         .map((action) => {
             const state = actionState(pullRequest, action);

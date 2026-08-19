@@ -475,8 +475,8 @@ export const PullRequests: Story = {
             pullRequestRegion.getAllByRole("button", { name: "Run preview" })
         ).toHaveLength(2);
         await expect(
-            pullRequestRegion.queryByRole("button", { name: "Rebuild preview" })
-        ).toBeNull();
+            pullRequestRegion.getAllByRole("button", { name: "Rebuild preview" })
+        ).toHaveLength(1);
     },
 };
 

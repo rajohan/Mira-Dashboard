@@ -1,12 +1,27 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+    createLiveHistoryAccumulator,
     liveHistoryArchiveQueryKey,
     liveHistoryHeadQueryKey,
     mergeLiveHistoryRows,
 } from "./liveHistory.ts";
 
 describe("live history", () => {
+    test("retains rows displaced from successive live heads", () => {
+        const accumulate = createLiveHistoryAccumulator<{ id: string }>(({ id }) => id);
+
+        expect(accumulate([{ id: "new-1" }, { id: "old" }], [{ id: "old" }])).toEqual([
+            { id: "new-1" },
+            { id: "old" },
+        ]);
+        expect(accumulate([{ id: "new-2" }, { id: "new-1" }], [{ id: "old" }])).toEqual([
+            { id: "new-2" },
+            { id: "new-1" },
+            { id: "old" },
+        ]);
+    });
+
     test("isolates archives while keeping live heads under their feature root", () => {
         const featureKey = ["reports", "list"] as const;
 

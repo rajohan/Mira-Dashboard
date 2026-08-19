@@ -579,7 +579,8 @@ function projectedUsage(entry: OpenClawCronProviderRunEntry) {
 }
 
 export function projectOpenClawCronRun(
-    entry: OpenClawCronProviderRunEntry
+    entry: OpenClawCronProviderRunEntry,
+    legacySourcePosition = 0
 ): OpenClawCronRun {
     const errorReason =
         entry.errorReason !== undefined &&
@@ -599,7 +600,7 @@ export function projectOpenClawCronRun(
             : safeLabelProjection(entry.provider, "unknown", 128);
     const runId =
         entry.runId ??
-        `synthetic:${sha256Hex(`${entry.jobId}\0${entry.runAtMs ?? entry.ts}\0${entry.ts}`)}`;
+        `synthetic:${sha256Hex(`${entry.jobId}\0${entry.runAtMs ?? entry.ts}\0${entry.ts}\0${legacySourcePosition}`)}`;
     return parseProviderProjection(openClawCronRunSchema, {
         completedAtMs: entry.ts,
         deliveryStatus: entry.deliveryStatus ?? "not-requested",
@@ -629,7 +630,9 @@ export function projectOpenClawCronRunsResult(
         limit: page.limit,
         ...(page.nextOffset === null ? {} : { nextOffset: page.nextOffset }),
         offset: page.offset,
-        runs: page.entries.map(projectOpenClawCronRun),
+        runs: page.entries.map((entry, index) =>
+            projectOpenClawCronRun(entry, page.offset + index)
+        ),
         total: page.total,
     });
 }

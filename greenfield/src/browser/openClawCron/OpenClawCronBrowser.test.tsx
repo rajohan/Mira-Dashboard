@@ -542,6 +542,7 @@ describe("OpenClaw scheduled jobs browser", () => {
             jobs: [disabledAlpha],
             offset: 1,
         };
+        const runOffsets: number[] = [];
         const client = {
             query(name: string, input: unknown) {
                 const offset = (input as { offset: number }).offset;
@@ -550,6 +551,7 @@ describe("OpenClaw scheduled jobs browser", () => {
                         offset === 0 ? firstInventory : secondInventory
                     );
                 }
+                runOffsets.push(offset);
                 return Promise.resolve(
                     offset === 0
                         ? runPage(0, "run-new", "Newest run")
@@ -578,6 +580,7 @@ describe("OpenClaw scheduled jobs browser", () => {
                 );
             });
             expect(await screen.findByText("Older run")).toBeTruthy();
+            expect(runOffsets.slice(-2)).toEqual([0, 1]);
         } finally {
             globalThis.IntersectionObserver = OriginalIntersectionObserver;
             rendered.view.unmount();

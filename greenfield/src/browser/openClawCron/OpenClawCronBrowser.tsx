@@ -5,7 +5,10 @@ import type {
     OpenClawCronJob,
     UpdateOpenClawCronPatch,
 } from "../../contracts/openClawCron.ts";
-import { mergeLiveHistoryRows } from "../api/liveHistory.ts";
+import {
+    liveHistoryRunIdentity,
+    useAccumulatedLiveHistoryRows,
+} from "../api/liveHistory.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { dashboardBrowserFailureMessage } from "../api/trpcError.ts";
 import { useAuthenticatedMutationBoundary } from "../auth/useAuthenticatedMutationBoundary.ts";
@@ -101,20 +104,27 @@ export function OpenClawCronBrowser({
     const archiveRunsAccumulation = accumulateOpenClawCronRunPages(
         runs.data?.pages ?? []
     );
+    const accumulatedRuns = useAccumulatedLiveHistoryRows(
+        runsLiveHead.data?.runs ?? [],
+        archiveRunsAccumulation?.result.runs ?? [],
+        liveHistoryRunIdentity,
+        effectiveSelectedId ?? ""
+    );
     const runsAccumulation = (() => {
         const live = runsLiveHead.data;
         const archive = archiveRunsAccumulation?.result;
         if (live === undefined) return archiveRunsAccumulation;
-        if (archive === undefined) return { result: live, stable: true as const };
+        if (archive === undefined) {
+            return {
+                result: { ...live, runs: accumulatedRuns },
+                stable: true as const,
+            };
+        }
         return {
             result: {
                 ...archive,
                 freshness: live.freshness,
-                runs: mergeLiveHistoryRows(
-                    live.runs,
-                    archive.runs,
-                    (run) => run.runId ?? String(run.completedAtMs)
-                ),
+                runs: accumulatedRuns,
             },
             stable: archiveRunsAccumulation?.stable ?? true,
         };
@@ -245,6 +255,11 @@ export function OpenClawCronBrowser({
     if (heartbeatSessions.data !== undefined) heartbeatSessionStatus = "ready";
     else if (heartbeatSessions.isPending) heartbeatSessionStatus = "loading";
     else heartbeatSessionStatus = "unavailable";
+    const loadMoreRuns = async () => {
+        const rebased = await runs.refetch();
+        if (rebased.isError) return;
+        await runs.fetchNextPage();
+    };
 
     return (
         <OpenClawCronSection
@@ -259,8 +274,8 @@ export function OpenClawCronBrowser({
                     : undefined
             }
             onLoadMoreRuns={
-                runs.hasNextPage && runsAccumulation?.stable !== false
-                    ? () => void runs.fetchNextPage()
+                runs.hasNextPage && !runs.isFetching && runsAccumulation?.stable !== false
+                    ? () => void loadMoreRuns()
                     : undefined
             }
             onReconcile={async () => {
@@ -292,7 +307,7 @@ export function OpenClawCronBrowser({
             runsLoading={
                 (runsLiveHead.isFetching || runs.isFetching) && !runs.isFetchingNextPage
             }
-            runsLoadingMore={runs.isFetchingNextPage}
+            runsLoadingMore={runs.isFetching && runs.data !== undefined}
             selectedJobId={effectiveSelectedId}
             state={state}
         />
