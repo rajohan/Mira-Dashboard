@@ -34,7 +34,7 @@ export const openClawSettingsUnknownOutcomeMessage =
     "Dashboard could not confirm whether OpenClaw applied the change. Refresh current status before submitting another change.";
 
 export const openClawGatewayRestartUnknownOutcomeMessage =
-    "Dashboard could not confirm whether the Gateway restart completed. Retrying this restart request will reuse its recovery key. Review Dashboard jobs before discarding the key; refreshing configuration does not prove restart status.";
+    "Dashboard could not confirm whether the Gateway restart completed. Retrying this restart request will reuse its recovery key. Review Dashboard jobs before discarding the key. Refreshing configuration does not prove restart status.";
 
 function configurationSuccessMessage(
     result: DashboardProcedureOutput<"openClawSettings.updateConfiguration">
@@ -292,7 +292,7 @@ export function useOpenClawSettingsMutations() {
         setRestartRecovery({ identity, pending: false });
         setError(undefined);
         setNotice(
-            "Previous Gateway restart recovery key discarded. No new restart was submitted; the next restart action creates a new intent."
+            "Previous Gateway restart recovery key discarded. No new restart was submitted. The next restart action creates a new intent."
         );
     }
 

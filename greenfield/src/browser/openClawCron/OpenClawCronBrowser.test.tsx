@@ -417,9 +417,18 @@ describe("OpenClaw scheduled jobs browser", () => {
             expect(
                 await screen.findByRole("heading", { level: 3, name: "Beta" })
             ).toBeTruthy();
-            await waitFor(() => expect(calls).toHaveLength(2));
+            await waitFor(() => expect(calls).toHaveLength(3));
             expect(calls.map(({ input, name }) => ({ input, name }))).toEqual([
                 { input: openClawCronInventoryInput, name: "openClawCron.list" },
+                {
+                    input: {
+                        id: enabledBeta.id,
+                        limit: 25,
+                        offset: 0,
+                        sortDir: "desc",
+                    },
+                    name: "openClawCron.listRuns",
+                },
                 {
                     input: {
                         id: enabledBeta.id,

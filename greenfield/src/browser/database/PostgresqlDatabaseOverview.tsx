@@ -1,7 +1,6 @@
 import { Activity, Database, Gauge, Magnet, Network, Orbit } from "lucide-react";
 
 import type { DatabaseOverview } from "../../contracts/database.ts";
-import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { formatByteCount, formatPercent } from "../lib/formatMeasurements.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Badge } from "../ui/Badge.tsx";
@@ -42,14 +41,6 @@ function torrentCountValue(
     return value.state === "available" ? formatCount(value.count) : "Unavailable";
 }
 
-function PostgresqlObservationTime({ timestampMs }: { readonly timestampMs: number }) {
-    return (
-        <time dateTime={new Date(timestampMs).toISOString()}>
-            {formatDashboardDateTime(timestampMs)}
-        </time>
-    );
-}
-
 function maintenanceStatusLabel(
     status: AvailablePostgresqlObservation["summary"]["maintenance"]["status"]
 ): string {
@@ -82,13 +73,13 @@ function postgresqlMaintenanceAttention(
     const messages: Array<{ readonly message: string; readonly warning: boolean }> = [];
     if (maintenance.requiresBloatReview) {
         messages.push({
-            message: `PostgreSQL has an estimated ${formatByteCount(maintenance.estimatedReclaimableBytes)} (${formatPercent(maintenance.estimatedReclaimablePercent)}) reclaimable table space. Review the affected tables; standard VACUUM makes space reusable internally, while returning disk to the host requires planned compaction or a table rebuild.`,
+            message: `PostgreSQL has an estimated ${formatByteCount(maintenance.estimatedReclaimableBytes)} (${formatPercent(maintenance.estimatedReclaimablePercent)}) reclaimable table space. Review the affected tables. Standard VACUUM makes space reusable internally, while returning disk to the host requires planned compaction or a table rebuild.`,
             warning: true,
         });
     }
     if (maintenance.highDeadTupleTableCount > 0) {
         messages.push({
-            message: `${formatCount(maintenance.highDeadTupleTableCount)} PostgreSQL table${maintenance.highDeadTupleTableCount === 1 ? " exceeds" : "s exceed"} the dead-tuple maintenance threshold. Review autovacuum behavior and plan VACUUM where needed; refresh planner statistics with ANALYZE separately when stale.`,
+            message: `${formatCount(maintenance.highDeadTupleTableCount)} PostgreSQL table${maintenance.highDeadTupleTableCount === 1 ? " exceeds" : "s exceed"} the dead-tuple maintenance threshold. Review autovacuum behavior and plan VACUUM where needed. Refresh planner statistics with ANALYZE separately when stale.`,
             warning: true,
         });
     }
@@ -223,16 +214,18 @@ function PgBouncerSummary({
 }
 
 interface PostgresqlDatabaseOverviewProps {
-    readonly browserCacheRetained: boolean;
     readonly observation: PostgresqlObservation;
     readonly observationConfirmed: boolean;
+    readonly onRetry: () => void;
+    readonly retryBusy: boolean;
 }
 
 /** @returns Independent PostgreSQL/PgBouncer availability and bounded observations. */
 export function PostgresqlDatabaseOverview({
-    browserCacheRetained,
     observation,
     observationConfirmed,
+    onRetry,
+    retryBusy,
 }: PostgresqlDatabaseOverviewProps) {
     if (observation.state === "unavailable") {
         if (!observationConfirmed) {
@@ -246,9 +239,10 @@ export function PostgresqlDatabaseOverview({
         }
         return (
             <PageState
-                description="No previously verified external observation is available. Dashboard SQLite remains available independently."
-                icon={Database}
-                status="empty"
+                message="No previously verified external observation is available. Dashboard SQLite remains available independently."
+                onRetry={onRetry}
+                retryBusy={retryBusy}
+                status="error"
                 title="PostgreSQL diagnostics unavailable"
             />
         );
@@ -273,7 +267,7 @@ export function PostgresqlDatabaseOverview({
                     <Alert
                         focusOnError={false}
                         message="The latest PostgreSQL/PgBouncer collection failed. Showing the most recent server-verified observation."
-                        variant="info"
+                        variant="warning"
                     />
                 ) : null}
                 {maintenanceAttention.map(({ message, warning }) => (
@@ -284,30 +278,6 @@ export function PostgresqlDatabaseOverview({
                         variant={warning ? "warning" : "info"}
                     />
                 ))}
-                {retained || browserCacheRetained ? (
-                    <div className="flex flex-wrap items-center gap-3">
-                        {retained ? (
-                            <Badge variant="warning">Last-known-good</Badge>
-                        ) : null}
-                        {browserCacheRetained ? (
-                            <Badge variant="warning">Browser cache retained</Badge>
-                        ) : null}
-                        <Text size="sm" tone="muted">
-                            Observed{" "}
-                            <PostgresqlObservationTime
-                                timestampMs={observation.observedAtMs}
-                            />
-                        </Text>
-                        {retained ? (
-                            <Text size="sm" tone="muted">
-                                Retained since{" "}
-                                <PostgresqlObservationTime
-                                    timestampMs={observation.staleSinceMs}
-                                />
-                            </Text>
-                        ) : null}
-                    </div>
-                ) : null}
                 <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                     <MetricCard
                         description={`${formatCount(observation.databases.length)} bounded database rows.`}

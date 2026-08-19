@@ -242,7 +242,7 @@ export function deployMainPrompt(
     return {
         confirmLabel: "Queue deploy",
         danger: true,
-        description: `Mira (mira-2026) will deploy exact main head ${checkout.remoteHeadSha}. The immutable release is atomically activated and verified; a failed cutover restores the prior paired release and database snapshot.`,
+        description: `Mira (mira-2026) will deploy exact main head ${checkout.remoteHeadSha}. The immutable release is atomically activated and verified. A failed cutover restores the prior paired release and database snapshot.`,
         input: {
             activationRevision: releases.activationRevision,
             checkoutRevision: checkout.revision,

@@ -394,7 +394,7 @@ export function WorkspaceFileEditorPane({
                 <Alert
                     className={paneAlertClassName}
                     focusOnError={false}
-                    message="If needed, enroll and confirm MFA in Account security before revealing. Reveal exposes raw secrets only in this pane; inspect and repair invalid JSON without copying secrets into logs or messages."
+                    message="If needed, enroll and confirm MFA in Account security before revealing. Reveal exposes raw secrets only in this pane. Inspect and repair invalid JSON without copying secrets into logs or messages."
                     variant="info"
                 />
             )}

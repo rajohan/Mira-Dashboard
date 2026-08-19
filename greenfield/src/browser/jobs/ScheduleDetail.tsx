@@ -220,7 +220,7 @@ export function ScheduleDetail({
                     />
                 </div>
             </div>
-            <div className="mt-7">
+            <div className="mt-5">
                 <div className="mb-4 flex items-center gap-2">
                     <Icon icon={CalendarClock} tone="accent" />
                     <Heading level={3}>Run history</Heading>

@@ -214,18 +214,20 @@ export function AutomationSecuritySection() {
                 />
             )}
             {principals.isError && (
-                <div className="mt-5">
-                    <Alert message={dashboardBrowserFailureMessage(principals.error)} />
-                    <Button
-                        className="mt-3"
-                        onClick={() => void principals.refetch()}
-                        size="sm"
-                        variant="secondary"
-                    >
-                        <Icon icon={RefreshCw} size="sm" tone="inherit" />
-                        Try again
-                    </Button>
-                </div>
+                <Alert
+                    action={
+                        <Button
+                            onClick={() => void principals.refetch()}
+                            size="sm"
+                            variant="secondary"
+                        >
+                            <Icon icon={RefreshCw} size="sm" tone="inherit" />
+                            Try again
+                        </Button>
+                    }
+                    className="mt-5"
+                    message={dashboardBrowserFailureMessage(principals.error)}
+                />
             )}
             {principals.isSuccess &&
                 principals.data.pages.every((page) => page.principals.length === 0) && (

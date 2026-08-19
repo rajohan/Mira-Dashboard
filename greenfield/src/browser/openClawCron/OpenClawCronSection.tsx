@@ -306,7 +306,7 @@ export function OpenClawCronSectionView({
                     className="mt-4"
                     focusOnError={false}
                     message="The latest refresh failed, so the last available OpenClaw data is shown. Refresh successfully before trying an action."
-                    variant="info"
+                    variant="warning"
                 />
             )}
 

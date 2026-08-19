@@ -386,17 +386,24 @@ function LogMaintenancePanelContent(properties: LogMaintenancePanelContentProps)
                     </Text>
                 </div>
             </div>
-            <Alert className="mt-4" focusOnError={false} message={maintenanceError} />
-            {maintenanceError === undefined || onRetryMaintenance === undefined ? null : (
-                <Button
-                    busy={maintenanceLoading}
-                    className="mt-3"
-                    onClick={onRetryMaintenance}
-                    variant="secondary"
-                >
-                    Try again
-                </Button>
-            )}
+            <Alert
+                action={
+                    maintenanceError === undefined ||
+                    onRetryMaintenance === undefined ? undefined : (
+                        <Button
+                            busy={maintenanceLoading}
+                            onClick={onRetryMaintenance}
+                            size="sm"
+                            variant="secondary"
+                        >
+                            Try again
+                        </Button>
+                    )
+                }
+                className="mt-4"
+                focusOnError={false}
+                message={maintenanceError}
+            />
             <Alert
                 className="mt-4"
                 focusOnError={false}

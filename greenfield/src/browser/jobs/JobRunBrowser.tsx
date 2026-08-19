@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import type { JobRunEvent } from "../../contracts/jobModel.ts";
 import type { JobRunDetail as JobRunDetailData } from "../../contracts/jobs.ts";
+import { mergeLiveHistoryRows } from "../api/liveHistory.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -21,6 +22,7 @@ import {
     jobRunEventGapQueryOptions,
     jobRunEventHistoryQueryKey,
     jobRunEventHistoryQueryOptions,
+    jobRunLiveHeadQueryOptions,
     jobRunListQueryOptions,
     jobQueueSummaryQueryOptions,
     uniqueJobRunEvents,
@@ -182,6 +184,13 @@ export function SelectedJobRun({
 
     const mutationError = cancellation.error;
     const error = mutationError ?? detail.error;
+    const primaryErrorMessage =
+        error === null ? undefined : jobBrowserFailureMessage(error);
+    const eventHistoryError = eventGap.error ?? history.error;
+    const eventHistoryErrorMessage =
+        eventHistoryError === null
+            ? undefined
+            : jobBrowserFailureMessage(eventHistoryError);
     const historyPages = history.data?.pages ?? [];
     const events = uniqueJobRunEvents([
         ...detail.data.events,
@@ -196,9 +205,21 @@ export function SelectedJobRun({
     return (
         <div>
             <Alert
+                action={
+                    mutationError === null && detail.error !== null ? (
+                        <Button
+                            busy={detail.isFetching}
+                            onClick={() => void detail.refetch()}
+                            size="sm"
+                            variant="secondary"
+                        >
+                            Try again
+                        </Button>
+                    ) : undefined
+                }
                 className="mb-4"
                 focusOnError={mutationError !== null}
-                message={error === null ? undefined : jobBrowserFailureMessage(error)}
+                message={primaryErrorMessage}
             />
             <JobRunDetail
                 cancelBusy={cancellation.isPending}
@@ -209,25 +230,33 @@ export function SelectedJobRun({
                 onFocusHandled={onFocusHandled}
             />
             <Alert
+                action={
+                    eventHistoryErrorMessage === undefined ||
+                    eventHistoryErrorMessage === primaryErrorMessage ? undefined : (
+                        <Button
+                            busy={eventGap.isFetching || history.isFetching}
+                            busyLabel="Retrying missing events…"
+                            onClick={() =>
+                                void Promise.allSettled([
+                                    eventGap.refetch(),
+                                    history.refetch(),
+                                ])
+                            }
+                            size="sm"
+                            variant="secondary"
+                        >
+                            Retry missing events
+                        </Button>
+                    )
+                }
                 className="mt-4"
                 focusOnError={false}
                 message={
-                    eventGap.error === null && history.error === null
+                    eventHistoryErrorMessage === primaryErrorMessage
                         ? undefined
-                        : jobBrowserFailureMessage(eventGap.error ?? history.error)
+                        : eventHistoryErrorMessage
                 }
             />
-            {eventGap.error !== null && (
-                <Button
-                    busy={eventGap.isFetching}
-                    busyLabel="Retrying missing events…"
-                    className="mt-4"
-                    onClick={() => void eventGap.refetch()}
-                    variant="secondary"
-                >
-                    Retry missing events
-                </Button>
-            )}
             {nextEventCursor !== undefined && (
                 <Button
                     busy={historyEnabled && (eventGap.isFetching || history.isFetching)}
@@ -284,10 +313,16 @@ export function JobRunBrowser({
     const navigate = useNavigate({ from: "/jobs" });
     const search = parseJobsRouteSearch(useSearch({ from: "/jobs" }) as unknown);
     const query = useInfiniteQuery(jobRunListQueryOptions(client, undefined));
+    const liveHead = useQuery(jobRunLiveHeadQueryOptions(client, undefined));
     const historySentinelRef = useRef<HTMLDivElement>(null);
     const summaryQuery = useQuery(jobQueueSummaryQueryOptions(client));
-    const runs = uniqueJobRows(query.data?.pages.flatMap((page) => page.runs) ?? []);
-    const summary = summaryQuery.data ?? query.data?.pages[0]?.summary;
+    const runs = mergeLiveHistoryRows(
+        liveHead.data?.runs ?? [],
+        uniqueJobRows(query.data?.pages.flatMap((page) => page.runs) ?? []),
+        ({ id }) => id
+    );
+    const summary =
+        summaryQuery.data ?? liveHead.data?.summary ?? query.data?.pages[0]?.summary;
     const claiming = useSetJobClaimingPausedMutation();
     const historyPageFailed = query.error !== null;
     const fetchNextHistoryPage = query.fetchNextPage;
@@ -339,8 +374,8 @@ export function JobRunBrowser({
         });
     };
     let backgroundError: unknown;
-    if (query.data !== undefined) {
-        backgroundError = query.error ?? summaryQuery.error;
+    if (query.data !== undefined || liveHead.data !== undefined) {
+        backgroundError = liveHead.error ?? query.error ?? summaryQuery.error;
     } else if (summaryQuery.data !== undefined) {
         backgroundError = summaryQuery.error;
     }
@@ -394,15 +429,22 @@ export function JobRunBrowser({
             historyNeedsInitialFill ? (
                 <div aria-hidden="true" className="h-px" ref={historySentinelRef} />
             ) : null}
-            {query.data === undefined && (
+            {query.data === undefined && liveHead.data === undefined && (
                 <div className="mt-4">
-                    {query.isPending ? (
+                    {query.isPending && liveHead.isPending ? (
                         <PageState label="Loading job runs…" status="loading" />
                     ) : (
                         <PageState
-                            message={jobBrowserFailureMessage(query.error)}
-                            onRetry={() => void query.refetch()}
-                            retryBusy={query.isFetching}
+                            message={jobBrowserFailureMessage(
+                                liveHead.error ?? query.error
+                            )}
+                            onRetry={() =>
+                                void Promise.allSettled([
+                                    liveHead.refetch(),
+                                    query.refetch(),
+                                ])
+                            }
+                            retryBusy={liveHead.isFetching || query.isFetching}
                             status="error"
                             title="Job history unavailable"
                         />
@@ -410,6 +452,24 @@ export function JobRunBrowser({
                 </div>
             )}
             <Alert
+                action={
+                    backgroundError == null ? undefined : (
+                        <Button
+                            busy={liveHead.isFetching || query.isFetching}
+                            onClick={() =>
+                                void Promise.allSettled([
+                                    liveHead.refetch(),
+                                    query.refetch(),
+                                    summaryQuery.refetch(),
+                                ])
+                            }
+                            size="sm"
+                            variant="secondary"
+                        >
+                            Retry job history
+                        </Button>
+                    )
+                }
                 className="mt-4"
                 focusOnError={false}
                 message={
@@ -418,16 +478,6 @@ export function JobRunBrowser({
                         : jobBrowserFailureMessage(backgroundError)
                 }
             />
-            {query.data !== undefined && query.error !== null && (
-                <Button
-                    busy={query.isFetching}
-                    className="mt-4"
-                    onClick={() => void query.refetch()}
-                    variant="secondary"
-                >
-                    Retry job history
-                </Button>
-            )}
         </section>
     );
 }

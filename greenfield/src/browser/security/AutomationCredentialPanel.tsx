@@ -190,18 +190,19 @@ export function AutomationCredentialPanel({ principal }: AutomationCredentialPan
                 <LoadingState label="Loading access tokens…" size="sm" />
             )}
             {credentials.isError && (
-                <div>
-                    <Alert message={dashboardBrowserFailureMessage(credentials.error)} />
-                    <Button
-                        className="mt-3"
-                        onClick={() => void credentials.refetch()}
-                        size="sm"
-                        variant="secondary"
-                    >
-                        <Icon icon={RefreshCw} size="sm" tone="inherit" />
-                        Try again
-                    </Button>
-                </div>
+                <Alert
+                    action={
+                        <Button
+                            onClick={() => void credentials.refetch()}
+                            size="sm"
+                            variant="secondary"
+                        >
+                            <Icon icon={RefreshCw} size="sm" tone="inherit" />
+                            Try again
+                        </Button>
+                    }
+                    message={dashboardBrowserFailureMessage(credentials.error)}
+                />
             )}
             <credentialForm.Subscribe
                 selector={(state) =>

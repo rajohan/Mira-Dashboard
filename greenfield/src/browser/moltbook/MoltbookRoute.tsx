@@ -29,16 +29,14 @@ import {
     refreshMoltbookQueries,
 } from "./moltbookQueries.ts";
 
-function MoltbookSnapshotNotice({ status }: { readonly status: MoltbookSnapshotStatus }) {
+function moltbookSnapshotNotice(status: MoltbookSnapshotStatus): string | undefined {
     if (status.freshness === "fresh" && status.lastAttemptStatus === "succeeded") {
-        return null;
+        return;
     }
-    const message =
-        status.lastAttemptStatus === "failed"
-            ? (status.refreshFailureMessage ??
-              "The latest Moltbook refresh failed; showing last-known-good data.")
-            : "Moltbook data is stale; showing the last-known-good snapshot.";
-    return <Alert focusOnError={false} message={message} variant="info" />;
+    return status.lastAttemptStatus === "failed"
+        ? (status.refreshFailureMessage ??
+              "The latest Moltbook refresh failed. Showing last-known-good data.")
+        : "Moltbook data is stale. Showing the last-known-good snapshot.";
 }
 
 function MoltbookFeedList({ posts }: { readonly posts: readonly MoltbookFeedPost[] }) {
@@ -97,11 +95,16 @@ export function MoltbookRoute() {
     const complete = ready !== undefined;
     const loading = snapshotQuery.isPending;
     const fetching = snapshotQuery.isFetching;
-    const snapshotNeedsRetry =
-        ready !== undefined &&
-        (ready.status.freshness !== "fresh" ||
-            ready.status.lastAttemptStatus !== "succeeded");
     const refresh = () => void refreshMoltbookQueries(queryClient);
+    let retainedMessage: string | undefined;
+    if (firstError === null) {
+        retainedMessage =
+            ready === undefined ? undefined : moltbookSnapshotNotice(ready.status);
+    } else if (ready?.feed.sort === sort) {
+        retainedMessage = dashboardBrowserFailureMessage(firstError);
+    } else {
+        retainedMessage = `The ${sort} feed could not be loaded. Showing ${ready?.feed.sort} feed data.`;
+    }
 
     return (
         <div>
@@ -123,43 +126,23 @@ export function MoltbookRoute() {
                 {complete ? (
                     <PageState status="ready">
                         <div className="space-y-6">
-                            {firstError === null ? null : (
-                                <div className="flex flex-wrap items-center gap-3">
-                                    <Alert
-                                        className="min-w-0 flex-1"
-                                        focusOnError={false}
-                                        message={
-                                            ready.feed.sort === sort
-                                                ? dashboardBrowserFailureMessage(
-                                                      firstError
-                                                  )
-                                                : `The ${sort} feed could not be loaded; showing ${ready.feed.sort} feed data.`
-                                        }
-                                        variant="info"
-                                    />
-                                    <Button
-                                        busy={fetching}
-                                        onClick={refresh}
-                                        variant="secondary"
-                                    >
-                                        Retry
-                                    </Button>
-                                </div>
-                            )}
-                            <div className="flex flex-wrap items-center gap-3">
-                                <div className="min-w-0 flex-1">
-                                    <MoltbookSnapshotNotice status={ready.status} />
-                                </div>
-                                {firstError === null && snapshotNeedsRetry && (
-                                    <Button
-                                        busy={fetching}
-                                        onClick={refresh}
-                                        variant="secondary"
-                                    >
-                                        Retry
-                                    </Button>
-                                )}
-                            </div>
+                            <Alert
+                                action={
+                                    retainedMessage === undefined ? undefined : (
+                                        <Button
+                                            busy={fetching}
+                                            onClick={refresh}
+                                            size="sm"
+                                            variant="secondary"
+                                        >
+                                            Retry
+                                        </Button>
+                                    )
+                                }
+                                focusOnError={false}
+                                message={retainedMessage}
+                                variant="warning"
+                            />
                             {ready.profile === undefined ? null : (
                                 <MoltbookProfileCard
                                     home={ready.home}

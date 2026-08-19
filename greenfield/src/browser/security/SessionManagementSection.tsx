@@ -171,18 +171,19 @@ export function SessionManagementSection() {
                 <LoadingState label="Loading browser sessions…" size="sm" />
             )}
             {sessions.isError && (
-                <div>
-                    <Alert message={dashboardBrowserFailureMessage(sessions.error)} />
-                    <Button
-                        className="mt-3"
-                        onClick={() => void sessions.refetch()}
-                        size="sm"
-                        variant="secondary"
-                    >
-                        <Icon icon={RefreshCw} size="sm" tone="inherit" />
-                        Try again
-                    </Button>
-                </div>
+                <Alert
+                    action={
+                        <Button
+                            onClick={() => void sessions.refetch()}
+                            size="sm"
+                            variant="secondary"
+                        >
+                            <Icon icon={RefreshCw} size="sm" tone="inherit" />
+                            Try again
+                        </Button>
+                    }
+                    message={dashboardBrowserFailureMessage(sessions.error)}
+                />
             )}
             {sessions.isSuccess && sessions.data.sessions.length === 0 && (
                 <EmptyState

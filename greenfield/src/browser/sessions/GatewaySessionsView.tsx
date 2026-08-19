@@ -257,7 +257,7 @@ export function GatewaySessionsView({
                             ? "A background refresh failed. Showing the most recent session data."
                             : `OpenClaw is disconnected. Showing session data from ${formatDashboardDateTime(snapshot.source.observedAtMs)}.`
                     }
-                    variant="error"
+                    variant="warning"
                 />
             )}
             <Alert

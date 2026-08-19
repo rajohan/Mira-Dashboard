@@ -41,7 +41,7 @@ describe("chat attachments", () => {
         );
         expect(
             validateChatAttachmentFiles([file("clip.mp4", 5, "video/mp4")]).message
-        ).toContain("video attachments are not supported");
+        ).toContain("Video attachments are not supported");
         expect(
             validateChatAttachmentFiles([file("safe\u202Efile.txt", 5)]).message
         ).toContain("invalid file name");

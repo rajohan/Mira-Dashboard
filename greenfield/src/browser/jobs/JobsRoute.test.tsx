@@ -995,10 +995,7 @@ describe("Dashboard jobs route", () => {
             paths.map((path) => [path, transport.callsFor(path).length] as const)
         );
         for (const path of paths) {
-            transport.failNextQueryCounts.set(
-                path,
-                path === "jobs.listRuns" ? (previousCallCounts.get(path) ?? 1) : 1
-            );
+            transport.failNextQueryCounts.set(path, path === "jobs.listRuns" ? 2 : 1);
         }
 
         await act(async () => {
@@ -1011,10 +1008,8 @@ describe("Dashboard jobs route", () => {
         expect(cachedRun).toHaveFocus();
 
         for (const path of paths) {
-            const expectedAdditionalCalls =
-                path === "jobs.listRuns" ? (previousCallCounts.get(path) ?? 1) : 1;
             expect(transport.callsFor(path)).toHaveLength(
-                (previousCallCounts.get(path) ?? 0) + expectedAdditionalCalls
+                (previousCallCounts.get(path) ?? 0) + (path === "jobs.listRuns" ? 2 : 1)
             );
         }
         expect(screen.getByRole("heading", { name: "Queue and workers" })).toBeTruthy();
@@ -1039,7 +1034,7 @@ describe("Dashboard jobs route", () => {
                     "The request could not be completed. Try again."
                 )
             );
-        expect(nonBlockingErrors.length).toBeGreaterThanOrEqual(5);
+        expect(nonBlockingErrors).toHaveLength(4);
         expect(
             screen.queryByRole("heading", { name: "Job history unavailable" })
         ).toBeNull();

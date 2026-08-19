@@ -16,6 +16,7 @@ import {
     type ListJobRunsResult,
 } from "../../contracts/jobs.ts";
 import { runScheduleInputSchema } from "../../contracts/schedules.ts";
+import { liveHistoryArchiveQueryKey } from "../api/liveHistory.ts";
 import { createDashboardQueryClient } from "../api/queryClient.ts";
 import {
     createDashboardTrpcClient,
@@ -236,10 +237,16 @@ describe("jobs browser mutations", () => {
         const queryClient = createDashboardQueryClient();
         const queued = queuedRun();
         const scheduleRecord = schedule();
-        const globalKey = jobRunListQueryKey(undefined);
-        const queuedFilterKey = jobRunListQueryKey({ states: ["queued"] });
-        const cancelledFilterKey = jobRunListQueryKey({ states: ["cancelled"] });
-        const scheduleRunsKey = scheduleRunListQueryKey(scheduleId);
+        const globalKey = liveHistoryArchiveQueryKey(jobRunListQueryKey(undefined));
+        const queuedFilterKey = liveHistoryArchiveQueryKey(
+            jobRunListQueryKey({ states: ["queued"] })
+        );
+        const cancelledFilterKey = liveHistoryArchiveQueryKey(
+            jobRunListQueryKey({ states: ["cancelled"] })
+        );
+        const scheduleRunsKey = liveHistoryArchiveQueryKey(
+            scheduleRunListQueryKey(scheduleId)
+        );
         const eventHistoryKey = jobRunEventHistoryQueryKey(runId);
         const enabledSchedulesKey = scheduleListQueryKey("enabled");
         const disabledSchedulesKey = scheduleListQueryKey("disabled");
@@ -404,9 +411,11 @@ describe("jobs browser mutations", () => {
             updatedAtMs: timestampMs + 3000,
             version: 3,
         });
-        const globalKey = jobRunListQueryKey(undefined);
+        const globalKey = liveHistoryArchiveQueryKey(jobRunListQueryKey(undefined));
         const eventHistoryKey = jobRunEventHistoryQueryKey(runId);
-        const scheduleRunsKey = scheduleRunListQueryKey(scheduleId);
+        const scheduleRunsKey = liveHistoryArchiveQueryKey(
+            scheduleRunListQueryKey(scheduleId)
+        );
         const schedulesKey = scheduleListQueryKey("all");
         queryClient.setQueryData(globalKey, {
             pageParams: [undefined],
@@ -649,8 +658,10 @@ describe("jobs browser mutations", () => {
             id: current.id,
             queuedAtMs: current.queuedAtMs,
         };
-        const globalKey = jobRunListQueryKey(undefined);
-        const scheduleRunsKey = scheduleRunListQueryKey(scheduleId);
+        const globalKey = liveHistoryArchiveQueryKey(jobRunListQueryKey(undefined));
+        const scheduleRunsKey = liveHistoryArchiveQueryKey(
+            scheduleRunListQueryKey(scheduleId)
+        );
         const schedulesKey = scheduleListQueryKey("all");
         const globalData = {
             pageParams: [undefined, firstPageCursor],
@@ -730,8 +741,10 @@ describe("jobs browser mutations", () => {
         const queryClient = createDashboardQueryClient();
         const run = queuedRun();
         const scheduleRecord = schedule();
-        const globalKey = jobRunListQueryKey(undefined);
-        const scheduleRunsKey = scheduleRunListQueryKey(scheduleId);
+        const globalKey = liveHistoryArchiveQueryKey(jobRunListQueryKey(undefined));
+        const scheduleRunsKey = liveHistoryArchiveQueryKey(
+            scheduleRunListQueryKey(scheduleId)
+        );
         const eventGapKey = jobRunEventGapQueryKey(runId);
         const eventHistoryKey = jobRunEventHistoryQueryKey(runId);
         const schedulesKey = scheduleListQueryKey("all");

@@ -406,17 +406,8 @@ describe("DatabaseRoute", () => {
             const states = await screen.findByRole("region", {
                 name: "SQLite lifecycle observation states",
             });
-            expect(within(states).getAllByText("Last-known-good")).toHaveLength(3);
-            expect(within(states).getAllByText(/Retained since/u)).toHaveLength(3);
-            expect(
-                [...states.querySelectorAll("time")].map((time) =>
-                    time.getAttribute("dateTime")
-                )
-            ).toEqual(
-                [172_200_000, 172_400_000, 172_300_000].map((timestampMs) =>
-                    new Date(timestampMs).toISOString()
-                )
-            );
+            expect(within(states).getAllByText("Retained")).toHaveLength(3);
+            expect(within(states).queryByText(/Retained since/u)).toBeNull();
         } finally {
             view.unmount();
             queryClient.clear();
@@ -640,9 +631,8 @@ describe("DatabaseRoute", () => {
         } as const satisfies DatabaseOverview;
         const { queryClient, view } = renderRoute(Promise.resolve(retained));
         try {
-            expect(await screen.findByText("Last-known-good")).toBeVisible();
             expect(
-                screen.getByText(/latest SQLite diagnostics check failed/iu)
+                await screen.findByText(/latest SQLite diagnostics check failed/iu)
             ).toBeVisible();
             expect(await screen.findByText("12 / 12")).toBeVisible();
         } finally {
@@ -886,9 +876,10 @@ describe("DatabaseRoute", () => {
             "postgresql"
         );
         try {
-            expect(await screen.findByText("Last-known-good")).toBeVisible();
             expect(
-                screen.getByText(/latest PostgreSQL\/PgBouncer collection failed/iu)
+                await screen.findByText(
+                    /latest PostgreSQL\/PgBouncer collection failed/iu
+                )
             ).toBeVisible();
             expect(screen.getByText("8.0 GiB")).toBeVisible();
         } finally {
@@ -1020,7 +1011,6 @@ describe("DatabaseRoute", () => {
                     "The latest refresh failed. Showing retained database data."
                 )
             ).toBeVisible();
-            expect(screen.getByText("Browser cache retained")).toBeVisible();
             expect(screen.queryByText("Fresh observation")).toBeNull();
             expect(screen.queryByText(/private database path/iu)).toBeNull();
             expect(screen.getByRole("button", { name: "Try again" })).toBeVisible();
@@ -1104,7 +1094,11 @@ describe("DatabaseRoute", () => {
             "postgresql"
         );
         try {
-            expect(await screen.findByText("Browser cache retained")).toBeVisible();
+            expect(
+                await screen.findByText(
+                    "The latest refresh failed. Showing retained database data."
+                )
+            ).toBeVisible();
             expect(screen.queryByText("Fresh observation")).toBeNull();
             expect(screen.getByText("2.0 GiB")).toBeVisible();
             expect(screen.queryByText(/private PostgreSQL failure/iu)).toBeNull();

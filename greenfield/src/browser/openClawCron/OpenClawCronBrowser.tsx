@@ -5,6 +5,7 @@ import type {
     OpenClawCronJob,
     UpdateOpenClawCronPatch,
 } from "../../contracts/openClawCron.ts";
+import { mergeLiveHistoryRows } from "../api/liveHistory.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { dashboardBrowserFailureMessage } from "../api/trpcError.ts";
 import { useAuthenticatedMutationBoundary } from "../auth/useAuthenticatedMutationBoundary.ts";
@@ -16,6 +17,7 @@ import {
     openClawCronDetailQueryOptions,
     openClawCronListQueryOptions,
     openClawCronQueryKey,
+    openClawCronRunsLiveHeadQueryOptions,
     openClawCronRunsQueryOptions,
     reconcileOpenClawCronQueries,
     refreshOpenClawCronQueries,
@@ -93,7 +95,30 @@ export function OpenClawCronBrowser({
     const runs = useInfiniteQuery(
         openClawCronRunsQueryOptions(client, effectiveSelectedId)
     );
-    const runsAccumulation = accumulateOpenClawCronRunPages(runs.data?.pages ?? []);
+    const runsLiveHead = useQuery(
+        openClawCronRunsLiveHeadQueryOptions(client, effectiveSelectedId)
+    );
+    const archiveRunsAccumulation = accumulateOpenClawCronRunPages(
+        runs.data?.pages ?? []
+    );
+    const runsAccumulation = (() => {
+        const live = runsLiveHead.data;
+        const archive = archiveRunsAccumulation?.result;
+        if (live === undefined) return archiveRunsAccumulation;
+        if (archive === undefined) return { result: live, stable: true as const };
+        return {
+            result: {
+                ...archive,
+                freshness: live.freshness,
+                runs: mergeLiveHistoryRows(
+                    live.runs,
+                    archive.runs,
+                    (run) => run.runId ?? String(run.completedAtMs)
+                ),
+            },
+            stable: archiveRunsAccumulation?.stable ?? true,
+        };
+    })();
     const mutation = useMutation<void, Error, OpenClawCronMutation>({
         mutationFn: (operation) =>
             boundary.run(async (signal) => {
@@ -202,12 +227,14 @@ export function OpenClawCronBrowser({
     if (runsAccumulation?.stable === false) {
         runsError =
             "OpenClaw run history changed while older runs were loading. Refresh before continuing.";
-    } else if (runs.error !== null) {
-        runsError = dashboardBrowserFailureMessage(runs.error);
+    } else if (runsLiveHead.error !== null || runs.error !== null) {
+        runsError = dashboardBrowserFailureMessage(runsLiveHead.error ?? runs.error);
     }
     const inventoryRefreshFailed =
         inventory.data !== undefined && inventory.error !== null;
-    const runsRefreshFailed = runsAccumulation?.stable !== false && runs.error !== null;
+    const runsRefreshFailed =
+        runsAccumulation?.stable !== false &&
+        (runsLiveHead.error !== null || runs.error !== null);
     let backgroundError = paginationWarning;
     if (inventoryRefreshFailed) {
         backgroundError = runsRefreshFailed
@@ -245,7 +272,9 @@ export function OpenClawCronBrowser({
                 return boundary.completionIsCurrent() && reconciled;
             }}
             onRetry={() => void inventory.refetch()}
-            onRetryRuns={() => void runs.refetch()}
+            onRetryRuns={() =>
+                void Promise.allSettled([runsLiveHead.refetch(), runs.refetch()])
+            }
             onRun={(job) => mutation.mutateAsync({ job, kind: "run" })}
             onSelectJob={(job) => {
                 setSelectedId(job.id);
@@ -260,7 +289,9 @@ export function OpenClawCronBrowser({
             runs={runsAccumulation?.result}
             runsError={runsError}
             runsJobId={effectiveSelectedId}
-            runsLoading={runs.isFetching && !runs.isFetchingNextPage}
+            runsLoading={
+                (runsLiveHead.isFetching || runs.isFetching) && !runs.isFetchingNextPage
+            }
             runsLoadingMore={runs.isFetchingNextPage}
             selectedJobId={effectiveSelectedId}
             state={state}

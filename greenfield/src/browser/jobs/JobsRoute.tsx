@@ -12,7 +12,7 @@ function DashboardJobsContent() {
     useJobRealtimeInvalidation();
     const [focusRunId, setFocusRunId] = useState<string>();
     return (
-        <div className="space-y-12">
+        <div className="space-y-4">
             <JobRunBrowser
                 focusRunId={focusRunId}
                 onRequestRunFocus={setFocusRunId}

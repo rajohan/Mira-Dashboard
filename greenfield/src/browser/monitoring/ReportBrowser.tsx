@@ -5,6 +5,7 @@ import { type ReactNode, useState } from "react";
 
 import type { ReportDetail, ReportSummary } from "../../contracts/monitoring.ts";
 import type { ListReportsInput } from "../../contracts/reports.ts";
+import { mergeLiveHistoryRows } from "../api/liveHistory.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import {
     classifyDashboardBrowserFailure,
@@ -31,6 +32,7 @@ import { useDeleteReportMutation } from "./monitoringMutations.ts";
 import { reportKindLabel, reportStatusVariant } from "./monitoringPresentation.ts";
 import {
     reportDetailQueryOptions,
+    reportLiveHeadQueryOptions,
     reportListQueryOptions,
     uniqueMonitoringRows,
 } from "./monitoringQueries.ts";
@@ -224,9 +226,16 @@ export function ReportBrowser() {
                   ...(status === "all" ? {} : { statuses: [status] }),
               };
     const query = useInfiniteQuery(reportListQueryOptions(client, filters));
-    const reports = uniqueMonitoringRows(
-        query.data?.pages.flatMap((page) => page.reports) ?? []
+    const liveHead = useQuery(reportLiveHeadQueryOptions(client, filters));
+    const reports = mergeLiveHistoryRows(
+        liveHead.data?.reports ?? [],
+        uniqueMonitoringRows(query.data?.pages.flatMap((page) => page.reports) ?? []),
+        ({ id }) => id
     );
+    const catalogError = liveHead.error ?? query.error;
+    const catalogHasData = liveHead.data !== undefined || query.data !== undefined;
+    const retryCatalog = () =>
+        void Promise.allSettled([liveHead.refetch(), query.refetch()]);
     const selectedId = search.reportId;
     const selectReport = (reportId: string | undefined) => {
         void navigate({
@@ -248,19 +257,19 @@ export function ReportBrowser() {
         setStatus("all");
     };
     let catalogContent: ReactNode;
-    if (query.isPending && query.data === undefined) {
+    if (liveHead.isPending && query.isPending && !catalogHasData) {
         catalogContent = (
             <div className="p-5">
                 <PageState label="Loading reports…" status="loading" />
             </div>
         );
-    } else if (query.data === undefined) {
+    } else if (!catalogHasData) {
         catalogContent = (
             <div className="p-5">
                 <PageState
-                    message={dashboardBrowserFailureMessage(query.error)}
-                    onRetry={() => void query.refetch()}
-                    retryBusy={query.isFetching}
+                    message={dashboardBrowserFailureMessage(catalogError)}
+                    onRetry={retryCatalog}
+                    retryBusy={liveHead.isFetching || query.isFetching}
                     status="error"
                     title="Reports unavailable"
                 />
@@ -338,10 +347,20 @@ export function ReportBrowser() {
                     </Button>
                 </div>
             </Form>
-            {query.error !== null && query.data !== undefined && (
+            {catalogError !== null && catalogHasData && (
                 <Alert
+                    action={
+                        <Button
+                            busy={liveHead.isFetching || query.isFetching}
+                            onClick={retryCatalog}
+                            size="sm"
+                            variant="secondary"
+                        >
+                            Try again
+                        </Button>
+                    }
                     className="mt-4"
-                    message={dashboardBrowserFailureMessage(query.error)}
+                    message={dashboardBrowserFailureMessage(catalogError)}
                 />
             )}
             <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-[minmax(18rem,24rem)_minmax(0,1fr)]">

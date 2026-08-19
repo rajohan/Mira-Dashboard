@@ -209,7 +209,7 @@ export function OpenClawCronDetail({
         ["Updated", dateTime(job.updatedAtMs)],
     ];
     return (
-        <div className="max-w-full min-w-0 space-y-5">
+        <div className="max-w-full min-w-0 space-y-4">
             <Card aria-labelledby={headingId} className="max-w-full min-w-0">
                 <header className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="w-full max-w-full min-w-0 sm:flex-1">
@@ -363,25 +363,29 @@ export function OpenClawCronDetail({
                     />
                 )}
                 {runsError !== undefined && (
-                    <div className="mt-5">
-                        <Alert focusOnError={runs === undefined} message={runsError} />
-                        {onRetryRuns !== undefined && (
-                            <Button
-                                className="mt-3"
-                                onClick={onRetryRuns}
-                                variant="secondary"
-                            >
-                                Try again
-                            </Button>
-                        )}
-                    </div>
+                    <Alert
+                        action={
+                            onRetryRuns === undefined ? undefined : (
+                                <Button
+                                    onClick={onRetryRuns}
+                                    size="sm"
+                                    variant="secondary"
+                                >
+                                    Try again
+                                </Button>
+                            )
+                        }
+                        className="mt-5"
+                        focusOnError={runs === undefined}
+                        message={runsError}
+                    />
                 )}
                 {runs !== undefined && runs.freshness.kind === "last-known-good" && (
                     <Alert
                         className="mt-5"
                         focusOnError={false}
                         message="The latest refresh failed, so the most recent available run history is shown."
-                        variant="info"
+                        variant="warning"
                     />
                 )}
                 {runs !== undefined && runs.runs.length === 0 && (

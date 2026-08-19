@@ -79,7 +79,7 @@ export function useDeliveryOperations(
     async function confirm(): Promise<void> {
         if (pending === undefined || busy) return;
         if (!deliveryOperationIsCurrent(pending.input, currentAuthority)) {
-            setError("Delivery state changed; reopen this confirmation.");
+            setError("Delivery state changed. Reopen this confirmation.");
             return;
         }
         setBusy(true);

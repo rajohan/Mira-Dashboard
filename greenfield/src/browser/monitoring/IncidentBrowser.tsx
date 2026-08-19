@@ -4,6 +4,7 @@ import { Filter, RotateCcw, ShieldAlert } from "lucide-react";
 import { type ReactNode, useState } from "react";
 
 import type { ListIncidentsInput } from "../../contracts/incidents.ts";
+import { mergeLiveHistoryRows } from "../api/liveHistory.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { dashboardBrowserFailureMessage } from "../api/trpcError.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
@@ -24,6 +25,7 @@ import { incidentSeverityVariant } from "./incidentPresentation.ts";
 import { IncidentTable } from "./IncidentTable.tsx";
 import {
     incidentDetailQueryOptions,
+    incidentLiveHeadQueryOptions,
     incidentListQueryOptions,
     uniqueMonitoringRows,
 } from "./monitoringQueries.ts";
@@ -142,9 +144,16 @@ export function IncidentBrowser() {
                   ...(state === "all" ? {} : { states: [state] }),
               };
     const query = useInfiniteQuery(incidentListQueryOptions(client, filters));
-    const incidents = uniqueMonitoringRows(
-        query.data?.pages.flatMap((page) => page.incidents) ?? []
+    const liveHead = useQuery(incidentLiveHeadQueryOptions(client, filters));
+    const incidents = mergeLiveHistoryRows(
+        liveHead.data?.incidents ?? [],
+        uniqueMonitoringRows(query.data?.pages.flatMap((page) => page.incidents) ?? []),
+        ({ id }) => id
     );
+    const catalogError = liveHead.error ?? query.error;
+    const catalogHasData = liveHead.data !== undefined || query.data !== undefined;
+    const retryCatalog = () =>
+        void Promise.allSettled([liveHead.refetch(), query.refetch()]);
     const selectedId = search.incidentId;
     const selectIncident = (incidentId: string) => {
         void navigate({ replace: true, search: { incidentId } });
@@ -166,19 +175,19 @@ export function IncidentBrowser() {
         setSeverity("all");
     };
     let catalogContent: ReactNode;
-    if (query.isPending && query.data === undefined) {
+    if (liveHead.isPending && query.isPending && !catalogHasData) {
         catalogContent = (
             <div className="p-5">
                 <PageState label="Loading incidents…" status="loading" />
             </div>
         );
-    } else if (query.data === undefined) {
+    } else if (!catalogHasData) {
         catalogContent = (
             <div className="p-5">
                 <PageState
-                    message={dashboardBrowserFailureMessage(query.error)}
-                    onRetry={() => void query.refetch()}
-                    retryBusy={query.isFetching}
+                    message={dashboardBrowserFailureMessage(catalogError)}
+                    onRetry={retryCatalog}
+                    retryBusy={liveHead.isFetching || query.isFetching}
                     status="error"
                     title="Incidents unavailable"
                 />
@@ -257,10 +266,20 @@ export function IncidentBrowser() {
                     </Button>
                 </div>
             </Form>
-            {query.error !== null && query.data !== undefined && (
+            {catalogError !== null && catalogHasData && (
                 <Alert
+                    action={
+                        <Button
+                            busy={liveHead.isFetching || query.isFetching}
+                            onClick={retryCatalog}
+                            size="sm"
+                            variant="secondary"
+                        >
+                            Try again
+                        </Button>
+                    }
                     className="mt-4"
-                    message={dashboardBrowserFailureMessage(query.error)}
+                    message={dashboardBrowserFailureMessage(catalogError)}
                 />
             )}
             <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-[minmax(18rem,24rem)_minmax(0,1fr)]">

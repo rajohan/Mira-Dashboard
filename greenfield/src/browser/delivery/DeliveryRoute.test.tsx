@@ -438,7 +438,11 @@ describe("DeliveryRoute", () => {
         const harness = createClient();
         const view = renderDelivery({ ...harness.client, query });
         try {
-            expect(await screen.findByText("Server last-known-good")).toBeVisible();
+            expect(
+                await screen.findByText(
+                    /Retained data is shown for pull request preview\./u
+                )
+            ).toBeVisible();
             const region = screen.getByRole("region", {
                 name: "Pull requests",
             });
@@ -449,7 +453,7 @@ describe("DeliveryRoute", () => {
             await waitFor(() => {
                 expect(
                     screen.getByText(
-                        "The latest pull requests refresh failed. Showing browser-retained data; consequential controls are disabled."
+                        /Retained data is shown for pull request preview, pull requests\./u
                     )
                 ).toBeVisible();
             });
@@ -506,13 +510,14 @@ describe("DeliveryRoute", () => {
             const mainCheckout = await screen.findByLabelText("Main checkout");
             expect(within(mainCheckout).queryByText("Current")).toBeNull();
             expect(within(mainCheckout).getByText("Checking")).toBeVisible();
+            const retainedAlert = screen
+                .getByText(/Retained data is shown for production checkout\./u)
+                .closest('[role="status"]');
+            expect(retainedAlert).toBeTruthy();
             expect(
-                within(mainCheckout).getByText(
-                    "The Delivery request could not be completed safely. Try again from fresh state."
-                )
-            ).toBeVisible();
-            expect(
-                within(mainCheckout).getByRole("button", { name: "Try again" })
+                within(retainedAlert as HTMLElement).getByRole("button", {
+                    name: "Try again",
+                })
             ).toBeVisible();
             expect(screen.queryByText("private checkout path")).toBeNull();
         } finally {

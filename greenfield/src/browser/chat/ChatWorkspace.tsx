@@ -108,7 +108,7 @@ function DismissibleChatStatus({
                 focusOnError={false}
                 message={message}
                 onDismiss={() => setDismissed(true)}
-                variant={errorPresent ? "error" : "info"}
+                variant={errorPresent ? "error" : "warning"}
             />
         </div>
     );

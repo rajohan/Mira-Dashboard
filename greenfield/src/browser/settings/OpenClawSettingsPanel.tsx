@@ -35,21 +35,21 @@ interface QueryFailureProps {
 
 function QueryFailure({ busy, error, label, onRetry }: QueryFailureProps) {
     return (
-        <div>
-            <Alert
-                focusOnError={false}
-                message={`${label}: ${dashboardBrowserFailureMessage(error)}`}
-            />
-            <Button
-                busy={busy}
-                busyLabel="Refreshing…"
-                className="mt-3"
-                onClick={onRetry}
-                variant="secondary"
-            >
-                Try again
-            </Button>
-        </div>
+        <Alert
+            action={
+                <Button
+                    busy={busy}
+                    busyLabel="Refreshing…"
+                    onClick={onRetry}
+                    size="sm"
+                    variant="secondary"
+                >
+                    Try again
+                </Button>
+            }
+            focusOnError={false}
+            message={`${label}: ${dashboardBrowserFailureMessage(error)}`}
+        />
     );
 }
 
@@ -197,7 +197,7 @@ export function OpenClawSettingsPanel() {
                         <div className="mt-4 grid gap-3">
                             <Alert
                                 focusOnError={false}
-                                message="Warning: this browser session retains a recovery key for a Gateway restart request that did not reach a confirmed success. Retrying reuses that exact request. Discarding it can enqueue a second restart if the earlier request already completed; configuration refresh does not prove restart status."
+                                message="Warning: this browser session retains a recovery key for a Gateway restart request that did not reach a confirmed success. Retrying reuses that exact request. Discarding it can enqueue a second restart if the earlier request already completed. Configuration refresh does not prove restart status."
                             />
                             <div className="flex flex-wrap gap-3">
                                 <ActionLink to="/jobs" variant="secondary">

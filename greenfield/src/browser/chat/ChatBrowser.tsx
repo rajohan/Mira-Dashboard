@@ -918,7 +918,7 @@ export function ChatBrowser({
                     error: "Outcome is unknown",
                 });
                 setActionError(
-                    "Dashboard could not confirm whether the message was sent. It will check automatically; do not send it again."
+                    "Dashboard could not confirm whether the message was sent. It will check automatically. Do not send it again."
                 );
                 return;
             }
@@ -1094,7 +1094,7 @@ export function ChatBrowser({
             if (!output.aborted) {
                 releaseGate();
                 setActionError(
-                    "OpenClaw did not stop this response. Its live status has been refreshed; try again if it is still running."
+                    "OpenClaw did not stop this response. Its live status has been refreshed. Try again if it is still running."
                 );
             }
             reconcileGate();
@@ -1732,7 +1732,7 @@ export function ChatBrowser({
                 setCompanionOverride((current) => ({
                     ...current,
                     [sessionKey]: {
-                        error: "Dashboard could not confirm whether the chat companion received the question. It will check automatically; do not submit it again.",
+                        error: "Dashboard could not confirm whether the chat companion received the question. It will check automatically. Do not submit it again.",
                         question,
                         status: "answering",
                     },
@@ -1881,7 +1881,7 @@ export function ChatBrowser({
                     [sessionKey]: companionOperationView(
                         companionBeforeReset,
                         "resetting",
-                        "Dashboard could not confirm whether the chat companion was reset. It will check automatically; do not reset it again."
+                        "Dashboard could not confirm whether the chat companion was reset. It will check automatically. Do not reset it again."
                     ),
                 }));
                 try {

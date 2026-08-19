@@ -14,6 +14,7 @@ import {
 import { ActionLink } from "../ui/ActionLink.tsx";
 import { Alert } from "../ui/Alert.tsx";
 import { Badge } from "../ui/Badge.tsx";
+import { Button } from "../ui/Button.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { Text } from "../ui/Text.tsx";
 
@@ -96,6 +97,18 @@ export function TaskAutomationSummary({ automation }: TaskAutomationSummaryProps
                 </Text>
             )}
             <Alert
+                action={
+                    retainedStatus ? (
+                        <Button
+                            busy={cron.isFetching}
+                            onClick={() => void cron.refetch()}
+                            size="sm"
+                            variant="secondary"
+                        >
+                            Try again
+                        </Button>
+                    ) : undefined
+                }
                 className="mt-3"
                 focusOnError={false}
                 message={
@@ -103,7 +116,7 @@ export function TaskAutomationSummary({ automation }: TaskAutomationSummaryProps
                         ? "The latest refresh failed, so the last available OpenClaw status is shown."
                         : undefined
                 }
-                variant="info"
+                variant="warning"
             />
             <dl className="mt-4 grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
                 <div className="min-w-0">

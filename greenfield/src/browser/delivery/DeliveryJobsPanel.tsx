@@ -57,7 +57,7 @@ function deploymentBadgeVariant(
 function deploymentStatusLabel(deployment: DeliveryDeployment): string {
     if (deployment.state !== "succeeded") return deployment.state;
     if (deployment.outcome === "enqueued") {
-        return "Merge queued; deploy not started";
+        return "Merge queued. Deploy not started";
     }
     if (deployment.outcome === "completed-with-warnings") {
         return "Completed with warnings";
@@ -65,7 +65,7 @@ function deploymentStatusLabel(deployment: DeliveryDeployment): string {
     if (deployment.outcome === "unknown-outcome") return "Outcome unknown";
     return deployment.postSettlementWarnings === undefined
         ? "Completed"
-        : "Completed; overview refresh pending";
+        : "Completed. Overview refresh pending";
 }
 
 /** @returns Latest ten production Delivery Jobs, with no raw output or diagnostics. */

@@ -180,7 +180,7 @@ test("Moltbook route renders LKG state, encoded links, and independent content t
         });
         expect(
             await screen.findByText(
-                "The new feed could not be loaded; showing hot feed data."
+                "The new feed could not be loaded. Showing hot feed data."
             )
         ).toBeVisible();
         expect(screen.getByText("A feed post")).toBeVisible();

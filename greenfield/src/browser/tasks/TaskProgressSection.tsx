@@ -1,8 +1,9 @@
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import type { TaskProgressUpdate } from "../../contracts/taskModel.ts";
+import { mergeLiveHistoryRows } from "../api/liveHistory.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { dashboardBrowserFailureMessage } from "../api/trpcError.ts";
 import { formatDashboardDateTimeToMinute } from "../lib/formatDateTime.ts";
@@ -17,7 +18,10 @@ import { Markdown } from "../ui/Markdown.tsx";
 import { Text } from "../ui/Text.tsx";
 import { useTaskMutation } from "./taskMutations.ts";
 import { TaskProgressForm } from "./TaskProgressForm.tsx";
-import { taskProgressQueryOptions } from "./taskQueries.ts";
+import {
+    taskProgressLiveHeadQueryOptions,
+    taskProgressQueryOptions,
+} from "./taskQueries.ts";
 
 function taskProgressAuthorLabel(update: TaskProgressUpdate): string {
     return update.author.kind === "user"
@@ -106,13 +110,19 @@ interface TaskProgressSectionProps {
 export function TaskProgressSection({ taskId }: TaskProgressSectionProps) {
     const client = useDashboardTrpcClient();
     const progress = useInfiniteQuery(taskProgressQueryOptions(client, taskId));
+    const progressLiveHead = useQuery(taskProgressLiveHeadQueryOptions(client, taskId));
     const addProgress = useTaskMutation("tasks.addUpdate");
     const updateProgress = useTaskMutation("tasks.updateProgress");
     const deleteProgress = useTaskMutation("tasks.deleteProgress");
     const [editingId, setEditingId] = useState<string>();
     const [pendingDelete, setPendingDelete] = useState<TaskProgressUpdate>();
-    const updates = progress.data?.pages.flatMap((page) => page.updates) ?? [];
+    const updates = mergeLiveHistoryRows(
+        progressLiveHead.data?.updates ?? [],
+        progress.data?.pages.flatMap((page) => page.updates) ?? [],
+        ({ id }) => id
+    );
     const failure =
+        progressLiveHead.error ??
         progress.error ??
         addProgress.error ??
         updateProgress.error ??

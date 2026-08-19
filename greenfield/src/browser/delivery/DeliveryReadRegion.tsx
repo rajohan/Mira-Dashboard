@@ -1,7 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
-import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -15,13 +14,12 @@ import { deliveryBrowserRetainedMessage } from "./deliveryRetainedMessage.ts";
 
 interface DeliveryReadRegionProps {
     readonly children?: ReactNode;
-    readonly checkedAtMs?: number;
     readonly error: unknown;
     readonly fetching: boolean;
     readonly headingId: string;
     readonly loading: boolean;
-    readonly observedAtMs?: number;
     readonly onRetry: () => void;
+    readonly showRetainedFeedback?: boolean;
     readonly state?: "fresh" | "last-known-good" | "unavailable";
     readonly title: string;
     readonly titleIcon?: LucideIcon;
@@ -31,20 +29,21 @@ interface DeliveryReadRegionProps {
 /** @returns One independently refreshable Delivery read boundary. */
 export function DeliveryReadRegion({
     children,
-    checkedAtMs,
     error,
     fetching,
     headingId,
     loading,
-    observedAtMs,
     onRetry,
+    showRetainedFeedback = true,
     state,
     title,
     titleIcon,
     visuallyHiddenTitle = false,
 }: DeliveryReadRegionProps) {
     const browserRetained = error !== null && state !== undefined;
-    const hideTitle = visuallyHiddenTitle && state === "fresh" && !browserRetained;
+    const hideTitle =
+        visuallyHiddenTitle &&
+        (!showRetainedFeedback || (state === "fresh" && !browserRetained));
     return (
         <section
             aria-label={hideTitle ? title : undefined}
@@ -67,14 +66,11 @@ export function DeliveryReadRegion({
                         </Heading>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
-                        {state === "last-known-good" ? (
+                        {showRetainedFeedback && state === "last-known-good" ? (
                             <Badge variant="warning">Server last-known-good</Badge>
                         ) : null}
-                        {browserRetained ? (
+                        {showRetainedFeedback && browserRetained ? (
                             <Badge variant="warning">Browser-retained</Badge>
-                        ) : null}
-                        {state === "unavailable" ? (
-                            <Badge variant="danger">Unavailable</Badge>
                         ) : null}
                     </div>
                 </div>
@@ -92,14 +88,14 @@ export function DeliveryReadRegion({
                     title={`${title} unavailable`}
                 />
             ) : null}
-            {browserRetained ? (
+            {showRetainedFeedback && browserRetained ? (
                 <Alert
                     focusOnError={false}
                     message={deliveryBrowserRetainedMessage(title)}
                     variant="warning"
                 />
             ) : null}
-            {state === "last-known-good" ? (
+            {showRetainedFeedback && state === "last-known-good" ? (
                 <Alert
                     focusOnError={false}
                     message={`The worker retained the last verified ${title.toLowerCase()} snapshot. Consequential controls require fresh data.`}
@@ -108,24 +104,22 @@ export function DeliveryReadRegion({
             ) : null}
             {state === "unavailable" ? (
                 <Card>
-                    <Text>No verified {title.toLowerCase()} data is available yet.</Text>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                        <Text>
+                            No verified {title.toLowerCase()} data is available yet.
+                        </Text>
+                        <Badge variant="danger">Unavailable</Badge>
+                    </div>
                 </Card>
             ) : null}
-            {state !== undefined && (state !== "fresh" || browserRetained) ? (
+            {showRetainedFeedback &&
+            state !== undefined &&
+            (state !== "fresh" || browserRetained) ? (
                 <Button busy={fetching} onClick={onRetry} variant="secondary">
                     Try again
                 </Button>
             ) : null}
             {state !== undefined && state !== "unavailable" ? children : null}
-            {checkedAtMs === undefined ||
-            (state === "fresh" && !browserRetained) ? null : (
-                <Text size="sm" tone="muted">
-                    Checked {formatDashboardDateTime(checkedAtMs)}
-                    {observedAtMs === undefined
-                        ? ""
-                        : ` · observed ${formatDashboardDateTime(observedAtMs)}`}
-                </Text>
-            )}
         </section>
     );
 }

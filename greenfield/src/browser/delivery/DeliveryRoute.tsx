@@ -26,7 +26,6 @@ import {
     rollbackReleasePrompt,
     stopPreviewPrompt,
 } from "./deliveryOperations.ts";
-import { deliveryFailureMessage } from "./deliveryPresentation.ts";
 import {
     deliveryCheckoutQueryOptions,
     deliveryDeploymentsQueryOptions,
@@ -36,7 +35,6 @@ import {
     useDeliveryRealtimeInvalidation,
 } from "./deliveryQueries.ts";
 import { DeliveryReadRegion } from "./DeliveryReadRegion.tsx";
-import { deliveryBrowserRetainedMessage } from "./deliveryRetainedMessage.ts";
 import { PreviewPanel } from "./PreviewPanel.tsx";
 import { ProductionReleasesPanel } from "./ProductionPanel.tsx";
 import { PullRequestBrowser } from "./PullRequestBrowser.tsx";
@@ -107,6 +105,31 @@ export function DeliveryRoute({ client }: DeliveryRouteProps) {
     const availableReleases = availableReleasesResult(releases);
     const pullRequestsBrowserRetained =
         pullRequestsQuery.error !== null && pullRequests?.state !== undefined;
+    const retainedReads = [
+        ["production releases", releases?.state, releasesQuery.error],
+        ["pull request preview", preview?.state, previewQuery.error],
+        ["production checkout", checkout?.state, checkoutQuery.error],
+        ["pull requests", pullRequests?.state, pullRequestsQuery.error],
+        ["recent Delivery jobs", deployments?.state, deploymentsQuery.error],
+    ].flatMap(([label, state, error]) =>
+        state === "last-known-good" || (state !== undefined && error !== null)
+            ? [label]
+            : []
+    );
+    const retainedReadsFetching =
+        releasesQuery.isFetching ||
+        previewQuery.isFetching ||
+        checkoutQuery.isFetching ||
+        pullRequestsQuery.isFetching ||
+        deploymentsQuery.isFetching;
+    const retryRetainedReads = () =>
+        void Promise.allSettled([
+            releasesQuery.refetch(),
+            previewQuery.refetch(),
+            checkoutQuery.refetch(),
+            pullRequestsQuery.refetch(),
+            deploymentsQuery.refetch(),
+        ]);
     const pullRequestsFresh =
         pullRequests?.state === "fresh" && pullRequestsQuery.error === null;
     const previewFresh = preview?.state === "fresh" && previewQuery.error === null;
@@ -307,19 +330,31 @@ export function DeliveryRoute({ client }: DeliveryRouteProps) {
                 {operations.error !== undefined && operations.pending === undefined ? (
                     <Alert message={operations.error} />
                 ) : null}
+                {retainedReads.length === 0 ? null : (
+                    <Alert
+                        action={
+                            <Button
+                                busy={retainedReadsFetching}
+                                onClick={retryRetainedReads}
+                                size="sm"
+                                variant="secondary"
+                            >
+                                Try again
+                            </Button>
+                        }
+                        focusOnError={false}
+                        message={`The latest Delivery refresh did not complete. Retained data is shown for ${retainedReads.join(", ")}. Consequential controls require fresh data.`}
+                        variant="warning"
+                    />
+                )}
 
                 <DeliveryReadRegion
-                    checkedAtMs={releases?.checkedAtMs}
                     error={releasesQuery.error}
                     fetching={releasesQuery.isFetching}
                     headingId="delivery-releases-heading"
                     loading={releasesQuery.isPending}
-                    observedAtMs={
-                        releases?.state === "unavailable"
-                            ? undefined
-                            : releases?.observedAtMs
-                    }
                     onRetry={() => void releasesQuery.refetch()}
+                    showRetainedFeedback={false}
                     state={releases?.state}
                     title="Production releases"
                     titleIcon={Rocket}
@@ -332,14 +367,7 @@ export function DeliveryRoute({ client }: DeliveryRouteProps) {
                             }
                             deployAvailable={deployAvailable}
                             deployReason={deployReason}
-                            checkoutError={
-                                checkoutQuery.error === null
-                                    ? undefined
-                                    : deliveryFailureMessage(checkoutQuery.error)
-                            }
-                            checkoutRetryBusy={checkoutQuery.isFetching}
                             onDeploy={requestDeploy}
-                            onRetryCheckout={() => void checkoutQuery.refetch()}
                             onRollback={() => {
                                 if (!releasesFresh) return;
                                 const prompt = rollbackReleasePrompt(
@@ -355,17 +383,12 @@ export function DeliveryRoute({ client }: DeliveryRouteProps) {
                 </DeliveryReadRegion>
 
                 <DeliveryReadRegion
-                    checkedAtMs={preview?.checkedAtMs}
                     error={previewQuery.error}
                     fetching={previewQuery.isFetching}
                     headingId="delivery-preview-heading"
                     loading={previewQuery.isPending}
-                    observedAtMs={
-                        preview?.state === "unavailable"
-                            ? undefined
-                            : preview?.observedAtMs
-                    }
                     onRetry={() => void previewQuery.refetch()}
+                    showRetainedFeedback={false}
                     state={preview?.state}
                     title="Pull request preview"
                     visuallyHiddenTitle
@@ -386,29 +409,16 @@ export function DeliveryRoute({ client }: DeliveryRouteProps) {
                     )}
                 </DeliveryReadRegion>
 
-                {pullRequestsBrowserRetained ? (
-                    <Alert
-                        focusOnError={false}
-                        message={deliveryBrowserRetainedMessage("Pull requests")}
-                        variant="warning"
-                    />
-                ) : null}
-
                 <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,1fr)_22.5rem]">
                     <DeliveryReadRegion
-                        checkedAtMs={pullRequests?.checkedAtMs}
                         error={
                             pullRequestsBrowserRetained ? null : pullRequestsQuery.error
                         }
                         fetching={pullRequestsQuery.isFetching}
                         headingId="delivery-pull-requests-heading"
                         loading={pullRequestsQuery.isPending}
-                        observedAtMs={
-                            pullRequests?.state === "unavailable"
-                                ? undefined
-                                : pullRequests?.observedAtMs
-                        }
                         onRetry={() => void pullRequestsQuery.refetch()}
+                        showRetainedFeedback={false}
                         state={pullRequests?.state}
                         title="Pull requests"
                         visuallyHiddenTitle
@@ -432,12 +442,12 @@ export function DeliveryRoute({ client }: DeliveryRouteProps) {
                         }
                     >
                         <DeliveryReadRegion
-                            checkedAtMs={deployments?.checkedAtMs}
                             error={deploymentsQuery.error}
                             fetching={deploymentsQuery.isFetching}
                             headingId="delivery-deployments-heading"
                             loading={deploymentsQuery.isPending}
                             onRetry={() => void deploymentsQuery.refetch()}
+                            showRetainedFeedback={false}
                             state={deployments?.state}
                             title="Recent Delivery jobs"
                             visuallyHiddenTitle
@@ -462,7 +472,7 @@ export function DeliveryRoute({ client }: DeliveryRouteProps) {
                 error={
                     operations.current
                         ? operations.error
-                        : "Delivery state changed; reopen this confirmation."
+                        : "Delivery state changed. Reopen this confirmation."
                 }
                 onCancel={operations.close}
                 onConfirm={() => void operations.confirm()}

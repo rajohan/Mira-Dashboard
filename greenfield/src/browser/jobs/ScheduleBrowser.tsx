@@ -4,6 +4,7 @@ import { CalendarClock } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import type { ScheduleConfiguration } from "../../contracts/jobModel.ts";
+import { mergeLiveHistoryRows } from "../api/liveHistory.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Badge } from "../ui/Badge.tsx";
@@ -20,6 +21,7 @@ import { useRunScheduleMutation, useUpdateScheduleMutation } from "./jobMutation
 import {
     scheduleDetailQueryOptions,
     scheduleListQueryOptions,
+    scheduleRunLiveHeadQueryOptions,
     scheduleRunListQueryOptions,
     uniqueJobRows,
 } from "./jobQueries.ts";
@@ -51,6 +53,7 @@ function SelectedSchedule({
     const client = useDashboardTrpcClient();
     const detail = useQuery(scheduleDetailQueryOptions(client, id));
     const history = useInfiniteQuery(scheduleRunListQueryOptions(client, id));
+    const liveHead = useQuery(scheduleRunLiveHeadQueryOptions(client, id));
     const update = useUpdateScheduleMutation();
     const run = useRunScheduleMutation();
     const historyScrollContainerRef = useRef<HTMLDivElement>(null);
@@ -59,7 +62,13 @@ function SelectedSchedule({
     const hasNextHistoryPage = history.hasNextPage;
     const historyPageLoading = history.isFetchingNextPage;
     const historyPageFailed = history.error !== null;
-    const runs = uniqueJobRows(history.data?.pages.flatMap((page) => page.runs) ?? []);
+    const historyError = liveHead.error ?? history.error;
+    const historyHasData = liveHead.data !== undefined || history.data !== undefined;
+    const runs = mergeLiveHistoryRows(
+        liveHead.data?.runs ?? [],
+        uniqueJobRows(history.data?.pages.flatMap((page) => page.runs) ?? []),
+        ({ id: runId }) => runId
+    );
 
     useEffect(() => {
         const sentinel = historySentinelRef.current;
@@ -113,6 +122,14 @@ function SelectedSchedule({
 
     const schedule = detail.data;
     const mutationError = update.error ?? run.error;
+    const scheduleErrorMessage =
+        mutationError === null && detail.error === null
+            ? undefined
+            : jobBrowserFailureMessage(mutationError ?? detail.error);
+    const historyErrorMessage =
+        historyError === null ? undefined : jobBrowserFailureMessage(historyError);
+    const historyErrorIsDistinct =
+        historyErrorMessage !== undefined && historyErrorMessage !== scheduleErrorMessage;
     const selectedRunDetail = selectedRunId !== undefined && (
         <div className="mt-2">
             <ExpandableCard
@@ -131,19 +148,21 @@ function SelectedSchedule({
         </div>
     );
     let historyContent;
-    if (history.isPending && history.data === undefined) {
+    if (history.isPending && liveHead.isPending && !historyHasData) {
         historyContent = <PageState label="Loading schedule runs…" status="loading" />;
-    } else if (history.data === undefined) {
+    } else if (!historyHasData) {
         historyContent = (
             <PageState
-                message={jobBrowserFailureMessage(history.error)}
-                onRetry={() => void history.refetch()}
-                retryBusy={history.isFetching}
+                message={jobBrowserFailureMessage(historyError)}
+                onRetry={() =>
+                    void Promise.allSettled([liveHead.refetch(), history.refetch()])
+                }
+                retryBusy={liveHead.isFetching || history.isFetching}
                 status="error"
                 title="Schedule history unavailable"
             />
         );
-    } else if (runs.length === 0 && !hasNextHistoryPage && history.error === null) {
+    } else if (runs.length === 0 && !hasNextHistoryPage && historyError === null) {
         historyContent = (
             <>
                 <div className="border-primary-700 bg-primary-900/40 rounded-lg border px-4 py-8 text-center">
@@ -161,24 +180,27 @@ function SelectedSchedule({
         historyContent = (
             <>
                 <Alert
+                    action={
+                        historyErrorIsDistinct ? (
+                            <Button
+                                busy={liveHead.isFetching || history.isFetching}
+                                onClick={() =>
+                                    void Promise.allSettled([
+                                        liveHead.refetch(),
+                                        history.refetch(),
+                                    ])
+                                }
+                                size="sm"
+                                variant="secondary"
+                            >
+                                Retry schedule history
+                            </Button>
+                        ) : undefined
+                    }
                     className="mb-4"
                     focusOnError={false}
-                    message={
-                        history.error === null
-                            ? undefined
-                            : jobBrowserFailureMessage(history.error)
-                    }
+                    message={historyErrorIsDistinct ? historyErrorMessage : undefined}
                 />
-                {historyPageFailed && (
-                    <Button
-                        busy={history.isFetching}
-                        className="mb-4"
-                        onClick={() => void history.refetch()}
-                        variant="secondary"
-                    >
-                        Retry schedule history
-                    </Button>
-                )}
                 <Virtualizer<HTMLLIElement>
                     count={runs.length}
                     estimateSize={() => 180}
@@ -311,11 +333,7 @@ function SelectedSchedule({
             disableError={
                 update.error === null ? undefined : jobBrowserFailureMessage(update.error)
             }
-            error={
-                mutationError === null && detail.error === null
-                    ? undefined
-                    : jobBrowserFailureMessage(mutationError ?? detail.error)
-            }
+            error={scheduleErrorMessage}
             errorFocus={mutationError !== null}
             history={historyContent}
             onDisable={(disableIntent, expectedVersion) =>

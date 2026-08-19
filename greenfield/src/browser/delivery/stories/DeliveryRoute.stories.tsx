@@ -540,7 +540,7 @@ export const BrowserRetained: Story = {
         await canvas.findByRole("link", { name: /Delivery parity/iu }, { timeout: 5000 });
         await expect(
             await canvas.findByText(
-                "The latest pull requests refresh failed. Showing browser-retained data; consequential controls are disabled."
+                "The latest Delivery refresh did not complete. Retained data is shown for pull requests. Consequential controls require fresh data."
             )
         ).toBeVisible();
     },

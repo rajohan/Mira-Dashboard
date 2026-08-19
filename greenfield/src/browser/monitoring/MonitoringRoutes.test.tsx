@@ -162,7 +162,7 @@ class MonitoringRouteTransport implements DashboardTrpcTransport {
         this.reportListIds = this.reportListIds.filter(
             (candidateId) => candidateId !== id
         );
-        if (this.failReportListAfterDelete) this.reportListFailuresRemaining = 1;
+        if (this.failReportListAfterDelete) this.reportListFailuresRemaining = 2;
         return Promise.resolve({ deletedAtMs: Date.now(), id });
     }
 
@@ -365,7 +365,7 @@ describe("monitoring browser routes", () => {
 
     test("auto-updates reports without routine refresh and retains initial retry", async () => {
         const transport = new MonitoringRouteTransport();
-        transport.reportListFailuresRemaining = 1;
+        transport.reportListFailuresRemaining = 2;
         await renderMonitoringRoute("/reports", transport);
         const user = userEvent.setup();
 
@@ -395,7 +395,7 @@ describe("monitoring browser routes", () => {
 
     test("auto-updates incidents without routine refresh and retains initial retry", async () => {
         const transport = new MonitoringRouteTransport();
-        transport.incidentListFailuresRemaining = 1;
+        transport.incidentListFailuresRemaining = 2;
         await renderMonitoringRoute("/incidents", transport);
         const user = userEvent.setup();
 
@@ -435,7 +435,7 @@ describe("monitoring browser routes", () => {
     test("loads an exact report deep link independently and keeps Markdown raw HTML inert", async () => {
         const transport = new MonitoringRouteTransport();
         transport.reportListIds = [reportId];
-        transport.reportListFailuresRemaining = 1;
+        transport.reportListFailuresRemaining = 2;
         transport.reports[1] = report(
             secondReportId,
             "Direct report",
@@ -477,13 +477,13 @@ describe("monitoring browser routes", () => {
         await user.type(source, "openclaw");
         expect(
             transport.calls.filter(({ path }) => path === "reports.list")
-        ).toHaveLength(1);
+        ).toHaveLength(2);
 
         await user.click(screen.getByRole("button", { name: "Apply" }));
         await waitFor(() =>
             expect(
                 transport.calls.filter(({ path }) => path === "reports.list")
-            ).toHaveLength(2)
+            ).toHaveLength(4)
         );
         expect(
             transport.calls.findLast(({ path }) => path === "reports.list")?.input
@@ -510,7 +510,7 @@ describe("monitoring browser routes", () => {
         expect(screen.getAllByText("Primary heartbeat")).toHaveLength(1);
         expect(
             transport.calls.filter(({ path }) => path === "reports.list")
-        ).toHaveLength(2);
+        ).toHaveLength(3);
     });
 
     test("removes a deleted report from cached lists when the refresh fails", async () => {
@@ -618,7 +618,7 @@ describe("monitoring browser routes", () => {
 
     test("loads an exact incident deep link independently of list availability", async () => {
         const transport = new MonitoringRouteTransport();
-        transport.incidentListFailuresRemaining = 1;
+        transport.incidentListFailuresRemaining = 2;
         await renderMonitoringRoute(
             `/incidents?incidentId=${secondIncidentId}`,
             transport

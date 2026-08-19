@@ -63,7 +63,7 @@ describe("DeliveryJobsPanel", () => {
         render(<RouterProvider router={router} />);
 
         expect(await screen.findByText("Completed")).toBeTruthy();
-        expect(screen.getByText("Merge queued; deploy not started")).toBeTruthy();
+        expect(screen.getByText("Merge queued. Deploy not started")).toBeTruthy();
         expect(screen.getByText("Completed with warnings")).toBeTruthy();
         expect(screen.getByText("Deployment did not start.")).toBeTruthy();
     });

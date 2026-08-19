@@ -43,7 +43,7 @@ export const serviceActionPresentations = Object.freeze({
             "Restarts the OpenClaw Gateway through the existing fixed worker-owned lifecycle action.",
         retryLabel: "Retry OpenClaw restart request",
         warning:
-            "Restarting the OpenClaw Gateway interrupts active Gateway sessions. Review Dashboard jobs for the durable result; a queued request does not confirm that the restart completed.",
+            "Restarting the OpenClaw Gateway interrupts active Gateway sessions. Review Dashboard jobs for the durable result. A queued request does not confirm that the restart completed.",
     },
     "openclaw-update": {
         actionLabel: "OpenClaw update",

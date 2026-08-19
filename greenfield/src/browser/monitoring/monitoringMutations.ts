@@ -1,6 +1,7 @@
 import { type InfiniteData, type QueryClient, useMutation } from "@tanstack/react-query";
 
 import type { ListReportsResult } from "../../contracts/reports.ts";
+import { liveHistoryArchiveQueryRoot } from "../api/liveHistory.ts";
 import type {
     DashboardProcedureInput,
     DashboardProcedureOutput,
@@ -20,7 +21,11 @@ import {
  */
 export function removeReportFromCachedLists(queryClient: QueryClient, id: string): void {
     queryClient.setQueriesData<InfiniteData<ListReportsResult>>(
-        { queryKey: reportListQueryRoot },
+        {
+            predicate: ({ queryKey }) =>
+                queryKey[0] === liveHistoryArchiveQueryRoot[0] &&
+                reportListQueryRoot.every((part, index) => queryKey[index + 1] === part),
+        },
         (data) =>
             data === undefined
                 ? undefined
@@ -30,6 +35,20 @@ export function removeReportFromCachedLists(queryClient: QueryClient, id: string
                           ...page,
                           reports: page.reports.filter((report) => report.id !== id),
                       })),
+                  }
+    );
+    queryClient.setQueriesData<ListReportsResult>(
+        {
+            predicate: ({ queryKey }) =>
+                reportListQueryRoot.every((part, index) => queryKey[index] === part) &&
+                queryKey.at(-1) === "live-head",
+        },
+        (data) =>
+            data === undefined
+                ? undefined
+                : {
+                      ...data,
+                      reports: data.reports.filter((report) => report.id !== id),
                   }
     );
 }

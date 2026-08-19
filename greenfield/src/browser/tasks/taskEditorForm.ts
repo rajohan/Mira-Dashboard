@@ -69,12 +69,12 @@ const taskLabelsTextSchema = v.pipe(
     v.string("Add labels, or leave them blank."),
     v.maxLength(
         taskMaximumLabels * (taskLabelMaximumLength * 2 + 2),
-        "Use at most 20 unique labels; each label may contain up to 64 visible characters."
+        "Use at most 20 unique labels. Each label may contain up to 64 visible characters."
     ),
     v.check(
         (value) =>
             v.safeParse(taskLabelInputSchema, rawTaskLabelsFromText(value)).success,
-        "Use at most 20 unique labels; each label may contain up to 64 visible characters."
+        "Use at most 20 unique labels. Each label may contain up to 64 visible characters."
     )
 );
 

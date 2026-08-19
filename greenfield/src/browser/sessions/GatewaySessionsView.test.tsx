@@ -365,7 +365,9 @@ describe("Gateway sessions view", () => {
         );
 
         expect(screen.queryByText("Last known")).toBeNull();
-        expect(screen.getByRole("alert")).toHaveTextContent("Showing session data from");
+        expect(
+            screen.getByText(/Showing session data from/u).closest('[role="status"]')
+        ).toBeTruthy();
         expect(
             screen.getByRole("table", { name: "Current OpenClaw sessions" })
         ).toBeTruthy();

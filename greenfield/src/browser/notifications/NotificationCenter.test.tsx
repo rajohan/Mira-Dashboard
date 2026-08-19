@@ -1467,7 +1467,7 @@ describe("Notification center", () => {
                 await Promise.resolve();
             });
             const partialFailureCopy =
-                "The bulk action may have completed partially. A refresh was requested; confirm the current state before retrying.";
+                "The bulk action may have completed partially. A refresh was requested. Confirm the current state before retrying.";
             await waitFor(() =>
                 expect(within(confirmation).getByText(partialFailureCopy)).toBeTruthy()
             );

@@ -1,9 +1,17 @@
-import { infiniteQueryOptions, type QueryClient } from "@tanstack/react-query";
+import {
+    infiniteQueryOptions,
+    queryOptions,
+    type QueryClient,
+} from "@tanstack/react-query";
 
 import type {
     ListAgentTaskHistoryInput,
     ListAgentTaskHistoryResult,
 } from "../../contracts/agents.ts";
+import {
+    liveHistoryArchiveQueryKey,
+    liveHistoryHeadQueryKey,
+} from "../api/liveHistory.ts";
 import type { DashboardTrpcClient } from "../api/trpcClient.ts";
 
 type AgentHistoryCursor = NonNullable<ListAgentTaskHistoryInput["cursor"]>;
@@ -26,7 +34,17 @@ export function agentHistoryQueryOptions(client: DashboardTrpcClient) {
                 { signal }
             ),
         getNextPageParam: (lastPage) => lastPage.nextCursor,
-        queryKey: [...agentQueryKey, "history"],
+        queryKey: liveHistoryArchiveQueryKey([...agentQueryKey, "history"]),
+        staleTime: Number.POSITIVE_INFINITY,
+    });
+}
+
+/** @returns Live first-page projection for current agent task history. */
+export function agentHistoryLiveHeadQueryOptions(client: DashboardTrpcClient) {
+    return queryOptions({
+        queryFn: ({ signal }): Promise<ListAgentTaskHistoryResult> =>
+            client.query("agents.listTaskHistory", { limit: 50 }, { signal }),
+        queryKey: liveHistoryHeadQueryKey([...agentQueryKey, "history"]),
         staleTime: 10_000,
     });
 }

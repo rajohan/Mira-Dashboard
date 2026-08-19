@@ -96,7 +96,7 @@ function SqliteLifecycleObservationStatus({
         badgeLabel = "Unavailable";
         badgeVariant = "default";
     } else if (retained) {
-        badgeLabel = "Last-known-good";
+        badgeLabel = "Retained";
         badgeVariant = "warning";
     }
     return (
@@ -106,12 +106,6 @@ function SqliteLifecycleObservationStatus({
             </Text>
             <div className="mt-1 flex flex-wrap items-center gap-2">
                 <Badge variant={badgeVariant}>{badgeLabel}</Badge>
-                {retained ? (
-                    <Text size="sm" tone="muted">
-                        Retained since{" "}
-                        <ObservationTime timestampMs={observation.staleSinceMs} />
-                    </Text>
-                ) : null}
             </div>
         </div>
     );
@@ -373,13 +367,15 @@ function sqliteLifecycleAttention(
 }
 
 function DatabaseOverviewContent({
-    browserCacheRetained,
     observationConfirmed,
+    onRetry,
     overview,
+    retryBusy,
 }: {
-    readonly browserCacheRetained: boolean;
     readonly observationConfirmed: boolean;
+    readonly onRetry: () => void;
     readonly overview: DatabaseOverview;
+    readonly retryBusy: boolean;
 }) {
     if (overview.sqlite.state === "unavailable") {
         if (!observationConfirmed) {
@@ -393,9 +389,10 @@ function DatabaseOverviewContent({
         }
         return (
             <PageState
-                description="No previously verified SQLite observation is available. Retry after the Dashboard database is ready."
-                icon={Database}
-                status="empty"
+                message="No previously verified SQLite observation is available. Retry after the Dashboard database is ready."
+                onRetry={onRetry}
+                retryBusy={retryBusy}
+                status="error"
                 title="SQLite diagnostics unavailable"
             />
         );
@@ -424,7 +421,7 @@ function DatabaseOverviewContent({
                     <Alert
                         focusOnError={false}
                         message="The latest SQLite diagnostics check failed. Showing the most recent verified observation."
-                        variant="info"
+                        variant="warning"
                     />
                 ) : null}
                 {storage.requiresVacuumReview ? (
@@ -449,28 +446,6 @@ function DatabaseOverviewContent({
                         variant="warning"
                     />
                 ))}
-                {retained || browserCacheRetained ? (
-                    <div className="flex flex-wrap items-center gap-3">
-                        {retained ? (
-                            <Badge variant="warning">Last-known-good</Badge>
-                        ) : null}
-                        {browserCacheRetained ? (
-                            <Badge variant="warning">Browser cache retained</Badge>
-                        ) : null}
-                        <Text size="sm" tone="muted">
-                            Observed{" "}
-                            <ObservationTime timestampMs={overview.sqlite.observedAtMs} />
-                        </Text>
-                        {retained ? (
-                            <Text size="sm" tone="muted">
-                                Retained since{" "}
-                                <ObservationTime
-                                    timestampMs={overview.sqlite.staleSinceMs}
-                                />
-                            </Text>
-                        ) : null}
-                    </div>
-                ) : null}
                 <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                     <MetricCard
                         description={`Canonical ${overview.sqlite.fileName} without its host path.`}
@@ -548,7 +523,6 @@ export function DatabaseRouteContent({ onSelect, source }: DatabaseRouteContentP
     const refresh = () =>
         void queryClient.invalidateQueries({ queryKey: databaseOverviewQueryKey });
     const complete = query.data !== undefined;
-    const selectedSourceUnavailable = query.data?.[source].state === "unavailable";
 
     return (
         <div>
@@ -577,31 +551,34 @@ export function DatabaseRouteContent({ onSelect, source }: DatabaseRouteContentP
                         <div className="space-y-4">
                             {query.error === null ? null : (
                                 <Alert
+                                    action={
+                                        <Button
+                                            busy={query.isFetching}
+                                            onClick={refresh}
+                                            size="sm"
+                                            variant="secondary"
+                                        >
+                                            Try again
+                                        </Button>
+                                    }
                                     focusOnError={false}
                                     message="The latest refresh failed. Showing retained database data."
-                                    variant="info"
+                                    variant="warning"
                                 />
-                            )}
-                            {(query.error !== null || selectedSourceUnavailable) && (
-                                <Button
-                                    busy={query.isFetching}
-                                    onClick={refresh}
-                                    variant="secondary"
-                                >
-                                    Try again
-                                </Button>
                             )}
                             {source === "sqlite" ? (
                                 <DatabaseOverviewContent
-                                    browserCacheRetained={query.error !== null}
                                     observationConfirmed={query.isFetchedAfterMount}
+                                    onRetry={refresh}
                                     overview={query.data}
+                                    retryBusy={query.isFetching}
                                 />
                             ) : (
                                 <PostgresqlDatabaseOverview
-                                    browserCacheRetained={query.error !== null}
                                     observation={query.data.postgresql}
                                     observationConfirmed={query.isFetchedAfterMount}
+                                    onRetry={refresh}
+                                    retryBusy={query.isFetching}
                                 />
                             )}
                         </div>
