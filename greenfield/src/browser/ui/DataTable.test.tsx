@@ -198,6 +198,26 @@ describe("Dashboard data table and virtualizer", () => {
         expect(within(table).getAllByRole("row")[1]).toHaveTextContent("First row");
     });
 
+    test("starts numeric columns ascending before descending and clearing", async () => {
+        render(<TableFixture data={staticRows} virtualized={false} />);
+
+        const table = screen.getByRole("table", { name: "Fixture rows" });
+        const header = within(table).getByRole("columnheader", { name: "Rank" });
+        const sortButton = within(header).getByRole("button");
+
+        await userEvent.click(sortButton);
+        expect(header).toHaveAttribute("aria-sort", "ascending");
+        expect(within(table).getAllByRole("row")[1]).toHaveTextContent("Second row");
+
+        await userEvent.click(sortButton);
+        expect(header).toHaveAttribute("aria-sort", "descending");
+        expect(within(table).getAllByRole("row")[1]).toHaveTextContent("First row");
+
+        await userEvent.click(sortButton);
+        expect(header).not.toHaveAttribute("aria-sort");
+        expect(within(table).getAllByRole("row")[1]).toHaveTextContent("First row");
+    });
+
     test("composes the table with a bounded virtual row window", () => {
         render(<TableFixture data={virtualRows} virtualized />);
 

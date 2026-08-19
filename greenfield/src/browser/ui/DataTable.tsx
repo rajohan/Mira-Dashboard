@@ -48,6 +48,7 @@ type DataTableProps<
 > = DataTableBaseProps<TFeatures, TData> & Readonly<{ rowWindow?: DataTableRowWindow }>;
 
 interface SortableColumn {
+    clearSorting(): void;
     getCanSort(): boolean;
     getIsSorted(): false | "asc" | "desc";
     getSortIndex(): number;
@@ -57,7 +58,8 @@ interface SortableColumn {
 function sortableColumn(value: unknown): SortableColumn | undefined {
     if (typeof value !== "object" || value === null) return undefined;
     const candidate = value as Partial<SortableColumn>;
-    return typeof candidate.getCanSort === "function" &&
+    return typeof candidate.clearSorting === "function" &&
+        typeof candidate.getCanSort === "function" &&
         typeof candidate.getIsSorted === "function" &&
         typeof candidate.getSortIndex === "function" &&
         typeof candidate.toggleSorting === "function" &&
@@ -97,10 +99,18 @@ function SortableHeaderButton({
     readonly column: SortableColumn;
     readonly direction: false | "asc" | "desc";
 }) {
+    function toggleSorting(multi: boolean): void {
+        if (direction === "desc") {
+            column.clearSorting();
+            return;
+        }
+        column.toggleSorting(direction === "asc", multi);
+    }
+
     return (
         <TableSortButton
             direction={tableSortDirection(direction)}
-            onClick={(event) => column.toggleSorting(undefined, event.shiftKey)}
+            onClick={(event) => toggleSorting(event.shiftKey)}
         >
             {children}
         </TableSortButton>
