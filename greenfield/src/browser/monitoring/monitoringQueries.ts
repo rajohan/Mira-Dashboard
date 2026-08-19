@@ -235,7 +235,12 @@ export function reportDetailQueryOptions(client: DashboardTrpcClient, id: string
 
 /** @param queryClient Browser cache to invalidate after one durable incident event. */
 export async function refreshIncidentQueries(queryClient: QueryClient): Promise<void> {
-    await queryClient.invalidateQueries({ queryKey: incidentQueryKey });
+    await Promise.all([
+        queryClient.invalidateQueries({ queryKey: incidentQueryKey }),
+        queryClient.invalidateQueries({
+            queryKey: liveHistoryArchiveQueryKey(incidentQueryKey),
+        }),
+    ]);
 }
 
 /** @param queryClient Browser cache to invalidate after one durable report event. */

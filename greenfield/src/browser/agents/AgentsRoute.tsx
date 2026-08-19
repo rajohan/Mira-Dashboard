@@ -61,6 +61,7 @@ export function AgentsRoute() {
         void Promise.allSettled([
             collections.definitions.utils.refetch(),
             collections.statuses.utils.refetch(),
+            historyLiveHead.refetch(),
             history.refetch(),
         ]);
     };

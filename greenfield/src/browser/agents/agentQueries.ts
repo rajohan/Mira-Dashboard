@@ -51,5 +51,10 @@ export function agentHistoryLiveHeadQueryOptions(client: DashboardTrpcClient) {
 
 /** Invalidates every agent projection after one durable status transition. */
 export async function refreshAgentQueries(queryClient: QueryClient): Promise<void> {
-    await queryClient.invalidateQueries({ queryKey: agentQueryKey });
+    await Promise.all([
+        queryClient.invalidateQueries({ queryKey: agentQueryKey }),
+        queryClient.invalidateQueries({
+            queryKey: liveHistoryArchiveQueryKey(agentQueryKey),
+        }),
+    ]);
 }

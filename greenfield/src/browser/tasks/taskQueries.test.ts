@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { liveHistoryArchiveQueryKey } from "../api/liveHistory.ts";
 import { createDashboardQueryClient } from "../api/queryClient.ts";
 import {
     createDashboardTrpcClient,
@@ -9,6 +10,8 @@ import {
     taskListQueryOptions,
     taskListQueryRoot,
     taskOverviewQueryOptions,
+    taskQueryKey,
+    refreshTaskQueries,
 } from "./taskQueries.ts";
 
 class TaskQueryTransport implements DashboardTrpcTransport {
@@ -28,6 +31,20 @@ class TaskQueryTransport implements DashboardTrpcTransport {
 }
 
 describe("task browser queries", () => {
+    test("invalidates mutable task progress archive pages", async () => {
+        const queryClient = createDashboardQueryClient();
+        const archiveKey = liveHistoryArchiveQueryKey([
+            ...taskQueryKey,
+            "progress",
+            "task-1",
+        ]);
+        queryClient.setQueryData(archiveKey, { pages: [] });
+
+        await refreshTaskQueries(queryClient);
+
+        expect(queryClient.getQueryState(archiveKey)?.isInvalidated).toBeTrue();
+    });
+
     test("isolates a bounded unfinished overview beneath the task-list root", async () => {
         const transport = new TaskQueryTransport();
         const queryClient = createDashboardQueryClient();

@@ -5,6 +5,7 @@ import { act } from "react";
 
 import type { AgentStatusProjection } from "../../contracts/agentModel.ts";
 import type { AuthStatus } from "../../contracts/auth.ts";
+import { liveHistoryArchiveQueryKey } from "../api/liveHistory.ts";
 import { createDashboardQueryClient } from "../api/queryClient.ts";
 import {
     createDashboardTrpcClient,
@@ -20,7 +21,12 @@ import { createDashboardRouter } from "../router.tsx";
 import type { DashboardWebAuthnClient } from "../security/webauthn/webauthnClient.ts";
 import { captureExpectedConsoleErrors } from "../test/expectedConsoleError.ts";
 import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
-import { agentConfigurationQueryKey, agentStatusesQueryKey } from "./agentQueries.ts";
+import {
+    agentConfigurationQueryKey,
+    agentQueryKey,
+    agentStatusesQueryKey,
+    refreshAgentQueries,
+} from "./agentQueries.ts";
 
 const { render, screen, waitFor } = await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
@@ -66,6 +72,7 @@ class AgentTransport implements DashboardTrpcTransport {
         startedAtMs: timestampMs,
         state: "working",
     };
+    historyQueryCount = 0;
     statusQueryCount = 0;
     statusQueryResponse: Promise<unknown> | undefined;
 
@@ -118,6 +125,7 @@ class AgentTransport implements DashboardTrpcTransport {
                 });
             }
             case "agents.listTaskHistory": {
+                this.historyQueryCount += 1;
                 return Promise.resolve({
                     runs: [
                         {
@@ -231,6 +239,16 @@ function renderAgentRoute(
 }
 
 describe("Dashboard agents route", () => {
+    test("invalidates mutable archived agent runs", async () => {
+        const queryClient = createDashboardQueryClient();
+        const archiveKey = liveHistoryArchiveQueryKey([...agentQueryKey, "history"]);
+        queryClient.setQueryData(archiveKey, { pages: [] });
+
+        await refreshAgentQueries(queryClient);
+
+        expect(queryClient.getQueryState(archiveKey)?.isInvalidated).toBeTrue();
+    });
+
     test("recovers an initial configuration failure through explicit retry", async () => {
         const transport = new AgentTransport();
         const queryClient = createDashboardQueryClient();
@@ -493,8 +511,12 @@ describe("Dashboard agents route", () => {
             expect(screen.queryByText(/redacted status failure/u)).toBeNull();
             expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
             transport.statusQueryResponse = undefined;
+            const historyQueriesBeforeRetry = transport.historyQueryCount;
             await user.click(screen.getByRole("button", { name: "Try again" }));
             await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+            await waitFor(() =>
+                expect(transport.historyQueryCount).toBe(historyQueriesBeforeRetry + 2)
+            );
             expect(screen.getAllByText("Implement agents route")).toHaveLength(2);
             consoleErrors.expectObserved();
         } finally {

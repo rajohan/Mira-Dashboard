@@ -155,7 +155,12 @@ export function taskProgressLiveHeadQueryOptions(
  * @returns Completion after active task observers have refreshed.
  */
 export async function refreshTaskQueries(queryClient: QueryClient): Promise<void> {
-    await queryClient.invalidateQueries({ queryKey: taskQueryKey });
+    await Promise.all([
+        queryClient.invalidateQueries({ queryKey: taskQueryKey }),
+        queryClient.invalidateQueries({
+            queryKey: liveHistoryArchiveQueryKey(taskQueryKey),
+        }),
+    ]);
 }
 
 /**

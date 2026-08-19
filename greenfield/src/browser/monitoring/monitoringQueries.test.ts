@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import type { TRPCRequestOptions } from "@trpc/client";
 
 import type { IncidentSummary, ReportSummary } from "../../contracts/monitoring.ts";
+import { liveHistoryArchiveQueryKey } from "../api/liveHistory.ts";
 import { createDashboardQueryClient } from "../api/queryClient.ts";
 import {
     createDashboardTrpcClient,
@@ -10,7 +11,9 @@ import {
 } from "../api/trpcClient.ts";
 import {
     incidentListQueryOptions,
+    incidentQueryKey,
     incidentOverviewQueryOptions,
+    refreshIncidentQueries,
     reportListQueryOptions,
     reportOverviewQueryOptions,
     uniqueMonitoringRows,
@@ -74,6 +77,20 @@ class MonitoringQueryTransport implements DashboardTrpcTransport {
 }
 
 describe("monitoring browser queries", () => {
+    test("invalidates mutable archived incident pages", async () => {
+        const queryClient = createDashboardQueryClient();
+        const archiveKey = liveHistoryArchiveQueryKey([
+            ...incidentQueryKey,
+            "list",
+            { states: ["active"] },
+        ]);
+        queryClient.setQueryData(archiveKey, { pages: [] });
+
+        await refreshIncidentQueries(queryClient);
+
+        expect(queryClient.getQueryState(archiveKey)?.isInvalidated).toBeTrue();
+    });
+
     test("isolates one cancellable newest-active incident window", async () => {
         const transport = new MonitoringQueryTransport({
             "incidents.list": [{ incidents: [incident] }],
