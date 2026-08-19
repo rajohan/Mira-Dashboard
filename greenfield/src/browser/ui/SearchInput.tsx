@@ -10,6 +10,7 @@ interface SearchInputProps {
     readonly clearLabel?: string;
     readonly disabled?: boolean;
     readonly label: string;
+    readonly maxLength?: number;
     readonly onChange: (value: string) => void;
     readonly placeholder?: string;
     readonly value: string;
@@ -24,6 +25,7 @@ export function SearchInput({
     clearLabel = "Clear search",
     disabled,
     label,
+    maxLength,
     onChange,
     placeholder,
     value,
@@ -40,6 +42,7 @@ export function SearchInput({
                 aria-label={label}
                 className="pr-10 pl-9"
                 disabled={disabled}
+                maxLength={maxLength}
                 onChange={(event) => onChange(event.currentTarget.value)}
                 placeholder={placeholder}
                 type="search"

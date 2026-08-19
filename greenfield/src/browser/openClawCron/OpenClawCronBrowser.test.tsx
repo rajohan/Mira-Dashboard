@@ -618,9 +618,40 @@ describe("OpenClaw scheduled jobs browser", () => {
             expect(
                 screen.getByText("Run history is temporarily unavailable.")
             ).toBeVisible();
+            expect(screen.getByRole("button", { name: "Try again" })).toBeVisible();
         } finally {
             globalThis.IntersectionObserver = OriginalIntersectionObserver;
             view.unmount();
+        }
+    });
+
+    test("keeps run pagination blocked when inventory and run refreshes fail alike", async () => {
+        let failing = false;
+        const client = {
+            query(name: string) {
+                if (failing) return Promise.reject(new Error("shared outage"));
+                if (name === "openClawCron.list") return Promise.resolve(inventory);
+                return Promise.resolve(runPage(0, "run-new", "Newest run"));
+            },
+        } as unknown as DashboardTrpcClient;
+        const rendered = renderBrowser(client);
+
+        try {
+            expect(await screen.findByText("Newest run")).toBeVisible();
+            failing = true;
+            await rendered.queryClient.invalidateQueries({
+                queryKey: openClawCronQueryKey,
+            });
+
+            expect(
+                await screen.findByText("The request could not be completed. Try again.")
+            ).toBeVisible();
+            expect(
+                screen.getAllByText("The request could not be completed. Try again.")
+            ).toHaveLength(1);
+        } finally {
+            rendered.view.unmount();
+            rendered.queryClient.clear();
         }
     });
 

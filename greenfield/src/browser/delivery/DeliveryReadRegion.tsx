@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Badge } from "../ui/Badge.tsx";
+import { Button } from "../ui/Button.tsx";
 import { Card } from "../ui/Card.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
@@ -109,6 +110,11 @@ export function DeliveryReadRegion({
                 <Card>
                     <Text>No verified {title.toLowerCase()} data is available yet.</Text>
                 </Card>
+            ) : null}
+            {state !== "fresh" && state !== undefined ? (
+                <Button busy={fetching} onClick={onRetry} variant="secondary">
+                    Try again
+                </Button>
             ) : null}
             {state !== undefined && state !== "unavailable" ? children : null}
             {checkedAtMs === undefined ||

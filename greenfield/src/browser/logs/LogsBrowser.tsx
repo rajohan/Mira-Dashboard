@@ -195,6 +195,7 @@ export function LogsBrowser() {
             onClearSearch={() => setSearch(undefined)}
             onRefresh={() => void refreshAll()}
             onRequestMaintenance={requestMaintenance}
+            onRetryMaintenance={() => void maintenanceQuery.refetch()}
             onSearch={(query) => {
                 if (selectedSource !== undefined && sourceAvailable) {
                     setSearch({ query, sourceId: selectedSource.id });

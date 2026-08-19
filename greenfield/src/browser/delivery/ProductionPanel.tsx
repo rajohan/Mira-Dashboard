@@ -103,9 +103,12 @@ function ReleaseSlot({
 interface ProductionReleasesPanelProps {
     readonly busy: boolean;
     readonly checkout?: DeliveryCheckout;
+    readonly checkoutError?: string;
+    readonly checkoutRetryBusy?: boolean;
     readonly deployAvailable: boolean;
     readonly deployReason?: string;
     readonly onDeploy: () => void;
+    readonly onRetryCheckout?: () => void;
     readonly onRollback: () => void;
     readonly releases: DeliveryReleases;
     readonly releasesFresh: boolean;
@@ -127,9 +130,12 @@ function rollbackUnavailableReason(releases: DeliveryReleases, fresh: boolean) {
 export function ProductionReleasesPanel({
     busy,
     checkout,
+    checkoutError,
+    checkoutRetryBusy = false,
     deployAvailable,
     deployReason,
     onDeploy,
+    onRetryCheckout,
     onRollback,
     releases,
     releasesFresh,
@@ -183,6 +189,26 @@ export function ProductionReleasesPanel({
                     <Text className="mt-1" size="sm" tone="muted">
                         Control checkout. Deploy syncs latest main first.
                     </Text>
+                    {checkoutError === undefined ? null : (
+                        <div className="mt-2">
+                            <Alert
+                                className="py-2"
+                                focusOnError={false}
+                                message={checkoutError}
+                            />
+                            {onRetryCheckout === undefined ? null : (
+                                <Button
+                                    busy={checkoutRetryBusy}
+                                    className="mt-2"
+                                    onClick={onRetryCheckout}
+                                    size="sm"
+                                    variant="secondary"
+                                >
+                                    Try again
+                                </Button>
+                            )}
+                        </div>
+                    )}
                 </section>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">

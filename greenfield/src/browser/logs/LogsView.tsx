@@ -1,4 +1,4 @@
-import { ArrowDown, Download, FileText, RefreshCw, Trash2, X } from "lucide-react";
+import { ArrowDown, Download, FileText, RefreshCw, Trash2 } from "lucide-react";
 import { type ReactNode, useState } from "react";
 /* eslint-disable jsx-a11y/no-noninteractive-tabindex -- The scrollable log must be keyboard-focusable. */
 
@@ -21,9 +21,9 @@ import { EmptyState } from "../ui/EmptyState.tsx";
 import { FormField } from "../ui/FormField.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
-import { Input } from "../ui/Input.tsx";
 import { LoadingState } from "../ui/LoadingState.tsx";
 import { PageState } from "../ui/PageState.tsx";
+import { SearchInput } from "../ui/SearchInput.tsx";
 import { Select } from "../ui/Select.tsx";
 import { Text } from "../ui/Text.tsx";
 import { Virtualizer } from "../ui/Virtualizer.tsx";
@@ -50,6 +50,7 @@ export interface LogsViewProps {
         policyId: LogMaintenancePolicyId,
         dryRun: boolean
     ) => Promise<RequestLogMaintenanceOutput>;
+    readonly onRetryMaintenance?: () => void;
     readonly onSearch: (query: string) => void;
     readonly onSelectSource: (sourceId: string) => void;
     readonly onRowCountChange: (rowCount: number) => void;
@@ -306,6 +307,7 @@ export function LogsView({
     onClearSearch,
     onRefresh,
     onRequestMaintenance,
+    onRetryMaintenance,
     onRowCountChange,
     onSearch,
     onSelectSource,
@@ -357,6 +359,7 @@ export function LogsView({
             maintenanceError={maintenanceError}
             maintenanceLoading={maintenanceLoading}
             onRequestMaintenance={onRequestMaintenance}
+            onRetryMaintenance={onRetryMaintenance}
             requestedRun={requestedRun}
             requestedRunError={requestedRunError}
             requestedRunInactiveConfirmed={requestedRunInactiveConfirmed}
@@ -459,46 +462,22 @@ export function LogsView({
                     </FormField>
                     <div className="flex min-w-0 items-end gap-2">
                         <FormField className="min-w-0 flex-1" label="Search logs">
-                            <Input
+                            <SearchInput
                                 className="mt-2"
+                                clearLabel="Clear log search"
                                 disabled={selectedSource?.availability !== "available"}
+                                label="Search logs"
                                 maxLength={logSearchMaximumCharacters}
-                                onChange={(event) => {
-                                    const draft = event.target.value;
+                                onChange={(draft) => {
                                     const query = draft.trim();
                                     setSearchDraft(draft);
                                     if (query.length === 0) onClearSearch();
                                     else onSearch(query);
                                 }}
                                 placeholder='Try "request-42" or "connection failed"'
-                                type="search"
                                 value={searchDraft}
                             />
                         </FormField>
-                        {searchQuery !== undefined && (
-                            <Button
-                                aria-label="Refresh log search"
-                                disabled={refreshing}
-                                onClick={onRefresh}
-                                variant="ghost"
-                            >
-                                <Icon icon={RefreshCw} size="sm" tone="inherit" />
-                                Refresh
-                            </Button>
-                        )}
-                        {searchQuery !== undefined && (
-                            <Button
-                                aria-label="Clear log search"
-                                onClick={() => {
-                                    setSearchDraft("");
-                                    onClearSearch();
-                                }}
-                                variant="ghost"
-                            >
-                                <Icon icon={X} size="sm" tone="inherit" />
-                                Latest
-                            </Button>
-                        )}
                     </div>
                 </div>
                 {selectedSource?.availability !== "available" && (

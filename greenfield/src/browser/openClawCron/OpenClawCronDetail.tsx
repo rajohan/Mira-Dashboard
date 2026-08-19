@@ -377,7 +377,18 @@ export function OpenClawCronDetail({
                     </div>
                 )}
                 {runsError !== undefined && runs !== undefined && (
-                    <Alert className="mt-5" focusOnError={false} message={runsError} />
+                    <div className="mt-5">
+                        <Alert focusOnError={false} message={runsError} />
+                        {onRetryRuns !== undefined && (
+                            <Button
+                                className="mt-3"
+                                onClick={onRetryRuns}
+                                variant="secondary"
+                            >
+                                Try again
+                            </Button>
+                        )}
+                    </div>
                 )}
                 {runs !== undefined && runs.freshness.kind === "last-known-good" && (
                     <Alert

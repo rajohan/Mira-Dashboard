@@ -39,6 +39,7 @@ export interface LogMaintenancePanelProps {
         policyId: LogMaintenancePolicyId,
         dryRun: boolean
     ) => Promise<RequestLogMaintenanceOutput>;
+    readonly onRetryMaintenance?: () => void;
     readonly requestedRun?: JobRunDetail;
     readonly requestedRunError?: string;
     readonly requestedRunInactiveConfirmed?: boolean;
@@ -326,6 +327,7 @@ function LogMaintenancePanelContent(properties: LogMaintenancePanelContentProps)
         onActionErrorChange,
         onActionStatusChange,
         onRequestMaintenance,
+        onRetryMaintenance,
         onRunningActionChange,
         requestedRun,
         requestedRunError,
@@ -385,6 +387,16 @@ function LogMaintenancePanelContent(properties: LogMaintenancePanelContentProps)
                 </div>
             </div>
             <Alert className="mt-4" focusOnError={false} message={maintenanceError} />
+            {maintenanceError === undefined || onRetryMaintenance === undefined ? null : (
+                <Button
+                    busy={maintenanceLoading}
+                    className="mt-3"
+                    onClick={onRetryMaintenance}
+                    variant="secondary"
+                >
+                    Try again
+                </Button>
+            )}
             <Alert
                 className="mt-4"
                 focusOnError={false}

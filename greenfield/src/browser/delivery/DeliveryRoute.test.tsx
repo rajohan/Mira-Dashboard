@@ -484,6 +484,14 @@ describe("DeliveryRoute", () => {
             const mainCheckout = await screen.findByLabelText("Main checkout");
             expect(within(mainCheckout).queryByText("Current")).toBeNull();
             expect(within(mainCheckout).getByText("Checking")).toBeVisible();
+            expect(
+                within(mainCheckout).getByText(
+                    "The Delivery request could not be completed safely. Try again from fresh state."
+                )
+            ).toBeVisible();
+            expect(
+                within(mainCheckout).getByRole("button", { name: "Try again" })
+            ).toBeVisible();
             expect(screen.queryByText("private checkout path")).toBeNull();
         } finally {
             view.unmount();

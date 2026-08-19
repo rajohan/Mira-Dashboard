@@ -337,14 +337,10 @@ describe("LogsView", () => {
         }
     });
 
-    test("keeps an explicit refresh action while search polling is disabled", async () => {
-        const props = properties();
-        render(<LogsView {...props} searchQuery="request-42" />);
+    test("does not add a permanent refresh action while searching", () => {
+        render(<LogsView {...properties()} searchQuery="request-42" />);
 
-        const user = userEvent.setup();
-        await user.click(screen.getByRole("button", { name: "Refresh log search" }));
-
-        expect(props.onRefresh).toHaveBeenCalledTimes(1);
+        expect(screen.queryByRole("button", { name: "Refresh log search" })).toBeNull();
     });
 
     test("clears the bounded current buffer without hiding new rows or crossing scopes", async () => {
@@ -841,10 +837,12 @@ describe("LogsView", () => {
     });
 
     test("disables cached maintenance actions after a status refetch error", () => {
+        const onRetryMaintenance = jest.fn();
         render(
             <LogsView
                 {...properties()}
                 maintenanceError="Maintenance status is temporarily unavailable."
+                onRetryMaintenance={onRetryMaintenance}
             />
         );
 
@@ -856,6 +854,8 @@ describe("LogsView", () => {
         expect(
             screen.getByText("Maintenance status is temporarily unavailable.")
         ).toBeVisible();
+        fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+        expect(onRetryMaintenance).toHaveBeenCalledTimes(1);
     });
 
     test("closes an open confirmation when authoritative status reports a global run", () => {
