@@ -168,7 +168,6 @@ const meta = {
         maintenance,
         onClearSearch: fn(),
         onRefresh: fn(),
-        onRefreshMaintenance: fn(),
         onRequestMaintenance: fn(() =>
             Promise.resolve({
                 dryRun: false,
@@ -436,17 +435,17 @@ export const MobileLevelFiltering: Story = {
                 "true"
             );
         }
-        await userEvent.click(
-            canvas.getByRole("button", { name: "Clear all log levels" })
-        );
+        for (const level of ["trace", "debug", "info", "warn", "error", "fatal"]) {
+            await userEvent.click(canvas.getByRole("button", { name: level }));
+        }
         await expect(
             canvas.getByRole("heading", {
                 name: "No log lines at the selected levels",
             })
         ).toBeVisible();
-        await userEvent.click(
-            canvas.getByRole("button", { name: "Select all log levels" })
-        );
+        for (const level of ["trace", "debug", "info", "warn", "error", "fatal"]) {
+            await userEvent.click(canvas.getByRole("button", { name: level }));
+        }
         await expect(
             canvas.getByRole("log", {
                 name: "Log lines with sensitive values removed",

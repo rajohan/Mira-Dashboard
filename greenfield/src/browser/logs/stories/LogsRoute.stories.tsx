@@ -217,7 +217,6 @@ export const EmptySearch: Story = {
             await canvas.findByRole("searchbox", { name: "Search logs" }),
             "no-matches"
         );
-        await userEvent.click(canvas.getByRole("button", { name: "Search" }));
         await expect(
             await canvas.findByRole("heading", { name: "No matching log lines" })
         ).toBeVisible();

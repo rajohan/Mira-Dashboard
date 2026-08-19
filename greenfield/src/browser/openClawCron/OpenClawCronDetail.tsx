@@ -13,6 +13,7 @@ import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { LoadingState } from "../ui/LoadingState.tsx";
 import { Text } from "../ui/Text.tsx";
+import { Virtualizer } from "../ui/Virtualizer.tsx";
 import type { OpenClawCronRunsView } from "./openClawCronQueries.ts";
 import {
     openClawCronDeliveryModeLabel,
@@ -81,6 +82,7 @@ export function OpenClawCronDetail({
 }: OpenClawCronDetailProps) {
     const headingId = useId();
     const historyHeadingId = useId();
+    const historyScrollContainerRef = useRef<HTMLDivElement>(null);
     const historySentinelRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -100,7 +102,10 @@ export function OpenClawCronDetail({
                     onLoadMoreRuns();
                 }
             },
-            { rootMargin: "400px 0px" }
+            {
+                root: historyScrollContainerRef.current,
+                rootMargin: "400px 0px",
+            }
         );
         observer.observe(sentinel);
         return () => observer.disconnect();
@@ -370,103 +375,165 @@ export function OpenClawCronDetail({
                     </Text>
                 )}
                 {runs !== undefined && runs.runs.length > 0 && (
-                    <ol
-                        aria-label={`OpenClaw runs for ${job.name}`}
-                        className="mt-5 grid max-w-full min-w-0 grid-cols-1 gap-3"
+                    <Virtualizer<HTMLLIElement>
+                        count={runs.runs.length}
+                        estimateSize={() => 210}
+                        getItemKey={(index) =>
+                            runs.runs[index]?.runId ??
+                            `${runs.runs[index]?.completedAtMs ?? "missing"}-${index}`
+                        }
+                        initialRect={{ height: 560, width: 960 }}
+                        overscan={4}
                     >
-                        {runs.runs.map((run, index) => {
+                        {({
+                            measureElement,
+                            scrollContainerRef,
+                            totalSize,
+                            virtualItems,
+                        }) => {
+                            const visibleRuns =
+                                virtualItems.length > 0
+                                    ? virtualItems
+                                    : runs.runs.slice(0, 7).map((run, index) => ({
+                                          index,
+                                          key:
+                                              run.runId ??
+                                              `${run.completedAtMs}-${index}`,
+                                          start: index * 210,
+                                      }));
+                            const historyHeight =
+                                virtualItems.length > 0
+                                    ? totalSize
+                                    : runs.runs.length * 210;
                             return (
-                                <li
-                                    className="border-primary-700 bg-primary-900/40 max-w-full min-w-0 rounded-lg border p-3 sm:p-4"
-                                    key={run.runId ?? `${run.completedAtMs}-${index}`}
+                                <div
+                                    aria-label="OpenClaw run history"
+                                    className="mt-5 h-[min(42rem,65dvh)] min-h-72 overflow-x-hidden overflow-y-auto overscroll-contain"
+                                    ref={(node) => {
+                                        scrollContainerRef.current = node;
+                                        historyScrollContainerRef.current = node;
+                                    }}
+                                    // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- The bounded virtual run history must remain keyboard-scrollable.
+                                    tabIndex={0}
                                 >
-                                    <dl className="grid max-w-full min-w-0 grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
-                                        <div className="min-w-0">
-                                            <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
-                                                Completed
-                                            </dt>
-                                            <dd className="text-primary-100 mt-1 text-sm wrap-anywhere">
-                                                {dateTime(run.completedAtMs)}
-                                            </dd>
-                                        </div>
-                                        <div className="min-w-0">
-                                            <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
-                                                Status
-                                            </dt>
-                                            <dd className="mt-1">
-                                                <Badge
-                                                    variant={openClawCronRunStatusBadgeVariant(
-                                                        run.status
-                                                    )}
+                                    <ol
+                                        aria-label={`OpenClaw runs for ${job.name}`}
+                                        className="relative max-w-full min-w-0"
+                                        style={{ height: historyHeight }}
+                                    >
+                                        {visibleRuns.map((virtualItem) => {
+                                            const run = runs.runs[virtualItem.index];
+                                            if (run === undefined) return null;
+                                            return (
+                                                <li
+                                                    className="border-primary-700 bg-primary-900/40 absolute top-0 left-0 w-full max-w-full min-w-0 rounded-lg border p-3 sm:p-4"
+                                                    data-index={virtualItem.index}
+                                                    key={virtualItem.key}
+                                                    ref={measureElement}
+                                                    style={{
+                                                        transform: `translateY(${virtualItem.start}px)`,
+                                                    }}
                                                 >
-                                                    {openClawCronRunStatusLabel(
-                                                        run.status
-                                                    )}
-                                                </Badge>
-                                            </dd>
+                                                    <dl className="grid max-w-full min-w-0 grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
+                                                        <div className="min-w-0">
+                                                            <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
+                                                                Completed
+                                                            </dt>
+                                                            <dd className="text-primary-100 mt-1 text-sm wrap-anywhere">
+                                                                {dateTime(
+                                                                    run.completedAtMs
+                                                                )}
+                                                            </dd>
+                                                        </div>
+                                                        <div className="min-w-0">
+                                                            <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
+                                                                Status
+                                                            </dt>
+                                                            <dd className="mt-1">
+                                                                <Badge
+                                                                    variant={openClawCronRunStatusBadgeVariant(
+                                                                        run.status
+                                                                    )}
+                                                                >
+                                                                    {openClawCronRunStatusLabel(
+                                                                        run.status
+                                                                    )}
+                                                                </Badge>
+                                                            </dd>
+                                                        </div>
+                                                        <div className="min-w-0">
+                                                            <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
+                                                                Delivery
+                                                            </dt>
+                                                            <dd className="text-primary-100 mt-1 text-sm wrap-anywhere">
+                                                                {openClawCronDeliveryStatusLabel(
+                                                                    run.deliveryStatus
+                                                                )}
+                                                            </dd>
+                                                        </div>
+                                                        <div className="min-w-0">
+                                                            <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
+                                                                Duration
+                                                            </dt>
+                                                            <dd className="text-primary-100 mt-1 text-sm wrap-anywhere">
+                                                                {run.durationMs ===
+                                                                undefined
+                                                                    ? "—"
+                                                                    : `${run.durationMs} ms`}
+                                                            </dd>
+                                                        </div>
+                                                        <div className="min-w-0">
+                                                            <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
+                                                                Model
+                                                            </dt>
+                                                            <dd className="text-primary-100 mt-1 max-w-full text-sm wrap-anywhere">
+                                                                {run.model ?? "—"}
+                                                                {run.model !==
+                                                                    undefined &&
+                                                                    run.modelTruncated &&
+                                                                    " (shortened)"}
+                                                            </dd>
+                                                        </div>
+                                                        <div className="min-w-0">
+                                                            <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
+                                                                Provider
+                                                            </dt>
+                                                            <dd className="text-primary-100 mt-1 max-w-full text-sm wrap-anywhere">
+                                                                {run.provider ?? "—"}
+                                                                {run.provider !==
+                                                                    undefined &&
+                                                                    run.providerTruncated &&
+                                                                    " (shortened)"}
+                                                            </dd>
+                                                        </div>
+                                                        <div className="min-w-0 sm:col-span-2 lg:col-span-3">
+                                                            <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
+                                                                Summary
+                                                            </dt>
+                                                            <dd className="text-primary-100 mt-1 max-w-full text-sm wrap-anywhere whitespace-pre-wrap">
+                                                                {run.summary ??
+                                                                    run.errorReason ??
+                                                                    "—"}
+                                                                {run.summaryTruncated &&
+                                                                    " (shortened preview)"}
+                                                            </dd>
+                                                        </div>
+                                                    </dl>
+                                                </li>
+                                            );
+                                        })}
+                                    </ol>
+                                    {runs.hasMore && onLoadMoreRuns !== undefined && (
+                                        <div className="py-2" ref={historySentinelRef}>
+                                            {runsLoadingMore && (
+                                                <LoadingState label="Loading older runs…" />
+                                            )}
                                         </div>
-                                        <div className="min-w-0">
-                                            <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
-                                                Delivery
-                                            </dt>
-                                            <dd className="text-primary-100 mt-1 text-sm wrap-anywhere">
-                                                {openClawCronDeliveryStatusLabel(
-                                                    run.deliveryStatus
-                                                )}
-                                            </dd>
-                                        </div>
-                                        <div className="min-w-0">
-                                            <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
-                                                Duration
-                                            </dt>
-                                            <dd className="text-primary-100 mt-1 text-sm wrap-anywhere">
-                                                {run.durationMs === undefined
-                                                    ? "—"
-                                                    : `${run.durationMs} ms`}
-                                            </dd>
-                                        </div>
-                                        <div className="min-w-0">
-                                            <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
-                                                Model
-                                            </dt>
-                                            <dd className="text-primary-100 mt-1 max-w-full text-sm wrap-anywhere">
-                                                {run.model ?? "—"}
-                                                {run.model !== undefined &&
-                                                    run.modelTruncated &&
-                                                    " (shortened)"}
-                                            </dd>
-                                        </div>
-                                        <div className="min-w-0">
-                                            <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
-                                                Provider
-                                            </dt>
-                                            <dd className="text-primary-100 mt-1 max-w-full text-sm wrap-anywhere">
-                                                {run.provider ?? "—"}
-                                                {run.provider !== undefined &&
-                                                    run.providerTruncated &&
-                                                    " (shortened)"}
-                                            </dd>
-                                        </div>
-                                        <div className="min-w-0 sm:col-span-2 lg:col-span-3">
-                                            <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
-                                                Summary
-                                            </dt>
-                                            <dd className="text-primary-100 mt-1 max-w-full text-sm wrap-anywhere whitespace-pre-wrap">
-                                                {run.summary ?? run.errorReason ?? "—"}
-                                                {run.summaryTruncated &&
-                                                    " (shortened preview)"}
-                                            </dd>
-                                        </div>
-                                    </dl>
-                                </li>
+                                    )}
+                                </div>
                             );
-                        })}
-                    </ol>
-                )}
-                {runs?.hasMore && onLoadMoreRuns !== undefined && (
-                    <div className="mt-4" ref={historySentinelRef}>
-                        {runsLoadingMore && <LoadingState label="Loading older runs…" />}
-                    </div>
+                        }}
+                    </Virtualizer>
                 )}
             </Card>
         </div>

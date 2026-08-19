@@ -97,6 +97,26 @@ test("Moltbook route renders LKG state, encoded links, and independent content t
         updatedAt,
     });
     const failedFeed = Promise.withResolvers<unknown>();
+    let newFeedRequests = 0;
+    const recoveredSnapshot = {
+        ...snapshot,
+        feed: {
+            ...snapshot.feed,
+            posts: [
+                {
+                    ...snapshot.feed.posts[0],
+                    title: "Recovered new feed post",
+                },
+            ],
+            sort: "new" as const,
+        },
+        status: {
+            ...status,
+            freshness: "fresh" as const,
+            lastAttemptStatus: "succeeded" as const,
+            lastSuccessAtMs: 3000,
+        },
+    } satisfies MoltbookSnapshotResult;
     const client = {
         mutation: () => Promise.reject(new Error("Unexpected mutation")),
         query: (name: string, input: unknown) => {
@@ -110,7 +130,10 @@ test("Moltbook route renders LKG state, encoded links, and independent content t
                 return Promise.reject(new Error(`Unexpected query: ${name}`));
             }
 
-            return failedFeed.promise;
+            newFeedRequests += 1;
+            return newFeedRequests === 1
+                ? failedFeed.promise
+                : Promise.resolve(recoveredSnapshot);
         },
     } as unknown as DashboardTrpcClient;
     const view = render(
@@ -162,7 +185,9 @@ test("Moltbook route renders LKG state, encoded links, and independent content t
         ).toBeVisible();
         expect(screen.getByText("A feed post")).toBeVisible();
 
-        expect(screen.getByRole("button", { name: "Retry" })).toBeVisible();
+        await user.click(screen.getByRole("button", { name: "Retry" }));
+        expect(await screen.findByText("Recovered new feed post")).toBeVisible();
+        expect(newFeedRequests).toBe(2);
     } finally {
         view.unmount();
         queryClient.clear();

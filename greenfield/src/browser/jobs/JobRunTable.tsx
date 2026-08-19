@@ -169,7 +169,7 @@ export function JobRunTable({
             table={table}
             tableClassName={
                 compact
-                    ? "min-w-0 [&_td:nth-child(n+4)]:hidden [&_th:nth-child(n+4)]:hidden md:min-w-192 md:[&_td:nth-child(n+4)]:table-cell md:[&_th:nth-child(n+4)]:table-cell"
+                    ? "min-w-0 [&_td:nth-child(n+4)]:hidden [&_th:nth-child(n+4)]:hidden @min-[66rem]:min-w-192 @min-[66rem]:[&_td:nth-child(n+4)]:table-cell @min-[66rem]:[&_th:nth-child(n+4)]:table-cell"
                     : "min-w-256"
             }
         />

@@ -1,5 +1,6 @@
 import { describe, expect, jest, test } from "bun:test";
 
+import type { JobRunSummary } from "../../contracts/jobModel.ts";
 import type { JobQueueSummary } from "../../contracts/jobs.ts";
 import { JobQueuePanel } from "./JobQueuePanel.tsx";
 
@@ -38,6 +39,48 @@ const summary: JobQueueSummary = {
 };
 
 describe("job queue panel", () => {
+    test("keeps compact run metadata hidden until the table container is wide", () => {
+        const recentRun = {
+            actionKey: "system.worker-smoke",
+            attemptCount: 1,
+            attemptLimit: 1,
+            availableAtMs: timestampMs - 1000,
+            cancellationPolicy: "cooperative",
+            displayName: "Recent worker smoke",
+            eventCount: 1,
+            id: "019fdd00-0000-7000-8000-000000000002",
+            priority: 0,
+            queuedAtMs: timestampMs - 1000,
+            resourceClass: "light",
+            resourceKeys: [],
+            retrySafe: true,
+            state: "succeeded",
+            stateVersion: 1,
+            timeoutMs: 60_000,
+            triggerType: "manual",
+            updatedAtMs: timestampMs,
+        } as const satisfies JobRunSummary;
+
+        render(
+            <JobQueuePanel
+                controlBusy={false}
+                onSelectRun={() => {}}
+                onSetClaimingPaused={() => {}}
+                runs={[recentRun]}
+                summary={summary}
+            />
+        );
+
+        expect(screen.getByRole("table", { name: "Recent jobs" })).toHaveClass(
+            "[&_td:nth-child(n+4)]:hidden",
+            "@min-[66rem]:[&_td:nth-child(n+4)]:table-cell"
+        );
+        expect(screen.getByRole("table", { name: "Job workers" })).toHaveClass(
+            "[&_td:nth-child(n+4)]:hidden",
+            "@min-[66rem]:[&_td:nth-child(n+4)]:table-cell"
+        );
+    });
+
     test("presents queue and worker state and requests a versioned pause direction", async () => {
         const onSetClaimingPaused = jest.fn();
         render(

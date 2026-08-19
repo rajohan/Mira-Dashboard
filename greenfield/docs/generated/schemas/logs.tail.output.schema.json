@@ -46,7 +46,7 @@
         ],
         "additionalProperties": false
       },
-      "maxItems": 500,
+      "maxItems": 5000,
       "$comment": "Live Valibot validation additionally requires every redacted log line ID to be unique."
     },
     "observedAtMs": {

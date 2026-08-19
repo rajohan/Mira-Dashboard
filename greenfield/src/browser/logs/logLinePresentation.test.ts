@@ -123,6 +123,22 @@ describe("redacted log-line presentation", () => {
         });
     });
 
+    test("parses Apport severity, process prefix, and comma-millisecond timestamp", () => {
+        const presentation = presentRedactedLogLine(
+            line(
+                "ERROR: apport (pid 3163794) 2026-08-19 15:10:56,970: /proc/8538 not found"
+            ),
+            { sourceId: "host.apport" }
+        );
+
+        expect(presentation).toMatchObject({
+            level: "error",
+            message: "/proc/8538 not found",
+            source: "apport",
+            timestampMs: Date.parse("2026-08-19 15:10:56.970"),
+        });
+    });
+
     test("normalizes textual level and bracketed source prefixes", () => {
         const presentation = presentRedactedLogLine(
             line("2026-08-10T01:27:45.000Z [WARN] [http] request rejected"),

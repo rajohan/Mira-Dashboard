@@ -1,6 +1,11 @@
-import { describe, expect, jest, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, jest, test } from "bun:test";
 
-import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+    notifyManager,
+    onlineManager,
+    QueryClient,
+    QueryClientProvider,
+} from "@tanstack/react-query";
 
 import type { AuthStatus } from "../../contracts/auth.ts";
 import type { RealtimeStreamOutput } from "../../contracts/events.ts";
@@ -27,9 +32,32 @@ import {
 } from "./logQueries.ts";
 import { LogsBrowser } from "./LogsBrowser.tsx";
 
-const { act, render, screen, waitFor } = await import("@testing-library/react");
+const { act, fireEvent, render, screen, waitFor } =
+    await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
 const userEvent = userEventModule.default;
+
+const hadOwnResizeObserver = Object.hasOwn(globalThis, "ResizeObserver");
+const originalResizeObserver = Reflect.get(globalThis, "ResizeObserver");
+
+beforeAll(() => {
+    notifyManager.setNotifyFunction((callback) => act(callback));
+    Reflect.set(
+        globalThis,
+        "ResizeObserver",
+        class {
+            disconnect(): void {}
+            observe(): void {}
+            unobserve(): void {}
+        }
+    );
+});
+afterAll(() => {
+    notifyManager.setNotifyFunction((callback) => callback());
+    if (hadOwnResizeObserver)
+        Reflect.set(globalThis, "ResizeObserver", originalResizeObserver);
+    else Reflect.deleteProperty(globalThis, "ResizeObserver");
+});
 
 function deferred<T>() {
     let resolveDeferred!: (value: T) => void;
@@ -232,8 +260,19 @@ function renderBrowser(
     return { queryClient, view };
 }
 
+async function cleanupBrowser(
+    queryClient: QueryClient,
+    view: Readonly<{ unmount: () => void }>
+): Promise<void> {
+    await act(async () => {
+        await queryClient.cancelQueries();
+        view.unmount();
+        queryClient.clear();
+    });
+}
+
 describe("LogsBrowser", () => {
-    test("selects an available source and drives search, source, refresh, and maintenance requests", async () => {
+    test("selects an available source and drives search, source, and maintenance requests", async () => {
         const query = jest.fn((name: string, input: unknown) => {
             switch (name) {
                 case "logs.listSources": {
@@ -273,9 +312,7 @@ describe("LogsBrowser", () => {
 
         try {
             expect(
-                await screen.findByRole("heading", {
-                    name: "Dashboard web stderr",
-                })
+                await screen.findByRole("region", { name: "Log viewer" })
             ).toBeVisible();
             await waitFor(() =>
                 expect(query).toHaveBeenCalledWith(
@@ -286,8 +323,14 @@ describe("LogsBrowser", () => {
             );
 
             const user = userEvent.setup();
-            await user.click(screen.getByRole("button", { name: "Log rows" }));
-            await user.click(screen.getByRole("option", { name: "500 lines" }));
+            await act(() => {
+                fireEvent.click(screen.getByRole("button", { name: /Log rows/u }));
+                return new Promise((resolve) => setTimeout(resolve, 0));
+            });
+            await act(() => {
+                fireEvent.click(screen.getByRole("option", { name: "500 lines" }));
+                return new Promise((resolve) => setTimeout(resolve, 0));
+            });
             await waitFor(() =>
                 expect(query).toHaveBeenCalledWith(
                     "logs.tail",
@@ -299,7 +342,9 @@ describe("LogsBrowser", () => {
                 screen.getByRole("searchbox", { name: "Search logs" }),
                 "request-42"
             );
-            await user.click(screen.getByRole("button", { name: "Search" }));
+            await act(async () => {
+                await new Promise((resolve) => setTimeout(resolve, 350));
+            });
             await waitFor(() =>
                 expect(query).toHaveBeenCalledWith(
                     "logs.search",
@@ -311,13 +356,22 @@ describe("LogsBrowser", () => {
                     expect.objectContaining({ signal: expect.any(AbortSignal) })
                 )
             );
-            expect(screen.getByText("Query: request-42")).toBeVisible();
+            expect(screen.queryByText("Query: request-42")).toBeNull();
+            expect(screen.queryByRole("button", { name: "Search" })).toBeNull();
             expect(
                 screen.getByRole("button", { name: "Clear log search" })
             ).toBeVisible();
 
-            await user.click(screen.getByRole("button", { name: /Log source/u }));
-            await user.click(screen.getByRole("option", { name: /OpenClaw gateway/u }));
+            await act(() => {
+                fireEvent.click(screen.getByRole("button", { name: /Log source/u }));
+                return new Promise((resolve) => setTimeout(resolve, 0));
+            });
+            await act(() => {
+                fireEvent.click(
+                    screen.getByRole("option", { name: /OpenClaw gateway/u })
+                );
+                return new Promise((resolve) => setTimeout(resolve, 0));
+            });
             await waitFor(() =>
                 expect(query).toHaveBeenCalledWith(
                     "logs.tail",
@@ -330,15 +384,7 @@ describe("LogsBrowser", () => {
             );
             expect(screen.queryByRole("button", { name: "Clear log search" })).toBeNull();
 
-            await user.click(screen.getByRole("button", { name: "Refresh" }));
-            await waitFor(() => {
-                expect(
-                    query.mock.calls.filter(([name]) => name === "logs.listSources")
-                ).toHaveLength(2);
-                expect(
-                    query.mock.calls.filter(([name]) => name === "logs.maintenanceStatus")
-                ).toHaveLength(2);
-            });
+            expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
 
             await user.click(
                 screen.getByRole("button", {
@@ -365,11 +411,10 @@ describe("LogsBrowser", () => {
                 expect(
                     query.mock.calls.filter(([name]) => name === "logs.maintenanceStatus")
                         .length
-                ).toBeGreaterThanOrEqual(3)
+                ).toBeGreaterThanOrEqual(2)
             );
         } finally {
-            view.unmount();
-            queryClient.clear();
+            await cleanupBrowser(queryClient, view);
         }
     });
 
@@ -424,7 +469,7 @@ describe("LogsBrowser", () => {
         const { queryClient, view } = renderBrowser({ mutation, query }, realtimeClient);
 
         try {
-            await screen.findByRole("heading", { name: "Dashboard web stderr" });
+            await screen.findByRole("region", { name: "Log viewer" });
             expect(realtimeClient.input).toEqual({
                 topics: [jobRealtimeTopics.runs],
             });
@@ -465,7 +510,10 @@ describe("LogsBrowser", () => {
             ).length;
 
             succeeded = true;
-            act(() => realtimeClient.emit(runChange()));
+            await act(() => {
+                realtimeClient.emit(runChange());
+                return Promise.resolve();
+            });
 
             await waitFor(() =>
                 expect(
@@ -488,8 +536,7 @@ describe("LogsBrowser", () => {
                 ).toBeGreaterThan(maintenanceReadsBeforeChange)
             );
         } finally {
-            view.unmount();
-            queryClient.clear();
+            await cleanupBrowser(queryClient, view);
         }
     });
 
@@ -523,10 +570,13 @@ describe("LogsBrowser", () => {
             );
 
             try {
-                await screen.findByRole("heading", { name: "Dashboard web stderr" });
+                await screen.findByRole("region", { name: "Log viewer" });
                 const intervalCallsBeforeFailure = setInterval.mock.calls.length;
 
-                act(() => realtimeClient.fail());
+                await act(() => {
+                    realtimeClient.fail();
+                    return Promise.resolve();
+                });
 
                 await waitFor(() =>
                     expect(
@@ -540,8 +590,7 @@ describe("LogsBrowser", () => {
                     ).toBeTrue()
                 );
             } finally {
-                view.unmount();
-                queryClient.clear();
+                await cleanupBrowser(queryClient, view);
             }
         } finally {
             setInterval.mockRestore();
@@ -579,7 +628,7 @@ describe("LogsBrowser", () => {
         const { queryClient, view } = renderBrowser({ mutation, query });
 
         try {
-            await screen.findByRole("heading", { name: "Dashboard web stderr" });
+            await screen.findByRole("region", { name: "Log viewer" });
             const invalidate = jest
                 .spyOn(queryClient, "invalidateQueries")
                 .mockResolvedValue();
@@ -592,11 +641,12 @@ describe("LogsBrowser", () => {
             await user.click(screen.getByRole("button", { name: "Queue dry run" }));
             await waitFor(() => expect(mutation).toHaveBeenCalledTimes(1));
 
-            act(() => {
+            await act(() => {
                 queryClient.setQueryData(logMaintenanceQueryKey, {
                     ...maintenanceStatus,
                     observedAtMs: observedAtMs + 1,
                 });
+                return Promise.resolve();
             });
             await act(async () => {
                 mutationResult.resolve(requestedRun);
@@ -614,8 +664,7 @@ describe("LogsBrowser", () => {
             expect(dryRunButton).toBeDisabled();
             invalidate.mockRestore();
         } finally {
-            view.unmount();
-            queryClient.clear();
+            await cleanupBrowser(queryClient, view);
         }
     }, 20_000);
 
@@ -650,8 +699,7 @@ describe("LogsBrowser", () => {
                 screen.getByText("Maintenance status is temporarily unavailable.")
             ).toBeVisible();
         } finally {
-            view.unmount();
-            queryClient.clear();
+            await cleanupBrowser(queryClient, view);
         }
     });
 
@@ -688,8 +736,7 @@ describe("LogsBrowser", () => {
                     screen.getByText("Maintenance status is temporarily unavailable.")
                 ).toBeVisible();
             } finally {
-                view.unmount();
-                queryClient.clear();
+                await cleanupBrowser(queryClient, view);
             }
         } finally {
             onlineManager.setOnline(true);
@@ -734,8 +781,7 @@ describe("LogsBrowser", () => {
             ).toBeVisible();
             expect(sourceRequestCount).toBe(2);
         } finally {
-            view.unmount();
-            queryClient.clear();
+            await cleanupBrowser(queryClient, view);
         }
     });
 
@@ -787,7 +833,7 @@ describe("LogsBrowser", () => {
 
         try {
             const user = userEvent.setup();
-            await screen.findByRole("heading", { name: "Dashboard web stderr" });
+            await screen.findByRole("region", { name: "Log viewer" });
             await user.click(screen.getByRole("button", { name: /Log source/u }));
             await user.click(screen.getByRole("option", { name: /OpenClaw gateway/u }));
             expect(await screen.findByText("1 line")).toBeVisible();
@@ -803,12 +849,13 @@ describe("LogsBrowser", () => {
             ).toMatchObject({
                 lines: [{ line: "sensitive cached line" }],
             });
-            const tailCallsBeforeRefresh = query.mock.calls.filter(
-                ([name]) => name === "logs.tail"
-            ).length;
-
             sourceUnavailable = true;
-            await user.click(screen.getByRole("button", { name: "Refresh" }));
+            await act(async () => {
+                await queryClient.refetchQueries({
+                    queryKey: ["logs"],
+                    type: "active",
+                });
+            });
 
             expect(
                 await screen.findByText(
@@ -834,12 +881,8 @@ describe("LogsBrowser", () => {
             ).toMatchObject({
                 lines: [{ line: "sensitive cached line" }],
             });
-            expect(
-                query.mock.calls.filter(([name]) => name === "logs.tail")
-            ).toHaveLength(tailCallsBeforeRefresh);
         } finally {
-            view.unmount();
-            queryClient.clear();
+            await cleanupBrowser(queryClient, view);
         }
     });
 
@@ -877,9 +920,12 @@ describe("LogsBrowser", () => {
         try {
             expect(await screen.findByText("1 line")).toBeVisible();
             snapshotUnavailable = true;
-            await userEvent
-                .setup()
-                .click(screen.getByRole("button", { name: "Refresh" }));
+            await act(async () => {
+                await queryClient.refetchQueries({
+                    queryKey: ["logs"],
+                    type: "active",
+                });
+            });
 
             expect(
                 await screen.findByText("The request could not be completed. Try again.")
@@ -901,8 +947,7 @@ describe("LogsBrowser", () => {
                 ])
             ).toMatchObject({ lines: [{ line: "sensitive cached line" }] });
         } finally {
-            view.unmount();
-            queryClient.clear();
+            await cleanupBrowser(queryClient, view);
         }
     });
 });

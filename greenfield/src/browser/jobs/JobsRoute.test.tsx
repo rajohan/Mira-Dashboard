@@ -610,6 +610,23 @@ describe("Dashboard jobs route", () => {
     }, 10_000);
 
     test("can page beyond the first run-history page", async () => {
+        const intersectionCallbacks: IntersectionObserverCallback[] = [];
+        const OriginalIntersectionObserver = globalThis.IntersectionObserver;
+        globalThis.IntersectionObserver = class {
+            readonly root = null;
+            readonly rootMargin = "400px 0px";
+            readonly scrollMargin = "0px";
+            readonly thresholds = [0];
+            constructor(callback: IntersectionObserverCallback) {
+                intersectionCallbacks.push(callback);
+            }
+            disconnect(): void {}
+            observe(): void {}
+            takeRecords(): IntersectionObserverEntry[] {
+                return [];
+            }
+            unobserve(): void {}
+        };
         const transport = new JobsRouteTransport();
         const newerActive = queuedRun({
             displayName: "Newer active run",
@@ -623,23 +640,33 @@ describe("Dashboard jobs route", () => {
         transport.runs = [newerActive, olderActive];
         transport.runPages = [[newerActive], [olderActive]];
 
-        await renderJobsRoute("/jobs", transport);
-        const user = userEvent.setup();
-        await user.click(await screen.findByRole("button", { name: "Load more jobs" }));
+        try {
+            await renderJobsRoute("/jobs", transport);
+            await waitFor(() => expect(intersectionCallbacks.length).toBeGreaterThan(0));
+            act(() => {
+                intersectionCallbacks.at(-1)?.(
+                    [{ isIntersecting: true } as IntersectionObserverEntry],
+                    {} as IntersectionObserver
+                );
+            });
 
-        expect(
-            await screen.findByRole("button", {
-                name: `Open run Older active run; action system.worker-smoke; id ${olderRunId}`,
-            })
-        ).toBeVisible();
-        expect(
-            transport
-                .callsFor("jobs.listRuns")
-                .some(
-                    ({ input }) =>
-                        (input as ListJobRunsInput).cursor?.id === newerActive.id
-                )
-        ).toBeTrue();
+            expect(
+                await screen.findByRole("button", {
+                    name: `Open run Older active run; action system.worker-smoke; id ${olderRunId}`,
+                })
+            ).toBeVisible();
+            expect(
+                transport
+                    .callsFor("jobs.listRuns")
+                    .some(
+                        ({ input }) =>
+                            (input as ListJobRunsInput).cursor?.id === newerActive.id
+                    )
+            ).toBeTrue();
+            expect(screen.queryByRole("button", { name: "Load more jobs" })).toBeNull();
+        } finally {
+            globalThis.IntersectionObserver = OriginalIntersectionObserver;
+        }
     });
 
     test("loads independent exact deep links and wires navigation and realtime refresh", async () => {
@@ -1248,6 +1275,54 @@ describe("Dashboard jobs route", () => {
             name: "Worker smoke",
         });
         await waitFor(() => expect(heading).toHaveFocus());
+    });
+
+    test("clears a run selection when switching schedules", async () => {
+        const transport = new JobsRouteTransport();
+        const secondScheduleId = "system.database-maintenance";
+        const firstSchedule = scheduleSummary(scheduleId, { name: "Worker smoke" });
+        const secondSchedule = scheduleSummary(secondScheduleId, {
+            name: "Database maintenance",
+        });
+        const selectedRun = queuedRun({
+            displayName: "First schedule run",
+            id: runId,
+            scheduledJobId: scheduleId,
+        });
+        transport.schedules = [firstSchedule, secondSchedule];
+        transport.addScheduleDetail(firstSchedule);
+        transport.addScheduleDetail(secondSchedule);
+        transport.addRunDetail(selectedRun);
+        const { queryClient, router } = await renderJobsRoute(
+            `/jobs?scheduleId=${scheduleId}&runId=${runId}`,
+            transport
+        );
+        const user = userEvent.setup();
+
+        await screen.findByRole("heading", {
+            level: 2,
+            name: "First schedule run",
+        });
+        await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+
+        await user.click(
+            await screen.findByRole("button", {
+                name: "Database maintenance; system.database-maintenance",
+            })
+        );
+
+        await waitFor(() => {
+            expect(router.state.location.search).toEqual({
+                scheduleId: secondScheduleId,
+            });
+        });
+        const secondHeading = await screen.findByRole("heading", {
+            level: 2,
+            name: "Database maintenance",
+        });
+        await waitFor(() => expect(secondHeading).toHaveFocus());
+        expect(screen.queryByText("First schedule run")).toBeNull();
+        await waitFor(() => expect(queryClient.isFetching()).toBe(0));
     });
 
     test("saves cadence through a versioned schedule update", async () => {

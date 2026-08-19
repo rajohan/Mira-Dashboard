@@ -498,6 +498,7 @@ describe("OpenClaw scheduled jobs browser", () => {
 
     test("loads bounded additional inventory and run pages", async () => {
         const intersectionCallbacks: IntersectionObserverCallback[] = [];
+        const intersectionOptions: (IntersectionObserverInit | undefined)[] = [];
         const OriginalIntersectionObserver = globalThis.IntersectionObserver;
         globalThis.IntersectionObserver = class {
             readonly root = null;
@@ -507,9 +508,10 @@ describe("OpenClaw scheduled jobs browser", () => {
 
             constructor(
                 callback: IntersectionObserverCallback,
-                _options?: IntersectionObserverInit
+                options?: IntersectionObserverInit
             ) {
                 intersectionCallbacks.push(callback);
+                intersectionOptions.push(options);
             }
 
             disconnect(): void {}
@@ -555,6 +557,10 @@ describe("OpenClaw scheduled jobs browser", () => {
             );
             expect(await screen.findByRole("button", { name: "Alpha" })).toBeTruthy();
             await waitFor(() => expect(intersectionCallbacks.length).toBeGreaterThan(0));
+            expect(intersectionOptions.at(-1)?.root).toHaveAttribute(
+                "aria-label",
+                "OpenClaw run history"
+            );
             act(() => {
                 intersectionCallbacks.at(-1)?.(
                     [{ isIntersecting: true } as IntersectionObserverEntry],
@@ -608,6 +614,33 @@ describe("OpenClaw scheduled jobs browser", () => {
             result: {
                 freshness: stale.freshness,
                 jobs: [{ id: enabledBeta.id }, { id: disabledAlpha.id }],
+            },
+            stable: true,
+        });
+    });
+
+    test("accumulates more than five stable 25-run history pages", () => {
+        const pages = Array.from({ length: 6 }, (_, pageIndex) => {
+            const offset = pageIndex * 25;
+            const template = runPage(offset, `run-${offset}`, `Run ${offset}`);
+            return {
+                ...template,
+                hasMore: pageIndex < 5,
+                nextOffset: pageIndex < 5 ? offset + 25 : undefined,
+                runs: Array.from({ length: 25 }, (_, runIndex) => ({
+                    ...template.runs[0]!,
+                    runId: `run-${offset + runIndex}`,
+                    summary: `Run ${offset + runIndex}`,
+                })),
+                total: 150,
+            };
+        });
+
+        expect(accumulateOpenClawCronRunPages(pages)).toMatchObject({
+            result: {
+                hasMore: false,
+                runs: pages.flatMap(({ runs }) => runs),
+                total: 150,
             },
             stable: true,
         });

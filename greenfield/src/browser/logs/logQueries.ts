@@ -22,6 +22,9 @@ export const logMaintenanceRefreshIntervalMs = 15_000;
 export const logSnapshotRowOptions = Object.freeze([
     100,
     logTailDefaultRows,
+    500,
+    1000,
+    2000,
     logRowMaximum,
 ] as const);
 

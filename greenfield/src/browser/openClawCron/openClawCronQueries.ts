@@ -173,9 +173,7 @@ export function accumulateOpenClawCronRunPages(
     let expectedOffset = 0;
     let stable = true;
 
-    for (const [pageIndex, page] of pages
-        .slice(0, openClawCronBrowserPageMaximum)
-        .entries()) {
+    for (const [pageIndex, page] of pages.entries()) {
         const candidateRunIds = page.runs.flatMap(({ runId }) =>
             runId === undefined ? [] : [runId]
         );
@@ -284,10 +282,7 @@ export function openClawCronRunsQueryOptions(
             );
         },
         getNextPageParam: (lastPage, pages) =>
-            pages.length >= openClawCronBrowserPageMaximum ||
-            !everyRunHasStableIdentity(pages)
-                ? undefined
-                : lastPage.nextOffset,
+            everyRunHasStableIdentity(pages) ? lastPage.nextOffset : undefined,
         queryKey: [...openClawCronRunsQueryRoot, id ?? null],
         refetchInterval: openClawCronRefreshIntervalMs,
         retry: false,

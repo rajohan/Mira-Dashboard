@@ -301,7 +301,7 @@ export function JobQueuePanel({
                     <DataTable
                         label="Job workers"
                         table={workerTable}
-                        tableClassName="min-w-0 [&_td:nth-child(n+4)]:hidden [&_th:nth-child(n+4)]:hidden md:min-w-224 md:[&_td:nth-child(n+4)]:table-cell md:[&_th:nth-child(n+4)]:table-cell"
+                        tableClassName="min-w-0 [&_td:nth-child(n+4)]:hidden [&_th:nth-child(n+4)]:hidden @min-[66rem]:min-w-224 @min-[66rem]:[&_td:nth-child(n+4)]:table-cell @min-[66rem]:[&_th:nth-child(n+4)]:table-cell"
                     />
                 )}
             </div>

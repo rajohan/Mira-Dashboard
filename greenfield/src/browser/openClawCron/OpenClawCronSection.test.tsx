@@ -280,7 +280,7 @@ describe("OpenClawCronSection", () => {
             name: `OpenClaw runs for ${longName}`,
         });
         expect(inventory).toHaveClass("grid-cols-1", "min-w-0", "max-w-full");
-        expect(history).toHaveClass("grid-cols-1", "min-w-0", "max-w-full");
+        expect(history).toHaveClass("relative", "min-w-0", "max-w-full");
         expect(history.querySelector("dl")).toHaveClass(
             "sm:grid-cols-2",
             "lg:grid-cols-3"

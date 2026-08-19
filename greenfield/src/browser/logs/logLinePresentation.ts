@@ -504,7 +504,22 @@ function severityPrefix(value: string): Readonly<{
 function textPrefix(
     value: string,
     context: RedactedLogLinePresentationContext
-): Pick<TextLogEnvelope, "message" | "source" | "timestampMs"> {
+): Pick<TextLogEnvelope, "level" | "message" | "source" | "timestampMs"> {
+    if (context.sourceId === "host.apport") {
+        const apport =
+            /^(TRACE|DEBUG|INFO|WARN(?:ING)?|ERROR|FATAL):\s+apport(?:\s+\(pid\s+\d+\))?\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}(?:[.,]\d{1,9})?):\s*(.*)$/iu.exec(
+                value
+            );
+        if (apport !== null) {
+            return {
+                level: normalizeSeverity(apport[1]),
+                message: apport[3] ?? "",
+                source: "apport",
+                timestampMs: textTimestamp(apport[2]!, context.referenceTimestampMs),
+            };
+        }
+    }
+
     const sourceThenIso =
         /^([A-Za-z0-9_.@/-]{1,80})\s+(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d{1,9})?(?:Z|[+-]\d{2}:?\d{2})?):\s*(.*)$/u.exec(
             value
@@ -565,7 +580,7 @@ function presentTextEnvelope(
     const sourcePrefix = sourcePrefixFromMessage(severity.message);
     return {
         facility: facilityFromPriority(priority),
-        level: severity.level ?? severityFromPriority(priority),
+        level: prefix.level ?? severity.level ?? severityFromPriority(priority),
         message: sourcePrefix.message,
         source:
             prefix.source ?? sourcePrefix.source ?? sourceHintFromId(context.sourceId),

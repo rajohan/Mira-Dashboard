@@ -97,6 +97,10 @@ export function MoltbookRoute() {
     const complete = ready !== undefined;
     const loading = snapshotQuery.isPending;
     const fetching = snapshotQuery.isFetching;
+    const snapshotNeedsRetry =
+        ready !== undefined &&
+        (ready.status.freshness !== "fresh" ||
+            ready.status.lastAttemptStatus !== "succeeded");
     const refresh = () => void refreshMoltbookQueries(queryClient);
 
     return (
@@ -142,7 +146,20 @@ export function MoltbookRoute() {
                                     </Button>
                                 </div>
                             )}
-                            <MoltbookSnapshotNotice status={ready.status} />
+                            <div className="flex flex-wrap items-center gap-3">
+                                <div className="min-w-0 flex-1">
+                                    <MoltbookSnapshotNotice status={ready.status} />
+                                </div>
+                                {firstError === null && snapshotNeedsRetry && (
+                                    <Button
+                                        busy={fetching}
+                                        onClick={refresh}
+                                        variant="secondary"
+                                    >
+                                        Retry
+                                    </Button>
+                                )}
+                            </div>
                             {ready.profile === undefined ? null : (
                                 <MoltbookProfileCard
                                     home={ready.home}

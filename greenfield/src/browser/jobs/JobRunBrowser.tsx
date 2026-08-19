@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { JobRunEvent } from "../../contracts/jobModel.ts";
 import type { JobRunDetail as JobRunDetailData } from "../../contracts/jobs.ts";
@@ -284,10 +284,37 @@ export function JobRunBrowser({
     const navigate = useNavigate({ from: "/jobs" });
     const search = parseJobsRouteSearch(useSearch({ from: "/jobs" }) as unknown);
     const query = useInfiniteQuery(jobRunListQueryOptions(client, undefined));
+    const historySentinelRef = useRef<HTMLDivElement>(null);
     const summaryQuery = useQuery(jobQueueSummaryQueryOptions(client));
     const runs = uniqueJobRows(query.data?.pages.flatMap((page) => page.runs) ?? []);
     const summary = summaryQuery.data ?? query.data?.pages[0]?.summary;
     const claiming = useSetJobClaimingPausedMutation();
+    const fetchNextHistoryPage = query.fetchNextPage;
+    const hasNextHistoryPage = query.hasNextPage;
+    const historyPageFailed = query.error !== null;
+    const historyPageLoading = query.isFetchingNextPage;
+    useEffect(() => {
+        const sentinel = historySentinelRef.current;
+        if (
+            sentinel === null ||
+            !hasNextHistoryPage ||
+            historyPageFailed ||
+            historyPageLoading ||
+            globalThis.IntersectionObserver === undefined
+        ) {
+            return;
+        }
+        const observer = new IntersectionObserver(
+            (entries) => {
+                if (entries.some(({ isIntersecting }) => isIntersecting)) {
+                    void fetchNextHistoryPage();
+                }
+            },
+            { rootMargin: "400px 0px" }
+        );
+        observer.observe(sentinel);
+        return () => observer.disconnect();
+    }, [fetchNextHistoryPage, hasNextHistoryPage, historyPageFailed, historyPageLoading]);
     const selectRun = (runId: string | undefined) => {
         if (runId !== undefined) onRequestRunFocus(runId);
         const selectedRun = runs.find(({ id }) => id === runId);
@@ -348,16 +375,8 @@ export function JobRunBrowser({
                     summary={summary}
                 />
             )}
-            {query.hasNextPage && summary !== undefined ? (
-                <div className="mt-4 flex justify-center">
-                    <Button
-                        busy={query.isFetchingNextPage}
-                        onClick={() => void query.fetchNextPage()}
-                        variant="secondary"
-                    >
-                        Load more jobs
-                    </Button>
-                </div>
+            {query.hasNextPage && summary !== undefined && !historyPageFailed ? (
+                <div aria-hidden="true" className="h-px" ref={historySentinelRef} />
             ) : null}
             {query.data === undefined && (
                 <div className="mt-4">
@@ -383,6 +402,16 @@ export function JobRunBrowser({
                         : jobBrowserFailureMessage(backgroundError)
                 }
             />
+            {query.data !== undefined && query.error !== null && (
+                <Button
+                    busy={query.isFetching}
+                    className="mt-4"
+                    onClick={() => void query.refetch()}
+                    variant="secondary"
+                >
+                    Retry job history
+                </Button>
+            )}
         </section>
     );
 }
