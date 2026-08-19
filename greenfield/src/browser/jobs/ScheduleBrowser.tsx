@@ -11,6 +11,7 @@ import { Button } from "../ui/Button.tsx";
 import { Card } from "../ui/Card.tsx";
 import { ExpandableCard } from "../ui/ExpandableCard.tsx";
 import { Heading } from "../ui/Heading.tsx";
+import { Icon } from "../ui/Icon.tsx";
 import { LoadingState } from "../ui/LoadingState.tsx";
 import { PageState } from "../ui/PageState.tsx";
 import { jobBrowserFailureMessage } from "./jobBrowserFailure.ts";
@@ -327,9 +328,12 @@ export function ScheduleBrowser({
             <div className="grid min-w-0 grid-cols-1 gap-3 sm:gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
                 <Card className="min-w-0 p-0 xl:flex xl:max-h-[calc(100vh-10rem)] xl:flex-col xl:overflow-hidden">
                     <div className="border-primary-700 shrink-0 border-b p-3">
-                        <Heading id="schedules-heading" level={2}>
-                            Dashboard schedules
-                        </Heading>
+                        <div className="flex items-center gap-2">
+                            <Icon icon={CalendarClock} tone="accent" />
+                            <Heading id="schedules-heading" level={2}>
+                                Dashboard schedules
+                            </Heading>
+                        </div>
                     </div>
                     <Alert
                         className="mx-3 mt-3"

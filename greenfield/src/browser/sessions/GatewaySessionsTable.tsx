@@ -1,11 +1,4 @@
-import {
-    ArrowDown,
-    ArrowUp,
-    ArrowUpDown,
-    PackageOpen,
-    RotateCcw,
-    Trash2,
-} from "lucide-react";
+import { PackageOpen, RotateCcw, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import type {
@@ -19,16 +12,15 @@ import {
     formatDashboardRelativeTime,
 } from "../lib/formatDateTime.ts";
 import { Badge } from "../ui/Badge.tsx";
-import { Button } from "../ui/Button.tsx";
 import { dashboardDataTableClassNames } from "../ui/dataTableStyles.ts";
 import { DropdownMenu } from "../ui/DropdownMenu.tsx";
-import { Icon } from "../ui/Icon.tsx";
 import { ProgressBar } from "../ui/ProgressBar.tsx";
+import { TableSortButton } from "../ui/TableSortButton.tsx";
+import { nextTableSortDirection } from "../ui/tableSortState.ts";
 import { Text } from "../ui/Text.tsx";
 import {
     type GatewaySessionSort,
     type GatewaySessionSortField,
-    defaultGatewaySessionSort,
     gatewaySessionKindBadgeVariant,
     gatewaySessionKindLabels,
     gatewaySessionTokenPresentation,
@@ -39,31 +31,26 @@ interface SortHeaderProps {
     readonly field: GatewaySessionSortField;
     readonly label: string;
     readonly onSort: (field: GatewaySessionSortField) => void;
-    readonly sort: GatewaySessionSort;
+    readonly sort: GatewaySessionSort | null;
 }
 
 function SortHeader({ field, label, onSort, sort }: SortHeaderProps) {
-    const active = sort.field === field;
-    const nextDirection =
-        active && sort.direction === "ascending" ? "descending" : "ascending";
-    let SortIcon = ArrowUpDown;
-    if (active) SortIcon = sort.direction === "ascending" ? ArrowUp : ArrowDown;
+    const active = sort?.field === field;
+    const direction = active ? sort.direction : false;
+    const nextDirection = nextTableSortDirection(direction);
     return (
         <th
             aria-sort={active ? sort.direction : "none"}
             className="text-primary-300 border-primary-700 bg-primary-950 border-b px-3 py-2 text-left text-xs font-semibold tracking-wide uppercase"
             scope="col"
         >
-            <Button
-                aria-label={`Sort by ${label} ${nextDirection}`}
-                className="hover:text-primary-50 focus-visible:ring-accent-300 inline-flex items-center gap-1 rounded-sm"
+            <TableSortButton
+                accessibleLabel={`Sort by ${label} ${nextDirection}`}
+                direction={direction}
                 onClick={() => onSort(field)}
-                type="button"
-                variant="unstyled"
             >
                 {label}
-                <Icon icon={SortIcon} size="sm" tone="inherit" />
-            </Button>
+            </TableSortButton>
         </th>
     );
 }
@@ -234,17 +221,17 @@ export function GatewaySessionsTable({
     onRequestAction,
     sessions,
 }: GatewaySessionsTableProps) {
-    const [sort, setSort] = useState<GatewaySessionSort>(defaultGatewaySessionSort);
-    const sortedSessions = sortGatewaySessions(sessions, sort);
+    const [sort, setSort] = useState<GatewaySessionSort | null>(null);
+    const sortedSessions = sort === null ? sessions : sortGatewaySessions(sessions, sort);
 
     function toggleSort(field: GatewaySessionSortField) {
-        setSort((current) => ({
-            direction:
-                current.field === field && current.direction === "ascending"
-                    ? "descending"
-                    : "ascending",
-            field,
-        }));
+        setSort((current) => {
+            if (current?.field !== field) return { direction: "ascending", field };
+            if (current.direction === "ascending") {
+                return { direction: "descending", field };
+            }
+            return null;
+        });
     }
 
     return (

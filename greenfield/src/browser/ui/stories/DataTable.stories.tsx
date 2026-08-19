@@ -1,11 +1,12 @@
 import type { Meta, StoryObj } from "@storybook/tanstack-react";
-import { createColumnHelper, tableFeatures, useTable } from "@tanstack/react-table";
+import { createColumnHelper, useTable } from "@tanstack/react-table";
 import { expect, waitFor, within } from "storybook/test";
 
 import {
     expectResponsiveTableCards,
     expectStickyTableHeaderContained,
 } from "../../storySupport/virtualizationAssertions.ts";
+import { dashboardTableFeatures } from "../dashboardTableFeatures.ts";
 import { DataTable } from "../DataTable.tsx";
 import { Virtualizer } from "../Virtualizer.tsx";
 
@@ -16,7 +17,7 @@ interface TableStoryRow {
     readonly status: string;
 }
 
-const storyTableFeatures = tableFeatures({});
+const storyTableFeatures = dashboardTableFeatures;
 const columnHelper = createColumnHelper<typeof storyTableFeatures, TableStoryRow>();
 const columns = columnHelper.columns([
     columnHelper.accessor("name", { header: "Name" }),

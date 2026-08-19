@@ -1,5 +1,5 @@
 import { useInfiniteQuery, infiniteQueryOptions } from "@tanstack/react-query";
-import { createColumnHelper, tableFeatures, useTable } from "@tanstack/react-table";
+import { createColumnHelper, useTable } from "@tanstack/react-table";
 import { RefreshCw, ScrollText } from "lucide-react";
 import { useRef, type ReactNode, type UIEvent } from "react";
 
@@ -14,6 +14,7 @@ import { formatDashboardDateTimeParts } from "../lib/formatDateTime.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
+import { dashboardTableFeatures } from "../ui/dashboardTableFeatures.ts";
 import { DataTable } from "../ui/DataTable.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { Icon } from "../ui/Icon.tsx";
@@ -27,7 +28,7 @@ type SecurityAuditCursor = NonNullable<ListSecurityAuditEventsInput["cursor"]>;
 const emptyAuditEvents: readonly SecurityAuditEventSummary[] = Object.freeze([]);
 const minimumVirtualizedAuditRows = 50;
 
-const auditTableFeatures = tableFeatures({});
+const auditTableFeatures = dashboardTableFeatures;
 const auditTableClassName = "min-w-240 table-fixed";
 const auditColumnWidths = Object.freeze({
     action: "17%",

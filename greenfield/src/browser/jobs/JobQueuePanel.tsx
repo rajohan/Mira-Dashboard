@@ -1,5 +1,5 @@
-import { createColumnHelper, tableFeatures, useTable } from "@tanstack/react-table";
-import { PauseCircle, PlayCircle, Server } from "lucide-react";
+import { createColumnHelper, useTable } from "@tanstack/react-table";
+import { History, ListTodo, PauseCircle, PlayCircle, Server } from "lucide-react";
 import type { ReactNode } from "react";
 
 import type {
@@ -12,6 +12,7 @@ import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Card } from "../ui/Card.tsx";
+import { dashboardTableFeatures } from "../ui/dashboardTableFeatures.ts";
 import { DataTable } from "../ui/DataTable.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
@@ -19,7 +20,7 @@ import { Text } from "../ui/Text.tsx";
 import { jobRunStateBadgeVariant, jobRunStateLabel } from "./jobRunPresentation.ts";
 import { JobRunTable } from "./JobRunTable.tsx";
 
-const workerTableFeatures = tableFeatures({});
+const workerTableFeatures = dashboardTableFeatures;
 const queueStateDefinitions = Object.freeze([
     { label: "Queued", state: "queued" },
     { label: "Running", state: "running" },
@@ -140,7 +141,10 @@ export function JobQueuePanel({
         <Card aria-label="Job queue and workers" className="p-3 sm:p-5">
             <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
-                    <Heading level={2}>Queue and workers</Heading>
+                    <div className="flex items-center gap-2">
+                        <Icon icon={Server} tone="accent" />
+                        <Heading level={2}>Queue and workers</Heading>
+                    </div>
                     <Text className="mt-1" tone="muted">
                         See waiting jobs and the workers that can run them.
                     </Text>
@@ -233,7 +237,10 @@ export function JobQueuePanel({
 
             <div className="mt-5 grid min-w-0 gap-5">
                 <div className="min-w-0">
-                    <Heading level={3}>Queued and running</Heading>
+                    <div className="flex items-center gap-2">
+                        <Icon icon={ListTodo} tone="accent" />
+                        <Heading level={3}>Queued and running</Heading>
+                    </div>
                     {activeRuns.length === 0 ? (
                         <Text className="mt-3" tone="muted">
                             No queued or running jobs.
@@ -251,7 +258,10 @@ export function JobQueuePanel({
                     )}
                 </div>
                 <div className="min-w-0">
-                    <Heading level={3}>Recent jobs</Heading>
+                    <div className="flex items-center gap-2">
+                        <Icon icon={History} tone="accent" />
+                        <Heading level={3}>Recent jobs</Heading>
+                    </div>
                     {recentRuns.length === 0 ? (
                         <Text className="mt-3" tone="muted">
                             No recent jobs.
@@ -278,7 +288,7 @@ export function JobQueuePanel({
 
             <div className="mt-6">
                 <div className="mb-3 flex items-center gap-2">
-                    <Icon icon={Server} />
+                    <Icon icon={Server} tone="accent" />
                     <Heading level={3}>Workers</Heading>
                 </div>
                 {summary.workers.length === 0 ? (

@@ -265,7 +265,7 @@ export function WorkspaceFileEditorPane({
             <header className="border-primary-700 flex flex-col gap-3 border-b p-4 xl:flex-row xl:items-start xl:justify-between">
                 <div className="min-w-0 xl:flex-1">
                     <div className="flex min-w-0 items-center gap-2">
-                        <Icon icon={FilePenLine} size="sm" />
+                        <Icon icon={FilePenLine} size="sm" tone="accent" />
                         <h2 className="text-primary-50 min-w-0 truncate font-semibold">
                             {entry.name}
                         </h2>

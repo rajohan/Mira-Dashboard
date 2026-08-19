@@ -266,9 +266,12 @@ export function IncidentBrowser() {
             <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-[minmax(18rem,24rem)_minmax(0,1fr)]">
                 <Card className="min-w-0 p-0">
                     <div className="border-primary-700 border-b px-4 py-3">
-                        <Heading level={2} size="subsection">
-                            Incidents
-                        </Heading>
+                        <div className="flex items-center gap-2">
+                            <Icon icon={ShieldAlert} tone="accent" />
+                            <Heading level={2} size="subsection">
+                                Incidents
+                            </Heading>
+                        </div>
                     </div>
                     {catalogContent}
                     {query.hasNextPage && (

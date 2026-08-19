@@ -269,7 +269,7 @@ describe("DatabaseRoute", () => {
         expect(options.staleTime).toBe(databaseOverviewRefreshIntervalMs);
     });
 
-    test("offers both reviewed sources through an accessible picker", () => {
+    test("offers both reviewed sources through accessible tabs", async () => {
         const onSelect = jest.fn();
         const queryClient = new QueryClient({
             defaultOptions: { queries: { retry: false } },
@@ -286,14 +286,19 @@ describe("DatabaseRoute", () => {
             </QueryClientProvider>
         );
         try {
-            const sqlite = screen.getByRole("button", { name: "Dashboard SQLite" });
-            const postgres = screen.getByRole("button", {
+            const sqlite = screen.getByRole("tab", { name: "Dashboard SQLite" });
+            const postgres = screen.getByRole("tab", {
                 name: "PostgreSQL & PgBouncer",
             });
-            expect(screen.getByRole("group", { name: "Database source" })).toBeVisible();
-            expect(sqlite).toHaveAttribute("aria-pressed", "true");
-            expect(postgres).toHaveAttribute("aria-pressed", "false");
-            postgres.click();
+            expect(
+                screen.getByRole("tablist", { name: "Database source" })
+            ).toBeVisible();
+            expect(sqlite).toHaveAttribute("aria-selected", "true");
+            expect(postgres).toHaveAttribute("aria-selected", "false");
+            await act(async () => {
+                postgres.click();
+                await Promise.resolve();
+            });
             expect(onSelect).toHaveBeenCalledWith("postgresql");
         } finally {
             view.unmount();
@@ -316,9 +321,14 @@ describe("DatabaseRoute", () => {
     test("renders the read-only SQLite lifecycle projection", async () => {
         const { query, queryClient, view } = renderRoute(Promise.resolve(freshOverview));
         try {
-            expect(await screen.findByText("Fresh observation")).toBeVisible();
-            expect(screen.getByText("12 / 12")).toBeVisible();
-            expect(screen.getByText("Current")).toBeVisible();
+            expect(await screen.findByText("12 / 12")).toBeVisible();
+            expect(screen.queryByText("Fresh observation")).toBeNull();
+            expect(screen.queryByText(/^Observed /u)).toBeNull();
+            expect(screen.queryByRole("heading", { name: "Schema state" })).toBeNull();
+            expect(screen.queryByRole("heading", { name: "Database source" })).toBeNull();
+            expect(
+                screen.queryByRole("heading", { name: "Storage permissions" })
+            ).toBeNull();
             expect(screen.getByText("1,000 pages")).toBeVisible();
             expect(screen.getByText("Disabled")).toBeVisible();
             expect(screen.getAllByText("64 MiB")).not.toHaveLength(0);
@@ -326,6 +336,9 @@ describe("DatabaseRoute", () => {
             expect(screen.getAllByText("4.0 MiB")).not.toHaveLength(0);
             expect(screen.getByText("Permissions secure")).toBeVisible();
             expect(screen.getByText("0700 / 0600 / 0600 / 0600")).toBeVisible();
+            expect(screen.getByText("Permission modes").closest("div")).toHaveClass(
+                "bg-primary-900/40"
+            );
             expect(screen.getByText("Backup kinds")).toBeVisible();
             expect(screen.getByText("None")).toBeVisible();
             expect(
@@ -351,7 +364,10 @@ describe("DatabaseRoute", () => {
             expect(await screen.findByText("1 verified · 8.0 MiB")).toBeVisible();
             expect(screen.getByText("scheduled: 1")).toBeVisible();
             expect(screen.getAllByText(/8\.0 MiB$/u)).toHaveLength(2);
-            expect(screen.getByText(/succeeded/u)).toBeVisible();
+            expect(screen.getByText(/succeeded/u)).toHaveClass(
+                "bg-emerald-500/15",
+                "capitalize"
+            );
             expect(screen.getByText("02:40 Europe/Oslo · 1 retained runs")).toBeVisible();
             expect(screen.queryByText(/\/state\//u)).toBeNull();
             expect(screen.queryByText(/raw error/iu)).toBeNull();
@@ -628,7 +644,7 @@ describe("DatabaseRoute", () => {
             expect(
                 screen.getByText(/latest SQLite diagnostics check failed/iu)
             ).toBeVisible();
-            expect(screen.getByText("12 / 12")).toBeVisible();
+            expect(await screen.findByText("12 / 12")).toBeVisible();
         } finally {
             view.unmount();
             queryClient.clear();
@@ -649,8 +665,8 @@ describe("DatabaseRoute", () => {
             ).toBeVisible();
             expect(screen.queryByText("Connection policy")).toBeNull();
             expect(
-                screen.getByRole("button", { name: "PostgreSQL & PgBouncer" })
-            ).toHaveAttribute("aria-pressed", "true");
+                screen.getByRole("tab", { name: "PostgreSQL & PgBouncer" })
+            ).toHaveAttribute("aria-selected", "true");
         } finally {
             view.unmount();
             queryClient.clear();
@@ -665,9 +681,13 @@ describe("DatabaseRoute", () => {
         );
         try {
             expect(await screen.findByText("Database storage")).toBeVisible();
+            expect(screen.queryByRole("heading", { name: "Maintenance" })).toBeNull();
+            expect(
+                screen.queryByRole("heading", { name: "Statement metrics" })
+            ).toBeNull();
             expect(screen.getByText("8.0 GiB")).toBeVisible();
             expect(screen.getByText("97.3%")).toBeVisible();
-            expect(screen.getAllByText("Review")).toHaveLength(2);
+            expect(screen.getByText("Review")).toBeVisible();
             expect(screen.getByText("5.0 GiB · 83.3%")).toBeVisible();
             expect(screen.getByText("Required")).toBeVisible();
             expect(
@@ -687,6 +707,15 @@ describe("DatabaseRoute", () => {
                 )
             ).toBeVisible();
             expect(screen.getByText("Unassessed physical size")).toBeVisible();
+            const maintenanceAssessment = screen.getByRole("region", {
+                name: "Maintenance assessment",
+            });
+            expect(
+                within(maintenanceAssessment).getByText("Bloat assessment").closest("div")
+            ).toHaveClass("bg-primary-900/40");
+            expect(within(maintenanceAssessment).getByText("Review")).toHaveClass(
+                "bg-amber-500/15"
+            );
             expect(
                 screen.getByRole("heading", { name: "Comet torrents" }).closest("section")
             ).toHaveTextContent("Unavailable");
@@ -704,10 +733,34 @@ describe("DatabaseRoute", () => {
             });
             expect(databases).toHaveClass(
                 "dashboard-data-table-container",
-                "overflow-x-auto",
-                "@max-[66rem]:overflow-x-hidden"
+                "overflow-x-hidden"
+            );
+            expect(databases).not.toHaveClass("overflow-y-hidden");
+            const databaseTable = within(databases).getByRole("table");
+            expect(databaseTable).toHaveClass(
+                "min-w-0!",
+                "table-fixed",
+                "@max-[66rem]:[&_.dashboard-data-table-row]:grid",
+                "@max-[66rem]:[&_.dashboard-data-table-row]:grid-cols-2",
+                "@max-[66rem]:[&_.dashboard-data-table-cell:first-child]:col-span-2"
             );
             expect(within(databases).getByText("mira_app")).toBeVisible();
+            expect(within(databases).getByText("mira_app")).toHaveClass("truncate");
+            expect(within(databases).getByText("mira_app")).toHaveAttribute(
+                "title",
+                "mira_app"
+            );
+            expect(
+                within(databases).queryByRole("columnheader", { name: "Details" })
+            ).toBeNull();
+            expect(
+                databaseTable.querySelector('col[style="width: 16%;"]')
+            ).not.toBeNull();
+            expect(databaseTable).toHaveClass(
+                "[&_th_span]:break-normal",
+                "[&_th_span]:wrap-normal",
+                "[&_th:nth-child(3)]:whitespace-nowrap"
+            );
             expect(within(databases).getByText("1,234")).toBeVisible();
             expect(within(databases).getByText("98.4%")).toBeVisible();
             expect(within(databases).getByText("5 active · 1 waiting")).toBeVisible();
@@ -716,15 +769,36 @@ describe("DatabaseRoute", () => {
             const health = screen.getByRole("region", {
                 name: "PostgreSQL table health",
             });
+            expect(health).toHaveClass("overflow-x-hidden");
+            expect(health).not.toHaveClass("overflow-y-hidden");
+            const healthTable = within(health).getByRole("table");
+            expect(healthTable).toHaveClass(
+                "min-w-0!",
+                "table-fixed",
+                "@max-[66rem]:[&_.dashboard-data-table-row]:grid-cols-2",
+                "@max-[66rem]:[&_.dashboard-data-table-cell:nth-child(3)]:col-span-2"
+            );
+            expect(healthTable.querySelector('col[style="width: 16%;"]')).not.toBeNull();
             expect(within(health).getByText("public")).toBeVisible();
             expect(within(health).getByText("events")).toBeVisible();
+            expect(within(health).getByText("public")).toHaveClass("truncate");
+            expect(within(health).getByText("events")).toHaveClass("truncate");
+            expect(
+                within(health).queryByRole("columnheader", { name: "Bloat assessment" })
+            ).toBeNull();
             expect(within(health).getByText("25%")).toBeVisible();
-            expect(within(health).getByText("Assessed")).toBeVisible();
             expect(within(health).getByText("5.0 GiB")).toBeVisible();
 
             const statements = screen.getByRole("region", {
                 name: "PostgreSQL statement metrics",
             });
+            expect(statements).toHaveClass("overflow-x-hidden");
+            expect(statements).not.toHaveClass("overflow-y-hidden");
+            expect(within(statements).getByRole("table")).toHaveClass(
+                "min-w-0!",
+                "table-fixed",
+                "@max-[66rem]:[&_.dashboard-data-table-row]:grid-cols-2"
+            );
             expect(within(statements).getByText("5,280 ms")).toBeVisible();
             expect(within(statements).getByText("508.25 ms")).toBeVisible();
             expect(
@@ -773,7 +847,7 @@ describe("DatabaseRoute", () => {
                 name: "PostgreSQL databases",
             });
             expect(within(databases).getByText("search_index")).toBeVisible();
-            expect(within(databases).getByText("Unavailable")).toBeVisible();
+            expect(within(databases).queryByText("Unavailable")).toBeNull();
 
             const maintenance = screen.getByRole("region", {
                 name: "Maintenance assessment",
@@ -884,7 +958,9 @@ describe("DatabaseRoute", () => {
             const health = screen.getByRole("region", {
                 name: "PostgreSQL table health",
             });
-            expect(within(health).getByText("Not assessed")).toBeVisible();
+            expect(
+                within(health).queryByRole("columnheader", { name: "Bloat assessment" })
+            ).toBeNull();
             expect(within(health).getAllByText("—")).toHaveLength(3);
             expect(
                 screen.queryByRole("region", {
@@ -947,6 +1023,70 @@ describe("DatabaseRoute", () => {
             expect(screen.getByText("Browser cache retained")).toBeVisible();
             expect(screen.queryByText("Fresh observation")).toBeNull();
             expect(screen.queryByText(/private database path/iu)).toBeNull();
+        } finally {
+            view.unmount();
+            queryClient.clear();
+        }
+    });
+
+    test("does not present cached retention as a new failure while remount revalidates", async () => {
+        const pending = Promise.withResolvers<DatabaseOverview>();
+        const retainedOverview = {
+            ...freshOverview,
+            checkedAtMs: freshOverview.checkedAtMs + 1000,
+            sqlite: {
+                ...freshOverview.sqlite,
+                staleSinceMs: freshOverview.sqlite.observedAtMs + 1000,
+                state: "last-known-good",
+            },
+        } as const satisfies DatabaseOverview;
+        const { queryClient, view } = renderRoute(pending.promise, (cache) =>
+            cache.setQueryData(databaseOverviewQueryKey, retainedOverview)
+        );
+        try {
+            expect(screen.getByText("12 / 12")).toBeVisible();
+            expect(
+                screen.queryByText(
+                    "The latest SQLite diagnostics check failed. Showing the most recent verified observation."
+                )
+            ).toBeNull();
+            expect(screen.queryByText("Last-known-good")).toBeNull();
+
+            pending.resolve(freshOverview);
+            await act(async () => pending.promise);
+
+            expect(screen.getByText("12 / 12")).toBeVisible();
+            expect(screen.queryByText("Last-known-good")).toBeNull();
+        } finally {
+            view.unmount();
+            queryClient.clear();
+        }
+    });
+
+    test("does not present cached SQLite unavailability before remount revalidation", async () => {
+        const pending = Promise.withResolvers<DatabaseOverview>();
+        const unavailableOverview = {
+            ...freshOverview,
+            sqlite: { state: "unavailable" },
+        } as const satisfies DatabaseOverview;
+        const { queryClient, view } = renderRoute(pending.promise, (cache) =>
+            cache.setQueryData(databaseOverviewQueryKey, unavailableOverview)
+        );
+        try {
+            expect(
+                screen.getByLabelText("Revalidating SQLite diagnostics…")
+            ).toBeVisible();
+            expect(
+                screen.queryByRole("heading", { name: "SQLite diagnostics unavailable" })
+            ).toBeNull();
+
+            pending.resolve(freshOverview);
+            await act(async () => pending.promise);
+
+            expect(await screen.findByText("12 / 12")).toBeVisible();
+            expect(
+                screen.queryByRole("heading", { name: "SQLite diagnostics unavailable" })
+            ).toBeNull();
         } finally {
             view.unmount();
             queryClient.clear();

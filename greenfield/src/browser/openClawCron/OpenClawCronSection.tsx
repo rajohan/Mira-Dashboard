@@ -11,6 +11,7 @@ import { isDashboardOperationOutcomeUnknown } from "../api/trpcError.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Heading } from "../ui/Heading.tsx";
+import { Icon } from "../ui/Icon.tsx";
 import { PageState } from "../ui/PageState.tsx";
 import { Text } from "../ui/Text.tsx";
 import { OpenClawCronConfirmationDialog } from "./OpenClawCronConfirmationDialog.tsx";
@@ -323,8 +324,11 @@ export function OpenClawCronSectionView({
             ) : (
                 <div className="grid max-w-full min-w-0 grid-cols-1 gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
                     <div className="border-primary-700 bg-primary-800/80 flex min-w-0 flex-col rounded-xl border p-2 xl:max-h-[calc(100vh-10rem)]">
-                        <div className="border-primary-700 text-primary-200 border-b px-2 pb-2 text-sm font-semibold">
-                            Schedules
+                        <div className="border-primary-700 flex items-center gap-2 border-b p-2">
+                            <Icon icon={CloudCog} tone="accent" />
+                            <Heading level={3} size="subsection">
+                                Schedules
+                            </Heading>
                         </div>
                         <div className="min-h-0 flex-1 pt-2 xl:overflow-y-auto">
                             <OpenClawCronTable

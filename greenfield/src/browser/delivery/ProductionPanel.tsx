@@ -57,9 +57,13 @@ export function ProductionCheckoutCard({ checkout }: ProductionCheckoutCardProps
 }
 
 function ReleaseSlot({
+    badgeLabel,
+    badgeVariant,
     label,
     release,
 }: {
+    readonly badgeLabel: string;
+    readonly badgeVariant: "default" | "success" | "warning";
     readonly label: string;
     readonly release?: DeliveryRelease;
 }) {
@@ -68,9 +72,12 @@ function ReleaseSlot({
             aria-label={label}
             className="border-primary-700 bg-primary-900/40 rounded-lg border p-3"
         >
-            <Heading level={3} size="subsection">
-                {label}
-            </Heading>
+            <div className="flex items-start justify-between gap-2">
+                <Heading level={3} size="subsection">
+                    {label}
+                </Heading>
+                <Badge variant={badgeVariant}>{badgeLabel}</Badge>
+            </div>
             {release === undefined ? (
                 <Text className="mt-2" size="sm" tone="muted">
                     No release available
@@ -136,23 +143,34 @@ export function ProductionReleasesPanel({
     const checkoutIsActive =
         checkout !== undefined && releases.current?.releaseId === checkout.headSha;
     let checkoutBadgeLabel = "Checking";
+    let checkoutBadgeVariant: "default" | "success" | "warning" = "default";
     if (checkout !== undefined) {
-        checkoutBadgeLabel = checkoutIsActive ? "Active" : "Deploy available";
+        if (checkoutIsActive) checkoutBadgeLabel = "Current";
+        else checkoutBadgeLabel = deployAvailable ? "Eligible" : "Not eligible";
+        checkoutBadgeVariant =
+            checkoutIsActive || deployAvailable ? "success" : "warning";
     }
     return (
         <Card aria-label="Production release slots" className="space-y-3 p-3 sm:p-4">
             <div className="grid gap-2 lg:grid-cols-3">
-                <ReleaseSlot label="Active release" release={releases.current} />
                 <ReleaseSlot
+                    badgeLabel={
+                        releases.current === undefined ? "Not available" : "Current"
+                    }
+                    badgeVariant={releases.current === undefined ? "default" : "success"}
+                    label="Active release"
+                    release={releases.current}
+                />
+                <ReleaseSlot
+                    badgeLabel={rollbackAvailable ? "Eligible" : "Not eligible"}
+                    badgeVariant={rollbackAvailable ? "success" : "warning"}
                     label="Previous / rollback target"
                     release={releases.previous}
                 />
                 <div className="border-primary-700 bg-primary-900/40 rounded-lg border p-3">
                     <div className="flex items-start justify-between gap-2">
                         <Heading level={3}>Main checkout</Heading>
-                        <Badge variant={checkoutIsActive ? "success" : "warning"}>
-                            {checkoutBadgeLabel}
-                        </Badge>
+                        <Badge variant={checkoutBadgeVariant}>{checkoutBadgeLabel}</Badge>
                     </div>
                     <code className="text-primary-100 mt-2 block text-sm">
                         {checkout?.headSha.slice(0, 8) ?? "Checking…"}

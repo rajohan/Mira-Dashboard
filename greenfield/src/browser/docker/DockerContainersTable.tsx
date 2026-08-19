@@ -1,33 +1,23 @@
 import { useNavigate } from "@tanstack/react-router";
-import {
-    ArrowDown,
-    ArrowUp,
-    ArrowUpDown,
-    Boxes,
-    FileText,
-    Play,
-    RotateCw,
-    Square,
-    SquareTerminal,
-} from "lucide-react";
+import { Boxes, FileText, Play, RotateCw, Square, SquareTerminal } from "lucide-react";
 import { useState } from "react";
 
 import type { DockerContainer } from "../../contracts/docker.ts";
 import { cn } from "../lib/classNames.ts";
 import { formatByteCount, formatPercent } from "../lib/formatMeasurements.ts";
 import { Badge } from "../ui/Badge.tsx";
-import { Button } from "../ui/Button.tsx";
 import { Card } from "../ui/Card.tsx";
 import { dashboardDataTableClassNames } from "../ui/dataTableStyles.ts";
 import { DropdownMenu } from "../ui/DropdownMenu.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { SearchInput } from "../ui/SearchInput.tsx";
+import { TableSortButton } from "../ui/TableSortButton.tsx";
+import { nextTableSortDirection } from "../ui/tableSortState.ts";
 import { Text } from "../ui/Text.tsx";
 import {
     type DockerContainerSort,
     type DockerContainerSortField,
-    defaultDockerContainerSort,
     dockerContainerHealthVariant,
     dockerContainerIsActive,
     dockerContainerMatchesSearch,
@@ -44,31 +34,26 @@ interface SortHeaderProps {
     readonly field: DockerContainerSortField;
     readonly label: string;
     readonly onSort: (field: DockerContainerSortField) => void;
-    readonly sort: DockerContainerSort;
+    readonly sort: DockerContainerSort | null;
 }
 
 function SortHeader({ field, label, onSort, sort }: SortHeaderProps) {
-    const active = sort.field === field;
-    const nextDirection =
-        active && sort.direction === "ascending" ? "descending" : "ascending";
-    let SortIcon = ArrowUpDown;
-    if (active) SortIcon = sort.direction === "ascending" ? ArrowUp : ArrowDown;
+    const active = sort?.field === field;
+    const direction = active ? sort.direction : false;
+    const nextDirection = nextTableSortDirection(direction);
     return (
         <th
             aria-sort={active ? sort.direction : "none"}
             className="text-primary-300 border-primary-700 bg-primary-950 border-b px-3 py-2 text-left text-xs font-semibold tracking-wide uppercase"
             scope="col"
         >
-            <Button
-                aria-label={"Sort by " + label + " " + nextDirection}
-                className="hover:text-primary-50 focus-visible:ring-accent-300 inline-flex items-center gap-1 rounded-sm"
+            <TableSortButton
+                accessibleLabel={`Sort by ${label} ${nextDirection}`}
+                direction={direction}
                 onClick={() => onSort(field)}
-                type="button"
-                variant="unstyled"
             >
                 {label}
-                <Icon icon={SortIcon} size="sm" tone="inherit" />
-            </Button>
+            </TableSortButton>
         </th>
     );
 }
@@ -387,20 +372,23 @@ export function DockerContainersTable({
 }: DockerContainersTableProps) {
     const navigate = useNavigate({ from: "/docker" });
     const [search, setSearch] = useState("");
-    const [sort, setSort] = useState<DockerContainerSort>(defaultDockerContainerSort);
-    const visibleContainers = sortDockerContainers(
-        containers.filter((container) => dockerContainerMatchesSearch(container, search)),
-        sort
+    const [sort, setSort] = useState<DockerContainerSort | null>(null);
+    const filteredContainers = containers.filter((container) =>
+        dockerContainerMatchesSearch(container, search)
     );
+    const visibleContainers =
+        sort === null
+            ? filteredContainers
+            : sortDockerContainers(filteredContainers, sort);
 
     function toggleSort(field: DockerContainerSortField): void {
-        setSort((current) => ({
-            direction:
-                current.field === field && current.direction === "ascending"
-                    ? "descending"
-                    : "ascending",
-            field,
-        }));
+        setSort((current) => {
+            if (current?.field !== field) return { direction: "ascending", field };
+            if (current.direction === "ascending") {
+                return { direction: "descending", field };
+            }
+            return null;
+        });
     }
 
     function openConsole(container: DockerContainer): void {

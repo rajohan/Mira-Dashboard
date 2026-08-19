@@ -1,11 +1,14 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 
-import { createColumnHelper, tableFeatures, useTable } from "@tanstack/react-table";
+import { createColumnHelper, useTable } from "@tanstack/react-table";
 
+import { dashboardTableFeatures } from "./dashboardTableFeatures.ts";
 import { DataTable } from "./DataTable.tsx";
 import { Virtualizer } from "./Virtualizer.tsx";
 
 const { render, screen, within } = await import("@testing-library/react");
+const userEventModule = await import("@testing-library/user-event");
+const userEvent = userEventModule.default;
 
 const originalOffsetHeight = Object.getOwnPropertyDescriptor(
     HTMLElement.prototype,
@@ -57,7 +60,7 @@ interface FixtureRow {
     readonly label: string;
 }
 
-const fixtureTableFeatures = tableFeatures({});
+const fixtureTableFeatures = dashboardTableFeatures;
 const fixtureColumnHelper = createColumnHelper<typeof fixtureTableFeatures, FixtureRow>();
 const fixtureColumns = fixtureColumnHelper.columns([
     fixtureColumnHelper.accessor("label", { header: "Label" }),
@@ -157,6 +160,32 @@ describe("Dashboard data table and virtualizer", () => {
             "First row"
         );
         expect(scrollRegion).not.toHaveClass("max-h-128", "overflow-auto");
+    });
+
+    test("sorts rows through accessible desktop headers only", async () => {
+        render(<TableFixture data={staticRows} virtualized={false} />);
+
+        const table = screen.getByRole("table", { name: "Fixture rows" });
+        const header = within(table).getByRole("columnheader", { name: "Label" });
+        const sortButtons = screen.getAllByRole("button", { name: "Label" });
+        expect(sortButtons).toHaveLength(1);
+        expect(screen.queryByRole("toolbar")).toBeNull();
+        expect(sortButtons[0]?.querySelector("svg")).toBeNull();
+
+        await userEvent.click(sortButtons[0]!);
+        expect(header).toHaveAttribute("aria-sort", "ascending");
+        expect(sortButtons[0]?.querySelector(".lucide-arrow-up")).not.toBeNull();
+        expect(within(table).getAllByRole("row")[1]).toHaveTextContent("First row");
+
+        await userEvent.click(sortButtons[0]!);
+        expect(header).toHaveAttribute("aria-sort", "descending");
+        expect(sortButtons[0]?.querySelector(".lucide-arrow-down")).not.toBeNull();
+        expect(within(table).getAllByRole("row")[1]).toHaveTextContent("Second row");
+
+        await userEvent.click(sortButtons[0]!);
+        expect(header).toHaveAttribute("aria-sort", "none");
+        expect(sortButtons[0]?.querySelector("svg")).toBeNull();
+        expect(within(table).getAllByRole("row")[1]).toHaveTextContent("First row");
     });
 
     test("composes the table with a bounded virtual row window", () => {

@@ -372,13 +372,16 @@ export function WorkspaceFilesView({
             <Card aria-labelledby="workspace-files-location-heading" className="p-4">
                 <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
                     <div className="min-w-0 flex-1">
-                        <Heading
-                            id="workspace-files-location-heading"
-                            level={2}
-                            size="subsection"
-                        >
-                            Workspace explorer
-                        </Heading>
+                        <div className="flex items-center gap-2">
+                            <Icon icon={FolderTree} tone="accent" />
+                            <Heading
+                                id="workspace-files-location-heading"
+                                level={2}
+                                size="subsection"
+                            >
+                                Workspace explorer
+                            </Heading>
+                        </div>
                         <nav aria-label="Workspace file path" className="mt-2">
                             <ol className="flex min-w-0 flex-wrap items-center gap-1 text-sm">
                                 {breadcrumbs.map((breadcrumb, index) => {
@@ -493,7 +496,7 @@ export function WorkspaceFilesView({
             <Card className="flex min-w-0 flex-col overflow-hidden p-0 lg:min-h-0 lg:flex-1 lg:flex-row">
                 <aside className="border-primary-700 flex max-h-96 min-h-0 w-full shrink-0 flex-col border-b lg:max-h-none lg:w-72 lg:border-r lg:border-b-0">
                     <div className="border-primary-700 flex items-center gap-2 border-b px-4 py-3">
-                        <Icon icon={FolderTree} size="sm" />
+                        <Icon icon={FolderTree} size="sm" tone="accent" />
                         <Heading level={3} size="subsection">
                             Files
                         </Heading>

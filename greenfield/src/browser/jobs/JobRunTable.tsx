@@ -1,4 +1,4 @@
-import { createColumnHelper, tableFeatures, useTable } from "@tanstack/react-table";
+import { createColumnHelper, useTable } from "@tanstack/react-table";
 import { History } from "lucide-react";
 
 import type { JobRunSummary } from "../../contracts/jobModel.ts";
@@ -6,6 +6,7 @@ import { cn } from "../lib/classNames.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
+import { dashboardTableFeatures } from "../ui/dashboardTableFeatures.ts";
 import { DataTable } from "../ui/DataTable.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { Text } from "../ui/Text.tsx";
@@ -13,7 +14,7 @@ import { Virtualizer, type VirtualizerRenderState } from "../ui/Virtualizer.tsx"
 import { jobRunStateBadgeVariant, jobRunStateLabel } from "./jobRunPresentation.ts";
 
 const minimumVirtualizedRows = 50;
-const jobRunTableFeatures = tableFeatures({});
+const jobRunTableFeatures = dashboardTableFeatures;
 
 interface JobRunTableRow {
     readonly onSelect: (id: string) => void;

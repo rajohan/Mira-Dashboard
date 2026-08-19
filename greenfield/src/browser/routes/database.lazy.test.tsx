@@ -145,14 +145,14 @@ test("database lazy route verifies the current session before rendering diagnost
             await screen.findByRole("heading", { level: 1, name: "Database" })
         ).toBeVisible();
         expect(
-            screen.getByRole("button", { name: "PostgreSQL & PgBouncer" })
-        ).toHaveAttribute("aria-pressed", "true");
+            screen.getByRole("tab", { name: "PostgreSQL & PgBouncer" })
+        ).toHaveAttribute("aria-selected", "true");
         expect(query).toHaveBeenCalledWith(
             "auth.status",
             {},
             expect.objectContaining({ signal: expect.any(AbortSignal) })
         );
-        await userEvent.click(screen.getByRole("button", { name: "Dashboard SQLite" }));
+        await userEvent.click(screen.getByRole("tab", { name: "Dashboard SQLite" }));
         expect(router.state.location.search).toEqual({ source: "sqlite" });
     } finally {
         view.unmount();
@@ -214,8 +214,8 @@ test("full Dashboard router owns normalized database source history and shell st
             await screen.findByRole("heading", { level: 1, name: "Database" })
         ).toBeVisible();
         expect(router.state.location.search.source).toBe("sqlite");
-        expect(screen.getByRole("button", { name: "Dashboard SQLite" })).toHaveAttribute(
-            "aria-pressed",
+        expect(screen.getByRole("tab", { name: "Dashboard SQLite" })).toHaveAttribute(
+            "aria-selected",
             "true"
         );
         const navigation = screen.getByRole("navigation", {
@@ -227,29 +227,30 @@ test("full Dashboard router owns normalized database source history and shell st
         expect(screen.getByText("Database", { selector: "header p" })).toBeVisible();
 
         await userEvent.click(
-            screen.getByRole("button", { name: "PostgreSQL & PgBouncer" })
+            screen.getByRole("tab", { name: "PostgreSQL & PgBouncer" })
         );
         await waitFor(() =>
             expect(router.state.location.search).toEqual({ source: "postgresql" })
         );
         expect(router.history.location.href).toBe("/database?source=postgresql");
         expect(
-            screen.getByRole("button", { name: "PostgreSQL & PgBouncer" })
-        ).toHaveAttribute("aria-pressed", "true");
+            screen.getByRole("tab", { name: "PostgreSQL & PgBouncer" })
+        ).toHaveAttribute("aria-selected", "true");
 
         act(() => router.history.back());
         await waitFor(() =>
-            expect(
-                screen.getByRole("button", { name: "Dashboard SQLite" })
-            ).toHaveAttribute("aria-pressed", "true")
+            expect(screen.getByRole("tab", { name: "Dashboard SQLite" })).toHaveAttribute(
+                "aria-selected",
+                "true"
+            )
         );
         expect(router.state.location.search.source).toBe("sqlite");
 
         act(() => router.history.forward());
         await waitFor(() =>
             expect(
-                screen.getByRole("button", { name: "PostgreSQL & PgBouncer" })
-            ).toHaveAttribute("aria-pressed", "true")
+                screen.getByRole("tab", { name: "PostgreSQL & PgBouncer" })
+            ).toHaveAttribute("aria-selected", "true")
         );
         expect(router.state.location.search).toEqual({ source: "postgresql" });
     } finally {

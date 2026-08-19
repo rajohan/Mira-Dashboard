@@ -1,29 +1,22 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import {
-    ArchiveRestore,
-    Database,
-    HardDrive,
-    RefreshCw,
-    ScrollText,
-    ShieldCheck,
-} from "lucide-react";
+import { ArchiveRestore, Cable, Database, HardDrive, ScrollText } from "lucide-react";
+import type { ReactNode } from "react";
 
 import type { DatabaseOverview } from "../../contracts/database.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { dashboardBrowserFailureMessage } from "../api/trpcError.ts";
+import { jobRunStateBadgeVariant, jobRunStateLabel } from "../jobs/jobRunPresentation.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { formatByteCount, formatPercent } from "../lib/formatMeasurements.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Badge } from "../ui/Badge.tsx";
-import { Button } from "../ui/Button.tsx";
 import { Card } from "../ui/Card.tsx";
-import { Fieldset } from "../ui/Fieldset.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { MetricCard } from "../ui/MetricCard.tsx";
-import { PageHeader } from "../ui/PageHeader.tsx";
 import { PageState } from "../ui/PageState.tsx";
+import { Tabs } from "../ui/Tabs.tsx";
 import { Text } from "../ui/Text.tsx";
 import {
     databaseOverviewQueryKey,
@@ -57,12 +50,18 @@ function ConnectionPolicy({ overview }: { readonly overview: DatabaseOverview })
     ] as const;
     return (
         <Card aria-labelledby="database-policy-heading">
-            <Heading id="database-policy-heading" level={2} size="section">
-                Connection policy
-            </Heading>
+            <div className="flex items-center gap-2">
+                <Icon icon={Cable} tone="accent" />
+                <Heading id="database-policy-heading" level={2} size="section">
+                    Connection policy
+                </Heading>
+            </div>
             <dl className="mt-4 grid gap-3 sm:grid-cols-2">
                 {rows.map(([label, value]) => (
-                    <div className="border-primary-700 rounded-lg border p-3" key={label}>
+                    <div
+                        className="border-primary-700 bg-primary-900/40 rounded-lg border p-3"
+                        key={label}
+                    >
                         <dt className="text-primary-400 text-sm">{label}</dt>
                         <dd className="text-primary-50 mt-1 font-medium">{value}</dd>
                     </div>
@@ -100,7 +99,7 @@ function SqliteLifecycleObservationStatus({
         badgeVariant = "warning";
     }
     return (
-        <div className="border-primary-700 rounded-lg border p-3">
+        <div className="border-primary-700 bg-primary-900/40 rounded-lg border p-3">
             <Text size="sm" tone="muted">
                 {label}
             </Text>
@@ -148,9 +147,12 @@ function SqliteStorageDetails({
     return (
         <Card aria-labelledby="sqlite-storage-heading">
             <div className="flex flex-wrap items-center justify-between gap-3">
-                <Heading id="sqlite-storage-heading" level={2} size="section">
-                    SQLite storage
-                </Heading>
+                <div className="flex items-center gap-2">
+                    <Icon icon={HardDrive} tone="accent" />
+                    <Heading id="sqlite-storage-heading" level={2} size="section">
+                        SQLite storage
+                    </Heading>
+                </div>
                 <Badge variant={permissions.secure ? "success" : "warning"}>
                     {permissions.secure ? "Permissions secure" : "Permission review"}
                 </Badge>
@@ -160,7 +162,10 @@ function SqliteStorageDetails({
             </Text>
             <dl className="mt-4 grid gap-3 sm:grid-cols-2">
                 {rows.map(([label, value]) => (
-                    <div className="border-primary-700 rounded-lg border p-3" key={label}>
+                    <div
+                        className="border-primary-700 bg-primary-900/40 rounded-lg border p-3"
+                        key={label}
+                    >
                         <dt className="text-primary-400 text-sm">{label}</dt>
                         <dd className="text-primary-50 mt-1 font-medium wrap-break-word">
                             {value}
@@ -229,9 +234,24 @@ function SqliteLifecycleBoundaries({
         ["Restore verification", restoreVerificationSummary],
         [
             "Latest maintenance",
-            latestRun === undefined
-                ? "No run recorded"
-                : `${latestRun.state}${latestRunAtMs === undefined ? "" : ` · ${formatDashboardDateTime(latestRunAtMs)}`}`,
+            latestRun === undefined ? (
+                "No run recorded"
+            ) : (
+                <span
+                    className="flex flex-wrap items-center gap-2"
+                    key="latest-maintenance"
+                >
+                    <Badge
+                        className="capitalize"
+                        variant={jobRunStateBadgeVariant(latestRun.state)}
+                    >
+                        {jobRunStateLabel(latestRun.state)}
+                    </Badge>
+                    {latestRunAtMs === undefined ? null : (
+                        <ObservationTime timestampMs={latestRunAtMs} />
+                    )}
+                </span>
+            ),
         ],
         [
             "Latest successful maintenance",
@@ -244,9 +264,12 @@ function SqliteLifecycleBoundaries({
     ] as const;
     return (
         <Card aria-labelledby="sqlite-lifecycle-heading">
-            <Heading id="sqlite-lifecycle-heading" level={2} size="section">
-                Backup, restore &amp; maintenance
-            </Heading>
+            <div className="flex items-center gap-2">
+                <Icon icon={ArchiveRestore} tone="accent" />
+                <Heading id="sqlite-lifecycle-heading" level={2} size="section">
+                    Backup, restore &amp; maintenance
+                </Heading>
+            </div>
             <Text className="mt-1" tone="muted">
                 Bounded scheduled and cutover snapshots with explicit verification levels
                 and durable maintenance history, without backup paths or raw failures.
@@ -270,7 +293,10 @@ function SqliteLifecycleBoundaries({
             </section>
             <dl className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 {rows.map(([label, value]) => (
-                    <div className="border-primary-700 rounded-lg border p-3" key={label}>
+                    <div
+                        className="border-primary-700 bg-primary-900/40 rounded-lg border p-3"
+                        key={label}
+                    >
                         <dt className="text-primary-400 text-sm">{label}</dt>
                         <dd className="text-primary-50 mt-1 font-medium">{value}</dd>
                     </div>
@@ -347,12 +373,23 @@ function sqliteLifecycleAttention(
 
 function DatabaseOverviewContent({
     browserCacheRetained,
+    observationConfirmed,
     overview,
 }: {
     readonly browserCacheRetained: boolean;
+    readonly observationConfirmed: boolean;
     readonly overview: DatabaseOverview;
 }) {
     if (overview.sqlite.state === "unavailable") {
+        if (!observationConfirmed) {
+            return (
+                <PageState
+                    label="Revalidating SQLite diagnostics…"
+                    size="lg"
+                    status="loading"
+                />
+            );
+        }
         return (
             <PageState
                 description="No previously verified SQLite observation is available. Retry after the Dashboard database is ready."
@@ -364,19 +401,23 @@ function DatabaseOverviewContent({
     }
     const { migrations } = overview.sqlite;
     const { storage } = overview.sqlite;
-    const retained = overview.sqlite.state === "last-known-good";
-    let observationBadgeLabel = "Fresh observation";
-    if (retained) observationBadgeLabel = "Last-known-good";
-    else if (browserCacheRetained) observationBadgeLabel = "Browser cache retained";
+    const retained = observationConfirmed && overview.sqlite.state === "last-known-good";
     const lifecycleAlerts = sqliteLifecycleAttention(
         overview.sqlite.lifecycle,
         overview.sqlite.observedAtMs
     );
     return (
         <PageState status="ready">
-            <section aria-labelledby="sqlite-overview-heading" className="space-y-6">
-                <Heading id="sqlite-overview-heading" level={2} size="section">
-                    SQLite overview
+            <section
+                aria-labelledby="sqlite-database-details-heading"
+                className="space-y-6"
+            >
+                <Heading
+                    className="sr-only"
+                    id="sqlite-database-details-heading"
+                    level={2}
+                >
+                    SQLite database details
                 </Heading>
                 {retained ? (
                     <Alert
@@ -407,26 +448,28 @@ function DatabaseOverviewContent({
                         variant="warning"
                     />
                 ))}
-                <div className="flex flex-wrap items-center gap-3">
-                    <Badge
-                        variant={retained || browserCacheRetained ? "warning" : "success"}
-                    >
-                        {observationBadgeLabel}
-                    </Badge>
-                    {browserCacheRetained && retained ? (
-                        <Badge variant="warning">Browser cache retained</Badge>
-                    ) : null}
-                    <Text size="sm" tone="muted">
-                        Observed{" "}
-                        <ObservationTime timestampMs={overview.sqlite.observedAtMs} />
-                    </Text>
-                    {overview.sqlite.state === "last-known-good" ? (
+                {retained || browserCacheRetained ? (
+                    <div className="flex flex-wrap items-center gap-3">
+                        {retained ? (
+                            <Badge variant="warning">Last-known-good</Badge>
+                        ) : null}
+                        {browserCacheRetained ? (
+                            <Badge variant="warning">Browser cache retained</Badge>
+                        ) : null}
                         <Text size="sm" tone="muted">
-                            Retained since{" "}
-                            <ObservationTime timestampMs={overview.sqlite.staleSinceMs} />
+                            Observed{" "}
+                            <ObservationTime timestampMs={overview.sqlite.observedAtMs} />
                         </Text>
-                    ) : null}
-                </div>
+                        {retained ? (
+                            <Text size="sm" tone="muted">
+                                Retained since{" "}
+                                <ObservationTime
+                                    timestampMs={overview.sqlite.staleSinceMs}
+                                />
+                            </Text>
+                        ) : null}
+                    </div>
+                ) : null}
                 <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                     <MetricCard
                         description={`Canonical ${overview.sqlite.fileName} without its host path.`}
@@ -457,24 +500,6 @@ function DatabaseOverviewContent({
                         title="Migrations"
                         value={`${migrations.applied} / ${migrations.available}`}
                     />
-                    <MetricCard
-                        description="Schema compatibility for this Dashboard release."
-                        icon={ShieldCheck}
-                        title="Schema state"
-                        value={migrations.current ? "Current" : "Migration required"}
-                    />
-                    <MetricCard
-                        description="The reviewed embedded database source."
-                        icon={Database}
-                        title="Database source"
-                        value="SQLite"
-                    />
-                    <MetricCard
-                        description="Database, WAL, SHM, and private state-directory modes."
-                        icon={ShieldCheck}
-                        title="Storage permissions"
-                        value={storage.permissions.secure ? "Secure" : "Review"}
-                    />
                 </div>
                 <ConnectionPolicy overview={overview} />
                 <SqliteStorageDetails sqlite={overview.sqlite} />
@@ -485,51 +510,34 @@ function DatabaseOverviewContent({
 }
 
 interface DatabaseSourcePickerProps {
+    readonly children: ReactNode;
     readonly onSelect: (source: DatabaseRouteSearch["source"]) => void;
     readonly source: DatabaseRouteSearch["source"];
 }
 
-function DatabaseSourcePicker({ onSelect, source }: DatabaseSourcePickerProps) {
+function DatabaseSourcePicker({ children, onSelect, source }: DatabaseSourcePickerProps) {
     return (
-        <Fieldset
-            className="mt-6 w-full sm:inline-block sm:w-auto"
-            legend={<span className="sr-only">Database source</span>}
-        >
-            <div className="border-primary-700 bg-primary-800/80 grid w-full grid-cols-2 gap-1 rounded-lg border p-1 sm:inline-grid sm:w-auto">
-                <Button
-                    aria-label="Dashboard SQLite"
-                    aria-pressed={source === "sqlite"}
-                    className="min-w-0 justify-center"
-                    onClick={() => onSelect("sqlite")}
-                    variant={source === "sqlite" ? "primary" : "ghost"}
-                >
-                    <span aria-hidden className="sm:hidden">
-                        SQLite
-                    </span>
-                    <span aria-hidden className="hidden sm:inline">
-                        Dashboard SQLite
-                    </span>
-                </Button>
-                <Button
-                    aria-label="PostgreSQL & PgBouncer"
-                    aria-pressed={source === "postgresql"}
-                    className="min-w-0 justify-center"
-                    onClick={() => onSelect("postgresql")}
-                    variant={source === "postgresql" ? "primary" : "ghost"}
-                >
-                    <span aria-hidden className="sm:hidden">
-                        PostgreSQL
-                    </span>
-                    <span aria-hidden className="hidden sm:inline">
-                        PostgreSQL &amp; PgBouncer
-                    </span>
-                </Button>
-            </div>
-        </Fieldset>
+        <Tabs
+            ariaLabel="Database source"
+            onChange={onSelect}
+            tabs={[
+                {
+                    label: "Dashboard SQLite",
+                    panel: source === "sqlite" ? children : null,
+                    value: "sqlite",
+                },
+                {
+                    label: "PostgreSQL & PgBouncer",
+                    panel: source === "postgresql" ? children : null,
+                    value: "postgresql",
+                },
+            ]}
+            value={source}
+        />
     );
 }
 
-type DatabaseRouteContentProps = DatabaseSourcePickerProps;
+type DatabaseRouteContentProps = Omit<DatabaseSourcePickerProps, "children">;
 
 /** @returns Read-only database observations for the selected reviewed source. */
 export function DatabaseRouteContent({ onSelect, source }: DatabaseRouteContentProps) {
@@ -542,67 +550,53 @@ export function DatabaseRouteContent({ onSelect, source }: DatabaseRouteContentP
 
     return (
         <div>
-            <PageHeader
-                actions={
-                    <Button
-                        busy={query.isFetching}
-                        busyLabel="Refreshing database…"
-                        onClick={refresh}
-                        variant="secondary"
-                    >
-                        <Icon icon={RefreshCw} size="sm" tone="inherit" />
-                        Retry
-                    </Button>
-                }
-                description="Inspect bounded, read-only SQLite and PostgreSQL/PgBouncer diagnostics without connection identities, SQL text, or credentials."
-                eyebrow="Data"
-                title="Database"
-            />
-            <DatabaseSourcePicker onSelect={onSelect} source={source} />
-            <div className="mt-8">
-                {query.isPending && !complete ? (
-                    <PageState
-                        label="Loading database overview…"
-                        size="lg"
-                        status="loading"
-                    />
-                ) : null}
-                {!query.isPending && query.error !== null && !complete ? (
-                    <PageState
-                        message={dashboardBrowserFailureMessage(query.error)}
-                        onRetry={refresh}
-                        retryBusy={query.isFetching}
-                        status="error"
-                        title="Database overview unavailable"
-                    />
-                ) : null}
-                {complete ? (
-                    <div className="space-y-4">
-                        {query.error === null ? null : (
-                            <Alert
-                                focusOnError={false}
-                                message="The latest refresh failed. Showing retained database data."
-                                variant="info"
-                            />
-                        )}
-                        {source === "sqlite" ? (
-                            <DatabaseOverviewContent
-                                browserCacheRetained={query.error !== null}
-                                overview={query.data}
-                            />
-                        ) : (
-                            <PostgresqlDatabaseOverview
-                                browserCacheRetained={query.error !== null}
-                                observation={query.data.postgresql}
-                            />
-                        )}
-                        <Text size="sm" tone="muted">
-                            Checked{" "}
-                            <ObservationTime timestampMs={query.data.checkedAtMs} />
-                        </Text>
-                    </div>
-                ) : null}
-            </div>
+            <Heading className="sr-only" level={1}>
+                Database
+            </Heading>
+            <DatabaseSourcePicker onSelect={onSelect} source={source}>
+                <div>
+                    {query.isPending && !complete ? (
+                        <PageState
+                            label="Loading database overview…"
+                            size="lg"
+                            status="loading"
+                        />
+                    ) : null}
+                    {!query.isPending && query.error !== null && !complete ? (
+                        <PageState
+                            message={dashboardBrowserFailureMessage(query.error)}
+                            onRetry={refresh}
+                            retryBusy={query.isFetching}
+                            status="error"
+                            title="Database overview unavailable"
+                        />
+                    ) : null}
+                    {complete ? (
+                        <div className="space-y-4">
+                            {query.error === null ? null : (
+                                <Alert
+                                    focusOnError={false}
+                                    message="The latest refresh failed. Showing retained database data."
+                                    variant="info"
+                                />
+                            )}
+                            {source === "sqlite" ? (
+                                <DatabaseOverviewContent
+                                    browserCacheRetained={query.error !== null}
+                                    observationConfirmed={query.isFetchedAfterMount}
+                                    overview={query.data}
+                                />
+                            ) : (
+                                <PostgresqlDatabaseOverview
+                                    browserCacheRetained={query.error !== null}
+                                    observation={query.data.postgresql}
+                                    observationConfirmed={query.isFetchedAfterMount}
+                                />
+                            )}
+                        </div>
+                    ) : null}
+                </div>
+            </DatabaseSourcePicker>
         </div>
     );
 }

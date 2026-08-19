@@ -18,6 +18,7 @@ import { ConfirmModal } from "../ui/ConfirmModal.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { Fieldset } from "../ui/Fieldset.tsx";
 import { Heading } from "../ui/Heading.tsx";
+import { Icon } from "../ui/Icon.tsx";
 import { Text } from "../ui/Text.tsx";
 import {
     gatewaySessionConfirmationCopy,
@@ -276,13 +277,16 @@ export function GatewaySessionsView({
                 <div className="outline-none" ref={inventoryFocus} tabIndex={-1}>
                     <div className="flex flex-wrap items-end justify-between gap-4">
                         <div>
-                            <Heading
-                                id="gateway-session-inventory-heading"
-                                level={2}
-                                size="subsection"
-                            >
-                                OpenClaw sessions
-                            </Heading>
+                            <div className="flex items-center gap-2">
+                                <Icon icon={Radio} tone="accent" />
+                                <Heading
+                                    id="gateway-session-inventory-heading"
+                                    level={2}
+                                    size="subsection"
+                                >
+                                    OpenClaw sessions
+                                </Heading>
+                            </div>
                             <Text className="mt-1" tone="muted">
                                 Filter and sort current sessions. The main session stays
                                 first.

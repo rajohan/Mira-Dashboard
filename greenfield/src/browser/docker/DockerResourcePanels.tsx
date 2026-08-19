@@ -1,4 +1,5 @@
 import { Database, Package, Trash2 } from "lucide-react";
+import { useState } from "react";
 
 import type {
     DockerContainer,
@@ -11,7 +12,80 @@ import { Button } from "../ui/Button.tsx";
 import { Card } from "../ui/Card.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
+import { TableSortButton } from "../ui/TableSortButton.tsx";
+import { nextTableSortDirection, type TableSortDirection } from "../ui/tableSortState.ts";
 import { Text } from "../ui/Text.tsx";
+
+type ResourceSort = Readonly<{
+    direction: Exclude<TableSortDirection, false>;
+    field: "name" | "size" | "usage";
+}>;
+
+function ResourceSortHeader({
+    field,
+    label,
+    onSort,
+    sort,
+}: {
+    readonly field: ResourceSort["field"];
+    readonly label: string;
+    readonly onSort: (field: ResourceSort["field"]) => void;
+    readonly sort: ResourceSort | null;
+}) {
+    const active = sort?.field === field;
+    const direction = active ? sort.direction : false;
+    const nextDirection = nextTableSortDirection(direction);
+    return (
+        <th
+            aria-sort={active ? sort.direction : "none"}
+            className="text-primary-300 border-primary-700 border-b px-3 py-2 text-left text-xs font-semibold tracking-wide uppercase"
+            scope="col"
+        >
+            <TableSortButton
+                accessibleLabel={`Sort by ${label} ${nextDirection}`}
+                direction={direction}
+                onClick={() => onSort(field)}
+            >
+                {label}
+            </TableSortButton>
+        </th>
+    );
+}
+
+function nextResourceSort(
+    sort: ResourceSort | null,
+    field: ResourceSort["field"]
+): ResourceSort | null {
+    if (sort?.field !== field) return { direction: "ascending", field };
+    if (sort.direction === "ascending") return { direction: "descending", field };
+    return null;
+}
+
+function sortDirectionValue(sort: ResourceSort): number {
+    return sort.direction === "ascending" ? 1 : -1;
+}
+
+function compareImages(
+    left: DockerImage,
+    right: DockerImage,
+    field: ResourceSort["field"]
+): number {
+    if (field === "size") return left.sizeBytes - right.sizeBytes;
+    if (field === "usage")
+        return left.usedByContainerIds.length - right.usedByContainerIds.length;
+    return (left.references[0] ?? left.id).localeCompare(right.references[0] ?? right.id);
+}
+
+function compareVolumes(
+    left: DockerVolume,
+    right: DockerVolume,
+    field: ResourceSort["field"]
+): number {
+    if (field === "size") return (left.sizeBytes ?? -1) - (right.sizeBytes ?? -1);
+    if (field === "usage")
+        return left.usedByContainerIds.length - right.usedByContainerIds.length;
+    return left.name.localeCompare(right.name);
+}
 
 interface DockerResourcePanelsProps {
     readonly busy: boolean;
@@ -207,6 +281,8 @@ export function DockerResourcePanels({
     onPreviewPrune,
     volumes,
 }: DockerResourcePanelsProps) {
+    const [imageSort, setImageSort] = useState<ResourceSort | null>(null);
+    const [volumeSort, setVolumeSort] = useState<ResourceSort | null>(null);
     const containerNames = new Map(
         containers.map((container) => [container.id, container.name] as const)
     );
@@ -221,6 +297,22 @@ export function DockerResourcePanels({
     const unusedVolumeCount = volumes.filter(
         (volume) => volume.usedByContainerIds.length === 0
     ).length;
+    const sortedImages =
+        imageSort === null
+            ? images
+            : images.toSorted(
+                  (left, right) =>
+                      compareImages(left, right, imageSort.field) *
+                      sortDirectionValue(imageSort)
+              );
+    const sortedVolumes =
+        volumeSort === null
+            ? volumes
+            : volumes.toSorted(
+                  (left, right) =>
+                      compareVolumes(left, right, volumeSort.field) *
+                      sortDirectionValue(volumeSort)
+              );
 
     return (
         <div className="@container min-w-0">
@@ -263,7 +355,7 @@ export function DockerResourcePanels({
                                 aria-label="Docker images"
                                 className="mt-5 space-y-3 @min-[30rem]:hidden"
                             >
-                                {images.map((image) => (
+                                {sortedImages.map((image) => (
                                     <DockerImageMobileCard
                                         containerNames={containerNames}
                                         deleteDisabled={controlsDisabled || busy}
@@ -286,24 +378,36 @@ export function DockerResourcePanels({
                                     </colgroup>
                                     <thead className="bg-primary-950 sticky top-0 z-10">
                                         <tr>
-                                            <th
-                                                className="text-primary-300 border-primary-700 border-b px-3 py-2 text-left text-xs font-semibold tracking-wide uppercase"
-                                                scope="col"
-                                            >
-                                                Image
-                                            </th>
-                                            <th
-                                                className="text-primary-300 border-primary-700 border-b px-3 py-2 text-left text-xs font-semibold tracking-wide uppercase"
-                                                scope="col"
-                                            >
-                                                Size
-                                            </th>
-                                            <th
-                                                className="text-primary-300 border-primary-700 border-b px-3 py-2 text-left text-xs font-semibold tracking-wide uppercase"
-                                                scope="col"
-                                            >
-                                                Usage
-                                            </th>
+                                            <ResourceSortHeader
+                                                field="name"
+                                                label="Image"
+                                                onSort={(field) =>
+                                                    setImageSort((sort) =>
+                                                        nextResourceSort(sort, field)
+                                                    )
+                                                }
+                                                sort={imageSort}
+                                            />
+                                            <ResourceSortHeader
+                                                field="size"
+                                                label="Size"
+                                                onSort={(field) =>
+                                                    setImageSort((sort) =>
+                                                        nextResourceSort(sort, field)
+                                                    )
+                                                }
+                                                sort={imageSort}
+                                            />
+                                            <ResourceSortHeader
+                                                field="usage"
+                                                label="Usage"
+                                                onSort={(field) =>
+                                                    setImageSort((sort) =>
+                                                        nextResourceSort(sort, field)
+                                                    )
+                                                }
+                                                sort={imageSort}
+                                            />
                                             <th
                                                 className="text-primary-300 border-primary-700 border-b p-2 text-center text-xs font-semibold tracking-wide uppercase"
                                                 scope="col"
@@ -313,7 +417,7 @@ export function DockerResourcePanels({
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {images.map((image) => {
+                                        {sortedImages.map((image) => {
                                             const unused =
                                                 image.usedByContainerIds.length === 0;
                                             return (
@@ -446,7 +550,7 @@ export function DockerResourcePanels({
                                 aria-label="Docker volumes"
                                 className="mt-5 space-y-3 @min-[30rem]:hidden"
                             >
-                                {volumes.map((volume) => (
+                                {sortedVolumes.map((volume) => (
                                     <DockerVolumeMobileCard
                                         containerNames={containerNames}
                                         deleteDisabled={controlsDisabled || busy}
@@ -469,24 +573,36 @@ export function DockerResourcePanels({
                                     </colgroup>
                                     <thead className="bg-primary-950 sticky top-0 z-10">
                                         <tr>
-                                            <th
-                                                className="text-primary-300 border-primary-700 border-b px-3 py-2 text-left text-xs font-semibold tracking-wide uppercase"
-                                                scope="col"
-                                            >
-                                                Volume
-                                            </th>
-                                            <th
-                                                className="text-primary-300 border-primary-700 border-b px-3 py-2 text-left text-xs font-semibold tracking-wide uppercase"
-                                                scope="col"
-                                            >
-                                                Size
-                                            </th>
-                                            <th
-                                                className="text-primary-300 border-primary-700 border-b px-3 py-2 text-left text-xs font-semibold tracking-wide uppercase"
-                                                scope="col"
-                                            >
-                                                Usage
-                                            </th>
+                                            <ResourceSortHeader
+                                                field="name"
+                                                label="Volume"
+                                                onSort={(field) =>
+                                                    setVolumeSort((sort) =>
+                                                        nextResourceSort(sort, field)
+                                                    )
+                                                }
+                                                sort={volumeSort}
+                                            />
+                                            <ResourceSortHeader
+                                                field="size"
+                                                label="Size"
+                                                onSort={(field) =>
+                                                    setVolumeSort((sort) =>
+                                                        nextResourceSort(sort, field)
+                                                    )
+                                                }
+                                                sort={volumeSort}
+                                            />
+                                            <ResourceSortHeader
+                                                field="usage"
+                                                label="Usage"
+                                                onSort={(field) =>
+                                                    setVolumeSort((sort) =>
+                                                        nextResourceSort(sort, field)
+                                                    )
+                                                }
+                                                sort={volumeSort}
+                                            />
                                             <th
                                                 className="text-primary-300 border-primary-700 border-b p-2 text-center text-xs font-semibold tracking-wide uppercase"
                                                 scope="col"
@@ -496,7 +612,7 @@ export function DockerResourcePanels({
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {volumes.map((volume) => {
+                                        {sortedVolumes.map((volume) => {
                                             const unused =
                                                 volume.usedByContainerIds.length === 0;
                                             return (

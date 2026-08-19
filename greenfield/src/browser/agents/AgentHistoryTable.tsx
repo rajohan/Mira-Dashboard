@@ -1,9 +1,10 @@
-import { createColumnHelper, tableFeatures, useTable } from "@tanstack/react-table";
+import { createColumnHelper, useTable } from "@tanstack/react-table";
 import { History } from "lucide-react";
 
 import type { AgentTaskRun } from "../../contracts/agentModel.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { Badge } from "../ui/Badge.tsx";
+import { dashboardTableFeatures } from "../ui/dashboardTableFeatures.ts";
 import { DataTable } from "../ui/DataTable.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { Heading } from "../ui/Heading.tsx";
@@ -11,7 +12,7 @@ import { Text } from "../ui/Text.tsx";
 import { Virtualizer, type VirtualizerRenderState } from "../ui/Virtualizer.tsx";
 
 const minimumVirtualizedRows = 50;
-const historyTableFeatures = tableFeatures({});
+const historyTableFeatures = dashboardTableFeatures;
 const historyColumnHelper = createColumnHelper<
     typeof historyTableFeatures,
     AgentTaskRun

@@ -109,7 +109,9 @@ describe("Docker resource panels", () => {
             screen.getAllByRole("button", { name: "Delete exact image sha256:used" })[0]!
         ).toBeDisabled();
         expect(
-            screen.getAllByRole("button", { name: "Delete exact volume used-volume" })[0]!
+            screen.getAllByRole("button", {
+                name: "Delete exact volume used-volume",
+            })[0]!
         ).toBeDisabled();
     });
 
@@ -135,7 +137,12 @@ describe("Docker resource panels", () => {
             />
         );
 
-        for (const button of screen.getAllByRole("button")) {
+        for (const button of screen
+            .getAllByRole("button")
+            .filter(
+                (candidate) =>
+                    !candidate.getAttribute("aria-label")?.startsWith("Sort by ")
+            )) {
             expect(button).toBeDisabled();
         }
     });

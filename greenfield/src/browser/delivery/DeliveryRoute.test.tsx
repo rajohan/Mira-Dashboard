@@ -381,6 +381,14 @@ describe("DeliveryRoute", () => {
             ).toBeInTheDocument();
             expect(screen.getAllByText("Current release").length).toBeGreaterThan(0);
             expect(screen.getByText("Previous release")).toBeVisible();
+            expect(
+                within(screen.getByLabelText("Active release")).getByText("Current")
+            ).toBeVisible();
+            expect(
+                within(screen.getByLabelText("Previous / rollback target")).getByText(
+                    "Eligible"
+                )
+            ).toBeVisible();
             expect(screen.getByText("Checks passed")).toBeVisible();
             expect(screen.getByText("Image: remote")).toBeVisible();
 
