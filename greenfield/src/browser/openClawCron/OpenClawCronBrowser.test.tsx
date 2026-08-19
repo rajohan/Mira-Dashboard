@@ -696,9 +696,13 @@ describe("OpenClaw scheduled jobs browser", () => {
         const rendered = renderBrowser(client);
 
         try {
-            expect(await screen.findByText("Check services")).toBeVisible();
-            expect(screen.getAllByText("Enabled")).toHaveLength(2);
-            expect(screen.queryByText("Disabled")).not.toBeInTheDocument();
+            const detailHeading = await screen.findByText("Check services");
+            const detail = detailHeading.closest<HTMLElement>("[aria-labelledby]");
+            expect(detail).not.toBeNull();
+            if (detail === null)
+                throw new Error("OpenClaw job detail card was not found");
+            expect(within(detail).getByText("Enabled")).toBeVisible();
+            expect(within(detail).queryByText("Disabled")).not.toBeInTheDocument();
         } finally {
             rendered.view.unmount();
             rendered.queryClient.clear();

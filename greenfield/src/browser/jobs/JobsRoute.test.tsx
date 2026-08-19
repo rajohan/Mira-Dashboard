@@ -1262,6 +1262,7 @@ describe("Dashboard jobs route", () => {
         const selected = queuedRun({
             displayName: "Selected older schedule run",
             id: olderRunId,
+            queuedAtMs: timestampMs - 1000,
             scheduledJobId: scheduleId,
         });
         transport.scheduleRuns = [
@@ -1367,6 +1368,39 @@ describe("Dashboard jobs route", () => {
         await waitFor(() => expect(secondHeading).toHaveFocus());
         expect(screen.queryByText("First schedule run")).toBeNull();
         await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    });
+
+    test("clears stale schedule context when selecting an unscheduled run", async () => {
+        const transport = new JobsRouteTransport();
+        const selectedSchedule = scheduleSummary();
+        const unscheduledRun = queuedRun({
+            displayName: "Unscheduled maintenance run",
+            id: olderRunId,
+        });
+        transport.runs = [unscheduledRun];
+        transport.addRunDetail(unscheduledRun);
+        transport.addScheduleDetail(selectedSchedule);
+        const { router } = await renderJobsRoute(
+            `/jobs?scheduleId=${scheduleId}`,
+            transport
+        );
+        const user = userEvent.setup();
+
+        await user.click(
+            await screen.findByRole("button", {
+                name: `Open run Unscheduled maintenance run; action system.worker-smoke; id ${olderRunId}`,
+            })
+        );
+
+        await waitFor(() => {
+            expect(router.state.location.search).toEqual({ runId: olderRunId });
+        });
+        expect(
+            await screen.findByRole("heading", {
+                level: 2,
+                name: "Unscheduled maintenance run",
+            })
+        ).toBeVisible();
     });
 
     test("saves cadence through a versioned schedule update", async () => {

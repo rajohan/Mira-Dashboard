@@ -362,23 +362,9 @@ export function OpenClawCronDetail({
                         size="sm"
                     />
                 )}
-                {runsError !== undefined && runs === undefined && (
+                {runsError !== undefined && (
                     <div className="mt-5">
-                        <Alert message={runsError} />
-                        {onRetryRuns !== undefined && (
-                            <Button
-                                className="mt-3"
-                                onClick={onRetryRuns}
-                                variant="secondary"
-                            >
-                                Try again
-                            </Button>
-                        )}
-                    </div>
-                )}
-                {runsError !== undefined && runs !== undefined && (
-                    <div className="mt-5">
-                        <Alert focusOnError={false} message={runsError} />
+                        <Alert focusOnError={runs === undefined} message={runsError} />
                         {onRetryRuns !== undefined && (
                             <Button
                                 className="mt-3"
@@ -442,6 +428,8 @@ export function OpenClawCronDetail({
                                         scrollContainerRef.current = node;
                                         historyScrollContainerRef.current = node;
                                     }}
+                                    // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- A div preserves the Virtualizer scroll-container ref contract while exposing its accessible name.
+                                    role="region"
                                     // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- The bounded virtual run history must remain keyboard-scrollable.
                                     tabIndex={0}
                                 >

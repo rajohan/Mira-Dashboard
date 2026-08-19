@@ -324,7 +324,8 @@ export function JobRunBrowser({
     const selectRun = (runId: string | undefined) => {
         if (runId !== undefined) onRequestRunFocus(runId);
         const selectedRun = runs.find(({ id }) => id === runId);
-        const scheduleId = selectedRun?.scheduledJobId ?? search.scheduleId;
+        const scheduleId =
+            selectedRun === undefined ? search.scheduleId : selectedRun.scheduledJobId;
         void navigate({
             replace: true,
             search: {

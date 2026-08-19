@@ -284,7 +284,10 @@ export function openClawCronRunsQueryOptions(
         getNextPageParam: (lastPage, pages) =>
             everyRunHasStableIdentity(pages) ? lastPage.nextOffset : undefined,
         queryKey: [...openClawCronRunsQueryRoot, id ?? null],
-        refetchInterval: openClawCronRefreshIntervalMs,
+        refetchInterval: ({ state }) =>
+            state.data !== undefined && state.data.pages.length > 1
+                ? false
+                : openClawCronRefreshIntervalMs,
         retry: false,
         staleTime: openClawCronRefreshIntervalMs,
     });

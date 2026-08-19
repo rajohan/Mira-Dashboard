@@ -111,7 +111,7 @@ export function DeliveryReadRegion({
                     <Text>No verified {title.toLowerCase()} data is available yet.</Text>
                 </Card>
             ) : null}
-            {state !== "fresh" && state !== undefined ? (
+            {state !== undefined && (state !== "fresh" || browserRetained) ? (
                 <Button busy={fetching} onClick={onRetry} variant="secondary">
                     Try again
                 </Button>

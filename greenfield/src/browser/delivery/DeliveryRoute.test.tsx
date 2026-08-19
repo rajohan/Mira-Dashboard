@@ -25,6 +25,7 @@ import {
     deliveryCheckoutQueryKey,
     deliveryPullRequestsQueryKey,
 } from "./deliveryQueries.ts";
+import { DeliveryReadRegion } from "./DeliveryReadRegion.tsx";
 import { DeliveryRoute } from "./DeliveryRoute.tsx";
 
 const { render, screen, waitFor, within } = await import("@testing-library/react");
@@ -459,6 +460,27 @@ describe("DeliveryRoute", () => {
         } finally {
             view.unmount();
         }
+    });
+
+    test("offers retry for browser-retained fresh data", async () => {
+        const onRetry = jest.fn();
+        render(
+            <DeliveryReadRegion
+                error={new Error("refresh failed")}
+                fetching={false}
+                headingId="retained-delivery-heading"
+                loading={false}
+                onRetry={onRetry}
+                state="fresh"
+                title="Pull requests"
+            >
+                <div>Retained pull requests</div>
+            </DeliveryReadRegion>
+        );
+        const user = userEvent.setup();
+
+        await user.click(screen.getByRole("button", { name: "Try again" }));
+        expect(onRetry).toHaveBeenCalledTimes(1);
     });
 
     test("does not present a browser-retained checkout as current", async () => {

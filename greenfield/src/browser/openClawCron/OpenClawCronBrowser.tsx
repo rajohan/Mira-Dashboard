@@ -205,11 +205,15 @@ export function OpenClawCronBrowser({
     } else if (runs.error !== null) {
         runsError = dashboardBrowserFailureMessage(runs.error);
     }
-    let backgroundError =
-        inventory.data !== undefined && inventory.error !== null
-            ? dashboardBrowserFailureMessage(inventory.error)
-            : paginationWarning;
-    if (runsError === backgroundError) backgroundError = undefined;
+    const inventoryRefreshFailed =
+        inventory.data !== undefined && inventory.error !== null;
+    const runsRefreshFailed = runsAccumulation?.stable !== false && runs.error !== null;
+    let backgroundError = paginationWarning;
+    if (inventoryRefreshFailed) {
+        backgroundError = runsRefreshFailed
+            ? undefined
+            : dashboardBrowserFailureMessage(inventory.error);
+    }
     let heartbeatSessionStatus: "loading" | "ready" | "unavailable";
     if (heartbeatSessions.data !== undefined) heartbeatSessionStatus = "ready";
     else if (heartbeatSessions.isPending) heartbeatSessionStatus = "loading";

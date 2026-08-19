@@ -191,7 +191,7 @@ export function LogsBrowser() {
         <LogsView
             maintenance={maintenanceQuery.data}
             maintenanceError={maintenanceError}
-            maintenanceLoading={maintenanceQuery.isPending}
+            maintenanceLoading={maintenanceQuery.isFetching}
             onClearSearch={() => setSearch(undefined)}
             onRefresh={() => void refreshAll()}
             onRequestMaintenance={requestMaintenance}

@@ -184,6 +184,7 @@ test("Moltbook route renders LKG state, encoded links, and independent content t
             )
         ).toBeVisible();
         expect(screen.getByText("A feed post")).toBeVisible();
+        expect(screen.getByRole("button", { name: "Retry" })).toBeVisible();
 
         await user.click(screen.getByRole("button", { name: "Retry" }));
         expect(await screen.findByText("Recovered new feed post")).toBeVisible();
