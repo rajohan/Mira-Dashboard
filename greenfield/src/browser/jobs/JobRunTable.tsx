@@ -107,7 +107,10 @@ const jobRunColumns = jobRunColumnHelper.columns([
     }),
     jobRunColumnHelper.accessor((row) => row.run.queuedAtMs, {
         cell: ({ getValue }) => (
-            <time dateTime={new Date(getValue()).toISOString()}>
+            <time
+                className="whitespace-nowrap"
+                dateTime={new Date(getValue()).toISOString()}
+            >
                 {formatDashboardDateTime(getValue())}
             </time>
         ),
@@ -116,7 +119,10 @@ const jobRunColumns = jobRunColumnHelper.columns([
     }),
     jobRunColumnHelper.accessor((row) => row.run.updatedAtMs, {
         cell: ({ getValue }) => (
-            <time dateTime={new Date(getValue()).toISOString()}>
+            <time
+                className="whitespace-nowrap"
+                dateTime={new Date(getValue()).toISOString()}
+            >
                 {formatDashboardDateTime(getValue())}
             </time>
         ),
@@ -180,12 +186,12 @@ export function JobRunTable({
         <DataTable
             columnWidths={{
                 attemptCount: "8%",
-                displayName: "24%",
-                queuedAtMs: "13.5%",
+                displayName: "21%",
+                queuedAtMs: "16.5%",
                 resourceClass: "10%",
                 state: "9%",
-                triggerType: "22%",
-                updatedAtMs: "13.5%",
+                triggerType: "19%",
+                updatedAtMs: "16.5%",
             }}
             footer={
                 loadingMore ? (

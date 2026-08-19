@@ -77,11 +77,12 @@ describe("job queue panel", () => {
             "@min-[66rem]:[&_td:nth-child(n+4)]:table-cell"
         );
         const recentTable = screen.getByRole("table", { name: "Recent jobs" });
-        expect(recentTable.querySelector('col[style="width: 24%;"]')).toBeTruthy();
-        expect(recentTable.querySelector('col[style="width: 22%;"]')).toBeTruthy();
-        expect(recentTable.querySelectorAll('col[style="width: 13.5%;"]')).toHaveLength(
+        expect(recentTable.querySelector('col[style="width: 21%;"]')).toBeTruthy();
+        expect(recentTable.querySelector('col[style="width: 19%;"]')).toBeTruthy();
+        expect(recentTable.querySelectorAll('col[style="width: 16.5%;"]')).toHaveLength(
             2
         );
+        expect(recentTable.querySelectorAll("time.whitespace-nowrap")).toHaveLength(2);
         expect(screen.getByRole("table", { name: "Job workers" })).toHaveClass(
             "[&_td:nth-child(n+4)]:hidden",
             "@min-[66rem]:[&_td:nth-child(n+4)]:table-cell"
