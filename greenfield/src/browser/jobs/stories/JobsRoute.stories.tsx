@@ -412,12 +412,17 @@ export const RunDetail: Story = {
     },
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement);
-        const heading = await canvas.findByRole("heading", {
-            level: 2,
-            name: queuedRun.displayName,
-        });
-        await expect(heading).toBeVisible();
-        await expect(canvas.getByRole("list", { name: "Job activity" })).toBeVisible();
+        await waitFor(async () => {
+            await expect(
+                canvas.getByRole("heading", {
+                    level: 2,
+                    name: queuedRun.displayName,
+                })
+            ).toBeVisible();
+            await expect(
+                canvas.getByRole("list", { name: "Job activity" })
+            ).toBeVisible();
+        }, asyncStoryTimeout);
     },
 };
 
