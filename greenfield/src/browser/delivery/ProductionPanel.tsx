@@ -165,7 +165,7 @@ export function ProductionReleasesPanel({
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 {rollbackReason === undefined ? null : (
                     <div
-                        className="min-w-0 flex-1"
+                        className="w-full min-w-0 flex-1"
                         id="delivery-rollback-disabled-reason"
                     >
                         <Alert
@@ -176,7 +176,7 @@ export function ProductionReleasesPanel({
                         />
                     </div>
                 )}
-                <div className="flex flex-col gap-2 sm:ml-auto sm:flex-row">
+                <div className="flex shrink-0 flex-col gap-2 sm:ml-auto sm:flex-row">
                     <div className="w-full sm:w-auto">
                         <Button
                             aria-describedby={
