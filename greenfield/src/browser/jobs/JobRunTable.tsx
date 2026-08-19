@@ -181,11 +181,11 @@ export function JobRunTable({
             columnWidths={{
                 attemptCount: "8%",
                 displayName: "24%",
-                queuedAtMs: "12%",
+                queuedAtMs: "13.5%",
                 resourceClass: "10%",
                 state: "9%",
-                triggerType: "25%",
-                updatedAtMs: "12%",
+                triggerType: "22%",
+                updatedAtMs: "13.5%",
             }}
             footer={
                 loadingMore ? (
