@@ -4,7 +4,7 @@ import type { JobRunSummary } from "../../contracts/jobModel.ts";
 import type { JobQueueSummary } from "../../contracts/jobs.ts";
 import { JobQueuePanel } from "./JobQueuePanel.tsx";
 
-const { render, screen } = await import("@testing-library/react");
+const { fireEvent, render, screen } = await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
 const userEvent = userEventModule.default;
 
@@ -79,6 +79,99 @@ describe("job queue panel", () => {
             "[&_td:nth-child(n+4)]:hidden",
             "@min-[66rem]:[&_td:nth-child(n+4)]:table-cell"
         );
+    });
+
+    test("keeps every loaded completed run browsable", () => {
+        const runs = Array.from({ length: 4 }, (_, index) => ({
+            actionKey: "system.worker-smoke",
+            attemptCount: 1,
+            attemptLimit: 1,
+            availableAtMs: timestampMs - index,
+            cancellationPolicy: "cooperative",
+            displayName: `Completed run ${index + 1}`,
+            eventCount: 1,
+            id: `019fdd00-0000-7000-8000-00000000000${index + 2}`,
+            priority: 0,
+            queuedAtMs: timestampMs - index,
+            resourceClass: "light",
+            resourceKeys: [],
+            retrySafe: true,
+            state: "succeeded",
+            stateVersion: 1,
+            timeoutMs: 60_000,
+            triggerType: "manual",
+            updatedAtMs: timestampMs - index,
+        })) satisfies JobRunSummary[];
+
+        render(
+            <JobQueuePanel
+                controlBusy={false}
+                onSelectRun={() => {}}
+                onSetClaimingPaused={() => {}}
+                runs={runs}
+                summary={summary}
+            />
+        );
+
+        expect(screen.getByText("Completed run 4")).toBeVisible();
+    });
+
+    test("loads older completed runs only near the recent-history scroll end", () => {
+        const onLoadMoreRuns = jest.fn();
+        const runs = Array.from({ length: 50 }, (_, index) => ({
+            actionKey: "system.worker-smoke",
+            attemptCount: 1,
+            attemptLimit: 1,
+            availableAtMs: timestampMs - index,
+            cancellationPolicy: "cooperative",
+            displayName: `Paged completed run ${index + 1}`,
+            eventCount: 1,
+            id: `019fdd00-0000-7000-9000-${String(index).padStart(12, "0")}`,
+            priority: 0,
+            queuedAtMs: timestampMs - index,
+            resourceClass: "light",
+            resourceKeys: [],
+            retrySafe: true,
+            state: "succeeded",
+            stateVersion: 1,
+            timeoutMs: 60_000,
+            triggerType: "manual",
+            updatedAtMs: timestampMs - index,
+        })) satisfies JobRunSummary[];
+
+        const { rerender } = render(
+            <JobQueuePanel
+                controlBusy={false}
+                onLoadMoreRuns={onLoadMoreRuns}
+                onSelectRun={() => {}}
+                onSetClaimingPaused={() => {}}
+                runs={runs}
+                summary={summary}
+            />
+        );
+
+        expect(onLoadMoreRuns).not.toHaveBeenCalled();
+        const history = screen.getByRole("region", { name: "Recent jobs" });
+        Object.defineProperties(history, {
+            clientHeight: { configurable: true, value: 500 },
+            scrollHeight: { configurable: true, value: 4000 },
+            scrollTop: { configurable: true, value: 3200, writable: true },
+        });
+        fireEvent.scroll(history);
+        expect(onLoadMoreRuns).toHaveBeenCalledTimes(1);
+
+        rerender(
+            <JobQueuePanel
+                controlBusy={false}
+                onLoadMoreRuns={onLoadMoreRuns}
+                onSelectRun={() => {}}
+                onSetClaimingPaused={() => {}}
+                runs={runs}
+                runsLoadingMore
+                summary={summary}
+            />
+        );
+        expect(screen.getByLabelText("Loading older jobs…")).toBeVisible();
     });
 
     test("presents queue and worker state and requests a versioned pause direction", async () => {

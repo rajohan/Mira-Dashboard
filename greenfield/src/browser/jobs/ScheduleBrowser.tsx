@@ -113,24 +113,23 @@ function SelectedSchedule({
 
     const schedule = detail.data;
     const mutationError = update.error ?? run.error;
-    const selectedRunOutsideHistory = selectedRunId !== undefined &&
-        !runs.some(({ id: runId }) => runId === selectedRunId) && (
-            <div className="mt-2">
-                <ExpandableCard
-                    compact
-                    onOpenChange={(open) => onSelectRun(open ? selectedRunId : "")}
-                    open
-                    title="Run details"
-                >
-                    <SelectedJobRun
-                        embedded
-                        focusRequested={selectedRunId === runFocusRequested}
-                        id={selectedRunId}
-                        onFocusHandled={onRunFocusHandled}
-                    />
-                </ExpandableCard>
-            </div>
-        );
+    const selectedRunDetail = selectedRunId !== undefined && (
+        <div className="mt-2">
+            <ExpandableCard
+                compact
+                onOpenChange={(open) => onSelectRun(open ? selectedRunId : "")}
+                open
+                title="Run details"
+            >
+                <SelectedJobRun
+                    embedded
+                    focusRequested={selectedRunId === runFocusRequested}
+                    id={selectedRunId}
+                    onFocusHandled={onRunFocusHandled}
+                />
+            </ExpandableCard>
+        </div>
+    );
     let historyContent;
     if (history.isPending && history.data === undefined) {
         historyContent = <PageState label="Loading schedule runs…" status="loading" />;
@@ -155,7 +154,7 @@ function SelectedSchedule({
                         Runs will appear here after this schedule starts a job.
                     </p>
                 </div>
-                {selectedRunOutsideHistory}
+                {selectedRunDetail}
             </>
         );
     } else {
@@ -203,85 +202,94 @@ function SelectedSchedule({
                                   }));
                         const historyHeight =
                             virtualItems.length > 0 ? totalSize : runs.length * 180;
+                        const selectedRunVisible = visibleRuns.some(
+                            ({ index }) => runs[index]?.id === selectedRunId
+                        );
                         return (
-                            <div
-                                aria-label="Schedule run history"
-                                className="h-[min(42rem,65dvh)] min-h-72 overflow-x-hidden overflow-y-auto overscroll-contain"
-                                ref={(node) => {
-                                    scrollContainerRef.current = node;
-                                    historyScrollContainerRef.current = node;
-                                }}
-                                // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- The shared Virtualizer requires a div scroll container.
-                                role="region"
-                                // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- The bounded virtual run history must remain keyboard-scrollable.
-                                tabIndex={0}
-                            >
-                                <ol
-                                    aria-label={`Runs for ${schedule.name}`}
-                                    className="relative min-w-0"
-                                    style={{ height: historyHeight }}
+                            <>
+                                <div
+                                    aria-label="Schedule run history"
+                                    className="h-[min(42rem,65dvh)] min-h-72 overflow-x-hidden overflow-y-auto overscroll-contain"
+                                    ref={(node) => {
+                                        scrollContainerRef.current = node;
+                                        historyScrollContainerRef.current = node;
+                                    }}
+                                    // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- The shared Virtualizer requires a div scroll container.
+                                    role="region"
+                                    // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- The bounded virtual run history must remain keyboard-scrollable.
+                                    tabIndex={0}
                                 >
-                                    {visibleRuns.map((virtualItem) => {
-                                        const jobRun = runs[virtualItem.index];
-                                        if (jobRun === undefined) return null;
-                                        return (
-                                            <li
-                                                className="absolute top-0 left-0 w-full min-w-0 pb-2"
-                                                data-index={virtualItem.index}
-                                                key={virtualItem.key}
-                                                ref={measureElement}
-                                                style={{
-                                                    transform: `translateY(${virtualItem.start}px)`,
-                                                }}
-                                            >
-                                                <ExpandableCard
-                                                    compact
-                                                    onOpenChange={(open) =>
-                                                        onSelectRun(open ? jobRun.id : "")
-                                                    }
-                                                    open={jobRun.id === selectedRunId}
-                                                    title={jobRun.displayName}
-                                                    trailing={
-                                                        <Badge
-                                                            variant={jobRunStateBadgeVariant(
-                                                                jobRun.state
-                                                            )}
-                                                        >
-                                                            {jobRunStateLabel(
-                                                                jobRun.state
-                                                            )}
-                                                        </Badge>
-                                                    }
+                                    <ol
+                                        aria-label={`Runs for ${schedule.name}`}
+                                        className="relative min-w-0"
+                                        style={{ height: historyHeight }}
+                                    >
+                                        {visibleRuns.map((virtualItem) => {
+                                            const jobRun = runs[virtualItem.index];
+                                            if (jobRun === undefined) return null;
+                                            return (
+                                                <li
+                                                    className="absolute top-0 left-0 w-full min-w-0 pb-2"
+                                                    data-index={virtualItem.index}
+                                                    key={virtualItem.key}
+                                                    ref={measureElement}
+                                                    style={{
+                                                        transform: `translateY(${virtualItem.start}px)`,
+                                                    }}
                                                 >
-                                                    <SelectedJobRun
-                                                        embedded
-                                                        focusRequested={
-                                                            jobRun.id ===
-                                                            runFocusRequested
+                                                    <ExpandableCard
+                                                        compact
+                                                        onOpenChange={(open) =>
+                                                            onSelectRun(
+                                                                open ? jobRun.id : ""
+                                                            )
                                                         }
-                                                        id={jobRun.id}
-                                                        onFocusHandled={onRunFocusHandled}
-                                                    />
-                                                </ExpandableCard>
-                                            </li>
-                                        );
-                                    })}
-                                </ol>
-                                {hasNextHistoryPage && !historyPageFailed && (
-                                    <div className="py-2" ref={historySentinelRef}>
-                                        {historyPageLoading && (
-                                            <LoadingState
-                                                label="Loading older runs…"
-                                                size="sm"
-                                            />
-                                        )}
-                                    </div>
-                                )}
-                            </div>
+                                                        open={jobRun.id === selectedRunId}
+                                                        title={jobRun.displayName}
+                                                        trailing={
+                                                            <Badge
+                                                                variant={jobRunStateBadgeVariant(
+                                                                    jobRun.state
+                                                                )}
+                                                            >
+                                                                {jobRunStateLabel(
+                                                                    jobRun.state
+                                                                )}
+                                                            </Badge>
+                                                        }
+                                                    >
+                                                        <SelectedJobRun
+                                                            embedded
+                                                            focusRequested={
+                                                                jobRun.id ===
+                                                                runFocusRequested
+                                                            }
+                                                            id={jobRun.id}
+                                                            onFocusHandled={
+                                                                onRunFocusHandled
+                                                            }
+                                                        />
+                                                    </ExpandableCard>
+                                                </li>
+                                            );
+                                        })}
+                                    </ol>
+                                    {hasNextHistoryPage && !historyPageFailed && (
+                                        <div className="py-2" ref={historySentinelRef}>
+                                            {historyPageLoading && (
+                                                <LoadingState
+                                                    label="Loading older runs…"
+                                                    size="sm"
+                                                />
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                                {selectedRunVisible ? null : selectedRunDetail}
+                            </>
                         );
                     }}
                 </Virtualizer>
-                {selectedRunOutsideHistory}
             </>
         );
     }

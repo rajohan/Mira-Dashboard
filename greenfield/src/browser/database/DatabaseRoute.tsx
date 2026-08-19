@@ -11,6 +11,7 @@ import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { formatByteCount, formatPercent } from "../lib/formatMeasurements.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Badge } from "../ui/Badge.tsx";
+import { Button } from "../ui/Button.tsx";
 import { Card } from "../ui/Card.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
@@ -547,6 +548,7 @@ export function DatabaseRouteContent({ onSelect, source }: DatabaseRouteContentP
     const refresh = () =>
         void queryClient.invalidateQueries({ queryKey: databaseOverviewQueryKey });
     const complete = query.data !== undefined;
+    const selectedSourceUnavailable = query.data?.[source].state === "unavailable";
 
     return (
         <div>
@@ -579,6 +581,15 @@ export function DatabaseRouteContent({ onSelect, source }: DatabaseRouteContentP
                                     message="The latest refresh failed. Showing retained database data."
                                     variant="info"
                                 />
+                            )}
+                            {(query.error !== null || selectedSourceUnavailable) && (
+                                <Button
+                                    busy={query.isFetching}
+                                    onClick={refresh}
+                                    variant="secondary"
+                                >
+                                    Try again
+                                </Button>
                             )}
                             {source === "sqlite" ? (
                                 <DatabaseOverviewContent

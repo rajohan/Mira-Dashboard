@@ -1023,6 +1023,7 @@ describe("DatabaseRoute", () => {
             expect(screen.getByText("Browser cache retained")).toBeVisible();
             expect(screen.queryByText("Fresh observation")).toBeNull();
             expect(screen.queryByText(/private database path/iu)).toBeNull();
+            expect(screen.getByRole("button", { name: "Try again" })).toBeVisible();
         } finally {
             view.unmount();
             queryClient.clear();

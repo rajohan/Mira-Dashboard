@@ -26,10 +26,12 @@ const historyColumns = historyColumnHelper.columns([
             </Text>
         ),
         header: "Agent",
+        enableSorting: false,
     }),
     historyColumnHelper.accessor("task", {
         cell: ({ getValue }) => <Text className="wrap-break-word">{getValue()}</Text>,
         header: "Task",
+        enableSorting: false,
     }),
     historyColumnHelper.accessor("status", {
         cell: ({ getValue }) => (
@@ -38,6 +40,7 @@ const historyColumns = historyColumnHelper.columns([
             </Badge>
         ),
         header: "Status",
+        enableSorting: false,
     }),
     historyColumnHelper.accessor("startedAtMs", {
         cell: ({ getValue }) => (
@@ -46,6 +49,7 @@ const historyColumns = historyColumnHelper.columns([
             </time>
         ),
         header: "Started",
+        enableSorting: false,
     }),
     historyColumnHelper.accessor(
         (run) => (run.status === "completed" ? run.completedAtMs : undefined),
@@ -64,6 +68,7 @@ const historyColumns = historyColumnHelper.columns([
             },
             header: "Completed",
             id: "completedAtMs",
+            enableSorting: false,
         }
     ),
 ]);

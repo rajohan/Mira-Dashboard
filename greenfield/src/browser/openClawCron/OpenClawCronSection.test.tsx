@@ -237,6 +237,23 @@ describe("OpenClawCronSection", () => {
         expect(within(history).getAllByText("—")).toHaveLength(2);
     });
 
+    test("does not present heartbeat session settings as defaults before observation", () => {
+        const heartbeatJob = {
+            ...job,
+            payload: { kind: "heartbeat" },
+        } satisfies OpenClawCronJob;
+
+        render(
+            <OpenClawCronSectionView
+                {...callbacks()}
+                heartbeatSessionStatus="unavailable"
+                state={{ result: resultWithJobs([heartbeatJob]), status: "ready" }}
+            />
+        );
+
+        expect(screen.getAllByText("Unavailable")).toHaveLength(2);
+    });
+
     test("uses mobile-first cards and desktop grids without horizontal scrolling or field loss", async () => {
         const actions = callbacks();
         const longJobId = `cron-${"i".repeat(251)}`;

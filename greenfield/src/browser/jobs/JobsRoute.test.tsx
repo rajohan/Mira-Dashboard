@@ -1257,6 +1257,40 @@ describe("Dashboard jobs route", () => {
         await waitFor(() => expect(heading).toHaveFocus());
     });
 
+    test("keeps a selected schedule run visible outside the virtual window", async () => {
+        const transport = new JobsRouteTransport();
+        const selected = queuedRun({
+            displayName: "Selected older schedule run",
+            id: olderRunId,
+            scheduledJobId: scheduleId,
+        });
+        transport.scheduleRuns = [
+            ...Array.from({ length: 60 }, (_, index) =>
+                queuedRun({
+                    displayName: `Schedule run ${index}`,
+                    id: `019fdd00-0000-7000-8000-${String(index).padStart(12, "0")}`,
+                    queuedAtMs: timestampMs - index,
+                    scheduledJobId: scheduleId,
+                })
+            ),
+            selected,
+        ];
+        transport.addRunDetail(selected);
+        transport.addScheduleDetail(scheduleSummary());
+
+        await renderJobsRoute(
+            `/jobs?scheduleId=${scheduleId}&runId=${olderRunId}`,
+            transport
+        );
+
+        expect(
+            await screen.findByRole("heading", {
+                level: 2,
+                name: "Selected older schedule run",
+            })
+        ).toBeVisible();
+    });
+
     test("shows an empty state when a schedule has no run history", async () => {
         const transport = new JobsRouteTransport();
         const schedule = scheduleSummary();

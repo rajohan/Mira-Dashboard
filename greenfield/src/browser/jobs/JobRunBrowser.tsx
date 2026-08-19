@@ -289,10 +289,16 @@ export function JobRunBrowser({
     const runs = uniqueJobRows(query.data?.pages.flatMap((page) => page.runs) ?? []);
     const summary = summaryQuery.data ?? query.data?.pages[0]?.summary;
     const claiming = useSetJobClaimingPausedMutation();
+    const historyPageFailed = query.error !== null;
     const fetchNextHistoryPage = query.fetchNextPage;
     const hasNextHistoryPage = query.hasNextPage;
-    const historyPageFailed = query.error !== null;
     const historyPageLoading = query.isFetchingNextPage;
+    const loadedActiveRunCount = runs.filter(
+        ({ state }) => state === "queued" || state === "running"
+    ).length;
+    const loadedCompletedRunCount = runs.length - loadedActiveRunCount;
+    const historyNeedsInitialFill =
+        loadedActiveRunCount < 50 && loadedCompletedRunCount < 50;
     useEffect(() => {
         const sentinel = historySentinelRef.current;
         if (
@@ -351,6 +357,11 @@ export function JobRunBrowser({
             {summary !== undefined && (
                 <JobQueuePanel
                     controlBusy={claiming.isPending}
+                    onLoadMoreRuns={
+                        query.hasNextPage && !historyPageFailed
+                            ? () => void query.fetchNextPage()
+                            : undefined
+                    }
                     onSelectRun={selectRun}
                     onSetClaimingPaused={(paused) =>
                         claiming.mutate({
@@ -359,6 +370,7 @@ export function JobRunBrowser({
                         })
                     }
                     runs={runs}
+                    runsLoadingMore={query.isFetchingNextPage}
                     selectedRunDetail={
                         search.runId === undefined ||
                         search.scheduleId !== undefined ? undefined : (
@@ -375,7 +387,10 @@ export function JobRunBrowser({
                     summary={summary}
                 />
             )}
-            {query.hasNextPage && summary !== undefined && !historyPageFailed ? (
+            {query.hasNextPage &&
+            summary !== undefined &&
+            !historyPageFailed &&
+            historyNeedsInitialFill ? (
                 <div aria-hidden="true" className="h-px" ref={historySentinelRef} />
             ) : null}
             {query.data === undefined && (

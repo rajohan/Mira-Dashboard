@@ -210,12 +210,17 @@ export function OpenClawCronBrowser({
             ? dashboardBrowserFailureMessage(inventory.error)
             : paginationWarning;
     if (runsError === backgroundError) runsError = undefined;
+    let heartbeatSessionStatus: "loading" | "ready" | "unavailable";
+    if (heartbeatSessions.data !== undefined) heartbeatSessionStatus = "ready";
+    else if (heartbeatSessions.isPending) heartbeatSessionStatus = "loading";
+    else heartbeatSessionStatus = "unavailable";
 
     return (
         <OpenClawCronSection
             backgroundError={backgroundError}
             jobsLoadingMore={inventory.isFetchingNextPage}
             heartbeatSession={heartbeatSession}
+            heartbeatSessionStatus={heartbeatSessionStatus}
             onDelete={(job) => mutation.mutateAsync({ job, kind: "delete" })}
             onLoadMoreJobs={
                 inventory.hasNextPage && inventoryAccumulation?.stable !== false

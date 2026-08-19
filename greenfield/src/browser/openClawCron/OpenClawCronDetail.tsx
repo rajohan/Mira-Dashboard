@@ -33,6 +33,7 @@ interface OpenClawCronDetailProps {
     readonly definitionControlsAvailable: boolean;
     readonly job: OpenClawCronJob;
     readonly heartbeatSession?: GatewaySession;
+    readonly heartbeatSessionStatus?: "loading" | "ready" | "unavailable";
     readonly onDelete: () => void;
     readonly onEdit: () => void;
     readonly onLoadMoreRuns?: () => void;
@@ -69,6 +70,7 @@ export function OpenClawCronDetail({
     definitionControlsAvailable,
     job,
     heartbeatSession,
+    heartbeatSessionStatus = heartbeatSession === undefined ? "loading" : "ready",
     onDelete,
     onEdit,
     onLoadMoreRuns,
@@ -125,6 +127,11 @@ export function OpenClawCronDetail({
     let configuredModel: string | undefined;
     if (job.payload.kind === "agent-turn") configuredModel = job.payload.model;
     else if (isHeartbeat) configuredModel = heartbeatSession?.model;
+    const heartbeatSetting = (value: string | undefined): string => {
+        if (heartbeatSessionStatus === "loading") return "Loading…";
+        if (heartbeatSessionStatus === "unavailable") return "Unavailable";
+        return value ?? "Default";
+    };
     const delivery = job.delivery;
     const definitionRows: readonly (readonly [string, ReactNode])[] = [
         ["Schedule", openClawCronScheduleLabel(job)],
@@ -143,8 +150,18 @@ export function OpenClawCronDetail({
               ] as const)),
         ...(job.payload.kind === "agent-turn" || isHeartbeat
             ? ([
-                  ["Model", configuredModel ?? "Default"],
-                  ["Provider", heartbeatSession?.modelProvider ?? "Default"],
+                  [
+                      "Model",
+                      isHeartbeat
+                          ? heartbeatSetting(configuredModel)
+                          : (configuredModel ?? "Default"),
+                  ],
+                  [
+                      "Provider",
+                      isHeartbeat
+                          ? heartbeatSetting(heartbeatSession?.modelProvider)
+                          : "Default",
+                  ],
                   [
                       "Thinking",
                       job.payload.kind === "agent-turn"

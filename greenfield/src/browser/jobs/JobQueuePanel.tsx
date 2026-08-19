@@ -102,8 +102,10 @@ const workerColumns = workerColumnHelper.columns([
 export interface JobQueuePanelProps {
     readonly controlBusy: boolean;
     readonly controlDisabled?: boolean;
+    readonly onLoadMoreRuns?: () => void;
     readonly onSelectRun: (id: string) => void;
     readonly runs: readonly JobRunSummary[];
+    readonly runsLoadingMore?: boolean;
     readonly selectedRunId?: string;
     readonly selectedRunDetail?: ReactNode;
     readonly onSetClaimingPaused: (paused: boolean) => void;
@@ -114,9 +116,11 @@ export interface JobQueuePanelProps {
 export function JobQueuePanel({
     controlBusy,
     controlDisabled = false,
+    onLoadMoreRuns,
     onSelectRun,
     onSetClaimingPaused,
     runs,
+    runsLoadingMore,
     selectedRunId,
     selectedRunDetail,
     summary,
@@ -133,9 +137,9 @@ export function JobQueuePanel({
     const activeRuns = runs.filter(
         ({ state }) => state === "queued" || state === "running"
     );
-    const recentRuns = runs
-        .filter(({ state }) => state !== "queued" && state !== "running")
-        .slice(0, 3);
+    const recentRuns = runs.filter(
+        ({ state }) => state !== "queued" && state !== "running"
+    );
 
     return (
         <Card aria-label="Job queue and workers" className="p-3 sm:p-5">
@@ -250,6 +254,8 @@ export function JobQueuePanel({
                             <JobRunTable
                                 compact
                                 label="Queued and running jobs"
+                                loadingMore={runsLoadingMore}
+                                onLoadMore={onLoadMoreRuns}
                                 onSelect={onSelectRun}
                                 runs={activeRuns}
                                 selectedId={selectedRunId}
@@ -271,6 +277,8 @@ export function JobQueuePanel({
                             <JobRunTable
                                 compact
                                 label="Recent jobs"
+                                loadingMore={runsLoadingMore}
+                                onLoadMore={onLoadMoreRuns}
                                 onSelect={onSelectRun}
                                 runs={recentRuns}
                                 selectedId={selectedRunId}

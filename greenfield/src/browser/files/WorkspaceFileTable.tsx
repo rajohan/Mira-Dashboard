@@ -101,11 +101,13 @@ const workspaceFileColumns = workspaceFileColumnHelper.columns([
         },
         header: "Name",
         id: "name",
+        enableSorting: false,
     }),
     workspaceFileColumnHelper.accessor((row) => workspaceFileKindLabel(row.entry), {
         cell: ({ getValue }) => <Text>{getValue()}</Text>,
         header: "Kind",
         id: "kind",
+        enableSorting: false,
     }),
     workspaceFileColumnHelper.accessor((row) => row.entry.sizeBytes, {
         cell: ({ getValue }) => {
@@ -118,6 +120,7 @@ const workspaceFileColumns = workspaceFileColumnHelper.columns([
         },
         header: "Size",
         id: "sizeBytes",
+        enableSorting: false,
     }),
     workspaceFileColumnHelper.accessor((row) => row.entry.modifiedAtMs, {
         cell: ({ getValue }) => {
@@ -132,6 +135,7 @@ const workspaceFileColumns = workspaceFileColumnHelper.columns([
         },
         header: "Modified",
         id: "modifiedAtMs",
+        enableSorting: false,
     }),
     workspaceFileColumnHelper.accessor((row) => row.entry.writable, {
         cell: ({ getValue }) => (
@@ -141,6 +145,7 @@ const workspaceFileColumns = workspaceFileColumnHelper.columns([
         ),
         header: "Access",
         id: "writable",
+        enableSorting: false,
     }),
     workspaceFileColumnHelper.display({
         cell: ({ row }) => {

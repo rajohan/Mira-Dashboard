@@ -40,6 +40,7 @@ export interface OpenClawCronSectionProps {
     readonly backgroundError?: string;
     readonly jobsLoadingMore?: boolean;
     readonly heartbeatSession?: GatewaySession;
+    readonly heartbeatSessionStatus?: "loading" | "ready" | "unavailable";
     readonly onDelete: (job: OpenClawCronJob) => Promise<void>;
     readonly onLoadMoreJobs?: () => void;
     readonly onLoadMoreRuns?: () => void;
@@ -102,6 +103,7 @@ export function OpenClawCronSectionView({
     backgroundError,
     jobsLoadingMore = false,
     heartbeatSession,
+    heartbeatSessionStatus,
     onDelete,
     onLoadMoreJobs,
     onLoadMoreRuns,
@@ -365,6 +367,7 @@ export function OpenClawCronSectionView({
                             }
                             job={selected}
                             heartbeatSession={heartbeatSession}
+                            heartbeatSessionStatus={heartbeatSessionStatus}
                             onDelete={() => {
                                 setSelectedId(selected.id);
                                 setConfirmation("delete");

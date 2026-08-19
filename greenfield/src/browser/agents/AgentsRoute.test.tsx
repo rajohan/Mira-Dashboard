@@ -381,6 +381,9 @@ describe("Dashboard agents route", () => {
 
         await expectAgentShellReady();
         expect(await screen.findByText("Newest agent task")).toBeTruthy();
+        expect(
+            screen.getByRole("columnheader", { name: "Started" }).querySelector("button")
+        ).toBeNull();
         await user.click(screen.getByRole("button", { name: "Load older tasks" }));
         expect(await screen.findByText("Older agent task")).toBeTruthy();
         expect(screen.getByText("Newest agent task")).toBeTruthy();
