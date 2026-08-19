@@ -108,7 +108,7 @@ function ReportListItem({ onSelect, report, selected }: ReportListItemProps) {
 
 interface ReportDetailPanelProps {
     readonly id: string;
-    readonly onDeleted: () => void;
+    readonly onDeleted: (id: string) => void;
 }
 
 function ReportDetailPanel({ id, onDeleted }: ReportDetailPanelProps) {
@@ -220,6 +220,9 @@ export function ReportBrowser() {
     const [source, setSource] = useState("");
     const [statusDraft, setStatusDraft] = useState<ReportStatusFilter>("all");
     const [status, setStatus] = useState<ReportStatusFilter>("all");
+    const [deletedReportIds, setDeletedReportIds] = useState<ReadonlySet<string>>(
+        () => new Set()
+    );
     const filters: ListReportsInput["filters"] =
         kind === "" && source === "" && status === "all"
             ? undefined
@@ -234,7 +237,8 @@ export function ReportBrowser() {
         liveHead.data?.reports ?? [],
         uniqueMonitoringRows(query.data?.pages.flatMap((page) => page.reports) ?? []),
         liveHistoryRowIdentity,
-        JSON.stringify(filters ?? null)
+        JSON.stringify(filters ?? null),
+        deletedReportIds
     );
     const catalogError = liveHead.error ?? query.error;
     const catalogHasData = liveHead.data !== undefined || query.data !== undefined;
@@ -404,7 +408,10 @@ export function ReportBrowser() {
                     <ReportDetailPanel
                         id={selectedId}
                         key={selectedId}
-                        onDeleted={() => selectReport(undefined)}
+                        onDeleted={(id) => {
+                            setDeletedReportIds((current) => new Set(current).add(id));
+                            selectReport(undefined);
+                        }}
                     />
                 )}
             </div>

@@ -9,7 +9,7 @@ import type {
     OpenClawCronAuditContext,
     OpenClawCronOperationAuditInput,
 } from "./operationAudit.ts";
-import { projectOpenClawCronRun } from "./projection.ts";
+import { projectOpenClawCronRun, projectOpenClawCronRunsResult } from "./projection.ts";
 import {
     type OpenClawCronProvider,
     OpenClawCronProviderError,
@@ -46,12 +46,29 @@ test("keeps synthesized run identities unique for maximum-length job IDs", () =>
     expect(first.runId).not.toBe(second.runId);
 });
 
-test("keeps indistinguishable legacy run identities unique within a source page", () => {
+test("keeps a legacy run identity independent of unrelated source positions", () => {
     const entry = { jobId: "legacy-job", ts: 2000 } as const;
-    const first = projectOpenClawCronRun(entry, 10);
-    const second = projectOpenClawCronRun(entry, 11);
+    const first = projectOpenClawCronRun(entry);
+    const second = projectOpenClawCronRun(entry);
 
-    expect(first.runId).not.toBe(second.runId);
+    expect(first.runId).toBe(second.runId);
+});
+
+test("disambiguates indistinguishable legacy runs within one source page", () => {
+    const entry = { jobId: "legacy-job", ts: 2000 } as const;
+    const result = projectOpenClawCronRunsResult(
+        {
+            entries: [entry, entry],
+            hasMore: false,
+            limit: 25,
+            nextOffset: null,
+            offset: 0,
+            total: 2,
+        },
+        { kind: "fresh", observedAtMs: 2000 }
+    );
+
+    expect(result.runs[0]?.runId).not.toBe(result.runs[1]?.runId);
 });
 
 function providerJob(

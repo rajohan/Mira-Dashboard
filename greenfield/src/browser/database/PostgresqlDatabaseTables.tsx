@@ -9,6 +9,7 @@ import type {
 } from "../../contracts/database.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { formatByteCount, formatPercent } from "../lib/formatMeasurements.ts";
+import { Badge } from "../ui/Badge.tsx";
 import { Card } from "../ui/Card.tsx";
 import { dashboardTableFeatures } from "../ui/dashboardTableFeatures.ts";
 import { DataTable } from "../ui/DataTable.tsx";
@@ -100,6 +101,17 @@ const databaseColumns = databaseColumnHelper.columns([
             );
         },
         header: "Database",
+    }),
+    databaseColumnHelper.accessor("detailsState", {
+        cell: ({ getValue }) => {
+            const available = getValue() === "available";
+            return (
+                <Badge variant={available ? "success" : "danger"}>
+                    {available ? "Available" : "Unavailable"}
+                </Badge>
+            );
+        },
+        header: "Details",
     }),
     databaseColumnHelper.accessor("sizeBytes", {
         cell: ({ getValue }) => formatByteCount(getValue()),
@@ -221,6 +233,17 @@ const tableHealthColumns = tableHealthColumnHelper.columns([
             );
         },
         header: "Table",
+    }),
+    tableHealthColumnHelper.accessor("assessment", {
+        cell: ({ getValue }) => {
+            const assessed = getValue() === "assessed";
+            return (
+                <Badge variant={assessed ? "success" : "danger"}>
+                    {assessed ? "Assessed" : "Unavailable"}
+                </Badge>
+            );
+        },
+        header: "Assessment",
     }),
     tableHealthColumnHelper.accessor("physicalBytes", {
         cell: ({ getValue }) => formatByteCount(getValue()),

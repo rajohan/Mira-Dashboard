@@ -58,16 +58,28 @@ export function mergeLiveHistoryRows<T>(
  * @returns A mount-scoped merger that retains rows seen in earlier live heads.
  */
 export function createLiveHistoryAccumulator<T>(identity: (row: T) => string) {
-    const retainedLiveRows = new Map<string, T>();
-    return (liveRows: readonly T[], archiveRows: readonly T[]): T[] => {
+    let retainedLiveRows = new Map<string, T>();
+    return (
+        liveRows: readonly T[],
+        archiveRows: readonly T[],
+        evictedIds: ReadonlySet<string> = new Set()
+    ): T[] => {
         const archiveIds = new Set(archiveRows.map((row) => identity(row)));
-        for (const id of archiveIds) retainedLiveRows.delete(id);
+        const nextRetainedLiveRows = new Map<string, T>();
         for (const row of liveRows) {
             const id = identity(row);
-            if (!archiveIds.has(id)) retainedLiveRows.set(id, row);
+            if (!archiveIds.has(id) && !evictedIds.has(id)) {
+                nextRetainedLiveRows.set(id, row);
+            }
         }
+        for (const [id, row] of retainedLiveRows) {
+            if (!archiveIds.has(id) && !evictedIds.has(id)) {
+                nextRetainedLiveRows.set(id, row);
+            }
+        }
+        retainedLiveRows = nextRetainedLiveRows;
         return mergeLiveHistoryRows(
-            liveRows,
+            liveRows.filter((row) => !evictedIds.has(identity(row))),
             [...retainedLiveRows.values(), ...archiveRows],
             identity
         );
@@ -80,13 +92,18 @@ export function createLiveHistoryAccumulator<T>(identity: (row: T) => string) {
  */
 export function createScopedLiveHistoryAccumulator<T>(identity: (row: T) => string) {
     const scopes = new Map<string, ReturnType<typeof createLiveHistoryAccumulator<T>>>();
-    return (scopeKey: string, liveRows: readonly T[], archiveRows: readonly T[]) => {
+    return (
+        scopeKey: string,
+        liveRows: readonly T[],
+        archiveRows: readonly T[],
+        evictedIds?: ReadonlySet<string>
+    ) => {
         let accumulate = scopes.get(scopeKey);
         if (accumulate === undefined) {
             accumulate = createLiveHistoryAccumulator(identity);
             scopes.set(scopeKey, accumulate);
         }
-        return accumulate(liveRows, archiveRows);
+        return accumulate(liveRows, archiveRows, evictedIds);
     };
 }
 
@@ -95,14 +112,16 @@ export function createScopedLiveHistoryAccumulator<T>(identity: (row: T) => stri
  * @param archiveRows Previously loaded archive rows.
  * @param identity Stable row identity selector for this history type.
  * @param scopeKey Stable identity for the selected history/filter scope.
+ * @param evictedIds Identities confirmed deleted while this history is mounted.
  * @returns Current history plus live rows displaced between polling snapshots.
  */
 export function useAccumulatedLiveHistoryRows<T>(
     liveRows: readonly T[],
     archiveRows: readonly T[],
     identity: (row: T) => string,
-    scopeKey: string
+    scopeKey: string,
+    evictedIds?: ReadonlySet<string>
 ): T[] {
     const [accumulate] = useState(() => createScopedLiveHistoryAccumulator(identity));
-    return accumulate(scopeKey, liveRows, archiveRows);
+    return accumulate(scopeKey, liveRows, archiveRows, evictedIds);
 }

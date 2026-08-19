@@ -837,7 +837,7 @@ describe("DatabaseRoute", () => {
                 name: "PostgreSQL databases",
             });
             expect(within(databases).getByText("search_index")).toBeVisible();
-            expect(within(databases).queryByText("Unavailable")).toBeNull();
+            expect(within(databases).getByText("Unavailable")).toBeVisible();
 
             const maintenance = screen.getByRole("region", {
                 name: "Maintenance assessment",
@@ -950,8 +950,9 @@ describe("DatabaseRoute", () => {
                 name: "PostgreSQL table health",
             });
             expect(
-                within(health).queryByRole("columnheader", { name: "Bloat assessment" })
-            ).toBeNull();
+                within(health).getByRole("columnheader", { name: "Assessment" })
+            ).toBeVisible();
+            expect(within(health).getByText("Unavailable")).toBeVisible();
             expect(within(health).getAllByText("—")).toHaveLength(3);
             expect(
                 screen.queryByRole("region", {

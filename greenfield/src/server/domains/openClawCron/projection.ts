@@ -580,7 +580,7 @@ function projectedUsage(entry: OpenClawCronProviderRunEntry) {
 
 export function projectOpenClawCronRun(
     entry: OpenClawCronProviderRunEntry,
-    legacySourcePosition = 0
+    legacyDuplicateOrdinal = 0
 ): OpenClawCronRun {
     const errorReason =
         entry.errorReason !== undefined &&
@@ -600,7 +600,7 @@ export function projectOpenClawCronRun(
             : safeLabelProjection(entry.provider, "unknown", 128);
     const runId =
         entry.runId ??
-        `synthetic:${sha256Hex(`${entry.jobId}\0${entry.runAtMs ?? entry.ts}\0${entry.ts}\0${legacySourcePosition}`)}`;
+        `synthetic:${sha256Hex(`${JSON.stringify(entry)}\0${legacyDuplicateOrdinal}`)}`;
     return parseProviderProjection(openClawCronRunSchema, {
         completedAtMs: entry.ts,
         deliveryStatus: entry.deliveryStatus ?? "not-requested",
@@ -624,15 +624,20 @@ export function projectOpenClawCronRunsResult(
     page: OpenClawCronProviderRunPage,
     freshness: OpenClawCronFreshness
 ): ListOpenClawCronRunsResult {
+    const legacyOccurrences = new Map<string, number>();
     return parseProviderProjection(listOpenClawCronRunsResultSchema, {
         freshness,
         hasMore: page.hasMore,
         limit: page.limit,
         ...(page.nextOffset === null ? {} : { nextOffset: page.nextOffset }),
         offset: page.offset,
-        runs: page.entries.map((entry, index) =>
-            projectOpenClawCronRun(entry, page.offset + index)
-        ),
+        runs: page.entries.map((entry) => {
+            if (entry.runId !== undefined) return projectOpenClawCronRun(entry);
+            const fingerprint = JSON.stringify(entry);
+            const ordinal = legacyOccurrences.get(fingerprint) ?? 0;
+            legacyOccurrences.set(fingerprint, ordinal + 1);
+            return projectOpenClawCronRun(entry, ordinal);
+        }),
         total: page.total,
     });
 }

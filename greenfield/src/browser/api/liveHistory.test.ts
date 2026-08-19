@@ -20,6 +20,20 @@ describe("live history", () => {
             { id: "new-1" },
             { id: "old" },
         ]);
+        expect(accumulate([{ id: "new-4" }, { id: "new-3" }], [{ id: "old" }])).toEqual([
+            { id: "new-4" },
+            { id: "new-3" },
+            { id: "new-2" },
+            { id: "new-1" },
+            { id: "old" },
+        ]);
+    });
+
+    test("evicts retained live rows after a confirmed deletion", () => {
+        const accumulate = createLiveHistoryAccumulator<{ id: string }>(({ id }) => id);
+        accumulate([{ id: "new" }], []);
+
+        expect(accumulate([], [], new Set(["new"]))).toEqual([]);
     });
 
     test("isolates archives while keeping live heads under their feature root", () => {

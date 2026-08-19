@@ -58,7 +58,7 @@ export function removeReportFromCachedLists(queryClient: QueryClient, id: string
  * @param onDeleted Clears the route selection before the missing detail can refetch.
  * @returns Contract-typed report deletion mutation.
  */
-export function useDeleteReportMutation(onDeleted: () => void) {
+export function useDeleteReportMutation(onDeleted: (id: string) => void) {
     const client = useDashboardTrpcClient();
     const boundary = useAuthenticatedMutationBoundary();
     return useMutation<
@@ -72,7 +72,7 @@ export function useDeleteReportMutation(onDeleted: () => void) {
             ),
         onSuccess: async (result) => {
             if (!boundary.completionIsCurrent()) return;
-            onDeleted();
+            onDeleted(result.id);
             removeReportFromCachedLists(boundary.queryClient, result.id);
             boundary.queryClient.removeQueries({
                 exact: true,

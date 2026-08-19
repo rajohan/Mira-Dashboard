@@ -18,6 +18,7 @@ import type {
     ListSchedulesResult,
 } from "../../contracts/schedules.ts";
 import {
+    liveHistoryArchiveQueryRoot,
     liveHistoryArchiveQueryKey,
     liveHistoryHeadQueryKey,
 } from "../api/liveHistory.ts";
@@ -394,7 +395,9 @@ export function scheduleRunLiveHeadQueryOptions(client: DashboardTrpcClient, id:
 export async function refreshJobQueries(queryClient: QueryClient): Promise<void> {
     await queryClient.invalidateQueries({
         predicate: ({ queryKey }) =>
-            queryKey[0] === jobQueryKey[0] &&
+            (queryKey[0] === jobQueryKey[0] ||
+                (queryKey[0] === liveHistoryArchiveQueryRoot[0] &&
+                    queryKey[1] === jobQueryKey[0])) &&
             !jobRunEventHistoryQueryRoot.every(
                 (segment, index) => queryKey[index] === segment
             ),
@@ -403,7 +406,12 @@ export async function refreshJobQueries(queryClient: QueryClient): Promise<void>
 
 /** Invalidates the schedule directory, details, and schedule-scoped histories. */
 export async function refreshScheduleQueries(queryClient: QueryClient): Promise<void> {
-    await queryClient.invalidateQueries({ queryKey: scheduleQueryKey });
+    await queryClient.invalidateQueries({
+        predicate: ({ queryKey }) =>
+            queryKey[0] === scheduleQueryKey[0] ||
+            (queryKey[0] === liveHistoryArchiveQueryRoot[0] &&
+                queryKey[1] === scheduleQueryKey[0]),
+    });
 }
 
 /** Invalidates projections shared by durable run and schedule mutations. */
