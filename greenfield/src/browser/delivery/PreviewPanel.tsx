@@ -1,4 +1,4 @@
-import { ExternalLink as ExternalLinkIcon, Play, Square } from "lucide-react";
+import { MonitorPlay, Play, Square } from "lucide-react";
 
 import type { DeliveryPreview } from "../../contracts/delivery.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
@@ -6,6 +6,7 @@ import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Card } from "../ui/Card.tsx";
 import { ExternalLink } from "../ui/ExternalLink.tsx";
+import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { Text } from "../ui/Text.tsx";
 
@@ -18,9 +19,10 @@ interface PreviewPanelProps {
 
 function previewBadgeVariant(
     status: DeliveryPreview["status"]
-): "danger" | "success" | "warning" {
-    if (status === "running") return "success";
-    return status === "failed" ? "danger" : "warning";
+): "danger" | "default" | "success" | "warning" {
+    if (status === "running" || status === "stopped") return "success";
+    if (status === "failed") return "danger";
+    return status === "view-only" ? "default" : "warning";
 }
 
 const previewLabels: Readonly<Record<DeliveryPreview["status"], string>> = {
@@ -46,44 +48,22 @@ export function PreviewPanel({
         preview.status !== "stopped" &&
         preview.status !== "view-only";
     return (
-        <Card aria-label="Pull request preview slot">
-            <div className="flex flex-wrap items-start justify-between gap-4">
+        <Card aria-label="Pull request preview slot" className="space-y-3 p-3 sm:p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant={previewBadgeVariant(preview.status)}>
-                            {previewLabels[preview.status]}
-                        </Badge>
-                        {preview.number === undefined ? null : (
-                            <Text as="span">PR #{preview.number}</Text>
-                        )}
-                    </div>
-                    <Text className="mt-2" tone="muted">
-                        {preview.title ??
-                            preview.reason ??
-                            "The isolated preview slot is ready for one exact pull request scope."}
+                    <Heading className="flex items-center gap-2" level={3}>
+                        <Icon icon={MonitorPlay} size="sm" />
+                        PR dev
+                    </Heading>
+                    <Text className="mt-1" size="sm" tone="muted">
+                        One prod-like HTTPS dev slot at a fixed PR commit, with isolated
+                        Dashboard data and the live production Gateway.
                     </Text>
-                    {preview.headSha === undefined ? null : (
-                        <code className="text-primary-400 mt-2 block text-xs wrap-anywhere">
-                            {preview.headSha}
-                        </code>
-                    )}
-                    {preview.startedAtMs === undefined ? null : (
-                        <Text className="mt-1" size="sm" tone="muted">
-                            Started {formatDashboardDateTime(preview.startedAtMs)} ·
-                            maximum lifetime four hours
-                        </Text>
-                    )}
                 </div>
-                <div className="flex flex-wrap gap-2">
-                    {preview.url === undefined ? null : (
-                        <ExternalLink
-                            className="border-primary-600 bg-primary-700/70 rounded-lg border px-3 py-2 text-sm no-underline"
-                            href={preview.url}
-                        >
-                            <Icon icon={ExternalLinkIcon} size="sm" />
-                            Open dev
-                        </ExternalLink>
-                    )}
+                <div className="grid grid-cols-1 justify-items-start gap-1.5 sm:flex sm:flex-wrap">
+                    <Badge variant={previewBadgeVariant(preview.status)}>
+                        {previewLabels[preview.status]}
+                    </Badge>
                     {stoppable ? (
                         <Button
                             aria-describedby={
@@ -91,19 +71,68 @@ export function PreviewPanel({
                             }
                             busy={busy}
                             busyLabel="Queueing preview stop…"
+                            className="w-full sm:w-auto"
                             disabled={!controlsFresh || transitional}
                             onClick={onStop}
-                            variant="danger"
+                            size="sm"
+                            title={
+                                controlsFresh
+                                    ? undefined
+                                    : "Fresh preview authority is required."
+                            }
+                            variant="secondary"
                         >
                             <Icon icon={Square} size="sm" />
-                            Stop preview
+                            Stop dev
                         </Button>
                     ) : null}
                 </div>
             </div>
+            {preview.number === undefined ? (
+                <div className="space-y-1">
+                    <Text tone="muted">
+                        {preview.reason ??
+                            "Run an eligible trusted pull request from its card below."}
+                    </Text>
+                    {preview.status === "stopped" ? (
+                        <div className="flex items-center gap-2">
+                            <Icon icon={Play} size="sm" />
+                            <Text size="sm" tone="muted">
+                                Start or rebuild controls are attached to eligible pull
+                                request cards.
+                            </Text>
+                        </div>
+                    ) : null}
+                </div>
+            ) : (
+                <div className="border-primary-700 bg-primary-900/40 rounded-lg border p-3">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0">
+                            <Text className="font-medium" tone="default">
+                                PR #{preview.number}:{" "}
+                                {preview.title ?? "Untitled preview"}
+                            </Text>
+                            <Text className="mt-1" size="sm" tone="muted">
+                                {preview.headSha?.slice(0, 8) ?? "commit pending"}
+                                {preview.startedAtMs === undefined
+                                    ? ""
+                                    : ` · Updated ${formatDashboardDateTime(preview.startedAtMs)}`}
+                            </Text>
+                        </div>
+                        {preview.url === undefined ? null : (
+                            <ExternalLink
+                                className="border-primary-600 bg-primary-700/70 w-full shrink-0 justify-center rounded-lg border px-3 py-1.5 text-sm no-underline sm:w-auto"
+                                href={preview.url}
+                            >
+                                Open dev
+                            </ExternalLink>
+                        )}
+                    </div>
+                </div>
+            )}
             {!controlsFresh && stoppable ? (
                 <Text
-                    className="mt-3"
+                    className="sr-only"
                     id="delivery-preview-stop-reason"
                     size="sm"
                     tone="muted"
@@ -111,15 +140,6 @@ export function PreviewPanel({
                     A fresh preview-slot revision with no active Delivery action is
                     required to stop this exact owner.
                 </Text>
-            ) : null}
-            {preview.status === "stopped" ? (
-                <div className="mt-4 flex items-center gap-2">
-                    <Icon icon={Play} size="sm" />
-                    <Text size="sm" tone="muted">
-                        Start or rebuild controls are attached to eligible pull request
-                        cards.
-                    </Text>
-                </div>
             ) : null}
         </Card>
     );

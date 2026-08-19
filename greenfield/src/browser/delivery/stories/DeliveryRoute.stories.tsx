@@ -164,6 +164,7 @@ const pullRequestsResult = {
         {
             id: "1".repeat(64),
             kind: "native-stack",
+            stackNumber: 90,
             members: [
                 pullRequest({
                     actions: nativeStackActions,
@@ -379,7 +380,9 @@ const operationOutcomeUnknown = Object.assign(new TypeError("Private provider de
 
 async function openMergeDialog(canvasElement: HTMLElement) {
     const pullRequestRegion = await loadedPullRequestRegion(canvasElement);
-    const mergeButtons = pullRequestRegion.getAllByRole("button", { name: "Merge" });
+    const mergeButtons = pullRequestRegion.getAllByRole("button", {
+        name: "Merge only",
+    });
     const mergeButton = mergeButtons.at(-1);
     if (mergeButton === undefined) throw new TypeError("Merge story control is missing");
     await userEvent.click(mergeButton);
@@ -388,30 +391,18 @@ async function openMergeDialog(canvasElement: HTMLElement) {
 
 async function loadedDeliveryRegion(canvasElement: HTMLElement, name: string) {
     const canvas = within(canvasElement);
-    const heading = await canvas.findByRole(
-        "heading",
-        {
-            level: 2,
-            name,
-        },
-        { timeout: 5000 }
-    );
-    const region = heading.closest("section");
-    if (region === null) throw new TypeError(`${name} story region is missing`);
-    const scoped = within(region);
-    await scoped.findByText("Fresh");
-    return scoped;
+    const region = await canvas.findByRole("region", { name }, { timeout: 5000 });
+    return within(region);
 }
 
 async function loadedPullRequestRegion(canvasElement: HTMLElement) {
     const [pullRequestRegion] = await Promise.all([
         loadedDeliveryRegion(canvasElement, "Pull requests"),
         loadedDeliveryRegion(canvasElement, "Pull request preview"),
-        loadedDeliveryRegion(canvasElement, "Production checkout"),
         loadedDeliveryRegion(canvasElement, "Production releases"),
     ]);
     await pullRequestRegion.findByRole("link", {
-        name: /#\s*424\s+Delivery parity/iu,
+        name: /Delivery parity/iu,
     });
     return pullRequestRegion;
 }
@@ -446,32 +437,31 @@ export const PullRequests: Story = {
     },
     play: async ({ canvasElement }) => {
         const pullRequestRegion = await loadedPullRequestRegion(canvasElement);
-        for (const action of ["Merge", "Merge + deploy"]) {
+        for (const action of [
+            /^Merge(?: stack through #\d+| only)$/u,
+            /^Merge(?: through #\d+)? \+ Deploy$/u,
+        ]) {
             const buttons = pullRequestRegion.getAllByRole("button", { name: action });
             await expect(buttons).toHaveLength(3);
-            for (const button of buttons.slice(0, 2)) {
+            await expect(buttons[0]).toBeEnabled();
+            for (const button of buttons.slice(1)) {
                 await expect(button).toBeDisabled();
                 await expect(button).toHaveAccessibleDescription(
                     headGuardUnavailableReason
                 );
             }
-            await expect(buttons[2]).toBeEnabled();
         }
 
         const rejectButtons = pullRequestRegion.getAllByRole("button", {
             name: "Reject",
         });
-        await expect(rejectButtons).toHaveLength(3);
+        await expect(rejectButtons).toHaveLength(1);
         for (const button of rejectButtons) {
             await expect(button).toBeDisabled();
             await expect(button).toHaveAccessibleDescription(headGuardUnavailableReason);
         }
 
-        for (const action of [
-            "Approve review",
-            "Run / rebuild preview",
-            "Update branch",
-        ]) {
+        for (const action of ["Approve PR", "Update branch"]) {
             const buttons = pullRequestRegion.getAllByRole("button", {
                 name: action,
             });
@@ -481,6 +471,12 @@ export const PullRequests: Story = {
             }
             await expect(ordinaryButton).toBeEnabled();
         }
+        await expect(
+            pullRequestRegion.getAllByRole("button", { name: "Run preview" })
+        ).toHaveLength(2);
+        await expect(
+            pullRequestRegion.queryByRole("button", { name: "Rebuild preview" })
+        ).toBeNull();
     },
 };
 
@@ -532,24 +528,21 @@ export const LastKnownGood: Story = {
 export const BrowserRetained: Story = {
     args: {
         fixtures: deliveryFixtures({
-            pullRequests: dashboardStoryResolver((_input, callIndex) =>
-                callIndex === 0
-                    ? pullRequestsResult
-                    : Promise.reject(new TypeError("Safe retained refresh failure"))
+            pullRequests: dashboardStoryResolver(() =>
+                Promise.reject(new TypeError("Safe retained refresh failure"))
             ),
         }),
+        querySeeds: loadedDeliveryQuerySeeds,
         route: "/delivery",
     },
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement);
-        await canvas.findByText("Delivery parity", {}, { timeout: 5000 });
-        const heading = await canvas.findByRole("heading", { name: "Pull requests" });
-        const region = heading.closest("section");
-        if (region === null) throw new TypeError("Pull request story region is missing");
-        await userEvent.click(
-            await within(region).findByRole("button", { name: "Refresh" })
-        );
-        await expect(await within(region).findByText("Browser-retained")).toBeVisible();
+        await canvas.findByRole("link", { name: /Delivery parity/iu }, { timeout: 5000 });
+        await expect(
+            await canvas.findByText(
+                "The latest pull requests refresh failed. Showing browser-retained data; consequential controls are disabled."
+            )
+        ).toBeVisible();
     },
 };
 

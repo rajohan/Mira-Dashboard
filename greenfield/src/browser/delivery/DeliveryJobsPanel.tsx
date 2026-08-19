@@ -7,6 +7,7 @@ import { ActionLink } from "../ui/ActionLink.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import { Card } from "../ui/Card.tsx";
 import { ExternalLink } from "../ui/ExternalLink.tsx";
+import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { Text } from "../ui/Text.tsx";
 import { deliveryDeploymentOperationLabels } from "./deliveryPresentation.ts";
@@ -69,85 +70,94 @@ function deploymentStatusLabel(deployment: DeliveryDeployment): string {
 
 /** @returns Latest ten production Delivery Jobs, with no raw output or diagnostics. */
 export function DeliveryJobsPanel({ deployments }: DeliveryJobsPanelProps) {
-    if (deployments.length === 0) {
-        return (
-            <Card>
-                <Text>No Delivery production jobs have been recorded.</Text>
-            </Card>
-        );
-    }
     return (
-        <ol className="space-y-3">
-            {deployments.map((deployment) => {
-                const warnings = deploymentWarnings(deployment);
-                return (
-                    <li key={deployment.jobRunId}>
-                        <Card aria-label={`Delivery job ${deployment.jobRunId}`}>
-                            <div className="flex flex-wrap items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                    <div className="flex flex-wrap items-center gap-2">
-                                        <Badge>
-                                            {
-                                                deliveryDeploymentOperationLabels[
-                                                    deployment.operation
-                                                ]
-                                            }
-                                        </Badge>
-                                        <Badge
-                                            variant={deploymentBadgeVariant(deployment)}
-                                        >
-                                            {deploymentStatusLabel(deployment)}
-                                        </Badge>
-                                    </div>
-                                    {deployment.commitUrl !== undefined &&
-                                    deployment.commitTitle !== undefined ? (
-                                        <ExternalLink
-                                            className="mt-2"
-                                            href={deployment.commitUrl}
-                                        >
-                                            {deployment.commitTitle}
-                                        </ExternalLink>
-                                    ) : null}
-                                    {deployment.commitSha === undefined ? null : (
-                                        <code className="text-primary-400 mt-1 block text-xs wrap-anywhere">
-                                            {deployment.commitSha}
-                                        </code>
-                                    )}
-                                    {deployment.note === undefined ? null : (
-                                        <Text className="mt-2" tone="muted">
-                                            {deployment.note}
+        <Card className="h-fit space-y-3 p-3 sm:p-4">
+            <Heading level={2} size="subsection">
+                Recent Delivery jobs
+            </Heading>
+            {deployments.length === 0 ? (
+                <Text tone="muted">No Delivery production jobs have been recorded.</Text>
+            ) : (
+                <ol className="space-y-2">
+                    {deployments.map((deployment) => {
+                        const warnings = deploymentWarnings(deployment);
+                        return (
+                            <li
+                                aria-label={`Delivery job ${deployment.jobRunId}`}
+                                className="border-primary-700 bg-primary-900/40 rounded border p-3"
+                                key={deployment.jobRunId}
+                            >
+                                <div className="flex flex-col items-start gap-2 sm:flex-row sm:justify-between">
+                                    <div className="min-w-0">
+                                        <div className="flex flex-wrap items-center gap-1.5">
+                                            <Badge>
+                                                {
+                                                    deliveryDeploymentOperationLabels[
+                                                        deployment.operation
+                                                    ]
+                                                }
+                                            </Badge>
+                                            <Badge
+                                                variant={deploymentBadgeVariant(
+                                                    deployment
+                                                )}
+                                            >
+                                                {deploymentStatusLabel(deployment)}
+                                            </Badge>
+                                        </div>
+                                        {deployment.commitUrl !== undefined &&
+                                        deployment.commitTitle !== undefined ? (
+                                            <ExternalLink
+                                                className="mt-2"
+                                                href={deployment.commitUrl}
+                                            >
+                                                {deployment.commitTitle}
+                                            </ExternalLink>
+                                        ) : null}
+                                        {deployment.commitSha === undefined ? null : (
+                                            <code className="text-primary-400 mt-1 block text-xs wrap-anywhere">
+                                                {deployment.commitSha}
+                                            </code>
+                                        )}
+                                        {deployment.note === undefined ? null : (
+                                            <Text className="mt-2" tone="muted">
+                                                {deployment.note}
+                                            </Text>
+                                        )}
+                                        {warnings.length === 0 ? null : (
+                                            <ul className="mt-2 list-disc pl-5">
+                                                {warnings.map((warning) => (
+                                                    <li key={warning}>
+                                                        <Text size="sm" tone="muted">
+                                                            {warning}
+                                                        </Text>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        )}
+                                        <Text className="mt-2" size="sm" tone="muted">
+                                            Updated{" "}
+                                            {formatDashboardDateTime(
+                                                deployment.updatedAtMs
+                                            )}
                                         </Text>
-                                    )}
-                                    {warnings.length === 0 ? null : (
-                                        <ul className="mt-2 list-disc pl-5">
-                                            {warnings.map((warning) => (
-                                                <li key={warning}>
-                                                    <Text size="sm" tone="muted">
-                                                        {warning}
-                                                    </Text>
-                                                </li>
-                                            ))}
-                                        </ul>
-                                    )}
-                                    <Text className="mt-2" size="sm" tone="muted">
-                                        Updated{" "}
-                                        {formatDashboardDateTime(deployment.updatedAtMs)}
-                                    </Text>
+                                    </div>
+                                    <ActionLink
+                                        className="w-full shrink-0 justify-center whitespace-nowrap sm:w-auto"
+                                        search={{ runId: deployment.jobRunId }}
+                                        size="sm"
+                                        to="/jobs"
+                                        variant="secondary"
+                                    >
+                                        <Icon icon={ExternalLinkIcon} size="sm" />
+                                        View job
+                                    </ActionLink>
                                 </div>
-                                <ActionLink
-                                    search={{ runId: deployment.jobRunId }}
-                                    size="sm"
-                                    to="/jobs"
-                                    variant="secondary"
-                                >
-                                    <Icon icon={ExternalLinkIcon} size="sm" />
-                                    View job
-                                </ActionLink>
-                            </div>
-                        </Card>
-                    </li>
-                );
-            })}
-        </ol>
+                            </li>
+                        );
+                    })}
+                </ol>
+            )}
+        </Card>
     );
 }

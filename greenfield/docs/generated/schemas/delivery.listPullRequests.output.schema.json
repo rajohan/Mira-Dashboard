@@ -303,6 +303,11 @@
                 },
                 "minItems": 1,
                 "maxItems": 100
+              },
+              "stackNumber": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
               }
             },
             "required": [
@@ -683,6 +688,11 @@
                 },
                 "minItems": 1,
                 "maxItems": 100
+              },
+              "stackNumber": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
               }
             },
             "required": [

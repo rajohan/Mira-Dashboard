@@ -21,6 +21,7 @@ import { DashboardRealtimeProvider } from "../api/realtimeContext.tsx";
 import { parseJobsRouteSearch } from "../jobs/jobRouteSearch.ts";
 import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
 import type { DeliveryClient } from "./deliveryClient.ts";
+import { deliveryPullRequestsQueryKey } from "./deliveryQueries.ts";
 import { DeliveryRoute } from "./DeliveryRoute.tsx";
 
 const { render, screen, waitFor, within } = await import("@testing-library/react");
@@ -80,7 +81,7 @@ const pullRequestsResult = {
                     mergeState: "CLEAN",
                     mergeability: "mergeable",
                     number: 424,
-                    reviewState: "approved",
+                    reviewState: "required",
                     title: "Delivery parity",
                     updatedAtMs: observedAtMs,
                     url: "https://github.com/rajohan/Mira-Dashboard/pull/424",
@@ -261,6 +262,7 @@ function renderDelivery(client: DeliveryClient) {
         </DashboardRealtimeProvider>
     );
     return {
+        queryClient,
         unmount() {
             view.unmount();
             queryClient.clear();
@@ -269,6 +271,36 @@ function renderDelivery(client: DeliveryClient) {
 }
 
 describe("DeliveryRoute", () => {
+    test("uses exact preview actions and hides an already completed approval", async () => {
+        const group = pullRequestsResult.groups[0];
+        const pullRequest = group.members[0];
+        const harness = createClient({
+            preview: {
+                ...previewResult,
+                preview: { ...previewResult.preview, headSha: previousSha },
+            },
+            pullRequests: {
+                ...pullRequestsResult,
+                groups: [
+                    {
+                        ...group,
+                        members: [{ ...pullRequest, reviewState: "approved" }],
+                    },
+                ],
+            },
+        });
+        const view = renderDelivery(harness.client);
+        try {
+            expect(
+                await screen.findByRole("button", { name: "Rebuild preview" })
+            ).toBeVisible();
+            expect(screen.queryByRole("button", { name: "Run preview" })).toBeNull();
+            expect(screen.queryByRole("button", { name: "Approve PR" })).toBeNull();
+        } finally {
+            view.unmount();
+        }
+    });
+
     test("disables direct preview and production controls while another Delivery action is active", async () => {
         const harness = createClient({
             preview: { ...previewResult, actionActive: true },
@@ -277,17 +309,17 @@ describe("DeliveryRoute", () => {
         const view = renderDelivery(harness.client);
         try {
             expect(
-                await screen.findByRole("button", { name: "Stop preview" })
+                await screen.findByRole("button", { name: "Stop dev" })
             ).toBeDisabled();
             expect(
                 screen.getByRole("button", { name: "Deploy latest main" })
             ).toBeDisabled();
             expect(
-                screen.getByRole("button", { name: "Run / rebuild preview" })
-            ).toBeDisabled();
+                screen.queryByRole("button", { name: /^(?:Run|Rebuild) preview$/u })
+            ).toBeNull();
             expect(
                 screen.getAllByText("Another Delivery action is active.").length
-            ).toBeGreaterThanOrEqual(2);
+            ).toBeGreaterThanOrEqual(1);
         } finally {
             view.unmount();
         }
@@ -301,7 +333,7 @@ describe("DeliveryRoute", () => {
                 await screen.findByRole("heading", { name: "Pull requests unavailable" })
             ).toBeVisible();
             const user = userEvent.setup();
-            await user.click(screen.getByRole("button", { name: "Stop preview" }));
+            await user.click(screen.getByRole("button", { name: "Stop dev" }));
             expect(
                 screen.getByRole("dialog", { name: "Stop pull request preview?" })
             ).toBeVisible();
@@ -333,35 +365,33 @@ describe("DeliveryRoute", () => {
         }
     });
 
-    test("renders all five regions and exact Mira/Raymond confirmation boundaries", async () => {
+    test("renders Delivery regions and exact Mira/Raymond confirmation boundaries", async () => {
         const harness = createClient();
         const view = renderDelivery(harness.client);
         try {
-            expect(
-                await screen.findByRole("heading", { level: 1, name: "Delivery" })
-            ).toBeVisible();
-            for (const name of [
-                "Pull request preview",
-                "Pull requests",
-                "Production checkout",
-                "Production releases",
-                "Recent Delivery jobs",
-            ]) {
+            await screen.findByRole("heading", { level: 2, name: "Production releases" });
+            for (const name of ["Production releases", "Recent Delivery jobs"]) {
                 expect(screen.getByRole("heading", { level: 2, name })).toBeVisible();
             }
+            expect(
+                screen.getByRole("region", { name: "Pull request preview" })
+            ).toBeInTheDocument();
+            expect(
+                screen.getByRole("region", { name: "Pull requests" })
+            ).toBeInTheDocument();
             expect(screen.getAllByText("Current release").length).toBeGreaterThan(0);
             expect(screen.getByText("Previous release")).toBeVisible();
             expect(screen.getByText("Checks passed")).toBeVisible();
             expect(screen.getByText("Image: remote")).toBeVisible();
 
             const user = userEvent.setup();
-            await user.click(screen.getByRole("button", { name: "Approve review" }));
+            await user.click(screen.getByRole("button", { name: "Approve PR" }));
             expect(
                 screen.getByText(/Raymond \(rajohan\).*does not merge or deploy/iu)
             ).toBeVisible();
             await user.click(screen.getByRole("button", { name: "Cancel" }));
 
-            await user.click(screen.getByRole("button", { name: "Merge" }));
+            await user.click(screen.getByRole("button", { name: "Merge only" }));
             expect(screen.getByText(/Mira \(mira-2026\).*squash-merge/iu)).toBeVisible();
         } finally {
             view.unmount();
@@ -393,21 +423,24 @@ describe("DeliveryRoute", () => {
         const view = renderDelivery({ ...harness.client, query });
         try {
             expect(await screen.findByText("Server last-known-good")).toBeVisible();
-            const pullRequestHeading = screen.getByRole("heading", {
-                level: 2,
+            const region = screen.getByRole("region", {
                 name: "Pull requests",
             });
-            const region = pullRequestHeading.closest("section");
-            expect(region).not.toBeNull();
             failRefresh = true;
-            await userEvent
-                .setup()
-                .click(within(region!).getByRole("button", { name: "Refresh" }));
-            await waitFor(() => {
-                expect(within(region!).getByText("Browser-retained")).toBeVisible();
+            await view.queryClient.invalidateQueries({
+                queryKey: deliveryPullRequestsQueryKey,
             });
-            expect(within(region!).getByRole("button", { name: "Merge" })).toBeDisabled();
-            expect(region?.textContent).not.toContain("/secret");
+            await waitFor(() => {
+                expect(
+                    screen.getByText(
+                        "The latest pull requests refresh failed. Showing browser-retained data; consequential controls are disabled."
+                    )
+                ).toBeVisible();
+            });
+            expect(
+                within(region).getByRole("button", { name: "Merge only" })
+            ).toBeDisabled();
+            expect(region.textContent).not.toContain("/secret");
         } finally {
             view.unmount();
         }
@@ -442,9 +475,13 @@ describe("DeliveryRoute", () => {
         });
         const view = renderDelivery(harness.client);
         try {
-            expect(await screen.findByRole("button", { name: "Reject" })).toBeDisabled();
+            const reject = await screen.findByRole("button", { name: "Reject" });
+            expect(reject).toBeDisabled();
+            const pullRequestCard = reject.closest("section");
+            expect(pullRequestCard).not.toBeNull();
+            const status = within(pullRequestCard!).getByRole("status");
             expect(
-                screen.getByText(
+                within(status).getByText(
                     "GitHub cannot atomically bind this action to the reviewed pull request head or stack heads."
                 )
             ).toBeVisible();

@@ -691,6 +691,9 @@ function publicGroups(input: {
                     pullRequest,
                 })
             ),
+            ...(group.kind === "native-stack" && group.members[0]?.stack !== undefined
+                ? { stackNumber: group.members[0].stack.number }
+                : {}),
         }))
         .toSorted((left, right) => compareStrings(left.id, right.id));
 }
