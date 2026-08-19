@@ -13,7 +13,11 @@ function DashboardJobsContent() {
     const [focusRunId, setFocusRunId] = useState<string>();
     return (
         <div className="space-y-12">
-            <JobRunBrowser onRequestRunFocus={setFocusRunId} />
+            <JobRunBrowser
+                focusRunId={focusRunId}
+                onRequestRunFocus={setFocusRunId}
+                onRunFocusHandled={() => setFocusRunId(undefined)}
+            />
             <ScheduleBrowser
                 focusRunId={focusRunId}
                 onRequestRunFocus={setFocusRunId}

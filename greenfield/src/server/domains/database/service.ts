@@ -276,6 +276,11 @@ export function createDatabaseObservabilityService(
             staleSinceMs = undefined;
             return result;
         } catch {
+            try {
+                checkedAtMs = checkedTime(nowMs);
+            } catch {
+                // Keep the bounded unavailable fallback timestamp.
+            }
             let postgresql: DatabaseOverview["postgresql"] = { state: "unavailable" };
             try {
                 postgresql = projectExternalSnapshot(postgresqlRecord, checkedAtMs);

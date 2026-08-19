@@ -10,6 +10,7 @@ import { Icon } from "../ui/Icon.tsx";
 import { PageState } from "../ui/PageState.tsx";
 import { Text } from "../ui/Text.tsx";
 import { deliveryFailureMessage } from "./deliveryPresentation.ts";
+import { deliveryBrowserRetainedMessage } from "./deliveryRetainedMessage.ts";
 
 interface DeliveryReadRegionProps {
     readonly children?: ReactNode;
@@ -93,7 +94,7 @@ export function DeliveryReadRegion({
             {browserRetained ? (
                 <Alert
                     focusOnError={false}
-                    message={`The latest ${title.toLowerCase()} refresh failed. Showing browser-retained data; consequential controls are disabled.`}
+                    message={deliveryBrowserRetainedMessage(title)}
                     variant="warning"
                 />
             ) : null}

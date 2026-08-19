@@ -9,6 +9,7 @@ import type {
     OpenClawCronAuditContext,
     OpenClawCronOperationAuditInput,
 } from "./operationAudit.ts";
+import { projectOpenClawCronRun } from "./projection.ts";
 import {
     type OpenClawCronProvider,
     OpenClawCronProviderError,
@@ -34,6 +35,16 @@ const auditContext = {
     },
     requestId: "request-1",
 } as const satisfies OpenClawCronAuditContext;
+
+test("keeps synthesized run identities unique for maximum-length job IDs", () => {
+    const jobId = "j".repeat(256);
+    const first = projectOpenClawCronRun({ jobId, runAtMs: 1000, ts: 2000 });
+    const second = projectOpenClawCronRun({ jobId, runAtMs: 2000, ts: 3000 });
+
+    expect(first.runId).toHaveLength(74);
+    expect(second.runId).toHaveLength(74);
+    expect(first.runId).not.toBe(second.runId);
+});
 
 function providerJob(
     overrides: Partial<OpenClawCronProviderJob> = {}

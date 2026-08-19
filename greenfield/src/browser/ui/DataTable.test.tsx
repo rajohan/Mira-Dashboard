@@ -6,7 +6,7 @@ import { dashboardTableFeatures } from "./dashboardTableFeatures.ts";
 import { DataTable } from "./DataTable.tsx";
 import { Virtualizer } from "./Virtualizer.tsx";
 
-const { render, screen, within } = await import("@testing-library/react");
+const { fireEvent, render, screen, within } = await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
 const userEvent = userEventModule.default;
 
@@ -58,21 +58,24 @@ afterAll(() => {
 interface FixtureRow {
     readonly id: string;
     readonly label: string;
+    readonly rank: number;
 }
 
 const fixtureTableFeatures = dashboardTableFeatures;
 const fixtureColumnHelper = createColumnHelper<typeof fixtureTableFeatures, FixtureRow>();
 const fixtureColumns = fixtureColumnHelper.columns([
     fixtureColumnHelper.accessor("label", { header: "Label" }),
+    fixtureColumnHelper.accessor("rank", { header: "Rank" }),
 ]);
 const staticRows = Object.freeze([
-    { id: "one", label: "First row" },
-    { id: "two", label: "Second row" },
+    { id: "one", label: "First row", rank: 2 },
+    { id: "two", label: "Second row", rank: 1 },
 ]);
 const virtualRows = Object.freeze(
     Array.from({ length: 100 }, (_, index) => ({
         id: `row-${index}`,
         label: `Virtual row ${index}`,
+        rank: index,
     }))
 );
 
@@ -167,15 +170,22 @@ describe("Dashboard data table and virtualizer", () => {
 
         const table = screen.getByRole("table", { name: "Fixture rows" });
         const header = within(table).getByRole("columnheader", { name: "Label" });
+        const rankHeader = within(table).getByRole("columnheader", { name: "Rank" });
         const sortButtons = screen.getAllByRole("button", { name: "Label" });
         expect(sortButtons).toHaveLength(1);
         expect(screen.queryByRole("toolbar")).toBeNull();
         expect(sortButtons[0]?.querySelector("svg")).toBeNull();
+        expect(header).not.toHaveAttribute("aria-sort");
+        expect(rankHeader).not.toHaveAttribute("aria-sort");
 
         await userEvent.click(sortButtons[0]!);
         expect(header).toHaveAttribute("aria-sort", "ascending");
         expect(sortButtons[0]?.querySelector(".lucide-arrow-up")).not.toBeNull();
         expect(within(table).getAllByRole("row")[1]).toHaveTextContent("First row");
+
+        fireEvent.click(within(rankHeader).getByRole("button"), { shiftKey: true });
+        expect(header).toHaveAttribute("aria-sort", "ascending");
+        expect(rankHeader).not.toHaveAttribute("aria-sort");
 
         await userEvent.click(sortButtons[0]!);
         expect(header).toHaveAttribute("aria-sort", "descending");
@@ -183,7 +193,7 @@ describe("Dashboard data table and virtualizer", () => {
         expect(within(table).getAllByRole("row")[1]).toHaveTextContent("Second row");
 
         await userEvent.click(sortButtons[0]!);
-        expect(header).toHaveAttribute("aria-sort", "none");
+        expect(header).not.toHaveAttribute("aria-sort");
         expect(sortButtons[0]?.querySelector("svg")).toBeNull();
         expect(within(table).getAllByRole("row")[1]).toHaveTextContent("First row");
     });

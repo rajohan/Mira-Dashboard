@@ -68,7 +68,7 @@ function ReleaseSlot({
     readonly release?: DeliveryRelease;
 }) {
     return (
-        <div
+        <section
             aria-label={label}
             className="border-primary-700 bg-primary-900/40 rounded-lg border p-3"
         >
@@ -96,7 +96,7 @@ function ReleaseSlot({
                     </Text>
                 </div>
             )}
-        </div>
+        </section>
     );
 }
 
@@ -167,9 +167,14 @@ export function ProductionReleasesPanel({
                     label="Previous / rollback target"
                     release={releases.previous}
                 />
-                <div className="border-primary-700 bg-primary-900/40 rounded-lg border p-3">
+                <section
+                    aria-label="Main checkout"
+                    className="border-primary-700 bg-primary-900/40 rounded-lg border p-3"
+                >
                     <div className="flex items-start justify-between gap-2">
-                        <Heading level={3}>Main checkout</Heading>
+                        <Heading level={3} size="subsection">
+                            Main checkout
+                        </Heading>
                         <Badge variant={checkoutBadgeVariant}>{checkoutBadgeLabel}</Badge>
                     </div>
                     <code className="text-primary-100 mt-2 block text-sm">
@@ -178,7 +183,7 @@ export function ProductionReleasesPanel({
                     <Text className="mt-1" size="sm" tone="muted">
                         Control checkout. Deploy syncs latest main first.
                     </Text>
-                </div>
+                </section>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 {rollbackReason === undefined ? null : (

@@ -316,13 +316,14 @@ function PullRequestCard({
             )}
             <div className="mt-3 grid grid-cols-1 gap-1.5 sm:flex sm:flex-wrap">
                 {actions.map(({ action, reason, state }) => {
-                    const reasonId = `delivery-pr-${pullRequest.number}-${action.action}-reason`;
+                    const reasonId =
+                        reason === undefined
+                            ? undefined
+                            : `delivery-pr-${pullRequest.number}-reason-${disabledReasons.indexOf(reason)}`;
                     return (
                         <div className="w-full sm:w-auto" key={action.action}>
                             <Button
-                                aria-describedby={
-                                    reason === undefined ? undefined : reasonId
-                                }
+                                aria-describedby={state.enabled ? undefined : reasonId}
                                 disabled={!state.enabled || busy}
                                 className="w-full sm:w-auto"
                                 onClick={() => onAction(group, pullRequest, action)}
@@ -336,30 +337,24 @@ function PullRequestCard({
                                 />
                                 {actionLabel(group, pullRequest, action, preview)}
                             </Button>
-                            {reason === undefined ? null : (
-                                <Text
-                                    className="sr-only"
-                                    id={reasonId}
-                                    size="sm"
-                                    tone="muted"
-                                >
-                                    {reason}
-                                </Text>
-                            )}
                         </div>
                     );
                 })}
             </div>
             {disabledReasons.length === 0 ? null : (
                 <div className="mt-2 space-y-1">
-                    {disabledReasons.map((reason) => (
-                        <Alert
-                            className="py-2"
-                            focusOnError={false}
+                    {disabledReasons.map((reason, index) => (
+                        <div
+                            id={`delivery-pr-${pullRequest.number}-reason-${index}`}
                             key={reason}
-                            message={reason}
-                            variant="warning"
-                        />
+                        >
+                            <Alert
+                                className="py-2"
+                                focusOnError={false}
+                                message={reason}
+                                variant="warning"
+                            />
+                        </div>
                     ))}
                 </div>
             )}

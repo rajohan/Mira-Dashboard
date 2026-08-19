@@ -48,7 +48,6 @@ export function ScheduleTable({ onSelect, schedules, selectedId }: ScheduleTable
                     >
                         <StretchedAction
                             aria-current={selected ? "true" : undefined}
-                            aria-pressed={selected}
                             className="z-10 focus-visible:ring-inset"
                             label={`${schedule.name}; ${schedule.id}`}
                             onClick={() => onSelect(schedule.id)}

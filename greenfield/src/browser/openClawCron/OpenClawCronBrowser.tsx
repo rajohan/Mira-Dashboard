@@ -8,10 +8,6 @@ import type {
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { dashboardBrowserFailureMessage } from "../api/trpcError.ts";
 import { useAuthenticatedMutationBoundary } from "../auth/useAuthenticatedMutationBoundary.ts";
-import {
-    reportListQueryOptions,
-    uniqueMonitoringRows,
-} from "../monitoring/monitoringQueries.ts";
 import { gatewaySessionQueryOptions } from "../sessions/gatewaySessionQueries.ts";
 import type { OpenClawCronDisableDraft } from "./OpenClawCronDisableDialog.tsx";
 import {
@@ -85,22 +81,6 @@ export function OpenClawCronBrowser({
         enabled:
             effectiveSelectedId !== undefined &&
             selectedJob?.payload.kind === "heartbeat",
-    });
-    const heartbeatReportFilters: {
-        kinds: string[];
-        sourceJobIds: string[];
-        sources: string[];
-    } = {
-        kinds: ["heartbeat"],
-        sourceJobIds:
-            selectedJob === undefined
-                ? []
-                : [selectedJob.id, selectedJob.name, "ops-check"],
-        sources: ["openclaw"],
-    };
-    const heartbeatReports = useInfiniteQuery({
-        ...reportListQueryOptions(client, heartbeatReportFilters),
-        enabled: selectedJob?.payload.kind === "heartbeat",
     });
     const heartbeatSessions = useQuery({
         ...gatewaySessionQueryOptions(client),
@@ -233,9 +213,6 @@ export function OpenClawCronBrowser({
         <OpenClawCronSection
             backgroundError={backgroundError}
             jobsLoadingMore={inventory.isFetchingNextPage}
-            heartbeatReports={uniqueMonitoringRows(
-                heartbeatReports.data?.pages.flatMap((page) => page.reports) ?? []
-            )}
             heartbeatSession={heartbeatSession}
             onDelete={(job) => mutation.mutateAsync({ job, kind: "delete" })}
             onLoadMoreJobs={

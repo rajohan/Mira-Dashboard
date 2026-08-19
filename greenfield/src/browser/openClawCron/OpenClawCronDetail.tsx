@@ -3,7 +3,6 @@ import type { ReactNode } from "react";
 import { useEffect, useId, useRef } from "react";
 
 import type { GatewaySession } from "../../contracts/gatewaySessions.ts";
-import type { ReportSummary } from "../../contracts/monitoring.ts";
 import type { OpenClawCronJob } from "../../contracts/openClawCron.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { Alert } from "../ui/Alert.tsx";
@@ -32,7 +31,6 @@ interface OpenClawCronDetailProps {
     readonly actionError?: string;
     readonly definitionControlsAvailable: boolean;
     readonly job: OpenClawCronJob;
-    readonly heartbeatReports?: readonly ReportSummary[];
     readonly heartbeatSession?: GatewaySession;
     readonly onDelete: () => void;
     readonly onEdit: () => void;
@@ -69,7 +67,6 @@ export function OpenClawCronDetail({
     actionError,
     definitionControlsAvailable,
     job,
-    heartbeatReports = [],
     heartbeatSession,
     onDelete,
     onEdit,
@@ -122,15 +119,6 @@ export function OpenClawCronDetail({
     let configuredModel: string | undefined;
     if (job.payload.kind === "agent-turn") configuredModel = job.payload.model;
     else if (isHeartbeat) configuredModel = heartbeatSession?.model;
-    const heartbeatReportForRun = (runAtMs: number): ReportSummary | undefined =>
-        heartbeatReports
-            .filter((report) => Math.abs(report.occurredAtMs - runAtMs) <= 30 * 60_000)
-            .toSorted(
-                (left, right) =>
-                    Math.abs(left.occurredAtMs - runAtMs) -
-                    Math.abs(right.occurredAtMs - runAtMs)
-            )
-            .at(0);
     const delivery = job.delivery;
     const definitionRows: readonly (readonly [string, ReactNode])[] = [
         ["Schedule", openClawCronScheduleLabel(job)],
@@ -387,9 +375,6 @@ export function OpenClawCronDetail({
                         className="mt-5 grid max-w-full min-w-0 grid-cols-1 gap-3"
                     >
                         {runs.runs.map((run, index) => {
-                            const heartbeatReport = isHeartbeat
-                                ? heartbeatReportForRun(run.runAtMs ?? run.completedAtMs)
-                                : undefined;
                             return (
                                 <li
                                     className="border-primary-700 bg-primary-900/40 max-w-full min-w-0 rounded-lg border p-3 sm:p-4"
@@ -401,10 +386,7 @@ export function OpenClawCronDetail({
                                                 Completed
                                             </dt>
                                             <dd className="text-primary-100 mt-1 text-sm wrap-anywhere">
-                                                {dateTime(
-                                                    heartbeatReport?.occurredAtMs ??
-                                                        run.completedAtMs
-                                                )}
+                                                {dateTime(run.completedAtMs)}
                                             </dd>
                                         </div>
                                         <div className="min-w-0">
@@ -448,9 +430,7 @@ export function OpenClawCronDetail({
                                                 Model
                                             </dt>
                                             <dd className="text-primary-100 mt-1 max-w-full text-sm wrap-anywhere">
-                                                {run.model ??
-                                                    heartbeatSession?.model ??
-                                                    "—"}
+                                                {run.model ?? "—"}
                                                 {run.model !== undefined &&
                                                     run.modelTruncated &&
                                                     " (shortened)"}
@@ -461,9 +441,7 @@ export function OpenClawCronDetail({
                                                 Provider
                                             </dt>
                                             <dd className="text-primary-100 mt-1 max-w-full text-sm wrap-anywhere">
-                                                {run.provider ??
-                                                    heartbeatSession?.modelProvider ??
-                                                    "—"}
+                                                {run.provider ?? "—"}
                                                 {run.provider !== undefined &&
                                                     run.providerTruncated &&
                                                     " (shortened)"}
@@ -474,11 +452,7 @@ export function OpenClawCronDetail({
                                                 Summary
                                             </dt>
                                             <dd className="text-primary-100 mt-1 max-w-full text-sm wrap-anywhere whitespace-pre-wrap">
-                                                {heartbeatReport?.summary ??
-                                                    heartbeatReport?.title ??
-                                                    run.summary ??
-                                                    run.errorReason ??
-                                                    "—"}
+                                                {run.summary ?? run.errorReason ?? "—"}
                                                 {run.summaryTruncated &&
                                                     " (shortened preview)"}
                                             </dd>

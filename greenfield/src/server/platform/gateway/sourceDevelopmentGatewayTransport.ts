@@ -1043,10 +1043,8 @@ export function createSourceDevelopmentGatewayTransport(
         requestAdmin(method, parameters, requestOptions) {
             assertPersistentGatewayAdminParameters(method, parameters);
             if (method === "cron.scratch.get") {
-                return options.readTransport.requestAdmin(
-                    method,
-                    parameters,
-                    requestOptions
+                return observedRead(state, readKey(method, parameters), () =>
+                    options.readTransport.requestAdmin(method, parameters, requestOptions)
                 );
             }
             return dispatch(method, parameters, requestOptions);

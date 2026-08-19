@@ -269,11 +269,17 @@ export function SelectedJobRun({
 }
 
 interface JobRunBrowserProps {
+    readonly focusRunId?: string;
     readonly onRequestRunFocus: (id: string) => void;
+    readonly onRunFocusHandled: (id: string) => void;
 }
 
 /** @returns Queue state, recent runs, and one exact durable run. */
-export function JobRunBrowser({ onRequestRunFocus }: JobRunBrowserProps) {
+export function JobRunBrowser({
+    focusRunId,
+    onRequestRunFocus,
+    onRunFocusHandled,
+}: JobRunBrowserProps) {
     const client = useDashboardTrpcClient();
     const navigate = useNavigate({ from: "/jobs" });
     const search = parseJobsRouteSearch(useSearch({ from: "/jobs" }) as unknown);
@@ -331,10 +337,10 @@ export function JobRunBrowser({ onRequestRunFocus }: JobRunBrowserProps) {
                         search.scheduleId !== undefined ? undefined : (
                             <SelectedJobRun
                                 embedded
-                                focusRequested={true}
+                                focusRequested={focusRunId === search.runId}
                                 id={search.runId}
                                 key={search.runId}
-                                onFocusHandled={() => {}}
+                                onFocusHandled={onRunFocusHandled}
                             />
                         )
                     }
@@ -342,6 +348,17 @@ export function JobRunBrowser({ onRequestRunFocus }: JobRunBrowserProps) {
                     summary={summary}
                 />
             )}
+            {query.hasNextPage && summary !== undefined ? (
+                <div className="mt-4 flex justify-center">
+                    <Button
+                        busy={query.isFetchingNextPage}
+                        onClick={() => void query.fetchNextPage()}
+                        variant="secondary"
+                    >
+                        Load more jobs
+                    </Button>
+                </div>
+            ) : null}
             {query.data === undefined && (
                 <div className="mt-4">
                     {query.isPending ? (

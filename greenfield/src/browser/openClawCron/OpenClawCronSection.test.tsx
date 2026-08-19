@@ -195,18 +195,6 @@ describe("OpenClawCronSection", () => {
         render(
             <OpenClawCronSectionView
                 {...actions}
-                heartbeatReports={[
-                    {
-                        id: "019fd974-54a2-74dd-a64b-d4186f8d8828",
-                        kind: "heartbeat",
-                        occurredAtMs: 1_800_009_997_000,
-                        source: "openclaw",
-                        sourceJobId: "ops-check",
-                        status: "ok",
-                        summary: "All bounded operations checks passed.",
-                        title: "Operations heartbeat",
-                    },
-                ]}
                 heartbeatSession={{
                     displayName: "Ops heartbeat",
                     hasActiveRun: false,
@@ -245,11 +233,8 @@ describe("OpenClawCronSection", () => {
         expect(within(history).getByText("Model")).toBeVisible();
         expect(within(history).getByText("Provider")).toBeVisible();
         expect(within(history).getByText("Delivery")).toBeVisible();
-        expect(
-            within(history).getByText("All bounded operations checks passed.")
-        ).toBeVisible();
-        expect(within(history).getByText(/^kimi/u)).toBeVisible();
-        expect(within(history).getByText(/^openai/u)).toBeVisible();
+        expect(within(history).getByText("Report delivered.")).toBeVisible();
+        expect(within(history).getAllByText("—")).toHaveLength(2);
     });
 
     test("uses mobile-first cards and desktop grids without horizontal scrolling or field loss", async () => {

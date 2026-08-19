@@ -50,6 +50,7 @@ type DataTableProps<
 interface SortableColumn {
     getCanSort(): boolean;
     getIsSorted(): false | "asc" | "desc";
+    getSortIndex(): number;
     toggleSorting(desc?: boolean, multi?: boolean): void;
 }
 
@@ -58,6 +59,7 @@ function sortableColumn(value: unknown): SortableColumn | undefined {
     const candidate = value as Partial<SortableColumn>;
     return typeof candidate.getCanSort === "function" &&
         typeof candidate.getIsSorted === "function" &&
+        typeof candidate.getSortIndex === "function" &&
         typeof candidate.toggleSorting === "function" &&
         candidate.getCanSort()
         ? (candidate as SortableColumn)
@@ -70,6 +72,14 @@ function ariaSortDirection(
     if (direction === "asc") return "ascending";
     if (direction === "desc") return "descending";
     return "none";
+}
+
+function primaryAriaSort(
+    column: SortableColumn | undefined
+): "ascending" | "descending" | undefined {
+    if (column === undefined || column.getSortIndex() !== 0) return undefined;
+    const direction = ariaSortDirection(column.getIsSorted());
+    return direction === "none" ? undefined : direction;
 }
 
 function tableSortDirection(direction: false | "asc" | "desc") {
@@ -320,8 +330,8 @@ export function DataTable<TFeatures extends TableFeatures, TData extends RowData
                             <tr key={headerGroup.id}>
                                 {headerGroup.headers.map((header) => (
                                     <th
-                                        aria-sort={ariaSortDirection(
-                                            sortableColumn(header.column)?.getIsSorted()
+                                        aria-sort={primaryAriaSort(
+                                            sortableColumn(header.column)
                                         )}
                                         className="text-primary-300 border-primary-700 bg-primary-950 border-b px-3 py-2 text-left text-xs font-semibold tracking-wide uppercase"
                                         key={header.id}

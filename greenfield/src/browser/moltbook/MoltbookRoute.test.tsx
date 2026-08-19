@@ -162,7 +162,7 @@ test("Moltbook route renders LKG state, encoded links, and independent content t
         ).toBeVisible();
         expect(screen.getByText("A feed post")).toBeVisible();
 
-        expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+        expect(screen.getByRole("button", { name: "Retry" })).toBeVisible();
     } finally {
         view.unmount();
         queryClient.clear();

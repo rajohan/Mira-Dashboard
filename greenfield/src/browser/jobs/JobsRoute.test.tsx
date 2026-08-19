@@ -576,7 +576,7 @@ describe("Dashboard jobs route", () => {
         const run = queuedRun({ displayName: "Dashboard background job", id: runId });
         transport.runs = [run];
         transport.addRunDetail(run);
-        await renderJobsRoute("/jobs", transport);
+        const { queryClient } = await renderJobsRoute("/jobs", transport);
         const user = userEvent.setup();
 
         expect(screen.queryByText("Service actions")).toBeNull();
@@ -591,11 +591,56 @@ describe("Dashboard jobs route", () => {
             name: run.displayName,
         });
         await waitFor(() => expect(detailHeading).toHaveFocus());
+        const cancelButton = screen.getByRole("button", {
+            name: `Cancel queued run: ${run.displayName}`,
+        });
+        act(() => cancelButton.focus());
+        expect(cancelButton).toHaveFocus();
+        await act(async () => {
+            await queryClient.invalidateQueries({
+                queryKey: ["jobs", "runs", "detail"],
+            });
+        });
+        await waitFor(() => expect(transport.callsFor("jobs.getRun")).toHaveLength(2));
+        expect(cancelButton).toHaveFocus();
         expect(transport.callsFor("jobs.getRun").at(-1)?.input).toEqual({
             eventLimit: 100,
             id: run.id,
         });
     }, 10_000);
+
+    test("can page beyond the first run-history page", async () => {
+        const transport = new JobsRouteTransport();
+        const newerActive = queuedRun({
+            displayName: "Newer active run",
+            id: runId,
+        });
+        const olderActive = queuedRun({
+            displayName: "Older active run",
+            id: olderRunId,
+            queuedAtMs: timestampMs - 1000,
+        });
+        transport.runs = [newerActive, olderActive];
+        transport.runPages = [[newerActive], [olderActive]];
+
+        await renderJobsRoute("/jobs", transport);
+        const user = userEvent.setup();
+        await user.click(await screen.findByRole("button", { name: "Load more jobs" }));
+
+        expect(
+            await screen.findByRole("button", {
+                name: `Open run Older active run; action system.worker-smoke; id ${olderRunId}`,
+            })
+        ).toBeVisible();
+        expect(
+            transport
+                .callsFor("jobs.listRuns")
+                .some(
+                    ({ input }) =>
+                        (input as ListJobRunsInput).cursor?.id === newerActive.id
+                )
+        ).toBeTrue();
+    });
 
     test("loads independent exact deep links and wires navigation and realtime refresh", async () => {
         const transport = new JobsRouteTransport();

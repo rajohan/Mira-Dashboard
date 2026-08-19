@@ -116,7 +116,7 @@ export function PreviewPanel({
                                 {preview.headSha?.slice(0, 8) ?? "commit pending"}
                                 {preview.startedAtMs === undefined
                                     ? ""
-                                    : ` · Updated ${formatDashboardDateTime(preview.startedAtMs)}`}
+                                    : ` · Started ${formatDashboardDateTime(preview.startedAtMs)}`}
                             </Text>
                         </div>
                         {preview.url === undefined ? null : (

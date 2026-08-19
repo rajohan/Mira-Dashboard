@@ -25,6 +25,7 @@ import {
     openClawCronRunSchema,
     openClawCronTimestampSchema,
 } from "../../../contracts/openClawCron.ts";
+import { sha256Hex } from "../../shared/crypto.ts";
 import type { OpenClawCronActiveDisableIntent } from "./intentStore.ts";
 import {
     OpenClawCronProviderError,
@@ -597,7 +598,8 @@ export function projectOpenClawCronRun(
             ? undefined
             : safeLabelProjection(entry.provider, "unknown", 128);
     const runId =
-        entry.runId ?? `${entry.jobId}:${entry.runAtMs ?? entry.ts}:${entry.ts}`;
+        entry.runId ??
+        `synthetic:${sha256Hex(`${entry.jobId}\0${entry.runAtMs ?? entry.ts}\0${entry.ts}`)}`;
     return parseProviderProjection(openClawCronRunSchema, {
         completedAtMs: entry.ts,
         deliveryStatus: entry.deliveryStatus ?? "not-requested",

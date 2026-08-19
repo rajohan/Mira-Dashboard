@@ -35,6 +35,7 @@ import {
     useDeliveryRealtimeInvalidation,
 } from "./deliveryQueries.ts";
 import { DeliveryReadRegion } from "./DeliveryReadRegion.tsx";
+import { deliveryBrowserRetainedMessage } from "./deliveryRetainedMessage.ts";
 import { PreviewPanel } from "./PreviewPanel.tsx";
 import { ProductionReleasesPanel } from "./ProductionPanel.tsx";
 import { PullRequestBrowser } from "./PullRequestBrowser.tsx";
@@ -378,7 +379,7 @@ export function DeliveryRoute({ client }: DeliveryRouteProps) {
                 {pullRequestsBrowserRetained ? (
                     <Alert
                         focusOnError={false}
-                        message="The latest pull requests refresh failed. Showing browser-retained data; consequential controls are disabled."
+                        message={deliveryBrowserRetainedMessage("Pull requests")}
                         variant="warning"
                     />
                 ) : null}

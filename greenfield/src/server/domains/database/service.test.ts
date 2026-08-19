@@ -339,6 +339,33 @@ describe("database observability service", () => {
         });
     });
 
+    test("refreshes the fallback response clock after diagnostics reject", async () => {
+        let nowMs = 1000;
+        let readAttempts = 0;
+        const service = createDatabaseObservabilityService({
+            nowMs: () => nowMs,
+            readDiagnostics: () => {
+                readAttempts += 1;
+                if (readAttempts === 1) return Promise.resolve(diagnostics);
+                nowMs = 3000;
+                return Promise.reject(new Error("private SQL failure"));
+            },
+        });
+
+        await service.read();
+        nowMs = 2000;
+        const retained = await service.read();
+
+        expect(retained).toMatchObject({
+            checkedAtMs: 3000,
+            sqlite: {
+                observedAtMs: 1000,
+                staleSinceMs: 3000,
+                state: "last-known-good",
+            },
+        });
+    });
+
     test("retains SQLite data across a transient failure at the browser poll interval", async () => {
         let nowMs = 1000;
         let readAttempts = 0;

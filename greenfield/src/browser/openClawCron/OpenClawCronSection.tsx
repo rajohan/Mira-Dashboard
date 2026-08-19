@@ -2,7 +2,6 @@ import { CloudCog } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 
 import type { GatewaySession } from "../../contracts/gatewaySessions.ts";
-import type { ReportSummary } from "../../contracts/monitoring.ts";
 import type {
     OpenClawCronJob,
     UpdateOpenClawCronPatch,
@@ -40,7 +39,6 @@ export type OpenClawCronSectionState =
 export interface OpenClawCronSectionProps {
     readonly backgroundError?: string;
     readonly jobsLoadingMore?: boolean;
-    readonly heartbeatReports?: readonly ReportSummary[];
     readonly heartbeatSession?: GatewaySession;
     readonly onDelete: (job: OpenClawCronJob) => Promise<void>;
     readonly onLoadMoreJobs?: () => void;
@@ -103,7 +101,6 @@ function confirmationTitle(confirmation: Confirmation): string {
 export function OpenClawCronSectionView({
     backgroundError,
     jobsLoadingMore = false,
-    heartbeatReports,
     heartbeatSession,
     onDelete,
     onLoadMoreJobs,
@@ -367,7 +364,6 @@ export function OpenClawCronSectionView({
                                 selected.configRevision !== undefined
                             }
                             job={selected}
-                            heartbeatReports={heartbeatReports}
                             heartbeatSession={heartbeatSession}
                             onDelete={() => {
                                 setSelectedId(selected.id);

@@ -237,7 +237,7 @@ interface ScheduleBrowserProps {
     readonly onRunFocusHandled: (id: string) => void;
 }
 
-/** @returns Filtered schedule directory, exact editor, and schedule-scoped history. */
+/** @returns Schedule directory, exact editor, and schedule-scoped history. */
 export function ScheduleBrowser({
     focusRunId,
     onRequestRunFocus,
@@ -294,7 +294,7 @@ export function ScheduleBrowser({
     } else if (schedules.length === 0) {
         directoryContent = (
             <PageState
-                description="Try another status filter."
+                description="Create or enable a Dashboard schedule to see it here."
                 icon={CalendarClock}
                 status="empty"
                 title="No matching schedules"

@@ -12,6 +12,7 @@ import type {
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { dashboardBrowserFailureMessage } from "../api/trpcError.ts";
 import { Alert } from "../ui/Alert.tsx";
+import { Button } from "../ui/Button.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { PageState } from "../ui/PageState.tsx";
@@ -119,15 +120,27 @@ export function MoltbookRoute() {
                     <PageState status="ready">
                         <div className="space-y-6">
                             {firstError === null ? null : (
-                                <Alert
-                                    focusOnError={false}
-                                    message={
-                                        ready.feed.sort === sort
-                                            ? dashboardBrowserFailureMessage(firstError)
-                                            : `The ${sort} feed could not be loaded; showing ${ready.feed.sort} feed data.`
-                                    }
-                                    variant="info"
-                                />
+                                <div className="flex flex-wrap items-center gap-3">
+                                    <Alert
+                                        className="min-w-0 flex-1"
+                                        focusOnError={false}
+                                        message={
+                                            ready.feed.sort === sort
+                                                ? dashboardBrowserFailureMessage(
+                                                      firstError
+                                                  )
+                                                : `The ${sort} feed could not be loaded; showing ${ready.feed.sort} feed data.`
+                                        }
+                                        variant="info"
+                                    />
+                                    <Button
+                                        busy={fetching}
+                                        onClick={refresh}
+                                        variant="secondary"
+                                    >
+                                        Retry
+                                    </Button>
+                                </div>
                             )}
                             <MoltbookSnapshotNotice status={ready.status} />
                             {ready.profile === undefined ? null : (
