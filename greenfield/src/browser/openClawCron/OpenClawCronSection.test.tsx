@@ -202,6 +202,7 @@ describe("OpenClawCronSection", () => {
                     kind: "main",
                     model: "kimi",
                     modelProvider: "openai",
+                    thinkingDefault: "high",
                     totalTokens: 12_345,
                     totalTokensFresh: true,
                     updatedAtMs: 1_800_010_000_000,
@@ -225,6 +226,7 @@ describe("OpenClawCronSection", () => {
         expect(screen.getAllByText("Model")).toHaveLength(2);
         expect(screen.getAllByText("Provider")).toHaveLength(2);
         expect(screen.getByText("Thinking")).toBeVisible();
+        expect(screen.getByText("high")).toBeVisible();
         expect(screen.getByText("Timeout")).toBeVisible();
         const history = screen.getByRole("list", {
             name: `OpenClaw runs for ${heartbeatJob.name}`,
@@ -251,7 +253,7 @@ describe("OpenClawCronSection", () => {
             />
         );
 
-        expect(screen.getAllByText("Unavailable")).toHaveLength(2);
+        expect(screen.getAllByText("Unavailable")).toHaveLength(3);
     });
 
     test("uses mobile-first cards and desktop grids without horizontal scrolling or field loss", async () => {

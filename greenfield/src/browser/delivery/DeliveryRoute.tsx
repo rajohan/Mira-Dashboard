@@ -466,7 +466,8 @@ export function DeliveryRoute({ client }: DeliveryRouteProps) {
                             title="Recent Delivery jobs"
                             visuallyHiddenTitle
                         >
-                            {deployments?.state === "fresh" ? (
+                            {deployments !== undefined &&
+                            deployments.state !== "unavailable" ? (
                                 <DeliveryJobsPanel
                                     deployments={deployments.deployments}
                                 />

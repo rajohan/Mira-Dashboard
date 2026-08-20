@@ -166,7 +166,10 @@ export function OpenClawCronDetail({
                       "Thinking",
                       job.payload.kind === "agent-turn"
                           ? (job.payload.thinking ?? "Default")
-                          : "Default",
+                          : heartbeatSetting(
+                                heartbeatSession?.thinkingLevel ??
+                                    heartbeatSession?.thinkingDefault
+                            ),
                   ],
                   [
                       "Timeout",

@@ -208,7 +208,7 @@ interface DeliveryClientOverrides {
 }
 
 function createClient(overrides: DeliveryClientOverrides = {}) {
-    const query = jest.fn((name: string) => {
+    const queryMock = jest.fn((name: string) => {
         switch (name) {
             case "delivery.listPullRequests": {
                 return overrides.pullRequests instanceof Error
@@ -233,9 +233,15 @@ function createClient(overrides: DeliveryClientOverrides = {}) {
                 return Promise.reject(new Error("Unexpected Delivery query"));
             }
         }
-    }) as unknown as DeliveryClient["query"];
+    });
+    const query = queryMock as unknown as DeliveryClient["query"];
     const mutation = overrides.mutation ?? jest.fn(() => Promise.resolve(queuedResult));
-    return { client: { mutation, query } satisfies DeliveryClient, mutation, query };
+    return {
+        client: { mutation, query } satisfies DeliveryClient,
+        mutation,
+        query,
+        queryMock,
+    };
 }
 
 function renderDelivery(
@@ -297,7 +303,7 @@ describe("DeliveryRoute", () => {
             await user.click(within(checkout).getByRole("button", { name: "Try again" }));
             await waitFor(() =>
                 expect(
-                    harness.query.mock.calls.filter(
+                    harness.queryMock.mock.calls.filter(
                         ([name]) => name === "delivery.getProductionCheckout"
                     )
                 ).toHaveLength(2)
@@ -498,15 +504,24 @@ describe("DeliveryRoute", () => {
                 return Promise.resolve(checkoutResult);
             }
             if (name === "delivery.getReleases") return Promise.resolve(releasesResult);
-            return Promise.resolve(deploymentsResult);
+            return Promise.resolve({
+                ...deploymentsResult,
+                staleSinceMs: observedAtMs + 500,
+                state: "last-known-good",
+            });
         }) as unknown as DeliveryClient["query"];
         const harness = createClient();
         const view = renderDelivery({ ...harness.client, query });
         try {
             expect(
                 await screen.findByText(
-                    /Retained data is shown for pull request preview\./u
+                    /Retained data is shown for pull request preview, recent Delivery jobs\./u
                 )
+            ).toBeVisible();
+            expect(
+                within(
+                    screen.getByRole("region", { name: "Recent Delivery jobs" })
+                ).getByText("Current release")
             ).toBeVisible();
             const region = screen.getByRole("region", {
                 name: "Pull requests",
@@ -518,7 +533,7 @@ describe("DeliveryRoute", () => {
             await waitFor(() => {
                 expect(
                     screen.getByText(
-                        /Retained data is shown for pull request preview, pull requests\./u
+                        /Retained data is shown for pull request preview, pull requests, recent Delivery jobs\./u
                     )
                 ).toBeVisible();
             });

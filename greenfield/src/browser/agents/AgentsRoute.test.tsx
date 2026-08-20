@@ -195,6 +195,30 @@ class PaginatedAgentTransport extends AgentTransport {
     }
 }
 
+class PartialAgentHistoryTransport extends AgentTransport {
+    readonly historyFailure = new TypeError("redacted archive failure");
+
+    override query(path: string, input?: unknown): Promise<unknown> {
+        if (path !== "agents.listTaskHistory") return super.query(path, input);
+        this.historyQueryCount += 1;
+        if (this.historyQueryCount === 1) {
+            return Promise.reject(this.historyFailure);
+        }
+        return Promise.resolve({
+            runs: [
+                {
+                    agentId: "main",
+                    id: "019fdc00-0000-7000-8000-000000000003",
+                    lastActivityAtMs: timestampMs,
+                    startedAtMs: timestampMs,
+                    status: "active",
+                    task: "Live-head agent task",
+                },
+            ],
+        });
+    }
+}
+
 const queryClients: ReturnType<typeof createDashboardQueryClient>[] = [];
 const collectionRegistries: DashboardBrowserCollections[] = [];
 const mountedViews: ReturnType<typeof render>[] = [];
@@ -239,6 +263,19 @@ function renderAgentRoute(
 }
 
 describe("Dashboard agents route", () => {
+    test("renders the live history head when the archive fails", async () => {
+        const transport = new PartialAgentHistoryTransport();
+        const queryClient = createDashboardQueryClient();
+        queryClient.setQueryDefaults(
+            liveHistoryArchiveQueryKey([...agentQueryKey, "history"]),
+            { retry: false }
+        );
+        renderAgentRoute(transport, queryClient);
+        await expectAgentShellReady();
+        expect(await screen.findByText("Live-head agent task")).toBeTruthy();
+        expect(screen.getByRole("alert")).toBeTruthy();
+    });
+
     test("invalidates mutable archived agent runs", async () => {
         const queryClient = createDashboardQueryClient();
         const archiveKey = liveHistoryArchiveQueryKey([...agentQueryKey, "history"]);

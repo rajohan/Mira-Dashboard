@@ -53,13 +53,18 @@ export function AgentsRoute() {
         collectionQueries.statuses?.error ??
         historyLiveHead.error ??
         history.error;
-    const pending = configuration.isLoading || statuses.isLoading || history.isPending;
+    const historyAvailable =
+        history.data !== undefined || historyLiveHead.data !== undefined;
+    const pending =
+        configuration.isLoading ||
+        statuses.isLoading ||
+        (history.isPending && historyLiveHead.isPending);
     const hasCompleteData =
         configuration.isReady &&
         statuses.isReady &&
         collectionQueries.configuration?.data !== undefined &&
         collectionQueries.statuses?.data !== undefined &&
-        history.data !== undefined;
+        historyAvailable;
 
     const refresh = () => {
         void Promise.allSettled([
