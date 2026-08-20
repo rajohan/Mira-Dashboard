@@ -19,6 +19,7 @@ import {
     useSetJobClaimingPausedMutation,
 } from "./jobMutations.ts";
 import {
+    jobHistoryNeedsInitialFill,
     jobRunDetailQueryOptions,
     type JobRunEventGapRequest,
     type JobRunEventGapResult,
@@ -339,8 +340,15 @@ export function JobRunBrowser({
         ({ state }) => state === "queued" || state === "running"
     ).length;
     const loadedCompletedRunCount = runs.length - loadedActiveRunCount;
-    const historyNeedsInitialFill =
-        loadedActiveRunCount < 50 && loadedCompletedRunCount < 50;
+    const reportedActiveRunCount =
+        summary === undefined
+            ? undefined
+            : summary.stateCounts.queued + summary.stateCounts.running;
+    const historyNeedsInitialFill = jobHistoryNeedsInitialFill(
+        loadedActiveRunCount,
+        loadedCompletedRunCount,
+        reportedActiveRunCount
+    );
     useEffect(() => {
         const sentinel = historySentinelRef.current;
         if (

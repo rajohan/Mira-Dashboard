@@ -134,6 +134,18 @@ function SelectedSchedule({
         historyError === null ? undefined : jobBrowserFailureMessage(historyError);
     const historyErrorIsDistinct =
         historyErrorMessage !== undefined && historyErrorMessage !== scheduleErrorMessage;
+    const historyRetry = historyErrorMessage !== undefined && (
+        <Button
+            busy={liveHead.isFetching || history.isFetching}
+            onClick={() =>
+                void Promise.allSettled([liveHead.refetch(), history.refetch()])
+            }
+            size="sm"
+            variant="secondary"
+        >
+            Retry schedule history
+        </Button>
+    );
     const selectedRunDetail = selectedRunId !== undefined && (
         <div className="mt-2">
             <ExpandableCard
@@ -184,23 +196,7 @@ function SelectedSchedule({
         historyContent = (
             <>
                 <Alert
-                    action={
-                        historyErrorIsDistinct ? (
-                            <Button
-                                busy={liveHead.isFetching || history.isFetching}
-                                onClick={() =>
-                                    void Promise.allSettled([
-                                        liveHead.refetch(),
-                                        history.refetch(),
-                                    ])
-                                }
-                                size="sm"
-                                variant="secondary"
-                            >
-                                Retry schedule history
-                            </Button>
-                        ) : undefined
-                    }
+                    action={historyErrorIsDistinct ? historyRetry : undefined}
                     className="mb-4"
                     focusOnError={false}
                     message={historyErrorIsDistinct ? historyErrorMessage : undefined}
@@ -338,6 +334,7 @@ function SelectedSchedule({
                 update.error === null ? undefined : jobBrowserFailureMessage(update.error)
             }
             error={scheduleErrorMessage}
+            errorAction={historyErrorIsDistinct ? undefined : historyRetry}
             errorFocus={mutationError !== null}
             history={historyContent}
             onDisable={(disableIntent, expectedVersion) =>

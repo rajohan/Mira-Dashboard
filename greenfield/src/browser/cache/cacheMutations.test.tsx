@@ -466,7 +466,7 @@ describe("cache browser refresh mutation", () => {
                 expect(
                     queryClient.getQueryState(exactCacheKey)?.isInvalidated
                 ).toBeTrue();
-                expect(queryClient.getQueryState(jobListKey)?.isInvalidated).toBeFalse();
+                expect(queryClient.getQueryState(jobListKey)?.isInvalidated).toBeTrue();
                 expect(
                     queryClient.getQueryState(jobRunDetailQueryKey(runId))?.isInvalidated
                 ).toBeTrue();

@@ -23,7 +23,11 @@ import {
     type DashboardTrpcTransport,
 } from "../api/trpcClient.ts";
 import { DashboardTrpcProvider } from "../api/trpcContext.tsx";
-import { jobRunDetailQueryKey, jobRunEventHistoryQueryKey } from "./jobQueries.ts";
+import {
+    jobHistoryNeedsInitialFill,
+    jobRunDetailQueryKey,
+    jobRunEventHistoryQueryKey,
+} from "./jobQueries.ts";
 import { parseJobsRouteSearch } from "./jobRouteSearch.ts";
 import { JobRunBrowser } from "./JobRunBrowser.tsx";
 
@@ -35,6 +39,12 @@ const runId = "019fdf70-0000-7000-8000-000000000002";
 const otherRunId = "019fdf70-0000-7000-8000-000000000003";
 const timestampMs = 1_800_000_000_000;
 const eventProjectionWait = { timeout: 3000 } as const;
+
+test("keeps filling history until reported active runs are represented", () => {
+    expect(jobHistoryNeedsInitialFill(0, 100, 1)).toBeTrue();
+    expect(jobHistoryNeedsInitialFill(1, 100, 1)).toBeFalse();
+    expect(jobHistoryNeedsInitialFill(0, 49)).toBeTrue();
+});
 
 function runningRun(eventCount: number, id = runId): JobRunSummary {
     return {

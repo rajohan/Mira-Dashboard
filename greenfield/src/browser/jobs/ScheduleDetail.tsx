@@ -26,6 +26,7 @@ import { scheduleConfigurationLabel } from "./schedulePresentation.ts";
 interface ScheduleDetailProps {
     readonly disableError?: string;
     readonly error?: string;
+    readonly errorAction?: ReactNode;
     readonly errorFocus?: boolean;
     readonly history: ReactNode;
     readonly onDisable: (
@@ -53,6 +54,7 @@ function focusScheduleDetailHeading(): void {
 export function ScheduleDetail({
     disableError,
     error,
+    errorAction,
     errorFocus = true,
     history,
     onDisable,
@@ -161,6 +163,7 @@ export function ScheduleDetail({
                 </div>
             </div>
             <Alert
+                action={disableOpen ? undefined : errorAction}
                 className="mt-4"
                 focusOnError={errorFocus}
                 message={disableOpen ? undefined : error}

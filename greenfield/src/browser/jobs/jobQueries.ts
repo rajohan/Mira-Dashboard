@@ -44,6 +44,24 @@ export const scheduleRunListQueryRoot = [...scheduleQueryKey, "runs"] as const;
 export const jobQueueSummaryRefreshIntervalMs = 10_000;
 
 /**
+ * @param loadedActiveRunCount Active rows currently represented in loaded history.
+ * @param loadedCompletedRunCount Terminal rows currently represented in loaded history.
+ * @param reportedActiveRunCount Active rows reported by the bounded queue summary.
+ * @returns Whether observer-driven pagination should continue filling history.
+ */
+export function jobHistoryNeedsInitialFill(
+    loadedActiveRunCount: number,
+    loadedCompletedRunCount: number,
+    reportedActiveRunCount?: number
+): boolean {
+    return (
+        (reportedActiveRunCount !== undefined &&
+            loadedActiveRunCount < reportedActiveRunCount) ||
+        (loadedActiveRunCount < 50 && loadedCompletedRunCount < 50)
+    );
+}
+
+/**
  * Removes repeated identities while preserving the first, newest-page occurrence.
  * @param rows Rows flattened from stable keyset pages.
  * @returns Rows with each durable identity represented once.
