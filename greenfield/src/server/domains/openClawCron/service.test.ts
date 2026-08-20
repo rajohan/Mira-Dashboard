@@ -71,6 +71,35 @@ test("disambiguates indistinguishable legacy runs within one source page", () =>
     expect(result.runs[0]?.runId).not.toBe(result.runs[1]?.runId);
 });
 
+test("disambiguates indistinguishable legacy runs across source pages", () => {
+    const entry = { jobId: "legacy-job", ts: 2000 } as const;
+    const freshness = { kind: "fresh", observedAtMs: 2000 } as const;
+    const first = projectOpenClawCronRunsResult(
+        {
+            entries: Array.from({ length: 25 }, () => entry),
+            hasMore: true,
+            limit: 25,
+            nextOffset: 25,
+            offset: 0,
+            total: 26,
+        },
+        freshness
+    );
+    const second = projectOpenClawCronRunsResult(
+        {
+            entries: [entry],
+            hasMore: false,
+            limit: 25,
+            nextOffset: null,
+            offset: 25,
+            total: 26,
+        },
+        freshness
+    );
+
+    expect(first.runs[0]?.runId).not.toBe(second.runs[0]?.runId);
+});
+
 function providerJob(
     overrides: Partial<OpenClawCronProviderJob> = {}
 ): OpenClawCronProviderJob {
