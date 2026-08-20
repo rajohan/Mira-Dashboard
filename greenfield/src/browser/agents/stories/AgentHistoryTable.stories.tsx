@@ -92,6 +92,7 @@ export const ResponsiveMobileCards: Story = {
         await expectResponsiveTableCards({
             canvasElement,
             label: "Agent task history",
+            rowDisplay: "grid",
         });
     },
 };
@@ -109,6 +110,7 @@ export const ResponsiveVirtualizedCards: Story = {
         await expectResponsiveTableCards({
             canvasElement,
             label: "Agent task history",
+            rowDisplay: "grid",
         });
         await expectVirtualizedTable({
             canvasElement,

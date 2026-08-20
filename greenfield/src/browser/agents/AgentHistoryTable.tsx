@@ -17,6 +17,8 @@ import { Virtualizer, type VirtualizerRenderState } from "../ui/Virtualizer.tsx"
 
 const minimumVirtualizedRows = 50;
 const historyTableFeatures = dashboardTableFeatures;
+const compactMobileHistoryClassName =
+    "min-w-224 @max-[66rem]:[&_.dashboard-data-table-row]:grid @max-[66rem]:[&_.dashboard-data-table-row]:grid-cols-2 @max-[66rem]:[&_.dashboard-data-table-cell]:p-2.5 @max-[66rem]:[&_.dashboard-data-table-cell]:gap-1 @max-[66rem]:[&_.dashboard-data-table-label]:text-[10px] @max-[66rem]:[&_.dashboard-data-table-label]:leading-3 @max-[66rem]:[&_.dashboard-data-table-cell:nth-child(1)]:order-1 @max-[66rem]:[&_.dashboard-data-table-cell:nth-child(2)]:order-3 @max-[66rem]:[&_.dashboard-data-table-cell:nth-child(2)]:col-span-2 @max-[66rem]:[&_.dashboard-data-table-cell:nth-child(3)]:order-2 @max-[66rem]:[&_.dashboard-data-table-cell:nth-child(4)]:order-4 @max-[66rem]:[&_.dashboard-data-table-cell:nth-child(5)]:order-5";
 const historyColumnHelper = createColumnHelper<
     typeof historyTableFeatures,
     AgentTaskRun
@@ -117,7 +119,7 @@ export function AgentHistoryTable({ pagination, runs }: AgentHistoryTableProps) 
             rowWindow={rowWindow}
             scrollContainerRef={rowWindow?.scrollContainerRef}
             table={table}
-            tableClassName="min-w-224"
+            tableClassName={compactMobileHistoryClassName}
         />
     );
 

@@ -208,7 +208,12 @@ export async function expectVirtualizedTable({
 export async function expectResponsiveTableCards({
     canvasElement,
     label,
-}: Readonly<{ canvasElement: HTMLElement; label: string }>): Promise<void> {
+    rowDisplay = "block",
+}: Readonly<{
+    canvasElement: HTMLElement;
+    label: string;
+    rowDisplay?: "block" | "grid";
+}>): Promise<void> {
     const canvas = within(canvasElement);
     const scrollRegion = canvas.getByRole("region", { name: label });
     const table = within(scrollRegion).getByRole("table", { name: label });
@@ -221,7 +226,7 @@ export async function expectResponsiveTableCards({
 
     await waitFor(async () => {
         await expect(getComputedStyle(table).display).toBe("block");
-        await expect(getComputedStyle(firstRow).display).toBe("block");
+        await expect(getComputedStyle(firstRow).display).toBe(rowDisplay);
         await expect(getComputedStyle(firstLabel).display).toBe("block");
         await expect(scrollRegion.scrollWidth).toBe(scrollRegion.clientWidth);
         await expect(table.getBoundingClientRect().width).toBeLessThanOrEqual(

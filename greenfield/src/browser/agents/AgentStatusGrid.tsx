@@ -12,6 +12,7 @@ import {
 import {
     type AgentDefinition,
     type AgentStatusProjection,
+    type AgentTaskRun,
     isWorkingAgentStatusProjection,
 } from "../../contracts/agentModel.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
@@ -24,6 +25,7 @@ import { Text } from "../ui/Text.tsx";
 interface AgentStatusCardProps {
     readonly agent: AgentDefinition;
     readonly status: AgentStatusProjection | undefined;
+    readonly taskRun: AgentTaskRun | undefined;
 }
 
 interface AgentStatusAppearance {
@@ -32,14 +34,22 @@ interface AgentStatusAppearance {
     readonly variant: "default" | "success" | "warning";
 }
 
+function agentIsActive(status: AgentStatusProjection | undefined): boolean {
+    return (
+        status !== undefined &&
+        (isWorkingAgentStatusProjection(status) ||
+            status.gatewayAvailability === "active")
+    );
+}
+
 function agentStatusAppearance(
     status: AgentStatusProjection | undefined
 ): AgentStatusAppearance {
     if (status === undefined) {
         return { icon: CircleAlert, label: "unavailable", variant: "warning" };
     }
-    if (isWorkingAgentStatusProjection(status)) {
-        return { icon: LoaderCircle, label: "working", variant: "success" };
+    if (agentIsActive(status)) {
+        return { icon: LoaderCircle, label: "active", variant: "success" };
     }
     return { icon: CircleCheck, label: "idle", variant: "default" };
 }
@@ -52,7 +62,7 @@ function gatewayAvailabilityAppearance(
             return { icon: LoaderCircle, label: "active", variant: "success" };
         }
         case "idle": {
-            return { icon: Link2, label: "idle", variant: "default" };
+            return { icon: Link2, label: "available", variant: "default" };
         }
         case "stale": {
             return { icon: CircleAlert, label: "stale", variant: "warning" };
@@ -77,57 +87,60 @@ function missingGatewaySessionMessage(status: AgentStatusProjection): string {
 function GatewayAvailabilityMetadata({ status }: Pick<AgentStatusCardProps, "status">) {
     if (status === undefined) {
         return (
-            <Text className="mt-2" size="sm" tone="muted">
+            <Text className="mt-2 min-h-18" size="sm" tone="muted">
                 No paired status projection was returned.
             </Text>
         );
     }
     if (status.sessionKey === undefined) {
         return (
-            <Text className="mt-2" size="sm" tone="muted">
+            <Text className="mt-2 min-h-18" size="sm" tone="muted">
                 {missingGatewaySessionMessage(status)}
             </Text>
         );
     }
     return (
-        <dl className="mt-2 space-y-1 text-sm">
+        <dl className="mt-2 min-h-18 space-y-1 text-sm">
             <div className="flex flex-wrap gap-x-2">
                 <dt className="text-primary-400">Session</dt>
                 <dd className="text-primary-200 wrap-break-word">{status.sessionKey}</dd>
             </div>
-            {status.providerModel !== undefined && (
-                <div className="flex flex-wrap gap-x-2">
-                    <dt className="text-primary-400">Provider/model</dt>
-                    <dd className="text-primary-200 wrap-break-word">
-                        {status.providerModel}
-                    </dd>
-                </div>
-            )}
-            {status.lastSeenAtMs !== undefined && (
-                <div className="flex flex-wrap gap-x-2">
-                    <dt className="text-primary-400">Last seen</dt>
-                    <dd className="text-primary-200">
+            <div className="flex flex-wrap gap-x-2">
+                <dt className="text-primary-400">Provider/model</dt>
+                <dd className="text-primary-200 wrap-break-word">
+                    {status.providerModel ?? "Unknown"}
+                </dd>
+            </div>
+            <div className="flex flex-wrap gap-x-2">
+                <dt className="text-primary-400">Last seen</dt>
+                <dd className="text-primary-200">
+                    {status.lastSeenAtMs === undefined ? (
+                        "Unknown"
+                    ) : (
                         <time dateTime={new Date(status.lastSeenAtMs).toISOString()}>
                             {formatDashboardDateTime(status.lastSeenAtMs)}
                         </time>
-                    </dd>
-                </div>
-            )}
+                    )}
+                </dd>
+            </div>
         </dl>
     );
 }
 
-function AgentStatusDetail({ status }: Pick<AgentStatusCardProps, "status">) {
+function AgentStatusDetail({
+    status,
+    taskRun,
+}: Pick<AgentStatusCardProps, "status" | "taskRun">) {
     if (status === undefined) {
         return (
-            <Text className="border-primary-700 mt-4 border-t pt-4" tone="muted">
+            <Text className="border-primary-700 my-4 border-t pt-4" tone="muted">
                 Current status was not returned
             </Text>
         );
     }
     if (isWorkingAgentStatusProjection(status)) {
         return (
-            <div className="border-primary-700 mt-4 border-t pt-4">
+            <div className="border-primary-700 my-4 border-t pt-4">
                 <Text className="wrap-break-word" tone="accent">
                     {status.currentTask}
                 </Text>
@@ -137,19 +150,29 @@ function AgentStatusDetail({ status }: Pick<AgentStatusCardProps, "status">) {
             </div>
         );
     }
+    if (taskRun === undefined) {
+        return (
+            <Text className="border-primary-700 my-4 border-t pt-4" tone="muted">
+                No recorded task activity
+            </Text>
+        );
+    }
     return (
-        <Text className="border-primary-700 mt-4 border-t pt-4" tone="muted">
-            {status.lastActivityAtMs === undefined
-                ? "No recorded task activity"
-                : `Last active ${formatDashboardDateTime(status.lastActivityAtMs)}`}
-        </Text>
+        <div className="border-primary-700 my-4 border-t pt-4">
+            <Text className="wrap-break-word">{taskRun.task}</Text>
+            <Text className="mt-2" size="sm" tone="muted">
+                {taskRun.status === "active"
+                    ? `Started ${formatDashboardDateTime(taskRun.startedAtMs)}`
+                    : `Completed ${formatDashboardDateTime(taskRun.completedAtMs)}`}
+            </Text>
+        </div>
     );
 }
 
 function GatewayAvailabilityDetail({ status }: Pick<AgentStatusCardProps, "status">) {
     const appearance = gatewayAvailabilityAppearance(status);
     return (
-        <div className="border-primary-700 mt-4 border-t pt-4">
+        <div className="border-primary-700 mt-auto border-t pt-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
                 <Text className="font-medium" size="sm">
                     Gateway session
@@ -158,7 +181,14 @@ function GatewayAvailabilityDetail({ status }: Pick<AgentStatusCardProps, "statu
                     aria-label={`Gateway session availability: ${appearance.label}`}
                     variant={appearance.variant}
                 >
-                    <Icon icon={appearance.icon} size="sm" tone="inherit" />
+                    <Icon
+                        className={
+                            appearance.label === "active" ? "animate-spin" : undefined
+                        }
+                        icon={appearance.icon}
+                        size="sm"
+                        tone="inherit"
+                    />
                     {appearance.label}
                 </Badge>
             </div>
@@ -167,10 +197,13 @@ function GatewayAvailabilityDetail({ status }: Pick<AgentStatusCardProps, "statu
     );
 }
 
-function AgentStatusCard({ agent, status }: AgentStatusCardProps) {
+function AgentStatusCard({ agent, status, taskRun }: AgentStatusCardProps) {
     const appearance = agentStatusAppearance(status);
     return (
-        <Card aria-labelledby={`agent-${agent.id}-heading`}>
+        <Card
+            aria-labelledby={`agent-${agent.id}-heading`}
+            className="flex h-full flex-col"
+        >
             <div className="flex items-start justify-between gap-3">
                 <div className="flex min-w-0 items-start gap-3">
                     <span className="bg-primary-700 text-accent-300 rounded-lg p-2">
@@ -190,17 +223,24 @@ function AgentStatusCard({ agent, status }: AgentStatusCardProps) {
                     </div>
                 </div>
                 <Badge
-                    aria-label={`Dashboard task state: ${appearance.label}`}
+                    aria-label={`Agent activity: ${appearance.label}`}
                     variant={appearance.variant}
                 >
-                    <Icon icon={appearance.icon} size="sm" tone="inherit" />
+                    <Icon
+                        className={
+                            appearance.label === "active" ? "animate-spin" : undefined
+                        }
+                        icon={appearance.icon}
+                        size="sm"
+                        tone="inherit"
+                    />
                     {appearance.label}
                 </Badge>
             </div>
             <Text className="mt-4" size="sm">
                 {agent.description}
             </Text>
-            <AgentStatusDetail status={status} />
+            <AgentStatusDetail status={status} taskRun={taskRun} />
             <GatewayAvailabilityDetail status={status} />
         </Card>
     );
@@ -208,27 +248,38 @@ function AgentStatusCard({ agent, status }: AgentStatusCardProps) {
 
 interface AgentStatusGridProps {
     readonly agents: readonly AgentDefinition[];
+    readonly runs?: readonly AgentTaskRun[];
     readonly statuses: readonly AgentStatusProjection[];
 }
 
 /** @returns Current status cards joined to the reviewed agent directory. */
-export function AgentStatusGrid({ agents, statuses }: AgentStatusGridProps) {
+export function AgentStatusGrid({ agents, runs = [], statuses }: AgentStatusGridProps) {
     const statusesById = new Map(statuses.map((status) => [status.agentId, status]));
+    const latestRunByAgentId = new Map<string, AgentTaskRun>();
+    for (const run of runs) {
+        if (!latestRunByAgentId.has(run.agentId))
+            latestRunByAgentId.set(run.agentId, run);
+    }
+    const orderedAgents = agents.toSorted((left, right) => {
+        const leftStatus = statusesById.get(left.id);
+        const rightStatus = statusesById.get(right.id);
+        const leftActive = agentIsActive(leftStatus);
+        const rightActive = agentIsActive(rightStatus);
+        if (leftActive !== rightActive) return leftActive ? -1 : 1;
+        const leftPrimary = left.role === "primary";
+        const rightPrimary = right.role === "primary";
+        if (leftPrimary !== rightPrimary) return leftPrimary ? -1 : 1;
+        return 0;
+    });
     return (
-        <section aria-labelledby="agent-status-heading">
-            <Heading id="agent-status-heading" level={2}>
-                Current status
-            </Heading>
-            <Text className="mt-2" size="sm" tone="muted">
-                Dashboard task state and Gateway session availability are separate.
-                Gateway availability is not online status or health.
-            </Text>
-            <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                {agents.map((agent) => (
+        <section aria-label="Agents">
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {orderedAgents.map((agent) => (
                     <AgentStatusCard
                         agent={agent}
                         key={agent.id}
                         status={statusesById.get(agent.id)}
+                        taskRun={latestRunByAgentId.get(agent.id)}
                     />
                 ))}
             </div>

@@ -825,11 +825,13 @@ describe("LogsView", () => {
 
         expect(screen.getByRole("heading", { name: "No log sources" })).toBeVisible();
         expect(screen.getByRole("heading", { name: "Log maintenance" })).toBeVisible();
-        expect(
-            screen.getByRole("button", {
-                name: "Run Managed application and container logs",
-            })
-        ).toBeEnabled();
+        const runMaintenanceButton = screen.getByRole("button", {
+            name: "Run Managed application and container logs",
+        });
+        expect(runMaintenanceButton).toBeEnabled();
+        expect(runMaintenanceButton.closest("fieldset")?.className).toContain(
+            "justify-end"
+        );
         const user = userEvent.setup();
         await user.click(screen.getByRole("button", { name: "Refresh sources" }));
         expect(props.onRefresh).toHaveBeenCalledTimes(1);

@@ -9,7 +9,7 @@ import {
 const configuredAgentsInput = {
     agents: [
         {
-            description: "Owns the operator conversation and coordinates Dashboard work.",
+            description: "Owns the operator conversation and coordinates work.",
             displayName: "Mira",
             id: "main",
             role: "primary",

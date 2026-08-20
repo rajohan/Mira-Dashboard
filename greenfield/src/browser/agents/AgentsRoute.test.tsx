@@ -94,16 +94,16 @@ class AgentTransport implements DashboardTrpcTransport {
                 return Promise.resolve({
                     agents: [
                         {
-                            description: "Owns the operator conversation.",
-                            displayName: "Mira",
-                            id: "main",
-                            role: "primary",
-                        },
-                        {
                             description: "Researches verified sources.",
                             displayName: "Researcher",
                             id: "researcher",
                             role: "specialist",
+                        },
+                        {
+                            description: "Owns the operator conversation.",
+                            displayName: "Mira",
+                            id: "main",
+                            role: "primary",
                         },
                     ],
                 });
@@ -377,21 +377,37 @@ describe("Dashboard agents route", () => {
         ).toBeTruthy();
         await expectAgentShellReady();
         expect(screen.getAllByText("Implement agents route")).toHaveLength(2);
-        expect(screen.getByLabelText("Dashboard task state: working")).toBeTruthy();
-        expect(
-            screen.getByLabelText("Gateway session availability: active")
-        ).toBeTruthy();
+        const activeAgentBadge = screen.getByLabelText("Agent activity: active");
+        expect(activeAgentBadge.querySelector("svg")?.classList).toContain(
+            "animate-spin"
+        );
+        const activeGatewayBadge = screen.getByLabelText(
+            "Gateway session availability: active"
+        );
+        expect(activeGatewayBadge.querySelector("svg")?.classList).toContain(
+            "animate-spin"
+        );
         expect(
             screen.getByLabelText("Gateway session availability: disconnected")
         ).toBeTruthy();
         expect(screen.getByText("agent:main:main")).toBeTruthy();
         expect(screen.getByText("openai/gpt-5.6-sol")).toBeTruthy();
-        expect(screen.getAllByText(/not online status or health/u)).toHaveLength(2);
+        expect(screen.queryByText(/not online status or health/u)).toBeNull();
         expect(
-            screen.getByText(/Updates automatically from agent and Gateway events/u)
-        ).toBeTruthy();
+            screen.queryByText(/Updates automatically from agent and Gateway events/u)
+        ).toBeNull();
+        expect(screen.getByText("No recorded task activity")).toBeTruthy();
+        expect(screen.queryByText(/^Last active /u)).toBeNull();
+        expect(screen.queryByRole("heading", { name: "Current status" })).toBeNull();
+        expect(
+            screen
+                .getAllByRole("heading", { level: 3 })
+                .map((heading) => heading.textContent)
+        ).toEqual(["Mira", "Researcher"]);
         expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
-        expect(screen.getByRole("table", { name: "Agent task history" })).toBeTruthy();
+        expect(
+            screen.getByRole("table", { name: "Agent task history" }).className
+        ).toContain("grid-cols-2");
         expect(screen.getByRole("link", { name: /Agents/u })).toBeTruthy();
 
         transport.mainStatus = {
@@ -408,8 +424,13 @@ describe("Dashboard agents route", () => {
         await act(async () => {
             await collections.agents.statuses.utils.refetch();
         });
-        expect(screen.getAllByLabelText("Dashboard task state: idle")).toHaveLength(2);
+        expect(screen.getAllByLabelText("Agent activity: idle")).toHaveLength(2);
         expect(screen.getByLabelText("Gateway session availability: stale")).toBeTruthy();
+        expect(
+            screen
+                .getAllByRole("heading", { level: 3 })
+                .map((heading) => heading.textContent)
+        ).toEqual(["Mira", "Researcher"]);
     });
 
     test("loads an older keyset page without replacing the newest history", async () => {
