@@ -109,9 +109,9 @@ describe("job run table", () => {
             })
         ).toHaveAttribute("aria-current", "true");
         expect(screen.queryByText("Durable job 49")).toBeNull();
-        expect(
-            screen.getByRole("table", { name: "Job runs" }).querySelector("td[height]")
-        ).toBeTruthy();
+        const table = screen.getByRole("table", { name: "Job runs" });
+        expect(table.querySelector("tbody")?.style.height).not.toBe("");
+        expect(table.querySelector("td[height]")).toBeNull();
 
         await user.click(firstRun);
         expect(onSelect).toHaveBeenCalledWith(runs[0]!.id);

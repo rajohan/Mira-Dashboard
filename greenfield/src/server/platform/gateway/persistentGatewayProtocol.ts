@@ -163,9 +163,6 @@ export const persistentGatewayWebReadMethods = Object.freeze([
     "system.info",
 ] as const);
 
-/** @deprecated Use persistentGatewayWebReadMethods. */
-export const persistentGatewayReadWriteMethods = persistentGatewayWebReadMethods;
-
 /** Exact control-plane methods permitted on a fresh, single-use admin socket. */
 export const persistentGatewayAdminMethods = Object.freeze([
     "cron.remove",
@@ -181,8 +178,6 @@ export const persistentGatewayAdminMethods = Object.freeze([
 
 export type PersistentGatewayWebReadMethod =
     (typeof persistentGatewayWebReadMethods)[number];
-/** @deprecated Use PersistentGatewayWebReadMethod. */
-export type PersistentGatewayReadWriteMethod = PersistentGatewayWebReadMethod;
 export type PersistentGatewayAdminMethod = (typeof persistentGatewayAdminMethods)[number];
 
 const webReadMethodSet = new Set<string>(persistentGatewayWebReadMethods);
@@ -1339,9 +1334,9 @@ function capabilitiesForProfile(
  * @param method Candidate Gateway method.
  * @returns Whether the method belongs to the generic data-plane allowlist.
  */
-export function isPersistentGatewayReadWriteMethod(
+export function isPersistentGatewayWebReadMethod(
     method: string
-): method is PersistentGatewayReadWriteMethod {
+): method is PersistentGatewayWebReadMethod {
     return webReadMethodSet.has(method);
 }
 
@@ -1408,8 +1403,8 @@ export function isPersistentGatewayOpenClawServiceActionMethod(
  * Enforces the installed Gateway's dynamic least-privilege rules before a
  * request reaches the long-lived read/write socket.
  */
-export function assertPersistentGatewayReadWriteParameters(
-    _method: PersistentGatewayReadWriteMethod,
+export function assertPersistentGatewayWebReadParameters(
+    _method: PersistentGatewayWebReadMethod,
     parameters: unknown
 ): asserts parameters is Readonly<Record<string, unknown>> {
     if (!isRecord(parameters)) {

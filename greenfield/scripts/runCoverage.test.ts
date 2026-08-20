@@ -162,11 +162,13 @@ describe("coverage runner", () => {
             "/tmp/dashboard",
             storybookPlan as NonNullable<typeof storybookPlan>
         );
-        expect(storybookCommand.slice(0, 9)).toEqual([
-            "/tmp/dashboard/node_modules/.bin/vitest",
+        expect(storybookCommand.slice(0, 11)).toEqual([
+            process.execPath,
+            "/tmp/dashboard/node_modules/vitest/vitest.mjs",
             "run",
             "--config",
             ".storybook/vitest.config.ts",
+            "--bail=1",
             "--project=storybook-exclusive-001",
             "--project=storybook",
             "--maxWorkers=3",
@@ -428,6 +430,7 @@ describe("coverage runner", () => {
             )
         ).toBeTrue();
         expect(testCalls.every((call) => call.includes("--no-isolate"))).toBeTrue();
+        expect(testCalls.every((call) => call.includes("--bail=1"))).toBeTrue();
         const plans = createCoveragePartitionPlan("/tmp/coverage", sampleInventories);
         expect(validatedReports).toEqual(
             plans

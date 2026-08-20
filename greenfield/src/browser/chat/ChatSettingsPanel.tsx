@@ -23,7 +23,6 @@ import type {
     ChatSendSettings,
     ChatSessionOption,
 } from "./chatTypes.ts";
-/* eslint-disable jsx-a11y/prefer-tag-over-role -- Headless UI PopoverPanel owns dialog visibility and focus without native dialog top-layer behavior. */
 
 interface ChatSettingsPanelProps {
     readonly busy?: boolean;
@@ -150,6 +149,7 @@ export function ChatSettingsPanel({
                         aria-label="Chat settings"
                         className="border-primary-600 bg-primary-950 z-50 max-h-[calc(100dvh-1.5rem)] w-[min(23rem,calc(100vw-1.5rem))] overflow-y-auto overscroll-contain rounded-xl border p-3 text-sm shadow-xl shadow-black/35 outline-none"
                         data-testid="chat-settings-surface"
+                        // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- Headless UI owns dialog visibility and focus without native dialog top-layer behavior.
                         role="dialog"
                     >
                         <div className="flex items-center justify-between gap-3">

@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import Fs from "node:fs";
 import Path from "node:path";
 
@@ -105,7 +104,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function sha256(value: Uint8Array): string {
-    return createHash("sha256").update(value).digest("hex");
+    return new Bun.CryptoHasher("sha256").update(value).digest("hex");
 }
 
 function compareText(left: string, right: string): number {

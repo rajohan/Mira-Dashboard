@@ -1,5 +1,3 @@
-/* Binary fixtures remain formatter-canonical hexadecimal values. */
-/* oxlint-disable unicorn/number-literal-case, unicorn/numeric-separators-style */
 import { describe, expect, test } from "bun:test";
 
 import {
@@ -32,13 +30,13 @@ function zipWithLocalEntries(names: readonly string[]): Uint8Array {
         const encoded = encoder.encode(name);
         const local = new Uint8Array(30 + encoded.byteLength);
         const localView = new DataView(local.buffer);
-        localView.setUint32(0, 0x0403_4b50, true);
+        localView.setUint32(0, 0x04_03_4b_50, true);
         localView.setUint16(4, 20, true);
         localView.setUint16(26, encoded.byteLength, true);
         local.set(encoded, 30);
         const central = new Uint8Array(46 + encoded.byteLength);
         const centralView = new DataView(central.buffer);
-        centralView.setUint32(0, 0x0201_4b50, true);
+        centralView.setUint32(0, 0x02_01_4b_50, true);
         centralView.setUint16(4, 20, true);
         centralView.setUint16(6, 20, true);
         centralView.setUint16(28, encoded.byteLength, true);
@@ -63,7 +61,7 @@ function zipWithLocalEntries(names: readonly string[]): Uint8Array {
         offset += central.byteLength;
     }
     const end = new DataView(output.buffer, offset, 22);
-    end.setUint32(0, 0x0605_4b50, true);
+    end.setUint32(0, 0x06_05_4b_50, true);
     end.setUint16(8, entries.length, true);
     end.setUint16(10, entries.length, true);
     end.setUint32(12, centralBytes, true);

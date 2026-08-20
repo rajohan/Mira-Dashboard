@@ -19,7 +19,7 @@ import {
     assertPersistentGatewayChatWriteParameters,
     type PersistentGatewayChatReadMethod,
     type PersistentGatewayChatWriteMethod,
-    type PersistentGatewayReadWriteMethod,
+    type PersistentGatewayWebReadMethod,
 } from "./persistentGatewayProtocol.ts";
 import {
     PersistentGatewayUnavailableError,
@@ -312,7 +312,7 @@ export function createPreviewGatewayTransport(
             return snapshot;
         },
         request(
-            method: PersistentGatewayReadWriteMethod,
+            method: PersistentGatewayWebReadMethod,
             parameters: Readonly<Record<string, unknown>>,
             requestOptions?: PersistentGatewayRequestOptions
         ) {

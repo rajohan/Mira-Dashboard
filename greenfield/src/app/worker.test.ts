@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import path from "node:path";
-import { inspect } from "node:util";
 
 import { Redacted } from "effect";
 
@@ -785,7 +784,7 @@ describe("Dashboard worker process", () => {
         expect(Object.isFrozen(credentials!["ghcr.io"])).toBe(true);
         for (const secret of Object.values(registrySecrets)) {
             expect(JSON.stringify(observedOptions)).not.toContain(secret);
-            expect(inspect(observedOptions)).not.toContain(secret);
+            expect(Bun.inspect(observedOptions)).not.toContain(secret);
             expect(fixture.logLines.join("\n")).not.toContain(secret);
         }
     });

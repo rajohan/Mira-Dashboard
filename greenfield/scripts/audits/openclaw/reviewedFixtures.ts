@@ -1,7 +1,5 @@
-import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { readBoundedUtf8RegularFile } from "../../files/boundedFile.ts";
 import {
@@ -54,7 +52,7 @@ function canonicalJson(value: unknown): string {
 }
 
 function sha256(contents: Uint8Array): string {
-    return createHash("sha256").update(contents).digest("hex");
+    return new Bun.CryptoHasher("sha256").update(contents).digest("hex");
 }
 
 async function readBoundedFixture(
@@ -86,7 +84,7 @@ export async function loadReviewedOpenClawFixtures(
     let selectedPath: string;
     if (selectedFixtureRoot instanceof URL) {
         const manifestUrl = new URL("manifest.json", selectedFixtureRoot);
-        selectedPath = path.dirname(fileURLToPath(manifestUrl));
+        selectedPath = path.dirname(Bun.fileURLToPath(manifestUrl));
     } else {
         selectedPath = selectedFixtureRoot;
     }

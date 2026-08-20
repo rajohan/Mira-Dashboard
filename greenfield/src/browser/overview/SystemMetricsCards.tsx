@@ -331,44 +331,48 @@ export function SystemMetricsCards({ metrics }: SystemMetricsCardsProps) {
                                         No registered cache snapshots have been attempted.
                                     </Text>
                                 ) : (
-                                    <ul
-                                        aria-label="Cache snapshot metrics"
-                                        className="border-primary-700/70 focus-visible:ring-accent-300 mt-4 max-h-64 space-y-1 overflow-y-auto border-t pt-2 focus-visible:ring-2 focus-visible:outline-none"
-                                        // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- Bounded diagnostic lists must remain keyboard-scrollable.
+                                    <section
+                                        aria-label="Cache snapshot metrics scroll area"
+                                        className="border-primary-700/70 focus-visible:ring-accent-300 mt-4 max-h-64 overflow-y-auto border-t pt-2 focus-visible:ring-2 focus-visible:outline-none"
                                         tabIndex={0}
                                     >
-                                        {metrics.application.cache.snapshots.map(
-                                            (snapshot) => (
-                                                <li
-                                                    className="bg-primary-900/45 rounded px-2 py-1.5"
-                                                    key={snapshot.key}
-                                                >
-                                                    <Text
-                                                        as="span"
-                                                        className="font-medium"
-                                                        size="sm"
+                                        <ul
+                                            aria-label="Cache snapshot metrics"
+                                            className="space-y-1"
+                                        >
+                                            {metrics.application.cache.snapshots.map(
+                                                (snapshot) => (
+                                                    <li
+                                                        className="bg-primary-900/45 rounded px-2 py-1.5"
+                                                        key={snapshot.key}
                                                     >
-                                                        {snapshot.key}
-                                                    </Text>
-                                                    <Text
-                                                        className="mt-0.5"
-                                                        size="sm"
-                                                        tone="muted"
-                                                    >
-                                                        {snapshot.freshness} ·{" "}
-                                                        {snapshot.attemptCount.toLocaleString()}{" "}
-                                                        attempts ·{" "}
-                                                        {snapshot.consecutiveFailures.toLocaleString()}{" "}
-                                                        consecutive failures ·{" "}
-                                                        {formatMilliseconds(
-                                                            snapshot.lastAttemptDurationMs
-                                                        )}{" "}
-                                                        last refresh
-                                                    </Text>
-                                                </li>
-                                            )
-                                        )}
-                                    </ul>
+                                                        <Text
+                                                            as="span"
+                                                            className="font-medium"
+                                                            size="sm"
+                                                        >
+                                                            {snapshot.key}
+                                                        </Text>
+                                                        <Text
+                                                            className="mt-0.5"
+                                                            size="sm"
+                                                            tone="muted"
+                                                        >
+                                                            {snapshot.freshness} ·{" "}
+                                                            {snapshot.attemptCount.toLocaleString()}{" "}
+                                                            attempts ·{" "}
+                                                            {snapshot.consecutiveFailures.toLocaleString()}{" "}
+                                                            consecutive failures ·{" "}
+                                                            {formatMilliseconds(
+                                                                snapshot.lastAttemptDurationMs
+                                                            )}{" "}
+                                                            last refresh
+                                                        </Text>
+                                                    </li>
+                                                )
+                                            )}
+                                        </ul>
+                                    </section>
                                 )}
                             </>
                         )}
@@ -380,31 +384,38 @@ export function SystemMetricsCards({ metrics }: SystemMetricsCardsProps) {
                         <Text className="mt-1" tone="muted">
                             Fixed procedure buckets; arbitrary routes remain in overflow.
                         </Text>
-                        <ul
-                            aria-label="HTTP procedure metrics"
-                            className="border-primary-700/70 focus-visible:ring-accent-300 mt-4 max-h-64 space-y-1 overflow-y-auto border-t pt-2 focus-visible:ring-2 focus-visible:outline-none"
-                            // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- Bounded diagnostic lists must remain keyboard-scrollable.
+                        <section
+                            aria-label="HTTP procedure metrics scroll area"
+                            className="border-primary-700/70 focus-visible:ring-accent-300 mt-4 max-h-64 overflow-y-auto border-t pt-2 focus-visible:ring-2 focus-visible:outline-none"
                             tabIndex={0}
                         >
-                            {metrics.application.http.procedures.map((procedure) => (
-                                <li
-                                    className="bg-primary-900/45 rounded px-2 py-1.5"
-                                    key={procedure.procedure}
-                                >
-                                    <Text as="span" className="font-medium" size="sm">
-                                        {procedure.procedure}
-                                    </Text>
-                                    <Text className="mt-0.5" size="sm" tone="muted">
-                                        {procedure.requestCount.toLocaleString()} requests
-                                        · {procedure.errorCount.toLocaleString()} errors ·{" "}
-                                        {formatMilliseconds(averageDuration(procedure))}{" "}
-                                        average ·{" "}
-                                        {formatMilliseconds(procedure.maximumDurationMs)}{" "}
-                                        maximum
-                                    </Text>
-                                </li>
-                            ))}
-                        </ul>
+                            <ul aria-label="HTTP procedure metrics" className="space-y-1">
+                                {metrics.application.http.procedures.map((procedure) => (
+                                    <li
+                                        className="bg-primary-900/45 rounded px-2 py-1.5"
+                                        key={procedure.procedure}
+                                    >
+                                        <Text as="span" className="font-medium" size="sm">
+                                            {procedure.procedure}
+                                        </Text>
+                                        <Text className="mt-0.5" size="sm" tone="muted">
+                                            {procedure.requestCount.toLocaleString()}{" "}
+                                            requests ·{" "}
+                                            {procedure.errorCount.toLocaleString()} errors
+                                            ·{" "}
+                                            {formatMilliseconds(
+                                                averageDuration(procedure)
+                                            )}{" "}
+                                            average ·{" "}
+                                            {formatMilliseconds(
+                                                procedure.maximumDurationMs
+                                            )}{" "}
+                                            maximum
+                                        </Text>
+                                    </li>
+                                ))}
+                            </ul>
+                        </section>
                     </Card>
                 </div>
             </div>

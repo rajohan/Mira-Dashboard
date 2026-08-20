@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import {
     chmod,
@@ -14,7 +13,6 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import Path from "node:path";
-import { pathToFileURL } from "node:url";
 
 import { Redacted } from "effect";
 
@@ -46,7 +44,7 @@ interface GitFixture {
 }
 
 function digest(value: string | Uint8Array): string {
-    return createHash("sha256").update(value).digest("hex");
+    return new Bun.CryptoHasher("sha256").update(value).digest("hex");
 }
 
 async function readBounded(
@@ -155,7 +153,12 @@ async function createFixture(
     ]);
     await runGit(repoRoot, ["add", "--", "apps/media/compose.yaml", "notes.txt"]);
     await runGit(repoRoot, ["commit", "-m", "initial fixture"]);
-    await runGit(repoRoot, ["remote", "add", "origin", pathToFileURL(remoteRoot).href]);
+    await runGit(repoRoot, [
+        "remote",
+        "add",
+        "origin",
+        Bun.pathToFileURL(remoteRoot).href,
+    ]);
     await runGit(repoRoot, ["push", "--set-upstream", "origin", "main"]);
     return {
         composePath,
@@ -232,7 +235,7 @@ describe("Docker updater Git synchronization", () => {
             "remote",
             "add",
             "origin",
-            pathToFileURL(remoteRoot).href,
+            Bun.pathToFileURL(remoteRoot).href,
         ]);
         await runGit(repoRoot, ["push", "--set-upstream", "origin", "main"]);
 
@@ -522,7 +525,7 @@ describe("Docker updater Git synchronization", () => {
         await unlink(hookPath);
         await runGit(fixture.repoRoot, [
             "push",
-            pathToFileURL(fixture.remoteRoot).href,
+            Bun.pathToFileURL(fixture.remoteRoot).href,
             `${pending.commit}:refs/heads/main`,
         ]);
         rejectPushes = true;

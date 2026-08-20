@@ -1,4 +1,3 @@
-/* oxlint-disable typescript/require-await -- Async test doubles mirror production promise ports. */
 import { describe, expect, test } from "bun:test";
 
 import { startDashboardChatRuntimeMaintenance } from "./dashboardChatRuntimeMaintenance.ts";
@@ -25,8 +24,9 @@ describe("Dashboard chat runtime maintenance", () => {
                 unref: () => events.push("interval:unref"),
             },
             service: {
-                recover: async () => {
+                recover: () => {
                     events.push("recover");
+                    return Promise.resolve();
                 },
                 sweepRetention: async () => {
                     events.push("retention");
@@ -86,13 +86,14 @@ describe("Dashboard chat runtime maintenance", () => {
                 },
             },
             service: {
-                recover: async () => {},
-                sweepRetention: async () => {
+                recover: () => Promise.resolve(),
+                sweepRetention: () => {
                     sweeps += 1;
-                    if (sweeps > 1) throw new Error("retention failed");
-                    return 0;
+                    return sweeps > 1
+                        ? Promise.reject(new Error("retention failed"))
+                        : Promise.resolve(0);
                 },
-                sweepSubscriptions: async () => 0,
+                sweepSubscriptions: () => Promise.resolve(0),
             },
         });
 
@@ -119,12 +120,14 @@ describe("Dashboard chat runtime maintenance", () => {
                 },
             },
             service: {
-                recover: async () => {
+                recover: () => {
                     recoveries += 1;
-                    if (recoveries === 1) throw new Error("Gateway connecting");
+                    return recoveries === 1
+                        ? Promise.reject(new Error("Gateway connecting"))
+                        : Promise.resolve();
                 },
-                sweepRetention: async () => 0,
-                sweepSubscriptions: async () => 0,
+                sweepRetention: () => Promise.resolve(0),
+                sweepSubscriptions: () => Promise.resolve(0),
             },
         });
 

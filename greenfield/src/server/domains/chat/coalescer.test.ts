@@ -1,4 +1,3 @@
-/* oxlint-disable typescript/require-await -- Async test doubles mirror production promise ports. */
 import { describe, expect, test } from "bun:test";
 
 import { chatDeltaCoalescingMilliseconds } from "../../../contracts/chatModel.ts";
@@ -20,8 +19,9 @@ describe("chat runtime event coalescer", () => {
             },
         };
         const batches: Array<readonly ChatRuntimeEventDraft[]> = [];
-        const coalescer = new ChatRuntimeEventCoalescer(async (events) => {
+        const coalescer = new ChatRuntimeEventCoalescer((events) => {
             batches.push(events);
+            return Promise.resolve();
         }, scheduler);
 
         await coalescer.push({
@@ -63,8 +63,9 @@ describe("chat runtime event coalescer", () => {
         let scheduled: (() => void) | undefined;
         const batches: Array<readonly ChatRuntimeEventDraft[]> = [];
         const coalescer = new ChatRuntimeEventCoalescer(
-            async (events) => {
+            (events) => {
                 batches.push(events);
+                return Promise.resolve();
             },
             {
                 clear() {
@@ -104,8 +105,9 @@ describe("chat runtime event coalescer", () => {
     test("flushes pending text and a tool boundary in one serialized commit", async () => {
         const batches: Array<readonly ChatRuntimeEventDraft[]> = [];
         const coalescer = new ChatRuntimeEventCoalescer(
-            async (events) => {
+            (events) => {
                 batches.push(events);
+                return Promise.resolve();
             },
             {
                 clear() {},
@@ -152,8 +154,9 @@ describe("chat runtime event coalescer", () => {
     test("serializes concurrent incompatible pushes without reversing event order", async () => {
         const batches: Array<readonly ChatRuntimeEventDraft[]> = [];
         const coalescer = new ChatRuntimeEventCoalescer(
-            async (events) => {
+            (events) => {
                 batches.push(events);
+                return Promise.resolve();
             },
             {
                 clear() {},
@@ -192,7 +195,7 @@ describe("chat runtime event coalescer", () => {
     });
 
     test("rejects half-present provider ranges before they enter a batch", async () => {
-        const coalescer = new ChatRuntimeEventCoalescer(async () => {}, {
+        const coalescer = new ChatRuntimeEventCoalescer(() => Promise.resolve(), {
             clear() {},
             schedule() {
                 return 1;
@@ -218,9 +221,7 @@ describe("chat runtime event coalescer", () => {
         const failure = new Error("database unavailable");
         const observed: unknown[] = [];
         const coalescer = new ChatRuntimeEventCoalescer(
-            async () => {
-                throw failure;
-            },
+            () => Promise.reject(failure),
             {
                 clear() {
                     scheduled = undefined;

@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { createHash } from "node:crypto";
 import Fs from "node:fs";
 import Os from "node:os";
 import Path from "node:path";
@@ -20,7 +19,7 @@ const directories: string[] = [];
 const runtimeImageId = `sha256:${"a".repeat(64)}`;
 
 function sha256(value: string | Uint8Array): string {
-    return createHash("sha256").update(value).digest("hex");
+    return new Bun.CryptoHasher("sha256").update(value).digest("hex");
 }
 
 function fixture(source: string): {

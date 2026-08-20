@@ -42,12 +42,12 @@ The browser development path follows Bun's native contracts:
 
 - `src/browser/index.html` is imported and passed directly to `Bun.serve({ routes })`;
 - `development: { hmr: true, console: true }` enables Bun HMR and browser-console forwarding;
-- `[serve.static]` in `bunfig.toml` runs the existing React Compiler plugin before Tailwind for
-  every development bundle;
+- Bun 1.4's fullstack bundler produces React Compiler output without the former Babel compiler
+  plugin; `[serve.static]` now contains only the development HMR workaround and Tailwind;
 - the browser entry uses direct `import.meta.hot.data` access to retain one React root across hot
   module evaluation; Bun's React Fast Refresh runtime preserves eligible component state;
-- production builds use the same compiler-first plugin order, while Bun removes the HMR-only data
-  holder.
+- production builds use Bun 1.4's built-in native React Compiler before the Tailwind plugin,
+  with no Babel/SWC dependency, while Bun removes the HMR-only data holder.
 
 The development-only `tanStackRouterHmrWorkaroundPlugin` narrowly transforms Router Core's ESM
 module around an upstream Bun evaluation cycle. It defers `replaceRouteChunk` access until the HMR

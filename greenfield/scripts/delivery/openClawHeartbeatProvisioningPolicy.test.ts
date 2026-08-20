@@ -1,5 +1,4 @@
 import { expect, test } from "bun:test";
-import { readFile } from "node:fs/promises";
 
 import {
     openClawHeartbeatProvisioningPolicy,
@@ -7,9 +6,9 @@ import {
 } from "./openClawHeartbeatProvisioningPolicy.ts";
 
 test("stages the exact heartbeat-v5 prompt metadata without changing external authority", async () => {
-    const artifact = await readFile(openClawHeartbeatProvisioningPolicy.artifactPath, {
-        encoding: "utf8",
-    });
+    const artifact = await Bun.file(
+        openClawHeartbeatProvisioningPolicy.artifactPath
+    ).text();
 
     expect(openClawHeartbeatProvisioningPolicy).toMatchObject({
         agentId: "ops",

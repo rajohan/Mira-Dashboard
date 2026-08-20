@@ -1,4 +1,3 @@
-/* oxlint-disable unicorn/number-literal-case -- Container signatures and bit masks retain wire-format readability. */
 import {
     chatSpeechLimits,
     chatSpeechRecordingContentTypes,

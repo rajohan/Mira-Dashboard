@@ -237,10 +237,10 @@ describe("Dashboard data table and virtualizer", () => {
         scrollRegion.focus();
         expect(scrollRegion).toHaveFocus();
         const table = screen.getByRole("table");
-        expect(table.querySelector("[style]")).toBeNull();
-        expect(table.querySelector("td[height]")).toHaveClass(
-            "dashboard-data-table-spacer-cell"
-        );
+        const body = table.querySelector("tbody");
+        expect(body?.style.height).not.toBe("");
+        expect(table.querySelector("td[height]")).toBeNull();
+        expect(within(table).getAllByRole("row")[1]).toHaveClass("absolute", "grid");
     });
 
     test("virtualizes non-table content independently", () => {

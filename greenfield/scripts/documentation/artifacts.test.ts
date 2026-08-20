@@ -397,7 +397,7 @@ describe("generated contract documentation", () => {
             "`@valibot/to-json-schema` | `1.7.1` | `1.7.1` | development"
         );
         expect(artifacts.get("packages-and-runtime.md")).toContain(
-            "| Repository channel | `canary` |"
+            "| Repository channel | `1.4.0` |"
         );
         expect(artifacts.get("packages-and-runtime.md")).toContain(
             "| Required runtime version | `1.4.0` |"

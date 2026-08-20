@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 const repositoryRoot = path.resolve(import.meta.dir, "../..");
@@ -8,9 +7,9 @@ const expectedCommand =
 
 describe("Dashboard host password-recovery delivery policy", () => {
     test("invokes only the pinned production runtime and active immutable release", async () => {
-        const packageValue = JSON.parse(
-            await readFile(path.join(repositoryRoot, "package.json"), "utf8")
-        ) as { readonly scripts?: Readonly<Record<string, string>> };
+        const packageValue = (await Bun.file(
+            path.join(repositoryRoot, "package.json")
+        ).json()) as { readonly scripts?: Readonly<Record<string, string>> };
 
         expect(packageValue.scripts?.["auth:reset-password"]).toBe(expectedCommand);
         expect(expectedCommand).not.toContain("doppler");

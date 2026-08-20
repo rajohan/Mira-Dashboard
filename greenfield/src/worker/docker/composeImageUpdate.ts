@@ -1,4 +1,3 @@
-import { createHash, randomUUID } from "node:crypto";
 import Fs from "node:fs";
 import Path from "node:path";
 
@@ -128,7 +127,7 @@ interface LineSpan {
 }
 
 function sha256(value: Uint8Array): string {
-    return createHash("sha256").update(value).digest("hex");
+    return new Bun.CryptoHasher("sha256").update(value).digest("hex");
 }
 
 function classifiedFailure(
@@ -384,7 +383,7 @@ function stageBytes(
 ): string {
     const stagePath = Path.join(
         Path.dirname(targetPath),
-        `.mira-docker-${randomUUID()}.stage`
+        `.mira-docker-${crypto.randomUUID()}.stage`
     );
     let fd: number | undefined;
     let committed = false;

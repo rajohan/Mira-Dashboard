@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import { constants } from "node:fs";
 import {
     type FileHandle,
@@ -39,6 +38,10 @@ const databaseFileNames = Object.freeze([
 const markerFileName = ".mira-dashboard-development-state.json";
 const privateDirectoryMode = 0o700;
 const privateFileMode = 0o600;
+
+function randomBytes(byteLength: number): Uint8Array {
+    return crypto.getRandomValues(new Uint8Array(byteLength));
+}
 
 interface DevelopmentStateMarker {
     readonly formatVersion: 1;
@@ -118,7 +121,7 @@ async function writePrivateFile(filePath: string, contents: string): Promise<voi
 }
 
 async function replacePrivateFile(filePath: string, contents: string): Promise<void> {
-    const stagingPath = `${filePath}.partial-${process.pid}-${randomBytes(8).toString("hex")}`;
+    const stagingPath = `${filePath}.partial-${process.pid}-${randomBytes(8).toHex()}`;
     try {
         await writePrivateFile(stagingPath, contents);
         await rename(stagingPath, filePath);
@@ -338,7 +341,7 @@ function serializedKeyring(): string {
         keys: [
             {
                 id: "development",
-                keyBase64: randomBytes(32).toString("base64"),
+                keyBase64: randomBytes(32).toBase64(),
             },
         ],
     });
@@ -549,7 +552,7 @@ export async function resetDevelopmentState(
     await assertPrivateRealDirectory(config.stateRoot);
     await readMarker(config);
     const lease = await acquireDevelopmentStateLease(config);
-    const tombstonePath = `${config.stateRoot}.removed-${process.pid}-${randomBytes(16).toString("hex")}`;
+    const tombstonePath = `${config.stateRoot}.removed-${process.pid}-${randomBytes(16).toHex()}`;
     let detached = false;
     try {
         await rename(config.stateRoot, tombstonePath);

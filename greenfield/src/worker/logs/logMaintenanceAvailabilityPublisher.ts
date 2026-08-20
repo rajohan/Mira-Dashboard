@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { constants, type Stats } from "node:fs";
 import { lstat, open, realpath, rename, unlink, type FileHandle } from "node:fs/promises";
 import path from "node:path";
@@ -206,7 +205,7 @@ async function publishProjection(options: {
         options.logMaintenanceRoot,
         options.expectedUserId
     );
-    const stageName = `.mira-log-availability-${randomUUID()}.tmp`;
+    const stageName = `.mira-log-availability-${crypto.randomUUID()}.tmp`;
     const stagePath = descriptorChild(directory, stageName);
     const destinationPath = descriptorChild(
         directory,

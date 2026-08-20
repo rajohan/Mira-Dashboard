@@ -1,4 +1,3 @@
-/* oxlint-disable typescript/require-await -- Async doubles mirror the chat service port. */
 import { describe, expect, test } from "bun:test";
 
 import { createChatSessionActivitySupervisor } from "./chatSessionActivitySupervisor.ts";
@@ -97,8 +96,9 @@ describe("chat session activity supervisor", () => {
         >[0][] = [];
         const supervisor = createChatSessionActivitySupervisor({
             chat: {
-                observeProviderUserMessage: async (message) => {
+                observeProviderUserMessage: (message) => {
                     observedUsers.push(message);
+                    return Promise.resolve();
                 },
                 reconcileProviderSessionActivity: async () => reconciliationBlocked,
             },
@@ -139,11 +139,13 @@ describe("chat session activity supervisor", () => {
         let unsubscribed = 0;
         const supervisor = createChatSessionActivitySupervisor({
             chat: {
-                observeProviderUserMessage: async (message) => {
+                observeProviderUserMessage: (message) => {
                     observedUsers.push(message.messageId);
+                    return Promise.resolve();
                 },
-                reconcileProviderSessionActivity: async (sessionKey) => {
+                reconcileProviderSessionActivity: (sessionKey) => {
                     reconciled.push(sessionKey);
+                    return Promise.resolve();
                 },
             },
             mediaReferences,
@@ -184,15 +186,17 @@ describe("chat session activity supervisor", () => {
         let listener: PersistentGatewayListener | undefined;
         const supervisor = createChatSessionActivitySupervisor({
             chat: {
-                observeProviderUserMessage: async (message) => {
+                observeProviderUserMessage: (message) => {
                     observedUsers.push(message.messageId);
-                    if (message.messageId === "message-user-1")
-                        throw new Error("user failed");
+                    return message.messageId === "message-user-1"
+                        ? Promise.reject(new Error("user failed"))
+                        : Promise.resolve();
                 },
-                reconcileProviderSessionActivity: async (sessionKey) => {
+                reconcileProviderSessionActivity: (sessionKey) => {
                     reconciled.push(sessionKey);
-                    if (sessionKey === "agent:main:main")
-                        throw new Error("session failed");
+                    return sessionKey === "agent:main:main"
+                        ? Promise.reject(new Error("session failed"))
+                        : Promise.resolve();
                 },
             },
             mediaReferences,
@@ -220,10 +224,11 @@ describe("chat session activity supervisor", () => {
         let listener: PersistentGatewayListener | undefined;
         const supervisor = createChatSessionActivitySupervisor({
             chat: {
-                observeProviderUserMessage: async (message) => {
+                observeProviderUserMessage: (message) => {
                     observedUsers.push(`${message.sessionKey}:${message.messageId}`);
+                    return Promise.resolve();
                 },
-                reconcileProviderSessionActivity: async () => {},
+                reconcileProviderSessionActivity: () => Promise.resolve(),
             },
             mediaReferences,
             transport: {

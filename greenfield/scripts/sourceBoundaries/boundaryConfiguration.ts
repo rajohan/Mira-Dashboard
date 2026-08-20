@@ -1,8 +1,6 @@
 import { lstat, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
 
-import { parse, type ParseError } from "jsonc-parser";
-
 import type { SourceBoundaryViolation } from "./policyTypes.ts";
 import { boundaryPathViolation, isContainedPath } from "./sourceBoundaryPaths.ts";
 
@@ -220,18 +218,10 @@ async function readRootJson(
     let parsed: unknown;
     try {
         const source = await Bun.file(absolutePath).text();
-        if (relativePath === "package.json") {
-            parsed = JSON.parse(source) as unknown;
-        } else {
-            const parseErrors: ParseError[] = [];
-            parsed = parse(source, parseErrors, {
-                allowTrailingComma: true,
-                disallowComments: false,
-            });
-            if (parseErrors.length > 0) {
-                throw new SyntaxError("TypeScript configuration is not valid JSONC");
-            }
-        }
+        parsed =
+            relativePath === "package.json"
+                ? (JSON.parse(source) as unknown)
+                : Bun.JSONC.parse(source);
     } catch {
         violations.push(
             boundaryPathViolation(

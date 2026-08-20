@@ -8,8 +8,8 @@ function boundedToolSummaryText(value: string): string | undefined {
         .replaceAll(/\s+/gu, " ")
         .trim();
     if (normalized === "") return undefined;
-    // oxlint-disable-next-line unicorn/prefer-spread -- The 120-unit contract counts Unicode code points, not UTF-16 units or grapheme clusters.
-    const codePoints = Array.from(normalized);
+    const codePoints: string[] = [];
+    for (const codePoint of normalized) codePoints.push(codePoint);
     if (codePoints.length <= toolSummaryMaximumCodePoints) return normalized;
     return `${codePoints.slice(0, toolSummaryMaximumCodePoints - 1).join("")}…`;
 }

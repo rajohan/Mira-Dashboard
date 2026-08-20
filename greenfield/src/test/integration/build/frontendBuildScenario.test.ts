@@ -6,7 +6,7 @@ import path from "node:path";
 import { assertSelfHostedFrontendHtml } from "../../../../scripts/frontendBuildArtifacts.ts";
 import {
     buildFrontendScenario,
-    frontendBuildPluginOrder,
+    frontendBuildConfiguration,
 } from "./frontendBuildScenario.ts";
 
 const hashedAssetPattern = /^assets\/.+-[a-z\d]{8}\.(?:css|js)$/u;
@@ -21,10 +21,10 @@ describe("Bun frontend build scenario", () => {
         );
 
         try {
-            expect(frontendBuildPluginOrder).toEqual([
-                "react-compiler",
-                "@tailwindcss/bun",
-            ]);
+            expect(frontendBuildConfiguration).toEqual({
+                pluginNames: ["@tailwindcss/bun"],
+                reactCompiler: true,
+            });
 
             const development = await buildFrontendScenario(
                 "development",

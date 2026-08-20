@@ -57,7 +57,7 @@ export const runtimeAuthorityIdentifierNames: ReadonlySet<string> = new Set([
 
 /**
  * Identifies a binding-aware runtime global-root expression.
- * @param node Candidate Babel AST node.
+ * @param node Candidate ESTree-compatible AST node.
  * @param runtimeIdentifierReferences Binding-aware global runtime references.
  * @param staticStringValues Bounded computed-key values.
  * @returns Whether the node denotes a runtime global root.
@@ -84,7 +84,7 @@ export function isRuntimeGlobalRoot(
 
 /**
  * Identifies a runtime owner that can expose process environment state.
- * @param node Candidate Babel AST node.
+ * @param node Candidate ESTree-compatible AST node.
  * @param runtimeIdentifierReferences Binding-aware global runtime references.
  * @param staticStringValues Bounded computed-key values.
  * @returns Whether the node owns runtime environment state.
@@ -125,7 +125,7 @@ export function isRuntimeEnvironmentOwner(
 
 /**
  * Identifies one binding-aware named runtime owner, directly or via a global root.
- * @param node Candidate Babel AST node.
+ * @param node Candidate ESTree-compatible AST node.
  * @param ownerName Reviewed runtime owner name.
  * @param runtimeIdentifierReferences Binding-aware global runtime references.
  * @param staticStringValues Bounded computed-key values.
@@ -206,6 +206,7 @@ export function objectPatternReadsNamedProperty(
         (property) =>
             isRecord(property) &&
             (nodeType(property) === "ObjectProperty" ||
+                nodeType(property) === "Property" ||
                 nodeType(property) === "ObjectMethod") &&
             (property.computed === true
                 ? staticStringValue(property.key, staticStringValues)
@@ -222,7 +223,8 @@ function objectPatternOnlyReadsEnvironment(
     return node.properties.every(
         (property) =>
             isRecord(property) &&
-            nodeType(property) === "ObjectProperty" &&
+            (nodeType(property) === "ObjectProperty" ||
+                nodeType(property) === "Property") &&
             (property.computed === true
                 ? staticStringValue(property.key, staticStringValues)
                 : identifierName(property.key)) === "env"
@@ -231,7 +233,7 @@ function objectPatternOnlyReadsEnvironment(
 
 /**
  * Finds one direct read of runtime-owned environment state.
- * @param node Babel AST record.
+ * @param node ESTree-compatible AST record.
  * @param runtimeIdentifierReferences Binding-aware global runtime references.
  * @param staticStringValues Bounded computed-key values.
  * @returns Environment access finding when present.
@@ -280,7 +282,7 @@ export function runtimeEnvironmentAccessFromNode(
 
 /**
  * Finds an alias, pass, return, or unresolved dynamic index of runtime authority.
- * @param node Babel AST record.
+ * @param node ESTree-compatible AST record.
  * @param parent Parent AST record when present.
  * @param runtimeIdentifierReferences Binding-aware global runtime references.
  * @param staticStringValues Bounded computed-key values.
@@ -324,7 +326,9 @@ export function runtimeOwnerEscapeFromNode(
     }
     if (
         identifierName(node) !== undefined &&
-        (parentType === "ObjectProperty" || parentType === "ObjectMethod") &&
+        (parentType === "ObjectProperty" ||
+            parentType === "Property" ||
+            parentType === "ObjectMethod") &&
         parent.key === node &&
         parent.value !== node &&
         parent.computed !== true

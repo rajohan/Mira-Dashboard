@@ -1,4 +1,3 @@
-/* oxlint-disable typescript/require-await -- Async test doubles mirror production promise ports. */
 import { describe, expect, test } from "bun:test";
 
 import type {
@@ -42,13 +41,14 @@ function managerHarness(
             reconciliations += 1;
         },
         provider: {
-            subscribeChat: async (request) => {
+            subscribeChat: (request) => {
                 requests.push(request);
-                return {
-                    close: async () => {
+                return Promise.resolve({
+                    close: () => {
                         closes += 1;
+                        return Promise.resolve();
                     },
-                };
+                });
             },
         },
         watermarks: (sessionKey): readonly ChatProviderRunWatermark[] =>
@@ -183,13 +183,14 @@ describe("ChatSessionSubscriptionManager", () => {
             onReconciliationRequired: () =>
                 Promise.reject(new Error("history unavailable")),
             provider: {
-                subscribeChat: async (request) => {
+                subscribeChat: (request) => {
                     requests.push(request);
-                    return {
-                        close: async () => {
+                    return Promise.resolve({
+                        close: () => {
                             closes += 1;
+                            return Promise.resolve();
                         },
-                    };
+                    });
                 },
             },
             watermarks: () => [],

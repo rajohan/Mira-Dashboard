@@ -294,6 +294,10 @@ export async function expectResponsiveVirtualizedTableTransition({
     await waitFor(async () => {
         await expect(getComputedStyle(table).display).toBe("table");
         await expect(scrollRegion.scrollHeight).toBeLessThan(rowCount * 80);
+    });
+    scrollRegion.scrollTop = scrollRegion.scrollHeight;
+    scrollRegion.dispatchEvent(new Event("scroll", { bubbles: true }));
+    await waitFor(async () => {
         await expect(Math.max(...renderedVirtualIndexes(table))).toBe(rowCount - 1);
     });
 

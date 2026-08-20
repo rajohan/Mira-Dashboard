@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type Fs from "node:fs";
 
 /**
@@ -13,7 +12,7 @@ export function workspaceFileRevisionForStat(
     segments: readonly string[],
     stat: Fs.BigIntStats
 ): string {
-    return createHash("sha256")
+    return new Bun.CryptoHasher("sha256")
         .update(rootId)
         .update("\0")
         .update(segments.join("\0"))

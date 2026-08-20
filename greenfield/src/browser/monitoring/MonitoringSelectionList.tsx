@@ -56,13 +56,9 @@ export function MonitoringSelectionList<TItem>({
             }}
             initialRect={{ height: 512, width: 384 }}
         >
-            {({ measureElement, scrollContainerRef, totalSize, virtualItems }) => (
+            {({ containerRef, measureElement, scrollContainerRef, virtualItems }) => (
                 <div className={scrollClassName} ref={scrollContainerRef}>
-                    <ul
-                        aria-label={label}
-                        className="relative w-full"
-                        style={{ height: totalSize }}
-                    >
+                    <ul aria-label={label} className="relative w-full" ref={containerRef}>
                         {virtualItems.map((virtualItem) => {
                             const item = items[virtualItem.index];
                             if (item === undefined) return null;
@@ -72,9 +68,6 @@ export function MonitoringSelectionList<TItem>({
                                     data-index={virtualItem.index}
                                     key={virtualItem.key}
                                     ref={measureElement}
-                                    style={{
-                                        transform: `translateY(${virtualItem.start}px)`,
-                                    }}
                                 >
                                     {renderItem(item)}
                                 </li>

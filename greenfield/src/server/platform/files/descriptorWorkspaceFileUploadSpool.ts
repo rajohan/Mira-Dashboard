@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import Fs from "node:fs";
 import Path from "node:path";
 
@@ -484,7 +483,7 @@ export function createDescriptorWorkspaceFileUploadSpool(
                         Fs.constants.O_NOFOLLOW,
                     0o600
                 );
-                const digest = createHash("sha256");
+                const digest = new Bun.CryptoHasher("sha256");
                 const reader = input.body.getReader();
                 let sizeBytes = 0;
                 try {

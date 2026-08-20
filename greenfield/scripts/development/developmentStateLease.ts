@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import { link, lstat, open, readFile, readdir, rm } from "node:fs/promises";
 import path from "node:path";
 
@@ -10,6 +9,10 @@ const leaseFilePattern =
     /^\.mira-dashboard-development-lease-(\d+)-([0-9a-f]{32})\.json$/u;
 const stateMarkerFileName = ".mira-dashboard-development-state.json";
 const privateFileMode = 0o600;
+
+function randomToken(): string {
+    return crypto.getRandomValues(new Uint8Array(16)).toHex();
+}
 
 interface DevelopmentStateLeaseMarker {
     readonly formatVersion: 1;
@@ -253,7 +256,7 @@ export async function acquireDevelopmentStateLease(
         throw new Error("Development state root is missing");
     }
     await validateStateOwnerMarker(config);
-    const token = randomBytes(16).toString("hex");
+    const token = randomToken();
     const processIdentity = await linuxProcessIdentity(process.pid);
     const marker = expectedLeaseMarker(config, token, processIdentity);
     const acquisitionLock = await acquireDevelopmentStateAcquisitionLock(

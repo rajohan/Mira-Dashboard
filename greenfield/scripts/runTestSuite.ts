@@ -1,8 +1,6 @@
-import { once } from "node:events";
 import { chmod, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type { Writable } from "node:stream";
 
 import { readTestTimingsInventory } from "./testBatching.ts";
 import { TestOutputInspector, type TestOutputViolation } from "./testOutputPolicy.ts";
@@ -82,7 +80,7 @@ async function pruneUpdatedTestTimings(
 
 async function relayOutput(
     stream: ReadableStream<Uint8Array>,
-    destination: Writable,
+    destination: Bun.BunFile,
     inspector: TestOutputInspector
 ): Promise<void> {
     const reader = stream.getReader();
@@ -93,7 +91,7 @@ async function relayOutput(
             if (result.done) break;
 
             inspector.inspect(decoder.decode(result.value, { stream: true }));
-            if (!destination.write(result.value)) await once(destination, "drain");
+            await Bun.write(destination, result.value);
         }
         inspector.inspect(decoder.decode());
     } finally {
@@ -157,8 +155,8 @@ export async function runTestProcess(
 
             const [exitCode] = await Promise.all([
                 child.exited,
-                relayOutput(child.stdout, process.stdout, stdoutInspector),
-                relayOutput(child.stderr, process.stderr, stderrInspector),
+                relayOutput(child.stdout, Bun.stdout, stdoutInspector),
+                relayOutput(child.stderr, Bun.stderr, stderrInspector),
             ]);
             const violation = firstViolation(stdoutInspector, stderrInspector);
             if (violation !== undefined) {

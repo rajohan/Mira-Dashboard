@@ -81,10 +81,10 @@ async function releaseFixture(): Promise<{
         },
     }\n`;
     await Promise.all([
-        writeFile(path.join(repositoryRoot, ".bun-version"), "canary\n"),
+        writeFile(path.join(repositoryRoot, ".bun-version"), "1.4.0\n"),
         writeFile(path.join(repositoryRoot, "package.json"), packageJson),
         writeFile(path.join(repositoryRoot, "bun.lock"), lockfile),
-        writeFile(path.join(releaseRoot, "metadata/.bun-version"), "canary\n"),
+        writeFile(path.join(releaseRoot, "metadata/.bun-version"), "1.4.0\n"),
         writeFile(path.join(releaseRoot, "metadata/package.json"), packageJson),
         writeFile(path.join(releaseRoot, "metadata/bun.lock"), lockfile),
         writeFile(path.join(releaseRoot, "browser/index.html"), "dashboard"),

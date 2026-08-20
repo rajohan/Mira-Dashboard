@@ -380,9 +380,9 @@ export function OpenClawCronDetail({
                         overscan={4}
                     >
                         {({
+                            containerRef,
                             measureElement,
                             scrollContainerRef,
-                            totalSize,
                             virtualItems,
                         }) => {
                             const visibleRuns =
@@ -395,24 +395,23 @@ export function OpenClawCronDetail({
                                               `${run.completedAtMs}-${index}`,
                                           start: index * 210,
                                       }));
-                            const historyHeight =
-                                virtualItems.length > 0
-                                    ? totalSize
-                                    : runs.runs.length * 210;
+                            const historyHeight = runs.runs.length * 210;
                             return (
-                                <div
+                                <section
                                     aria-label="OpenClaw run history"
                                     className="mt-5 h-[min(42rem,65dvh)] min-h-72 overflow-x-hidden overflow-y-auto overscroll-contain"
                                     ref={scrollContainerRef}
-                                    // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- A div preserves the Virtualizer scroll-container ref contract while exposing its accessible name.
-                                    role="region"
-                                    // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- The bounded virtual run history must remain keyboard-scrollable.
                                     tabIndex={0}
                                 >
                                     <ol
                                         aria-label={`OpenClaw runs for ${job.name}`}
                                         className="relative max-w-full min-w-0"
-                                        style={{ height: historyHeight }}
+                                        ref={containerRef}
+                                        style={
+                                            virtualItems.length > 0
+                                                ? undefined
+                                                : { height: historyHeight }
+                                        }
                                     >
                                         {visibleRuns.map((virtualItem) => {
                                             const run = runs.runs[virtualItem.index];
@@ -423,9 +422,13 @@ export function OpenClawCronDetail({
                                                     data-index={virtualItem.index}
                                                     key={virtualItem.key}
                                                     ref={measureElement}
-                                                    style={{
-                                                        transform: `translateY(${virtualItem.start}px)`,
-                                                    }}
+                                                    style={
+                                                        virtualItems.length > 0
+                                                            ? undefined
+                                                            : {
+                                                                  transform: `translateY(${virtualItem.start}px)`,
+                                                              }
+                                                    }
                                                 >
                                                     <dl className="grid max-w-full min-w-0 grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
                                                         <div className="min-w-0">
@@ -527,7 +530,7 @@ export function OpenClawCronDetail({
                                             rootRef={scrollContainerRef}
                                         />
                                     )}
-                                </div>
+                                </section>
                             );
                         }}
                     </Virtualizer>

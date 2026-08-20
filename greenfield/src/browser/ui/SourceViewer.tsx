@@ -93,7 +93,6 @@ function sourceCode(
     );
 }
 
-/* oxlint-disable jsx-a11y/no-noninteractive-tabindex -- The bounded source viewport must be keyboard-focusable when either axis scrolls. */
 function SourceSurfaceFrame({
     ariaLabel,
     source,
@@ -223,4 +222,3 @@ export function SourceViewer({
         />
     );
 }
-/* oxlint-enable jsx-a11y/no-noninteractive-tabindex */

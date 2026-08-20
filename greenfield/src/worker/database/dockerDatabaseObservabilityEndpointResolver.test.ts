@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { inspect } from "node:util";
 
 import { Redacted } from "effect";
 
@@ -364,7 +363,7 @@ describe("Docker database observability endpoint resolver", () => {
         const result = await resolver(discoveryProcess([[row]])).resolve();
         expect(JSON.stringify(result)).not.toContain(passwordValue);
         expect(JSON.stringify(result)).not.toContain(unrelatedSecret);
-        expect(inspect(result)).not.toContain(passwordValue);
+        expect(Bun.inspect(result)).not.toContain(passwordValue);
         expect(JSON.stringify(result.connection.password)).toBe(
             '"<redacted:database-observability-password>"'
         );
@@ -383,7 +382,7 @@ describe("Docker database observability endpoint resolver", () => {
             failure = error;
         }
         expect(String(failure)).not.toContain(secret);
-        expect(inspect(failure)).not.toContain(secret);
+        expect(Bun.inspect(failure)).not.toContain(secret);
         expect(JSON.stringify(failure)).not.toContain(secret);
     });
 });

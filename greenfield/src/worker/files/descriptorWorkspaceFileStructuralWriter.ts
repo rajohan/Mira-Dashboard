@@ -1,4 +1,4 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { timingSafeEqual } from "node:crypto";
 import Fs from "node:fs";
 import Path from "node:path";
 
@@ -520,7 +520,7 @@ async function hashOpenFile(
     if (!Number.isSafeInteger(sizeBytes) || sizeBytes < 0 || sizeBytes > maximumBytes) {
         throw failure("too-large");
     }
-    const digest = createHash("sha256");
+    const digest = new Bun.CryptoHasher("sha256");
     const buffer = Buffer.alloc(Math.min(copyChunkBytes, Math.max(sizeBytes, 1)));
     let offset = 0;
     while (offset < sizeBytes) {
@@ -537,7 +537,7 @@ async function hashOpenFile(
 }
 
 function replaceCommandSha256(command: WorkerWorkspaceFileWriteCommand): string {
-    return createHash("sha256")
+    return new Bun.CryptoHasher("sha256")
         .update(
             JSON.stringify([
                 1,
@@ -668,7 +668,7 @@ async function copyVerifiedSpool(
     command: WorkerWorkspaceFileWriteCommand,
     signal?: AbortSignal
 ): Promise<void> {
-    const digest = createHash("sha256");
+    const digest = new Bun.CryptoHasher("sha256");
     const buffer = Buffer.alloc(Math.min(copyChunkBytes, Math.max(command.sizeBytes, 1)));
     let offset = 0;
     while (offset < command.sizeBytes) {
@@ -695,7 +695,7 @@ function revisionForStat(
     segments: readonly string[],
     stat: Fs.BigIntStats
 ): string {
-    return createHash("sha256")
+    return new Bun.CryptoHasher("sha256")
         .update(rootId)
         .update("\0")
         .update(segments.join("\0"))

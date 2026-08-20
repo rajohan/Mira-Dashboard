@@ -42,7 +42,7 @@ export function VirtualizedList<TItem>({
                 return item === undefined ? `missing-list-item-${index}` : getKey(item);
             }}
         >
-            {({ measureElement, scrollContainerRef, totalSize, virtualItems }) => {
+            {({ containerRef, measureElement, scrollContainerRef, virtualItems }) => {
                 const virtualized = virtualItems.length > 0;
                 // Preserve complete SSR/test semantics until a real scroll viewport is measured.
                 const fallbackCount = items.length;
@@ -76,16 +76,16 @@ export function VirtualizedList<TItem>({
                         aria-label={`${label} scroll area`}
                         className={cn("max-h-128 overflow-y-auto", className)}
                         ref={scrollContainerRef}
-                        // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- Virtualized scroll regions must remain keyboard-scrollable.
                         tabIndex={0}
                     >
                         <ul
                             aria-label={label}
                             className="relative w-full"
+                            ref={containerRef}
                             role={listRole}
-                            style={{
-                                height: virtualized ? totalSize : estimatedTotalSize,
-                            }}
+                            style={
+                                virtualized ? undefined : { height: estimatedTotalSize }
+                            }
                         >
                             {visibleItems.map((virtualItem) => {
                                 const item = items[virtualItem.index];
@@ -100,9 +100,13 @@ export function VirtualizedList<TItem>({
                                         key={virtualItem.key}
                                         ref={virtualized ? measureElement : undefined}
                                         role={itemRole}
-                                        style={{
-                                            transform: `translateY(${virtualItem.start}px)`,
-                                        }}
+                                        style={
+                                            virtualized
+                                                ? undefined
+                                                : {
+                                                      transform: `translateY(${virtualItem.start}px)`,
+                                                  }
+                                        }
                                     >
                                         {renderItem(item)}
                                     </li>

@@ -9,7 +9,7 @@ import {
 } from "../../domains/openClawCron/service.ts";
 import type {
     PersistentGatewayAdminMethod,
-    PersistentGatewayReadWriteMethod,
+    PersistentGatewayWebReadMethod,
 } from "./persistentGatewayProtocol.ts";
 import {
     PersistentGatewayAbortError,
@@ -56,7 +56,7 @@ class TestPersistentOpenClawCronTransport implements PersistentOpenClawCronTrans
     }
 
     request(
-        method: PersistentGatewayReadWriteMethod,
+        method: PersistentGatewayWebReadMethod,
         parameters: Readonly<Record<string, unknown>>,
         options?: PersistentGatewayRequestOptions
     ): Promise<unknown> {

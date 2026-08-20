@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { bunRuntimePolicy, readRuntimeIdentity } from "./runtimeCandidate.ts";
 
 describe("Bun runtime candidate", () => {
-    test("executes on the repository's Bun 1.4 canary channel", async () => {
+    test("executes on the repository's stable Bun 1.4.0 release", async () => {
         const selectedChannel = await Bun.file(
             new URL("../../../../.bun-version", import.meta.url)
         ).text();

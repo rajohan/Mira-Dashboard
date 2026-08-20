@@ -1,7 +1,5 @@
-import { createHash } from "node:crypto";
 import Fs from "node:fs";
 import Path from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { Redacted } from "effect";
 import * as v from "valibot";
@@ -198,7 +196,7 @@ class GitBoundaryFailure extends Error {
 const gitSyncLocks = new Map<string, Promise<void>>();
 
 function sha256(value: Uint8Array | string): string {
-    return createHash("sha256").update(value).digest("hex");
+    return new Bun.CryptoHasher("sha256").update(value).digest("hex");
 }
 
 function unavailable(
@@ -556,7 +554,7 @@ function validateRemoteUrl(rawUrl: string, allowLocalUpstreamForTests: boolean):
         throw new GitBoundaryFailure("upstream");
     }
     try {
-        const localPath = fileURLToPath(parsed);
+        const localPath = Bun.fileURLToPath(parsed);
         const canonical = Fs.realpathSync(localPath);
         if (
             canonical !== localPath ||

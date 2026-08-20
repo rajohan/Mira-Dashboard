@@ -1,9 +1,7 @@
-import { randomUUID } from "node:crypto";
 import { constants, type Stats } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
 import { link, lstat, open, opendir, realpath, rename, unlink } from "node:fs/promises";
 import path from "node:path";
-import { gzipSync } from "node:zlib";
 
 import * as v from "valibot";
 
@@ -275,11 +273,11 @@ function archiveStamp(nowMs: number): string {
 }
 
 function archiveName(fileName: string, nowMs: number, compressed: boolean): string {
-    return `${fileName}.${archiveStamp(nowMs)}.${randomUUID()}${compressed ? ".gz" : ""}`;
+    return `${fileName}.${archiveStamp(nowMs)}.${crypto.randomUUID()}${compressed ? ".gz" : ""}`;
 }
 
 function stageName(): string {
-    return `.mira-log-maintenance-${randomUUID()}.tmp`;
+    return `.mira-log-maintenance-${crypto.randomUUID()}.tmp`;
 }
 
 async function createStage(
@@ -342,7 +340,7 @@ async function copyTruncate(
 ): Promise<void> {
     const source = await readExactFile(file);
     await verifyIdentity(file);
-    const archiveBytes = target.compress ? gzipSync(source) : source;
+    const archiveBytes = target.compress ? Bun.gzipSync(Uint8Array.from(source)) : source;
     if (archiveBytes.byteLength > target.maximumSourceBytes + 1024 * 1024) {
         throw sanitizedFailure();
     }
@@ -519,7 +517,7 @@ async function compressArchive(
     );
     if (source === undefined) return;
     try {
-        const bytes = gzipSync(await readExactFile(source));
+        const bytes = Bun.gzipSync(Uint8Array.from(await readExactFile(source)));
         await verifyIdentity(source);
         const stage = await createStage(directory, bytes, source.status.mode & 0o777);
         await commitStage(directory, stage, `${fileName}.gz`);

@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import {
     constants,
     closeSync,
@@ -201,7 +200,7 @@ export function createSourceDevelopmentChatWriteCapability(
 ): SourceDevelopmentChatWriteCapability {
     const now = input.nowMs ?? Date.now();
     const capability = v.parse(chatWriteCapabilitySchema, {
-        capabilityId: randomUUID(),
+        capabilityId: crypto.randomUUID(),
         expiresAtMs: input.expiresAtMs,
         formatVersion: 1,
         owner: chatWriteCapabilityOwner,

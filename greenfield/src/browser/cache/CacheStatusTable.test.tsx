@@ -109,7 +109,8 @@ describe("CacheStatusTable", () => {
         );
         const table = screen.getByRole("table", { name: "Saved data sources" });
         expect(table.getAttribute("aria-rowcount")).toBe("51");
-        expect(table.querySelector("td[height]")).toBeTruthy();
+        expect(table.querySelector("tbody")?.style.height).not.toBe("");
+        expect(table.querySelector("td[height]")).toBeNull();
         expect(screen.getByRole("region", { name: "Saved data sources" }).tabIndex).toBe(
             0
         );

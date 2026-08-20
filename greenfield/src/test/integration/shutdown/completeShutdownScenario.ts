@@ -1,7 +1,6 @@
 import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { Data, Deferred, Duration, Effect, Fiber, Schedule, Scope } from "effect";
 import * as v from "valibot";
@@ -18,7 +17,7 @@ import {
 } from "./shutdownProtocol.ts";
 
 const serviceModulePath = path.join(
-    path.dirname(fileURLToPath(import.meta.url)),
+    path.dirname(Bun.fileURLToPath(import.meta.url)),
     "shutdownService.ts"
 );
 const statusMaximumBytes = 64 * 1024;

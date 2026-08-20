@@ -8,16 +8,16 @@
 
 | Item                               | Verified value                             |
 | ---------------------------------- | ------------------------------------------ |
-| Repository channel                 | `canary`                                   |
+| Repository channel                 | `1.4.0`                                    |
 | Required runtime version           | `1.4.0`                                    |
 | Running production release runtime | `1.4.0-canary.1+e82022145`                 |
 | Audited qualification candidate    | `1.4.0-canary.1+17d684360`                 |
 | Audited full revision              | `17d6843606d76620cb55d31424d7fb0aed51c367` |
 | Audited commit date                | 2026-08-06 00:27:30 UTC                    |
 
-The audited revision is evidence for this qualification round, not a repository-wide pin.
-Normal CI resolves the `canary` channel and runs the complete gate set. Release creation then
-captures the resolved revision in the immutable release manifest, preserving exact deployment
+The audited canary revision remains historical evidence for the original qualification round.
+Normal CI now installs stable `1.4.0` and runs the complete gate set. Release creation captures
+the resolved stable revision in the immutable release manifest, preserving exact deployment
 identity without custom Bun download or mirroring infrastructure.
 
 ### What Bun 1.4 changes
@@ -36,11 +36,11 @@ Changes after the currently installed revision include relevant fixes for:
 - React Compiler code generation; and
 - experimental directory routes in `Bun.serve`.
 
-The rewrite should qualify the latest canary rather than copy the installed revision. The
-directory-route feature is not an architectural dependency: compiled frontend assets may use
+The rewrite now qualifies the pinned stable release. The directory-route feature is not an
+architectural dependency: compiled frontend assets may use
 the Bun HTML pipeline, but workspace files and media retain explicit, policy-checked handlers.
 
-### Mandatory canary qualification
+### Mandatory runtime qualification
 
 Before promoting a new repository baseline, run the following in an isolated, memory-capped
 environment against the exact candidate binary:
@@ -98,14 +98,10 @@ owns the authoritative resource measurements.
 These measurements qualify the mechanisms and current limits; Phase 6 still owns final
 production-shaped load, restore, and cutover evidence.
 
-`.bun-version` selects the `canary` channel through the official `setup-bun` action. The serving
-process enforces Bun `1.4.0`, while the runtime revision remains diagnostic until release creation
-records it as part of the immutable build identity. When Bun 1.4 is officially released, the
-version file changes to `1.4.0` without redesigning CI or deployment. npm does not publish a
-`bun-types` snapshot for every runtime canary: the repository pins and qualifies the latest
-available snapshot (`1.4.0-canary.20260519T150915`) instead of claiming source-revision parity.
-The types pin is requalified only during an explicit Bun/types upgrade round and is replaced by
-the official Bun 1.4 types when stable ships.
+`.bun-version` and the greenfield GitHub jobs select stable `1.4.0`. The serving process enforces
+that version, while the exact runtime revision remains diagnostic until release creation records
+it as part of the immutable build identity. `bun-types` is pinned to the matching stable `1.4.0`
+declarations.
 
 ### Server and build shape
 

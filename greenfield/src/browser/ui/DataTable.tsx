@@ -14,6 +14,7 @@ import { dashboardDataTableClassNames } from "./dataTableStyles.ts";
 import { TableSortButton } from "./TableSortButton.tsx";
 
 export interface DataTableRowWindow {
+    readonly containerRef: (node: HTMLElement | null) => void;
     readonly getVirtualItemForOffset: (
         offset: number
     ) => Readonly<{ index: number }> | undefined;
@@ -140,13 +141,7 @@ export function DataTable<TFeatures extends TableFeatures, TData extends RowData
     const headerByColumnId = new Map(
         leafHeaders.map((header) => [header.column.id, header] as const)
     );
-    const firstVirtualItem = rowWindow?.virtualItems.at(0);
-    const lastVirtualItem = rowWindow?.virtualItems.at(-1);
-    const topSpacerHeight = firstVirtualItem?.start ?? 0;
-    const bottomSpacerHeight =
-        rowWindow === undefined
-            ? 0
-            : Math.max(0, rowWindow.totalSize - (lastVirtualItem?.end ?? 0));
+    const bodyElementRef = useRef<HTMLTableSectionElement>(null);
     const queryContainerRef = useRef<HTMLDivElement>(null);
     const footerElementRef = useRef<HTMLTableSectionElement>(null);
     const footerPresentRef = useRef(footer !== undefined);
@@ -158,6 +153,32 @@ export function DataTable<TFeatures extends TableFeatures, TData extends RowData
     const getVirtualItemForOffset = rowWindow?.getVirtualItemForOffset;
     const measureRows = rowWindow?.measure;
     const scrollToIndex = rowWindow?.scrollToIndex;
+
+    useLayoutEffect(() => {
+        const bodyElement = bodyElementRef.current;
+        const tableElement = tableElementRef.current;
+        if (rowWindow === undefined || bodyElement === null || tableElement === null) {
+            return;
+        }
+        const virtualBody = bodyElement;
+        const virtualTable = tableElement;
+        function synchronizeColumns(): void {
+            const widths = [...virtualTable.querySelectorAll("thead th")].map(
+                (header) => `${header.getBoundingClientRect().width}px`
+            );
+            if (widths.length > 0) {
+                virtualBody.style.setProperty(
+                    "--dashboard-virtual-table-columns",
+                    widths.join(" ")
+                );
+            }
+        }
+        synchronizeColumns();
+        if (typeof ResizeObserver === "undefined") return;
+        const observer = new ResizeObserver(synchronizeColumns);
+        observer.observe(virtualTable);
+        return () => observer.disconnect();
+    }, [rowWindow, visibleColumnCount]);
 
     function handleScroll(event: React.UIEvent<HTMLElement>): void {
         const container = event.currentTarget;
@@ -266,7 +287,12 @@ export function DataTable<TFeatures extends TableFeatures, TData extends RowData
                         ? undefined
                         : headerGroups.length + virtualItem.index + 1
                 }
-                className={dashboardDataTableClassNames.row}
+                className={cn(
+                    dashboardDataTableClassNames.row,
+                    virtualItem === undefined
+                        ? undefined
+                        : "absolute top-0 left-0 grid w-full grid-cols-(--dashboard-virtual-table-columns) @max-[66rem]:block"
+                )}
                 data-index={virtualItem?.index}
                 key={row.id}
                 ref={virtualItem === undefined ? undefined : rowWindow?.measureElement}
@@ -378,32 +404,17 @@ export function DataTable<TFeatures extends TableFeatures, TData extends RowData
                             </tr>
                         ))}
                     </thead>
-                    <tbody className={dashboardDataTableClassNames.body}>
-                        {topSpacerHeight > 0 && (
-                            <tr
-                                aria-hidden="true"
-                                className={dashboardDataTableClassNames.spacerRow}
-                            >
-                                <td
-                                    className={dashboardDataTableClassNames.spacerCell}
-                                    colSpan={visibleColumnCount}
-                                    height={topSpacerHeight}
-                                />
-                            </tr>
+                    <tbody
+                        className={cn(
+                            dashboardDataTableClassNames.body,
+                            rowWindow === undefined ? undefined : "relative block w-full"
                         )}
+                        ref={(node) => {
+                            bodyElementRef.current = node;
+                            rowWindow?.containerRef(node);
+                        }}
+                    >
                         {renderedRows}
-                        {bottomSpacerHeight > 0 && (
-                            <tr
-                                aria-hidden="true"
-                                className={dashboardDataTableClassNames.spacerRow}
-                            >
-                                <td
-                                    className={dashboardDataTableClassNames.spacerCell}
-                                    colSpan={visibleColumnCount}
-                                    height={bottomSpacerHeight}
-                                />
-                            </tr>
-                        )}
                     </tbody>
                     {footer !== undefined && (
                         <tfoot

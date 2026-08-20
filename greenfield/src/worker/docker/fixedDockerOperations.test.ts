@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { inspect } from "node:util";
 
 import * as v from "valibot";
 
@@ -734,7 +733,7 @@ describe("fixed Docker worker operations", () => {
             );
             expectReason(failure, "unknown-outcome");
             expect(JSON.stringify(failure)).not.toContain(privateFailure);
-            expect(inspect(failure)).not.toContain(privateFailure);
+            expect(Bun.inspect(failure)).not.toContain(privateFailure);
             expect((failure as Error).cause).toBeUndefined();
         }
     });

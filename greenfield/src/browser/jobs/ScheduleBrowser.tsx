@@ -182,8 +182,8 @@ function SelectedSchedule({
                 >
                     {({
                         measureElement,
+                        containerRef,
                         scrollContainerRef,
-                        totalSize,
                         virtualItems,
                     }) => {
                         const visibleRuns =
@@ -194,26 +194,27 @@ function SelectedSchedule({
                                       key: jobRun.id,
                                       start: index * 180,
                                   }));
-                        const historyHeight =
-                            virtualItems.length > 0 ? totalSize : runs.length * 180;
+                        const historyHeight = runs.length * 180;
                         const selectedRunVisible = visibleRuns.some(
                             ({ index }) => runs[index]?.id === selectedRunId
                         );
                         return (
                             <>
-                                <div
+                                <section
                                     aria-label="Schedule run history"
                                     className="h-[min(42rem,65dvh)] min-h-72 overflow-x-hidden overflow-y-auto overscroll-contain"
                                     ref={scrollContainerRef}
-                                    // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- The shared Virtualizer requires a div scroll container.
-                                    role="region"
-                                    // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- The bounded virtual run history must remain keyboard-scrollable.
                                     tabIndex={0}
                                 >
                                     <ol
                                         aria-label={`Runs for ${schedule.name}`}
                                         className="relative min-w-0"
-                                        style={{ height: historyHeight }}
+                                        ref={containerRef}
+                                        style={
+                                            virtualItems.length > 0
+                                                ? undefined
+                                                : { height: historyHeight }
+                                        }
                                     >
                                         {visibleRuns.map((virtualItem) => {
                                             const jobRun = runs[virtualItem.index];
@@ -224,9 +225,13 @@ function SelectedSchedule({
                                                     data-index={virtualItem.index}
                                                     key={virtualItem.key}
                                                     ref={measureElement}
-                                                    style={{
-                                                        transform: `translateY(${virtualItem.start}px)`,
-                                                    }}
+                                                    style={
+                                                        virtualItems.length > 0
+                                                            ? undefined
+                                                            : {
+                                                                  transform: `translateY(${virtualItem.start}px)`,
+                                                              }
+                                                    }
                                                 >
                                                     <ExpandableCard
                                                         compact
@@ -279,7 +284,7 @@ function SelectedSchedule({
                                         onLoadMore={() => void fetchNextHistoryPage()}
                                         rootRef={scrollContainerRef}
                                     />
-                                </div>
+                                </section>
                                 {selectedRunVisible ? null : selectedRunDetail}
                             </>
                         );

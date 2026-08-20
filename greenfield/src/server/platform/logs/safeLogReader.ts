@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { timingSafeEqual } from "node:crypto";
 import { constants } from "node:fs";
 import { open, realpath } from "node:fs/promises";
 
@@ -81,13 +81,13 @@ const logSourceCheckpointMaximumBytes = 4 * 1024;
 export const logSearchMaximumInspectedLines = logRowMaximum * 8;
 
 function sha256(...values: readonly (Buffer | string)[]): string {
-    const hash = createHash("sha256");
+    const hash = new Bun.CryptoHasher("sha256");
     for (const value of values) hash.update(value);
     return hash.digest("hex");
 }
 
 function framedSha256(domain: string, ...values: readonly string[]): string {
-    const hash = createHash("sha256").update(domain);
+    const hash = new Bun.CryptoHasher("sha256").update(domain);
     const length = Buffer.allocUnsafe(8);
     for (const value of values) {
         const bytes = Buffer.from(value, "utf8");
@@ -160,7 +160,7 @@ function sourceGenerationIdentity(
 }
 
 function checkpointDigest(key: Buffer, bytes: Buffer): Buffer {
-    return createHmac("sha256", key).update(bytes).digest();
+    return new Bun.CryptoHasher("sha256", key).update(bytes).digest();
 }
 
 function checkpointsMatch(left: Buffer, right: Buffer): boolean {
@@ -552,7 +552,7 @@ export function createSafeLogReader(
     now: () => number = Date.now,
     rotationEpochProbe: LogRotationEpochProbe = absentRotationEpochProbe
 ): SafeLogReader {
-    const checkpointKey = randomBytes(32);
+    const checkpointKey = Buffer.from(crypto.getRandomValues(new Uint8Array(32)));
     const coordinateRead = createSourceReadCoordinator();
     const generationTracker = createSourceGenerationTracker();
     async function snapshotFor(

@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { inspect } from "node:util";
 
 import { Redacted } from "effect";
 
@@ -584,7 +583,7 @@ describe("Moltbook dashboard provider", () => {
                 .catch((error: unknown) => error);
             expect(failure).toBeInstanceOf(MoltbookProviderFailure);
             expect(String(failure)).not.toContain(secret);
-            expect(inspect(failure)).not.toContain(secret);
+            expect(Bun.inspect(failure)).not.toContain(secret);
             expect(JSON.stringify(failure)).not.toContain(secret);
         }
     });

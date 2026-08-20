@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import * as v from "valibot";
 
 import {
@@ -401,7 +399,7 @@ function volumes(
 }
 
 function serviceId(service: DockerComposeDiscoveredService): string {
-    return createHash("sha256")
+    return new Bun.CryptoHasher("sha256")
         .update(`${service.project}\0${service.service}`)
         .digest("hex");
 }
@@ -492,7 +490,7 @@ function sourceRevision(
     engine: DockerEngineInventorySnapshot,
     compose: DockerComposeDiscoveryResult
 ): string {
-    return createHash("sha256")
+    return new Bun.CryptoHasher("sha256")
         .update(
             JSON.stringify({
                 compose: compose.sourceRevision,

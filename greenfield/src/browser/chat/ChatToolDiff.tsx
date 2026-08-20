@@ -124,7 +124,7 @@ export function ChatToolDiff({ diff, label, status }: ChatToolDiffProps) {
                 initialRect={diffInitialRect}
                 overscan={12}
             >
-                {({ measureElement, scrollContainerRef, totalSize, virtualItems }) => {
+                {({ containerRef, measureElement, scrollContainerRef, virtualItems }) => {
                     const estimatedTotalSize = estimatedDiffStart(
                         diff.lines.length,
                         diff.lines
@@ -137,8 +137,6 @@ export function ChatToolDiff({ diff, label, status }: ChatToolDiffProps) {
                                   key: `initial:${index}`,
                                   start: estimatedDiffStart(index, diff.lines),
                               }));
-                    const sourceHeight =
-                        virtualItems.length === 0 ? estimatedTotalSize : totalSize;
                     return (
                         <ToolScrollRegion
                             ariaLabel={`${label} diff source`}
@@ -147,7 +145,12 @@ export function ChatToolDiff({ diff, label, status }: ChatToolDiffProps) {
                         >
                             <div
                                 className="relative min-w-0"
-                                style={{ height: `${sourceHeight}px` }}
+                                ref={containerRef}
+                                style={
+                                    virtualItems.length === 0
+                                        ? { height: estimatedTotalSize }
+                                        : undefined
+                                }
                             >
                                 {visibleLines.map((virtualLine) => {
                                     const line = diff.lines[virtualLine.index];
@@ -160,7 +163,11 @@ export function ChatToolDiff({ diff, label, status }: ChatToolDiffProps) {
                                                 left: 0,
                                                 position: "absolute",
                                                 top: 0,
-                                                transform: `translateY(${virtualLine.start}px)`,
+                                                ...(virtualItems.length === 0
+                                                    ? {
+                                                          transform: `translateY(${virtualLine.start}px)`,
+                                                      }
+                                                    : {}),
                                                 width: "100%",
                                             }}
                                         >

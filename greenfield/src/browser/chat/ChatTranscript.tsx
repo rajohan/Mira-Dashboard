@@ -1,6 +1,5 @@
 import { ArrowDown, LoaderCircle, MessagesSquare } from "lucide-react";
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
-/* eslint-disable jsx-a11y/no-noninteractive-tabindex -- The scrollable transcript log must be keyboard-focusable. */
 
 import { Button } from "../ui/Button.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
@@ -306,9 +305,15 @@ export function ChatTranscript({
 
     useEffect(() => () => stopActiveReadAloud(), [sessionKey]);
     useLayoutEffect(() => {
-        const currentTimeMs = Date.now();
-        // oxlint-disable-next-line react/react-compiler -- A changed provider lifecycle must refresh the external wall clock before paint so an already-expired status never flashes.
-        setNowMs((previous) => Math.max(previous, currentTimeMs));
+        let active = true;
+        queueMicrotask(() => {
+            if (!active) return;
+            const currentTimeMs = Date.now();
+            setNowMs((previous) => Math.max(previous, currentTimeMs));
+        });
+        return () => {
+            active = false;
+        };
     }, [compactionRevision]);
     useEffect(() => {
         if (nextCompactionExpiry === undefined) return;
@@ -429,7 +434,7 @@ export function ChatTranscript({
                         >
                             <div
                                 className="relative w-full"
-                                style={{ height: `${virtualization.totalSize}px` }}
+                                ref={virtualization.containerRef}
                             >
                                 {virtualization.virtualItems.map((virtualItem) => {
                                     const message = visibleMessages[virtualItem.index];
@@ -446,9 +451,6 @@ export function ChatTranscript({
                                             data-index={virtualItem.index}
                                             key={virtualItem.key}
                                             ref={virtualization.measureElement}
-                                            style={{
-                                                transform: `translateY(${virtualItem.start}px)`,
-                                            }}
                                         >
                                             <ChatMessageBubble
                                                 activeRunIds={

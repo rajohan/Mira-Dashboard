@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 const webSocketGuid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const headerTerminator = Buffer.from("\r\n\r\n", "ascii");
 export const maximumRawWebSocketFixtureOutboundBytes = 128 * 1024;
@@ -142,7 +140,7 @@ function hasHeaderToken(value: string | undefined, expected: string): boolean {
 function createUpgradeResponse(key: string): Buffer {
     // RFC 6455 section 4.2.2 mandates SHA-1 for Sec-WebSocket-Accept; this is
     // protocol framing, not a cryptographic integrity or credential decision.
-    const accept = createHash("sha1") // lgtm[js/weak-cryptographic-algorithm]
+    const accept = new Bun.CryptoHasher("sha1") // lgtm[js/weak-cryptographic-algorithm]
         .update(`${key}${webSocketGuid}`, "ascii")
         .digest("base64");
     return Buffer.from(

@@ -1,4 +1,3 @@
-/* oxlint-disable typescript/require-await -- Async test doubles mirror production promise ports. */
 import { describe, expect, test } from "bun:test";
 
 import { asc } from "drizzle-orm";
@@ -17,9 +16,9 @@ describe("OpenClaw task realtime publisher", () => {
                 database.orm,
                 testImmediateDatabaseWriteAdmission,
                 () => 1000,
-                async () => {
+                () => {
                     wakes += 1;
-                    throw new Error("best-effort wake failed");
+                    return Promise.reject(new Error("best-effort wake failed"));
                 }
             );
             await publisher.publishSnapshotRequired();

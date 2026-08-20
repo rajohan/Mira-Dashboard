@@ -12,7 +12,6 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import Path from "node:path";
-import { pathToFileURL } from "node:url";
 
 import { resolveReviewedOpenClawFileRoot } from "../files/openClawFileRootConfiguration.ts";
 import {
@@ -79,7 +78,7 @@ describe("descriptor OpenClaw local-history media fetcher", () => {
 
         const relative = fetcher.normalizeLocator("nested/diagram.png");
         const absolute = fetcher.normalizeLocator(file);
-        const fileUrl = fetcher.normalizeLocator(pathToFileURL(file).href);
+        const fileUrl = fetcher.normalizeLocator(Bun.pathToFileURL(file).href);
         expect(relative).toEqual(["nested", "diagram.png"]);
         expect(Object.isFrozen(relative)).toBe(true);
         expect(absolute).toEqual(relative);

@@ -98,10 +98,12 @@ export function createStorybookTestCommand(
         throw new TypeError("Storybook timing report path must be absolute");
     }
     return Object.freeze([
-        path.join(projectRoot, "node_modules", ".bin", "vitest"),
+        process.execPath,
+        path.join(projectRoot, "node_modules", "vitest", "vitest.mjs"),
         "run",
         "--config",
         ".storybook/vitest.config.ts",
+        "--bail=1",
         ...storybookTestProjectNames.map((name) => `--project=${name}`),
         `--maxWorkers=${testWorkerCount}`,
         "--no-isolate",

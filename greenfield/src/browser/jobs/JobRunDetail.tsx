@@ -21,8 +21,6 @@ import { Text } from "../ui/Text.tsx";
 import { VirtualizedList } from "../ui/VirtualizedList.tsx";
 import { jobRunStateBadgeVariant, jobRunStateLabel } from "./jobRunPresentation.ts";
 
-/* oxlint-disable jsx-a11y/no-noninteractive-tabindex -- Safari requires explicit tab stops for keyboard access to bounded scroll regions. */
-
 const browserTruncationSuffix = "\n… [display truncated]";
 
 function boundedDisplayText(value: string, maximumCharacters: number): string {
@@ -484,5 +482,3 @@ export function JobRunDetail({
         </Card>
     );
 }
-
-/* oxlint-enable jsx-a11y/no-noninteractive-tabindex */

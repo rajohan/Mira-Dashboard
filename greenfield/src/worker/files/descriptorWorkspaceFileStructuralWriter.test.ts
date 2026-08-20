@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { createHash, randomUUID } from "node:crypto";
 import Fs from "node:fs";
 import Os from "node:os";
 import Path from "node:path";
@@ -37,7 +36,7 @@ function fixture() {
 function stageUpload(spool: string, spoolId: string, contents: string): string {
     const bytes = Buffer.from(contents);
     Fs.writeFileSync(Path.join(spool, `${spoolId}.upload`), bytes, { mode: 0o600 });
-    return createHash("sha256").update(bytes).digest("hex");
+    return new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
 }
 
 function replacementRevision(root: string, fileName: string): string {
@@ -940,7 +939,7 @@ describe("descriptor workspace file structural writer", () => {
                 spoolRoot: spool,
             });
             writers.push(writer);
-            const spoolId = randomUUID();
+            const spoolId = crypto.randomUUID();
 
             expect(
                 await captureFailure(() =>
@@ -956,7 +955,7 @@ describe("descriptor workspace file structural writer", () => {
                         sha256: stageUpload(spool, spoolId, "replacement"),
                         sizeBytes: 11,
                         spoolId,
-                        ticketId: randomUUID(),
+                        ticketId: crypto.randomUUID(),
                     })
                 )
             ).toMatchObject({
@@ -1154,7 +1153,7 @@ describe("descriptor workspace file structural writer", () => {
             Fs.writeFileSync(target, "old", { mode: 0o600 });
             Fs.writeFileSync(backup, "earlier", { mode: 0o600 });
             Fs.writeFileSync(concurrent, "concurrent", { mode: 0o600 });
-            const spoolId = randomUUID();
+            const spoolId = crypto.randomUUID();
             const command: WorkerWorkspaceFileWriteCommand = {
                 expectedRevision: workspaceFileRevisionForStat(
                     "openclaw-config",
@@ -1171,7 +1170,7 @@ describe("descriptor workspace file structural writer", () => {
                 sha256: stageUpload(spool, spoolId, "replacement"),
                 sizeBytes: 11,
                 spoolId,
-                ticketId: randomUUID(),
+                ticketId: crypto.randomUUID(),
             };
             let exchangeCount = 0;
             const interruptedWriter = createDescriptorWorkspaceFileStructuralWriter({
@@ -1550,7 +1549,7 @@ describe("descriptor workspace file structural writer", () => {
 
         for (let index = 0; index < 2; index += 1) {
             const contents = `replacement-${index}`;
-            const spoolId = randomUUID();
+            const spoolId = crypto.randomUUID();
             const command: WorkerWorkspaceFileWriteCommand = {
                 expectedRevision: replacementRevision(root, "note.txt"),
                 fileName: "note.txt",
@@ -1560,7 +1559,7 @@ describe("descriptor workspace file structural writer", () => {
                 sha256: stageUpload(spool, spoolId, contents),
                 sizeBytes: Buffer.byteLength(contents),
                 spoolId,
-                ticketId: randomUUID(),
+                ticketId: crypto.randomUUID(),
             };
 
             await writer.apply(command);

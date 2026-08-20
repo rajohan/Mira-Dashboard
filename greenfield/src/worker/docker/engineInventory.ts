@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { isIP } from "node:net";
 
 import * as v from "valibot";
@@ -786,7 +785,7 @@ function projectStats(
 function sourceRevision(
     snapshot: Omit<DockerEngineInventorySnapshot, "sourceRevision">
 ): string {
-    return createHash("sha256")
+    return new Bun.CryptoHasher("sha256")
         .update(
             JSON.stringify({
                 containers: snapshot.containers,

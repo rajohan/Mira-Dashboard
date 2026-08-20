@@ -2,7 +2,6 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { inspect } from "node:util";
 
 import {
     encodeDockerBrokerFrame,
@@ -234,7 +233,7 @@ describe("Docker broker web client", () => {
                 reason: fixtureCase.reason,
             });
             expect(JSON.stringify(failure)).not.toContain("private-worker-failure");
-            expect(inspect(failure)).not.toContain("private-worker-failure");
+            expect(Bun.inspect(failure)).not.toContain("private-worker-failure");
             expect((failure as Error).cause).toBeUndefined();
         }
     });
