@@ -208,24 +208,23 @@ export function ProductionReleasesPanel({
                         Control checkout. Deploy syncs latest main first.
                     </Text>
                     {checkoutError === undefined ? null : (
-                        <div className="mt-2">
-                            <Alert
-                                className="py-2"
-                                focusOnError={false}
-                                message={checkoutError}
-                            />
-                            {onRetryCheckout === undefined ? null : (
-                                <Button
-                                    busy={checkoutRetryBusy}
-                                    className="mt-2"
-                                    onClick={onRetryCheckout}
-                                    size="sm"
-                                    variant="secondary"
-                                >
-                                    Try again
-                                </Button>
-                            )}
-                        </div>
+                        <Alert
+                            action={
+                                onRetryCheckout === undefined ? undefined : (
+                                    <Button
+                                        busy={checkoutRetryBusy}
+                                        onClick={onRetryCheckout}
+                                        size="sm"
+                                        variant="secondary"
+                                    >
+                                        Try again
+                                    </Button>
+                                )
+                            }
+                            className="mt-2 py-2"
+                            focusOnError={false}
+                            message={checkoutError}
+                        />
                     )}
                 </section>
             </div>

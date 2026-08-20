@@ -200,6 +200,7 @@ const queuedResult = {
 } as const satisfies DeliveryRequestOperationResult;
 
 interface DeliveryClientOverrides {
+    readonly checkout?: DeliveryProductionCheckoutResult | Error;
     readonly mutation?: DeliveryClient["mutation"];
     readonly preview?: DeliveryPreviewResult;
     readonly pullRequests?: DeliveryPullRequestsResult | Error;
@@ -218,7 +219,9 @@ function createClient(overrides: DeliveryClientOverrides = {}) {
                 return Promise.resolve(overrides.preview ?? previewResult);
             }
             case "delivery.getProductionCheckout": {
-                return Promise.resolve(checkoutResult);
+                return overrides.checkout instanceof Error
+                    ? Promise.reject(overrides.checkout)
+                    : Promise.resolve(overrides.checkout ?? checkoutResult);
             }
             case "delivery.getReleases": {
                 return Promise.resolve(overrides.releases ?? releasesResult);
@@ -279,6 +282,31 @@ function renderDelivery(
 }
 
 describe("DeliveryRoute", () => {
+    test("surfaces and retries an initial production checkout failure", async () => {
+        const harness = createClient({ checkout: new Error("private provider detail") });
+        const view = renderDelivery(harness.client);
+        try {
+            const checkout = await screen.findByLabelText("Main checkout");
+            expect(
+                within(checkout).getByText(
+                    "The Delivery request could not be completed safely. Try again from fresh state."
+                )
+            ).toBeVisible();
+
+            const user = userEvent.setup();
+            await user.click(within(checkout).getByRole("button", { name: "Try again" }));
+            await waitFor(() =>
+                expect(
+                    harness.query.mock.calls.filter(
+                        ([name]) => name === "delivery.getProductionCheckout"
+                    )
+                ).toHaveLength(2)
+            );
+        } finally {
+            view.unmount();
+        }
+    });
+
     test("shows the failure reason for an owned preview", async () => {
         const harness = createClient({
             preview: {

@@ -127,9 +127,9 @@ export function TaskProgressSection({ taskId }: TaskProgressSectionProps) {
         undefined,
         progress.dataUpdatedAt
     );
+    const progressFailure = progressLiveHead.error ?? progress.error;
     const failure =
-        progressLiveHead.error ??
-        progress.error ??
+        progressFailure ??
         addProgress.error ??
         updateProgress.error ??
         deleteProgress.error;
@@ -145,6 +145,23 @@ export function TaskProgressSection({ taskId }: TaskProgressSectionProps) {
                 Authenticated progress notes remain versioned and auditable.
             </Text>
             <Alert
+                action={
+                    progressFailure === null ? undefined : (
+                        <Button
+                            busy={progressLiveHead.isFetching || progress.isFetching}
+                            onClick={() =>
+                                void Promise.allSettled([
+                                    progressLiveHead.refetch(),
+                                    progress.refetch(),
+                                ])
+                            }
+                            size="sm"
+                            variant="secondary"
+                        >
+                            Try again
+                        </Button>
+                    )
+                }
                 className="mt-4"
                 message={
                     failure === null ? undefined : dashboardBrowserFailureMessage(failure)

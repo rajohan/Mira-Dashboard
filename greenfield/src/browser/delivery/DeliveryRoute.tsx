@@ -26,6 +26,7 @@ import {
     rollbackReleasePrompt,
     stopPreviewPrompt,
 } from "./deliveryOperations.ts";
+import { deliveryFailureMessage } from "./deliveryPresentation.ts";
 import {
     deliveryCheckoutQueryOptions,
     deliveryDeploymentsQueryOptions,
@@ -365,9 +366,22 @@ export function DeliveryRoute({ client }: DeliveryRouteProps) {
                             checkout={
                                 checkoutFresh ? availableCheckout?.checkout : undefined
                             }
+                            checkoutError={
+                                checkoutQuery.data === undefined &&
+                                checkoutQuery.error !== null
+                                    ? deliveryFailureMessage(checkoutQuery.error)
+                                    : undefined
+                            }
+                            checkoutRetryBusy={checkoutQuery.isFetching}
                             deployAvailable={deployAvailable}
                             deployReason={deployReason}
                             onDeploy={requestDeploy}
+                            onRetryCheckout={
+                                checkoutQuery.data === undefined &&
+                                checkoutQuery.error !== null
+                                    ? () => void checkoutQuery.refetch()
+                                    : undefined
+                            }
                             onRollback={() => {
                                 if (!releasesFresh) return;
                                 const prompt = rollbackReleasePrompt(
