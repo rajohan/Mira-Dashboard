@@ -151,6 +151,13 @@ function AgentStatusDetail({
         );
     }
     if (taskRun === undefined) {
+        if (status.lastActivityAtMs !== undefined) {
+            return (
+                <Text className="border-primary-700 my-4 border-t pt-4" tone="muted">
+                    Last active {formatDashboardDateTime(status.lastActivityAtMs)}
+                </Text>
+            );
+        }
         return (
             <Text className="border-primary-700 my-4 border-t pt-4" tone="muted">
                 No recorded task activity

@@ -80,6 +80,12 @@ interface TreeRowsInput {
 
 type WorkspaceFileTreeRow =
     | Readonly<{
+          depth: 1;
+          key: string;
+          kind: "root";
+          root: WorkspaceFileRoot;
+      }>
+    | Readonly<{
           depth: number;
           entry: WorkspaceFileEntry;
           key: string;
@@ -158,54 +164,54 @@ export function WorkspaceFileTree({
         snapshots.map((snapshot) => [snapshot.directory.resourceId, snapshot])
     );
     const selectedRoot = roots.find((root) => root.id === selectedRootId);
-    const rows =
-        selectedRoot === undefined
-            ? []
-            : directoryRows({
+    const rows = roots.flatMap((root): WorkspaceFileTreeRow[] => [
+        { depth: 1, key: `root:${root.id}`, kind: "root", root },
+        ...(root.id === selectedRootId
+            ? directoryRows({
                   depth: 2,
-                  directoryId: selectedRoot.resourceId,
+                  directoryId: root.resourceId,
                   expandedDirectoryIds,
                   loadingDirectoryId,
                   snapshotById,
-              });
+              })
+            : []),
+    ]);
     return (
         <nav aria-label="Workspace file tree" className="flex min-h-0 flex-1 flex-col">
-            <div className="p-2">
-                {roots.map((root) => {
-                    const selected = root.id === selectedRootId;
-                    return (
-                        <Button
-                            aria-expanded={selected}
-                            className={`min-h-10 w-full min-w-0 justify-start gap-2 rounded-md p-2 text-left font-medium ${
-                                selected
-                                    ? "bg-primary-700 text-primary-50 data-hover:bg-primary-700 data-hover:text-primary-50"
-                                    : "text-primary-300 hover:bg-primary-700/60 data-hover:bg-primary-700/60"
-                            }`}
-                            key={root.id}
-                            onClick={() => onSelectRoot(root.id)}
-                            variant="ghost"
-                        >
-                            <Icon
-                                className="text-accent-300 shrink-0"
-                                icon={selected ? ChevronDown : ChevronRight}
-                                size="sm"
-                            />
-                            <Icon icon={HardDrive} size="sm" />
-                            <span className="min-w-0 truncate">{root.label}</span>
-                        </Button>
-                    );
-                })}
-            </div>
             <VirtualizedList
-                className="max-h-none min-h-0 flex-1 px-2 pb-2"
+                className="max-h-none min-h-0 flex-1 p-2"
                 estimateSize={() => 40}
                 getKey={(row) => row.key}
+                getItemAriaLevel={(row) => row.depth}
                 itemRole="treeitem"
                 items={rows}
                 label={`${selectedRoot?.label ?? "Workspace"} contents`}
                 listRole="tree"
                 pagination={pagination}
                 renderItem={(row) => {
+                    if (row.kind === "root") {
+                        const selected = row.root.id === selectedRootId;
+                        return (
+                            <Button
+                                aria-expanded={selected}
+                                className={`min-h-10 w-full min-w-0 justify-start gap-2 rounded-md p-2 text-left font-medium ${
+                                    selected
+                                        ? "bg-primary-700 text-primary-50 data-hover:bg-primary-700 data-hover:text-primary-50"
+                                        : "text-primary-300 hover:bg-primary-700/60 data-hover:bg-primary-700/60"
+                                }`}
+                                onClick={() => onSelectRoot(row.root.id)}
+                                variant="ghost"
+                            >
+                                <Icon
+                                    className="text-accent-300 shrink-0"
+                                    icon={selected ? ChevronDown : ChevronRight}
+                                    size="sm"
+                                />
+                                <Icon icon={HardDrive} size="sm" />
+                                <span className="min-w-0 truncate">{row.root.label}</span>
+                            </Button>
+                        );
+                    }
                     if (row.kind === "status") {
                         return (
                             <Text

@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { ListTodo, Plus } from "lucide-react";
+import { ListTodo, Plus, RefreshCw } from "lucide-react";
 import { useDeferredValue, useEffect, useRef, useState } from "react";
 
 import type { OpenClawCronJob } from "../../contracts/openClawCron.ts";
@@ -163,6 +163,24 @@ export function TaskBoardRoute() {
                     message={dashboardBrowserFailureMessage(taskPages.error)}
                 />
             )}
+            {taskPages.error !== null &&
+                taskPages.data !== undefined &&
+                !taskPages.isFetchNextPageError && (
+                    <Alert
+                        action={
+                            <Button
+                                onClick={() => void taskPages.refetch()}
+                                size="sm"
+                                variant="secondary"
+                            >
+                                <Icon icon={RefreshCw} size="sm" tone="inherit" />
+                                Try again
+                            </Button>
+                        }
+                        className="mt-6"
+                        message={dashboardBrowserFailureMessage(taskPages.error)}
+                    />
+                )}
             {taskPages.isSuccess && tasks.length === 0 && (
                 <div className="mt-8">
                     <EmptyState
@@ -203,7 +221,7 @@ export function TaskBoardRoute() {
                         onMoveTask={(input) => moveTask.mutate(input)}
                         onSelectTask={setSelectedTaskId}
                         pagination={{
-                            ...(taskPages.data !== undefined && taskPages.error !== null
+                            ...(taskPages.isFetchNextPageError && taskPages.error !== null
                                 ? {
                                       error: dashboardBrowserFailureMessage(
                                           taskPages.error

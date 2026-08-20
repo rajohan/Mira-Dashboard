@@ -471,6 +471,35 @@ describe("Dashboard task route", () => {
         expect(await screen.findByText("Build task domain")).toBeTruthy();
     });
 
+    test("retries a failed background task refresh instead of loading older tasks", async () => {
+        const transport = new TaskTransport();
+        const queryClient = createDashboardQueryClient();
+        queryClient.setQueryDefaults(taskQueryKey, { retry: false });
+        renderTaskRoute(transport, queryClient);
+
+        await screen.findByText("Build task domain");
+        const callsBeforeRefresh = transport.calls.filter(
+            (call) => call.path === "tasks.list"
+        ).length;
+        transport.taskListQueryResponse = Promise.reject(
+            new TypeError("private background task refresh failure")
+        );
+        await act(async () => {
+            await queryClient.invalidateQueries({ queryKey: taskQueryKey });
+        });
+
+        const retry = await screen.findByRole("button", { name: "Try again" });
+        expect(screen.queryByText(/private background task refresh failure/u)).toBeNull();
+        transport.taskListQueryResponse = undefined;
+        await userEvent.setup().click(retry);
+        await waitFor(() =>
+            expect(
+                transport.calls.filter((call) => call.path === "tasks.list").length
+            ).toBeGreaterThan(callsBeforeRefresh + 1)
+        );
+        expect(screen.getByText("Build task domain")).toBeTruthy();
+    });
+
     test("opens and edits the task creation form", async () => {
         const transport = new TaskTransport();
         renderTaskRoute(transport);

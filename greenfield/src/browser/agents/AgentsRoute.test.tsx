@@ -120,6 +120,7 @@ class AgentTransport implements DashboardTrpcTransport {
                             agentId: "researcher",
                             freshness: "unavailable",
                             gatewayAvailability: "disconnected",
+                            lastActivityAtMs: timestampMs - 60_000,
                             state: "idle",
                         },
                     ],
@@ -396,8 +397,8 @@ describe("Dashboard agents route", () => {
         expect(
             screen.queryByText(/Updates automatically from agent and Gateway events/u)
         ).toBeNull();
-        expect(screen.getByText("No recorded task activity")).toBeTruthy();
-        expect(screen.queryByText(/^Last active /u)).toBeNull();
+        expect(screen.queryByText("No recorded task activity")).toBeNull();
+        expect(screen.getByText(/^Last active /u)).toBeTruthy();
         expect(screen.queryByRole("heading", { name: "Current status" })).toBeNull();
         expect(
             screen

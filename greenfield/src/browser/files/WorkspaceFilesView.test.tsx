@@ -131,7 +131,16 @@ describe("WorkspaceFilesView", () => {
         expect(props.onNavigate).toHaveBeenCalledWith(0);
 
         const tree = screen.getByRole("navigation", { name: "Workspace file tree" });
+        const rootButton = within(tree).getByRole("button", { name: "Workspace" });
+        expect(rootButton.closest('[role="treeitem"]')).toHaveAttribute(
+            "aria-level",
+            "1"
+        );
         const directoryButton = within(tree).getByRole("button", { name: "guides" });
+        expect(directoryButton.closest('[role="treeitem"]')).toHaveAttribute(
+            "aria-level",
+            "2"
+        );
         expect(directoryButton).toHaveAttribute("type", "button");
         await user.click(directoryButton);
         expect(props.onOpenDirectory).toHaveBeenCalledWith(entries[0], root.resourceId);

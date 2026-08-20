@@ -11,6 +11,7 @@ interface VirtualizedListProps<TItem> {
     readonly className?: string;
     readonly estimateSize: (index: number) => number;
     readonly getKey: (item: TItem) => string;
+    readonly getItemAriaLevel?: (item: TItem) => number;
     readonly itemClassName?: string;
     readonly itemRole?: "listitem" | "none" | "treeitem";
     readonly items: readonly TItem[];
@@ -27,6 +28,7 @@ export function VirtualizedList<TItem>({
     className,
     estimateSize,
     getKey,
+    getItemAriaLevel,
     itemClassName,
     itemRole,
     items,
@@ -97,6 +99,7 @@ export function VirtualizedList<TItem>({
                                 if (item === undefined) return null;
                                 return (
                                     <li
+                                        aria-level={getItemAriaLevel?.(item)}
                                         className={cn(
                                             !preserveItemState &&
                                                 "absolute top-0 left-0 w-full",
