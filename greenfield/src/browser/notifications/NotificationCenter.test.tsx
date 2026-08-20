@@ -644,6 +644,54 @@ describe("Notification center", () => {
             await harness.cleanup();
         }
     });
+
+    test("continues filtered history when the latest window has no matching rows", async () => {
+        const newest = notification(ids[0]!, timestampMs, {
+            severity: "warning",
+            title: "Newest warning",
+        });
+        const olderCritical = notification(ids[1]!, timestampMs - 1000, {
+            severity: "critical",
+            title: "Older critical incident",
+        });
+        const transport = new NotificationCenterTransport({
+            nextCursor: { id: newest.id, occurredAtMs: newest.occurredAtMs },
+            notifications: [newest],
+            readCount: 0,
+            unreadCount: 2,
+        });
+        transport.history.set(newest.id, {
+            notifications: [olderCritical],
+            readCount: 0,
+            unreadCount: 2,
+        });
+        const observer = installIntersectionObserverHarness();
+        const harness = renderCenter(transport);
+
+        try {
+            const { user } = await openNotificationCenter();
+            await user.click(
+                screen.getByRole("button", {
+                    name: "Filter notifications by severity",
+                })
+            );
+            await user.click(screen.getByRole("option", { name: "Critical" }));
+            expect(
+                await screen.findByRole("heading", {
+                    name: "No matching notifications",
+                })
+            ).toBeVisible();
+
+            act(() => observer.intersectInfiniteScroll());
+
+            expect(await screen.findByText("Older critical incident")).toBeVisible();
+            expect(screen.queryByText("Newest warning")).toBeNull();
+        } finally {
+            observer.restore();
+            await harness.cleanup();
+        }
+    });
+
     test("marks one notification read and removes another before refresh", async () => {
         const first = notification(ids[0]!, timestampMs, { title: "Mark me" });
         const second = notification(ids[1]!, timestampMs - 1000, {

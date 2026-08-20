@@ -150,6 +150,10 @@ describe("Dashboard data table and virtualizer", () => {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
         expect(within(list).getAllByRole("listitem")).toHaveLength(virtualRows.length);
+        expect(list).not.toHaveClass("relative");
+        expect(list).not.toHaveAttribute("style");
+        expect(within(list).getAllByRole("listitem")[0]).not.toHaveClass("absolute");
+        expect(within(list).getAllByRole("listitem")[0]).not.toHaveAttribute("style");
         expect(screen.getByRole("textbox", { name: "row-0" })).toBe(firstInput);
         expect(firstInput).toHaveValue("unsaved draft");
     });

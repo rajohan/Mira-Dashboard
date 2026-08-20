@@ -83,11 +83,13 @@ export function VirtualizedList<TItem>({
                     >
                         <ul
                             aria-label={label}
-                            className="relative w-full"
-                            ref={containerRef}
+                            className={cn(!preserveItemState && "relative", "w-full")}
+                            ref={preserveItemState ? undefined : containerRef}
                             role={listRole}
                             style={
-                                virtualized ? undefined : { height: estimatedTotalSize }
+                                virtualized || preserveItemState
+                                    ? undefined
+                                    : { height: estimatedTotalSize }
                             }
                         >
                             {visibleItems.map((virtualItem) => {
@@ -96,7 +98,8 @@ export function VirtualizedList<TItem>({
                                 return (
                                     <li
                                         className={cn(
-                                            "absolute top-0 left-0 w-full",
+                                            !preserveItemState &&
+                                                "absolute top-0 left-0 w-full",
                                             itemClassName
                                         )}
                                         data-index={virtualItem.index}
@@ -104,7 +107,7 @@ export function VirtualizedList<TItem>({
                                         ref={virtualized ? measureElement : undefined}
                                         role={itemRole}
                                         style={
-                                            virtualized
+                                            virtualized || preserveItemState
                                                 ? undefined
                                                 : {
                                                       transform: `translateY(${virtualItem.start}px)`,

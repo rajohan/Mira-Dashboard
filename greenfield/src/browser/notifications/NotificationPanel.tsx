@@ -15,6 +15,7 @@ import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
 import { ConfirmModal } from "../ui/ConfirmModal.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
+import { InfiniteScrollTrigger } from "../ui/InfiniteScrollTrigger.tsx";
 import { LoadingState } from "../ui/LoadingState.tsx";
 import { Select, type SelectOption } from "../ui/Select.tsx";
 import { Text } from "../ui/Text.tsx";
@@ -322,11 +323,29 @@ export function NotificationPanel({
                 <LoadingState label="Loading notifications…" size="sm" />
             )}
             {latestReady && notifications.length === 0 && (
-                <EmptyState
-                    className="mt-4 py-7"
-                    description="Try another filter or wait for the next monitoring update."
-                    title="No matching notifications"
-                />
+                <>
+                    <EmptyState
+                        className="mt-4 py-7"
+                        description="Try another filter or wait for the next monitoring update."
+                        title="No matching notifications"
+                    />
+                    {firstHistoryCursor !== undefined && (
+                        <InfiniteScrollTrigger
+                            className="py-2"
+                            {...(history.error === null
+                                ? {}
+                                : {
+                                      error: dashboardBrowserFailureMessage(
+                                          history.error
+                                      ),
+                                  })}
+                            hasMore={!historyEnabled || history.hasNextPage}
+                            loading={historyEnabled && history.isFetching}
+                            loadingLabel="Loading older notifications…"
+                            onLoadMore={loadNextHistoryPage}
+                        />
+                    )}
+                </>
             )}
             {notifications.length > 0 && (
                 <VirtualizedList
