@@ -148,13 +148,14 @@ export function IncidentBrowser() {
               };
     const query = useInfiniteQuery(incidentListQueryOptions(client, filters));
     const liveHead = useQuery(incidentLiveHeadQueryOptions(client, filters));
+    const archiveFirstPageResetKey = JSON.stringify(query.data?.pages[0]);
     const incidents = useAccumulatedLiveHistoryRows(
         liveHead.data?.incidents ?? [],
         uniqueMonitoringRows(query.data?.pages.flatMap((page) => page.incidents) ?? []),
         liveHistoryRowIdentity,
         JSON.stringify(filters ?? null),
         undefined,
-        query.dataUpdatedAt
+        archiveFirstPageResetKey
     );
     const catalogError = liveHead.error ?? query.error;
     const catalogHasData = liveHead.data !== undefined || query.data !== undefined;
