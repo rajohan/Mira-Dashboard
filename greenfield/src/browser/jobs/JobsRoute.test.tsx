@@ -1039,7 +1039,7 @@ describe("Dashboard jobs route", () => {
                     "The request could not be completed. Try again."
                 )
             );
-        expect(nonBlockingErrors).toHaveLength(5);
+        expect(nonBlockingErrors).toHaveLength(4);
         expect(
             screen.queryByRole("heading", { name: "Job history unavailable" })
         ).toBeNull();
