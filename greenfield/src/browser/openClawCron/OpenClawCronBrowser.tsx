@@ -212,6 +212,7 @@ export function OpenClawCronBrowser({
             };
         }
         const detailedHeartbeat = heartbeatDetail.data?.job;
+        const detailedHeartbeatFreshness = heartbeatDetail.data?.freshness;
         return {
             result:
                 detailedHeartbeat === undefined ||
@@ -219,6 +220,9 @@ export function OpenClawCronBrowser({
                     ? inventoryAccumulation.result
                     : {
                           ...inventoryAccumulation.result,
+                          ...(detailedHeartbeatFreshness?.kind === "last-known-good"
+                              ? { freshness: detailedHeartbeatFreshness }
+                              : {}),
                           jobs: inventoryAccumulation.result.jobs.map((job) =>
                               job.id === detailedHeartbeat.id
                                   ? { ...job, scratch: detailedHeartbeat.scratch }

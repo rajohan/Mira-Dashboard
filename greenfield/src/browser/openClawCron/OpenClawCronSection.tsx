@@ -363,6 +363,7 @@ export function OpenClawCronSectionView({
                             actionBusy={actionBusy || reconciliation !== "ready"}
                             actionError={actionError}
                             definitionControlsAvailable={
+                                result.freshness.kind === "fresh" &&
                                 selected.configRevision !== undefined
                             }
                             job={selected}

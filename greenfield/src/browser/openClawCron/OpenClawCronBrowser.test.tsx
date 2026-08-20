@@ -715,6 +715,14 @@ describe("OpenClaw scheduled jobs browser", () => {
                 throw new Error("OpenClaw job detail card was not found");
             expect(within(detail).getByText("Enabled")).toBeVisible();
             expect(within(detail).queryByText("Disabled")).not.toBeInTheDocument();
+            expect(
+                screen.getByText(
+                    "The latest refresh failed, so the last available OpenClaw data is shown. Refresh successfully before trying an action."
+                )
+            ).toBeVisible();
+            expect(
+                within(detail).getByRole("button", { name: "Edit settings" })
+            ).toBeDisabled();
         } finally {
             rendered.view.unmount();
             rendered.queryClient.clear();
