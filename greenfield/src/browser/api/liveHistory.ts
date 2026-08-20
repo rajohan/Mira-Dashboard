@@ -95,19 +95,26 @@ export function createLiveHistoryAccumulator<T>(identity: (row: T) => string) {
  * @returns A merger with isolated mount-scoped accumulation per history scope.
  */
 export function createScopedLiveHistoryAccumulator<T>(identity: (row: T) => string) {
-    const scopes = new Map<string, ReturnType<typeof createLiveHistoryAccumulator<T>>>();
+    const scopes = new Map<
+        string,
+        {
+            accumulate: ReturnType<typeof createLiveHistoryAccumulator<T>>;
+            resetKey: unknown;
+        }
+    >();
     return (
         scopeKey: string,
         liveRows: readonly T[],
         archiveRows: readonly T[],
-        evictedIds?: ReadonlySet<string>
+        evictedIds?: ReadonlySet<string>,
+        resetKey?: unknown
     ) => {
-        let accumulate = scopes.get(scopeKey);
-        if (accumulate === undefined) {
-            accumulate = createLiveHistoryAccumulator(identity);
-            scopes.set(scopeKey, accumulate);
+        let scope = scopes.get(scopeKey);
+        if (scope === undefined || scope.resetKey !== resetKey) {
+            scope = { accumulate: createLiveHistoryAccumulator(identity), resetKey };
+            scopes.set(scopeKey, scope);
         }
-        return accumulate(liveRows, archiveRows, evictedIds);
+        return scope.accumulate(liveRows, archiveRows, evictedIds);
     };
 }
 
@@ -117,6 +124,7 @@ export function createScopedLiveHistoryAccumulator<T>(identity: (row: T) => stri
  * @param identity Stable row identity selector for this history type.
  * @param scopeKey Stable identity for the selected history/filter scope.
  * @param evictedIds Identities confirmed deleted while this history is mounted.
+ * @param resetKey Changes after an authoritative archive rebase.
  * @returns Current history plus live rows displaced between polling snapshots.
  */
 export function useAccumulatedLiveHistoryRows<T>(
@@ -124,8 +132,9 @@ export function useAccumulatedLiveHistoryRows<T>(
     archiveRows: readonly T[],
     identity: (row: T) => string,
     scopeKey: string,
-    evictedIds?: ReadonlySet<string>
+    evictedIds?: ReadonlySet<string>,
+    resetKey?: unknown
 ): T[] {
     const [accumulate] = useState(() => createScopedLiveHistoryAccumulator(identity));
-    return accumulate(scopeKey, liveRows, archiveRows, evictedIds);
+    return accumulate(scopeKey, liveRows, archiveRows, evictedIds, resetKey);
 }

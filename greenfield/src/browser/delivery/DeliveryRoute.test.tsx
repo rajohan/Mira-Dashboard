@@ -279,6 +279,26 @@ function renderDelivery(
 }
 
 describe("DeliveryRoute", () => {
+    test("shows the failure reason for an owned preview", async () => {
+        const harness = createClient({
+            preview: {
+                ...previewResult,
+                preview: {
+                    ...previewResult.preview,
+                    reason: "Preview runtime failed.",
+                    status: "failed",
+                    url: undefined,
+                },
+            },
+        });
+        const view = renderDelivery(harness.client);
+        try {
+            expect(await screen.findByText("Preview runtime failed.")).toBeVisible();
+        } finally {
+            view.unmount();
+        }
+    });
+
     test("keeps rebuild for the current preview and hides a completed approval", async () => {
         const group = pullRequestsResult.groups[0];
         const pullRequest = group.members[0];

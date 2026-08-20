@@ -128,6 +128,11 @@ export function PreviewPanel({
                             </ExternalLink>
                         )}
                     </div>
+                    {preview.reason === undefined ? null : (
+                        <Text className="mt-2" size="sm" tone="muted">
+                            {preview.reason}
+                        </Text>
+                    )}
                 </div>
             )}
             {!controlsFresh && stoppable ? (

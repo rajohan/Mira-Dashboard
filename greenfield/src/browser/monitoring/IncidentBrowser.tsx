@@ -152,7 +152,9 @@ export function IncidentBrowser() {
         liveHead.data?.incidents ?? [],
         uniqueMonitoringRows(query.data?.pages.flatMap((page) => page.incidents) ?? []),
         liveHistoryRowIdentity,
-        JSON.stringify(filters ?? null)
+        JSON.stringify(filters ?? null),
+        undefined,
+        query.dataUpdatedAt
     );
     const catalogError = liveHead.error ?? query.error;
     const catalogHasData = liveHead.data !== undefined || query.data !== undefined;

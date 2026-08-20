@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
     createLiveHistoryAccumulator,
+    createScopedLiveHistoryAccumulator,
     liveHistoryArchiveQueryKey,
     liveHistoryHeadQueryKey,
     mergeLiveHistoryRows,
@@ -46,6 +47,15 @@ describe("live history", () => {
         accumulate([{ id: "run", state: "completed" }], []);
 
         expect(accumulate([], [])).toEqual([{ id: "run", state: "completed" }]);
+    });
+
+    test("resets retained rows after an authoritative archive rebase", () => {
+        const accumulate = createScopedLiveHistoryAccumulator<{ id: string }>(
+            ({ id }) => id
+        );
+        accumulate("active", [{ id: "incident" }], [], undefined, 1);
+
+        expect(accumulate("active", [], [], undefined, 2)).toEqual([]);
     });
 
     test("isolates archives while keeping live heads under their feature root", () => {
