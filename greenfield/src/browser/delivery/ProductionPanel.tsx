@@ -146,6 +146,11 @@ export function ProductionReleasesPanel({
         !releases.rollback.available &&
         (releases.rollback.reason === "incompatible" ||
             releases.rollback.reason === "source-unavailable");
+    const rollbackReasonMatchesDeploy =
+        rollbackReason !== undefined && rollbackReason === deployReason;
+    const deployDescriptionId = rollbackReasonMatchesDeploy
+        ? "delivery-rollback-disabled-reason"
+        : "delivery-deploy-disabled-reason";
     const checkoutIsActive =
         checkout !== undefined && releases.current?.releaseId === checkout.headSha;
     let checkoutBadgeLabel = "Checking";
@@ -226,30 +231,18 @@ export function ProductionReleasesPanel({
                     </div>
                 )}
                 <div className="flex shrink-0 flex-col gap-2 sm:ml-auto sm:flex-row">
-                    <div className="w-full sm:w-auto">
-                        <Button
-                            aria-describedby={
-                                deployReason === undefined
-                                    ? undefined
-                                    : "delivery-deploy-disabled-reason"
-                            }
-                            className="w-full sm:w-auto"
-                            disabled={!deployAvailable || busy}
-                            onClick={onDeploy}
-                            title={deployReason}
-                        >
-                            <Icon icon={Rocket} size="sm" />
-                            Deploy latest main
-                        </Button>
-                        {deployReason === undefined ? null : (
-                            <Text
-                                className="sr-only"
-                                id="delivery-deploy-disabled-reason"
-                            >
-                                {deployReason}
-                            </Text>
-                        )}
-                    </div>
+                    <Button
+                        aria-describedby={
+                            deployReason === undefined ? undefined : deployDescriptionId
+                        }
+                        className="w-full sm:w-auto"
+                        disabled={!deployAvailable || busy}
+                        onClick={onDeploy}
+                        title={deployReason}
+                    >
+                        <Icon icon={Rocket} size="sm" />
+                        Deploy latest main
+                    </Button>
                     <Button
                         aria-describedby={
                             rollbackReason === undefined
@@ -268,6 +261,16 @@ export function ProductionReleasesPanel({
                     </Button>
                 </div>
             </div>
+            {deployReason === undefined || rollbackReasonMatchesDeploy ? null : (
+                <div id="delivery-deploy-disabled-reason">
+                    <Alert
+                        className="py-2"
+                        focusOnError={false}
+                        message={deployReason}
+                        variant="warning"
+                    />
+                </div>
+            )}
         </Card>
     );
 }

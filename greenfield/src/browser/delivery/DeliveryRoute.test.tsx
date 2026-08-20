@@ -322,6 +322,22 @@ describe("DeliveryRoute", () => {
             expect(
                 screen.getByRole("button", { name: /^(?:Run|Rebuild) preview$/u })
             ).toBeDisabled();
+            const productionPanel = screen.getByRole("region", {
+                name: "Production release slots",
+            });
+            const deployButton = within(productionPanel).getByRole("button", {
+                name: "Deploy latest main",
+            });
+            const deployAlert = within(productionPanel)
+                .getByText("Another Delivery action is active.")
+                .closest("#delivery-deploy-disabled-reason");
+            expect(deployAlert).not.toBeNull();
+            expect(deployButton).toHaveAccessibleDescription(
+                "Another Delivery action is active."
+            );
+            expect(
+                within(productionPanel).getAllByText("Another Delivery action is active.")
+            ).toHaveLength(1);
             expect(
                 screen.getAllByText("Another Delivery action is active.").length
             ).toBeGreaterThanOrEqual(1);
