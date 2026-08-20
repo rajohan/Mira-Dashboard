@@ -332,6 +332,10 @@ describe("DeliveryRoute", () => {
                 .getByText("Another Delivery action is active.")
                 .closest("#delivery-deploy-disabled-reason");
             expect(deployAlert).not.toBeNull();
+            expect(
+                deployAlert!.compareDocumentPosition(deployButton) &
+                    Node.DOCUMENT_POSITION_FOLLOWING
+            ).not.toBe(0);
             expect(deployButton).toHaveAccessibleDescription(
                 "Another Delivery action is active."
             );

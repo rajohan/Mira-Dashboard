@@ -148,9 +148,22 @@ export function ProductionReleasesPanel({
             releases.rollback.reason === "source-unavailable");
     const rollbackReasonMatchesDeploy =
         rollbackReason !== undefined && rollbackReason === deployReason;
-    const deployDescriptionId = rollbackReasonMatchesDeploy
-        ? "delivery-rollback-disabled-reason"
-        : "delivery-deploy-disabled-reason";
+    const primaryReason = deployReason ?? rollbackReason;
+    const primaryReasonId =
+        deployReason === undefined
+            ? "delivery-rollback-disabled-reason"
+            : "delivery-deploy-disabled-reason";
+    const primaryReasonIsError = deployReason === undefined && rollbackReasonIsError;
+    const secondaryRollbackReason =
+        deployReason !== undefined && !rollbackReasonMatchesDeploy
+            ? rollbackReason
+            : undefined;
+    let rollbackDescriptionId: string | undefined;
+    if (rollbackReason !== undefined && rollbackReasonMatchesDeploy) {
+        rollbackDescriptionId = "delivery-deploy-disabled-reason";
+    } else if (rollbackReason !== undefined) {
+        rollbackDescriptionId = "delivery-rollback-disabled-reason";
+    }
     const checkoutIsActive =
         checkout !== undefined && releases.current?.releaseId === checkout.headSha;
     let checkoutBadgeLabel = "Checking";
@@ -216,24 +229,39 @@ export function ProductionReleasesPanel({
                     )}
                 </section>
             </div>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                {rollbackReason === undefined ? null : (
+            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                {primaryReason === undefined ? null : (
                     <div
-                        className="w-full min-w-0 flex-1"
+                        className="min-w-0 sm:col-start-1 sm:row-start-1"
+                        id={primaryReasonId}
+                    >
+                        <Alert
+                            className="py-2"
+                            focusOnError={false}
+                            message={primaryReason}
+                            variant={primaryReasonIsError ? "error" : "warning"}
+                        />
+                    </div>
+                )}
+                {secondaryRollbackReason === undefined ? null : (
+                    <div
+                        className="sm:col-span-2 sm:row-start-2"
                         id="delivery-rollback-disabled-reason"
                     >
                         <Alert
                             className="py-2"
                             focusOnError={false}
-                            message={rollbackReason}
+                            message={secondaryRollbackReason}
                             variant={rollbackReasonIsError ? "error" : "warning"}
                         />
                     </div>
                 )}
-                <div className="flex shrink-0 flex-col gap-2 sm:ml-auto sm:flex-row">
+                <div className="flex shrink-0 flex-col gap-2 sm:col-start-2 sm:row-start-1 sm:flex-row">
                     <Button
                         aria-describedby={
-                            deployReason === undefined ? undefined : deployDescriptionId
+                            deployReason === undefined
+                                ? undefined
+                                : "delivery-deploy-disabled-reason"
                         }
                         className="w-full sm:w-auto"
                         disabled={!deployAvailable || busy}
@@ -244,11 +272,7 @@ export function ProductionReleasesPanel({
                         Deploy latest main
                     </Button>
                     <Button
-                        aria-describedby={
-                            rollbackReason === undefined
-                                ? undefined
-                                : "delivery-rollback-disabled-reason"
-                        }
+                        aria-describedby={rollbackDescriptionId}
                         className="w-full shrink-0 sm:w-auto"
                         disabled={!rollbackAvailable || busy}
                         onClick={onRollback}
@@ -261,16 +285,6 @@ export function ProductionReleasesPanel({
                     </Button>
                 </div>
             </div>
-            {deployReason === undefined || rollbackReasonMatchesDeploy ? null : (
-                <div id="delivery-deploy-disabled-reason">
-                    <Alert
-                        className="py-2"
-                        focusOnError={false}
-                        message={deployReason}
-                        variant="warning"
-                    />
-                </div>
-            )}
         </Card>
     );
 }
