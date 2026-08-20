@@ -123,7 +123,9 @@ export function TaskProgressSection({ taskId }: TaskProgressSectionProps) {
         progressLiveHead.data?.updates ?? [],
         progress.data?.pages.flatMap((page) => page.updates) ?? [],
         liveHistoryRowIdentity,
-        taskId
+        taskId,
+        undefined,
+        progress.dataUpdatedAt
     );
     const failure =
         progressLiveHead.error ??
