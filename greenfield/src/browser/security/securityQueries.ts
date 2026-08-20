@@ -1,5 +1,6 @@
 import { queryOptions, type QueryClient } from "@tanstack/react-query";
 
+import { liveHistoryHeadQueryKey } from "../api/liveHistory.ts";
 import type { DashboardTrpcClient } from "../api/trpcClient.ts";
 import { invalidateAuthenticationStatusWhenAllowed } from "../auth/authQueries.ts";
 
@@ -50,7 +51,9 @@ export async function refreshSecurityQueries(queryClient: QueryClient): Promise<
         invalidateAuthenticationStatusWhenAllowed(queryClient),
         queryClient.invalidateQueries({ queryKey: automationPrincipalsQueryKey }),
         queryClient.invalidateQueries({ queryKey: browserSessionsQueryKey }),
-        queryClient.invalidateQueries({ queryKey: securityAuditQueryKey }),
+        queryClient.invalidateQueries({
+            queryKey: liveHistoryHeadQueryKey(securityAuditQueryKey),
+        }),
         queryClient.invalidateQueries({
             queryKey: ["automation-security", "credentials"],
         }),
