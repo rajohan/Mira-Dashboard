@@ -74,6 +74,7 @@ class AgentTransport implements DashboardTrpcTransport {
         state: "working",
     };
     historyQueryCount = 0;
+    historyQueryResponse: Promise<unknown> | undefined;
     statusQueryCount = 0;
     statusQueryResponse: Promise<unknown> | undefined;
 
@@ -128,6 +129,9 @@ class AgentTransport implements DashboardTrpcTransport {
             }
             case "agents.listTaskHistory": {
                 this.historyQueryCount += 1;
+                if (this.historyQueryResponse !== undefined) {
+                    return this.historyQueryResponse;
+                }
                 return Promise.resolve({
                     runs: [
                         {
@@ -582,5 +586,31 @@ describe("Dashboard agents route", () => {
         } finally {
             consoleErrors.restore();
         }
+    });
+
+    test("retries a failed background history refresh instead of loading older runs", async () => {
+        const transport = new AgentTransport();
+        const queryClient = createDashboardQueryClient();
+        const archiveKey = liveHistoryArchiveQueryKey([...agentQueryKey, "history"]);
+        queryClient.setQueryDefaults(archiveKey, { retry: false });
+        renderAgentRoute(transport, queryClient);
+
+        await expectAgentShellReady();
+        const callsBeforeRefresh = transport.historyQueryCount;
+        transport.historyQueryResponse = Promise.reject(
+            new TypeError("redacted background archive failure")
+        );
+        await act(async () => {
+            await queryClient.invalidateQueries({ queryKey: archiveKey });
+        });
+
+        const retry = await screen.findByRole("button", { name: "Try again" });
+        expect(screen.queryByText(/redacted background archive failure/u)).toBeNull();
+        expect(screen.getAllByText("Implement agents route")).toHaveLength(2);
+        transport.historyQueryResponse = undefined;
+        await userEvent.setup().click(retry);
+        await waitFor(() =>
+            expect(transport.historyQueryCount).toBeGreaterThan(callsBeforeRefresh + 1)
+        );
     });
 });

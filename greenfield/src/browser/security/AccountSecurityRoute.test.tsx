@@ -37,7 +37,10 @@ import {
 import { createDashboardRouter } from "../router.tsx";
 import { emptyNotificationListResult } from "../test/notifications.ts";
 import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
-import { automationPrincipalsQueryKey } from "./securityQueries.ts";
+import {
+    automationCredentialsQueryKey,
+    automationPrincipalsQueryKey,
+} from "./securityQueries.ts";
 import {
     createSecurityVerificationCoordinator,
     type SecurityVerificationCoordinator,
@@ -213,6 +216,7 @@ class SecurityTransport implements DashboardTrpcTransport {
     authStatusQueryHandler: (() => Promise<AuthStatus>) | undefined;
     readonly calls: TransportCall[] = [];
     credentials = new Map<string, AutomationCredentialSummary[]>();
+    credentialListQueryHandler: ((input: unknown) => Promise<unknown>) | undefined;
     mutationHandler: (
         path: string,
         input: unknown,
@@ -255,6 +259,9 @@ class SecurityTransport implements DashboardTrpcTransport {
                 return Promise.resolve(emptyNotificationListResult);
             }
             case "automationSecurity.listCredentials": {
+                if (this.credentialListQueryHandler !== undefined) {
+                    return this.credentialListQueryHandler(input);
+                }
                 if (
                     typeof input !== "object" ||
                     input === null ||
@@ -1662,6 +1669,35 @@ describe("Dashboard account security route", () => {
                 (call) => call.path === "automationSecurity.disablePrincipal"
             )
         ).toHaveLength(1);
+    });
+
+    test("keeps cached credentials visible and retries a failed refresh", async () => {
+        const transport = new SecurityTransport();
+        transport.principals = [automationPrincipal];
+        transport.credentials.set(automationPrincipal.id, [automationCredential]);
+        const queryClient = renderAccountSecurity(transport);
+        const userActions = userEvent.setup();
+
+        await screen.findByText(automationPrincipal.label);
+        await userActions.click(
+            screen.getByRole("button", { name: /Manage access tokens/u })
+        );
+        await screen.findByText(automationCredential.label);
+        const credentialKey = automationCredentialsQueryKey(automationPrincipal.id);
+        queryClient.setQueryDefaults(credentialKey, { retry: false });
+        transport.credentialListQueryHandler = () =>
+            Promise.reject(new TypeError("redacted credential refresh failure"));
+        await act(async () => {
+            await queryClient.invalidateQueries({ queryKey: credentialKey });
+        });
+
+        expect(screen.getByText(automationCredential.label)).toBeTruthy();
+        expect(screen.queryByText(/redacted credential refresh failure/u)).toBeNull();
+        const retry = await screen.findByRole("button", { name: "Try again" });
+        transport.credentialListQueryHandler = undefined;
+        await userActions.click(retry);
+        await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+        expect(screen.getByText(automationCredential.label)).toBeTruthy();
     });
 
     test("marks expired automation credentials unusable", async () => {

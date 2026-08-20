@@ -94,7 +94,9 @@ export function AutomationCredentialPanel({ principal }: AutomationCredentialPan
             staleTime: 0,
         })
     );
-    const credentialPageError = credentials.data === undefined ? null : credentials.error;
+    const credentialPageError = credentials.isFetchNextPageError
+        ? credentials.error
+        : null;
 
     async function complete(operation: () => Promise<unknown>): Promise<void> {
         await action.run(async () => {
@@ -191,7 +193,7 @@ export function AutomationCredentialPanel({ principal }: AutomationCredentialPan
             {credentials.isPending && (
                 <LoadingState label="Loading access tokens…" size="sm" />
             )}
-            {credentials.isError && credentials.data === undefined && (
+            {credentials.error !== null && !credentials.isFetchNextPageError && (
                 <Alert
                     action={
                         <Button
@@ -213,7 +215,7 @@ export function AutomationCredentialPanel({ principal }: AutomationCredentialPan
             >
                 {([canSubmit, isSubmitting, credentialLabel]) => (
                     <>
-                        {credentials.isSuccess &&
+                        {credentials.data !== undefined &&
                             credentials.data.pages.every(
                                 (page) => page.credentials.length === 0
                             ) && (
@@ -223,7 +225,7 @@ export function AutomationCredentialPanel({ principal }: AutomationCredentialPan
                                     title="No access tokens"
                                 />
                             )}
-                        {credentials.isSuccess && (
+                        {credentials.data !== undefined && (
                             <VirtualizedList
                                 estimateSize={() => 176}
                                 getKey={(credential) => credential.id}

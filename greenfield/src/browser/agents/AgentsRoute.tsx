@@ -48,12 +48,12 @@ export function AgentsRoute() {
         liveHistoryRowIdentity,
         "agents"
     );
-    const historyPageError = history.data === undefined ? null : history.error;
+    const historyPageError = history.isFetchNextPageError ? history.error : null;
     const error =
         collectionQueries.configuration?.error ??
         collectionQueries.statuses?.error ??
         historyLiveHead.error ??
-        (history.data === undefined ? history.error : null);
+        (history.isFetchNextPageError ? null : history.error);
     const historyAvailable =
         history.data !== undefined || historyLiveHead.data !== undefined;
     const pending =
