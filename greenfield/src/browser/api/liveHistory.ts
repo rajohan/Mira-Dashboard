@@ -73,7 +73,11 @@ export function createLiveHistoryAccumulator<T>(identity: (row: T) => string) {
             }
         }
         for (const [id, row] of retainedLiveRows) {
-            if (!archiveIds.has(id) && !evictedIds.has(id)) {
+            if (
+                !nextRetainedLiveRows.has(id) &&
+                !archiveIds.has(id) &&
+                !evictedIds.has(id)
+            ) {
                 nextRetainedLiveRows.set(id, row);
             }
         }

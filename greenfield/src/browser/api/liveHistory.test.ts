@@ -36,6 +36,18 @@ describe("live history", () => {
         expect(accumulate([], [], new Set(["new"]))).toEqual([]);
     });
 
+    test("retains the newest value after an updated live row is displaced", () => {
+        const accumulate = createLiveHistoryAccumulator<{
+            id: string;
+            state: "completed" | "queued";
+        }>(({ id }) => id);
+
+        accumulate([{ id: "run", state: "queued" }], []);
+        accumulate([{ id: "run", state: "completed" }], []);
+
+        expect(accumulate([], [])).toEqual([{ id: "run", state: "completed" }]);
+    });
+
     test("isolates archives while keeping live heads under their feature root", () => {
         const featureKey = ["reports", "list"] as const;
 
