@@ -356,6 +356,8 @@ export function ScheduleBrowser({
     const search = parseJobsRouteSearch(useSearch({ from: "/jobs" }) as unknown);
     const [focusScheduleId, setFocusScheduleId] = useState<string>();
     const query = useInfiniteQuery(scheduleListQueryOptions(client, "all"));
+    const pageError = query.isFetchNextPageError ? query.error : null;
+    const refreshError = query.isFetchNextPageError ? null : query.error;
     const schedules = uniqueJobRows(
         query.data?.pages.flatMap((page) => page.schedules) ?? []
     );
@@ -411,9 +413,9 @@ export function ScheduleBrowser({
                 <ScheduleTable
                     onSelect={selectSchedule}
                     pagination={{
-                        ...(query.error === null
+                        ...(pageError === null
                             ? {}
-                            : { error: jobBrowserFailureMessage(query.error) }),
+                            : { error: jobBrowserFailureMessage(pageError) }),
                         hasMore: query.hasNextPage,
                         loading: query.isFetchingNextPage,
                         loadingLabel: "Loading more schedules…",
@@ -439,12 +441,23 @@ export function ScheduleBrowser({
                         </div>
                     </div>
                     <Alert
+                        action={
+                            refreshError === null ? undefined : (
+                                <Button
+                                    onClick={() => void query.refetch()}
+                                    size="sm"
+                                    variant="secondary"
+                                >
+                                    Try again
+                                </Button>
+                            )
+                        }
                         className="mx-3 mt-3"
                         focusOnError={false}
                         message={
-                            query.data === undefined || query.error === null
+                            query.data === undefined || refreshError === null
                                 ? undefined
-                                : jobBrowserFailureMessage(query.error)
+                                : jobBrowserFailureMessage(refreshError)
                         }
                     />
                     <div className="min-h-0 p-2 xl:flex-1 xl:overflow-y-auto">

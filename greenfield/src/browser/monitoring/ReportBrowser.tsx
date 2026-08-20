@@ -26,6 +26,7 @@ import { Form } from "../ui/Form.tsx";
 import { FormField } from "../ui/FormField.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
+import { InfiniteScrollTrigger } from "../ui/InfiniteScrollTrigger.tsx";
 import { Input } from "../ui/Input.tsx";
 import { Markdown } from "../ui/Markdown.tsx";
 import { PageState } from "../ui/PageState.tsx";
@@ -294,6 +295,20 @@ export function ReportBrowser() {
                     status="empty"
                     title="No reports"
                 />
+                {query.hasNextPage && (
+                    <InfiniteScrollTrigger
+                        className="py-2"
+                        {...(archivePageError === null
+                            ? {}
+                            : {
+                                  error: dashboardBrowserFailureMessage(archivePageError),
+                              })}
+                        hasMore
+                        loading={query.isFetchingNextPage}
+                        loadingLabel="Loading older reports…"
+                        onLoadMore={() => void query.fetchNextPage()}
+                    />
+                )}
             </div>
         );
     } else {
