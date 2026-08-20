@@ -119,13 +119,17 @@ export function TaskProgressSection({ taskId }: TaskProgressSectionProps) {
     const deleteProgress = useTaskMutation("tasks.deleteProgress");
     const [editingId, setEditingId] = useState<string>();
     const [pendingDelete, setPendingDelete] = useState<TaskProgressUpdate>();
+    const [evictedUpdateIds, setEvictedUpdateIds] = useState<ReadonlySet<string>>(
+        () => new Set()
+    );
+    const archiveFirstPageResetKey = JSON.stringify(progress.data?.pages[0]);
     const updates = useAccumulatedLiveHistoryRows(
         progressLiveHead.data?.updates ?? [],
         progress.data?.pages.flatMap((page) => page.updates) ?? [],
         liveHistoryRowIdentity,
         taskId,
-        undefined,
-        progress.dataUpdatedAt
+        evictedUpdateIds,
+        archiveFirstPageResetKey
     );
     const progressFailure = progressLiveHead.error ?? progress.error;
     const failure =
@@ -233,7 +237,14 @@ export function TaskProgressSection({ taskId }: TaskProgressSectionProps) {
                             taskId,
                             updateId: pendingDelete.id,
                         },
-                        { onSuccess: () => setPendingDelete(undefined) }
+                        {
+                            onSuccess: () => {
+                                setEvictedUpdateIds((current) =>
+                                    new Set(current).add(pendingDelete.id)
+                                );
+                                setPendingDelete(undefined);
+                            },
+                        }
                     );
                 }}
                 open={pendingDelete !== undefined}

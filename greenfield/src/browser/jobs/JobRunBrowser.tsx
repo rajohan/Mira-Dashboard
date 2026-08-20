@@ -438,6 +438,19 @@ export function JobRunBrowser({
                     summary={summary}
                 />
             )}
+            {summary === undefined &&
+                summaryQuery.error !== null &&
+                query.error !== null &&
+                liveHead.error !== null &&
+                search.runId !== undefined &&
+                search.scheduleId === undefined && (
+                    <SelectedJobRun
+                        focusRequested={focusRunId === search.runId}
+                        id={search.runId}
+                        key={search.runId}
+                        onFocusHandled={onRunFocusHandled}
+                    />
+                )}
             {query.hasNextPage &&
             summary !== undefined &&
             !historyPageFailed &&

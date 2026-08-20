@@ -1,8 +1,10 @@
+import { TZDate } from "@date-fns/tz";
 import { isValid, parse as parseDate, setYear } from "date-fns";
 
 import { logLineMaximumCharacters, type LogLine } from "../../contracts/logs.ts";
 
 const detailFieldMaximum = 8;
+const dashboardHostTimeZone = "Europe/Oslo";
 const maximumDateTimestamp = 8_640_000_000_000_000;
 const nestedCollectionItemMaximum = 6;
 const nestedDepthMaximum = 3;
@@ -463,6 +465,29 @@ function textTimestamp(
         : undefined;
 }
 
+function hostLocalTimestamp(value: string): number | undefined {
+    const match =
+        /^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})(?:[.,](\d{1,9}))?$/u.exec(
+            value
+        );
+    if (match === null) return undefined;
+    const timestamp = TZDate.tz(
+        dashboardHostTimeZone,
+        Number(match[1]),
+        Number(match[2]) - 1,
+        Number(match[3]),
+        Number(match[4]),
+        Number(match[5]),
+        Number(match[6]),
+        Number((match[7] ?? "").slice(0, 3).padEnd(3, "0"))
+    ).getTime();
+    return Number.isSafeInteger(timestamp) &&
+        timestamp >= 0 &&
+        timestamp <= maximumDateTimestamp
+        ? timestamp
+        : undefined;
+}
+
 function processPrefix(
     value: string,
     includesHost: boolean
@@ -515,7 +540,7 @@ function textPrefix(
                 level: normalizeSeverity(apport[1]),
                 message: apport[3] ?? "",
                 source: "apport",
-                timestampMs: textTimestamp(apport[2]!, context.referenceTimestampMs),
+                timestampMs: hostLocalTimestamp(apport[2]!),
             };
         }
     }

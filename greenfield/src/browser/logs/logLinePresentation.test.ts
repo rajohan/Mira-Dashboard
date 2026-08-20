@@ -135,7 +135,7 @@ describe("redacted log-line presentation", () => {
             level: "error",
             message: "/proc/8538 not found",
             source: "apport",
-            timestampMs: Date.parse("2026-08-19 15:10:56.970"),
+            timestampMs: Date.parse("2026-08-19T15:10:56.970+02:00"),
         });
     });
 

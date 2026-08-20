@@ -58,6 +58,18 @@ describe("live history", () => {
         expect(accumulate("active", [], [], undefined, 2)).toEqual([]);
     });
 
+    test("keeps displaced rows when later archive pages are appended", () => {
+        const accumulate = createScopedLiveHistoryAccumulator<{ id: string }>(
+            ({ id }) => id
+        );
+        const firstPage = { revision: 1 };
+        accumulate("progress", [{ id: "displaced" }], [], undefined, firstPage);
+
+        expect(
+            accumulate("progress", [], [{ id: "older-page" }], undefined, firstPage)
+        ).toEqual([{ id: "displaced" }, { id: "older-page" }]);
+    });
+
     test("isolates archives while keeping live heads under their feature root", () => {
         const featureKey = ["reports", "list"] as const;
 

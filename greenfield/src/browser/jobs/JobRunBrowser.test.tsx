@@ -194,6 +194,20 @@ class EventGapTransport implements DashboardTrpcTransport {
     }
 }
 
+class DetailOnlyTransport extends EventGapTransport {
+    override query(
+        path: string,
+        input?: unknown,
+        options?: TRPCRequestOptions
+    ): Promise<unknown> {
+        if (path === "jobs.listRuns") {
+            this.calls.push({ input, path, signal: options?.signal });
+            return Promise.reject(new TypeError("Run list unavailable"));
+        }
+        return super.query(path, input, options);
+    }
+}
+
 function eventCursors(transport: EventGapTransport): (number | undefined)[] {
     return transport.calls
         .filter(({ path }) => path === "jobs.getRun")
@@ -275,6 +289,21 @@ async function refreshExactDetail(
 }
 
 describe("job run browser", () => {
+    test("renders a deep-linked run while list and summary reads fail", async () => {
+        const transport = new DetailOnlyTransport();
+        const { queryClient, view } = createJobBrowserHarness(transport);
+
+        try {
+            expect(
+                await screen.findByRole("heading", { name: "Gap-safe worker smoke" })
+            ).toBeTruthy();
+            expect(transport.calls.some(({ path }) => path === "jobs.getRun")).toBeTrue();
+        } finally {
+            view.unmount();
+            queryClient.clear();
+        }
+    });
+
     test("fills a realtime cursor jump without discarding loaded history", async () => {
         const transport = new EventGapTransport();
         const { queryClient, view } = createJobBrowserHarness(transport);
