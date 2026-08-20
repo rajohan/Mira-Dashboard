@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from "@storybook/tanstack-react";
 import { expect, userEvent, within } from "storybook/test";
 
 import type { ReportDetail, ReportSummary } from "../../../contracts/monitoring.ts";
+import { liveHistoryArchiveQueryKey } from "../../api/liveHistory.ts";
 import { DashboardPageStory } from "../../storySupport/dashboardPageStoryHarness.tsx";
 import {
     dashboardStoryFailure,
@@ -115,7 +116,7 @@ export const BrowserRetained: Story = {
         }),
         querySeeds: [
             {
-                key: reportListQueryKey(undefined),
+                key: liveHistoryArchiveQueryKey(reportListQueryKey(undefined)),
                 updatedAtMs: 1,
                 value: { pageParams: [undefined], pages: [reportPage] },
             },
