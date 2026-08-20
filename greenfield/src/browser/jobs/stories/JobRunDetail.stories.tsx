@@ -124,6 +124,17 @@ export const RunningWithEvents: Story = {
     },
 };
 
+export const InfiniteEventHistoryLoading: Story = {
+    args: {
+        pagination: {
+            hasMore: true,
+            loading: true,
+            loadingLabel: "Loading older events…",
+            onLoadMore: fn(),
+        },
+    },
+};
+
 export const CancellationPending: Story = {
     args: {
         cancelBusy: true,

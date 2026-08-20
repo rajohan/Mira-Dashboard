@@ -1,4 +1,4 @@
-import { type QueryClient, useMutation } from "@tanstack/react-query";
+import { type InfiniteData, type QueryClient, useMutation } from "@tanstack/react-query";
 
 import type { NotificationRecord } from "../../contracts/monitoring.ts";
 import type {
@@ -74,14 +74,23 @@ function assertNotificationMutationActive(
     }
 }
 
+function notificationHistoryPages(
+    data: InfiniteData<ListNotificationsResult> | ListNotificationsResult | undefined
+): readonly ListNotificationsResult[] {
+    if (data === undefined) return [];
+    return "pages" in data ? data.pages : [data];
+}
+
 function notificationFromHistoryCache(
     queryClient: QueryClient,
     id: string
 ): NotificationRecord | undefined {
-    for (const [, data] of queryClient.getQueriesData<ListNotificationsResult>({
-        queryKey: notificationHistoryQueryRoot,
-    })) {
-        const notification = data?.notifications.find((candidate) => candidate.id === id);
+    for (const [, data] of queryClient.getQueriesData<
+        InfiniteData<ListNotificationsResult> | ListNotificationsResult
+    >({ queryKey: notificationHistoryQueryRoot })) {
+        const notification = notificationHistoryPages(data)
+            .flatMap((page) => page.notifications)
+            .find((candidate) => candidate.id === id);
         if (notification !== undefined) return notification;
     }
     return undefined;
@@ -132,10 +141,14 @@ function updateNotificationHistory(
     queryClient: QueryClient,
     update: (result: ListNotificationsResult) => ListNotificationsResult
 ): void {
-    queryClient.setQueriesData<ListNotificationsResult>(
-        { queryKey: notificationHistoryQueryRoot },
-        (data) => (data === undefined ? undefined : update(data))
-    );
+    queryClient.setQueriesData<
+        InfiniteData<ListNotificationsResult> | ListNotificationsResult
+    >({ queryKey: notificationHistoryQueryRoot }, (data) => {
+        if (data === undefined) return;
+        return "pages" in data
+            ? { ...data, pages: data.pages.map((page) => update(page)) }
+            : update(data);
+    });
 }
 
 /** Patches one known notification and global counts before its refresh can fail. */

@@ -100,7 +100,7 @@ export function AutomationPrincipalCard({ principal }: AutomationPrincipalCardPr
     }
 
     return (
-        <li className="border-primary-700 rounded-xl border p-4">
+        <div className="border-primary-700 rounded-xl border p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                     <Heading level={3}>{principal.label}</Heading>
@@ -152,6 +152,6 @@ export function AutomationPrincipalCard({ principal }: AutomationPrincipalCardPr
                 open={disableConfirmationOpen}
                 title="Disable automation account?"
             />
-        </li>
+        </div>
     );
 }

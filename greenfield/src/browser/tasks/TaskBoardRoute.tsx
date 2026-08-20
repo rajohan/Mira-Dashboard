@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { ListTodo, Plus } from "lucide-react";
-import { useDeferredValue, useEffect, useState } from "react";
+import { useDeferredValue, useEffect, useRef, useState } from "react";
 
 import type { OpenClawCronJob } from "../../contracts/openClawCron.ts";
 import type { TaskSummary } from "../../contracts/taskModel.ts";
@@ -83,6 +83,7 @@ export function TaskBoardRoute() {
     const deferredSearch = useDeferredValue(search);
     const filters = taskFilters(deferredSearch, assignee, automation);
     const taskPages = useInfiniteQuery(taskListQueryOptions(client, filters));
+    const taskPageRequest = useRef<Promise<unknown> | undefined>(undefined);
     const labelSuggestions = useQuery(taskLabelSuggestionsQueryOptions(client));
     const moveTask = useTaskMutation("tasks.move");
     const tasks = uniqueTasks(taskPages.data?.pages ?? []);
@@ -107,6 +108,15 @@ export function TaskBoardRoute() {
     }, [fetchNextCronPage, shouldLoadMoreCronJobs]);
     const labels = labelSuggestions.data?.labels ?? [];
     const hasFilters = filters !== undefined;
+
+    function loadMoreTaskPage(): void {
+        if (taskPageRequest.current !== undefined) return;
+        const request = taskPages.fetchNextPage();
+        taskPageRequest.current = request;
+        void request.finally(() => {
+            if (taskPageRequest.current === request) taskPageRequest.current = undefined;
+        });
+    }
 
     return (
         <div className="flex min-h-full flex-col lg:h-full lg:min-h-0">
@@ -138,7 +148,7 @@ export function TaskBoardRoute() {
             {taskPages.isPending && (
                 <LoadingState className="mt-10" label="Loading tasks…" />
             )}
-            {taskPages.isError && (
+            {taskPages.isError && taskPages.data === undefined && (
                 <Alert
                     action={
                         <Button
@@ -192,19 +202,21 @@ export function TaskBoardRoute() {
                         disabled={moveTask.isPending}
                         onMoveTask={(input) => moveTask.mutate(input)}
                         onSelectTask={setSelectedTaskId}
+                        pagination={{
+                            ...(taskPages.data !== undefined && taskPages.error !== null
+                                ? {
+                                      error: dashboardBrowserFailureMessage(
+                                          taskPages.error
+                                      ),
+                                  }
+                                : {}),
+                            hasMore: taskPages.hasNextPage,
+                            loading: taskPages.isFetchingNextPage,
+                            loadingLabel: "Loading more tasks…",
+                            onLoadMore: loadMoreTaskPage,
+                        }}
                         tasks={tasks}
                     />
-                    {taskPages.hasNextPage && (
-                        <Button
-                            busy={taskPages.isFetchingNextPage}
-                            busyLabel="Loading…"
-                            className="mt-5"
-                            onClick={() => void taskPages.fetchNextPage()}
-                            variant="secondary"
-                        >
-                            Load more tasks
-                        </Button>
-                    )}
                 </div>
             )}
             <NewTaskModal

@@ -6,7 +6,6 @@ import {
 } from "@tanstack/react-query";
 import { createColumnHelper, useTable } from "@tanstack/react-table";
 import { RefreshCw, ScrollText } from "lucide-react";
-import { useRef, type ReactNode, type UIEvent } from "react";
 
 import type {
     ListSecurityAuditEventsInput,
@@ -29,6 +28,7 @@ import { dashboardTableFeatures } from "../ui/dashboardTableFeatures.ts";
 import { DataTable } from "../ui/DataTable.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { Icon } from "../ui/Icon.tsx";
+import { InfiniteScrollTrigger } from "../ui/InfiniteScrollTrigger.tsx";
 import { LoadingState } from "../ui/LoadingState.tsx";
 import { Virtualizer } from "../ui/Virtualizer.tsx";
 import { securityAuditQueryKey } from "./securityQueries.ts";
@@ -37,7 +37,6 @@ import { SecuritySection } from "./SecurityUi.tsx";
 type SecurityAuditCursor = NonNullable<ListSecurityAuditEventsInput["cursor"]>;
 
 const emptyAuditEvents: readonly SecurityAuditEventSummary[] = Object.freeze([]);
-const minimumVirtualizedAuditRows = 50;
 
 const auditTableFeatures = dashboardTableFeatures;
 const auditTableClassName = "min-w-240 table-fixed";
@@ -170,7 +169,6 @@ function SecurityAuditTable({
     loadingMore,
     onLoadMore,
 }: SecurityAuditTableProps) {
-    const loadRequestedRef = useRef(false);
     const table = useTable({
         columns: auditColumns,
         data: events,
@@ -178,67 +176,6 @@ function SecurityAuditTable({
         getRowId: (event) => event.id,
     });
     const rows = table.getRowModel().rows;
-
-    function loadMoreNearBottom(event: UIEvent<HTMLElement>): void {
-        if (!loadingMore) loadRequestedRef.current = false;
-        if (
-            !hasMore ||
-            loadMoreError !== undefined ||
-            loadingMore ||
-            loadRequestedRef.current
-        ) {
-            return;
-        }
-        const container = event.currentTarget;
-        if (
-            container.scrollHeight - container.scrollTop - container.clientHeight <=
-            320
-        ) {
-            loadRequestedRef.current = true;
-            onLoadMore();
-        }
-    }
-
-    let footer: ReactNode;
-    if (loadingMore) {
-        footer = (
-            <LoadingState className="min-h-16" label="Loading older events…" size="sm" />
-        );
-    } else if (loadMoreError !== undefined) {
-        footer = (
-            <div className="p-3">
-                <Alert
-                    action={
-                        <Button onClick={onLoadMore} size="sm" variant="secondary">
-                            <Icon icon={RefreshCw} size="sm" tone="inherit" />
-                            Try again
-                        </Button>
-                    }
-                    message={loadMoreError}
-                />
-            </div>
-        );
-    } else if (hasMore && rows.length < minimumVirtualizedAuditRows) {
-        footer = (
-            <div className="p-3">
-                <Button onClick={onLoadMore} size="sm" variant="secondary">
-                    Load older events
-                </Button>
-            </div>
-        );
-    }
-
-    if (rows.length < minimumVirtualizedAuditRows) {
-        return (
-            <DataTable
-                columnWidths={auditColumnWidths}
-                footer={footer}
-                label="Security audit events"
-                table={table}
-                tableClassName={auditTableClassName}
-            />
-        );
-    }
 
     return (
         <Virtualizer<HTMLTableRowElement>
@@ -249,9 +186,18 @@ function SecurityAuditTable({
             {(virtualization) => (
                 <DataTable
                     columnWidths={auditColumnWidths}
-                    footer={footer}
+                    footer={
+                        <InfiniteScrollTrigger
+                            className="p-3"
+                            error={loadMoreError}
+                            hasMore={hasMore}
+                            loading={loadingMore}
+                            loadingLabel="Loading older events…"
+                            onLoadMore={onLoadMore}
+                            rootRef={virtualization.scrollContainerRef}
+                        />
+                    }
                     label="Security audit events"
-                    onScroll={loadMoreNearBottom}
                     rowWindow={virtualization}
                     scrollContainerRef={virtualization.scrollContainerRef}
                     table={table}

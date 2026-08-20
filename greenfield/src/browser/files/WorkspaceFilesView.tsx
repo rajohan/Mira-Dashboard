@@ -522,25 +522,17 @@ export function WorkspaceFilesView({
                                 return next;
                             })
                         }
+                        pagination={{
+                            hasMore: stable && hasNextPage,
+                            loading: directoryLoading || loadingMore,
+                            loadingLabel: "Loading more files…",
+                            onLoadMore,
+                        }}
                         roots={roots}
                         selectedFileId={activeSelected?.selection.entry.resourceId}
                         selectedRootId={selectedRootId}
                         snapshots={treeSnapshots}
                     />
-                    {stable && hasNextPage && !directoryLoading && (
-                        <div className="border-primary-700 border-t p-3">
-                            <Button
-                                busy={loadingMore}
-                                busyLabel="Loading…"
-                                fullWidth
-                                onClick={onLoadMore}
-                                size="sm"
-                                variant="secondary"
-                            >
-                                Load more in current folder
-                            </Button>
-                        </div>
-                    )}
                 </aside>
 
                 {renderFilePane()}

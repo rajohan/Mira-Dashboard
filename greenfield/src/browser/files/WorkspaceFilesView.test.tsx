@@ -136,10 +136,9 @@ describe("WorkspaceFilesView", () => {
         expect(props.onOpenDirectory).toHaveBeenCalledWith(entries[0], root.resourceId);
         expect(within(tree).getByText(/Open this folder to load/u)).toBeTruthy();
 
-        await user.click(
-            screen.getByRole("button", { name: "Load more in current folder" })
-        );
-        expect(props.onLoadMore).toHaveBeenCalledTimes(1);
+        expect(
+            screen.queryByRole("button", { name: "Load more in current folder" })
+        ).toBeNull();
     });
 
     test("renders text in the persistent pane with raw and rendered modes", async () => {

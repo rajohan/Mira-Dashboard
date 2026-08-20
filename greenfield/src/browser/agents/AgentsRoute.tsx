@@ -48,11 +48,12 @@ export function AgentsRoute() {
         liveHistoryRowIdentity,
         "agents"
     );
+    const historyPageError = history.data === undefined ? null : history.error;
     const error =
         collectionQueries.configuration?.error ??
         collectionQueries.statuses?.error ??
         historyLiveHead.error ??
-        history.error;
+        (history.data === undefined ? history.error : null);
     const historyAvailable =
         history.data !== undefined || historyLiveHead.data !== undefined;
     const pending =
@@ -100,18 +101,22 @@ export function AgentsRoute() {
                 <div className="mt-8 space-y-10">
                     <AgentStatusGrid agents={agents} statuses={agentStatuses} />
                     <div>
-                        <AgentHistoryTable runs={runs} />
-                        {history.hasNextPage && (
-                            <Button
-                                busy={history.isFetchingNextPage}
-                                busyLabel="Loading…"
-                                className="mt-4"
-                                onClick={() => void history.fetchNextPage()}
-                                variant="secondary"
-                            >
-                                Load older tasks
-                            </Button>
-                        )}
+                        <AgentHistoryTable
+                            pagination={{
+                                ...(historyPageError === null
+                                    ? {}
+                                    : {
+                                          error: dashboardBrowserFailureMessage(
+                                              historyPageError
+                                          ),
+                                      }),
+                                hasMore: history.hasNextPage,
+                                loading: history.isFetchingNextPage,
+                                loadingLabel: "Loading older tasks…",
+                                onLoadMore: () => void history.fetchNextPage(),
+                            }}
+                            runs={runs}
+                        />
                     </div>
                 </div>
             )}

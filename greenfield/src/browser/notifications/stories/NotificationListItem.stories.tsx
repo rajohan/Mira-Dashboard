@@ -29,9 +29,9 @@ const meta = {
     component: NotificationListItem,
     decorators: [
         (Story) => (
-            <ul className="w-full max-w-2xl">
+            <div className="w-full max-w-2xl">
                 <Story />
-            </ul>
+            </div>
         ),
     ],
     parameters: {

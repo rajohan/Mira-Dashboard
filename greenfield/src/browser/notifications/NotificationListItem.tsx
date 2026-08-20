@@ -43,91 +43,86 @@ export function NotificationListItem({
     ].join(", ");
 
     return (
-        <li>
-            <article
-                aria-labelledby={titleId}
-                className={
-                    unread
-                        ? "border-accent-500/35 bg-accent-950/25 rounded-lg border p-3"
-                        : "border-primary-700 bg-primary-900 rounded-lg border p-3"
-                }
-                ref={itemRef}
-                tabIndex={-1}
-            >
-                <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                            <h3
-                                className="text-primary-50 text-sm font-semibold wrap-anywhere"
-                                id={titleId}
-                            >
-                                {notification.title}
-                            </h3>
-                            {unread && (
-                                <>
-                                    <span
-                                        aria-hidden="true"
-                                        className="bg-accent-400 size-2 rounded-full"
-                                    />
-                                    <span className="sr-only">Unread notification</span>
-                                </>
-                            )}
-                        </div>
-                        <Text className="mt-1 wrap-anywhere" size="sm">
-                            {notification.message}
-                        </Text>
+        <article
+            aria-labelledby={titleId}
+            className={
+                unread
+                    ? "border-accent-500/35 bg-accent-950/25 rounded-lg border p-3"
+                    : "border-primary-700 bg-primary-900 rounded-lg border p-3"
+            }
+            ref={itemRef}
+            tabIndex={-1}
+        >
+            <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                        <h3
+                            className="text-primary-50 text-sm font-semibold wrap-anywhere"
+                            id={titleId}
+                        >
+                            {notification.title}
+                        </h3>
+                        {unread && (
+                            <>
+                                <span
+                                    aria-hidden="true"
+                                    className="bg-accent-400 size-2 rounded-full"
+                                />
+                                <span className="sr-only">Unread notification</span>
+                            </>
+                        )}
                     </div>
-                    <Badge
-                        variant={notificationSeverityBadgeVariant(notification.severity)}
-                    >
-                        <span className="capitalize">{notification.severity}</span>
-                    </Badge>
+                    <Text className="mt-1 wrap-anywhere" size="sm">
+                        {notification.message}
+                    </Text>
                 </div>
-                <Text className="mt-2 wrap-anywhere" size="sm" tone="muted">
-                    {formatDashboardDateTime(notification.occurredAtMs)} ·{" "}
-                    {notification.kind}
-                    {notification.source === undefined ? "" : ` · ${notification.source}`}
-                </Text>
-                <div className="mt-3 flex flex-wrap gap-2">
-                    {destination !== undefined && (
-                        <a
-                            aria-label={`${destination.label} for ${notification.title} (${actionDetails})`}
-                            className={buttonClassNames({
-                                size: "sm",
-                                variant: "secondary",
-                            })}
-                            href={destination.href}
-                        >
-                            <Icon icon={ExternalLink} size="sm" tone="inherit" />
-                            {destination.label}
-                        </a>
-                    )}
-                    {unread && (
-                        <Button
-                            aria-label={`Mark ${notification.title} read (${actionDetails})`}
-                            data-notification-mark-read="true"
-                            disabled={actionsDisabled}
-                            onClick={() => onMarkRead(notification.id)}
-                            size="sm"
-                            variant="secondary"
-                        >
-                            <Icon icon={CheckCheck} size="sm" tone="inherit" />
-                            Mark read
-                        </Button>
-                    )}
+                <Badge variant={notificationSeverityBadgeVariant(notification.severity)}>
+                    <span className="capitalize">{notification.severity}</span>
+                </Badge>
+            </div>
+            <Text className="mt-2 wrap-anywhere" size="sm" tone="muted">
+                {formatDashboardDateTime(notification.occurredAtMs)} · {notification.kind}
+                {notification.source === undefined ? "" : ` · ${notification.source}`}
+            </Text>
+            <div className="mt-3 flex flex-wrap gap-2">
+                {destination !== undefined && (
+                    <a
+                        aria-label={`${destination.label} for ${notification.title} (${actionDetails})`}
+                        className={buttonClassNames({
+                            size: "sm",
+                            variant: "secondary",
+                        })}
+                        href={destination.href}
+                    >
+                        <Icon icon={ExternalLink} size="sm" tone="inherit" />
+                        {destination.label}
+                    </a>
+                )}
+                {unread && (
                     <Button
-                        aria-label={`Delete notification: ${notification.title} (${actionDetails})`}
-                        data-notification-delete="true"
+                        aria-label={`Mark ${notification.title} read (${actionDetails})`}
+                        data-notification-mark-read="true"
                         disabled={actionsDisabled}
-                        onClick={() => onDelete(notification.id)}
+                        onClick={() => onMarkRead(notification.id)}
                         size="sm"
-                        variant="ghost"
+                        variant="secondary"
                     >
-                        <Icon icon={Trash2} size="sm" tone="inherit" />
-                        Delete
+                        <Icon icon={CheckCheck} size="sm" tone="inherit" />
+                        Mark read
                     </Button>
-                </div>
-            </article>
-        </li>
+                )}
+                <Button
+                    aria-label={`Delete notification: ${notification.title} (${actionDetails})`}
+                    data-notification-delete="true"
+                    disabled={actionsDisabled}
+                    onClick={() => onDelete(notification.id)}
+                    size="sm"
+                    variant="ghost"
+                >
+                    <Icon icon={Trash2} size="sm" tone="inherit" />
+                    Delete
+                </Button>
+            </div>
+        </article>
     );
 }

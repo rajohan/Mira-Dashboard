@@ -98,7 +98,7 @@ describe("CacheStatusTable", () => {
         expect(screen.queryAllByText("Unavailable")).toHaveLength(0);
     });
 
-    test("virtualizes a large bounded snapshot without removing table semantics", () => {
+    test("keeps a large bounded snapshot accessible before viewport measurement", () => {
         render(
             <CacheStatusTable
                 entries={Array.from({ length: 50 }, (_, index) =>
@@ -113,6 +113,6 @@ describe("CacheStatusTable", () => {
         expect(screen.getByRole("region", { name: "Saved data sources" }).tabIndex).toBe(
             0
         );
-        expect(screen.queryAllByRole("button").length).toBeLessThan(50);
+        expect(screen.getAllByRole("button", { name: /^provider\./u })).toHaveLength(50);
     });
 });

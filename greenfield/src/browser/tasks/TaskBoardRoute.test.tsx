@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 
 import { createMemoryHistory } from "@tanstack/react-router";
-import { act } from "react";
+import { act as reactAct } from "react";
 import * as v from "valibot";
 
 import type { AuthStatus } from "../../contracts/auth.ts";
@@ -35,6 +35,25 @@ import type { DashboardWebAuthnClient } from "../security/webauthn/webauthnClien
 import { emptyNotificationListResult } from "../test/notifications.ts";
 import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
 import { taskQueryKey } from "./taskQueries.ts";
+
+const originalActEnvironment: unknown = Reflect.get(
+    globalThis,
+    "IS_REACT_ACT_ENVIRONMENT"
+);
+
+beforeAll(() => Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", false));
+afterAll(() =>
+    Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", originalActEnvironment)
+);
+
+async function act(callback: () => Promise<void> | void): Promise<void> {
+    Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
+    try {
+        await reactAct(callback);
+    } finally {
+        Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", false);
+    }
+}
 
 const { render, screen, waitFor, within } = await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");

@@ -294,6 +294,13 @@ export function DataTable<TFeatures extends TableFeatures, TData extends RowData
             </tr>
         );
     }
+    const renderedRows =
+        rowWindow === undefined || rowWindow.virtualItems.length === 0
+            ? rows.map((row) => renderRow(row))
+            : rowWindow.virtualItems.map((virtualItem) => {
+                  const row = rows[virtualItem.index];
+                  return row === undefined ? null : renderRow(row, virtualItem);
+              });
 
     return (
         <div
@@ -384,14 +391,7 @@ export function DataTable<TFeatures extends TableFeatures, TData extends RowData
                                 />
                             </tr>
                         )}
-                        {rowWindow === undefined
-                            ? rows.map((row) => renderRow(row))
-                            : rowWindow.virtualItems.map((virtualItem) => {
-                                  const row = rows[virtualItem.index];
-                                  return row === undefined
-                                      ? null
-                                      : renderRow(row, virtualItem);
-                              })}
+                        {renderedRows}
                         {bottomSpacerHeight > 0 && (
                             <tr
                                 aria-hidden="true"

@@ -245,18 +245,27 @@ function PreviewRetentionStory(properties: WorkspaceFilesViewProps) {
 }
 
 export const BoundedInventory: Story = {
-    play: async ({ canvasElement }) => {
+    play: async ({ args, canvasElement }) => {
         const canvas = within(canvasElement);
         await expect(
             canvas.getByRole("navigation", { name: "Workspace file tree" })
         ).toBeVisible();
-        await expect(canvas.getByText("More available")).toBeVisible();
+        await waitFor(() => expect(args.onLoadMore).toHaveBeenCalled());
         await userEvent.click(canvas.getByRole("button", { name: "README.md" }));
         await expect(
             await canvas.findByRole("heading", { name: "README.md" })
         ).toBeVisible();
         await expect(
             canvas.getByText(/Preview files without losing your place/u)
+        ).toBeVisible();
+    },
+};
+
+export const InfiniteScrollLoading: Story = {
+    args: { loadingMore: true },
+    play: async ({ canvasElement }) => {
+        await expect(
+            within(canvasElement).getByLabelText("Loading more files…")
         ).toBeVisible();
     },
 };

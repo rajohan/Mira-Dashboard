@@ -19,6 +19,7 @@ import { IconOnlyButton } from "../ui/IconOnlyButton.tsx";
 import { LoadingState } from "../ui/LoadingState.tsx";
 import { Markdown } from "../ui/Markdown.tsx";
 import { Text } from "../ui/Text.tsx";
+import { VirtualizedList } from "../ui/VirtualizedList.tsx";
 import { useTaskMutation } from "./taskMutations.ts";
 import { TaskProgressForm } from "./TaskProgressForm.tsx";
 import {
@@ -52,7 +53,7 @@ function TaskProgressEntry({
     update,
 }: TaskProgressEntryProps) {
     return (
-        <li className="border-primary-700 bg-primary-900/40 rounded border p-3">
+        <div className="border-primary-700 bg-primary-900/40 rounded border p-3">
             <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                     <Text
@@ -101,7 +102,7 @@ function TaskProgressEntry({
             ) : (
                 <Markdown className="mt-3" source={update.messageMarkdown} />
             )}
-        </li>
+        </div>
     );
 }
 
@@ -131,7 +132,9 @@ export function TaskProgressSection({ taskId }: TaskProgressSectionProps) {
         evictedUpdateIds,
         archiveFirstPageResetKey
     );
-    const progressFailure = progressLiveHead.error ?? progress.error;
+    const progressPageError = progress.data === undefined ? null : progress.error;
+    const progressFailure =
+        progressLiveHead.error ?? (progress.data === undefined ? progress.error : null);
     const failure =
         progressFailure ??
         addProgress.error ??
@@ -190,12 +193,30 @@ export function TaskProgressSection({ taskId }: TaskProgressSectionProps) {
                 />
             )}
             {updates.length > 0 && (
-                <ol className="mt-5 space-y-3">
-                    {updates.map((update) => (
+                <VirtualizedList
+                    className="mt-5"
+                    estimateSize={() => 144}
+                    getKey={(update) => update.id}
+                    itemClassName="pb-3"
+                    items={updates}
+                    label="Task progress updates"
+                    pagination={{
+                        ...(progressPageError === null
+                            ? {}
+                            : {
+                                  error: dashboardBrowserFailureMessage(
+                                      progressPageError
+                                  ),
+                              }),
+                        hasMore: progress.hasNextPage,
+                        loading: progress.isFetchingNextPage,
+                        loadingLabel: "Loading older progress updates…",
+                        onLoadMore: () => void progress.fetchNextPage(),
+                    }}
+                    renderItem={(update) => (
                         <TaskProgressEntry
                             busy={busy}
                             editing={editingId === update.id}
-                            key={update.id}
                             onCancelEdit={() => setEditingId(undefined)}
                             onDelete={() => setPendingDelete(update)}
                             onEdit={() => setEditingId(update.id)}
@@ -209,19 +230,8 @@ export function TaskProgressSection({ taskId }: TaskProgressSectionProps) {
                             }}
                             update={update}
                         />
-                    ))}
-                </ol>
-            )}
-            {progress.hasNextPage && (
-                <Button
-                    busy={progress.isFetchingNextPage}
-                    busyLabel="Loading…"
-                    className="mt-4"
-                    onClick={() => void progress.fetchNextPage()}
-                    variant="secondary"
-                >
-                    Load older updates
-                </Button>
+                    )}
+                />
             )}
             <ConfirmModal
                 busy={deleteProgress.isPending}

@@ -100,8 +100,8 @@ describe("job run detail", () => {
         progressRegion.focus();
         expect(progressRegion).toHaveFocus();
         expect(
-            screen.getByText("Use “Load older events”", { exact: false })
-        ).toBeTruthy();
+            screen.queryByText("Use “Load older events”", { exact: false })
+        ).toBeNull();
 
         await user.click(
             screen.getByRole("button", {

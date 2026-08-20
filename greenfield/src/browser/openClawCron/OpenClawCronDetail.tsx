@@ -1,6 +1,6 @@
 import { Pencil, Play, Power, Trash2 } from "lucide-react";
 import type { ReactNode } from "react";
-import { useEffect, useId, useRef } from "react";
+import { useId } from "react";
 
 import type { GatewaySession } from "../../contracts/gatewaySessions.ts";
 import type { OpenClawCronJob } from "../../contracts/openClawCron.ts";
@@ -11,6 +11,7 @@ import { Button } from "../ui/Button.tsx";
 import { Card } from "../ui/Card.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
+import { InfiniteScrollTrigger } from "../ui/InfiniteScrollTrigger.tsx";
 import { LoadingState } from "../ui/LoadingState.tsx";
 import { Text } from "../ui/Text.tsx";
 import { Virtualizer } from "../ui/Virtualizer.tsx";
@@ -84,35 +85,6 @@ export function OpenClawCronDetail({
 }: OpenClawCronDetailProps) {
     const headingId = useId();
     const historyHeadingId = useId();
-    const historyScrollContainerRef = useRef<HTMLDivElement>(null);
-    const historySentinelRef = useRef<HTMLDivElement>(null);
-
-    useEffect(() => {
-        const sentinel = historySentinelRef.current;
-        if (
-            sentinel === null ||
-            !runs?.hasMore ||
-            onLoadMoreRuns === undefined ||
-            runsLoadingMore ||
-            runsError !== undefined ||
-            globalThis.IntersectionObserver === undefined
-        ) {
-            return;
-        }
-        const observer = new IntersectionObserver(
-            (entries) => {
-                if (entries.some(({ isIntersecting }) => isIntersecting)) {
-                    onLoadMoreRuns();
-                }
-            },
-            {
-                root: historyScrollContainerRef.current,
-                rootMargin: "400px 0px",
-            }
-        );
-        observer.observe(sentinel);
-        return () => observer.disconnect();
-    }, [onLoadMoreRuns, runs?.hasMore, runsError, runsLoadingMore]);
     const payloadTruncated = "truncated" in job.payload && job.payload.truncated;
     const payloadRedacted =
         "contentRedacted" in job.payload && job.payload.contentRedacted;
@@ -431,10 +403,7 @@ export function OpenClawCronDetail({
                                 <div
                                     aria-label="OpenClaw run history"
                                     className="mt-5 h-[min(42rem,65dvh)] min-h-72 overflow-x-hidden overflow-y-auto overscroll-contain"
-                                    ref={(node) => {
-                                        scrollContainerRef.current = node;
-                                        historyScrollContainerRef.current = node;
-                                    }}
+                                    ref={scrollContainerRef}
                                     // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- A div preserves the Virtualizer scroll-container ref contract while exposing its accessible name.
                                     role="region"
                                     // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- The bounded virtual run history must remain keyboard-scrollable.
@@ -547,12 +516,16 @@ export function OpenClawCronDetail({
                                             );
                                         })}
                                     </ol>
-                                    {runs.hasMore && onLoadMoreRuns !== undefined && (
-                                        <div className="py-2" ref={historySentinelRef}>
-                                            {runsLoadingMore && (
-                                                <LoadingState label="Loading older runs…" />
-                                            )}
-                                        </div>
+                                    {onLoadMoreRuns !== undefined && (
+                                        <InfiniteScrollTrigger
+                                            hasMore={
+                                                runs.hasMore && runsError === undefined
+                                            }
+                                            loading={runsLoadingMore}
+                                            loadingLabel="Loading older runs…"
+                                            onLoadMore={onLoadMoreRuns}
+                                            rootRef={scrollContainerRef}
+                                        />
                                     )}
                                 </div>
                             );

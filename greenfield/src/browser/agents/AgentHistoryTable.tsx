@@ -8,6 +8,10 @@ import { dashboardTableFeatures } from "../ui/dashboardTableFeatures.ts";
 import { DataTable } from "../ui/DataTable.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { Heading } from "../ui/Heading.tsx";
+import {
+    type InfiniteScrollContinuation,
+    InfiniteScrollTrigger,
+} from "../ui/InfiniteScrollTrigger.tsx";
 import { Text } from "../ui/Text.tsx";
 import { Virtualizer, type VirtualizerRenderState } from "../ui/Virtualizer.tsx";
 
@@ -74,11 +78,12 @@ const historyColumns = historyColumnHelper.columns([
 ]);
 
 interface AgentHistoryTableProps {
+    readonly pagination?: InfiniteScrollContinuation;
     readonly runs: readonly AgentTaskRun[];
 }
 
 /** @returns Shared table and virtual window for durable agent task history. */
-export function AgentHistoryTable({ runs }: AgentHistoryTableProps) {
+export function AgentHistoryTable({ pagination, runs }: AgentHistoryTableProps) {
     const table = useTable({
         columns: historyColumns,
         data: runs,
@@ -99,6 +104,15 @@ export function AgentHistoryTable({ runs }: AgentHistoryTableProps) {
 
     const tableElement = (rowWindow?: VirtualizerRenderState<HTMLTableRowElement>) => (
         <DataTable
+            footer={
+                pagination === undefined ? undefined : (
+                    <InfiniteScrollTrigger
+                        className="p-3"
+                        rootRef={rowWindow?.scrollContainerRef}
+                        {...pagination}
+                    />
+                )
+            }
             label="Agent task history"
             rowWindow={rowWindow}
             scrollContainerRef={rowWindow?.scrollContainerRef}

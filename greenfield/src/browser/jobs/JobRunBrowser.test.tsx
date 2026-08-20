@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
 import { QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -24,6 +24,10 @@ import {
 } from "../api/trpcClient.ts";
 import { DashboardTrpcProvider } from "../api/trpcContext.tsx";
 import {
+    installIntersectionObserverHarness,
+    type IntersectionObserverHarness,
+} from "../test/intersectionObserverTest.ts";
+import {
     jobHistoryNeedsInitialFill,
     jobRunDetailQueryKey,
     jobRunEventHistoryQueryKey,
@@ -39,6 +43,13 @@ const runId = "019fdf70-0000-7000-8000-000000000002";
 const otherRunId = "019fdf70-0000-7000-8000-000000000003";
 const timestampMs = 1_800_000_000_000;
 const eventProjectionWait = { timeout: 3000 } as const;
+let intersectionObserver: IntersectionObserverHarness;
+
+beforeEach(() => {
+    intersectionObserver = installIntersectionObserverHarness();
+});
+
+afterEach(() => intersectionObserver.restore());
 
 test("keeps filling history until reported active runs are represented", () => {
     expect(jobHistoryNeedsInitialFill(0, 100, 1)).toBeTrue();
@@ -262,9 +273,7 @@ async function loadInitialEventHistory(): Promise<void> {
             eventProjectionWait
         )
     ).toBeTruthy();
-    await userEvent
-        .setup()
-        .click(screen.getByRole("button", { name: "Load older events" }));
+    act(() => intersectionObserver.intersectLatest());
     expect(
         await screen.findByRole(
             "article",

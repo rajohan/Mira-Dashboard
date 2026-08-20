@@ -23,12 +23,10 @@ import { authStatusQueryKey } from "../auth/authQueries.ts";
 import { createDashboardBrowserCollections } from "../data/dashboardCollections.ts";
 import { DashboardCollectionsProvider } from "../data/dashboardCollectionsContext.tsx";
 import { captureExpectedConsoleErrors } from "../test/expectedConsoleError.ts";
+import { installIntersectionObserverHarness } from "../test/intersectionObserverTest.ts";
 import { ControlledDashboardRealtimeClient } from "../test/realtime.ts";
 import { AuthenticatedNotificationCenter } from "./AuthenticatedNotificationCenter.tsx";
-import {
-    notificationHistoryQueryKey,
-    notificationLatestQueryKey,
-} from "./notificationQueries.ts";
+import { notificationLatestQueryKey } from "./notificationQueries.ts";
 import { notificationRealtimeRefreshDelayMs } from "./useNotificationRealtimeInvalidation.ts";
 
 const { render, screen, waitFor, within } = await import("@testing-library/react");
@@ -587,7 +585,7 @@ describe("Notification center", () => {
         }
     });
 
-    test("shows one deep history page at a time and resets paging when filters change", async () => {
+    test("accumulates notification history through infinite scroll", async () => {
         const newest = notification(ids[0]!, timestampMs, {
             title: "Newest warning",
         });
@@ -597,14 +595,11 @@ describe("Notification center", () => {
         const secondPageRow = notification(ids[2]!, timestampMs - 2000, {
             title: "Second history page",
         });
-        const terminalPageRow = notification(ids[3]!, timestampMs - 3000, {
-            title: "Terminal history page",
-        });
         const transport = new NotificationCenterTransport({
             nextCursor: { id: newest.id, occurredAtMs: newest.occurredAtMs },
             notifications: [newest],
             readCount: 0,
-            unreadCount: 4,
+            unreadCount: 3,
         });
         transport.history.set(newest.id, {
             nextCursor: {
@@ -613,416 +608,42 @@ describe("Notification center", () => {
             },
             notifications: [newest, firstPageRow],
             readCount: 0,
-            unreadCount: 4,
+            unreadCount: 3,
         });
         transport.history.set(firstPageRow.id, {
-            nextCursor: {
-                id: secondPageRow.id,
-                occurredAtMs: secondPageRow.occurredAtMs,
-            },
             notifications: [secondPageRow],
             readCount: 0,
-            unreadCount: 4,
+            unreadCount: 3,
         });
-        transport.history.set(secondPageRow.id, {
-            notifications: [terminalPageRow],
-            readCount: 0,
-            unreadCount: 4,
-        });
+        const observer = installIntersectionObserverHarness();
         const harness = renderCenter(transport);
 
         try {
-            const { user } = await openNotificationCenter();
+            await openNotificationCenter();
             expect(await screen.findByText("Newest warning")).toBeTruthy();
-            expect(
-                transport.queryCalls.filter(
-                    ({ input }) =>
-                        (input as ListNotificationsInput | undefined)?.cursor !==
-                        undefined
-                )
-            ).toHaveLength(0);
-
-            await user.click(
-                screen.getByRole("button", { name: "Load older notifications" })
+            act(() => observer.intersectInfiniteScroll());
+            await waitFor(() =>
+                expect(
+                    transport.queryCalls.some(
+                        ({ input }) =>
+                            (input as ListNotificationsInput | undefined)?.cursor?.id ===
+                            newest.id
+                    )
+                ).toBeTrue()
             );
             expect(await screen.findByText("First history page")).toBeTruthy();
-            expect(
-                screen.getAllByRole("heading", { level: 3, name: "Newest warning" })
-            ).toHaveLength(1);
-
-            await user.click(
-                screen.getByRole("button", { name: "Load next older page" })
-            );
+            act(() => observer.intersectInfiniteScroll());
             expect(await screen.findByText("Second history page")).toBeTruthy();
-            expect(screen.queryByText("First history page")).toBeNull();
-
-            await user.click(
-                screen.getByRole("button", { name: "Load next older page" })
-            );
-            expect(await screen.findByText("Terminal history page")).toBeTruthy();
-            expect(screen.queryByText("Second history page")).toBeNull();
-
-            await user.click(
-                screen.getByRole("button", {
-                    name: "Filter notifications by severity",
-                })
-            );
-            await user.click(screen.getByRole("option", { name: "Error" }));
-            expect(screen.queryByText("Terminal history page")).toBeNull();
+            expect(screen.getByText("Newest warning")).toBeTruthy();
+            expect(screen.getByText("First history page")).toBeTruthy();
             expect(
-                screen.getByRole("button", { name: "Load older notifications" })
-            ).toBeTruthy();
-
-            await user.click(
-                screen.getByRole("button", { name: "Load older notifications" })
-            );
-            await waitFor(() =>
-                expect(
-                    transport.queryCalls.filter(
-                        ({ input }) =>
-                            (input as ListNotificationsInput | undefined)?.cursor !==
-                            undefined
-                    )
-                ).toHaveLength(4)
-            );
-            expect(transport.queryCalls.at(-1)).toEqual({
-                input: {
-                    cursor: { id: newest.id, occurredAtMs: newest.occurredAtMs },
-                    filters: { readState: "all", severities: ["error"] },
-                    limit: 100,
-                },
-                path: "notifications.list",
-            });
+                screen.queryByRole("button", { name: "Load older notifications" })
+            ).toBeNull();
         } finally {
+            observer.restore();
             await harness.cleanup();
         }
     });
-
-    test("resets a stale history path when the newest continuation cursor shifts", async () => {
-        const originalNewest = notification(ids[0]!, timestampMs, {
-            title: "Original newest",
-        });
-        const originalHistory = notification(ids[1]!, timestampMs - 1000, {
-            title: "Original history",
-        });
-        const shiftedNewest = notification(ids[4]!, timestampMs + 1000, {
-            title: "Shifted newest",
-        });
-        const shiftedHistory = notification(ids[5]!, timestampMs - 2000, {
-            title: "Shifted history",
-        });
-        const transport = new NotificationCenterTransport({
-            nextCursor: {
-                id: originalNewest.id,
-                occurredAtMs: originalNewest.occurredAtMs,
-            },
-            notifications: [originalNewest],
-            readCount: 0,
-            unreadCount: 2,
-        });
-        transport.history.set(originalNewest.id, {
-            notifications: [originalHistory],
-            readCount: 0,
-            unreadCount: 2,
-        });
-        transport.history.set(shiftedNewest.id, {
-            notifications: [shiftedHistory],
-            readCount: 0,
-            unreadCount: 2,
-        });
-        const harness = renderCenter(transport);
-
-        try {
-            const { user } = await openNotificationCenter();
-            const historyControl = screen.getByRole<HTMLButtonElement>("button", {
-                name: "Load older notifications",
-            });
-            await user.click(historyControl);
-            expect(await screen.findByText("Original history")).toBeTruthy();
-            const backControl = screen.getByRole("button", {
-                name: "Back to newest notifications",
-            });
-            act(() => backControl.focus());
-            expect(backControl).toHaveFocus();
-
-            transport.latest = {
-                nextCursor: {
-                    id: shiftedNewest.id,
-                    occurredAtMs: shiftedNewest.occurredAtMs,
-                },
-                notifications: [shiftedNewest],
-                readCount: 0,
-                unreadCount: 2,
-            };
-            await act(async () => {
-                await harness.queryClient.refetchQueries({
-                    exact: true,
-                    queryKey: notificationLatestQueryKey,
-                });
-            });
-
-            expect(await screen.findByText("Shifted newest")).toBeTruthy();
-            await waitFor(() =>
-                expect(screen.queryByText("Original history")).toBeNull()
-            );
-            expect(screen.getByRole("button", { name: "Load older notifications" })).toBe(
-                historyControl
-            );
-            await waitFor(() => expect(historyControl).toHaveFocus());
-
-            await user.click(historyControl);
-            expect(await screen.findByText("Shifted history")).toBeTruthy();
-            expect(transport.queryCalls.at(-1)).toEqual({
-                input: {
-                    cursor: {
-                        id: shiftedNewest.id,
-                        occurredAtMs: shiftedNewest.occurredAtMs,
-                    },
-                    filters: { readState: "all" },
-                    limit: 100,
-                },
-                path: "notifications.list",
-            });
-        } finally {
-            await harness.cleanup();
-        }
-    });
-
-    test("restores heading focus when realtime removes the history cursor", async () => {
-        for (const focusedControl of ["forward", "back"] as const) {
-            const newest = notification(ids[0]!, timestampMs, {
-                title: `Newest ${focusedControl}`,
-            });
-            const historyRow = notification(ids[1]!, timestampMs - 1000, {
-                title: `History ${focusedControl}`,
-            });
-            const transport = new NotificationCenterTransport({
-                nextCursor: {
-                    id: newest.id,
-                    occurredAtMs: newest.occurredAtMs,
-                },
-                notifications: [newest],
-                readCount: 0,
-                unreadCount: 2,
-            });
-            transport.history.set(newest.id, {
-                notifications: [historyRow],
-                readCount: 0,
-                unreadCount: 2,
-            });
-            const harness = renderCenter(transport);
-
-            try {
-                const { user } = await openNotificationCenter();
-                await user.click(
-                    screen.getByRole("button", {
-                        name: "Load older notifications",
-                    })
-                );
-                expect(await screen.findByText(`History ${focusedControl}`)).toBeTruthy();
-                const control =
-                    focusedControl === "forward"
-                        ? screen.getByRole("button", {
-                              name: "All available notifications loaded",
-                          })
-                        : screen.getByRole("button", {
-                              name: "Back to newest notifications",
-                          });
-                act(() => control.focus());
-                expect(control).toHaveFocus();
-
-                transport.latest = {
-                    notifications: [newest],
-                    readCount: 0,
-                    unreadCount: 1,
-                };
-                await act(async () => {
-                    await harness.queryClient.refetchQueries({
-                        exact: true,
-                        queryKey: notificationLatestQueryKey,
-                    });
-                });
-
-                await waitFor(() =>
-                    expect(screen.queryByText(`History ${focusedControl}`)).toBeNull()
-                );
-                await waitFor(() =>
-                    expect(
-                        screen.getByRole("heading", {
-                            level: 2,
-                            name: "Notifications",
-                        })
-                    ).toHaveFocus()
-                );
-                expect(
-                    screen.queryByRole("button", {
-                        name: "Load older notifications",
-                    })
-                ).toBeNull();
-            } finally {
-                await harness.cleanup();
-            }
-        }
-    });
-
-    test("keeps one history control focused through forward, terminal, and back paging", async () => {
-        const newest = notification(ids[0]!, timestampMs, { title: "Newest row" });
-        const firstHistory = notification(ids[1]!, timestampMs - 1000, {
-            title: "First history row",
-        });
-        const terminalHistory = notification(ids[2]!, timestampMs - 2000, {
-            title: "Terminal history row",
-        });
-        const transport = new NotificationCenterTransport({
-            nextCursor: { id: newest.id, occurredAtMs: newest.occurredAtMs },
-            notifications: [newest],
-            readCount: 0,
-            unreadCount: 3,
-        });
-        transport.history.set(newest.id, {
-            nextCursor: {
-                id: firstHistory.id,
-                occurredAtMs: firstHistory.occurredAtMs,
-            },
-            notifications: [firstHistory],
-            readCount: 0,
-            unreadCount: 3,
-        });
-        transport.history.set(firstHistory.id, {
-            notifications: [terminalHistory],
-            readCount: 0,
-            unreadCount: 3,
-        });
-        const harness = renderCenter(transport);
-
-        try {
-            const { user } = await openNotificationCenter();
-            const historyControl = screen.getByRole("button", {
-                name: "Load older notifications",
-            });
-
-            await user.click(historyControl);
-            expect(await screen.findByText("First history row")).toBeTruthy();
-            expect(screen.getByRole("button", { name: "Load next older page" })).toBe(
-                historyControl
-            );
-
-            await user.click(historyControl);
-            expect(await screen.findByText("Terminal history row")).toBeTruthy();
-            const terminalControl = screen.getByRole("button", {
-                name: "All available notifications loaded",
-            });
-            expect(terminalControl).toBe(historyControl);
-            expect(terminalControl).toHaveAttribute("aria-disabled", "true");
-            expect(terminalControl).toHaveFocus();
-
-            await user.click(screen.getByRole("button", { name: "Load newer page" }));
-            expect(await screen.findByText("First history row")).toBeTruthy();
-            await waitFor(() => expect(historyControl).toHaveFocus());
-
-            await user.click(
-                screen.getByRole("button", { name: "Back to newest notifications" })
-            );
-            await waitFor(() =>
-                expect(screen.queryByText("First history row")).toBeNull()
-            );
-            expect(screen.getByRole("button", { name: "Load older notifications" })).toBe(
-                historyControl
-            );
-            await waitFor(() => expect(historyControl).toHaveFocus());
-        } finally {
-            await harness.cleanup();
-        }
-    });
-
-    test("keeps history focus during delayed forward and cache-miss back requests", async () => {
-        const newest = notification(ids[0]!, timestampMs, { title: "Newest row" });
-        const firstHistory = notification(ids[1]!, timestampMs - 1000, {
-            title: "Delayed first history row",
-        });
-        const terminalHistory = notification(ids[2]!, timestampMs - 2000, {
-            title: "Delayed terminal history row",
-        });
-        const firstCursor = {
-            id: newest.id,
-            occurredAtMs: newest.occurredAtMs,
-        };
-        const firstPage = {
-            nextCursor: {
-                id: firstHistory.id,
-                occurredAtMs: firstHistory.occurredAtMs,
-            },
-            notifications: [firstHistory],
-            readCount: 0,
-            unreadCount: 3,
-        } satisfies ListNotificationsResult;
-        const firstLoad = Promise.withResolvers<ListNotificationsResult>();
-        const backLoad = Promise.withResolvers<ListNotificationsResult>();
-        let firstPageRequests = 0;
-        const transport = new NotificationCenterTransport({
-            nextCursor: firstCursor,
-            notifications: [newest],
-            readCount: 0,
-            unreadCount: 3,
-        });
-        transport.historyResponders.set(newest.id, () => {
-            firstPageRequests += 1;
-            return firstPageRequests === 1 ? firstLoad.promise : backLoad.promise;
-        });
-        transport.history.set(firstHistory.id, {
-            notifications: [terminalHistory],
-            readCount: 0,
-            unreadCount: 3,
-        });
-        const harness = renderCenter(transport);
-
-        try {
-            const { user } = await openNotificationCenter();
-            const historyControl = screen.getByRole<HTMLButtonElement>("button", {
-                name: "Load older notifications",
-            });
-            await user.click(historyControl);
-            await waitFor(() => expect(firstPageRequests).toBe(1));
-            const pendingForward = await screen.findByRole<HTMLButtonElement>("button", {
-                name: "Loading older notifications…",
-            });
-            expect(pendingForward).toBe(historyControl);
-            expect(pendingForward).toHaveFocus();
-            expect(pendingForward.getAttribute("aria-busy")).toBe("true");
-            expect(pendingForward.disabled).toBeFalse();
-
-            firstLoad.resolve(firstPage);
-            expect(await screen.findByText("Delayed first history row")).toBeTruthy();
-            expect(historyControl).toHaveFocus();
-            await user.click(historyControl);
-            expect(await screen.findByText("Delayed terminal history row")).toBeTruthy();
-
-            harness.queryClient.removeQueries({
-                exact: true,
-                queryKey: notificationHistoryQueryKey(firstCursor, {
-                    readState: "all",
-                }),
-            });
-            await user.click(screen.getByRole("button", { name: "Load newer page" }));
-            await waitFor(() => expect(firstPageRequests).toBe(2));
-            const pendingBack = await screen.findByRole<HTMLButtonElement>("button", {
-                name: "Loading older notifications…",
-            });
-            expect(pendingBack).toBe(historyControl);
-            expect(pendingBack).toHaveFocus();
-            expect(pendingBack.getAttribute("aria-busy")).toBe("true");
-            expect(pendingBack.disabled).toBeFalse();
-
-            backLoad.resolve(firstPage);
-            expect(await screen.findByText("Delayed first history row")).toBeTruthy();
-            expect(historyControl).toHaveFocus();
-        } finally {
-            firstLoad.resolve(firstPage);
-            backLoad.resolve(firstPage);
-            await harness.cleanup();
-        }
-    });
-
     test("marks one notification read and removes another before refresh", async () => {
         const first = notification(ids[0]!, timestampMs, { title: "Mark me" });
         const second = notification(ids[1]!, timestampMs - 1000, {

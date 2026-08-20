@@ -467,8 +467,8 @@ describe("OpenClaw scheduled jobs browser", () => {
             expect(selectedCardTarget).toHaveAttribute("aria-current", "true");
             expect(selectedCardTarget).toHaveAttribute("aria-pressed", "true");
             expect(nextCardTarget).toHaveAttribute("aria-pressed", "false");
-            const selectedCard = selectedCardTarget.closest("li");
-            const nextCard = nextCardTarget.closest("li");
+            const selectedCard = selectedCardTarget.closest(".group");
+            const nextCard = nextCardTarget.closest(".group");
             expect(selectedCard).toHaveClass(
                 "border-accent-400",
                 "bg-accent-500/20",
@@ -560,13 +560,15 @@ describe("OpenClaw scheduled jobs browser", () => {
             },
         } as unknown as DashboardTrpcClient;
         const rendered = renderBrowser(client);
-        const user = userEvent.setup();
-
         try {
             await screen.findByText("Newest run");
-            await user.click(
-                screen.getByRole("button", { name: "Load more OpenClaw jobs" })
-            );
+            await waitFor(() => expect(intersectionCallbacks.length).toBeGreaterThan(1));
+            act(() => {
+                intersectionCallbacks[0]?.(
+                    [{ isIntersecting: true } as IntersectionObserverEntry],
+                    {} as IntersectionObserver
+                );
+            });
             expect(await screen.findByRole("button", { name: "Alpha" })).toBeTruthy();
             await waitFor(() => expect(intersectionCallbacks.length).toBeGreaterThan(0));
             expect(intersectionOptions.at(-1)?.root).toHaveAttribute(

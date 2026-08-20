@@ -474,9 +474,16 @@ describe("Dashboard account security route", () => {
                 target: { id: user.id, type: "user" },
             },
         ];
+        const actEnvironment: unknown = Reflect.get(
+            globalThis,
+            "IS_REACT_ACT_ENVIRONMENT"
+        );
+        Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", false);
         renderAccountSecurity(transport);
 
         await screen.findByRole("heading", { level: 1, name: "Account security" });
+        await screen.findByText("auth.login");
+        Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", actEnvironment);
         for (const name of [
             "Verification and password",
             "Multi-factor authentication",
@@ -486,7 +493,7 @@ describe("Dashboard account security route", () => {
         ]) {
             expect(screen.getByRole("heading", { level: 2, name })).toBeTruthy();
         }
-        expect(await screen.findByText("auth.login")).toBeTruthy();
+        expect(screen.getByText("auth.login")).toBeTruthy();
         expect(screen.getByText("succeeded")).toBeTruthy();
         expect(screen.getByText(/method=password/u)).toBeTruthy();
         expect(screen.queryByRole("button", { name: "Time" })).toBeNull();

@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { CalendarClock } from "lucide-react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 
 import type { ScheduleConfiguration } from "../../contracts/jobModel.ts";
 import {
@@ -16,7 +16,7 @@ import { Card } from "../ui/Card.tsx";
 import { ExpandableCard } from "../ui/ExpandableCard.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
-import { LoadingState } from "../ui/LoadingState.tsx";
+import { InfiniteScrollTrigger } from "../ui/InfiniteScrollTrigger.tsx";
 import { PageState } from "../ui/PageState.tsx";
 import { Virtualizer } from "../ui/Virtualizer.tsx";
 import { jobBrowserFailureMessage } from "./jobBrowserFailure.ts";
@@ -59,8 +59,6 @@ function SelectedSchedule({
     const liveHead = useQuery(scheduleRunLiveHeadQueryOptions(client, id));
     const update = useUpdateScheduleMutation();
     const run = useRunScheduleMutation();
-    const historyScrollContainerRef = useRef<HTMLDivElement>(null);
-    const historySentinelRef = useRef<HTMLDivElement>(null);
     const fetchNextHistoryPage = history.fetchNextPage;
     const hasNextHistoryPage = history.hasNextPage;
     const historyPageLoading = history.isFetchingNextPage;
@@ -73,32 +71,6 @@ function SelectedSchedule({
         liveHistoryRowIdentity,
         id
     );
-
-    useEffect(() => {
-        const sentinel = historySentinelRef.current;
-        if (
-            sentinel === null ||
-            !hasNextHistoryPage ||
-            historyPageFailed ||
-            historyPageLoading ||
-            globalThis.IntersectionObserver === undefined
-        ) {
-            return;
-        }
-        const observer = new IntersectionObserver(
-            (entries) => {
-                if (entries.some(({ isIntersecting }) => isIntersecting)) {
-                    void fetchNextHistoryPage();
-                }
-            },
-            {
-                root: historyScrollContainerRef.current,
-                rootMargin: "400px 0px",
-            }
-        );
-        observer.observe(sentinel);
-        return () => observer.disconnect();
-    }, [fetchNextHistoryPage, hasNextHistoryPage, historyPageFailed, historyPageLoading]);
 
     useEffect(() => {
         if (!focusRequested || detail.data === undefined) return;
@@ -232,10 +204,7 @@ function SelectedSchedule({
                                 <div
                                     aria-label="Schedule run history"
                                     className="h-[min(42rem,65dvh)] min-h-72 overflow-x-hidden overflow-y-auto overscroll-contain"
-                                    ref={(node) => {
-                                        scrollContainerRef.current = node;
-                                        historyScrollContainerRef.current = node;
-                                    }}
+                                    ref={scrollContainerRef}
                                     // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- The shared Virtualizer requires a div scroll container.
                                     role="region"
                                     // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- The bounded virtual run history must remain keyboard-scrollable.
@@ -296,16 +265,20 @@ function SelectedSchedule({
                                             );
                                         })}
                                     </ol>
-                                    {hasNextHistoryPage && !historyPageFailed && (
-                                        <div className="py-2" ref={historySentinelRef}>
-                                            {historyPageLoading && (
-                                                <LoadingState
-                                                    label="Loading older runs…"
-                                                    size="sm"
-                                                />
-                                            )}
-                                        </div>
-                                    )}
+                                    <InfiniteScrollTrigger
+                                        {...(historyPageFailed
+                                            ? {
+                                                  error: jobBrowserFailureMessage(
+                                                      history.error
+                                                  ),
+                                              }
+                                            : {})}
+                                        hasMore={hasNextHistoryPage}
+                                        loading={historyPageLoading}
+                                        loadingLabel="Loading older runs…"
+                                        onLoadMore={() => void fetchNextHistoryPage()}
+                                        rootRef={scrollContainerRef}
+                                    />
                                 </div>
                                 {selectedRunVisible ? null : selectedRunDetail}
                             </>
@@ -432,20 +405,18 @@ export function ScheduleBrowser({
             <>
                 <ScheduleTable
                     onSelect={selectSchedule}
+                    pagination={{
+                        ...(query.error === null
+                            ? {}
+                            : { error: jobBrowserFailureMessage(query.error) }),
+                        hasMore: query.hasNextPage,
+                        loading: query.isFetchingNextPage,
+                        loadingLabel: "Loading more schedules…",
+                        onLoadMore: () => void query.fetchNextPage(),
+                    }}
                     schedules={schedules}
                     selectedId={selectedScheduleId}
                 />
-                {query.hasNextPage && (
-                    <Button
-                        busy={query.isFetchingNextPage}
-                        busyLabel="Loading…"
-                        className="mt-4"
-                        onClick={() => void query.fetchNextPage()}
-                        variant="secondary"
-                    >
-                        Load more schedules
-                    </Button>
-                )}
             </>
         );
     }

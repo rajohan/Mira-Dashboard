@@ -3,6 +3,7 @@ import { expect, fn, userEvent, within } from "storybook/test";
 
 import { expectVirtualizedList } from "../../storySupport/virtualizationAssertions.ts";
 import { Button } from "../../ui/Button.tsx";
+import type { InfiniteScrollContinuation } from "../../ui/InfiniteScrollTrigger.tsx";
 import { MonitoringSelectionList } from "../MonitoringSelectionList.tsx";
 
 interface CatalogItem {
@@ -13,17 +14,20 @@ interface CatalogItem {
 interface MonitoringSelectionListStoryProps {
     readonly items: readonly CatalogItem[];
     readonly onSelect: (id: string) => void;
+    readonly pagination?: InfiniteScrollContinuation;
 }
 
 function MonitoringSelectionListStory({
     items,
     onSelect,
+    pagination,
 }: MonitoringSelectionListStoryProps) {
     return (
         <MonitoringSelectionList
             getKey={(item) => item.id}
             items={items}
             label="Monitoring catalog"
+            pagination={pagination}
             renderItem={(item) => (
                 <Button
                     className="w-full justify-start"
@@ -72,5 +76,16 @@ export const VirtualizedInventory: Story = {
             })
         );
         await expect(args.onSelect).toHaveBeenCalledWith("monitoring-item-49");
+    },
+};
+
+export const InfiniteScrollLoading: Story = {
+    args: {
+        pagination: {
+            hasMore: true,
+            loading: true,
+            loadingLabel: "Loading older monitoring records…",
+            onLoadMore: fn(),
+        },
     },
 };

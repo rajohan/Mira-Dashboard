@@ -20,6 +20,7 @@ import {
 import { createDashboardRouter } from "../router.tsx";
 import type { DashboardWebAuthnClient } from "../security/webauthn/webauthnClient.ts";
 import { captureExpectedConsoleErrors } from "../test/expectedConsoleError.ts";
+import { installIntersectionObserverHarness } from "../test/intersectionObserverTest.ts";
 import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
 import {
     agentConfigurationQueryKey,
@@ -412,6 +413,7 @@ describe("Dashboard agents route", () => {
     });
 
     test("loads an older keyset page without replacing the newest history", async () => {
+        const observer = installIntersectionObserverHarness();
         const queryClient = createDashboardQueryClient();
         queryClients.push(queryClient);
         const router = createDashboardRouter(
@@ -432,16 +434,15 @@ describe("Dashboard agents route", () => {
                 />
             )
         );
-        const user = userEvent.setup();
-
         await expectAgentShellReady();
         expect(await screen.findByText("Newest agent task")).toBeTruthy();
         expect(
             screen.getByRole("columnheader", { name: "Started" }).querySelector("button")
         ).toBeNull();
-        await user.click(screen.getByRole("button", { name: "Load older tasks" }));
+        act(() => observer.intersectLatest());
         expect(await screen.findByText("Older agent task")).toBeTruthy();
         expect(screen.getByText("Newest agent task")).toBeTruthy();
+        observer.restore();
     });
 
     test("recreates agent collections after the authenticated cache is reset", async () => {
