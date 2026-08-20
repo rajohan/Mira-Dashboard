@@ -240,9 +240,9 @@ export function ReportBrowser() {
         JSON.stringify(filters ?? null),
         deletedReportIds
     );
-    const archivePageError = query.data === undefined ? null : query.error;
+    const archivePageError = query.isFetchNextPageError ? query.error : null;
     const catalogError =
-        liveHead.error ?? (query.data === undefined ? query.error : null);
+        liveHead.error ?? (query.isFetchNextPageError ? null : query.error);
     const catalogHasData = liveHead.data !== undefined || query.data !== undefined;
     const retryCatalog = () =>
         void Promise.allSettled([liveHead.refetch(), query.refetch()]);

@@ -124,6 +124,8 @@ export function NotificationPanel({
             historyFilters
         )
     );
+    const historyPageError = history.isFetchNextPageError ? history.error : null;
+    const historyRefreshError = history.isFetchNextPageError ? null : history.error;
     const markRead = useMarkNotificationReadMutation();
     const deleteNotification = useDeleteNotificationMutation();
     const markAllRead = useMarkAllNotificationsReadMutation();
@@ -299,6 +301,26 @@ export function NotificationPanel({
             <Alert className="mt-3" focusOnError={false} message={actionError} />
             <Alert
                 action={
+                    historyRefreshError === null ? undefined : (
+                        <Button
+                            disabled={actionsDisabled}
+                            onClick={() => void history.refetch()}
+                            size="sm"
+                            variant="secondary"
+                        >
+                            Try again
+                        </Button>
+                    )
+                }
+                className="mt-3"
+                message={
+                    historyRefreshError === null
+                        ? undefined
+                        : dashboardBrowserFailureMessage(historyRefreshError)
+                }
+            />
+            <Alert
+                action={
                     latestError === null ? undefined : (
                         <Button
                             disabled={actionsDisabled}
@@ -332,11 +354,11 @@ export function NotificationPanel({
                     {firstHistoryCursor !== undefined && (
                         <InfiniteScrollTrigger
                             className="py-2"
-                            {...(history.error === null
+                            {...(historyPageError === null
                                 ? {}
                                 : {
                                       error: dashboardBrowserFailureMessage(
-                                          history.error
+                                          historyPageError
                                       ),
                                   })}
                             hasMore={!historyEnabled || history.hasNextPage}
@@ -356,10 +378,10 @@ export function NotificationPanel({
                     items={notifications}
                     label="Notifications"
                     pagination={{
-                        ...(history.error === null
+                        ...(historyPageError === null
                             ? {}
                             : {
-                                  error: dashboardBrowserFailureMessage(history.error),
+                                  error: dashboardBrowserFailureMessage(historyPageError),
                               }),
                         hasMore:
                             firstHistoryCursor !== undefined &&

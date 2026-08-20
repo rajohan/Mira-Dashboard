@@ -132,9 +132,9 @@ export function TaskProgressSection({ taskId }: TaskProgressSectionProps) {
         evictedUpdateIds,
         archiveFirstPageResetKey
     );
-    const progressPageError = progress.data === undefined ? null : progress.error;
+    const progressPageError = progress.isFetchNextPageError ? progress.error : null;
     const progressFailure =
-        progressLiveHead.error ?? (progress.data === undefined ? progress.error : null);
+        progressLiveHead.error ?? (progress.isFetchNextPageError ? null : progress.error);
     const failure =
         progressFailure ??
         addProgress.error ??
