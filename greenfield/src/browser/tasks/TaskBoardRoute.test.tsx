@@ -34,6 +34,7 @@ import { createDashboardRouter } from "../router.tsx";
 import type { DashboardWebAuthnClient } from "../security/webauthn/webauthnClient.ts";
 import { emptyNotificationListResult } from "../test/notifications.ts";
 import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
+import { TaskBoard } from "./TaskBoard.tsx";
 import { taskQueryKey } from "./taskQueries.ts";
 
 const originalActEnvironment: unknown = Reflect.get(
@@ -351,6 +352,50 @@ afterEach(async () => {
 });
 
 describe("Dashboard task route", () => {
+    test("owns the global continuation in only the most populated column", () => {
+        const task = (index: number, status: TaskSummary["status"]): TaskSummary => ({
+            createdAtMs: timestampMs - index,
+            id: `019fd984-63e8-7404-a7da-80c6f24379${index.toString().padStart(2, "0")}`,
+            labels: [],
+            number: index + 1,
+            priority: "medium",
+            status,
+            title: `Task ${index + 1}`,
+            updatedAtMs: timestampMs - index,
+            version: 1,
+        });
+        const view = render(
+            <TaskBoard
+                cronJobsById={new Map()}
+                disabled={false}
+                onMoveTask={() => {}}
+                onSelectTask={() => {}}
+                pagination={{
+                    hasMore: true,
+                    loading: false,
+                    loadingLabel: "Loading more tasks…",
+                    onLoadMore: () => {},
+                }}
+                tasks={[task(0, "todo"), task(1, "in-progress"), task(2, "in-progress")]}
+            />
+        );
+
+        expect(
+            view.container.querySelectorAll("[data-infinite-scroll-trigger]")
+        ).toHaveLength(1);
+        const activeColumn = screen
+            .getByRole("heading", { name: "In progress" })
+            .closest("section");
+        expect(activeColumn).not.toBeNull();
+        expect(
+            within(activeColumn!).getByRole("region", {
+                name: "In progress tasks scroll area",
+            })
+        ).toContainElement(
+            view.container.querySelector("[data-infinite-scroll-trigger]")
+        );
+    });
+
     test("renders the authenticated four-column board", async () => {
         const transport = new TaskTransport();
         renderTaskRoute(transport);

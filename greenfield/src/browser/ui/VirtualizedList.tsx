@@ -17,6 +17,8 @@ interface VirtualizedListProps<TItem> {
     readonly label: string;
     readonly listRole?: "list" | "tree";
     readonly pagination?: InfiniteScrollContinuation;
+    /** Keeps every row mounted when row-local unsaved state must survive scrolling. */
+    readonly preserveItemState?: boolean;
     readonly renderItem: (item: TItem) => ReactNode;
 }
 
@@ -31,6 +33,7 @@ export function VirtualizedList<TItem>({
     label,
     listRole,
     pagination,
+    preserveItemState = false,
     renderItem,
 }: VirtualizedListProps<TItem>) {
     return (
@@ -43,7 +46,7 @@ export function VirtualizedList<TItem>({
             }}
         >
             {({ containerRef, measureElement, scrollContainerRef, virtualItems }) => {
-                const virtualized = virtualItems.length > 0;
+                const virtualized = !preserveItemState && virtualItems.length > 0;
                 // Preserve complete SSR/test semantics until a real scroll viewport is measured.
                 const fallbackCount = items.length;
                 let fallbackStart = 0;

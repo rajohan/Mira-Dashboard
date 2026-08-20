@@ -16,7 +16,10 @@ describe("InfiniteScrollTrigger", () => {
             readonly scrollMargin = "0px";
             readonly thresholds = [0];
 
-            constructor(callback: IntersectionObserverCallback) {
+            constructor(
+                callback: IntersectionObserverCallback,
+                _options?: IntersectionObserverInit
+            ) {
                 callbacks.push(callback);
             }
 

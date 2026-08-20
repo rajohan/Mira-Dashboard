@@ -70,6 +70,15 @@ export function TaskBoard({
             tasks.filter((task) => task.status === status).toSorted(compareTasks),
         ])
     ) as Record<TaskStatus, TaskSummary[]>;
+    let continuationStatus: TaskStatus | undefined;
+    for (const { status } of taskStatusDefinitions) {
+        if (
+            continuationStatus === undefined ||
+            tasksByStatus[status].length > tasksByStatus[continuationStatus].length
+        ) {
+            continuationStatus = status;
+        }
+    }
 
     return (
         <DragDropProvider
@@ -91,7 +100,9 @@ export function TaskBoard({
                         disabled={disabled}
                         key={status}
                         onSelectTask={onSelectTask}
-                        pagination={pagination}
+                        pagination={
+                            status === continuationStatus ? pagination : undefined
+                        }
                         status={status}
                         tasks={tasksByStatus[status]}
                     />

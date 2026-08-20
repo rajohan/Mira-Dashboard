@@ -64,7 +64,7 @@ export function AutomationSecuritySection() {
             staleTime: 0,
         })
     );
-    const principalPageError = principals.data === undefined ? null : principals.error;
+    const principalPageError = principals.isFetchNextPageError ? principals.error : null;
     const principalForm = useForm({
         defaultValues: {
             capabilities: [] as ApplicationCapability[],
@@ -215,7 +215,7 @@ export function AutomationSecuritySection() {
                     size="sm"
                 />
             )}
-            {principals.isError && principals.data === undefined && (
+            {principals.error !== null && !principals.isFetchNextPageError && (
                 <Alert
                     action={
                         <Button
@@ -231,7 +231,7 @@ export function AutomationSecuritySection() {
                     message={dashboardBrowserFailureMessage(principals.error)}
                 />
             )}
-            {principals.isSuccess &&
+            {principals.data !== undefined &&
                 principals.data.pages.every((page) => page.principals.length === 0) && (
                     <EmptyState
                         className="mt-5"
@@ -240,7 +240,7 @@ export function AutomationSecuritySection() {
                         title="No automation accounts"
                     />
                 )}
-            {principals.isSuccess && (
+            {principals.data !== undefined && (
                 <VirtualizedList
                     className="mt-5"
                     estimateSize={() => 320}
@@ -248,6 +248,7 @@ export function AutomationSecuritySection() {
                     itemClassName="pb-4"
                     items={principals.data.pages.flatMap((page) => page.principals)}
                     label="Automation accounts"
+                    preserveItemState
                     pagination={{
                         ...(principalPageError === null
                             ? {}

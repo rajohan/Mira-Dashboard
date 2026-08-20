@@ -1,9 +1,11 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 
 import { createColumnHelper, useTable } from "@tanstack/react-table";
+import { useState } from "react";
 
 import { dashboardTableFeatures } from "./dashboardTableFeatures.ts";
 import { DataTable } from "./DataTable.tsx";
+import { VirtualizedList } from "./VirtualizedList.tsx";
 import { Virtualizer } from "./Virtualizer.tsx";
 
 const { fireEvent, render, screen, within } = await import("@testing-library/react");
@@ -79,6 +81,17 @@ const virtualRows = Object.freeze(
     }))
 );
 
+function StatefulRow({ id }: Readonly<{ id: string }>) {
+    const [value, setValue] = useState(id);
+    return (
+        <input
+            aria-label={id}
+            onChange={(event) => setValue(event.currentTarget.value)}
+            value={value}
+        />
+    );
+}
+
 interface TableFixtureProps {
     readonly data: readonly FixtureRow[];
     readonly virtualized: boolean;
@@ -116,6 +129,31 @@ function TableFixture({ data, virtualized }: TableFixtureProps) {
 }
 
 describe("Dashboard data table and virtualizer", () => {
+    test("keeps stateful virtual-list rows mounted across scrolling", async () => {
+        render(
+            <VirtualizedList
+                estimateSize={() => 36}
+                getKey={(item) => item}
+                items={virtualRows.map(({ id }) => id)}
+                label="Stateful rows"
+                preserveItemState
+                renderItem={(item) => <StatefulRow id={item} />}
+            />
+        );
+        const list = screen.getByRole("list", { name: "Stateful rows" });
+        const scrollRegion = list.parentElement!;
+        const firstInput = screen.getByRole("textbox", { name: "row-0" });
+        fireEvent.change(firstInput, { target: { value: "unsaved draft" } });
+
+        scrollRegion.scrollTop = 3000;
+        fireEvent.scroll(scrollRegion);
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+        expect(within(list).getAllByRole("listitem")).toHaveLength(virtualRows.length);
+        expect(screen.getByRole("textbox", { name: "row-0" })).toBe(firstInput);
+        expect(firstInput).toHaveValue("unsaved draft");
+    });
+
     test("renders a complete TanStack table without virtualization", () => {
         render(<TableFixture data={staticRows} virtualized={false} />);
 

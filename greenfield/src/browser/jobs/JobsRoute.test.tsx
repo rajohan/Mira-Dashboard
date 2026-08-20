@@ -618,7 +618,10 @@ describe("Dashboard jobs route", () => {
             readonly rootMargin = "400px 0px";
             readonly scrollMargin = "0px";
             readonly thresholds = [0];
-            constructor(callback: IntersectionObserverCallback) {
+            constructor(
+                callback: IntersectionObserverCallback,
+                _options?: IntersectionObserverInit
+            ) {
                 intersectionCallbacks.push(callback);
             }
             disconnect(): void {}
@@ -1057,7 +1060,10 @@ describe("Dashboard jobs route", () => {
             readonly rootMargin = "400px 0px";
             readonly scrollMargin = "0px";
             readonly thresholds = [0];
-            constructor(callback: IntersectionObserverCallback) {
+            constructor(
+                callback: IntersectionObserverCallback,
+                _options?: IntersectionObserverInit
+            ) {
                 intersectionCallbacks.push(callback);
             }
             disconnect(): void {}

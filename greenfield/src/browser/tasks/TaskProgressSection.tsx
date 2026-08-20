@@ -200,6 +200,7 @@ export function TaskProgressSection({ taskId }: TaskProgressSectionProps) {
                     itemClassName="pb-3"
                     items={updates}
                     label="Task progress updates"
+                    preserveItemState
                     pagination={{
                         ...(progressPageError === null
                             ? {}

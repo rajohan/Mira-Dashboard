@@ -598,6 +598,10 @@ describe("OpenClaw scheduled jobs browser", () => {
             readonly rootMargin = "0px";
             readonly scrollMargin = "0px";
             readonly thresholds = [0];
+            constructor(
+                _callback: IntersectionObserverCallback,
+                _options?: IntersectionObserverInit
+            ) {}
             disconnect(): void {}
             observe = observe;
             takeRecords(): IntersectionObserverEntry[] {

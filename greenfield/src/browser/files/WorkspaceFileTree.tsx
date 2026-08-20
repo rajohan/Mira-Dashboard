@@ -169,7 +169,7 @@ export function WorkspaceFileTree({
                   snapshotById,
               });
     return (
-        <nav aria-label="Workspace file tree" className="min-h-0 flex-1">
+        <nav aria-label="Workspace file tree" className="flex min-h-0 flex-1 flex-col">
             <div className="p-2">
                 {roots.map((root) => {
                     const selected = root.id === selectedRootId;

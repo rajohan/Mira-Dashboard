@@ -37,6 +37,7 @@ import {
 import { createDashboardRouter } from "../router.tsx";
 import { emptyNotificationListResult } from "../test/notifications.ts";
 import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
+import { automationPrincipalsQueryKey } from "./securityQueries.ts";
 import {
     createSecurityVerificationCoordinator,
     type SecurityVerificationCoordinator,
@@ -219,6 +220,7 @@ class SecurityTransport implements DashboardTrpcTransport {
     ) => Promise<unknown> = (path) =>
         Promise.reject(new TypeError(`Unexpected mutation: ${path}`));
     principals: AutomationPrincipalSummary[] = [];
+    principalListError: Error | undefined;
     sessions: AuthSessionSummary[] = [currentSession, otherSession];
     summary: AccountSecuritySummary;
 
@@ -270,6 +272,9 @@ class SecurityTransport implements DashboardTrpcTransport {
                 });
             }
             case "automationSecurity.listPrincipals": {
+                if (this.principalListError !== undefined) {
+                    return Promise.reject(this.principalListError);
+                }
                 return Promise.resolve({
                     activePrincipalCount: this.principals.filter(
                         (principal) => !principal.disabled
@@ -457,6 +462,42 @@ afterEach(async () => {
 });
 
 describe("Dashboard account security route", () => {
+    test("retries a failed principal refetch while retaining cached accounts", async () => {
+        const transport = new SecurityTransport();
+        transport.principals = [automationPrincipal];
+        const queryClient = renderAccountSecurity(transport);
+
+        expect(await screen.findByText("OpenClaw heartbeat")).toBeVisible();
+        transport.principalListError = new TypeError("private principal failure");
+        await act(async () => {
+            await queryClient.invalidateQueries({
+                queryKey: automationPrincipalsQueryKey,
+            });
+        });
+
+        expect(screen.getByText("OpenClaw heartbeat")).toBeVisible();
+        const automationSection = screen
+            .getByRole("heading", { level: 2, name: "Automation access" })
+            .closest("section")!;
+        await waitFor(() =>
+            expect(within(automationSection).getByRole("alert")).toBeVisible()
+        );
+        const callsBeforeRetry = transport.calls.filter(
+            ({ path }) => path === "automationSecurity.listPrincipals"
+        ).length;
+        transport.principalListError = undefined;
+        await userEvent
+            .setup()
+            .click(within(automationSection).getByRole("button", { name: "Try again" }));
+        await waitFor(() =>
+            expect(
+                transport.calls.filter(
+                    ({ path }) => path === "automationSecurity.listPrincipals"
+                )
+            ).toHaveLength(callsBeforeRetry + 1)
+        );
+    });
+
     test("renders protected security inventories and redacted audit history", async () => {
         const transport = new SecurityTransport();
         transport.auditEvents = [

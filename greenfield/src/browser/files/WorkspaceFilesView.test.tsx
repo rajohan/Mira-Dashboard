@@ -116,6 +116,7 @@ describe("WorkspaceFilesView", () => {
         const fileTree = screen.getByRole("navigation", {
             name: "Workspace file tree",
         });
+        expect(fileTree).toHaveClass("flex", "min-h-0", "flex-1", "flex-col");
         expect(fileTree.closest("aside")?.parentElement).toHaveClass(
             "lg:min-h-0",
             "lg:flex-1"

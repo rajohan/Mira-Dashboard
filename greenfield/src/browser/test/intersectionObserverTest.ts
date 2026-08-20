@@ -29,7 +29,10 @@ export function installIntersectionObserverHarness(): IntersectionObserverHarnes
         readonly thresholds = [];
         readonly scrollMargin = "0px";
         readonly record: (typeof observers)[number];
-        constructor(callback: IntersectionObserverCallback) {
+        constructor(
+            callback: IntersectionObserverCallback,
+            _options?: IntersectionObserverInit
+        ) {
             this.record = { callback };
             observers.push(this.record);
         }
