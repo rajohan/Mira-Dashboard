@@ -29,7 +29,7 @@
       "additionalProperties": false
     },
     "idleTimeoutMs": {
-      "const": 600000
+      "const": 1800000
     },
     "mode": {
       "const": "pty"
@@ -88,7 +88,7 @@
       "const": 32768
     },
     "sessionMaximumDurationMs": {
-      "const": 1800000
+      "const": 28800000
     },
     "supportsInput": {
       "const": true

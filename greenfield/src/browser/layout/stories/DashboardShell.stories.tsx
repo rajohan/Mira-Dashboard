@@ -107,7 +107,7 @@ function TerminalLayoutStoryPage(): ReactElement {
         <TerminalPageLayout>
             <section
                 aria-label="Interactive terminal canvas"
-                className="border-primary-700 bg-primary-950 min-h-0 w-full flex-1 overflow-hidden rounded-xl border p-4"
+                className="border-primary-700 bg-primary-950 mb-8 min-h-0 w-full flex-1 overflow-hidden rounded-xl border p-4"
             >
                 <p className="truncate font-mono text-emerald-300">
                     operator@dashboard:~/greenfield$
@@ -204,21 +204,14 @@ async function expectTerminalLayoutGeometry(
     sidebarExpected: boolean
 ): Promise<void> {
     const canvas = within(canvasElement);
-    const heading = await canvas.findByRole("heading", { name: "Terminal" });
-    const pageHeader = heading.closest("header");
-    const routeLayout = pageHeader?.parentElement?.parentElement;
     const main = canvasElement.querySelector<HTMLElement>("#dashboard-content");
     const sidebar = canvasElement.querySelector<HTMLElement>("aside");
     const terminalCanvas = canvas.getByRole("region", {
         name: "Interactive terminal canvas",
     });
+    const routeLayout = terminalCanvas.parentElement?.parentElement;
 
-    if (
-        pageHeader === null ||
-        routeLayout === null ||
-        routeLayout === undefined ||
-        main === null
-    ) {
+    if (routeLayout === null || routeLayout === undefined || main === null) {
         throw new Error("The Terminal page layout fixture is incomplete.");
     }
 
@@ -237,18 +230,22 @@ async function expectTerminalLayoutGeometry(
     const expectedWidth = Math.min(availableWidth, finitePixelValue(routeStyle.maxWidth));
     const expectedLeft = contentLeft + (availableWidth - expectedWidth) / 2;
     const routeBounds = routeLayout.getBoundingClientRect();
-    const headerBounds = pageHeader.getBoundingClientRect();
     const terminalBounds = terminalCanvas.getBoundingClientRect();
+    const terminalStyle = getComputedStyle(terminalCanvas);
 
     await expect(Math.abs(routeBounds.left - expectedLeft)).toBeLessThanOrEqual(1);
     await expect(Math.abs(routeBounds.width - expectedWidth)).toBeLessThanOrEqual(1);
-    await expect(Math.abs(headerBounds.left - routeBounds.left)).toBeLessThanOrEqual(1);
-    await expect(Math.abs(headerBounds.right - routeBounds.right)).toBeLessThanOrEqual(1);
     await expect(Math.abs(terminalBounds.left - routeBounds.left)).toBeLessThanOrEqual(1);
     await expect(Math.abs(terminalBounds.right - routeBounds.right)).toBeLessThanOrEqual(
         1
     );
-    await expect(Math.abs(terminalBounds.bottom - contentBottom)).toBeLessThanOrEqual(1);
+    await expect(
+        Math.abs(
+            terminalBounds.bottom +
+                finitePixelValue(terminalStyle.marginBottom) -
+                contentBottom
+        )
+    ).toBeLessThanOrEqual(1);
     await expect(terminalBounds.height).toBeGreaterThan(200);
     await expect(main.scrollWidth).toBe(main.clientWidth);
 

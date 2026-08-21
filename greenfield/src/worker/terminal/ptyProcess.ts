@@ -228,7 +228,7 @@ function serviceEnvironmentArguments(user: PtyRuntimeUser): readonly string[] {
         "LC_ALL=C.UTF-8",
         `LOGNAME=${user.userName}`,
         `PATH=${fixedPath}`,
-        String.raw`PS1=\u@\h:\w\$ `,
+        String.raw`PS1=\[\e[32m\]\u@\h\[\e[34m\]:\w\[\e[0m\]\$ `,
         `SHELL=${shellExecutable}`,
         `TERM=${terminalName}`,
         `USER=${user.userName}`,
