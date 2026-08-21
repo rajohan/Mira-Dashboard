@@ -140,7 +140,9 @@ function hasHeaderToken(value: string | undefined, expected: string): boolean {
 function createUpgradeResponse(key: string): Buffer {
     // RFC 6455 section 4.2.2 mandates SHA-1 for Sec-WebSocket-Accept; this is
     // protocol framing, not a cryptographic integrity or credential decision.
-    const accept = new Bun.CryptoHasher("sha1") // lgtm[js/weak-cryptographic-algorithm]
+    // RFC 6455 mandates SHA-1 for this public handshake transform; it is not a
+    // password, signature, authentication, or integrity primitive.
+    const accept = new Bun.CryptoHasher("sha1")
         .update(`${key}${webSocketGuid}`, "ascii")
         .digest("base64");
     return Buffer.from(

@@ -225,6 +225,8 @@ async function preparePrivateChildDirectory(
         const heldDescriptorPath = descriptorPath(handle);
         const [resolvedPath, entry, held] = await Promise.all([
             realpath(heldDescriptorPath),
+            // The pathname result is accepted only when it still identifies the
+            // O_NOFOLLOW-held descriptor opened above.
             lstat(anchoredPath, { bigint: true }),
             handle.stat({ bigint: true }),
         ]);
@@ -302,7 +304,7 @@ async function prepareReviewedFile(
             if (errorCode(error) !== "EEXIST") throw error;
             // EEXIST only selects reuse. The held parent and O_NOFOLLOW confine
             // this open; its inode is matched to the anchored entry before return.
-            handle = await open(anchoredPath, existingFileOpenFlags); // lgtm[js/file-system-race]
+            handle = await open(anchoredPath, existingFileOpenFlags);
         }
         const heldDescriptorPath = descriptorPath(handle);
         const [resolvedPath, entry, held] = await Promise.all([

@@ -1378,19 +1378,17 @@ export function createDockerUpdaterGitSync(
                 change.expectedAfterContentSha256,
             ])
         );
-        let staged = false;
         let tree: string;
         try {
             // No staged entries existed at preflight, so restoring these exact paths is
             // safe even when validation fails before `git add` changes the index.
-            staged = true;
             await stageExactChanges(changes, signal);
             onCommitStarting?.();
             // Freeze and revalidate the entire index. A concurrent stage before
             // `write-tree` is rejected; one after it cannot enter this tree.
             tree = await writeExactTree(head, expectedAfter, signal);
         } catch (error) {
-            if (staged && !(await restoreStaging(relativePaths))) {
+            if (!(await restoreStaging(relativePaths))) {
                 return unknownOutcome(relativePaths);
             }
             return unavailable(failureReason(error));

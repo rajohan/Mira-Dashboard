@@ -543,7 +543,7 @@ export function createPreviewSystemdRuntime(
 
     const start: PreviewRuntimePort["start"] = async (specification, gateway, signal) => {
         assertLaunchSpecification(specification, environment);
-        await bindGateway(specification.unitName, gateway, signal);
+        await bindGateway(specification.unitName, gateway);
         const result = await runProcess(
             runner,
             specification.argv,

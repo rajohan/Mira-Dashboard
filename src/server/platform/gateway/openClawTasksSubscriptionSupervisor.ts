@@ -86,11 +86,10 @@ export function createOpenClawTasksSubscriptionSupervisor(
                     return;
                 }
                 await subscription.done;
-                if (!stopped) {
-                    throw new Error(
-                        "OpenClaw tasks subscription ended without an explicit close"
-                    );
-                }
+                if (signal.aborted) return;
+                throw new Error(
+                    "OpenClaw tasks subscription ended without an explicit close"
+                );
             } catch (error) {
                 if (!stopped) {
                     options.onFailure?.(error);

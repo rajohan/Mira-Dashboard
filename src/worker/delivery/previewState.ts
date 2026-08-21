@@ -378,6 +378,8 @@ export async function prepareManagedPreviewStateRoot(
             fail("state-unavailable");
         }
         try {
+            // O_NOFOLLOW opens the object itself; all validation and reads below
+            // use this same held descriptor rather than the checked pathname.
             handle = await open(markerPath, fileReadFlags);
             const metadata = await handle.stat({ bigint: true });
             if (

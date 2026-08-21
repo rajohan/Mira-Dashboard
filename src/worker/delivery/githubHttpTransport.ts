@@ -410,6 +410,7 @@ export function createDeliveryGitHubHttpTransport(
     }
 
     let identityPromise: Promise<DeliveryGitHubActor> | undefined;
+    let identityRequestGeneration = 0;
 
     async function rawRequest(
         operation: DeliveryGitHubHttpOperation,
@@ -477,6 +478,8 @@ export function createDeliveryGitHubHttpTransport(
             signal ?? new AbortController().signal,
             AbortSignal.timeout(deadlineMs),
         ]);
+        const generation = identityRequestGeneration + 1;
+        identityRequestGeneration = generation;
         const pending = (async () => {
             let providerActor: v.InferOutput<typeof providerActorSchema>;
             try {
@@ -504,7 +507,7 @@ export function createDeliveryGitHubHttpTransport(
         try {
             return await pending;
         } catch (error) {
-            if (identityPromise === pending) identityPromise = undefined;
+            if (identityRequestGeneration === generation) identityPromise = undefined;
             throw error instanceof DeliveryGitHubError
                 ? error
                 : new DeliveryGitHubError("unavailable");

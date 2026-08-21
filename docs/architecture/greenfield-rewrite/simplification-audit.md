@@ -77,3 +77,26 @@ Patch coverage is also a local merge gate. It compares executable changed lines 
 with merged LCOV and requires at least 85%. GitHub uses the pull request base; local runs use
 `origin/main` unless `MIRA_DASHBOARD_COVERAGE_BASE` selects a nearer stacked-PR base. Codecov remains
 the independent hosted enforcement.
+
+## Suppression and ignore audit
+
+Every checked-in lint, type, coverage, test, formatter, and CodeQL suppression was reviewed. There
+are no skipped or todo tests, production TypeScript diagnostic suppressions, coverage exclusions,
+or blanket source-tree lint exclusions.
+
+| Mechanism                        |        Retained scope | Reason                                                                                                                                                                                                                                                                                                                                                |
+| -------------------------------- | --------------------: | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CodeQL `file-system-race`        | 4 reviewed operations | Node/Bun expose descriptor-safe `O_NOFOLLOW` opens but not `openat`/`unlinkat`. Each pathname step is paired with a held descriptor plus post-operation inode/device validation and adversarial swap tests. Ineffective inline `lgtm` directives were removed; analyzer false positives are reviewed with this evidence rather than hidden in source. |
+| CodeQL weak SHA-1                |         1 test helper | WebSocket RFC 6455 requires SHA-1 for the public handshake accept value; it is not used for authentication, signatures, or stored secrets. The reason remains an ordinary code comment, not an analyzer directive.                                                                                                                                    |
+| Oxlint/ESLint rule directives    |        7 single lines | Framework-owned dialog semantics, WAI-ARIA composite roles, user-provided media without authored captions, one responsive focus trap, one DOM-derived React synchronization, and one HappyDOM regression probe. Each directive names one rule and explains the constraint.                                                                            |
+| TypeScript diagnostic directives |    test fixtures only | Literal fixture strings verify that the source-boundary checker rejects these directives; one compiled negative probe is marked with `@ts-expect-error`. Production policy rejects all such directives.                                                                                                                                               |
+
+The prior CodeQL missing-await suppression was removed by using an explicit request generation for
+the shared in-flight identity slot. Oxlint also rejects unused disable directives, so a suppression
+whose triggering condition disappears fails the normal check.
+
+Configuration ignores are limited to generated/build/runtime ownership boundaries: dependencies,
+Git/editor metadata, logs, root runtime `data/`, coverage, distribution output, and TypeScript build
+metadata. Oxfmt additionally leaves generated documentation, generated migrations, and minified
+assets byte-stable. Test files are excluded only from production-specific trust-direction rules;
+they are still linted, formatted, typechecked, discovered exactly, and executed by their suite.

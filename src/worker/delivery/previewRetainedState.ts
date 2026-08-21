@@ -463,6 +463,8 @@ async function emptyDirectory(
                         fail();
                     await rename(child, retired);
                     await directory.handle.sync();
+                    // Rename occurs inside the held directory; verify the renamed
+                    // entry still identifies the descriptor-held inode.
                     const named = await lstat(retired, { bigint: true });
                     if (!validFile(named, root.device) || named.ino !== held.ino) fail();
                     await unlink(retired);

@@ -386,9 +386,7 @@ export function createDashboardMainGitSync(
         if (remote.split(/\s+/u)[0] !== expectedRemoteHead) {
             throw new MainGitBoundaryError("conflict");
         }
-        let mutationStarted = false;
         try {
-            mutationStarted = true;
             await required(
                 [
                     "fetch",
@@ -410,7 +408,7 @@ export function createDashboardMainGitSync(
             }
             await required(["merge", "--ff-only", expectedRemoteHead], root, combined);
         } catch (error) {
-            if (mutationStarted && combined.aborted) {
+            if (combined.aborted) {
                 return Object.freeze({
                     headSha: expectedRemoteHead,
                     outcome: "unknown-outcome" as const,
