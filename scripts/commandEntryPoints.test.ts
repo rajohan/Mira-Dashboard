@@ -6,6 +6,7 @@ import { parseCheckCommandArguments } from "./checkCommand.ts";
 import { parseDeliveryCommandArguments } from "./deliveryCommand.ts";
 import { parseDevelopmentCommandArguments } from "./developmentCommand.ts";
 import { parseGenerateCommandArguments } from "./generateCommand.ts";
+import { installGitHooks } from "./installGitHooks.ts";
 import {
     productionPreflightCommands,
     runProductionPreflight,
@@ -118,6 +119,36 @@ describe("repository command entrypoints", () => {
                 run: () => Promise.resolve(0),
             })
         ).rejects.toThrow("requires Bun 1.4.0");
+    });
+
+    test("installs portable Git hooks relative to the current package root", async () => {
+        const calls: Array<readonly [string, string]> = [];
+        expect(
+            await installGitHooks("/checkout", {
+                readPrefix: () => Promise.resolve([0, ""]),
+                run: (root, hooksPath) => {
+                    calls.push([root, hooksPath]);
+                    return Promise.resolve(0);
+                },
+            })
+        ).toBe(0);
+        expect(calls).toEqual([["/checkout", ".githooks"]]);
+        expect(
+            await installGitHooks("/checkout/greenfield", {
+                readPrefix: () => Promise.resolve([0, "greenfield/"]),
+                run: (root, hooksPath) => {
+                    calls.push([root, hooksPath]);
+                    return Promise.resolve(0);
+                },
+            })
+        ).toBe(0);
+        expect(calls.at(-1)).toEqual(["/checkout/greenfield", "greenfield/.githooks"]);
+        expect(
+            await installGitHooks("/checkout", {
+                readPrefix: () => Promise.resolve([7, ""]),
+                run: () => Promise.resolve(0),
+            })
+        ).toBe(7);
     });
 
     test("runs the unchanged production preflight sequentially and stops on failure", async () => {
