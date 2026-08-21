@@ -31,7 +31,7 @@ export const Search: Story = {
     args: Ready.args,
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement);
-        fireEvent.change(
+        await fireEvent.change(
             await canvas.findByRole("searchbox", { name: "Search documentation" }),
             { target: { value: "Mira Dashboard raw HTTP API" } }
         );
