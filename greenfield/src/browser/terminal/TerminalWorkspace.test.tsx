@@ -13,7 +13,7 @@ const userEvent = userEventModule.default;
 const runtime: TerminalRuntime = {
     clientMessageMaximumBytes: 16 * 1024,
     defaultLocation: { path: "/", rootId: "openclaw" },
-    idleTimeoutMs: 10 * 60 * 1000,
+    idleTimeoutMs: 30 * 60 * 1000,
     mode: "pty",
     outputReplayMaximumBytes: 256 * 1024,
     reconnectGraceMs: 15 * 1000,
@@ -23,7 +23,7 @@ const runtime: TerminalRuntime = {
         { defaultPath: "/", id: "openclaw", label: "OpenClaw" },
     ],
     serverMessageMaximumBytes: 32 * 1024,
-    sessionMaximumDurationMs: 30 * 60 * 1000,
+    sessionMaximumDurationMs: 8 * 60 * 60 * 1000,
     supportsInput: true,
     supportsPty: true,
     supportsResize: true,
@@ -72,6 +72,7 @@ function renderWorkspace(overrides: Partial<TerminalWorkspaceProps> = {}) {
 describe("interactive terminal workspace", () => {
     test("starts only from a canonical reviewed location", () => {
         const handlers = renderWorkspace();
+        expect(screen.getByText("Terminal not started")).toBeTruthy();
         fireEvent.click(screen.getByRole("button", { name: "Start terminal" }));
         expect(handlers.onStart).toHaveBeenCalledTimes(1);
 
@@ -116,10 +117,14 @@ describe("interactive terminal workspace", () => {
 
         expect(screen.queryByRole("searchbox")).toBeNull();
         expect(screen.queryByRole("button", { name: "Send Ctrl+C" })).toBeNull();
+        expect(
+            screen.getByText(/Ends after 30 minutes idle · 8 hour limit/)
+        ).toBeTruthy();
         expect(handlers.onCopySelection).toHaveBeenCalledTimes(1);
         expect(handlers.onFocus).toHaveBeenCalledTimes(1);
         expect(handlers.onClear).toHaveBeenCalledTimes(1);
         expect(screen.getByTestId("terminal-canvas")).toBeTruthy();
+        expect(screen.queryByText("Terminal not started")).toBeNull();
         expect(screen.getByRole("button", { name: "End terminal" })).toBeEnabled();
     });
 

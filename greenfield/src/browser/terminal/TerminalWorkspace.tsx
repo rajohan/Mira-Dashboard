@@ -142,9 +142,10 @@ export function TerminalWorkspace({
                             {inputPaused && <Badge variant="warning">Input paused</Badge>}
                         </div>
                         <Text className="mt-1" size="sm" tone="muted">
-                            {dimensions.columns} × {dimensions.rows} · Ends automatically
-                            after {Math.round(runtime.sessionMaximumDurationMs / 60_000)}
-                            minutes
+                            {dimensions.columns} × {dimensions.rows} · Ends after{" "}
+                            {Math.round(runtime.idleTimeoutMs / 60_000)} minutes idle ·{" "}
+                            {Math.round(runtime.sessionMaximumDurationMs / 3_600_000)}{" "}
+                            hour limit
                         </Text>
                         {session !== undefined && (
                             <Text className="mt-1" size="sm" tone="muted">
@@ -290,7 +291,21 @@ export function TerminalWorkspace({
                         />
                     </div>
                 </div>
-                <div className="min-h-0 flex-1">{canvas}</div>
+                <div className="relative min-h-0 flex-1">
+                    {canvas}
+                    {!hasSession && (
+                        <div className="bg-primary-950/90 pointer-events-none absolute inset-0 flex items-center justify-center p-6 text-center">
+                            <div>
+                                <Text className="font-semibold">
+                                    Terminal not started
+                                </Text>
+                                <Text className="mt-1" size="sm" tone="muted">
+                                    Choose a starting folder to open an interactive shell.
+                                </Text>
+                            </div>
+                        </div>
+                    )}
+                </div>
             </section>
 
             <output aria-live="polite" className="sr-only">

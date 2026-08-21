@@ -501,7 +501,6 @@
         "src/worker/docker/tagPolicy.test.ts": 1,
         "src/worker/logs/logMaintenanceExecutor.test.ts": 1,
         "src/worker/terminal/bunTerminalBrokerIpc.test.ts": 1,
-        "src/worker/terminal/developmentPtyProcess.test.ts": 1,
         "src/server/database/validation/reports.test.ts": 1,
         "src/server/domains/security/authenticationResolution.test.ts": 1,
         "src/server/domains/system/httpProcedureMetrics.test.ts": 1,

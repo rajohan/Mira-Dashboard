@@ -189,7 +189,7 @@ describe("worker systemd PTY process adapter", () => {
                 `--working-directory=${workingDirectory}`,
                 "--property=Type=exec",
                 "--property=KillMode=mixed",
-                "--property=RuntimeMaxSec=1800s",
+                "--property=RuntimeMaxSec=28800s",
                 "--property=MemoryMax=536870912",
                 "--property=TasksMax=128",
                 "--property=CPUQuota=200%",
