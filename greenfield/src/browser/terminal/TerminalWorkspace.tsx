@@ -9,6 +9,7 @@ import {
     type TerminalRuntime,
     type TerminalSessionSummary,
 } from "../../contracts/terminal.ts";
+import { cn } from "../lib/classNames.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Badge } from "../ui/Badge.tsx";
@@ -292,7 +293,9 @@ export function TerminalWorkspace({
                     </div>
                 </div>
                 <div className="relative min-h-0 flex-1">
-                    {canvas}
+                    <div className={cn("size-full", !hasSession && "invisible")}>
+                        {canvas}
+                    </div>
                     {!hasSession && (
                         <div className="bg-primary-950/90 pointer-events-none absolute inset-0 flex items-center justify-center p-6 text-center">
                             <div>

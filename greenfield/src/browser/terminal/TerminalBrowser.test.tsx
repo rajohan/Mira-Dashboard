@@ -62,6 +62,7 @@ const connectedSession: TerminalSessionSummary = {
 function createFakeEmulator() {
     let input: ((data: Uint8Array) => void) | undefined;
     const inputEnabled: boolean[] = [];
+    let resetCalls = 0;
     const emulator: TerminalEmulator = {
         clear() {},
         copySelection: () => Promise.resolve("empty"),
@@ -75,7 +76,9 @@ function createFakeEmulator() {
                 input = undefined;
             };
         },
-        reset() {},
+        reset() {
+            resetCalls += 1;
+        },
         setInputEnabled(enabled) {
             inputEnabled.push(enabled);
         },
@@ -89,6 +92,9 @@ function createFakeEmulator() {
             input?.(data);
         },
         inputEnabled,
+        get resetCalls() {
+            return resetCalls;
+        },
     };
 }
 
@@ -170,6 +176,7 @@ describe("interactive terminal browser lifecycle", () => {
             expect(await screen.findByText("Connected")).toBeTruthy();
             act(() => fakeEmulator.emitInput(new Uint8Array([27, 91, 65])));
             expect(sentInput).toEqual([new Uint8Array([27, 91, 65])]);
+            const resetCallsBeforeEnd = fakeEmulator.resetCalls;
 
             await userEvent
                 .setup()
@@ -188,6 +195,8 @@ describe("interactive terminal browser lifecycle", () => {
                 })
             );
             expect(closeCalls).toBe(1);
+            expect(fakeEmulator.resetCalls).toBe(resetCallsBeforeEnd + 1);
+            expect(screen.getByText("Terminal not started")).toBeTruthy();
         } finally {
             view.unmount();
             queryClient.clear();

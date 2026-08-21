@@ -291,6 +291,7 @@ export function TerminalBrowser({
                         : "Terminal session ended."
                 );
                 emulator.current?.setInputEnabled(false);
+                emulator.current?.reset();
                 void activeQuery.refetch();
                 return;
             }
@@ -570,6 +571,7 @@ export function TerminalBrowser({
             setInputPaused(false);
             setAnnouncement("Terminal ended by operator.");
             emulator.current?.setInputEnabled(false);
+            emulator.current?.reset();
             await activeQuery.refetch();
         } catch (error) {
             setActionError(terminalFailureMessage(error));

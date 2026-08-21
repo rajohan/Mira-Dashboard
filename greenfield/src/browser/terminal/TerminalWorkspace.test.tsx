@@ -73,6 +73,9 @@ describe("interactive terminal workspace", () => {
     test("starts only from a canonical reviewed location", () => {
         const handlers = renderWorkspace();
         expect(screen.getByText("Terminal not started")).toBeTruthy();
+        expect(screen.getByTestId("terminal-canvas").parentElement).toHaveClass(
+            "invisible"
+        );
         fireEvent.click(screen.getByRole("button", { name: "Start terminal" }));
         expect(handlers.onStart).toHaveBeenCalledTimes(1);
 
@@ -124,6 +127,9 @@ describe("interactive terminal workspace", () => {
         expect(handlers.onFocus).toHaveBeenCalledTimes(1);
         expect(handlers.onClear).toHaveBeenCalledTimes(1);
         expect(screen.getByTestId("terminal-canvas")).toBeTruthy();
+        expect(screen.getByTestId("terminal-canvas").parentElement).not.toHaveClass(
+            "invisible"
+        );
         expect(screen.queryByText("Terminal not started")).toBeNull();
         expect(screen.getByRole("button", { name: "End terminal" })).toBeEnabled();
     });
