@@ -346,6 +346,7 @@ const emptyV8CoverageRecord = Object.freeze([
     "BRF:0",
     "BRH:0",
 ]);
+const generatedDocumentationBrowserAsset = "docs/generated/browser-reference.json";
 
 function isEmptyV8CoverageRecord(lines: readonly string[]): boolean {
     return (
@@ -398,6 +399,7 @@ export function normalizeStorybookProductionCoverage(lcov: string): string {
             (sourceLines[0] as string).slice(3)
         );
         if (sourcePath.length === 0 && isEmptyV8CoverageRecord(lines)) continue;
+        if (sourcePath === generatedDocumentationBrowserAsset) continue;
         if (!validateStorybookCoverageSource(sourcePath)) {
             invalidSources.push(sourcePath);
             continue;

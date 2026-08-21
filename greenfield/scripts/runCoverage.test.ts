@@ -528,8 +528,23 @@ describe("coverage runner", () => {
                 )
             )
         ).not.toThrow();
+        expect(
+            normalizeStorybookProductionCoverage(
+                [
+                    "SF:docs/generated/browser-reference.json",
+                    "LF:1",
+                    "LH:1",
+                    "end_of_record",
+                    "SF:src/browser/ui/Badge.tsx",
+                    "LF:3",
+                    "LH:3",
+                    "end_of_record",
+                ].join("\n")
+            )
+        ).toBe("SF:src/browser/ui/Badge.tsx\nLF:3\nLH:3\nend_of_record\n");
         for (const sourcePath of [
             ".storybook/preview.tsx",
+            "docs/generated/other.json",
             "src/browser/ui/stories/Badge.stories.tsx",
             "src/browser/storySupport/dashboardPageStoryHarness.tsx",
             "src/browser/ui/Badge.test.tsx",
