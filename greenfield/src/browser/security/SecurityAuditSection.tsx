@@ -187,15 +187,19 @@ function SecurityAuditTable({
                 <DataTable
                     columnWidths={auditColumnWidths}
                     footer={
-                        <InfiniteScrollTrigger
-                            className="p-3"
-                            error={loadMoreError}
-                            hasMore={hasMore}
-                            loading={loadingMore}
-                            loadingLabel="Loading older events…"
-                            onLoadMore={onLoadMore}
-                            rootRef={virtualization.scrollContainerRef}
-                        />
+                        !hasMore &&
+                        !loadingMore &&
+                        loadMoreError === undefined ? undefined : (
+                            <InfiniteScrollTrigger
+                                className="p-3"
+                                error={loadMoreError}
+                                hasMore={hasMore}
+                                loading={loadingMore}
+                                loadingLabel="Loading older events…"
+                                onLoadMore={onLoadMore}
+                                rootRef={virtualization.scrollContainerRef}
+                            />
+                        )
                     }
                     label="Security audit events"
                     rowWindow={virtualization}
