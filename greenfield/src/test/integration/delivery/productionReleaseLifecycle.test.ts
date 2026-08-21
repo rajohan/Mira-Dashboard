@@ -493,11 +493,10 @@ describe("disposable production release lifecycle", () => {
                         )
                     );
                 } catch (error) {
-                    throw new AggregateError(
-                        [error],
-                        `Production lifecycle activation diagnostics:\n${await activationDiagnostics(paths.stateDirectory)}`,
-                        { cause: error }
+                    process.stderr.write(
+                        `Production lifecycle activation diagnostics:\n${await activationDiagnostics(paths.stateDirectory)}\n`
                     );
+                    throw error;
                 }
                 expect(activation.current).toEqual({
                     releaseId,
