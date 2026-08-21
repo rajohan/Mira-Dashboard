@@ -238,7 +238,7 @@ function LogSnapshot({
     }
     return (
         <>
-            <div className="mt-4 grid min-w-0 gap-3 xl:grid-cols-[auto_minmax(0,1fr)_auto] xl:items-center">
+            <div className="mt-4 flex min-w-0 flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
                 <section
                     aria-label="Log snapshot summary"
                     className="text-primary-400 flex min-w-0 flex-nowrap items-center gap-3 overflow-x-auto text-xs whitespace-nowrap"
@@ -248,43 +248,46 @@ function LogSnapshot({
                     <span>{formatByteCount(snapshot.scannedBytes)} read</span>
                     <span>{lineCountLabel}</span>
                 </section>
-                <div className="min-w-0">
+                <section
+                    aria-label="Log filters and snapshot actions"
+                    className="flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center xl:flex-nowrap xl:justify-end"
+                >
                     <LogLevelFilter
                         activeLevels={activeLevels}
                         onChange={onActiveLevelsChange}
                     />
-                </div>
-                <div className="grid min-w-0 grid-cols-2 gap-2 sm:flex sm:items-center">
-                    <Button
-                        className="min-w-0 whitespace-nowrap"
-                        disabled={visibleLines.length === 0}
-                        onClick={() =>
-                            downloadRedactedLogLines(
-                                snapshot,
-                                visibleLines.map(({ entry }) => entry)
-                            )
-                        }
-                        size="sm"
-                        variant="secondary"
-                    >
-                        <Icon icon={Download} size="sm" tone="inherit" />
-                        Export
-                    </Button>
-                    <Button
-                        className="min-w-0 whitespace-nowrap"
-                        disabled={unclearedLines.length === 0}
-                        onClick={() => {
-                            setClearedLineIds(
-                                new Set(snapshot.lines.map(({ id }) => id))
-                            );
-                        }}
-                        size="sm"
-                        variant="secondary"
-                    >
-                        <Icon icon={Trash2} size="sm" tone="inherit" />
-                        Clear buffer
-                    </Button>
-                </div>
+                    <div className="grid min-w-0 grid-cols-2 gap-2 sm:flex sm:items-center">
+                        <Button
+                            className="min-w-0 whitespace-nowrap"
+                            disabled={visibleLines.length === 0}
+                            onClick={() =>
+                                downloadRedactedLogLines(
+                                    snapshot,
+                                    visibleLines.map(({ entry }) => entry)
+                                )
+                            }
+                            size="sm"
+                            variant="secondary"
+                        >
+                            <Icon icon={Download} size="sm" tone="inherit" />
+                            Export
+                        </Button>
+                        <Button
+                            className="min-w-0 whitespace-nowrap"
+                            disabled={unclearedLines.length === 0}
+                            onClick={() => {
+                                setClearedLineIds(
+                                    new Set(snapshot.lines.map(({ id }) => id))
+                                );
+                            }}
+                            size="sm"
+                            variant="secondary"
+                        >
+                            <Icon icon={Trash2} size="sm" tone="inherit" />
+                            Clear buffer
+                        </Button>
+                    </div>
+                </section>
             </div>
             {linesContent}
         </>

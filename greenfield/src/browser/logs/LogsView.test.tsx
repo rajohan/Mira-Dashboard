@@ -430,6 +430,9 @@ describe("LogsView", () => {
             '[aria-haspopup="listbox"]'
         );
         const logViewer = screen.getByRole("region", { name: "Log viewer" });
+        const filterActions = screen.getByRole("region", {
+            name: "Log filters and snapshot actions",
+        });
 
         expect(
             container.querySelector("[data-log-source-description-spacer]")
@@ -442,6 +445,17 @@ describe("LogsView", () => {
             screen.getByRole("searchbox", { name: "Search logs" })
         ).not.toHaveAccessibleDescription();
         expect(sourceSelect?.closest("section")).toBe(logViewer);
+        expect(
+            within(filterActions).getByRole("group", {
+                name: "Log levels in current snapshot",
+            })
+        ).toBeVisible();
+        expect(
+            within(filterActions).getByRole("button", { name: "Export" })
+        ).toBeVisible();
+        expect(
+            within(filterActions).getByRole("button", { name: "Clear buffer" })
+        ).toBeVisible();
         expect(
             screen.queryByRole("heading", { name: "Dashboard web stderr" })
         ).toBeNull();
