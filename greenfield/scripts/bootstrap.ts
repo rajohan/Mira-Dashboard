@@ -87,7 +87,7 @@ export async function runBootstrap(
         [[process.execPath, "install", "--frozen-lockfile"]],
         [
             [path.join(root, "node_modules", ".bin", "lefthook"), "install"],
-            { LEFTHOOK_CONFIG: path.join(root, "lefthook.yml") },
+            { LEFTHOOK_CONFIG: path.join(root, "..", "lefthook.yml") },
         ],
         [[process.execPath, "scripts/generateDocs.ts", "--check"]],
         [[process.execPath, "scripts/checkDatabaseSchema.ts"]],

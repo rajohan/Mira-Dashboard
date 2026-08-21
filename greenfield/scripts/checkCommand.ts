@@ -164,7 +164,7 @@ export async function runCheckCommand(
                     path.join(root, "node_modules", ".bin", "lefthook"),
                     "validate",
                 ],
-                environment: { LEFTHOOK_CONFIG: path.join(root, "lefthook.yml") },
+                environment: { LEFTHOOK_CONFIG: path.join(root, "..", "lefthook.yml") },
             },
             { cwd: root, environment: process.env }
         );
