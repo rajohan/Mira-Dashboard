@@ -51,8 +51,6 @@ function renderWorkspace(overrides: Partial<TerminalWorkspaceProps> = {}) {
         onLocation: mock(() => {}),
         onRefreshSession: mock(() => {}),
         onResume: mock(() => {}),
-        onSearch: mock(() => {}),
-        onSendInterrupt: mock(() => {}),
         onStart: mock(() => {}),
     };
     render(
@@ -108,26 +106,21 @@ describe("interactive terminal workspace", () => {
         });
     });
 
-    test("exposes keyboard, search, copy, clear, and focus controls without React terminal content", () => {
+    test("keeps terminal input in the canvas and exposes only local canvas controls", () => {
         const handlers = renderWorkspace({ phase: "connected", session });
-        const search = screen.getByRole("searchbox", {
-            name: "Search terminal output",
-        });
-        fireEvent.change(search, { target: { value: "worker" } });
-        fireEvent.keyDown(search, { key: "Enter" });
-        fireEvent.click(screen.getByRole("button", { name: "Send Ctrl+C" }));
         fireEvent.click(screen.getByRole("button", { name: "Copy terminal selection" }));
         fireEvent.click(screen.getByRole("button", { name: "Focus terminal" }));
         fireEvent.click(
             screen.getByRole("button", { name: "Clear local terminal buffer" })
         );
 
-        expect(handlers.onSearch).toHaveBeenCalledWith("worker", "next");
-        expect(handlers.onSendInterrupt).toHaveBeenCalledTimes(1);
+        expect(screen.queryByRole("searchbox")).toBeNull();
+        expect(screen.queryByRole("button", { name: "Send Ctrl+C" })).toBeNull();
         expect(handlers.onCopySelection).toHaveBeenCalledTimes(1);
         expect(handlers.onFocus).toHaveBeenCalledTimes(1);
         expect(handlers.onClear).toHaveBeenCalledTimes(1);
         expect(screen.getByTestId("terminal-canvas")).toBeTruthy();
+        expect(screen.getByRole("button", { name: "End terminal" })).toBeEnabled();
     });
 
     test("requires explicit confirmation before ending the worker PTY", () => {

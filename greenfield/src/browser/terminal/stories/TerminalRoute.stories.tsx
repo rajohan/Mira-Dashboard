@@ -97,7 +97,6 @@ function createStoryEmulator(): TerminalEmulator {
         },
         onInput: () => () => {},
         reset() {},
-        search: () => false,
         setInputEnabled() {},
         write(_data, callback) {
             callback();

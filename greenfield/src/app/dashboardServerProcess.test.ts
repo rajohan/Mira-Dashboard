@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import os from "node:os";
+import path from "node:path";
 
 import { Redacted } from "effect";
 
@@ -192,9 +194,17 @@ function processFixture(totpFailure?: Error, cutoverValidation = false) {
                 layout.production.state.terminalBrokerSocket
             );
             expect(options.terminalRoots).toEqual([
-                { id: "openclaw", label: "OpenClaw", path: openClawRoot },
+                {
+                    id: "openclaw",
+                    label: "OpenClaw",
+                    path: path.join(os.homedir(), ".openclaw"),
+                },
                 { id: "docker", label: "Docker", path: "/opt/docker" },
-                { id: "dashboard", label: "Mira Dashboard", path: layout.root },
+                {
+                    id: "dashboard",
+                    label: "Mira Dashboard",
+                    path: path.join(os.homedir(), "projects/mira-dashboard"),
+                },
             ]);
             events.push("server-create");
             const server = Object.freeze({

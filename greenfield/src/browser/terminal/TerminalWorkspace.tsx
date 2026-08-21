@@ -1,14 +1,4 @@
-import {
-    ChevronDown,
-    ChevronUp,
-    Clipboard,
-    Eraser,
-    Focus,
-    Keyboard,
-    Play,
-    RefreshCw,
-    SquareTerminal,
-} from "lucide-react";
+import { Clipboard, Eraser, Focus, Play, RefreshCw, SquareTerminal } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import * as v from "valibot";
 
@@ -59,8 +49,6 @@ export interface TerminalWorkspaceProps {
     readonly onLocation: (location: TerminalLocation) => void;
     readonly onRefreshSession: () => void;
     readonly onResume: () => void;
-    readonly onSearch: (query: string, direction: "next" | "previous") => void;
-    readonly onSendInterrupt: () => void;
     readonly onStart: () => void;
     readonly phase: TerminalWorkspacePhase;
     readonly replayGap?: boolean;
@@ -114,8 +102,6 @@ export function TerminalWorkspace({
     onLocation,
     onRefreshSession,
     onResume,
-    onSearch,
-    onSendInterrupt,
     onStart,
     phase,
     replayGap = false,
@@ -125,8 +111,6 @@ export function TerminalWorkspace({
     terminalReady,
 }: TerminalWorkspaceProps) {
     const [confirmEnd, setConfirmEnd] = useState(false);
-    const [searchQuery, setSearchQuery] = useState("");
-    const connected = phase === "connected";
     const hasSession = session !== undefined;
     const resumeAvailable =
         phase === "active-elsewhere" && session?.state === "awaiting-reconnect";
@@ -285,48 +269,7 @@ export function TerminalWorkspace({
                         Terminal canvas
                     </Heading>
                     <Icon className="text-primary-400" icon={SquareTerminal} size="sm" />
-                    <div className="flex min-w-0 flex-1 items-center gap-1 sm:max-w-md">
-                        <Input
-                            aria-label="Search terminal output"
-                            className="h-9"
-                            onChange={(event) =>
-                                setSearchQuery(event.currentTarget.value)
-                            }
-                            onKeyDown={(event) => {
-                                if (event.key === "Enter") {
-                                    onSearch(
-                                        searchQuery,
-                                        event.shiftKey ? "previous" : "next"
-                                    );
-                                }
-                            }}
-                            placeholder="error"
-                            type="search"
-                            value={searchQuery}
-                        />
-                        <IconOnlyButton
-                            disabled={searchQuery.length === 0}
-                            icon={ChevronUp}
-                            label="Previous terminal search result"
-                            onClick={() => onSearch(searchQuery, "previous")}
-                            variant="ghost"
-                        />
-                        <IconOnlyButton
-                            disabled={searchQuery.length === 0}
-                            icon={ChevronDown}
-                            label="Next terminal search result"
-                            onClick={() => onSearch(searchQuery, "next")}
-                            variant="ghost"
-                        />
-                    </div>
                     <div className="ml-auto flex flex-wrap items-center gap-1">
-                        <IconOnlyButton
-                            disabled={!connected}
-                            icon={Keyboard}
-                            label="Send Ctrl+C"
-                            onClick={onSendInterrupt}
-                            variant="ghost"
-                        />
                         <IconOnlyButton
                             icon={Clipboard}
                             label="Copy terminal selection"

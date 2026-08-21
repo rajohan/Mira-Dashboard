@@ -76,7 +76,6 @@ function createFakeEmulator() {
             };
         },
         reset() {},
-        search: () => false,
         setInputEnabled(enabled) {
             inputEnabled.push(enabled);
         },

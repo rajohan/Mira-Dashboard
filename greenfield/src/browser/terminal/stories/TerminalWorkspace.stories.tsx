@@ -65,8 +65,6 @@ const meta = {
         onLocation: fn(),
         onRefreshSession: fn(),
         onResume: fn(),
-        onSearch: fn(),
-        onSendInterrupt: fn(),
         onStart: fn(),
         phase: "connected",
         runtime,

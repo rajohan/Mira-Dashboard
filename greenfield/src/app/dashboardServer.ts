@@ -1,4 +1,5 @@
 import { realpath } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 
 import { Redacted } from "effect";
@@ -1940,9 +1941,17 @@ export async function runDashboardWebProcess(
             terminalBrokerDirectory: layout.production.state.terminalBroker,
             terminalBrokerSocket: layout.production.state.terminalBrokerSocket,
             terminalRoots: [
-                { id: "openclaw", label: "OpenClaw", path: openClawFileRoot.path },
+                {
+                    id: "openclaw",
+                    label: "OpenClaw",
+                    path: path.join(os.homedir(), ".openclaw"),
+                },
                 { id: "docker", label: "Docker", path: "/opt/docker" },
-                { id: "dashboard", label: "Mira Dashboard", path: layout.root },
+                {
+                    id: "dashboard",
+                    label: "Mira Dashboard",
+                    path: path.join(os.homedir(), "projects/mira-dashboard"),
+                },
             ],
             totpSecretCipher,
             trustedProxyAddresses: configuration.trustedProxyAddresses,

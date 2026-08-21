@@ -250,6 +250,7 @@ export function TerminalBrowser({
             case "ready": {
                 setLocalSession(message.session);
                 setLocalPhase("connected");
+                setEndBusy(false);
                 setInputPaused(false);
                 setAnnouncement(
                     message.resumed
@@ -627,21 +628,6 @@ export function TerminalBrowser({
             onLocation={setSelectedLocation}
             onRefreshSession={() => void activeQuery.refetch()}
             onResume={() => void resumeTerminal()}
-            onSearch={(query, direction) => {
-                const found = emulator.current?.search(query, direction) ?? false;
-                setAnnouncement(
-                    found
-                        ? "Terminal search result selected."
-                        : "No matching terminal text."
-                );
-            }}
-            onSendInterrupt={() => {
-                const sent = socket.current?.sendControl({
-                    signal: "SIGINT",
-                    type: "signal",
-                });
-                setAnnouncement(sent ? "Interrupt sent." : "Interrupt was not sent.");
-            }}
             onStart={() => void startTerminal()}
             phase={workspacePhase}
             replayGap={replayGap}
