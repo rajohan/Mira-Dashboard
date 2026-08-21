@@ -34,6 +34,36 @@ async function captureFailure(operation: () => Promise<void>): Promise<Error> {
 }
 
 describe("development file roots", () => {
+    test("preserves populated reviewed files and initializes an empty file", async () => {
+        const temporaryRoot = await mkdtemp(
+            path.join(tmpdir(), "mira-dashboard-development-reviewed-file-")
+        );
+        const config = resolveDevelopmentStackConfig(
+            {
+                MIRA_DASHBOARD_PROJECT_ROOT: path.join(temporaryRoot, "project"),
+            },
+            repositoryRoot
+        );
+        const openClawConfigPath = path.join(config.openClawRoot, "openclaw.json");
+
+        try {
+            await prepareDevelopmentState(config);
+            await writeFile(openClawConfigPath, '{"preserved":true}\n', {
+                mode: 0o600,
+            });
+            await prepareDevelopmentFileRoots(config);
+            expect(await readFile(openClawConfigPath, "utf8")).toBe(
+                '{"preserved":true}\n'
+            );
+
+            await writeFile(openClawConfigPath, "", { mode: 0o600 });
+            await prepareDevelopmentFileRoots(config);
+            expect(await readFile(openClawConfigPath, "utf8")).toBe("{}\n");
+        } finally {
+            await rm(temporaryRoot, { force: true, recursive: true });
+        }
+    });
+
     test("never chmods a swapped directory target outside held state", async () => {
         const temporaryRoot = await mkdtemp(
             path.join(tmpdir(), "mira-dashboard-development-directory-swap-")

@@ -5,7 +5,7 @@ import path from "node:path";
 import type { DevelopmentStackConfig } from "./developmentStackConfig.ts";
 
 const createFileOpenFlags =
-    constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW | constants.O_RDWR;
+    constants.O_CREAT | constants.O_NOFOLLOW | constants.O_NONBLOCK | constants.O_RDWR;
 const directoryOpenFlags =
     constants.O_RDONLY |
     constants.O_DIRECTORY |
@@ -43,7 +43,7 @@ interface HeldDirectory {
 interface HeldReviewedFile {
     readonly canonicalPath: string;
     readonly childName: string;
-    readonly created: boolean;
+    readonly initialized: boolean;
     readonly handle: FileHandle;
     readonly identity: EntryIdentity;
     readonly parent: HeldDirectory;
@@ -289,7 +289,7 @@ async function prepareReviewedFile(
 ): Promise<HeldReviewedFile> {
     const anchoredPath = path.join(parent.descriptorPath, childName);
     const canonicalPath = path.join(parent.canonicalPath, childName);
-    let created = false;
+    let initialized: boolean;
     let handle: FileHandle | undefined;
     try {
         await revalidateVisibleDirectory(parent, userId, stateDevice);
@@ -297,21 +297,14 @@ async function prepareReviewedFile(
             "before-child-mutation",
             Object.freeze(segments.slice(0, -1))
         );
-        try {
-            handle = await open(anchoredPath, createFileOpenFlags, privateFileMode);
-            created = true;
-        } catch (error) {
-            if (errorCode(error) !== "EEXIST") throw error;
-            // EEXIST only selects reuse. The held parent and O_NOFOLLOW confine
-            // this open; its inode is matched to the anchored entry before return.
-            handle = await open(anchoredPath, existingFileOpenFlags);
-        }
+        handle = await open(anchoredPath, createFileOpenFlags, privateFileMode);
         const heldDescriptorPath = descriptorPath(handle);
         const [resolvedPath, entry, held] = await Promise.all([
             realpath(heldDescriptorPath),
             lstat(anchoredPath, { bigint: true }),
             handle.stat({ bigint: true }),
         ]);
+        initialized = held.size === 0n;
         const identity = identityOf(held);
         if (
             resolvedPath !== canonicalPath ||
@@ -325,7 +318,7 @@ async function prepareReviewedFile(
         const reviewedFile = Object.freeze({
             canonicalPath,
             childName,
-            created,
+            initialized,
             handle,
             identity,
             parent,
@@ -333,9 +326,9 @@ async function prepareReviewedFile(
         await testHooks?.afterStage?.(
             "file-opened",
             Object.freeze([...segments]),
-            created
+            initialized
         );
-        if (created) {
+        if (initialized) {
             await handle.chmod(privateFileMode);
             await handle.writeFile(contents, "utf8");
             await handle.sync();
@@ -348,10 +341,10 @@ async function prepareReviewedFile(
         ]);
         if (
             !hasIdentity(after, identity) ||
-            !validReviewedFile(after, userId, stateDevice, created) ||
-            (created && after.size !== BigInt(Buffer.byteLength(contents, "utf8"))) ||
+            !validReviewedFile(after, userId, stateDevice, initialized) ||
+            (initialized && after.size !== BigInt(Buffer.byteLength(contents, "utf8"))) ||
             !hasIdentity(entryAfter, identity) ||
-            !validReviewedFile(entryAfter, userId, stateDevice, created) ||
+            !validReviewedFile(entryAfter, userId, stateDevice, initialized) ||
             !hasIdentity(parentAfter, parent.identity) ||
             !validPrivateDirectory(parentAfter, userId, stateDevice)
         ) {
@@ -431,8 +424,13 @@ async function revalidateVisibleFile(
         if (
             !hasIdentity(held, reviewedFile.identity) ||
             !hasIdentity(anchoredEntry, reviewedFile.identity) ||
-            !validReviewedFile(held, userId, stateDevice, reviewedFile.created) ||
-            !validReviewedFile(anchoredEntry, userId, stateDevice, reviewedFile.created)
+            !validReviewedFile(held, userId, stateDevice, reviewedFile.initialized) ||
+            !validReviewedFile(
+                anchoredEntry,
+                userId,
+                stateDevice,
+                reviewedFile.initialized
+            )
         ) {
             throw invalidDevelopmentFileRoot();
         }
@@ -446,8 +444,13 @@ async function revalidateVisibleFile(
             canonicalPath !== reviewedFile.canonicalPath ||
             !hasIdentity(entry, reviewedFile.identity) ||
             !hasIdentity(visibleStatus, reviewedFile.identity) ||
-            !validReviewedFile(entry, userId, stateDevice, reviewedFile.created) ||
-            !validReviewedFile(visibleStatus, userId, stateDevice, reviewedFile.created)
+            !validReviewedFile(entry, userId, stateDevice, reviewedFile.initialized) ||
+            !validReviewedFile(
+                visibleStatus,
+                userId,
+                stateDevice,
+                reviewedFile.initialized
+            )
         ) {
             throw invalidDevelopmentFileRoot();
         }
