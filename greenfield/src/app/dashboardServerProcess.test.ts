@@ -1,7 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import os from "node:os";
-import path from "node:path";
-
 import { Redacted } from "effect";
 
 import { rejectionError } from "../../scripts/testSupport/rejection.ts";
@@ -197,13 +194,13 @@ function processFixture(totpFailure?: Error, cutoverValidation = false) {
                 {
                     id: "openclaw",
                     label: "OpenClaw",
-                    path: path.join(os.homedir(), ".openclaw"),
+                    path: openClawRoot,
                 },
                 { id: "docker", label: "Docker", path: "/opt/docker" },
                 {
                     id: "dashboard",
                     label: "Mira Dashboard",
-                    path: path.join(os.homedir(), "projects/mira-dashboard"),
+                    path: layout.root,
                 },
             ]);
             events.push("server-create");
@@ -240,6 +237,25 @@ function processFixture(totpFailure?: Error, cutoverValidation = false) {
         resolveProjectLayout(observedProjectRoot) {
             events.push(`layout:${observedProjectRoot}`);
             return Promise.resolve(layout);
+        },
+        resolveTerminalRoots(observedOpenClawRoot, observedDashboardRoot) {
+            expect(observedOpenClawRoot).toBe(openClawRoot);
+            expect(observedDashboardRoot).toBe(layout.root);
+            return Promise.resolve(
+                Object.freeze([
+                    Object.freeze({
+                        id: "openclaw",
+                        label: "OpenClaw",
+                        path: openClawRoot,
+                    }),
+                    Object.freeze({ id: "docker", label: "Docker", path: "/opt/docker" }),
+                    Object.freeze({
+                        id: "dashboard",
+                        label: "Mira Dashboard",
+                        path: layout.root,
+                    }),
+                ])
+            );
         },
         resolveOpenClawFileRoot(observedOpenClawRoot, observedProductionRoot) {
             expect(observedOpenClawRoot).toBe(openClawRoot);

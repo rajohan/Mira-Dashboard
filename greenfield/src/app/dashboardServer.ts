@@ -1,5 +1,4 @@
 import { realpath } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 
 import { Redacted } from "effect";
@@ -1786,8 +1785,30 @@ export interface DashboardWebProcessDependencies {
     readonly resolveProjectLayout: (
         projectRoot: string
     ) => Promise<DashboardProjectLayout>;
+    readonly resolveTerminalRoots: (
+        openClawRoot: string,
+        dashboardRoot: string
+    ) => Promise<readonly DashboardTerminalWorkspaceRoot[]>;
     readonly resolveOpenClawFileRoot: typeof resolveReviewedOpenClawFileRoot;
     readonly resolveWorkspaceFileRoot: typeof resolveReviewedWorkspaceFileRoot;
+}
+
+async function resolveTerminalWorkspaceRoots(
+    openClawRoot: string,
+    dashboardRoot: string
+): Promise<readonly DashboardTerminalWorkspaceRoot[]> {
+    const roots: DashboardTerminalWorkspaceRoot[] = [
+        { id: "openclaw", label: "OpenClaw", path: openClawRoot },
+    ];
+    try {
+        if ((await realpath("/opt/docker")) === "/opt/docker") {
+            roots.push({ id: "docker", label: "Docker", path: "/opt/docker" });
+        }
+    } catch {
+        // Docker storage is optional on hosts that do not run the production stack.
+    }
+    roots.push({ id: "dashboard", label: "Mira Dashboard", path: dashboardRoot });
+    return Object.freeze(roots.map((root) => Object.freeze(root)));
 }
 
 const defaultWebProcessDependencies = Object.freeze({
@@ -1816,6 +1837,7 @@ const defaultWebProcessDependencies = Object.freeze({
     loadRelease: (releasesDirectory, releaseRoot, processRole) =>
         loadRuntimeRelease(releasesDirectory, releaseRoot, processRole),
     resolveProjectLayout: resolveDashboardProjectLayout,
+    resolveTerminalRoots: resolveTerminalWorkspaceRoots,
     resolveOpenClawFileRoot: resolveReviewedOpenClawFileRoot,
     resolveWorkspaceFileRoot: resolveReviewedWorkspaceFileRoot,
 } satisfies DashboardWebProcessDependencies);
@@ -1880,6 +1902,10 @@ export async function runDashboardWebProcess(
         configuration.openClawRoot,
         layout.production.root
     );
+    const terminalRoots = await dependencies.resolveTerminalRoots(
+        openClawFileRoot.path,
+        layout.root
+    );
     const destination = dependencies.createLogDestination(
         layout.production.state.logs,
         "web"
@@ -1940,19 +1966,7 @@ export async function runDashboardWebProcess(
             sessionIdleDurationMs: configuration.sessionIdleDurationMs,
             terminalBrokerDirectory: layout.production.state.terminalBroker,
             terminalBrokerSocket: layout.production.state.terminalBrokerSocket,
-            terminalRoots: [
-                {
-                    id: "openclaw",
-                    label: "OpenClaw",
-                    path: path.join(os.homedir(), ".openclaw"),
-                },
-                { id: "docker", label: "Docker", path: "/opt/docker" },
-                {
-                    id: "dashboard",
-                    label: "Mira Dashboard",
-                    path: path.join(os.homedir(), "projects/mira-dashboard"),
-                },
-            ],
+            terminalRoots,
             totpSecretCipher,
             trustedProxyAddresses: configuration.trustedProxyAddresses,
             verifiedReleaseId: release.manifest.source.commitSha,
