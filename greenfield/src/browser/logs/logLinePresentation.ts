@@ -53,6 +53,10 @@ const detailMetadataKeys = new Set([
 type LogSeverity = LogLine["severity"];
 type StructuredRecord = Record<string, unknown>;
 
+function presentationSeverity(level: LogSeverity): LogSeverity {
+    return level === "unknown" ? "info" : level;
+}
+
 interface BoundedText {
     readonly text: string;
     readonly truncated: boolean;
@@ -667,7 +671,7 @@ export function presentRedactedLogLine(
                 ? {}
                 : { facility: textEnvelope.facility }),
             kind: "raw",
-            level: textEnvelope.level ?? entry.severity,
+            level: presentationSeverity(textEnvelope.level ?? entry.severity),
             message: textEnvelope.message,
             omittedFieldCount: 0,
             raw,
@@ -716,7 +720,7 @@ export function presentRedactedLogLine(
             ? {}
             : { facility: textEnvelope.facility }),
         kind: "structured",
-        level,
+        level: presentationSeverity(level),
         message: prefixed.message,
         omittedFieldCount: details.omittedFieldCount,
         raw,

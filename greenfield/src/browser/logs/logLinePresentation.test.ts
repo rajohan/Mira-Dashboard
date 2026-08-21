@@ -85,7 +85,7 @@ describe("redacted log-line presentation", () => {
 
         expect(kernel).toMatchObject({
             kind: "raw",
-            level: "unknown",
+            level: "info",
             message: "[123.456] device ready",
             source: "kernel",
             timestampMs: new Date(2026, 7, 10, 1, 23, 45).getTime(),

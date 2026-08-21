@@ -475,6 +475,7 @@ describe("LogsView", () => {
             expect(screen.getByLabelText("Source gateway/ws")).toBeVisible()
         );
         expect(screen.getByLabelText("Source kernel")).toBeVisible();
+        expect(screen.getAllByLabelText("Level info")).toHaveLength(2);
         expect(screen.getByText("↔ response ✓ request-42")).toBeVisible();
         expect(screen.queryByText(/subsystem.*gateway\/ws/u)).toBeNull();
         expect(rendered.container.querySelectorAll("time")).toHaveLength(2);
@@ -485,7 +486,7 @@ describe("LogsView", () => {
         expect(rendered.container.querySelector("script")).toBeNull();
     });
 
-    test("keeps unknown rows only in the all-levels state and shows a clear empty state", async () => {
+    test("treats unknown rows as info and keeps the filtered count compact", async () => {
         const levelSnapshot: LogSnapshotOutput = {
             ...scrollingSnapshot(0, "f"),
             hasEarlier: false,
@@ -511,9 +512,12 @@ describe("LogsView", () => {
             expect(screen.getByText("unclassified current-window row")).toBeVisible()
         );
         await user.click(screen.getByRole("button", { name: "trace" }));
-        expect(screen.queryByText("unclassified current-window row")).toBeNull();
+        expect(screen.getByText("unclassified current-window row")).toBeVisible();
         expect(screen.queryByText("trace row")).toBeNull();
         expect(screen.getByText("debug row")).toBeVisible();
+        expect(
+            within(screen.getByLabelText("Log snapshot summary")).getByText("6 of 7")
+        ).toBeVisible();
 
         for (const level of filterableLogLevels.slice(1)) {
             await user.click(screen.getByRole("button", { name: level }));

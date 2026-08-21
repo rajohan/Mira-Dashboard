@@ -141,9 +141,7 @@ function LogSnapshot({
     const lineCountLabel =
         visibleLineCount === totalLineCount
             ? `${totalLineCount} ${totalLineCount === 1 ? "line" : "lines"}`
-            : `${visibleLineCount} of ${totalLineCount} ${
-                  totalLineCount === 1 ? "line" : "lines"
-              } in this snapshot`;
+            : `${visibleLineCount} of ${totalLineCount}`;
     let linesContent: ReactNode;
     if (snapshot.lines.length === 0) {
         linesContent = (
