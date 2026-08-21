@@ -200,6 +200,7 @@ describe("worker systemd PTY process adapter", () => {
                 "LC_ALL=C.UTF-8",
                 "LOGNAME=ubuntu",
                 "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                String.raw`PS1=\u@\h:\w\$ `,
                 "SHELL=/bin/bash",
                 "TERM=xterm-256color",
                 "USER=ubuntu",

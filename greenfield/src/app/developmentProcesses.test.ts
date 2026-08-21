@@ -23,7 +23,6 @@ import type {
     DashboardApplicationRuntimeOptions,
 } from "../server/platform/runtime/applicationRuntime.ts";
 import { createTestStructuredLogger } from "../server/test/support/requestContext.ts";
-import { createDevelopmentPtyProcess } from "../worker/terminal/developmentPtyProcess.ts";
 import {
     type DashboardServerOptions,
     type DashboardWebProcessDependencies,
@@ -35,7 +34,6 @@ import {
     withSourceDevelopmentScheduleDefinitions,
 } from "./developmentWeb.ts";
 import {
-    developmentTerminalBrokerOptions,
     developmentWorkerActionDefinitions,
     runDevelopmentWorkerProcess,
     withoutDevelopmentDockerCapabilities,
@@ -159,15 +157,6 @@ describe("development process entrypoints", () => {
         expect(recoveryFailure.message).toBe(
             "Production cutover recovery is unavailable in development"
         );
-    });
-
-    test("replaces only the ordinary source-development PTY with the isolated simulator", () => {
-        const options = Object.freeze({ projectRoot: "/srv/mira-dashboard-dev" });
-
-        const ordinary = developmentTerminalBrokerOptions(options, false);
-        expect(ordinary).not.toBe(options);
-        expect(ordinary.sessionBrokerDependencies?.pty).toBe(createDevelopmentPtyProcess);
-        expect(developmentTerminalBrokerOptions(options, true)).toBe(options);
     });
 
     test("injects the complete production-shaped schedule inventory", async () => {

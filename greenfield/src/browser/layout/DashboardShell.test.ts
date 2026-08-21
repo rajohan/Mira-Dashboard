@@ -19,12 +19,12 @@ describe("Dashboard shell layout", () => {
         expect(paths.indexOf("/delivery")).toBe(paths.indexOf("/jobs") + 1);
     });
 
-    test("keeps the Terminal workspace full-height with the standard responsive gutter", () => {
+    test("keeps the Terminal workspace scrollable with the standard responsive gutter", () => {
         expect(dashboardMainClassName("/terminal").split(" ")).toEqual(
             expect.arrayContaining([
                 "min-h-0",
                 "flex-1",
-                "overflow-hidden",
+                "overflow-y-auto",
                 "px-4",
                 "pt-8",
                 "pb-3",

@@ -31,7 +31,7 @@ export interface DashboardTerminalOptions {
     readonly now?: () => Date;
     readonly terminalBrokerDirectory: string;
     readonly terminalBrokerSocket: string;
-    readonly workspaceRoot: DashboardTerminalWorkspaceRoot;
+    readonly roots: readonly DashboardTerminalWorkspaceRoot[];
     readonly writeAdmission: ImmediateDatabaseWriteAdmission;
 }
 
@@ -51,14 +51,14 @@ export async function createDashboardTerminalComposition(
     options: DashboardTerminalOptions
 ): Promise<DashboardTerminalComposition> {
     const clock = options.now ?? (() => new Date());
-    const roots = await createTerminalRootRegistry([
-        {
-            absolutePath: options.workspaceRoot.path,
+    const roots = await createTerminalRootRegistry(
+        options.roots.map((root) => ({
+            absolutePath: root.path,
             defaultPath: "/",
-            id: options.workspaceRoot.id,
-            label: options.workspaceRoot.label,
-        },
-    ]);
+            id: root.id,
+            label: root.label,
+        }))
+    );
     const broker = createTerminalBrokerClient({
         transport: createBunUnixTerminalBrokerTransport({
             projectLocalDirectory: options.terminalBrokerDirectory,

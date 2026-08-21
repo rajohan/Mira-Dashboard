@@ -115,12 +115,13 @@ export async function createTerminalRootRegistry(
     const roots = await Promise.all(
         definitions.map((definition) => resolveRootDefinition(definition))
     );
+    const defaultRootId = definitions[0]?.id;
     roots.sort((left, right) => left.publicRoot.id.localeCompare(right.publicRoot.id));
     if (new Set(roots.map(({ publicRoot }) => publicRoot.id)).size !== roots.length) {
         throw new TerminalRootAccessError("root-unavailable");
     }
     const byId = new Map(roots.map((root) => [root.publicRoot.id, root]));
-    const defaultRoot = roots[0];
+    const defaultRoot = roots.find(({ publicRoot }) => publicRoot.id === defaultRootId);
     if (defaultRoot === undefined) throw new TerminalRootAccessError("root-unavailable");
 
     const runtime = v.parse(terminalRuntimeSchema, {

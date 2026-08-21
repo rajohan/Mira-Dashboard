@@ -191,6 +191,11 @@ function processFixture(totpFailure?: Error, cutoverValidation = false) {
             expect(options.terminalBrokerSocket).toBe(
                 layout.production.state.terminalBrokerSocket
             );
+            expect(options.terminalRoots).toEqual([
+                { id: "openclaw", label: "OpenClaw", path: openClawRoot },
+                { id: "docker", label: "Docker", path: "/opt/docker" },
+                { id: "dashboard", label: "Mira Dashboard", path: layout.root },
+            ]);
             events.push("server-create");
             const server = Object.freeze({
                 port: 3100,

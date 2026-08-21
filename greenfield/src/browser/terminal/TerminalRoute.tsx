@@ -4,7 +4,6 @@ import type { ReactNode } from "react";
 import { dashboardPageContainerClassName } from "../layout/dashboardShellLayout.ts";
 import { cn } from "../lib/classNames.ts";
 import { Alert } from "../ui/Alert.tsx";
-import { PageHeader } from "../ui/PageHeader.tsx";
 import { TerminalBrowser } from "./TerminalBrowser.tsx";
 import { useTerminalBrowserDependencies } from "./terminalBrowserDependenciesContext.ts";
 import { parseTerminalRouteSearch } from "./terminalRouteSearch.ts";
@@ -14,25 +13,14 @@ interface TerminalPageLayoutProps {
 }
 
 /**
- * Keeps the full-height terminal canvas aligned with normal Dashboard pages.
- * @returns The shared Terminal heading and a height-preserving workspace slot.
+ * Keeps the terminal canvas aligned with normal Dashboard pages while allowing
+ * the shell's main viewport to scroll when the controls and canvas exceed it.
+ * @returns A height-preserving workspace slot without a redundant page intro.
  */
 export function TerminalPageLayout({ children }: TerminalPageLayoutProps) {
     return (
-        <div
-            className={cn(
-                dashboardPageContainerClassName,
-                "flex h-full min-h-[calc(100dvh-8rem)] flex-col"
-            )}
-        >
-            <div className="shrink-0">
-                <PageHeader
-                    description="Open an interactive terminal that starts in the folder you choose. The Dashboard does not save terminal input or output."
-                    eyebrow="Operations"
-                    title="Terminal"
-                />
-            </div>
-            <div className="mt-8 flex min-h-0 flex-1 flex-col">{children}</div>
+        <div className={cn(dashboardPageContainerClassName, "flex min-h-full flex-col")}>
+            <div className="flex min-h-0 flex-1 flex-col">{children}</div>
         </div>
     );
 }

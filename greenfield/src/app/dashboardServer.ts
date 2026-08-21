@@ -240,7 +240,10 @@ import {
     type DashboardChatRuntimeMaintenance,
 } from "./dashboardChatRuntimeMaintenance.ts";
 import { createDashboardLogsService } from "./dashboardLogs.ts";
-import { createDashboardTerminalComposition } from "./dashboardTerminal.ts";
+import {
+    createDashboardTerminalComposition,
+    type DashboardTerminalWorkspaceRoot,
+} from "./dashboardTerminal.ts";
 import { environmentSource } from "./environmentSource.ts";
 import { createServer, type ApplicationServer, type ServerOptions } from "./server.ts";
 
@@ -319,6 +322,7 @@ export interface DashboardServerOptions extends Omit<
     /** Optional only for isolated composition tests; production supplies both paths. */
     readonly terminalBrokerDirectory?: string;
     readonly terminalBrokerSocket?: string;
+    readonly terminalRoots?: readonly DashboardTerminalWorkspaceRoot[];
     readonly totpSecretCipher: TotpSecretCipher;
     readonly trustedProxyAddresses?: readonly string[];
     /** Explicit WebAuthn trust configuration; request host headers are never used. */
@@ -1102,7 +1106,7 @@ export async function createDashboardServer(
                       ...(domainNow === undefined ? {} : { now: domainNow }),
                       terminalBrokerDirectory: options.terminalBrokerDirectory,
                       terminalBrokerSocket: options.terminalBrokerSocket,
-                      workspaceRoot: options.workspaceFileRoot,
+                      roots: options.terminalRoots ?? [options.workspaceFileRoot],
                       writeAdmission: databaseRuntime,
                   });
         let workspaceFileRawHttpHandler: WorkspaceFileRawHttpHandler | undefined;
@@ -1935,6 +1939,11 @@ export async function runDashboardWebProcess(
             sessionIdleDurationMs: configuration.sessionIdleDurationMs,
             terminalBrokerDirectory: layout.production.state.terminalBroker,
             terminalBrokerSocket: layout.production.state.terminalBrokerSocket,
+            terminalRoots: [
+                { id: "openclaw", label: "OpenClaw", path: openClawFileRoot.path },
+                { id: "docker", label: "Docker", path: "/opt/docker" },
+                { id: "dashboard", label: "Mira Dashboard", path: layout.root },
+            ],
             totpSecretCipher,
             trustedProxyAddresses: configuration.trustedProxyAddresses,
             verifiedReleaseId: release.manifest.source.commitSha,

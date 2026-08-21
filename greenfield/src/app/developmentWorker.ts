@@ -22,7 +22,6 @@ import {
 import { developmentTaskNotificationLoop } from "../worker/developmentTaskNotifications.ts";
 import { createDescriptorWorkspaceFileStructuralWriter } from "../worker/files/descriptorWorkspaceFileStructuralWriter.ts";
 import { createDevelopmentLogMaintenanceExecutor } from "../worker/logs/developmentLogMaintenance.ts";
-import { createDevelopmentPtyProcess } from "../worker/terminal/developmentPtyProcess.ts";
 import { environmentSource } from "./environmentSource.ts";
 import {
     type DashboardWorkerProcessDependencies,
@@ -73,31 +72,6 @@ export function developmentWorkerActionDefinitions(
     return managedPreview
         ? managedPreviewJobActionDefinitions
         : sourceDevelopmentExecutableJobActionDefinitions;
-}
-
-type DevelopmentTerminalBrokerOptions = Parameters<
-    DashboardWorkerProcessDependencies["startTerminalBroker"]
->[0];
-
-/**
- * Selects the process-free PTY factory only for ordinary source development.
- * Managed preview retains its existing sandbox-owned terminal composition unchanged.
- * @param options Existing terminal broker composition.
- * @param managedPreview Whether the process is an untrusted managed preview.
- * @returns The profile-specific terminal broker composition.
- */
-export function developmentTerminalBrokerOptions(
-    options: DevelopmentTerminalBrokerOptions,
-    managedPreview: boolean
-): DevelopmentTerminalBrokerOptions {
-    return managedPreview
-        ? options
-        : Object.freeze({
-              ...options,
-              sessionBrokerDependencies: Object.freeze({
-                  pty: createDevelopmentPtyProcess,
-              }),
-          });
 }
 
 function developmentInvocation(arguments_: readonly string[]): Readonly<{
@@ -240,10 +214,6 @@ export async function runDevelopmentWorkerProcess(
             }
             return layout;
         },
-        startTerminalBroker: (options) =>
-            defaults.startTerminalBroker(
-                developmentTerminalBrokerOptions(options, isManagedPreview)
-            ),
     } satisfies DashboardWorkerProcessDependencies);
     await runDashboardWorkerProcess(
         {

@@ -7,17 +7,20 @@ import type {
 import { TerminalWorkspace, type TerminalWorkspaceProps } from "./TerminalWorkspace.tsx";
 
 const { fireEvent, render, screen, within } = await import("@testing-library/react");
+const userEventModule = await import("@testing-library/user-event");
+const userEvent = userEventModule.default;
 
 const runtime: TerminalRuntime = {
     clientMessageMaximumBytes: 16 * 1024,
-    defaultLocation: { path: "/", rootId: "dashboard" },
+    defaultLocation: { path: "/", rootId: "openclaw" },
     idleTimeoutMs: 10 * 60 * 1000,
     mode: "pty",
     outputReplayMaximumBytes: 256 * 1024,
     reconnectGraceMs: 15 * 1000,
     roots: [
-        { defaultPath: "/", id: "dashboard", label: "Dashboard project" },
-        { defaultPath: "/", id: "workspace", label: "Mira workspace" },
+        { defaultPath: "/", id: "dashboard", label: "Mira Dashboard" },
+        { defaultPath: "/", id: "docker", label: "Docker" },
+        { defaultPath: "/", id: "openclaw", label: "OpenClaw" },
     ],
     serverMessageMaximumBytes: 32 * 1024,
     sessionMaximumDurationMs: 30 * 60 * 1000,
@@ -82,7 +85,26 @@ describe("interactive terminal workspace", () => {
         );
         expect(handlers.onLocation).toHaveBeenCalledWith({
             path: "/../private",
-            rootId: "dashboard",
+            rootId: "openclaw",
+        });
+    });
+
+    test("offers the reviewed OpenClaw, Docker, and Dashboard starting roots", async () => {
+        const handlers = renderWorkspace();
+        const user = userEvent.setup();
+        const rootSelect = screen.getByRole("button", {
+            name: /Terminal starting root/,
+        });
+
+        await user.click(rootSelect);
+        expect(screen.getByRole("option", { name: /OpenClaw/ })).toBeTruthy();
+        expect(screen.getByRole("option", { name: /Docker/ })).toBeTruthy();
+        expect(screen.getByRole("option", { name: /Mira Dashboard/ })).toBeTruthy();
+
+        await user.click(screen.getByRole("option", { name: /Docker/ }));
+        expect(handlers.onLocation).toHaveBeenCalledWith({
+            path: "/",
+            rootId: "docker",
         });
     });
 
