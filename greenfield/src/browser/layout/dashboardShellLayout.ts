@@ -28,7 +28,7 @@ export function dashboardMainClassName(pathname: string): string {
         return "min-h-0 flex-1 overflow-hidden p-2 sm:p-3";
     }
     if (pathname === "/terminal") {
-        return "min-h-0 flex-1 overflow-y-auto px-4 py-8 sm:px-6 lg:px-8";
+        return "min-h-0 flex-1 overflow-y-auto px-4 pt-8 pb-3 sm:px-6 lg:px-8";
     }
     if (pathname === "/files") {
         return "min-h-0 flex-1 overflow-y-auto px-4 py-8 sm:px-6 lg:overflow-hidden lg:px-8";
