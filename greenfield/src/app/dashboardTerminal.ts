@@ -19,6 +19,7 @@ import type { AuthenticateCredential } from "../server/trpc/context.ts";
 export interface DashboardTerminalWorkspaceRoot {
     readonly id: string;
     readonly label: string;
+    readonly optional?: boolean;
     readonly path: string;
 }
 
@@ -57,6 +58,7 @@ export async function createDashboardTerminalComposition(
             defaultPath: "/",
             id: root.id,
             label: root.label,
+            optional: root.optional,
         }))
     );
     const broker = createTerminalBrokerClient({

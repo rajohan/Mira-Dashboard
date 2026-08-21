@@ -1806,7 +1806,12 @@ export function resolveTerminalWorkspaceRoots(
         roots.push({ id: "openclaw", label: "OpenClaw", path: openClawRoot });
     }
     if (workspaceRoot !== "/opt/docker" && openClawRoot !== "/opt/docker") {
-        roots.push({ id: "docker", label: "Docker", path: "/opt/docker" });
+        roots.push({
+            id: "docker",
+            label: "Docker",
+            optional: true,
+            path: "/opt/docker",
+        });
     }
     if (
         dashboardRoot !== workspaceRoot &&

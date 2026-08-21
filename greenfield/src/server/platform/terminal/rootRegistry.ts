@@ -25,6 +25,8 @@ export interface TerminalRootDefinition {
     readonly defaultPath?: string;
     readonly id: string;
     readonly label: string;
+    /** Omits this reviewed convenience root when the host does not provide it. */
+    readonly optional?: boolean;
 }
 
 interface ResolvedTerminalRoot {
@@ -74,7 +76,7 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
 
 async function resolveRootDefinition(
     definition: TerminalRootDefinition
-): Promise<ResolvedTerminalRoot> {
+): Promise<ResolvedTerminalRoot | undefined> {
     try {
         if (
             !path.isAbsolute(definition.absolutePath) ||
@@ -96,6 +98,7 @@ async function resolveRootDefinition(
             }),
         });
     } catch (error) {
+        if (definition.optional === true) return undefined;
         throw new TerminalRootAccessError("root-unavailable", error);
     }
 }
@@ -112,8 +115,11 @@ export async function createTerminalRootRegistry(
     if (definitions.length === 0 || definitions.length > 8) {
         throw new TerminalRootAccessError("root-unavailable");
     }
-    const roots = await Promise.all(
+    const resolvedRoots = await Promise.all(
         definitions.map((definition) => resolveRootDefinition(definition))
+    );
+    const roots = resolvedRoots.filter(
+        (root): root is ResolvedTerminalRoot => root !== undefined
     );
     const defaultRootId = definitions[0]?.id;
     roots.sort((left, right) => left.publicRoot.id.localeCompare(right.publicRoot.id));

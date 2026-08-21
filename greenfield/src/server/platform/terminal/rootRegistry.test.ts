@@ -70,6 +70,21 @@ describe("terminal starting-root registry", () => {
         ).rejects.toBeInstanceOf(TerminalRootAccessError);
     });
 
+    test("omits an unavailable optional convenience root", async () => {
+        const root = await temporaryDirectory("mira-terminal-required-");
+        const registry = await createTerminalRootRegistry([
+            { absolutePath: root, id: "workspace", label: "Workspace" },
+            {
+                absolutePath: path.join(root, "missing"),
+                id: "optional",
+                label: "Optional",
+                optional: true,
+            },
+        ]);
+
+        expect(registry.runtime().roots.map(({ id }) => id)).toEqual(["workspace"]);
+    });
+
     test("rejects a symlinked starting directory that escapes its reviewed root", async () => {
         const root = await temporaryDirectory("mira-terminal-contained-");
         const outside = await temporaryDirectory("mira-terminal-outside-");
