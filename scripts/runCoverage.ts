@@ -8,6 +8,7 @@ import {
     type LineCoverageSummary,
     requiredLineCoveragePercent,
 } from "./checkCoverage.ts";
+import { checkPatchCoverage, type PatchCoverageSummary } from "./checkPatchCoverage.ts";
 import { readBoundedUtf8RegularFile } from "./files/boundedFile.ts";
 import { createStorybookTestCommand } from "./runStorybookTests.ts";
 import { runTestProcess } from "./runTestSuite.ts";
@@ -73,6 +74,10 @@ export interface CoveragePartitionPlan {
 
 /** Injectable side-effect boundary for the coverage orchestrator. */
 export interface CoverageRunnerDependencies {
+    readonly checkPatchReport?: (
+        lcovPath: string,
+        projectRoot: string
+    ) => Promise<PatchCoverageSummary>;
     readonly checkReport: (
         lcovPath: string,
         thresholdPercent: number,
@@ -516,6 +521,7 @@ async function writeCoverageReport(filePath: string, coverage: string): Promise<
 }
 
 const defaultDependencies: CoverageRunnerDependencies = Object.freeze({
+    checkPatchReport: checkPatchCoverage,
     checkReport: checkCoverageFile,
     coverageDirectory,
     listArtifacts: listCoverageArtifacts,
@@ -580,6 +586,15 @@ async function mergeAndCheckCoverage(
     dependencies.log(
         `Coverage ${summary.percent.toFixed(2)}% meets required ${requiredLineCoveragePercent.toFixed(2)}% (${summary.hitLines}/${summary.foundLines} lines)`
     );
+    if (dependencies.checkPatchReport !== undefined) {
+        const patch = await dependencies.checkPatchReport(
+            lcovPath,
+            dependencies.projectRoot
+        );
+        dependencies.log(
+            `Patch coverage ${patch.percent.toFixed(2)}% meets required ${requiredLineCoveragePercent.toFixed(2)}% (${patch.hitLines}/${patch.foundLines} executable changed lines)`
+        );
+    }
 }
 
 /**

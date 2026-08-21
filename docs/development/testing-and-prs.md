@@ -32,7 +32,9 @@ reports into `coverage/lcov.info`. Storybook contributes V8 coverage hits for pr
 modules. Stories, Storybook support and configuration, tests, and test support are excluded from
 the production denominator. The gate requires at least 85% aggregate production line coverage,
 rejects executable `scripts/` or `src/` modules missing entirely from LCOV, and publishes the same
-report for Codecov's 85% patch gate.
+report for Codecov's 85% patch gate. The local merge also calculates executable changed-line
+coverage from Git and requires 85%: GitHub uses the PR base, while local stacked work can set
+`MIRA_DASHBOARD_COVERAGE_BASE` to the exact parent branch (otherwise `origin/main` is used).
 
 After adding, removing, or materially changing tests, refresh all three timing inventories before
 push with:
@@ -51,7 +53,8 @@ In CI, `coverage-bun`, `coverage-browser`, and `coverage-storybook` run concurre
 nine-batch plan. Each job owns exactly three private LCOV reports; only `coverage-storybook`
 installs Chromium. The downstream `dashboard-checks` aggregator downloads the three explicit
 artifacts, proves that all nine expected reports exist exactly once with no stale LCOV input,
-revalidates the Storybook production-source records, and then applies the same aggregate 85% gate.
+revalidates the Storybook production-source records, and then applies the same aggregate and patch
+85% gates using the fetched PR-base history.
 It alone publishes `coverage/lcov.info` to Codecov. `dashboard-static-checks` owns the non-coverage
 checks, while the separate `storybook` job only verifies the static build.
 

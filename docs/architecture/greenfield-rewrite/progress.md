@@ -15,7 +15,7 @@ closes a phase; dated entries below provide the evidence, not a second status so
 | 3 — Core operator domains           | Complete | Task, agent, monitoring, report, incident, notification, Dashboard Jobs/schedules, cache, host metrics, and application-observability server/browser parity are implemented. `/jobs` includes the OpenClaw-cron projection, and `/` composes the complete operational overview with independent retained-data and unavailable states. The Phase 3 parity and browser gates pass.                                                                                                                                                                                     |
 | 4 — Gateway and chat                | Started  | The installed OpenClaw source is hash-pinned for sessions, cron, chat, companion, task, and media. Process-owned Gateway lifecycle, durable realtime invalidation, sessions and agent availability, OpenClaw cron/tasks, heartbeat schema v5, chat journal/runtime, bounded history/reconciliation, transcript-authorized local-history media, and `/chat` are implemented. The immutable external heartbeat consumer is staged; live Gateway smoke/restart and the manual credential/config cutover plus authenticated one-collection/one-report proof remain open. |
 | 5 — Privileged and external domains | Complete | Files, Logs, Moltbook, Terminal, Settings, bounded Service Actions, Database observability, Docker, Delivery, Kopia/WAL-G status/control, quota, Git, and weather are implemented. The consumed generic-exec behavior maps to the bounded PTY and purpose-built durable actions, with the unused synchronous surface removed. Provider/root provisioning is release-owned and fail-closed pending production activation. No operator-facing database restore operation is introduced.                                                                                |
-| 6 — Parity, hardening, and cutover  | Started  | All 16 legacy browser routes, full-page Storybook coverage, ordinary source-development production inventory parity, and 153 of 154 retained endpoint behaviors are implemented; the three reviewed removals stay removed. The rewrite now owns the repository root and the legacy source and CI are deleted. External heartbeat cutover/live smoke, remaining Gateway/production smokes, restore/cutover rehearsal, fresh production activation, the `node:*` audit, and full-cycle monitoring remain open.                                                         |
+| 6 — Parity, hardening, and cutover  | Started  | All 16 legacy browser routes, full-page Storybook coverage, ordinary source-development production inventory parity, and 153 of 154 retained endpoint behaviors are implemented; the three reviewed removals stay removed. The rewrite owns the repository root; legacy source/CI are deleted; repository simplification and the `node:*` audit are complete. External heartbeat cutover/live smoke, remaining Gateway/production smokes, restore/cutover rehearsal, fresh production activation, and full-cycle monitoring remain open.                             |
 
 ### 2026-08-03 — Phase 0 started
 
@@ -2001,3 +2001,18 @@ full-browser parity, production rehearsal, cutover, and legacy deletion remain o
   references the retired source tree.
 - This source-layout promotion does not activate or mutate production. Production cutover remains
   gated by preflight, live smoke, restore/cutover rehearsal, explicit activation, and monitoring.
+
+### 2026-08-21 — Repository-wide simplification and `node:*` audit complete
+
+- The [simplification audit](simplification-audit.md) records the complete non-test compatibility
+  inventory: 325 occurrences in 156 files across nine reviewed module categories. Each retained
+  category has a concrete filesystem, path, host, socket, constant-time, URL, TTY, or Brotli
+  capability reason; no equally capable Bun-native replacement was identified.
+- The obsolete nested-root Git-hook prefix path was removed. Exact source discovery, Oxlint,
+  strict TypeScript graphs, exact test inventories, and LCOV source-presence checks found no other
+  production module or dependency that could be removed safely.
+- Test runner settings remain unchanged across Bun, browser, and Storybook. The Bun inventory was
+  refreshed to 510 files; no slow release/security/browser test was removed without duplicate
+  evidence. Full preflight passes at 89.00% aggregate production line coverage.
+- Patch coverage is now enforced locally during coverage merge at the same 85% minimum as Codecov,
+  using the pull-request base in GitHub Actions and a configurable base for stacked local work.

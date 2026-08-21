@@ -8,6 +8,7 @@ import {
     discoverExecutableCoverageSources,
     summarizeLineCoverage,
 } from "./checkCoverage.ts";
+import { parseChangedLines, summarizePatchCoverage } from "./checkPatchCoverage.ts";
 import { temporaryProject } from "./sourceBoundaries/testSupport.ts";
 
 function record(source: string, foundLines: number, hitLines: number): string {
@@ -209,5 +210,50 @@ describe("coverage threshold", () => {
         expect(() =>
             assertCoverageIncludesSources(lcov, ["src/service.ts"])
         ).not.toThrow();
+    });
+
+    test("measures only executable lines added by a zero-context Git diff", () => {
+        const changed = parseChangedLines(
+            [
+                "diff --git a/src/service.ts b/src/service.ts",
+                "+++ b/src/service.ts",
+                "@@ -3,0 +4,3 @@",
+                "+const comment = true;",
+                "+covered();",
+                "+missed();",
+                "diff --git a/scripts/tool.ts b/scripts/tool.ts",
+                "+++ b/scripts/tool.ts",
+                "@@ -0,0 +1 @@",
+                "+run();",
+            ].join("\n")
+        );
+        expect([...changed.get("src/service.ts")!]).toEqual([4, 5, 6]);
+        const summary = summarizePatchCoverage(
+            [
+                "SF:src/service.ts",
+                "DA:5,2",
+                "DA:6,0",
+                "end_of_record",
+                "SF:scripts/tool.ts",
+                "DA:1,1",
+                "end_of_record",
+            ].join("\n"),
+            changed,
+            "/checkout"
+        );
+        expect(summary.foundLines).toBe(3);
+        expect(summary.hitLines).toBe(2);
+        expect(summary.percent).toBeCloseTo(200 / 3);
+    });
+
+    test("normalizes absolute LCOV source paths for patch coverage", () => {
+        const changed = new Map([["src/service.ts", new Set([7])]]);
+        expect(
+            summarizePatchCoverage(
+                "SF:/checkout/src/service.ts\nDA:7,1\nend_of_record",
+                changed,
+                "/checkout"
+            )
+        ).toEqual({ foundLines: 1, hitLines: 1, percent: 100 });
     });
 });

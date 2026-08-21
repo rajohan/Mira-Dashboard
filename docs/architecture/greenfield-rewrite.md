@@ -14,6 +14,7 @@
 ## Blueprint Map
 
 - [Implementation progress](greenfield-rewrite/progress.md) records completed qualification and delivery milestones.
+- [Repository simplification audit](greenfield-rewrite/simplification-audit.md) records root promotion, test review, dead-code controls, and every retained `node:*` capability category.
 - [Application architecture](greenfield-rewrite/application-architecture.md) defines the modular-monolith boundaries, API, realtime, and frontend design.
 - [Data and security](greenfield-rewrite/data-and-security.md) defines SQLite, privileged operations, authentication, and trust boundaries.
 - [Runtime and delivery](greenfield-rewrite/runtime-and-delivery.md) covers the Bun baseline, configuration, documentation, operations, quality gates, deployment, packages, and cutover.

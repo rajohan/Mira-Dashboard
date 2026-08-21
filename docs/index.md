@@ -2,6 +2,7 @@
 
 - [Greenfield rewrite blueprint](architecture/greenfield-rewrite.md)
 - [Implementation progress](architecture/greenfield-rewrite/progress.md)
+- [Repository simplification and `node:*` audit](architecture/greenfield-rewrite/simplification-audit.md)
 - [Application architecture](architecture/greenfield-rewrite/application-architecture.md)
 - [Data and security](architecture/greenfield-rewrite/data-and-security.md)
 - [Runtime and delivery](architecture/greenfield-rewrite/runtime-and-delivery.md)

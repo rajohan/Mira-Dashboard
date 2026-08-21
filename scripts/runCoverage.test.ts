@@ -270,6 +270,10 @@ describe("coverage runner", () => {
         const events: string[] = [];
         const validatedReports: string[] = [];
         const dependencies: CoverageRunnerDependencies = {
+            checkPatchReport: (reportPath, root) => {
+                events.push(`patch:${reportPath}:${root}`);
+                return Promise.resolve({ foundLines: 10, hitLines: 9, percent: 90 });
+            },
             checkReport: (reportPath, threshold, roots, root) => {
                 events.push(
                     `check:${reportPath}:${threshold}:${roots.join(",")}:${root}`
@@ -313,6 +317,8 @@ describe("coverage runner", () => {
             "write:/tmp/coverage/lcov.info:TN:\nend_of_record",
             "check:/tmp/coverage/lcov.info:85:scripts,src,drizzle.config.ts,tailwind.config.ts:/tmp/project",
             "log:Coverage 90.00% meets required 85.00% (18/20 lines)",
+            "patch:/tmp/coverage/lcov.info:/tmp/project",
+            "log:Patch coverage 90.00% meets required 85.00% (9/10 executable changed lines)",
         ]);
     });
 
