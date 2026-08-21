@@ -46,6 +46,7 @@ export interface WorkspaceFilesViewProps {
     readonly entries: readonly WorkspaceFileEntry[];
     readonly hasNextPage: boolean;
     readonly loadingMore?: boolean;
+    readonly paginationError?: string;
     readonly onDownload: (entry: WorkspaceFileEntry) => Promise<void>;
     readonly onLoadMore: () => void;
     readonly onNavigate: (breadcrumbIndex: number) => void;
@@ -120,6 +121,7 @@ export function WorkspaceFilesView({
     entries,
     hasNextPage,
     loadingMore = false,
+    paginationError,
     onDownload,
     onLoadMore,
     onNavigate,
@@ -523,6 +525,9 @@ export function WorkspaceFilesView({
                             })
                         }
                         pagination={{
+                            ...(paginationError === undefined
+                                ? {}
+                                : { error: paginationError }),
                             hasMore: stable && hasNextPage,
                             loading: directoryLoading || loadingMore,
                             loadingLabel: "Loading more files…",

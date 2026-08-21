@@ -198,7 +198,7 @@ export function WorkspaceFilesBrowser() {
     return (
         <WorkspaceFilesView
             backgroundError={
-                directoryQuery.error === null
+                directoryQuery.error === null || directoryQuery.isFetchNextPageError
                     ? undefined
                     : workspaceFileFailureMessage(directoryQuery.error)
             }
@@ -209,6 +209,11 @@ export function WorkspaceFilesBrowser() {
             entries={accumulated?.entries ?? []}
             hasNextPage={accumulated?.nextCursor !== undefined}
             loadingMore={directoryQuery.isFetchingNextPage}
+            paginationError={
+                directoryQuery.isFetchNextPageError
+                    ? workspaceFileFailureMessage(directoryQuery.error)
+                    : undefined
+            }
             onDownload={(entry) =>
                 boundary.run((signal) => downloadWorkspaceFile(client, entry, signal))
             }

@@ -107,7 +107,10 @@ export function AgentHistoryTable({ pagination, runs }: AgentHistoryTableProps) 
     const tableElement = (rowWindow?: VirtualizerRenderState<HTMLTableRowElement>) => (
         <DataTable
             footer={
-                pagination === undefined ? undefined : (
+                pagination === undefined ||
+                (!pagination.hasMore &&
+                    !pagination.loading &&
+                    pagination.error === undefined) ? undefined : (
                     <InfiniteScrollTrigger
                         className="p-3"
                         rootRef={rowWindow?.scrollContainerRef}

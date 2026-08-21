@@ -245,7 +245,9 @@ export function OpenClawCronBrowser({
         runsError = dashboardBrowserFailureMessage(runsLiveHead.error ?? runs.error);
     }
     const inventoryRefreshFailed =
-        inventory.data !== undefined && inventory.error !== null;
+        inventory.data !== undefined &&
+        inventory.error !== null &&
+        !inventory.isFetchNextPageError;
     const runsRefreshFailed =
         runsAccumulation?.stable !== false &&
         (runsLiveHead.error !== null || runs.error !== null);
@@ -269,6 +271,11 @@ export function OpenClawCronBrowser({
         <OpenClawCronSection
             backgroundError={backgroundError}
             jobsLoadingMore={inventory.isFetchingNextPage}
+            jobsPaginationError={
+                inventory.isFetchNextPageError
+                    ? dashboardBrowserFailureMessage(inventory.error)
+                    : undefined
+            }
             heartbeatSession={heartbeatSession}
             heartbeatSessionStatus={heartbeatSessionStatus}
             onDelete={(job) => mutation.mutateAsync({ job, kind: "delete" })}

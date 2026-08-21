@@ -38,6 +38,7 @@ export type OpenClawCronSectionState =
 export interface OpenClawCronSectionProps {
     readonly backgroundError?: string;
     readonly jobsLoadingMore?: boolean;
+    readonly jobsPaginationError?: string;
     readonly heartbeatSession?: GatewaySession;
     readonly heartbeatSessionStatus?: "loading" | "ready" | "unavailable";
     readonly onDelete: (job: OpenClawCronJob) => Promise<void>;
@@ -101,6 +102,7 @@ function confirmationTitle(confirmation: Confirmation): string {
 export function OpenClawCronSectionView({
     backgroundError,
     jobsLoadingMore = false,
+    jobsPaginationError,
     heartbeatSession,
     heartbeatSessionStatus,
     onDelete,
@@ -341,6 +343,9 @@ export function OpenClawCronSectionView({
                                     onLoadMoreJobs === undefined
                                         ? undefined
                                         : {
+                                              ...(jobsPaginationError === undefined
+                                                  ? {}
+                                                  : { error: jobsPaginationError }),
                                               hasMore: result.hasMore,
                                               loading: jobsLoadingMore,
                                               loadingLabel: "Loading more OpenClaw jobs…",
