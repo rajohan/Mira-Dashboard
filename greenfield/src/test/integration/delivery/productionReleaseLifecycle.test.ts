@@ -60,16 +60,31 @@ afterEach(async () => {
     await removeProductionDeliveryFixtures(temporaryDirectories);
 });
 
-async function unusedLoopbackPort(): Promise<number> {
+interface LoopbackPortReservation {
+    readonly port: number;
+    readonly release: () => Promise<void>;
+}
+
+function reserveLoopbackPort(): LoopbackPortReservation {
     const server = Bun.serve({
         fetch: () => new Response(null, { status: 503 }),
         hostname: "127.0.0.1",
         port: 0,
     });
     const port = server.port;
-    await server.stop(true);
-    if (port === undefined) throw new Error("Bun did not assign a loopback port");
-    return port;
+    if (port === undefined) {
+        void server.stop(true);
+        throw new Error("Bun did not assign a loopback port");
+    }
+    let reserved = true;
+    return Object.freeze({
+        port,
+        async release() {
+            if (!reserved) return;
+            reserved = false;
+            await server.stop(true);
+        },
+    });
 }
 
 async function realReleaseFixture(
@@ -269,6 +284,7 @@ class DirectProcessController implements ProductionServiceController {
     readonly #paths: Parameters<typeof pointProductionProcessesAtRelease>[1];
     readonly #port: number;
     readonly #projectRoot: string;
+    readonly #portReservation: LoopbackPortReservation;
     readonly #stopResults: Array<
         ChildStopResult & { readonly process: "web" | "worker" }
     > = [];
@@ -279,12 +295,13 @@ class DirectProcessController implements ProductionServiceController {
         lease: Parameters<typeof pointProductionProcessesAtRelease>[0],
         paths: Parameters<typeof pointProductionProcessesAtRelease>[1],
         projectRoot: string,
-        port: number
+        portReservation: LoopbackPortReservation
     ) {
         this.#lease = lease;
         this.#paths = paths;
         this.#projectRoot = projectRoot;
-        this.#port = port;
+        this.#port = portReservation.port;
+        this.#portReservation = portReservation;
     }
 
     prepare(): Promise<void> {
@@ -302,6 +319,7 @@ class DirectProcessController implements ProductionServiceController {
         runtime: InstalledProductionRuntime
     ): Promise<void> {
         await this.stop();
+        await this.#portReservation.release();
         const openClawRoot = path.join(this.#projectRoot, "openclaw-test");
         await mkdir(openClawRoot, { mode: 0o700, recursive: true });
         await chmod(openClawRoot, 0o700);
@@ -429,7 +447,7 @@ describe("disposable production release lifecycle", () => {
         );
         temporaryDirectories.push(projectRoot);
         const state = await prepareProtectedProductionStatePath(projectRoot);
-        const port = await unusedLoopbackPort();
+        const portReservation = reserveLoopbackPort();
         await withDeploymentLease(state.stateDirectory, async (lease) => {
             const paths = await prepareProductionDeliveryDirectories(state);
             const runtime = await installProductionRuntime(
@@ -444,7 +462,12 @@ describe("disposable production release lifecycle", () => {
                 sourceRelease,
                 runtimeIdentity
             );
-            const services = new DirectProcessController(lease, paths, projectRoot, port);
+            const services = new DirectProcessController(
+                lease,
+                paths,
+                projectRoot,
+                portReservation
+            );
             try {
                 const activation = await Effect.runPromise(
                     activatePublishedProductionRelease(lease, paths, release, runtime, {
@@ -455,13 +478,13 @@ describe("disposable production release lifecycle", () => {
                     releaseId,
                     runtimeRevision: Bun.revision,
                 });
-                const browser = await fetch(`http://127.0.0.1:${port}/`);
+                const browser = await fetch(`http://127.0.0.1:${portReservation.port}/`);
                 expect(browser.status).toBe(200);
                 expect(browser.headers.get("content-type")).toContain("text/html");
                 expect(await browser.text()).toBe(lifecycleBrowserHtml);
                 const smoke = await runBundledWorkerSmoke(
                     path.join(paths.stateDirectory, "mira-dashboard.db"),
-                    port
+                    portReservation.port
                 );
                 expect(smoke.result).toMatchObject({
                     databaseReleaseId: releaseId,
@@ -489,6 +512,7 @@ describe("disposable production release lifecycle", () => {
                 expect(databaseStatus.mode & 0o777n).toBe(0o600n);
             } finally {
                 await services.stop();
+                await portReservation.release();
             }
         });
     }, 120_000);
