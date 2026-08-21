@@ -15,6 +15,7 @@ import { Text } from "./Text.tsx";
 
 const sourceViewerLineNumberMaximum = 20_000;
 const sourceViewerHighlightByteMaximum = 256 * 1024;
+const sourceViewerHighlightMatchMaximum = 1000;
 
 interface SourceViewerProps {
     readonly ariaLabel: string;
@@ -54,14 +55,18 @@ interface PlainSourceProps {
     readonly numbered: boolean;
 }
 
-function sourceText(content: string, highlightQuery: string | undefined): ReactNode {
+function sourceText(
+    content: string,
+    highlightQuery: string | undefined,
+    highlightBudget: { remaining: number }
+): ReactNode {
     const query = highlightQuery?.trim().toLowerCase() ?? "";
     if (query.length === 0) return content;
     const normalizedContent = content.toLowerCase();
     const parts: ReactNode[] = [];
     let cursor = 0;
     let match = normalizedContent.indexOf(query);
-    while (match >= 0) {
+    while (match >= 0 && highlightBudget.remaining > 0) {
         if (match > cursor) parts.push(content.slice(cursor, match));
         parts.push(
             <mark
@@ -71,6 +76,7 @@ function sourceText(content: string, highlightQuery: string | undefined): ReactN
                 {content.slice(match, match + query.length)}
             </mark>
         );
+        highlightBudget.remaining -= 1;
         cursor = match + query.length;
         match = normalizedContent.indexOf(query, cursor);
     }
@@ -79,9 +85,12 @@ function sourceText(content: string, highlightQuery: string | undefined): ReactN
 }
 
 function PlainSource({ content, highlightQuery, language, numbered }: PlainSourceProps) {
+    const highlightBudget = { remaining: sourceViewerHighlightMatchMaximum };
     if (!numbered) {
         return (
-            <code data-language={language}>{sourceText(content, highlightQuery)}</code>
+            <code data-language={language}>
+                {sourceText(content, highlightQuery, highlightBudget)}
+            </code>
         );
     }
 
@@ -96,7 +105,7 @@ function PlainSource({ content, highlightQuery, language, numbered }: PlainSourc
                     className={sourceViewerLineClassName(true)}
                     key={`source-line-${index + 1}`}
                 >
-                    {sourceText(line, highlightQuery)}
+                    {sourceText(line, highlightQuery, highlightBudget)}
                     {index < lines.length - 1 ? "\n" : null}
                 </span>
             ))}

@@ -342,6 +342,7 @@ export function DocsRoute({
                     >
                         {selected.kind === "markdown" ? (
                             <Markdown
+                                className="[&_pre]:w-max [&_pre]:max-w-none [&_pre]:min-w-full [&_pre]:overflow-visible [&_table]:w-max [&_table]:min-w-full"
                                 components={{
                                     a: ({ children, href }) => {
                                         const target = documentationLinkPath(
@@ -439,6 +440,11 @@ export function DocsRoute({
                                                 {children}
                                             </HighlightedText>
                                         </th>
+                                    ),
+                                    table: ({ children, node: _node, ...properties }) => (
+                                        <div className="my-6 w-max min-w-full">
+                                            <table {...properties}>{children}</table>
+                                        </div>
                                     ),
                                 }}
                                 source={documentContent(selected, openApiDocument)}

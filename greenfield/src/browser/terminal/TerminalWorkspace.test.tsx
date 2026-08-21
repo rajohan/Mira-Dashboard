@@ -70,6 +70,15 @@ function renderWorkspace(overrides: Partial<TerminalWorkspaceProps> = {}) {
 }
 
 describe("interactive terminal workspace", () => {
+    test("keeps retained output visible after the server returns to idle", () => {
+        renderWorkspace({ hasRetainedOutput: true, phase: "idle" });
+
+        expect(screen.getByTestId("terminal-canvas").parentElement).not.toHaveClass(
+            "invisible"
+        );
+        expect(screen.queryByText("Terminal not started")).toBeNull();
+    });
+
     test("starts only from a canonical reviewed location", () => {
         const handlers = renderWorkspace();
         expect(screen.getByText("Terminal not started")).toBeTruthy();

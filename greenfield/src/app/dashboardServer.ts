@@ -1787,7 +1787,8 @@ export interface DashboardWebProcessDependencies {
     ) => Promise<DashboardProjectLayout>;
     readonly resolveTerminalRoots: (
         openClawRoot: string,
-        dashboardRoot: string
+        dashboardRoot: string,
+        workspaceRoot: string
     ) => Promise<readonly DashboardTerminalWorkspaceRoot[]>;
     readonly resolveOpenClawFileRoot: typeof resolveReviewedOpenClawFileRoot;
     readonly resolveWorkspaceFileRoot: typeof resolveReviewedWorkspaceFileRoot;
@@ -1795,12 +1796,18 @@ export interface DashboardWebProcessDependencies {
 
 export function resolveTerminalWorkspaceRoots(
     openClawRoot: string,
-    dashboardRoot: string
+    dashboardRoot: string,
+    workspaceRoot: string
 ): Promise<readonly DashboardTerminalWorkspaceRoot[]> {
     const roots: DashboardTerminalWorkspaceRoot[] = [
-        { id: "openclaw", label: "OpenClaw", path: openClawRoot },
-        { id: "dashboard", label: "Mira Dashboard", path: dashboardRoot },
+        { id: "workspace", label: "Workspace", path: workspaceRoot },
     ];
+    if (openClawRoot !== workspaceRoot) {
+        roots.push({ id: "openclaw", label: "OpenClaw", path: openClawRoot });
+    }
+    if (dashboardRoot !== workspaceRoot && dashboardRoot !== openClawRoot) {
+        roots.push({ id: "dashboard", label: "Mira Dashboard", path: dashboardRoot });
+    }
     return Promise.resolve(Object.freeze(roots.map((root) => Object.freeze(root))));
 }
 
@@ -1897,7 +1904,8 @@ export async function runDashboardWebProcess(
     );
     const terminalRoots = await dependencies.resolveTerminalRoots(
         openClawFileRoot.path,
-        layout.root
+        layout.root,
+        workspaceFileRoot.path
     );
     const destination = dependencies.createLogDestination(
         layout.production.state.logs,

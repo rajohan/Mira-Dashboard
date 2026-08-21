@@ -107,4 +107,23 @@ describe("SourceViewer", () => {
         );
         expect(screen.queryByTestId("syntax-highlighted-source")).toBeNull();
     });
+
+    test("caps marks in large source documents", () => {
+        const content = "e ".repeat(1005);
+        const { container } = render(
+            <SourceViewer
+                ariaLabel="large.json source"
+                content={content}
+                copyLabel="Copy large.json"
+                highlightQuery="e"
+                language="json"
+                languageLabel="JSON"
+            />
+        );
+
+        expect(container.querySelectorAll("mark")).toHaveLength(1000);
+        expect(container.querySelector("code[data-language='json']")?.textContent).toBe(
+            content
+        );
+    });
 });

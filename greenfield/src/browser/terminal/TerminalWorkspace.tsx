@@ -41,6 +41,7 @@ export interface TerminalWorkspaceProps {
     readonly canvas: ReactNode;
     readonly dimensions: TerminalDimensions;
     readonly endBusy?: boolean;
+    readonly hasRetainedOutput?: boolean;
     readonly inputPaused?: boolean;
     readonly location: TerminalLocation;
     readonly onClear: () => void;
@@ -94,6 +95,7 @@ export function TerminalWorkspace({
     canvas,
     dimensions,
     endBusy = false,
+    hasRetainedOutput = false,
     inputPaused = false,
     location,
     onClear,
@@ -113,7 +115,7 @@ export function TerminalWorkspace({
 }: TerminalWorkspaceProps) {
     const [confirmEnd, setConfirmEnd] = useState(false);
     const hasSession = session !== undefined;
-    const showTerminalCanvas = hasSession || phase === "ended";
+    const showTerminalCanvas = hasSession || hasRetainedOutput;
     const resumeAvailable =
         phase === "active-elsewhere" && session?.state === "awaiting-reconnect";
     const startAvailable = !hasSession && phase !== "starting" && phase !== "connecting";

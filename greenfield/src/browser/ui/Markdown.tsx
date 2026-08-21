@@ -74,7 +74,7 @@ const sharedMarkdownComponents = {
     },
     table({ children, node: _node, ...properties }) {
         return (
-            <div className="my-6 w-max min-w-full">
+            <div className="my-6 max-w-full overflow-x-auto">
                 <table {...properties}>{children}</table>
             </div>
         );
@@ -96,7 +96,7 @@ export function Markdown({
     return (
         <div
             className={cn(
-                "prose prose-invert prose-sm prose-a:text-accent-300 prose-code:text-primary-100 prose-code:before:content-none prose-code:after:content-none prose-pre:bg-primary-950 max-w-full min-w-0 wrap-break-word [&_pre]:w-max [&_pre]:max-w-none [&_pre]:min-w-full [&_pre]:overflow-visible [&_pre_code]:rounded-none [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-inherit [&_table]:my-0 [&_table]:w-max [&_table]:min-w-full",
+                "prose prose-invert prose-sm prose-a:text-accent-300 prose-code:text-primary-100 prose-code:before:content-none prose-code:after:content-none prose-pre:bg-primary-950 max-w-full min-w-0 wrap-break-word [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre_code]:rounded-none [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-inherit [&_table]:my-0",
                 className
             )}
         >

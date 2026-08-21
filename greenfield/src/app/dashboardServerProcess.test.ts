@@ -86,9 +86,14 @@ const processOptions = Object.freeze({
 });
 
 test("resolves configured terminal roots without web-sandbox-only paths", async () => {
-    const roots = await resolveTerminalWorkspaceRoots(openClawRoot, projectRoot);
+    const roots = await resolveTerminalWorkspaceRoots(
+        openClawRoot,
+        projectRoot,
+        workspaceRoot
+    );
 
     expect(roots).toEqual([
+        { id: "workspace", label: "Workspace", path: workspaceRoot },
         { id: "openclaw", label: "OpenClaw", path: openClawRoot },
         { id: "dashboard", label: "Mira Dashboard", path: projectRoot },
     ]);
@@ -205,6 +210,11 @@ function processFixture(totpFailure?: Error, cutoverValidation = false) {
             );
             expect(options.terminalRoots).toEqual([
                 {
+                    id: "workspace",
+                    label: "Workspace",
+                    path: workspaceRoot,
+                },
+                {
                     id: "openclaw",
                     label: "OpenClaw",
                     path: openClawRoot,
@@ -250,11 +260,21 @@ function processFixture(totpFailure?: Error, cutoverValidation = false) {
             events.push(`layout:${observedProjectRoot}`);
             return Promise.resolve(layout);
         },
-        resolveTerminalRoots(observedOpenClawRoot, observedDashboardRoot) {
+        resolveTerminalRoots(
+            observedOpenClawRoot,
+            observedDashboardRoot,
+            observedWorkspaceRoot
+        ) {
             expect(observedOpenClawRoot).toBe(openClawRoot);
             expect(observedDashboardRoot).toBe(layout.root);
+            expect(observedWorkspaceRoot).toBe(workspaceRoot);
             return Promise.resolve(
                 Object.freeze([
+                    Object.freeze({
+                        id: "workspace",
+                        label: "Workspace",
+                        path: workspaceRoot,
+                    }),
                     Object.freeze({
                         id: "openclaw",
                         label: "OpenClaw",
