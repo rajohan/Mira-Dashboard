@@ -27,9 +27,6 @@ test("terminal page removes the redundant intro and preserves a scrollable works
     expect(canvas.parentElement?.className.split(" ")).toEqual(
         expect.arrayContaining(["min-h-0", "flex-1", "flex-col"])
     );
-    expect(layout?.lastElementChild?.className.split(" ")).toEqual(
-        expect.arrayContaining(["h-8", "shrink-0"])
-    );
     expect(screen.queryByText("Operations")).toBeNull();
     expect(screen.queryByRole("heading", { name: "Terminal" })).toBeNull();
     expect(

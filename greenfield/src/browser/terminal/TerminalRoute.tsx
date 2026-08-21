@@ -21,7 +21,6 @@ export function TerminalPageLayout({ children }: TerminalPageLayoutProps) {
     return (
         <div className={cn(dashboardPageContainerClassName, "flex min-h-full flex-col")}>
             <div className="flex min-h-0 flex-1 flex-col">{children}</div>
-            <div aria-hidden="true" className="h-8 shrink-0" />
         </div>
     );
 }

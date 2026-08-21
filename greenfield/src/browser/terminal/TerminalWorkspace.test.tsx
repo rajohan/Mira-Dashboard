@@ -76,6 +76,9 @@ describe("interactive terminal workspace", () => {
         expect(screen.getByTestId("terminal-canvas").parentElement).toHaveClass(
             "invisible"
         );
+        expect(screen.getByTestId("terminal-canvas").closest("section")).toHaveClass(
+            "mb-8"
+        );
         fireEvent.click(screen.getByRole("button", { name: "Start terminal" }));
         expect(handlers.onStart).toHaveBeenCalledTimes(1);
 

@@ -264,7 +264,7 @@ export function TerminalWorkspace({
 
             <section
                 aria-labelledby="terminal-canvas-heading"
-                className="border-primary-700 bg-primary-950 flex min-h-[28rem] flex-1 flex-col overflow-hidden rounded-xl border shadow-sm shadow-black/20"
+                className="border-primary-700 bg-primary-950 mb-8 flex min-h-[28rem] flex-1 flex-col overflow-hidden rounded-xl border shadow-sm shadow-black/20"
             >
                 <div className="border-primary-700 bg-primary-900 flex shrink-0 flex-wrap items-center gap-2 border-b p-2">
                     <Heading className="sr-only" id="terminal-canvas-heading" level={2}>
