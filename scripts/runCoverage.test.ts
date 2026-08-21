@@ -64,7 +64,7 @@ describe("coverage runner", () => {
 
     test("discovers exact current inventories and creates nine complete batches", async () => {
         const inventories = await loadCoverageTestInventories(projectRoot);
-        expect(inventories.bun).toHaveLength(509);
+        expect(inventories.bun).toHaveLength(510);
         expect(inventories.browser).toHaveLength(193);
         expect(inventories.storybook).toHaveLength(90);
 
@@ -91,7 +91,7 @@ describe("coverage runner", () => {
                     .filter(({ partition }) => partition === "bun")
                     .flatMap(({ testFiles }) => testFiles)
             ).size
-        ).toBe(509);
+        ).toBe(510);
         expect(
             new Set(
                 plans
