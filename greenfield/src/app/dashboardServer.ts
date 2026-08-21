@@ -1805,7 +1805,7 @@ async function resolveTerminalWorkspaceRoots(
             roots.push({ id: "docker", label: "Docker", path: "/opt/docker" });
         }
     } catch {
-        // Docker storage is optional on hosts that do not run the production stack.
+        // An unavailable optional Docker root must not prevent Dashboard startup.
     }
     roots.push({ id: "dashboard", label: "Mira Dashboard", path: dashboardRoot });
     return Object.freeze(roots.map((root) => Object.freeze(root)));
