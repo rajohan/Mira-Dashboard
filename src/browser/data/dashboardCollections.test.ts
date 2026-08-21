@@ -14,8 +14,7 @@ import { createDashboardBrowserCollections } from "./dashboardCollections.ts";
 const unusedTransport: DashboardTrpcTransport = Object.freeze({
     mutation: (path: string) =>
         Promise.reject(new TypeError(`Unexpected mutation: ${path}`)),
-    query: (path: string) =>
-        Promise.reject(new TypeError(`Unexpected query: ${path}`)),
+    query: (path: string) => Promise.reject(new TypeError(`Unexpected query: ${path}`)),
 });
 
 describe("Dashboard browser collections", () => {
@@ -158,9 +157,9 @@ describe("Dashboard browser collections", () => {
 
             await collections.notifications.toArrayWhenReady();
             expect(notificationQueryCount).toBe(2);
-            expect(
-                collections.notifications.get(secondNotificationId)?.title
-            ).toBe("Second session");
+            expect(collections.notifications.get(secondNotificationId)?.title).toBe(
+                "Second session"
+            );
             expect(collections.notifications.get(firstNotificationId)).toBeUndefined();
             expect(queryClient.getQueryData(notificationLatestQueryKey)).toEqual(
                 results[1]

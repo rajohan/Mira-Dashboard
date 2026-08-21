@@ -23,7 +23,6 @@
         "@simplewebauthn/browser": "13.3.0",
         "@simplewebauthn/server": "13.3.2",
         "@tailwindcss/typography": "^0.5.20",
-        "@tanstack/db": "0.8.1",
         "@tanstack/query-core": "5.101.4",
         "@tanstack/query-db-collection": "1.2.6",
         "@tanstack/react-db": "0.3.1",

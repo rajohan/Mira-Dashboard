@@ -65,14 +65,13 @@ export default defineConfig({
     ],
     ignorePatterns: [
         "**/coverage/**",
-        "**/data/**",
+        "data/**",
         "**/dist/**",
         "**/node_modules/**",
         "**/*.log",
         "**/*.tsbuildinfo",
         ".git/**",
         ".vscode/**",
-        "build/**",
     ],
     options: {
         denyWarnings: true,

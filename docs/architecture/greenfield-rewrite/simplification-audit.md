@@ -12,14 +12,30 @@ The rewrite is the repository root. The retired `backend/`, `frontend/`, legacy 
 package graph, scripts, and systemd units are deleted. GitHub Actions now installs and tests only
 the root package. The public package surface has ten typed entrypoints instead of 53 aliases.
 
-Repository checks found no additional safely removable production module or dependency. Oxlint's
+Repository checks found no additional safely removable production module. Oxlint's
 unused-import/local rules, three strict TypeScript graphs, exact source discovery, exact test
 inventories, and the coverage source-presence gate remain the executable dead-code defenses.
 Historical parity fixtures remain because the parity inventory still consumes them; they are not
 runtime compatibility code.
 
+An independent Knip 5.63.1 scan was also run with TypeScript 5.9 because Knip does not yet load the
+repository's native TypeScript 7 package. Its file and export findings are not deletion evidence in
+this repository: the reported files are configuration, declared test setup, exact child-process
+entrypoints, generated-contract exports, or public/test-consumed symbols. The dependency finding
+was actionable: the root's unused direct `@tanstack/db` declaration was removed because the exact
+package is already owned transitively by `@tanstack/query-db-collection` and no repository source
+imports it directly. Tooling packages reported as unused are invoked by configuration or executable
+name and remain required.
+
 One transitional helper was removed during this audit: Git-hook installation no longer discovers
 or preserves a nested `greenfield/` prefix. It configures the committed root `.githooks` directly.
+
+The ignore audit removed obsolete npm, Yarn, pnpm, Lerna, Vite SSR, and retired test-runtime
+patterns. It also narrowed Oxlint and Oxfmt from `**/data/**` to `data/**`: root runtime state stays
+excluded without accidentally excluding `src/browser/data/`. Enabling that source tree exposed and
+fixed two lint findings and normalized the module and its test. Generated documentation and
+migrations remain Oxfmt exclusions because their generators own byte-stable output; both remain
+covered by their dedicated drift checks.
 
 ## `node:*` inventory and decisions
 

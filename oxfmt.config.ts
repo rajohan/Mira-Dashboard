@@ -4,7 +4,7 @@ export default defineConfig({
     endOfLine: "lf",
     ignorePatterns: [
         "**/coverage/**",
-        "**/data/**",
+        "data/**",
         "**/dist/**",
         "docs/generated/**",
         "migrations/**",

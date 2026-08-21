@@ -21,7 +21,6 @@
 | `@simplewebauthn/browser` | `13.3.0` | `13.3.0` | runtime |
 | `@simplewebauthn/server` | `13.3.2` | `13.3.2` | runtime |
 | `@tailwindcss/typography` | `^0.5.20` | `0.5.20` | runtime |
-| `@tanstack/db` | `0.8.1` | `0.8.1` | runtime |
 | `@tanstack/query-core` | `5.101.4` | `5.101.4` | runtime |
 | `@tanstack/query-db-collection` | `1.2.6` | `1.2.6` | runtime |
 | `@tanstack/react-db` | `0.3.1` | `0.3.1` | runtime |

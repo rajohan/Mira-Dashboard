@@ -27,8 +27,8 @@ async function cleanupCollections(
         agents.statuses.cleanup(),
         notifications.cleanup(),
     ]);
-    const failures = results.flatMap((result) =>
-        result.status === "rejected" ? [result.reason] : []
+    const failures: unknown[] = results.flatMap((result) =>
+        result.status === "rejected" ? [result.reason as unknown] : []
     );
     if (failures.length > 0) {
         throw new AggregateError(failures, "Dashboard collection cleanup failed");
@@ -52,7 +52,7 @@ export function createDashboardBrowserCollections(
 
     function enqueue(operation: () => Promise<void>): Promise<void> {
         const result = pendingOperation.then(operation);
-        pendingOperation = result.catch(() => undefined);
+        pendingOperation = result.catch(() => {});
         return result;
     }
 
@@ -78,16 +78,10 @@ export function createDashboardBrowserCollections(
                 const previousAgents = agents;
                 const previousNotifications = notifications;
                 try {
-                    await cleanupCollections(
-                        previousAgents,
-                        previousNotifications
-                    );
+                    await cleanupCollections(previousAgents, previousNotifications);
                 } finally {
                     agents = createAgentCollections(queryClient, trpcClient);
-                    notifications = createNotificationCollection(
-                        queryClient,
-                        trpcClient
-                    );
+                    notifications = createNotificationCollection(queryClient, trpcClient);
                 }
             });
         },
