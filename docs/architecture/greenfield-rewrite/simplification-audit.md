@@ -1,7 +1,9 @@
 # Repository simplification and `node:*` compatibility audit
 
-**Audit date:** 2026-08-21  
-**Runtime:** Bun 1.4.0  
+**Audit date:** 2026-08-21
+
+**Runtime:** Bun 1.4.0
+
 **Scope:** repository-root application, scripts, Storybook configuration, tests, CI, and delivery
 
 ## Result
