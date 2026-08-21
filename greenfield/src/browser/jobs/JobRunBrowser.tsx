@@ -329,7 +329,7 @@ export function JobRunBrowser({
     const summary =
         summaryQuery.data ?? liveHead.data?.summary ?? query.data?.pages[0]?.summary;
     const claiming = useSetJobClaimingPausedMutation();
-    const historyPageFailed = query.error !== null;
+    const historyPageFailed = query.isFetchNextPageError;
     const fetchNextHistoryPage = query.fetchNextPage;
     const hasNextHistoryPage = query.hasNextPage;
     const historyPageLoading = query.isFetchingNextPage;

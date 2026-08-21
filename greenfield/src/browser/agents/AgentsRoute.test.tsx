@@ -417,8 +417,8 @@ describe("Dashboard agents route", () => {
 
         transport.mainStatus = {
             agentId: "main",
-            freshness: "stale",
-            gatewayAvailability: "stale",
+            freshness: "fresh",
+            gatewayAvailability: "active",
             hasActiveRun: true,
             lastActivityAtMs: timestampMs + 1000,
             lastSeenAtMs: timestampMs,
@@ -430,7 +430,9 @@ describe("Dashboard agents route", () => {
             await collections.agents.statuses.utils.refetch();
         });
         expect(screen.getAllByLabelText("Agent activity: idle")).toHaveLength(2);
-        expect(screen.getByLabelText("Gateway session availability: stale")).toBeTruthy();
+        expect(
+            screen.getByLabelText("Gateway session availability: active")
+        ).toBeTruthy();
         expect(
             screen
                 .getAllByRole("heading", { level: 3 })

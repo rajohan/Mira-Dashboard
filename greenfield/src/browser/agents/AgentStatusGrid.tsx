@@ -35,11 +35,7 @@ interface AgentStatusAppearance {
 }
 
 function agentIsActive(status: AgentStatusProjection | undefined): boolean {
-    return (
-        status !== undefined &&
-        (isWorkingAgentStatusProjection(status) ||
-            status.gatewayAvailability === "active")
-    );
+    return status !== undefined && isWorkingAgentStatusProjection(status);
 }
 
 function agentStatusAppearance(

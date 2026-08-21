@@ -395,7 +395,12 @@ describe("chat browser", () => {
             log.scrollTop = 0;
             fireEvent.scroll(log);
             fireEvent.scroll(log);
-            await waitFor(() => expect(historyCursors).toEqual(["0", "100"]));
+            await waitFor(() => {
+                if (historyCursors.length !== 2) {
+                    throw new Error("First older history request has not started");
+                }
+            });
+            expect(historyCursors).toEqual(["0", "100"]);
             expect(log).toHaveAttribute("aria-busy", "true");
 
             await act(async () => {
@@ -429,7 +434,12 @@ describe("chat browser", () => {
             fireEvent.wheel(log, { deltaY: -100 });
             log.scrollTop = 0;
             fireEvent.scroll(log);
-            await waitFor(() => expect(historyCursors).toEqual(["0", "100", "200"]));
+            await waitFor(() => {
+                if (historyCursors.length !== 3) {
+                    throw new Error("Second older history request has not started");
+                }
+            });
+            expect(historyCursors).toEqual(["0", "100", "200"]);
             expect(log).toHaveAttribute("aria-busy", "true");
             await act(async () => {
                 secondOlderPage.resolve({

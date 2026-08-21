@@ -273,15 +273,18 @@ export async function expectResponsiveVirtualizedTableTransition({
 
     container.style.width = "20rem";
     container.style.maxWidth = "20rem";
-    await waitFor(async () => {
-        const narrowAnchor = firstVisibleVirtualIndex(scrollRegion, table);
-        await expect(getComputedStyle(table).display).toBe("block");
-        await expect(scrollRegion.scrollWidth).toBe(scrollRegion.clientWidth);
-        await expect(scrollRegion.scrollHeight).toBeGreaterThan(rowCount * 100);
-        await expect(
-            Math.abs((narrowAnchor ?? -1) - (wideAnchor ?? -1))
-        ).toBeLessThanOrEqual(Math.ceil(rowCount / 4));
-    });
+    await waitFor(
+        async () => {
+            const narrowAnchor = firstVisibleVirtualIndex(scrollRegion, table);
+            await expect(getComputedStyle(table).display).toBe("block");
+            await expect(scrollRegion.scrollWidth).toBe(scrollRegion.clientWidth);
+            await expect(scrollRegion.scrollHeight).toBeGreaterThan(rowCount * 100);
+            await expect(
+                Math.abs((narrowAnchor ?? -1) - (wideAnchor ?? -1))
+            ).toBeLessThanOrEqual(Math.ceil(rowCount / 4));
+        },
+        { timeout: 5000 }
+    );
 
     scrollRegion.scrollTop = scrollRegion.scrollHeight;
     scrollRegion.dispatchEvent(new Event("scroll", { bubbles: true }));

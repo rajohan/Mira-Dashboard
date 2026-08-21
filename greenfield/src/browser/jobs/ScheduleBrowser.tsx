@@ -62,7 +62,7 @@ function SelectedSchedule({
     const fetchNextHistoryPage = history.fetchNextPage;
     const hasNextHistoryPage = history.hasNextPage;
     const historyPageLoading = history.isFetchingNextPage;
-    const historyPageFailed = history.error !== null;
+    const historyPageFailed = history.isFetchNextPageError;
     const historyError = liveHead.error ?? history.error;
     const historyHasData = liveHead.data !== undefined || history.data !== undefined;
     const runs = useAccumulatedLiveHistoryRows(

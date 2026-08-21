@@ -16,6 +16,7 @@ import { ConfirmModal } from "../ui/ConfirmModal.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { IconOnlyButton } from "../ui/IconOnlyButton.tsx";
+import { InfiniteScrollTrigger } from "../ui/InfiniteScrollTrigger.tsx";
 import { LoadingState } from "../ui/LoadingState.tsx";
 import { Markdown } from "../ui/Markdown.tsx";
 import { Text } from "../ui/Text.tsx";
@@ -185,12 +186,30 @@ export function TaskProgressSection({ taskId }: TaskProgressSectionProps) {
             {progress.isPending && (
                 <LoadingState label="Loading task progress…" size="sm" />
             )}
-            {progress.isSuccess && updates.length === 0 && (
-                <EmptyState
-                    className="mt-5"
-                    description="Add an update when work begins or circumstances change."
-                    title="No progress updates"
-                />
+            {progress.data !== undefined && updates.length === 0 && (
+                <>
+                    <EmptyState
+                        className="mt-5"
+                        description="Add an update when work begins or circumstances change."
+                        title="No progress updates"
+                    />
+                    {progress.hasNextPage && (
+                        <InfiniteScrollTrigger
+                            className="py-2"
+                            {...(progressPageError === null
+                                ? {}
+                                : {
+                                      error: dashboardBrowserFailureMessage(
+                                          progressPageError
+                                      ),
+                                  })}
+                            hasMore
+                            loading={progress.isFetchingNextPage}
+                            loadingLabel="Loading older progress updates…"
+                            onLoadMore={() => void progress.fetchNextPage()}
+                        />
+                    )}
+                </>
             )}
             {updates.length > 0 && (
                 <VirtualizedList

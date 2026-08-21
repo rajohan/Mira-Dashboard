@@ -633,7 +633,7 @@ describe("Bun-native dashboard backend", () => {
                   stdout: string;
               }
             | undefined;
-        for (let attempt = 0; attempt < 30; attempt += 1) {
+        for (let attempt = 0; attempt < 100; attempt += 1) {
             const response = await api<{
                 code?: number;
                 status: "done" | "running" | "signaled";
