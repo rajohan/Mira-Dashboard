@@ -87,4 +87,24 @@ describe("SourceViewer", () => {
             container.querySelector("[data-testid='syntax-highlighted-source']")
         ).toBeNull();
     });
+
+    test("marks source search matches without changing the copied content", () => {
+        const content = '{\n  "status": "ready"\n}';
+        const { container } = render(
+            <SourceViewer
+                ariaLabel="status.json source"
+                content={content}
+                copyLabel="Copy status.json"
+                highlightQuery="READY"
+                language="json"
+                languageLabel="JSON"
+            />
+        );
+
+        expect(container.querySelector("mark")).toHaveTextContent("ready");
+        expect(container.querySelector("code[data-language='json']")?.textContent).toBe(
+            content
+        );
+        expect(screen.queryByTestId("syntax-highlighted-source")).toBeNull();
+    });
 });

@@ -14,8 +14,10 @@ interface ExpandableCardBaseProps {
     readonly defaultOpen?: boolean;
     readonly description?: ReactNode;
     readonly icon?: LucideIcon;
+    readonly panelClassName?: string;
     readonly title: ReactNode;
     readonly trailing?: ReactNode;
+    readonly triggerClassName?: string;
 }
 
 type ExpandableCardProps = ExpandableCardBaseProps &
@@ -43,8 +45,10 @@ export function ExpandableCard({
     icon,
     onOpenChange,
     open,
+    panelClassName,
     title,
     trailing,
+    triggerClassName,
 }: ExpandableCardProps) {
     const trigger = useRef<HTMLButtonElement>(null);
     const restoreFocusAfterControlledChange = useRef(false);
@@ -88,7 +92,8 @@ export function ExpandableCard({
                                     "group focus-visible:ring-accent-400 flex w-full text-left focus-visible:ring-inset",
                                     compact
                                         ? "hover:bg-primary-800 data-open:bg-primary-800 min-h-8 items-center gap-2 p-2 text-sm"
-                                        : "items-start justify-between gap-4 p-5"
+                                        : "items-start justify-between gap-4 p-5",
+                                    triggerClassName
                                 )}
                                 onClick={(event) => {
                                     if (open === undefined) return;
@@ -161,7 +166,8 @@ export function ExpandableCard({
                             <DisclosurePanel
                                 className={cn(
                                     "border-primary-700 border-t transition duration-150 data-closed:-translate-y-1 data-closed:opacity-0",
-                                    compact ? "p-3" : "p-5"
+                                    compact ? "p-3" : "p-5",
+                                    panelClassName
                                 )}
                                 transition
                             >

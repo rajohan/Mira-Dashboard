@@ -1,4 +1,4 @@
-import { type ReactElement, useState } from "react";
+import { type ReactElement, type ReactNode, useState } from "react";
 
 import { Badge } from "./Badge.tsx";
 import { CopyTextButton } from "./CopyTextButton.tsx";
@@ -20,6 +20,7 @@ interface SourceViewerProps {
     readonly ariaLabel: string;
     readonly content: string;
     readonly copyLabel: string;
+    readonly highlightQuery?: string;
     readonly language: string;
     readonly languageLabel: string;
 }
@@ -48,13 +49,40 @@ function sourceLineCount(content: string): number {
 
 interface PlainSourceProps {
     readonly content: string;
+    readonly highlightQuery?: string;
     readonly language: string;
     readonly numbered: boolean;
 }
 
-function PlainSource({ content, language, numbered }: PlainSourceProps) {
+function sourceText(content: string, highlightQuery: string | undefined): ReactNode {
+    const query = highlightQuery?.trim().toLowerCase() ?? "";
+    if (query.length === 0) return content;
+    const normalizedContent = content.toLowerCase();
+    const parts: ReactNode[] = [];
+    let cursor = 0;
+    let match = normalizedContent.indexOf(query);
+    while (match >= 0) {
+        if (match > cursor) parts.push(content.slice(cursor, match));
+        parts.push(
+            <mark
+                className="bg-accent-400/30 data-[active=true]:bg-accent-300 data-[active=true]:text-primary-950 data-[active=true]:outline-accent-200 rounded-sm text-inherit data-[active=true]:outline-2 data-[active=true]:outline-offset-2"
+                key={`${match}:${content.slice(match, match + query.length)}`}
+            >
+                {content.slice(match, match + query.length)}
+            </mark>
+        );
+        cursor = match + query.length;
+        match = normalizedContent.indexOf(query, cursor);
+    }
+    parts.push(content.slice(cursor));
+    return parts;
+}
+
+function PlainSource({ content, highlightQuery, language, numbered }: PlainSourceProps) {
     if (!numbered) {
-        return <code data-language={language}>{content}</code>;
+        return (
+            <code data-language={language}>{sourceText(content, highlightQuery)}</code>
+        );
     }
 
     const lines = content.split("\n");
@@ -68,7 +96,7 @@ function PlainSource({ content, language, numbered }: PlainSourceProps) {
                     className={sourceViewerLineClassName(true)}
                     key={`source-line-${index + 1}`}
                 >
-                    {line}
+                    {sourceText(line, highlightQuery)}
                     {index < lines.length - 1 ? "\n" : null}
                 </span>
             ))}
@@ -80,16 +108,24 @@ function sourceCode(
     content: string,
     highlighted: boolean,
     language: string,
-    numbered: boolean
+    numbered: boolean,
+    highlightQuery?: string
 ): ReactElement {
-    return highlighted && supportsSyntaxHighlightedSourceLanguage(language) ? (
+    return highlighted &&
+        highlightQuery === undefined &&
+        supportsSyntaxHighlightedSourceLanguage(language) ? (
         <SyntaxHighlightedSource
             content={content}
             language={language}
             numbered={numbered}
         />
     ) : (
-        <PlainSource content={content} language={language} numbered={numbered} />
+        <PlainSource
+            content={content}
+            highlightQuery={highlightQuery}
+            language={language}
+            numbered={numbered}
+        />
     );
 }
 
@@ -200,6 +236,7 @@ export function SourceViewer({
     ariaLabel,
     content,
     copyLabel,
+    highlightQuery,
     language,
     languageLabel,
 }: SourceViewerProps) {
@@ -218,7 +255,13 @@ export function SourceViewer({
             languageLabel={languageLabel}
             lineSummary={lineSummary}
             numbered={numbered}
-            source={sourceCode(content, highlighted, language, numbered)}
+            source={sourceCode(
+                content,
+                highlighted,
+                language,
+                numbered,
+                highlightQuery?.trim().length === 0 ? undefined : highlightQuery
+            )}
         />
     );
 }
