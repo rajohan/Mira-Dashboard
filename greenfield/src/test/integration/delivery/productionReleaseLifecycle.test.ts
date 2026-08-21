@@ -178,7 +178,7 @@ interface ChildStopResult {
 }
 
 async function stopChild(
-    child: Bun.Subprocess<"ignore", "ignore", "ignore">
+    child: Bun.Subprocess<"ignore", "ignore", "pipe">
 ): Promise<ChildStopResult> {
     if (child.exitCode !== null) {
         throw new Error("Production child exited before the shutdown signal");
@@ -280,7 +280,10 @@ async function runBundledWorkerSmoke(
     );
 }
 
-async function activationDiagnostics(stateDirectory: string): Promise<string> {
+async function activationDiagnostics(
+    stateDirectory: string,
+    processStderr: string
+): Promise<string> {
     const entries = await Promise.all(
         ["web", "worker"].map(async (processName) => {
             const logPath = path.join(stateDirectory, `logs/${processName}.ndjson`);
@@ -288,7 +291,7 @@ async function activationDiagnostics(stateDirectory: string): Promise<string> {
             return `${processName}: ${contents}`;
         })
     );
-    return entries.join("\n");
+    return `${entries.join("\n")}\nstderr:\n${processStderr}`;
 }
 
 class DirectProcessController implements ProductionServiceController {
@@ -300,8 +303,10 @@ class DirectProcessController implements ProductionServiceController {
     readonly #stopResults: Array<
         ChildStopResult & { readonly process: "web" | "worker" }
     > = [];
-    #web: Bun.Subprocess<"ignore", "ignore", "ignore"> | undefined;
-    #worker: Bun.Subprocess<"ignore", "ignore", "ignore"> | undefined;
+    #web: Bun.Subprocess<"ignore", "ignore", "pipe"> | undefined;
+    #webStderr = Promise.resolve("");
+    #worker: Bun.Subprocess<"ignore", "ignore", "pipe"> | undefined;
+    #workerStderr = Promise.resolve("");
 
     constructor(
         lease: Parameters<typeof pointProductionProcessesAtRelease>[0],
@@ -326,6 +331,11 @@ class DirectProcessController implements ProductionServiceController {
         return Object.freeze([...this.#stopResults]);
     }
 
+    async stderrDiagnostics(): Promise<string> {
+        const [web, worker] = await Promise.all([this.#webStderr, this.#workerStderr]);
+        return `web stderr: ${web || "<empty>"}\nworker stderr: ${worker || "<empty>"}`;
+    }
+
     async start(
         release: PublishedProductionRelease,
         runtime: InstalledProductionRuntime
@@ -343,7 +353,7 @@ class DirectProcessController implements ProductionServiceController {
         );
         const common = {
             cwd: release.releaseRoot,
-            stderr: "ignore" as const,
+            stderr: "pipe" as const,
             stdin: "ignore" as const,
             stdout: "ignore" as const,
         };
@@ -360,10 +370,12 @@ class DirectProcessController implements ProductionServiceController {
                 },
             }
         );
+        this.#workerStderr = new Response(this.#worker.stderr).text();
         this.#web = Bun.spawn(
             [runtime.executable, path.join(release.releaseRoot, "server/web.js")],
             { ...common, env: webEnvironment(this.#projectRoot, this.#port) }
         );
+        this.#webStderr = new Response(this.#web.stderr).text();
     }
 
     async stop(): Promise<void> {
@@ -431,7 +443,7 @@ class DirectProcessController implements ProductionServiceController {
 describe("disposable production release lifecycle", () => {
     test("rejects a child that exits before its shutdown signal", async () => {
         const child = Bun.spawn([process.execPath, "-e", "process.exit(0)"], {
-            stderr: "ignore",
+            stderr: "pipe",
             stdin: "ignore",
             stdout: "ignore",
         });
@@ -494,7 +506,7 @@ describe("disposable production release lifecycle", () => {
                     );
                 } catch (error) {
                     process.stderr.write(
-                        `Production lifecycle activation diagnostics:\n${await activationDiagnostics(paths.stateDirectory)}\n`
+                        `Production lifecycle activation diagnostics:\n${await activationDiagnostics(paths.stateDirectory, await services.stderrDiagnostics())}\n`
                     );
                     throw error;
                 }
