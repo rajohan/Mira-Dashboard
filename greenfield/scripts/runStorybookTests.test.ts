@@ -200,6 +200,7 @@ describe("Storybook test runner", () => {
             ".storybook/vitest.config.ts",
             "--bail=1",
             "--project=storybook-exclusive-001",
+            "--project=storybook-exclusive-002",
             "--project=storybook",
             "--maxWorkers=3",
             "--no-isolate",
@@ -217,6 +218,7 @@ describe("Storybook test runner", () => {
             ".storybook/vitest.config.ts",
             "--bail=1",
             "--project=storybook-exclusive-001",
+            "--project=storybook-exclusive-002",
             "--project=storybook",
             "--maxWorkers=3",
             "--no-isolate",
@@ -231,7 +233,7 @@ describe("Storybook test runner", () => {
             ["a.stories.tsx"],
             { coverageDirectory: "/tmp/coverage/storybook-001" }
         );
-        expect(coverageCommand.slice(0, 11)).toEqual([
+        expect(coverageCommand.slice(0, 12)).toEqual([
             process.execPath,
             "/tmp/dashboard/node_modules/vitest/vitest.mjs",
             "run",
@@ -239,6 +241,7 @@ describe("Storybook test runner", () => {
             ".storybook/vitest.config.ts",
             "--bail=1",
             "--project=storybook-exclusive-001",
+            "--project=storybook-exclusive-002",
             "--project=storybook",
             "--maxWorkers=3",
             "--no-isolate",
@@ -272,9 +275,11 @@ describe("Storybook test runner", () => {
         const standardPlan = plans.find(({ name }) => name === "storybook");
 
         expect(plans.map(({ name }) => name)).toEqual(storybookTestProjectNames);
-        expect(plans.map(({ groupOrder }) => groupOrder)).toEqual([0, 1]);
+        expect(plans.map(({ groupOrder }) => groupOrder)).toEqual([0, 1, 2]);
         expect(exclusivePlans).toHaveLength(exclusiveStorybookTestFiles.length);
-        expect(exclusivePlans[0]?.testFiles).toEqual(exclusiveStorybookTestFiles);
+        expect(exclusivePlans.map(({ testFiles }) => testFiles)).toEqual(
+            exclusiveStorybookTestFiles.map((filePath) => [filePath])
+        );
         expect(exclusivePlans[0]?.excludedFiles).not.toContain(
             exclusiveStorybookTestFiles[0]
         );

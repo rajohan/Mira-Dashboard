@@ -242,7 +242,8 @@ async function runBundledWorkerSmoke(
         triggerType: "manual",
     });
 
-    const deadline = Date.now() + 15_000;
+    // The coverage worker needs extra time to load instrumented server modules.
+    const deadline = Date.now() + 30_000;
     let last: v.InferOutput<typeof jobRunDetailSchema> | undefined;
     while (Date.now() < deadline) {
         const input = encodeURIComponent(JSON.stringify({ json: { id: queued.id } }));
@@ -370,7 +371,9 @@ class DirectProcessController implements ProductionServiceController {
     }
 
     async verifyReady(): Promise<void> {
-        const deadline = Date.now() + 15_000;
+        // Coverage instrumentation and parallel CI can make the first production
+        // process startup materially slower than an uninstrumented local run.
+        const deadline = Date.now() + 30_000;
         const readinessUrl = `http://127.0.0.1:${this.#port}/api/health/ready`;
         while (Date.now() < deadline) {
             if (this.#web?.exitCode !== null || this.#worker?.exitCode !== null) {
