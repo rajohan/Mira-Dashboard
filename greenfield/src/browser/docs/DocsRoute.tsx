@@ -106,7 +106,7 @@ export function DocsRoute() {
                                 <span className="block truncate font-medium">
                                     {documentLabel(document.path)}
                                 </span>
-                                <span className="text-primary-500 block truncate text-xs">
+                                <span className="text-primary-400 block truncate text-xs">
                                     {document.path}
                                 </span>
                             </button>

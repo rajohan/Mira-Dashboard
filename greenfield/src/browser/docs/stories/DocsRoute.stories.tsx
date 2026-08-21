@@ -2,6 +2,17 @@ import type { Meta, StoryObj } from "@storybook/tanstack-react";
 import { expect, userEvent, within } from "storybook/test";
 
 import { DashboardPageStory } from "../../storySupport/dashboardPageStoryHarness.tsx";
+import { dashboardStoryValue } from "../../storySupport/dashboardStoryTransport.ts";
+
+const fixtures = {
+    queries: {
+        "notifications.list": dashboardStoryValue({
+            notifications: [],
+            readCount: 0,
+            unreadCount: 0,
+        }),
+    },
+};
 
 const meta = {
     component: DashboardPageStory,
@@ -13,7 +24,7 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Ready: Story = {
-    args: { route: "/docs" },
+    args: { fixtures, route: "/docs" },
 };
 
 export const Search: Story = {
