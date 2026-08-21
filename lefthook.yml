@@ -2,11 +2,11 @@ pre-commit:
     parallel: true
     commands:
         format:
-            run: cd greenfield && bun run check format
+            run: bun run check format
         lint:
-            run: cd greenfield && bun run check lint
+            run: bun run check lint
 
 pre-push:
     commands:
         check:
-            run: cd greenfield && bun run check
+            run: bun run check

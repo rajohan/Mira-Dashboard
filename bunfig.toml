@@ -2,17 +2,24 @@
 peer = false
 
 [test]
-coverageReporter = ["text", "lcov"]
-coverageDir = "coverage"
+preload = ["./src/test/setup.ts"]
 coverageSkipTestFiles = true
 coveragePathIgnorePatterns = [
-    "backend/dist/**",
-    "backend/src/**/*.d.ts",
-    "backend/test/**",
-    "frontend/src/test/**",
-    "frontend/src/**/*.d.ts",
+    "scripts/**/testSupport/**",
+    "scripts/**/testSupport.ts",
+    "scripts/**/testSupport.tsx",
+    "src/**/*.d.ts",
+    "src/**/*.stories.tsx",
+    "src/**/storySupport/**",
+    "src/**/test/**",
+    "src/**/testSupport/**",
+    "src/server/test/**",
+    "src/test/**",
 ]
 
 [serve.static]
-plugins = ["bun-plugin-tailwind", "./scripts/reactCompilerPlugin.ts"]
+plugins = [
+    "./scripts/development/tanStackRouterHmrWorkaroundPlugin.ts",
+    "bun-plugin-tailwind",
+]
 environment = "PUBLIC_*"

@@ -1,62 +1,108 @@
 import path from "node:path";
 
-import { runDevelopmentStack as runStack } from "../backend/src/development/developmentRuntime.ts";
 import {
-    type DevelopmentStackConfig as StackConfig,
-    resolveDevelopmentStackConfig as resolveDevelopmentStackConfigForRoot,
-} from "../backend/src/development/developmentStackConfig.ts";
+    runDevelopmentStack,
+    runManagedPreviewStackWithPreparedState,
+} from "./development/developmentRuntime.ts";
 import {
-    prepareDevelopmentState as prepareState,
-    resetDevelopmentState as resetState,
-} from "../backend/src/development/developmentState.ts";
+    type DevelopmentStackConfig,
+    resolveDevelopmentStackConfig as resolveForRoot,
+    resolveManagedPreviewStackConfig,
+} from "./development/developmentStackConfig.ts";
+import {
+    openPreparedDevelopmentRuntimeState,
+    prepareDevelopmentState,
+    resetDevelopmentDatabase,
+    resetDevelopmentState,
+} from "./development/developmentState.ts";
 
-export type { DevelopmentStackConfig } from "../backend/src/development/developmentStackConfig.ts";
-export { developmentBackendEnvironment } from "../backend/src/development/developmentEnvironment.ts";
+export type { DevelopmentStackConfig } from "./development/developmentStackConfig.ts";
+export {
+    runDevelopmentStack,
+    runDevelopmentStackWithPreparedState,
+} from "./development/developmentRuntime.ts";
 export {
     prepareDevelopmentState,
+    prepareDevelopmentRuntimeState,
+    resetDevelopmentDatabase,
     resetDevelopmentState,
-} from "../backend/src/development/developmentState.ts";
-export type { DevelopmentStateResult } from "../backend/src/development/developmentState.ts";
-export { runDevelopmentStack } from "../backend/src/development/developmentRuntime.ts";
+} from "./development/developmentState.ts";
 
-const repoRoot = path.resolve(import.meta.dir, "..");
+const repositoryRoot = path.resolve(import.meta.dir, "..");
 
 /**
- * Resolves the development stack for this repository unless a test root is supplied.
- * @returns Resolved the development stack for this repository unless a test root is supplied.
+ * Resolves development configuration for this self-contained repository root.
+ * @param environment Raw configuration environment.
+ * @param root Absolute source root to develop.
+ * @returns Validated immutable development stack configuration.
  */
 export function resolveDevelopmentStackConfig(
-    environment: Record<string, string | undefined> = process.env,
-    root = repoRoot
-): StackConfig {
-    return resolveDevelopmentStackConfigForRoot(environment, root);
+    environment: Readonly<Record<string, string | undefined>> = process.env,
+    root = repositoryRoot
+): DevelopmentStackConfig {
+    return resolveForRoot(environment, root);
 }
 
 async function main(): Promise<number> {
-    const config = resolveDevelopmentStackConfig();
     const [command] = Bun.argv.slice(2);
+    if (command === "--managed-preview") {
+        const [, expectedHeadSha] = Bun.argv.slice(2);
+        if (expectedHeadSha === undefined) {
+            throw new TypeError(
+                "Usage: developmentStack.ts --managed-preview <expected-head-sha>"
+            );
+        }
+        const config = resolveManagedPreviewStackConfig(process.env, repositoryRoot);
+        const stateSession = await openPreparedDevelopmentRuntimeState(config);
+        try {
+            return await runManagedPreviewStackWithPreparedState(
+                config,
+                stateSession,
+                expectedHeadSha,
+                config.gatewaySocket
+            );
+        } finally {
+            await stateSession.release();
+        }
+    }
+    const config = resolveDevelopmentStackConfig();
     if (command === "--prepare-state") {
-        const result = prepareState(config);
-        console.log(JSON.stringify({ ...result, stateRoot: config.stateRoot }));
+        const state = await prepareDevelopmentState(config);
+        process.stdout.write(
+            `${JSON.stringify({ database: state.database, stateRoot: config.stateRoot })}\n`
+        );
         return 0;
     }
     if (command === "--reset-state") {
-        resetState(config);
-        console.log(`Removed development state: ${config.stateRoot}`);
+        await resetDevelopmentState(config);
+        process.stdout.write(`Removed marked development state: ${config.stateRoot}\n`);
         return 0;
     }
-    if (command) {
-        throw new TypeError("Usage: developmentStack.ts [--prepare-state|--reset-state]");
+    if (command === "--reset-database") {
+        const removed = await resetDevelopmentDatabase(config);
+        process.stdout.write(
+            `${
+                removed
+                    ? `Removed development database: ${config.databasePath}`
+                    : `No existing development database: ${config.databasePath}`
+            }\n`
+        );
+        return 0;
     }
-    return runStack(config);
+    if (command !== undefined) {
+        throw new TypeError(
+            "Usage: developmentStack.ts [--managed-preview <sha>|--prepare-state|--reset-database|--reset-state]"
+        );
+    }
+    return runDevelopmentStack(config);
 }
 
 if (import.meta.main) {
     try {
         process.exitCode = await main();
     } catch (error) {
-        console.error(
-            error instanceof Error ? error.message : "Development stack failed"
+        process.stderr.write(
+            `${error instanceof Error ? error.message : "Development stack failed"}\n`
         );
         process.exitCode = 1;
     }

@@ -1,174 +1,133 @@
-# Testing And PR Workflow
+# Testing and Pull Requests
 
-## Standard Gates
+## Standard gates
 
-Root/frontend:
-
-```bash
-bun run lint
-bun run format:check
-bun run build:frontend
-bun run build:backend
-bun run test:frontend
-bun run test:backend
-bun run test:frontend:coverage
-bun run test:backend:coverage
-```
-
-`bun run build`, `bun run test`, and `bun run test:coverage` remain aggregate
-shortcuts when both applications are in scope. The explicit names make
-single-surface verification unambiguous and can be run from every worktree
-without changing directories.
-
-Application and test source is type-checked strictly. `skipLibCheck` remains
-enabled only because current upstream declarations from Bun Canary, DnD Kit,
-TanStack devtools, and the React Compiler/Babel stack do not all pass
-TypeScript 7 declaration checking. Re-run both project builds with
-`--skipLibCheck false` after those packages update, and remove the setting once
-the upstream declaration errors are gone; do not add library-wide declaration
-shims to hide them.
-
-`test/bunCanaryMatchers.d.ts` is a separate, deliberately narrow compatibility
-declaration for Bun Canary's current `AsymmetricMatcher = any` type. It narrows
-only Bun's test matcher boundary to `unknown`, so the strict unsafe-value lint
-rules still protect application and test code without changing matcher runtime
-behavior. Both TypeScript projects include it. When Bun 1.4 is stable, check
-the released `bun-types` declaration and remove this file once asymmetric
-matchers no longer return `any`; keep the unrelated DOM matcher declarations
-in `test/domMatchers.d.ts`.
-
-Every documentation change, whether docs-only or accompanying code, must run
-the Markdown formatter check and validate local Markdown links:
+Run these commands from the repository root:
 
 ```bash
-bunx oxfmt --check "docs/**/*.md"
-
-python3 - <<'PY'
-from pathlib import Path
-import re
-
-missing = []
-for path in Path("docs").rglob("*.md"):
-    for target in re.findall(r"\[[^]]+\]\(([^)]+)\)", path.read_text()):
-        if "://" in target or target.startswith("#"):
-            continue
-        local_target = target.split("#", 1)[0]
-        if local_target and not (path.parent / local_target).resolve().exists():
-            missing.append(f"{path}: {target}")
-
-if missing:
-    raise SystemExit("\n".join(missing))
-print("All local Markdown links resolve.")
-PY
-
+bun run check
+bun run test
+bun run test coverage
+bun run build storybook
 git diff --check
 ```
 
-## Test Architecture
+`bun run check` combines formatting, boundaries, lint, all three TypeScript graphs, generated docs,
+and database schema verification. Focused diagnosis uses `bun run check <gate>`.
 
-Dashboard uses Bun test for both applications. Frontend behavior runs through
-happy-dom and Testing Library; backend behavior uses Bun-native integration,
-contract, database, and service tests. Do not add a permanent Playwright,
-Cypress, screenshot, or second browser-runner suite. Use a targeted manual dev
-smoke when a layout engine or browser API cannot be represented faithfully by
-the existing stack.
+Use focused tests while iterating, then run the full affected suite before handoff. `bun run test`
+runs the Bun, Happy DOM, and real-browser Storybook partitions in that order. All three use the
+shared exact-inventory and batching engine with their checked-in `.bun-test-timings.json`,
+`.bun-browser-test-timings.json`, and `.storybook-test-timings.json` files. Discovery must match
+each inventory exactly. Every partition runs three deterministic, duration-balanced batches
+sequentially; each Bun or Happy DOM child uses exactly `--parallel=3`, while each Storybook child
+uses exactly `--maxWorkers=3`. Every child also uses Vitest/Bun's single `--no-isolate` switch so
+the selected files reuse the child runtime's global and module registry instead of rebuilding them
+for every file; the next batch starts in fresh worker processes. Three batches and three workers are repository policy in
+the shared batching engine, not package-script or public CLI arguments; any attempted parallelism
+override fails closed.
 
-Test files live under domain-owned directories:
+`bun run test coverage` uses the same three-by-three batch plan and merges all nine private LCOV
+reports into `coverage/lcov.info`. Storybook contributes V8 coverage hits for production browser
+modules. Stories, Storybook support and configuration, tests, and test support are excluded from
+the production denominator. The gate requires at least 85% aggregate production line coverage,
+rejects executable `scripts/` or `src/` modules missing entirely from LCOV, and publishes the same
+report for Codecov's 85% patch gate.
 
-- `frontend/src/test/<domain>` for app, auth, chat, contracts, delivery,
-  development, Docker, files, hooks, pages, settings, shared UI, and tasks;
-- `backend/test/<domain>` for auth, cache, chat, database, delivery,
-  development, Docker, Gateway, HTTP, jobs, observability, and operations;
-- `backend/test/routes` and `backend/test/services` for broader route/service
-  characterization suites that cross more than one domain seam;
-- each `support` directory for reusable fixtures and harnesses, while fixture
-  payloads remain under `fixtures`.
-
-Keep mutable mock, timer, collection, and cleanup state inside a per-suite
-harness factory. Keep pure builders and assertions at module scope so they are
-not recreated for every suite. Prefer event- or dependency-driven test timing
-over production polling delays; test-only timing overrides must preserve the
-production default and still exercise the real runtime path.
-
-Use `test:frontend:changed` or `test:backend:changed` for quick local feedback,
-then run the full affected suite and coverage gate before handoff. New tests
-belong in the narrowest domain directory and should not recreate a general
-omnibus file.
-
-Documentation must be considered for changes to route families, response
-shapes, cache projections, database state, operational workflows, user-facing
-controls, and fallback/error behavior. If none applies, state
-`Docs: not needed` with a reason in the PR body.
-
-## Coverage
-
-Coverage is uploaded to Codecov with two flags:
-
-- `frontend`
-- `backend`
-
-Local total coverage can differ from Codecov patch coverage. When Codecov
-fails, inspect the patch coverage and missing lines instead of relying only on
-the local total percentage.
-
-Do not use ignore comments or coverage config to hide meaningful gaps. Add
-targeted functional coverage.
-
-## GitHub Checks
-
-Workflows:
-
-- `Dashboard checks`: frontend and backend lint/build/coverage.
-- `CodeQL`: JavaScript/TypeScript security and quality analysis.
-
-Required PR reality:
-
-- human review may still block even when checks are green;
-- CodeRabbit can be advisory and sometimes rate-limited;
-- Codecov patch failures need actual coverage or reduced risky diff.
-
-## PR Hygiene
-
-Use `mira-2026` git identity and GitHub token. Do not use connector write tools
-that may authenticate as Raymond.
-
-When creating/editing PR bodies, write the body to a temp file and use
-`--body-file`; do not pass escaped newlines inline.
-
-Verify body formatting:
+After adding, removing, or materially changing tests, refresh all three timing inventories before
+push with:
 
 ```bash
-GITHUB_TOKEN="$MIRA_GITHUB_TOKEN" gh pr view <number> --json body --jq .body | sed -n l
+bun run test timings bun
+bun run test timings browser
+bun run test timings storybook
 ```
 
-Expected: line endings shown as `$`, not literal `\\n`.
+Run all three commands when changing shared timing behavior. Each timing inventory is staged and
+replaced atomically only after its own three batches pass; a failing partition keeps its tracked
+file unchanged and stops the remaining updates.
 
-Apply useful labels. Common Dashboard labels:
+In CI, `coverage-bun`, `coverage-browser`, and `coverage-storybook` run concurrently from the same
+nine-batch plan. Each job owns exactly three private LCOV reports; only `coverage-storybook`
+installs Chromium. The downstream `dashboard-checks` aggregator downloads the three explicit
+artifacts, proves that all nine expected reports exist exactly once with no stale LCOV input,
+revalidates the Storybook production-source records, and then applies the same aggregate 85% gate.
+It alone publishes `coverage/lcov.info` to Codecov. `dashboard-static-checks` owns the non-coverage
+checks, while the separate `storybook` job only verifies the static build.
 
-- `type: documentation`
-- `type: bugfix`
-- `type: feature`
-- `type: maintenance`
-- `type: security`
-- `area: frontend`
-- `area: backend`
-- `area: ci`
-- `area: docker`
-- `area: auth`
-- `area: openclaw`
-- `area: ops`
+## TypeScript graphs
 
-## Production Checkout
+The project has exactly four TypeScript configurations in one solution:
 
-Feature and autopilot PR work must not edit, build, or pull inside the
-production checkout. Do the implementation and verification in a separate
-worktree, then finish with a read-only check that production is still clean
-`main`:
+- `tsconfig.json` owns every shared strict compiler rule. It has `files: []` and references
+  `tsconfig.browser.json`, `tsconfig.storybook.json`, and `tsconfig.bun.json`, making it the
+  conventional solution entry point for editors and `tsc -b` without claiming source files
+  itself.
+- `tsconfig.bun.json` extends the root rules and checks server, worker, repository scripts,
+  non-browser tests, and non-browser test support. Its catch-all membership excludes the browser
+  paths. It adds Bun and Node types with `ESNext` only, so DOM globals are unavailable.
+- `tsconfig.browser.json` also extends the root rules and owns React/browser source and browser
+  tests. It adds DOM/DOM iterable libraries, JSX, its narrow type declarations, and its explicit
+  browser membership without exposing Bun or Node ambient types to production browser code.
+- `tsconfig.storybook.json` owns Storybook preview, manager, stories, and browser-safe story
+  support. It exposes DOM and Vite client types without exposing Bun or Node ambient types.
 
-```bash
-cd /home/ubuntu/projects/mira-dashboard/production/checkout
-git status --short --branch
-```
+There is no `tsconfig.server.json` or per-role configuration proliferation. Runtime and import
+authority inside the three referenced compiler graphs is enforced by the path-aware source-boundary
+policy.
 
-Syncing the production checkout with `git pull --ff-only` belongs in the
-approved deploy workflow, not in background PR preparation.
+Browser tests are checked by the browser graph with DOM/JSX and the narrow `bun:test` declaration.
+All remaining tests are included by the Bun graph. Every `*.test.ts(x)`, `*.spec.ts(x)`,
+`__tests__/`, `test/`, and `testSupport/` file must therefore remain type-checked.
+
+## Test ownership
+
+Keep a module's tests beside that module. If one production module needs multiple concern-focused
+suites, use `<module><Concern>.test.ts` rather than creating an omnibus suite.
+
+- Put reusable executable helpers in the owning module's `testSupport/` directory.
+- Keep browser-wide setup and self-contained browser build fixtures under `src/browser/test/`.
+- Put genuinely cross-domain server harnesses in `src/server/test/support/`.
+- Reserve `fixtures/` for immutable payloads, reviewed evidence, and self-contained build inputs;
+  never put reusable helper logic there.
+- Put cross-module contracts in `src/server/test/contracts/`.
+- Put composition-root behavior in `src/server/test/system/`.
+- Keep executable repository audits and tools under `scripts/`. Tests that directly verify one
+  such script may remain colocated under `scripts/`; application, transport, and cross-process
+  integration tests belong under the appropriate `src/test/` owner instead.
+
+Production source must never import test or test-support code. Prefer event- or dependency-driven
+test timing over arbitrary sleeps. Test-only overrides must preserve the production default and
+exercise the same runtime path.
+
+The Bun and Happy DOM partitions run through `scripts/runBatchedTestSuite.ts`, and the real-browser
+partition runs through `scripts/runStorybookTests.ts`; coverage orchestrates all three with the same
+batching and output policies. Their child processes preserve the failure code and fail an otherwise
+green suite when output contains a forbidden React, browser, or Bun runtime diagnostic. Do not
+bypass these runners in repository test scripts.
+
+Every suite preloads the process-private test root and mock cleanup. The browser suite additionally
+preloads Happy DOM, Testing Library matchers and cleanup, the React act-environment marker, and the
+Headless UI animation mock. Browser tests and their support remain in the browser TypeScript graph.
+The product-shell test renders the real QueryClient, router, accessible route, and error-boundary
+composition. Build tests separately exercise the actual HTML entrypoint, React Compiler, Tailwind,
+code splitting, compression, CSP policy, and bundle budgets.
+
+## Lint and boundaries
+
+Oxlint applies its baseline strict rules to tests as well as production source. Some
+production-only restrictions deliberately exclude tests—for example, tests may import
+`bun:test`, fixtures, or test support—but tests are not globally ignored.
+
+The source-boundary checker scans `.storybook/`, `src/`, and `scripts/`, including test files. It
+requires the adopted Storybook configuration files and rejects repository escapes, undeclared
+packages, environment-authority violations, and imports that break the reviewed process
+architecture.
+
+## Pull-request evidence
+
+Document the focused regression tests and all gates run. For visible browser behavior, include a
+short manual smoke result or screenshot when a layout engine or browser API cannot be represented
+faithfully by the Bun test environment. Explain any gate that could not be run.
+
+Never commit secrets, tokens, private keys, production data, database files, or runtime state.

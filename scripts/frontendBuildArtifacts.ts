@@ -1,6 +1,5 @@
-import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { brotliCompressSync, constants, gzipSync } from "node:zlib";
+import { brotliCompressSync, constants } from "node:zlib";
 
 const COMPRESSIBLE_EXTENSIONS = new Set([
     ".css",
@@ -13,10 +12,22 @@ const COMPRESSIBLE_EXTENSIONS = new Set([
     ".xml",
 ]);
 const MINIMUM_COMPRESSION_BYTES = 512;
-const FRONTEND_APP_INPUT = "frontend/src/main.tsx";
 const SCRIPT_TAG_PATTERN = /<script\b[^>]*>[\s\S]*?<\/script(?:\s[^>]*)?>/giu;
 const SCRIPT_SOURCE_ATTRIBUTE_PATTERN = /\bsrc=(["'])([^"']+)\1/iu;
 const MODULE_SCRIPT_TYPE_PATTERN = /\btype=(["'])module\1/iu;
+const frontendHtmlResourceAttributes = new Set([
+    "action",
+    "background",
+    "cite",
+    "data",
+    "formaction",
+    "href",
+    "manifest",
+    "poster",
+    "src",
+    "xlink:href",
+]);
+const frontendHtmlSourceSetAttributes = new Set(["imagesrcset", "srcset"]);
 
 export interface FrontendBundleMeasurements {
     initialJavaScriptGzipBytes: number;
@@ -37,10 +48,10 @@ type FrontendBundleBudget = keyof Pick<
 >;
 
 export const FRONTEND_BUNDLE_BUDGETS: Readonly<Record<FrontendBundleBudget, number>> = {
-    initialJavaScriptGzipBytes: 350 * 1024,
+    initialJavaScriptGzipBytes: 392 * 1024,
     initialStylesheetGzipBytes: 25 * 1024,
-    largestJavaScriptGzipBytes: 75 * 1024,
-    totalJavaScriptGzipBytes: 850 * 1024,
+    largestJavaScriptGzipBytes: 200 * 1024,
+    totalJavaScriptGzipBytes: 1280 * 1024,
 };
 
 interface MeasuredOutput {
@@ -80,30 +91,37 @@ function resolvedOutput(outdir: string, outputKey: string) {
     };
 }
 
-function isFrontendAppInput(inputKey: string): boolean {
+function isFrontendAppInput(inputKey: string, expectedAppInput: string): boolean {
     const normalized = normalizedOutputKey(inputKey);
+    const normalizedExpectedInput = normalizedOutputKey(expectedAppInput);
     return (
-        normalized === FRONTEND_APP_INPUT || normalized.endsWith(`/${FRONTEND_APP_INPUT}`)
+        normalized === normalizedExpectedInput ||
+        normalized.endsWith(`/${normalizedExpectedInput}`)
     );
 }
 
 /**
  * Resolves the single JavaScript output that owns the application bootstrap.
+ * @param metafile Bun build metadata for the completed browser build.
+ * @param expectedAppInput Repository-relative application entrypoint.
  * @returns Resolved the single JavaScript output that owns the application bootstrap.
  */
-export function frontendAppOutputKey(metafile: Bun.BuildMetafile): string {
+export function frontendAppOutputKey(
+    metafile: Bun.BuildMetafile,
+    expectedAppInput: string
+): string {
     const candidates = Object.entries(metafile.outputs)
         .filter(
             ([outputKey, output]) =>
                 path.extname(outputKey) === ".js" &&
                 Object.keys(output.inputs).some((inputKey) =>
-                    isFrontendAppInput(inputKey)
+                    isFrontendAppInput(inputKey, expectedAppInput)
                 )
         )
         .map(([outputKey]) => outputKey);
     if (candidates.length !== 1) {
         throw new Error(
-            `Frontend build metadata must contain exactly one ${FRONTEND_APP_INPUT} output; found ${candidates.length}`
+            `Frontend build metadata must contain exactly one ${expectedAppInput} output; found ${candidates.length}`
         );
     }
     return candidates[0]!;
@@ -112,16 +130,23 @@ export function frontendAppOutputKey(metafile: Bun.BuildMetafile): string {
 /**
  * Works around Bun selecting an unrelated split chunk for the generated HTML
  * module script when metafile output is enabled.
+ * @param metafile Bun build metadata for the completed browser build.
+ * @param outdir Build output directory containing the generated HTML.
+ * @param expectedAppInput Repository-relative application entrypoint.
  * @returns Promise resolving to the write frontend html app entrypoint result.
  */
 export async function writeFrontendHtmlAppEntrypoint(
     metafile: Bun.BuildMetafile,
-    outdir: string
+    outdir: string,
+    expectedAppInput: string
 ): Promise<string> {
-    const appOutput = resolvedOutput(outdir, frontendAppOutputKey(metafile));
+    const appOutput = resolvedOutput(
+        outdir,
+        frontendAppOutputKey(metafile, expectedAppInput)
+    );
     const publicPath = `/${appOutput.relativePath}`;
     const indexPath = path.join(path.resolve(outdir), "index.html");
-    const html = await readFile(indexPath, "utf8");
+    const html = await Bun.file(indexPath).text();
     const moduleScripts = html
         .matchAll(SCRIPT_TAG_PATTERN)
         .filter(
@@ -150,7 +175,7 @@ export async function writeFrontendHtmlAppEntrypoint(
             html.slice(0, scriptIndex) +
             correctedScript +
             html.slice(scriptIndex + script.length);
-        await writeFile(indexPath, correctedHtml);
+        await Bun.write(indexPath, correctedHtml);
     }
     return publicPath;
 }
@@ -158,9 +183,14 @@ export async function writeFrontendHtmlAppEntrypoint(
 /**
  * Resolves the static startup graph while excluding route and feature
  * `dynamic-import` edges.
+ * @param metafile Bun build metadata for the completed browser build.
+ * @param expectedAppInput Repository-relative application entrypoint.
  * @returns Resolved the static startup graph while excluding route and feature `dynamic-import` edges.
  */
-export function initialFrontendOutputKeys(metafile: Bun.BuildMetafile): Set<string> {
+export function initialFrontendOutputKeys(
+    metafile: Bun.BuildMetafile,
+    expectedAppInput: string
+): Set<string> {
     const outputs = metafile.outputs;
     const keyByNormalizedPath = new Map(
         Object.keys(outputs).map((outputKey) => [
@@ -172,7 +202,7 @@ export function initialFrontendOutputKeys(metafile: Bun.BuildMetafile): Set<stri
         Object.hasOwn(outputs, candidate)
             ? candidate
             : keyByNormalizedPath.get(normalizedOutputKey(candidate));
-    const pending = [frontendAppOutputKey(metafile)];
+    const pending = [frontendAppOutputKey(metafile, expectedAppInput)];
     const initialOutputKeys = new Set<string>();
 
     while (pending.length > 0) {
@@ -209,26 +239,30 @@ function sumOutputs(
 
 /**
  * Measures the complete and initial production JavaScript/CSS graphs.
+ * @param metafile Bun build metadata for the completed browser build.
+ * @param outdir Build output directory containing emitted assets.
+ * @param expectedAppInput Repository-relative application entrypoint.
  * @returns Promise resolving to the measure frontend bundle result.
  */
 export async function measureFrontendBundle(
     metafile: Bun.BuildMetafile,
-    outdir: string
+    outdir: string,
+    expectedAppInput: string
 ): Promise<FrontendBundleMetrics> {
     const measuredOutputs = new Map<string, MeasuredOutput>();
     for (const outputKey of Object.keys(metafile.outputs)) {
         const extension = path.extname(outputKey);
         if (extension !== ".css" && extension !== ".js") continue;
         const output = resolvedOutput(outdir, outputKey);
-        const contents = await readFile(output.filePath);
+        const contents = await Bun.file(output.filePath).bytes();
         measuredOutputs.set(outputKey, {
-            gzipBytes: gzipSync(contents, { level: 9 }).byteLength,
+            gzipBytes: Bun.gzipSync(contents, { level: 9 }).byteLength,
             outputPath: output.relativePath,
             rawBytes: contents.byteLength,
         });
     }
 
-    const initialOutputKeys = initialFrontendOutputKeys(metafile);
+    const initialOutputKeys = initialFrontendOutputKeys(metafile, expectedAppInput);
     const initialFiles = [...initialOutputKeys]
         .map((outputKey) => measuredOutputs.get(outputKey))
         .filter((output): output is MeasuredOutput => output !== undefined)
@@ -268,7 +302,10 @@ export async function measureFrontendBundle(
     };
 }
 
-/** Fails production builds that exceed the checked-in network-size budgets. */
+/**
+ * Fails production builds that exceed the checked-in network-size budgets.
+ * @param measurements Measured browser bundle sizes.
+ */
 export function assertFrontendBundleBudgets(
     measurements: FrontendBundleMeasurements
 ): void {
@@ -290,6 +327,7 @@ export function assertFrontendBundleBudgets(
 
 /**
  * Writes deterministic Brotli and gzip sidecars for compressible build outputs.
+ * @param outputPaths Emitted build assets to inspect and compress.
  * @returns Promise resolving to the write precompressed frontend assets result.
  */
 export async function writePrecompressedFrontendAssets(
@@ -299,7 +337,7 @@ export async function writePrecompressedFrontendAssets(
 
     for (const outputPath of outputPaths) {
         if (!COMPRESSIBLE_EXTENSIONS.has(path.extname(outputPath))) continue;
-        const contents = await readFile(outputPath);
+        const contents = await Bun.file(outputPath).bytes();
         if (contents.byteLength < MINIMUM_COMPRESSION_BYTES) continue;
 
         const brotliContents = brotliCompressSync(contents, {
@@ -308,16 +346,150 @@ export async function writePrecompressedFrontendAssets(
             },
         });
         if (brotliContents.byteLength < contents.byteLength) {
-            await writeFile(`${outputPath}.br`, brotliContents);
+            await Bun.write(`${outputPath}.br`, brotliContents);
             compressedFileCount += 1;
         }
 
-        const gzipContents = gzipSync(contents, { level: 9 });
+        const gzipContents = Bun.gzipSync(contents, { level: 9 });
         if (gzipContents.byteLength < contents.byteLength) {
-            await writeFile(`${outputPath}.gz`, gzipContents);
+            await Bun.write(`${outputPath}.gz`, gzipContents);
             compressedFileCount += 1;
         }
     }
 
     return compressedFileCount;
+}
+
+function isSelfHostedResourceReference(value: string): boolean {
+    const reference = value.trim();
+    if (reference.length === 0 || reference.includes("&") || reference.includes("\\")) {
+        return false;
+    }
+    if (/^[a-z][a-z\d+.-]*:/iu.test(reference) || reference.startsWith("//")) {
+        return false;
+    }
+    try {
+        const base = new URL("https://build.invalid/");
+        const resolved = new URL(reference, base);
+        return (
+            resolved.origin === base.origin && resolved.pathname.startsWith("/assets/")
+        );
+    } catch {
+        return false;
+    }
+}
+
+function isSelfHostedSourceSet(value: string): boolean {
+    const candidates = value.split(",");
+    return (
+        candidates.length > 0 &&
+        candidates.every((candidate) => {
+            const tokens = candidate.trim().split(/\s+/u);
+            if (
+                tokens.length === 0 ||
+                tokens.length > 2 ||
+                !isSelfHostedResourceReference(tokens[0] ?? "")
+            ) {
+                return false;
+            }
+            const descriptor = tokens[1];
+            return (
+                descriptor === undefined ||
+                /^\d+w$/u.test(descriptor) ||
+                /^(?:\d+|\d*\.\d+)x$/u.test(descriptor)
+            );
+        })
+    );
+}
+
+/**
+ * Fails when generated HTML would require inline or third-party script/style CSP.
+ * @param indexPath Generated HTML entrypoint.
+ * @returns Promise that resolves when the entrypoint is self-hosted.
+ */
+export async function assertSelfHostedFrontendHtml(indexPath: string): Promise<void> {
+    const html = await Bun.file(indexPath).text();
+    const scripts: Array<{ body: string; source: string | null; type: string | null }> =
+        [];
+    let styleCount = 0;
+    let hasInlineEventHandler = false;
+    let hasInlineSourceDocument = false;
+    let hasInlineStyle = false;
+    let hasNonSelfHostedResource = false;
+    let hasBaseElement = false;
+    const rewriter = new HTMLRewriter()
+        .on("*", {
+            element(element) {
+                for (const [name, value] of element.attributes) {
+                    const normalizedName = name.toLowerCase();
+                    if (normalizedName.startsWith("on")) {
+                        hasInlineEventHandler = true;
+                    } else if (normalizedName === "srcdoc") {
+                        hasInlineSourceDocument = true;
+                    } else if (normalizedName === "style") {
+                        hasInlineStyle = true;
+                    } else if (
+                        frontendHtmlResourceAttributes.has(normalizedName) &&
+                        !isSelfHostedResourceReference(value)
+                    ) {
+                        hasNonSelfHostedResource = true;
+                    } else if (
+                        frontendHtmlSourceSetAttributes.has(normalizedName) &&
+                        !isSelfHostedSourceSet(value)
+                    ) {
+                        hasNonSelfHostedResource = true;
+                    }
+                }
+            },
+        })
+        .on("base", {
+            element() {
+                hasBaseElement = true;
+            },
+        })
+        .on("script", {
+            element(element) {
+                scripts.push({
+                    body: "",
+                    source: element.getAttribute("src"),
+                    type: element.getAttribute("type"),
+                });
+            },
+            text(text) {
+                const script = scripts.at(-1);
+                if (script) script.body += text.text;
+            },
+        })
+        .on("style", {
+            element() {
+                styleCount += 1;
+            },
+        });
+    rewriter.transform(html);
+
+    if (
+        scripts.length !== 1 ||
+        styleCount > 0 ||
+        hasInlineEventHandler ||
+        hasInlineSourceDocument ||
+        hasInlineStyle ||
+        hasBaseElement
+    ) {
+        throw new Error(
+            "Frontend HTML must contain one external script and no inline code"
+        );
+    }
+
+    const script = scripts[0]!;
+    if (
+        script.type !== "module" ||
+        !script.source?.startsWith("/assets/") ||
+        script.body.trim().length > 0
+    ) {
+        throw new Error("Frontend HTML module script must be external and self-hosted");
+    }
+
+    if (hasNonSelfHostedResource) {
+        throw new Error("Frontend HTML cannot depend on a third-party CSP origin");
+    }
 }

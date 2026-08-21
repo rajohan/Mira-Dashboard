@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+
+project_root="$(git rev-parse --show-toplevel)"
+cd "$project_root"
+LEFTHOOK_CONFIG="$project_root/lefthook.yml" exec "$project_root/node_modules/.bin/lefthook" run pre-push "$@"

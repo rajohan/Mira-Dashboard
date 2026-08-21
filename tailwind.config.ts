@@ -2,7 +2,6 @@ import typography from "@tailwindcss/typography";
 import type { Config } from "tailwindcss";
 
 export default {
-    content: ["./frontend/index.html", "./frontend/src/**/*.{js,ts,jsx,tsx}"],
     theme: {
         extend: {
             colors: {
@@ -31,6 +30,16 @@ export default {
                     800: "#2F4891",
                     900: "#22366E",
                     950: "#17244A",
+                },
+            },
+            keyframes: {
+                "loading-state-second-dot": {
+                    "0%, 32%": { opacity: "0" },
+                    "33%, 100%": { opacity: "1" },
+                },
+                "loading-state-third-dot": {
+                    "0%, 65%": { opacity: "0" },
+                    "66%, 100%": { opacity: "1" },
                 },
             },
         },

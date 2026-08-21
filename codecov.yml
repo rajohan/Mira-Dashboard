@@ -13,28 +13,10 @@ coverage:
                 flags:
                     - dashboard
                 paths:
-                    - greenfield/scripts/
-                    - greenfield/src/
-                    - greenfield/drizzle.config.ts
-                    - greenfield/tailwind.config.ts
-            backend:
-                target: 85%
-                threshold: 0%
-                informational: false
-                if_ci_failed: error
-                flags:
-                    - backend
-                paths:
-                    - backend/src/
-            frontend:
-                target: 85%
-                threshold: 0%
-                informational: false
-                if_ci_failed: error
-                flags:
-                    - frontend
-                paths:
-                    - frontend/src/
+                    - scripts/
+                    - src/
+                    - drizzle.config.ts
+                    - tailwind.config.ts
         patch:
             dashboard:
                 target: 85%
@@ -45,28 +27,10 @@ coverage:
                 flags:
                     - dashboard
                 paths:
-                    - greenfield/scripts/
-                    - greenfield/src/
-                    - greenfield/drizzle.config.ts
-                    - greenfield/tailwind.config.ts
-            backend:
-                target: 85%
-                threshold: 0%
-                informational: false
-                if_ci_failed: error
-                flags:
-                    - backend
-                paths:
-                    - backend/src/
-            frontend:
-                target: 85%
-                threshold: 0%
-                informational: false
-                if_ci_failed: error
-                flags:
-                    - frontend
-                paths:
-                    - frontend/src/
+                    - scripts/
+                    - src/
+                    - drizzle.config.ts
+                    - tailwind.config.ts
 
 comment:
     layout: "reach,diff,flags,tree"
@@ -76,13 +40,7 @@ comment:
 flags:
     dashboard:
         paths:
-            - greenfield/scripts/
-            - greenfield/src/
-            - greenfield/drizzle.config.ts
-            - greenfield/tailwind.config.ts
-    frontend:
-        paths:
-            - frontend/src/
-    backend:
-        paths:
-            - backend/src/
+            - scripts/
+            - src/
+            - drizzle.config.ts
+            - tailwind.config.ts

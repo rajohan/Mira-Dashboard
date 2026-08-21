@@ -45,7 +45,7 @@ body:
           description: Commands, dashboard actions, rollout order, or rollback notes.
           placeholder: |
               1. Pull latest main
-              2. Build frontend/backend
+              2. Build and verify the release
               3. Restart service
               4. Verify /api/health/ready
       validations:

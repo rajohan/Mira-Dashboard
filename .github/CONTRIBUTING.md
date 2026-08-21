@@ -15,12 +15,10 @@ Thanks for helping improve Mira Dashboard.
 Run the relevant checks locally when possible:
 
 ```bash
-bun run lint
-bun run format:check
-bun run build:frontend
-bun run build:backend
-bun run test:frontend:coverage
-bun run test:backend:coverage
+bun run check
+bun run test
+bun run test coverage
+bun run build storybook
 ```
 
 Run focused tests while iterating, then run the applicable coverage suite before
@@ -32,7 +30,7 @@ a check cannot be run locally, explain why in the pull request.
 Pull requests must satisfy the repository rules before merging:
 
 - Required status checks must pass.
-- Frontend and backend patch coverage must satisfy Codecov.
+- Every changed runtime boundary must retain focused regression coverage.
 - CodeQL/code scanning checks must pass.
 - Code owner review is required.
 - Conversations should be resolved before merge.

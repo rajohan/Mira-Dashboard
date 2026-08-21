@@ -12,12 +12,14 @@ lerna-debug.log*
 node_modules
 dist
 release-manifest.json
-backend/data/
-data/
+/data/
+!/src/browser/data/
+!/src/browser/data/**
 .test-openclaw/
 .test-data
 dist-ssr
 *.local
+*.tsbuildinfo
 
 # Editor directories and files
 .vscode/*
