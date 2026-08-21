@@ -95,6 +95,7 @@ test("resolves configured terminal roots without web-sandbox-only paths", async 
     expect(roots).toEqual([
         { id: "workspace", label: "Workspace", path: workspaceRoot },
         { id: "openclaw", label: "OpenClaw", path: openClawRoot },
+        { id: "docker", label: "Docker", path: "/opt/docker" },
         { id: "dashboard", label: "Mira Dashboard", path: projectRoot },
     ]);
     expect(Object.isFrozen(roots)).toBe(true);
@@ -220,6 +221,11 @@ function processFixture(totpFailure?: Error, cutoverValidation = false) {
                     path: openClawRoot,
                 },
                 {
+                    id: "docker",
+                    label: "Docker",
+                    path: "/opt/docker",
+                },
+                {
                     id: "dashboard",
                     label: "Mira Dashboard",
                     path: layout.root,
@@ -279,6 +285,11 @@ function processFixture(totpFailure?: Error, cutoverValidation = false) {
                         id: "openclaw",
                         label: "OpenClaw",
                         path: openClawRoot,
+                    }),
+                    Object.freeze({
+                        id: "docker",
+                        label: "Docker",
+                        path: "/opt/docker",
                     }),
                     Object.freeze({
                         id: "dashboard",

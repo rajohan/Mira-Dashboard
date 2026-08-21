@@ -1805,7 +1805,14 @@ export function resolveTerminalWorkspaceRoots(
     if (openClawRoot !== workspaceRoot) {
         roots.push({ id: "openclaw", label: "OpenClaw", path: openClawRoot });
     }
-    if (dashboardRoot !== workspaceRoot && dashboardRoot !== openClawRoot) {
+    if (workspaceRoot !== "/opt/docker" && openClawRoot !== "/opt/docker") {
+        roots.push({ id: "docker", label: "Docker", path: "/opt/docker" });
+    }
+    if (
+        dashboardRoot !== workspaceRoot &&
+        dashboardRoot !== openClawRoot &&
+        dashboardRoot !== "/opt/docker"
+    ) {
         roots.push({ id: "dashboard", label: "Mira Dashboard", path: dashboardRoot });
     }
     return Promise.resolve(Object.freeze(roots.map((root) => Object.freeze(root))));
