@@ -1793,23 +1793,15 @@ export interface DashboardWebProcessDependencies {
     readonly resolveWorkspaceFileRoot: typeof resolveReviewedWorkspaceFileRoot;
 }
 
-export async function resolveTerminalWorkspaceRoots(
+export function resolveTerminalWorkspaceRoots(
     openClawRoot: string,
-    dashboardRoot: string,
-    resolvePath: (candidate: string) => Promise<string> = realpath
+    dashboardRoot: string
 ): Promise<readonly DashboardTerminalWorkspaceRoot[]> {
     const roots: DashboardTerminalWorkspaceRoot[] = [
         { id: "openclaw", label: "OpenClaw", path: openClawRoot },
+        { id: "dashboard", label: "Mira Dashboard", path: dashboardRoot },
     ];
-    try {
-        if ((await resolvePath("/opt/docker")) === "/opt/docker") {
-            roots.push({ id: "docker", label: "Docker", path: "/opt/docker" });
-        }
-    } catch {
-        // An unavailable optional Docker root must not prevent Dashboard startup.
-    }
-    roots.push({ id: "dashboard", label: "Mira Dashboard", path: dashboardRoot });
-    return Object.freeze(roots.map((root) => Object.freeze(root)));
+    return Promise.resolve(Object.freeze(roots.map((root) => Object.freeze(root))));
 }
 
 const defaultWebProcessDependencies = Object.freeze({

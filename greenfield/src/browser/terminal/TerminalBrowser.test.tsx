@@ -195,7 +195,7 @@ describe("interactive terminal browser lifecycle", () => {
                 })
             );
             expect(closeCalls).toBe(1);
-            expect(fakeEmulator.resetCalls).toBe(resetCallsBeforeEnd + 1);
+            expect(fakeEmulator.resetCalls).toBe(resetCallsBeforeEnd);
             expect(screen.getByText("Terminal not started")).toBeTruthy();
         } finally {
             view.unmount();

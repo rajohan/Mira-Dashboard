@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/tanstack-react";
 import { expect, fireEvent, userEvent, within } from "storybook/test";
 
+import generatedDocuments from "../../../../docs/generated/browser-reference.json";
 import { DashboardPageStory } from "../../storySupport/dashboardPageStoryHarness.tsx";
 import { dashboardStoryValue } from "../../storySupport/dashboardStoryTransport.ts";
 
@@ -11,6 +12,7 @@ const fixtures = {
             readCount: 0,
             unreadCount: 0,
         }),
+        "system.documentationReference": dashboardStoryValue(generatedDocuments),
     },
 };
 

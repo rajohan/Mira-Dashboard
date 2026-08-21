@@ -2,11 +2,15 @@ import { describe, expect, mock, test } from "bun:test";
 
 import { fireEvent, render, screen, within } from "@testing-library/react";
 
+import generatedDocuments from "../../../docs/generated/browser-reference.json";
 import { DocsRoute } from "./DocsRoute.tsx";
+
+const renderDocsRoute = () =>
+    render(<DocsRoute documents={generatedDocuments as never} />);
 
 describe("DocsRoute", () => {
     test("renders the complete generated reference and filters by content", () => {
-        render(<DocsRoute />);
+        renderDocsRoute();
 
         expect(
             screen.queryByRole("heading", { name: "Documentation" })
@@ -35,7 +39,7 @@ describe("DocsRoute", () => {
     });
 
     test("groups schema documents into collapsible domain menus", () => {
-        render(<DocsRoute />);
+        renderDocsRoute();
 
         const authMenu = screen.getByRole("button", { name: /^Auth \d+$/u });
         expect(authMenu).toHaveAttribute("aria-expanded", "false");
@@ -56,7 +60,7 @@ describe("DocsRoute", () => {
     });
 
     test("lets the fixed viewer own horizontal scrolling for wide tables", () => {
-        render(<DocsRoute />);
+        renderDocsRoute();
 
         fireEvent.click(
             screen.getByRole("button", { name: /packages and runtime packages/u })
@@ -82,7 +86,7 @@ describe("DocsRoute", () => {
             value: scrollIntoView,
         });
         try {
-            render(<DocsRoute />);
+            renderDocsRoute();
 
             const path = screen.getByText("README.md", { selector: "p" });
             const viewerCard = path.closest("section")!;
@@ -114,7 +118,7 @@ describe("DocsRoute", () => {
     });
 
     test("counts search matches and jumps forward with wrapping navigation", () => {
-        render(<DocsRoute />);
+        renderDocsRoute();
 
         fireEvent.change(
             screen.getByRole("searchbox", { name: "Search documentation" }),
@@ -135,7 +139,7 @@ describe("DocsRoute", () => {
     });
 
     test("navigates every logs match in routes and features", () => {
-        render(<DocsRoute />);
+        renderDocsRoute();
 
         fireEvent.click(
             screen.getByRole("button", {
@@ -147,21 +151,23 @@ describe("DocsRoute", () => {
             { target: { value: "logs" } }
         );
 
-        expect(screen.getByText("1 of 3 matches")).toBeVisible();
         const viewerCard = screen
             .getByText("routes-and-features.md", { selector: "p" })
             .closest("section")!;
-        expect(viewerCard.querySelectorAll("mark")).toHaveLength(3);
+        const matchCount = viewerCard.querySelectorAll("mark").length;
+        expect(matchCount).toBeGreaterThan(1);
+        expect(viewerCard.querySelector("mark mark")).toBeNull();
+        expect(screen.getByText(`1 of ${matchCount} matches`)).toBeVisible();
 
         fireEvent.click(screen.getByRole("button", { name: "Next match" }));
-        expect(screen.getByText("2 of 3 matches")).toBeVisible();
+        expect(screen.getByText(`2 of ${matchCount} matches`)).toBeVisible();
         expect(viewerCard.querySelectorAll("mark[data-active='true']")).toHaveLength(1);
         expect(viewerCard.querySelectorAll("mark")[1]).toHaveAttribute(
             "data-active",
             "true"
         );
         fireEvent.click(screen.getByRole("button", { name: "Previous match" }));
-        expect(screen.getByText("1 of 3 matches")).toBeVisible();
+        expect(screen.getByText(`1 of ${matchCount} matches`)).toBeVisible();
         expect(viewerCard.querySelectorAll("mark[data-active='true']")).toHaveLength(1);
         expect(viewerCard.querySelectorAll("mark")[0]).toHaveAttribute(
             "data-active",
@@ -169,8 +175,41 @@ describe("DocsRoute", () => {
         );
     });
 
+    test("counts only rendered matches and highlights fenced code", () => {
+        render(
+            <DocsRoute
+                documents={[
+                    {
+                        content:
+                            "[Visible label](hidden-target.md)\n\n```text\nfenced-only\n```\n",
+                        kind: "markdown",
+                        path: "README.md",
+                    },
+                    {
+                        content: "{}\n",
+                        kind: "json",
+                        path: "openapi.raw-http.json",
+                    },
+                ]}
+            />
+        );
+
+        const search = screen.getByRole("searchbox", {
+            name: "Search documentation",
+        });
+        fireEvent.change(search, { target: { value: "hidden-target" } });
+        expect(screen.getByText("No matches")).toBeVisible();
+        expect(document.querySelectorAll("mark")).toHaveLength(0);
+
+        fireEvent.change(search, { target: { value: "fenced-only" } });
+        expect(screen.getByText("1 of 1 matches")).toBeVisible();
+        expect(document.querySelector("mark[data-active='true']")).toHaveTextContent(
+            "fenced-only"
+        );
+    });
+
     test("opens generated Markdown links and projects individual schemas", () => {
-        render(<DocsRoute />);
+        renderDocsRoute();
 
         fireEvent.click(screen.getByRole("link", { name: "tRPC procedures" }));
         expect(screen.getByText("procedures.md", { selector: "p" })).toBeVisible();

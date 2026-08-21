@@ -206,13 +206,35 @@ describe("generated contract documentation", () => {
         );
         const openApi = JSON.parse(first.get("openapi.raw-http.json") ?? "null") as {
             openapi: string;
-            paths: Record<string, unknown>;
+            paths: Record<string, Record<string, Record<string, unknown>>>;
         };
         expect(openApi.openapi).toBe("3.1.0");
         expect(openApi.paths).toHaveProperty("/api/health/live");
         expect(openApi.paths).toHaveProperty(
             "/api/chat/attachments/{ticketId}/{attachmentId}"
         );
+        expect(openApi.paths["/api/health/live"]?.get?.["x-access"]).toEqual({
+            kind: "public",
+        });
+        expect(
+            openApi.paths["/api/files/uploads/{ticketId}"]?.put?.["x-access"]
+        ).toMatchObject({ kind: "recent-auth" });
+        expect(
+            openApi.paths["/api/files/uploads/{ticketId}"]?.put?.requestBody
+        ).toMatchObject({
+            content: {
+                "application/octet-stream": {
+                    schema: {
+                        format: "binary",
+                        type: "string",
+                        "x-transfer": "streamed",
+                    },
+                },
+            },
+        });
+        expect(first.get("database.md")).toContain("### Foreign keys");
+        expect(first.get("database.md")).toContain("### Indexes");
+        expect(first.get("database.md")).toContain("### Checks");
         const browserReference = JSON.parse(
             first.get("browser-reference.json") ?? "null"
         ) as { content?: string; kind: string; path: string }[];

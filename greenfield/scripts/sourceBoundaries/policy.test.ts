@@ -155,8 +155,8 @@ describe("source-boundary policy", () => {
         ).toBeUndefined();
         expect(
             validateSourceImport(
-                "src/browser/docs/DocsRoute.tsx",
-                staticImport("../../../docs/generated/browser-reference.json")
+                "src/server/domains/system/procedures.ts",
+                staticImport("../../../../docs/generated/browser-reference.json")
             )
         ).toBeUndefined();
         expect(

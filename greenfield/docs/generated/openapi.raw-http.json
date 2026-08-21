@@ -46515,6 +46515,45 @@
         "additionalProperties": false,
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
+      "system.documentationReference.input": {
+        "$id": "urn:mira-dashboard:system.documentationReference.input",
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false,
+        "default": {},
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "system.documentationReference.output": {
+        "$id": "urn:mira-dashboard:system.documentationReference.output",
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "content": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "json",
+                "markdown",
+                "schema"
+              ],
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "additionalProperties": false
+        },
+        "maxItems": 1000,
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
       "system.healthDiagnostics.input": {
         "$id": "urn:mira-dashboard:system.healthDiagnostics.input",
         "type": "object",
@@ -51235,6 +51274,13 @@
           }
         },
         "summary": "Consumes one non-empty, ticket-declared attachment body after MIME and byte verification.",
+        "x-access": {
+          "capabilities": [
+            "chat:write"
+          ],
+          "capabilityPolicy": "all",
+          "kind": "authenticated"
+        },
         "parameters": [
           {
             "in": "path",
@@ -51258,176 +51304,201 @@
             "application/json": {
               "schema": {
                 "format": "binary",
-                "maxLength": 16777216,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 16777216,
+                "x-transfer": "buffered"
               }
             },
             "application/msword": {
               "schema": {
                 "format": "binary",
-                "maxLength": 16777216,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 16777216,
+                "x-transfer": "buffered"
               }
             },
             "application/pdf": {
               "schema": {
                 "format": "binary",
-                "maxLength": 16777216,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 16777216,
+                "x-transfer": "buffered"
               }
             },
             "application/vnd.ms-excel": {
               "schema": {
                 "format": "binary",
-                "maxLength": 16777216,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 16777216,
+                "x-transfer": "buffered"
               }
             },
             "application/vnd.ms-powerpoint": {
               "schema": {
                 "format": "binary",
-                "maxLength": 16777216,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 16777216,
+                "x-transfer": "buffered"
               }
             },
             "application/vnd.openxmlformats-officedocument.presentationml.presentation": {
               "schema": {
                 "format": "binary",
-                "maxLength": 16777216,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 16777216,
+                "x-transfer": "buffered"
               }
             },
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
               "schema": {
                 "format": "binary",
-                "maxLength": 16777216,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 16777216,
+                "x-transfer": "buffered"
               }
             },
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {
               "schema": {
                 "format": "binary",
-                "maxLength": 16777216,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 16777216,
+                "x-transfer": "buffered"
               }
             },
             "application/zip": {
               "schema": {
                 "format": "binary",
-                "maxLength": 16777216,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 16777216,
+                "x-transfer": "buffered"
               }
             },
             "audio/aac": {
               "schema": {
                 "format": "binary",
-                "maxLength": 16777216,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 16777216,
+                "x-transfer": "buffered"
               }
             },
             "audio/flac": {
               "schema": {
                 "format": "binary",
-                "maxLength": 16777216,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 16777216,
+                "x-transfer": "buffered"
               }
             },
             "audio/mpeg": {
               "schema": {
                 "format": "binary",
-                "maxLength": 16777216,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 16777216,
+                "x-transfer": "buffered"
               }
             },
             "audio/ogg": {
               "schema": {
                 "format": "binary",
-                "maxLength": 16777216,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 16777216,
+                "x-transfer": "buffered"
               }
             },
             "audio/opus": {
               "schema": {
                 "format": "binary",
-                "maxLength": 16777216,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 16777216,
+                "x-transfer": "buffered"
               }
             },
             "audio/wav": {
               "schema": {
                 "format": "binary",
-                "maxLength": 16777216,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 16777216,
+                "x-transfer": "buffered"
               }
             },
             "image/avif": {
               "schema": {
                 "format": "binary",
-                "maxLength": 16777216,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 16777216,
+                "x-transfer": "buffered"
               }
             },
             "image/bmp": {
               "schema": {
                 "format": "binary",
-                "maxLength": 16777216,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 16777216,
+                "x-transfer": "buffered"
               }
             },
             "image/gif": {
               "schema": {
                 "format": "binary",
-                "maxLength": 16777216,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 16777216,
+                "x-transfer": "buffered"
               }
             },
             "image/heic": {
               "schema": {
                 "format": "binary",
-                "maxLength": 16777216,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 16777216,
+                "x-transfer": "buffered"
               }
             },
             "image/heif": {
               "schema": {
                 "format": "binary",
-                "maxLength": 16777216,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 16777216,
+                "x-transfer": "buffered"
               }
             },
             "image/jpeg": {
               "schema": {
                 "format": "binary",
-                "maxLength": 16777216,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 16777216,
+                "x-transfer": "buffered"
               }
             },
             "image/png": {
               "schema": {
                 "format": "binary",
-                "maxLength": 16777216,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 16777216,
+                "x-transfer": "buffered"
               }
             },
             "image/svg+xml": {
               "schema": {
                 "format": "binary",
-                "maxLength": 16777216,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 16777216,
+                "x-transfer": "buffered"
               }
             },
             "image/webp": {
               "schema": {
                 "format": "binary",
-                "maxLength": 16777216,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 16777216,
+                "x-transfer": "buffered"
               }
             },
             "text/*": {
               "schema": {
                 "format": "binary",
-                "maxLength": 16777216,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 16777216,
+                "x-transfer": "buffered"
               }
             }
           },
@@ -51444,8 +51515,9 @@
               "*/*": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 16777216,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 16777216,
+                  "x-transfer": "buffered"
                 }
               }
             }
@@ -51456,8 +51528,9 @@
               "*/*": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 16777216,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 16777216,
+                  "x-transfer": "buffered"
                 }
               }
             }
@@ -51491,6 +51564,13 @@
           }
         },
         "summary": "Serves bounded transcript-authorized managed or local-history media through an opaque reference; preview additionally enforces safe MIME policy and a one-MiB text cap.",
+        "x-access": {
+          "capabilities": [
+            "chat:read"
+          ],
+          "capabilityPolicy": "all",
+          "kind": "authenticated"
+        },
         "parameters": [
           {
             "in": "path",
@@ -51551,6 +51631,13 @@
           }
         },
         "summary": "Checks bounded transcript-authorized managed or local-history media metadata without returning a body.",
+        "x-access": {
+          "capabilities": [
+            "chat:read"
+          ],
+          "capabilityPolicy": "all",
+          "kind": "authenticated"
+        },
         "parameters": [
           {
             "in": "path",
@@ -51604,7 +51691,12 @@
             "description": "Expected error response"
           }
         },
-        "summary": "Reports caller-scoped ephemeral speech availability without exposing provider configuration."
+        "summary": "Reports caller-scoped ephemeral speech availability without exposing provider configuration.",
+        "x-access": {
+          "capabilities": [],
+          "capabilityPolicy": "all",
+          "kind": "authenticated"
+        }
       }
     },
     "/api/chat/speech/transcribe": {
@@ -51658,34 +51750,45 @@
           }
         },
         "summary": "Transcribes one MIME-sniffed, duration-checked Opus or AAC recording without retaining audio or transcript text.",
+        "x-access": {
+          "capabilities": [
+            "chat:write"
+          ],
+          "capabilityPolicy": "all",
+          "kind": "authenticated"
+        },
         "requestBody": {
           "content": {
             "audio/webm;codecs=opus": {
               "schema": {
                 "format": "binary",
-                "maxLength": 8388608,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 8388608,
+                "x-transfer": "buffered"
               }
             },
             "audio/ogg;codecs=opus": {
               "schema": {
                 "format": "binary",
-                "maxLength": 8388608,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 8388608,
+                "x-transfer": "buffered"
               }
             },
             "audio/mp4;codecs=mp4a.40.2": {
               "schema": {
                 "format": "binary",
-                "maxLength": 8388608,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 8388608,
+                "x-transfer": "buffered"
               }
             },
             "audio/mp4": {
               "schema": {
                 "format": "binary",
-                "maxLength": 8388608,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 8388608,
+                "x-transfer": "buffered"
               }
             }
           },
@@ -51702,8 +51805,9 @@
               "audio/mpeg": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 8388608,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 8388608,
+                  "x-transfer": "buffered"
                 }
               }
             }
@@ -51746,6 +51850,13 @@
           }
         },
         "summary": "Generates one bounded no-store MPEG audio response from bounded text without retaining text or audio.",
+        "x-access": {
+          "capabilities": [
+            "chat:write"
+          ],
+          "capabilityPolicy": "all",
+          "kind": "authenticated"
+        },
         "requestBody": {
           "content": {
             "application/json": {
@@ -51767,99 +51878,113 @@
               "application/json": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "application/octet-stream": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "application/pdf": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "audio/mpeg": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "audio/ogg": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "audio/wav": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "image/avif": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "image/gif": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "image/jpeg": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "image/png": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "image/webp": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "text/csv": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "text/markdown": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "text/plain": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               }
             }
@@ -51870,99 +51995,113 @@
               "application/json": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "application/octet-stream": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "application/pdf": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "audio/mpeg": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "audio/ogg": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "audio/wav": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "image/avif": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "image/gif": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "image/jpeg": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "image/png": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "image/webp": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "text/csv": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "text/markdown": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "text/plain": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               }
             }
@@ -52002,6 +52141,16 @@
           }
         },
         "summary": "Reads one ticket-bound workspace file revision or bounded source prefix.",
+        "x-access": {
+          "capabilities": [
+            "files:read"
+          ],
+          "capabilityPolicy": "all",
+          "kind": "authenticated",
+          "principalKinds": [
+            "session"
+          ]
+        },
         "parameters": [
           {
             "in": "path",
@@ -52021,99 +52170,113 @@
               "application/json": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "application/octet-stream": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "application/pdf": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "audio/mpeg": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "audio/ogg": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "audio/wav": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "image/avif": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "image/gif": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "image/jpeg": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "image/png": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "image/webp": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "text/csv": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "text/markdown": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "text/plain": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               }
             }
@@ -52124,99 +52287,113 @@
               "application/json": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "application/octet-stream": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "application/pdf": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "audio/mpeg": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "audio/ogg": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "audio/wav": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "image/avif": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "image/gif": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "image/jpeg": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "image/png": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "image/webp": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "text/csv": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "text/markdown": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               },
               "text/plain": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 33554432,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 33554432,
+                  "x-transfer": "buffered"
                 }
               }
             }
@@ -52256,6 +52433,16 @@
           }
         },
         "summary": "Inspects one ticket-bound workspace file revision or bounded source prefix.",
+        "x-access": {
+          "capabilities": [
+            "files:read"
+          ],
+          "capabilityPolicy": "all",
+          "kind": "authenticated",
+          "principalKinds": [
+            "session"
+          ]
+        },
         "parameters": [
           {
             "in": "path",
@@ -52322,6 +52509,17 @@
           }
         },
         "summary": "Spools one bounded upload and enqueues one audited structural worker write.",
+        "x-access": {
+          "capabilities": [
+            "files:write"
+          ],
+          "kind": "recent-auth",
+          "principalKinds": [
+            "session"
+          ],
+          "whenMfaDisabled": "deny",
+          "whenMfaEnabled": "mfa"
+        },
         "parameters": [
           {
             "in": "path",
@@ -52337,99 +52535,113 @@
             "application/json": {
               "schema": {
                 "format": "binary",
-                "maxLength": 16777216,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 16777216,
+                "x-transfer": "streamed"
               }
             },
             "application/octet-stream": {
               "schema": {
                 "format": "binary",
-                "maxLength": 16777216,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 16777216,
+                "x-transfer": "streamed"
               }
             },
             "application/pdf": {
               "schema": {
                 "format": "binary",
-                "maxLength": 16777216,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 16777216,
+                "x-transfer": "streamed"
               }
             },
             "audio/mpeg": {
               "schema": {
                 "format": "binary",
-                "maxLength": 16777216,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 16777216,
+                "x-transfer": "streamed"
               }
             },
             "audio/ogg": {
               "schema": {
                 "format": "binary",
-                "maxLength": 16777216,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 16777216,
+                "x-transfer": "streamed"
               }
             },
             "audio/wav": {
               "schema": {
                 "format": "binary",
-                "maxLength": 16777216,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 16777216,
+                "x-transfer": "streamed"
               }
             },
             "image/avif": {
               "schema": {
                 "format": "binary",
-                "maxLength": 16777216,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 16777216,
+                "x-transfer": "streamed"
               }
             },
             "image/gif": {
               "schema": {
                 "format": "binary",
-                "maxLength": 16777216,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 16777216,
+                "x-transfer": "streamed"
               }
             },
             "image/jpeg": {
               "schema": {
                 "format": "binary",
-                "maxLength": 16777216,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 16777216,
+                "x-transfer": "streamed"
               }
             },
             "image/png": {
               "schema": {
                 "format": "binary",
-                "maxLength": 16777216,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 16777216,
+                "x-transfer": "streamed"
               }
             },
             "image/webp": {
               "schema": {
                 "format": "binary",
-                "maxLength": 16777216,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 16777216,
+                "x-transfer": "streamed"
               }
             },
             "text/csv": {
               "schema": {
                 "format": "binary",
-                "maxLength": 16777216,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 16777216,
+                "x-transfer": "streamed"
               }
             },
             "text/markdown": {
               "schema": {
                 "format": "binary",
-                "maxLength": 16777216,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 16777216,
+                "x-transfer": "streamed"
               }
             },
             "text/plain": {
               "schema": {
                 "format": "binary",
-                "maxLength": 16777216,
-                "type": "string"
+                "type": "string",
+                "x-maximum-bytes": 16777216,
+                "x-transfer": "streamed"
               }
             }
           },
@@ -52446,8 +52658,9 @@
               "application/json": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 2101248,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 2101248,
+                  "x-transfer": "buffered"
                 }
               }
             }
@@ -52481,6 +52694,17 @@
           }
         },
         "summary": "Consumes one actor-bound no-store OpenClaw configuration export ticket.",
+        "x-access": {
+          "capabilities": [
+            "openclaw-settings:write"
+          ],
+          "kind": "recent-auth",
+          "principalKinds": [
+            "session"
+          ],
+          "whenMfaDisabled": "deny",
+          "whenMfaEnabled": "mfa"
+        },
         "parameters": [
           {
             "in": "path",
@@ -52500,8 +52724,9 @@
               "application/json": {
                 "schema": {
                   "format": "binary",
-                  "maxLength": 2101248,
-                  "type": "string"
+                  "type": "string",
+                  "x-maximum-bytes": 2101248,
+                  "x-transfer": "buffered"
                 }
               }
             }
@@ -52535,6 +52760,17 @@
           }
         },
         "summary": "Inspects one actor-bound no-store OpenClaw configuration export ticket.",
+        "x-access": {
+          "capabilities": [
+            "openclaw-settings:write"
+          ],
+          "kind": "recent-auth",
+          "principalKinds": [
+            "session"
+          ],
+          "whenMfaDisabled": "deny",
+          "whenMfaEnabled": "mfa"
+        },
         "parameters": [
           {
             "in": "path",
@@ -52561,7 +52797,10 @@
             }
           }
         },
-        "summary": "Confirms that the Bun web process can answer requests."
+        "summary": "Confirms that the Bun web process can answer requests.",
+        "x-access": {
+          "kind": "public"
+        }
       },
       "head": {
         "responses": {
@@ -52569,7 +52808,10 @@
             "description": "Successful response"
           }
         },
-        "summary": "Checks Bun web-process liveness without a response body."
+        "summary": "Checks Bun web-process liveness without a response body.",
+        "x-access": {
+          "kind": "public"
+        }
       }
     },
     "/api/health/ready": {
@@ -52589,7 +52831,10 @@
             "description": "Expected error response"
           }
         },
-        "summary": "Reports whether critical application initialization is complete."
+        "summary": "Reports whether critical application initialization is complete.",
+        "x-access": {
+          "kind": "public"
+        }
       },
       "head": {
         "responses": {
@@ -52600,7 +52845,10 @@
             "description": "Expected error response"
           }
         },
-        "summary": "Checks application readiness without a response body."
+        "summary": "Checks application readiness without a response body.",
+        "x-access": {
+          "kind": "public"
+        }
       }
     },
     "/api/terminal/sessions/{sessionId}/socket": {
@@ -52644,6 +52892,17 @@
           }
         },
         "summary": "Upgrades one actor-bound ticket to a full-duplex interactive PTY stream.",
+        "x-access": {
+          "capabilities": [
+            "terminal:write"
+          ],
+          "kind": "recent-auth",
+          "principalKinds": [
+            "session"
+          ],
+          "whenMfaDisabled": "deny",
+          "whenMfaEnabled": "mfa"
+        },
         "parameters": [
           {
             "in": "path",

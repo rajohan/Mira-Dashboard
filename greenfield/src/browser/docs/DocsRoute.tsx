@@ -1,15 +1,7 @@
 import { ChevronDown, ChevronUp } from "lucide-react";
-import type { ReactElement, ReactNode } from "react";
-import {
-    Children,
-    cloneElement,
-    isValidElement,
-    useLayoutEffect,
-    useRef,
-    useState,
-} from "react";
+import type { ReactNode, RefObject } from "react";
+import { Children, useDeferredValue, useLayoutEffect, useRef, useState } from "react";
 
-import generatedDocuments from "../../../docs/generated/browser-reference.json";
 import { cn } from "../lib/classNames.ts";
 import { Button } from "../ui/Button.tsx";
 import { Card } from "../ui/Card.tsx";
@@ -32,15 +24,15 @@ interface DocumentGroup {
     readonly label: string;
 }
 
-const documents = generatedDocuments as readonly GeneratedDocument[];
 const initialDocumentPath = "README.md";
 const visibleScrollbarClassName =
     "[scrollbar-gutter:stable] [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-primary-950 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-primary-500 [&::-webkit-scrollbar-thumb:hover]:bg-primary-400";
-const openApiDocument = JSON.parse(
-    documents.find(({ path }) => path === "openapi.raw-http.json")?.content ?? "{}"
-) as { readonly components?: { readonly schemas?: Readonly<Record<string, unknown>> } };
-
-function documentContent(document: GeneratedDocument): string {
+function documentContent(
+    document: GeneratedDocument,
+    openApiDocument: {
+        readonly components?: { readonly schemas?: Readonly<Record<string, unknown>> };
+    }
+): string {
     if (document.kind !== "schema") return document.content ?? "";
     const schemaId = document.path
         .replace(/^schemas\//u, "")
@@ -107,18 +99,6 @@ function highlightedText(value: string, query: string): ReactNode {
     return parts;
 }
 
-function occurrenceCount(value: string, query: string): number {
-    if (query.length === 0) return 0;
-    const normalizedValue = value.toLowerCase();
-    let count = 0;
-    let cursor = normalizedValue.indexOf(query);
-    while (cursor >= 0) {
-        count += 1;
-        cursor = normalizedValue.indexOf(query, cursor + query.length);
-    }
-    return count;
-}
-
 function HighlightedText({
     children,
     query,
@@ -126,17 +106,9 @@ function HighlightedText({
     readonly children: ReactNode;
     readonly query: string;
 }) {
-    const highlightNode = (node: ReactNode): ReactNode => {
-        if (typeof node === "string") return highlightedText(node, query);
-        if (!isValidElement<{ readonly children?: ReactNode }>(node)) return node;
-        if (node.props.children === undefined) return node;
-        return cloneElement(
-            node as ReactElement<{ readonly children?: ReactNode }>,
-            undefined,
-            Children.map(node.props.children, highlightNode)
-        );
-    };
-    return Children.map(children, highlightNode);
+    return Children.map(children, (node) =>
+        typeof node === "string" ? highlightedText(node, query) : node
+    );
 }
 
 function documentationLinkPath(currentPath: string, href: string | undefined) {
@@ -153,52 +125,123 @@ function documentationLinkPath(currentPath: string, href: string | undefined) {
     return resolved.join("/");
 }
 
+function activateSearchMatch(highlights: NodeListOf<HTMLElement>, index: number) {
+    for (const [highlightIndex, highlight] of highlights.entries()) {
+        if (highlightIndex === index) highlight.dataset.active = "true";
+        else delete highlight.dataset.active;
+    }
+    highlights[index]?.scrollIntoView?.({ block: "center" });
+}
+
+function SearchMatchNavigation({
+    query,
+    selectedPath,
+    viewer,
+}: {
+    readonly query: string;
+    readonly selectedPath: string;
+    readonly viewer: RefObject<HTMLDivElement | null>;
+}) {
+    const [matchState, setMatchState] = useState({ active: 0, count: 0 });
+
+    useLayoutEffect(() => {
+        const highlights = viewer.current?.querySelectorAll<HTMLElement>("mark");
+        if (highlights === undefined) return;
+        if (highlights.length > 0) activateSearchMatch(highlights, 0);
+        // This isolated control synchronizes its label with marks owned by the viewer DOM.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setMatchState({ active: 0, count: highlights.length });
+    }, [query, selectedPath, viewer]);
+
+    const jump = (offset: number) => {
+        const highlights = viewer.current?.querySelectorAll<HTMLElement>("mark");
+        if (highlights === undefined || highlights.length === 0) return;
+        const active =
+            (matchState.active + offset + highlights.length) % highlights.length;
+        activateSearchMatch(highlights, active);
+        setMatchState({ active, count: highlights.length });
+    };
+
+    return (
+        <div className="flex shrink-0 items-center gap-1.5">
+            <Text size="sm" tone="muted">
+                {matchState.count === 0
+                    ? "No matches"
+                    : `${matchState.active + 1} of ${matchState.count} matches`}
+            </Text>
+            <Button
+                aria-label="Previous match"
+                className="size-8 justify-center p-0"
+                disabled={matchState.count <= 1}
+                onClick={() => jump(-1)}
+                size="sm"
+                variant="ghost"
+            >
+                <Icon icon={ChevronUp} size="sm" />
+            </Button>
+            <Button
+                aria-label="Next match"
+                className="size-8 justify-center p-0"
+                disabled={matchState.count <= 1}
+                onClick={() => jump(1)}
+                size="sm"
+                variant="ghost"
+            >
+                <Icon icon={ChevronDown} size="sm" />
+            </Button>
+        </div>
+    );
+}
+
 /**
  * Renders the complete checked-in generated reference without runtime filesystem access.
  * @returns Searchable release documentation with Markdown and JSON viewers.
  */
-export function DocsRoute() {
+export function DocsRoute({
+    documents,
+}: {
+    readonly documents: readonly GeneratedDocument[];
+}) {
     const viewer = useRef<HTMLDivElement>(null);
-    const [activeMatch, setActiveMatch] = useState(0);
     const [query, setQuery] = useState("");
     const [selectedPath, setSelectedPath] = useState(initialDocumentPath);
-    const normalizedQuery = query.trim().toLowerCase();
-    const matches = documents.filter(
-        (document) =>
-            normalizedQuery.length === 0 ||
-            document.path.toLowerCase().includes(normalizedQuery) ||
-            documentContent(document).toLowerCase().includes(normalizedQuery)
+    const [openApiDocument] = useState(
+        () =>
+            JSON.parse(
+                documents.find(({ path }) => path === "openapi.raw-http.json")?.content ??
+                    "{}"
+            ) as {
+                readonly components?: {
+                    readonly schemas?: Readonly<Record<string, unknown>>;
+                };
+            }
     );
+    const normalizedQuery = useDeferredValue(query.trim().toLowerCase());
+    const [searchIndex] = useState(() =>
+        documents.map((document) => ({
+            document,
+            searchableContent: documentContent(document, openApiDocument).toLowerCase(),
+            searchablePath: document.path.toLowerCase(),
+        }))
+    );
+    const matches = searchIndex
+        .filter(
+            ({ searchableContent, searchablePath }) =>
+                normalizedQuery.length === 0 ||
+                searchablePath.includes(normalizedQuery) ||
+                searchableContent.includes(normalizedQuery)
+        )
+        .map(({ document }) => document);
     const groups = groupDocuments(matches);
     const selected =
         matches.find(({ path }) => path === selectedPath) ??
         matches[0] ??
         documents.find(({ path }) => path === initialDocumentPath)!;
-    const matchCount = occurrenceCount(documentContent(selected), normalizedQuery);
-
-    const jumpToMatch = (requestedIndex: number) => {
-        if (matchCount === 0) return;
-        setActiveMatch((requestedIndex + matchCount) % matchCount);
-    };
-
-    useLayoutEffect(() => {
-        if (normalizedQuery.length === 0) return;
-        const highlights = viewer.current?.querySelectorAll<HTMLElement>("mark") ?? [];
-        if (highlights.length === 0) return;
-        const index = activeMatch % highlights.length;
-        for (const [highlightIndex, highlight] of highlights.entries()) {
-            if (highlightIndex === index) highlight.dataset.active = "true";
-            else delete highlight.dataset.active;
-        }
-        highlights[index]?.scrollIntoView?.({ block: "center" });
-    }, [activeMatch, normalizedQuery, selected.path]);
-
     return (
         <div className="space-y-4">
             <SearchInput
                 label="Search documentation"
                 onChange={(value) => {
-                    setActiveMatch(0);
                     setQuery(value);
                 }}
                 placeholder="Search paths and contents…"
@@ -245,7 +288,6 @@ export function DocsRoute() {
                                             )}
                                             key={document.path}
                                             onClick={() => {
-                                                setActiveMatch(0);
                                                 setSelectedPath(document.path);
                                             }}
                                             type="button"
@@ -284,33 +326,11 @@ export function DocsRoute() {
                             {selected.path}
                         </Text>
                         {normalizedQuery.length > 0 && (
-                            <div className="flex shrink-0 items-center gap-1.5">
-                                <Text size="sm" tone="muted">
-                                    {matchCount === 0
-                                        ? "No matches"
-                                        : `${activeMatch + 1} of ${matchCount} matches`}
-                                </Text>
-                                <Button
-                                    aria-label="Previous match"
-                                    className="size-8 justify-center p-0"
-                                    disabled={matchCount <= 1}
-                                    onClick={() => jumpToMatch(activeMatch - 1)}
-                                    size="sm"
-                                    variant="ghost"
-                                >
-                                    <Icon icon={ChevronUp} size="sm" />
-                                </Button>
-                                <Button
-                                    aria-label="Next match"
-                                    className="size-8 justify-center p-0"
-                                    disabled={matchCount <= 1}
-                                    onClick={() => jumpToMatch(activeMatch + 1)}
-                                    size="sm"
-                                    variant="ghost"
-                                >
-                                    <Icon icon={ChevronDown} size="sm" />
-                                </Button>
-                            </div>
+                            <SearchMatchNavigation
+                                query={normalizedQuery}
+                                selectedPath={selected.path}
+                                viewer={viewer}
+                            />
                         )}
                     </div>
                     <div
@@ -336,7 +356,6 @@ export function DocsRoute() {
                                                 href={`#${target}`}
                                                 onClick={(event) => {
                                                     event.preventDefault();
-                                                    setActiveMatch(0);
                                                     setSelectedPath(target!);
                                                 }}
                                             >
@@ -352,6 +371,19 @@ export function DocsRoute() {
                                             </span>
                                         );
                                     },
+                                    code: ({ children, className, ...properties }) => (
+                                        <code
+                                            {...properties}
+                                            className={cn(
+                                                "rounded bg-black/25 box-decoration-clone px-1 py-0.5 font-mono text-[0.92em]",
+                                                className
+                                            )}
+                                        >
+                                            <HighlightedText query={normalizedQuery}>
+                                                {children}
+                                            </HighlightedText>
+                                        </code>
+                                    ),
                                     h1: ({ children }) => (
                                         <h1>
                                             <HighlightedText query={normalizedQuery}>
@@ -409,12 +441,12 @@ export function DocsRoute() {
                                         </th>
                                     ),
                                 }}
-                                source={documentContent(selected)}
+                                source={documentContent(selected, openApiDocument)}
                             />
                         ) : (
                             <SourceViewer
                                 ariaLabel={`${selected.path} source`}
-                                content={documentContent(selected)}
+                                content={documentContent(selected, openApiDocument)}
                                 copyLabel={`Copy ${selected.path}`}
                                 highlightQuery={normalizedQuery}
                                 language="json"

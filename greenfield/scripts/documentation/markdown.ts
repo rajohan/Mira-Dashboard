@@ -90,6 +90,7 @@ export function renderGeneratedIndex(): string {
 
 /** One immutable Drizzle table projected into generated documentation. */
 export interface DatabaseTableDocumentationInput {
+    readonly checks: readonly { readonly expression: string; readonly name: string }[];
     readonly columns: readonly {
         readonly defaulted: boolean;
         readonly name: string;
@@ -98,6 +99,20 @@ export interface DatabaseTableDocumentationInput {
         readonly type: string;
     }[];
     readonly name: string;
+    readonly foreignKeys: readonly {
+        readonly columns: readonly string[];
+        readonly name: string;
+        readonly onDelete: string;
+        readonly onUpdate: string;
+        readonly referencedColumns: readonly string[];
+        readonly referencedTable: string;
+    }[];
+    readonly indexes: readonly {
+        readonly columns: readonly string[];
+        readonly name: string;
+        readonly unique: boolean;
+        readonly where: string | null;
+    }[];
 }
 
 /**
@@ -120,7 +135,19 @@ export function renderDatabase(
                 (column) =>
                     `| \`${markdownTableCell(column.name)}\` | \`${markdownTableCell(column.type)}\` | ${column.notNull ? "No" : "Yes"} | ${column.primaryKey ? "Yes" : "No"} | ${column.defaulted ? "Yes" : "No"} |`
             );
-            return `## \`${markdownTableCell(table.name)}\`\n\n| Column | SQLite type | Nullable | Primary key | Default |\n| --- | --- | --- | --- | --- |\n${rows.join("\n")}`;
+            const foreignKeys = table.foreignKeys.map(
+                (foreignKey) =>
+                    `| \`${markdownTableCell(foreignKey.name)}\` | \`${foreignKey.columns.map(markdownTableCell).join(", ")}\` | \`${markdownTableCell(foreignKey.referencedTable)}(${foreignKey.referencedColumns.map(markdownTableCell).join(", ")})\` | \`${markdownTableCell(foreignKey.onUpdate)}\` | \`${markdownTableCell(foreignKey.onDelete)}\` |`
+            );
+            const indexes = table.indexes.map(
+                (index) =>
+                    `| \`${markdownTableCell(index.name)}\` | \`${index.columns.map(markdownTableCell).join(", ")}\` | ${index.unique ? "Yes" : "No"} | ${index.where === null ? "—" : `\`${markdownTableCell(index.where)}\``} |`
+            );
+            const checks = table.checks.map(
+                (check) =>
+                    `| \`${markdownTableCell(check.name)}\` | \`${markdownTableCell(check.expression)}\` |`
+            );
+            return `## \`${markdownTableCell(table.name)}\`\n\n| Column | SQLite type | Nullable | Primary key | Default |\n| --- | --- | --- | --- | --- |\n${rows.join("\n")}\n\n### Foreign keys\n\n| Name | Columns | References | On update | On delete |\n| --- | --- | --- | --- | --- |\n${foreignKeys.length === 0 ? "| — | — | — | — | — |" : foreignKeys.join("\n")}\n\n### Indexes\n\n| Name | Columns | Unique | Predicate |\n| --- | --- | --- | --- |\n${indexes.length === 0 ? "| — | — | — | — |" : indexes.join("\n")}\n\n### Checks\n\n| Name | Expression |\n| --- | --- |\n${checks.length === 0 ? "| — | — |" : checks.join("\n")}`;
         });
     return `${documentHeader("Database Schema", "bun run docs:generate")}This reference is generated from the exact Drizzle schema used by migrations and runtime composition.\n\n${sections.join("\n\n")}\n`;
 }

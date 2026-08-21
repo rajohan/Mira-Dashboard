@@ -18,6 +18,19 @@ export const healthReadinessPath = "/api/health/ready";
 /** Empty object accepted by procedures without user input. */
 export const emptyInputSchema = v.optional(v.strictObject({}), {});
 
+/** Authenticated generated-document payload served outside the public browser bundle. */
+export const documentationReferenceSchema = v.pipe(
+    v.array(
+        v.strictObject({
+            content: v.optional(v.string()),
+            kind: v.picklist(["json", "markdown", "schema"]),
+            path: v.string(),
+        })
+    ),
+    v.maxLength(1000)
+);
+export type DocumentationReference = v.InferOutput<typeof documentationReferenceSchema>;
+
 const systemMetricByteCountSchema = v.pipe(v.number(), v.safeInteger(), v.minValue(0));
 const systemMetricPercentSchema = v.pipe(v.number(), v.minValue(0), v.maxValue(100));
 const systemMetricLoadSchema = v.pipe(v.number(), v.minValue(0), v.maxValue(100_000));
@@ -742,6 +755,31 @@ export const runtimeIdentityContract = {
     },
 } as const satisfies ProcedureContract;
 
+/** Session-only immutable documentation reference contract. */
+export const documentationReferenceContract = {
+    access: {
+        capabilities: [],
+        capabilityPolicy: "all",
+        kind: "authenticated",
+        principalKinds: ["session"],
+    },
+    domain: "system",
+    errors: ["FORBIDDEN", "UNAUTHORIZED"],
+    input: emptyInputSchema,
+    inputSchemaId: "system.documentationReference.input",
+    kind: "query",
+    name: "system.documentationReference",
+    output: documentationReferenceSchema,
+    outputSchemaId: "system.documentationReference.output",
+    summary:
+        "Returns the immutable generated release reference to an authenticated browser session.",
+    transport: {
+        batching: "adapter-default",
+        handler: "default",
+        requestBody: "default",
+    },
+} as const satisfies ProcedureContract;
+
 /** Session-only metrics contract without automation authority or host identity. */
 export const systemMetricsContract = {
     access: {
@@ -794,6 +832,7 @@ export const systemHealthDiagnosticsContract = {
 
 /** Implemented system tRPC contracts. */
 export const systemProcedureContracts = [
+    documentationReferenceContract,
     systemHealthDiagnosticsContract,
     systemMetricsContract,
     runtimeIdentityContract,

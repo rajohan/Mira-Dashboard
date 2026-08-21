@@ -307,10 +307,7 @@ export function validateSourceImport(
     }
 
     const targetRole = sourceRole(target);
-    if (
-        importerRole === "browser" &&
-        isReviewedBrowserGeneratedDocumentationTarget(normalizedImporter, target)
-    ) {
+    if (isReviewedBrowserGeneratedDocumentationTarget(normalizedImporter, target)) {
         return undefined;
     }
     if (

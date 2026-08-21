@@ -153,16 +153,24 @@ const reviewedBrowserGeneratedDocumentationTargets: ReadonlyMap<
     ReadonlySet<string>
 > = new Map([
     [
-        "src/browser/docs/DocsRoute.tsx",
+        "src/server/domains/system/procedures.ts",
+        new Set(["docs/generated/browser-reference.json"]),
+    ],
+    [
+        "src/browser/docs/DocsRoute.test.tsx",
+        new Set(["docs/generated/browser-reference.json"]),
+    ],
+    [
+        "src/browser/docs/stories/DocsRoute.stories.tsx",
         new Set(["docs/generated/browser-reference.json"]),
     ],
 ]);
 
 /**
- * Checks the exact immutable generated-reference edge owned by `/docs`.
- * @param importer Normalized browser route source.
+ * Checks reviewed generated-reference edges owned by the authenticated server and test evidence.
+ * @param importer Normalized source path.
  * @param target Normalized checked-in generated manifest path.
- * @returns Whether the browser may bundle this one secret-free release artifact.
+ * @returns Whether this source may import the generated artifact.
  */
 export function isReviewedBrowserGeneratedDocumentationTarget(
     importer: string,

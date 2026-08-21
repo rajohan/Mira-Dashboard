@@ -1,0 +1,30 @@
+{
+  "$id": "urn:mira-dashboard:system.documentationReference.output",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "content": {
+        "type": "string"
+      },
+      "kind": {
+        "enum": [
+          "json",
+          "markdown",
+          "schema"
+        ],
+        "type": "string"
+      },
+      "path": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "kind",
+      "path"
+    ],
+    "additionalProperties": false
+  },
+  "maxItems": 1000,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

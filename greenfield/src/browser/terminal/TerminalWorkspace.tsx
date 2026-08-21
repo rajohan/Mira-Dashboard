@@ -113,6 +113,7 @@ export function TerminalWorkspace({
 }: TerminalWorkspaceProps) {
     const [confirmEnd, setConfirmEnd] = useState(false);
     const hasSession = session !== undefined;
+    const showTerminalCanvas = hasSession || phase === "ended";
     const resumeAvailable =
         phase === "active-elsewhere" && session?.state === "awaiting-reconnect";
     const startAvailable = !hasSession && phase !== "starting" && phase !== "connecting";
@@ -293,10 +294,10 @@ export function TerminalWorkspace({
                     </div>
                 </div>
                 <div className="relative min-h-0 flex-1">
-                    <div className={cn("size-full", !hasSession && "invisible")}>
+                    <div className={cn("size-full", !showTerminalCanvas && "invisible")}>
                         {canvas}
                     </div>
-                    {!hasSession && (
+                    {!showTerminalCanvas && (
                         <div className="bg-primary-950/90 pointer-events-none absolute inset-0 flex items-center justify-center p-6 text-center">
                             <div>
                                 <Text className="font-semibold">

@@ -88,6 +88,11 @@ function schemaArtifactPath(schemaId: string): string {
     return `schemas/${schemaId}.schema.json`;
 }
 
+function optionalSnapshotText(value: unknown): string | null {
+    if (value === null) return null;
+    return typeof value === "string" ? value : JSON.stringify(value);
+}
+
 function openApiContent(body: RawHttpBodyContract): Record<string, unknown> | undefined {
     if (body.kind === "none" || body.kind === "websocket") return undefined;
     if (body.kind === "schema") {
@@ -104,8 +109,9 @@ function openApiContent(body: RawHttpBodyContract): Record<string, unknown> | un
             {
                 schema: {
                     format: "binary",
-                    maxLength: body.maximumBytes,
                     type: "string",
+                    "x-maximum-bytes": body.maximumBytes,
+                    "x-transfer": body.transfer,
                 },
             },
         ])
@@ -139,6 +145,7 @@ function renderRawHttpOpenApi(schemas: ReadonlyMap<string, RegisteredSchema>): s
                 ])
             ),
             summary: contract.summary,
+            "x-access": contract.access,
         };
         const pathParameters = [...contract.path.matchAll(/:([A-Za-z0-9_]+)/gu)].map(
             ([, name]) => ({
@@ -197,6 +204,15 @@ function databaseTables() {
         .map((table) => {
             const tableName = String(table.name);
             return {
+                checks: entries
+                    .filter(
+                        (entry) =>
+                            entry.entityType === "checks" && entry.table === tableName
+                    )
+                    .map((entry) => ({
+                        expression: String(entry.value),
+                        name: String(entry.name),
+                    })),
                 columns: entries
                     .filter(
                         (entry) =>
@@ -210,6 +226,31 @@ function databaseTables() {
                             `${tableName}:${String(column.name)}`
                         ),
                         type: String(column.type),
+                    })),
+                foreignKeys: entries
+                    .filter(
+                        (entry) => entry.entityType === "fks" && entry.table === tableName
+                    )
+                    .map((entry) => ({
+                        columns: entry.columns as readonly string[],
+                        name: String(entry.name),
+                        onDelete: String(entry.onDelete),
+                        onUpdate: String(entry.onUpdate),
+                        referencedColumns: entry.columnsTo as readonly string[],
+                        referencedTable: String(entry.tableTo),
+                    })),
+                indexes: entries
+                    .filter(
+                        (entry) =>
+                            entry.entityType === "indexes" && entry.table === tableName
+                    )
+                    .map((entry) => ({
+                        columns: (
+                            entry.columns as readonly Record<string, unknown>[]
+                        ).map((column) => String(column.value)),
+                        name: String(entry.name),
+                        unique: entry.isUnique === true,
+                        where: optionalSnapshotText(entry.where),
                     })),
                 name: tableName,
             };
