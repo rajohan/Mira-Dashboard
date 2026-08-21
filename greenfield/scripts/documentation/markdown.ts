@@ -85,7 +85,44 @@ function errorReasonsLabel(contract: ProcedureContract): string {
  * @returns Generated Markdown index.
  */
 export function renderGeneratedIndex(): string {
-    return `${documentHeader("Generated Dashboard Reference", "bun run docs:generate")}## Current Generated Subset\n\n- [tRPC procedures](procedures.md)\n- [Raw HTTP routes](raw-http.md)\n- [Realtime events](realtime-events.md)\n- [Browser routes and features](routes-and-features.md)\n- [Application configuration](configuration.md)\n- [Packages and runtime](packages-and-runtime.md)\n- [Transport schemas](schemas/)\n\n## Required Before Cutover\n\nThe target generator must also emit the database reference plus OpenAPI 3.1 for true raw HTTP endpoints. The generated browser documentation route must render the complete checked-in set. These artifacts are future gates, not current generated outputs.\n`;
+    return `${documentHeader("Generated Dashboard Reference", "bun run docs:generate")}The complete immutable reference is available in the authenticated Dashboard at \`/docs\`.\n\n- [tRPC procedures](procedures.md)\n- [Raw HTTP routes](raw-http.md)\n- [Raw HTTP OpenAPI 3.1](openapi.raw-http.json)\n- [Realtime events](realtime-events.md)\n- [Database schema](database.md)\n- [Browser routes and features](routes-and-features.md)\n- [Application configuration](configuration.md)\n- [Packages and runtime](packages-and-runtime.md)\n- [Transport schemas](schemas/)\n`;
+}
+
+/** One immutable Drizzle table projected into generated documentation. */
+export interface DatabaseTableDocumentationInput {
+    readonly columns: readonly {
+        readonly defaulted: boolean;
+        readonly name: string;
+        readonly notNull: boolean;
+        readonly primaryKey: boolean;
+        readonly type: string;
+    }[];
+    readonly name: string;
+}
+
+/**
+ * Renders the authoritative SQLite table and column catalog.
+ * @param tables Tables projected from the checked migration snapshot.
+ * @returns Generated database Markdown.
+ */
+export function renderDatabase(
+    tables: readonly DatabaseTableDocumentationInput[]
+): string {
+    if (tables.length === 0) throw new Error("Database table registry is empty");
+    const names = tables.map(({ name }) => name);
+    if (new Set(names).size !== names.length) {
+        throw new Error("Database table registry contains duplicates");
+    }
+    const sections = tables
+        .toSorted((left, right) => left.name.localeCompare(right.name))
+        .map((table) => {
+            const rows = table.columns.map(
+                (column) =>
+                    `| \`${markdownTableCell(column.name)}\` | \`${markdownTableCell(column.type)}\` | ${column.notNull ? "No" : "Yes"} | ${column.primaryKey ? "Yes" : "No"} | ${column.defaulted ? "Yes" : "No"} |`
+            );
+            return `## \`${markdownTableCell(table.name)}\`\n\n| Column | SQLite type | Nullable | Primary key | Default |\n| --- | --- | --- | --- | --- |\n${rows.join("\n")}`;
+        });
+    return `${documentHeader("Database Schema", "bun run docs:generate")}This reference is generated from the exact Drizzle schema used by migrations and runtime composition.\n\n${sections.join("\n\n")}\n`;
 }
 
 /** Browser route metadata required by generated documentation. */

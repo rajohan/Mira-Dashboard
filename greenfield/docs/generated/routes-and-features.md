@@ -11,6 +11,7 @@
 | `/database` | Browser session | Database | `database` | Shows bounded read-only health and lifecycle observations for Dashboard databases. |
 | `/delivery` | Browser session | Delivery | `delivery` | Reviews ordinary and stacked pull requests, manages one isolated preview, and queues exact deploy or paired rollback operations. |
 | `/docker` | Browser session | Docker | `docker` | Observes dynamic Docker Engine and Compose state and queues source-fenced fixed operations and updates. |
+| `/docs` | Browser session | Docs | `documentation` | Searches and renders immutable generated API, database, runtime, configuration, and route references. |
 | `/files` | Browser session | Files | `files` | Browses, previews, downloads, uploads, and CAS-replaces workspace files. |
 | `/incidents` | Browser session | Hidden | `monitoring` | Lists and inspects persisted monitoring incident generations. |
 | `/jobs` | Browser session | Jobs | `jobs` | Shows Dashboard jobs, schedules, worker state, and OpenClaw cron. |

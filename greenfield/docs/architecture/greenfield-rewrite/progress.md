@@ -1954,3 +1954,19 @@ full-browser parity, production rehearsal, cutover, and legacy deletion remain o
 - Successful collection teardown is bounded as well as request execution: stdin closes, `SIGTERM`
   gets 250 ms, then `SIGKILL` gets one final bounded wait. A child that retains stdio after a valid
   response therefore cannot hang the worker or its cache schedule.
+
+### 2026-08-21 — Generated `/docs` reference completed
+
+- The authenticated `/docs` route now renders the immutable checked-in documentation set with
+  shared Markdown and source-viewer primitives, responsive navigation, full path/content search,
+  and working links from contract tables to individual JSON Schemas. The lazy route reads only the
+  bundled release reference and never reaches into production source files or an external service.
+- Deterministic generation now includes the migration-snapshot-backed SQLite table/column catalog
+  and OpenAPI 3.1 for true raw HTTP routes, including path/query parameters, schema and bounded
+  binary request bodies, successful response bodies, and the shared transport components. The
+  browser manifest de-duplicates individual schemas against the OpenAPI component catalog so the
+  complete reference stays within production bundle budgets.
+- Mintlify, Docsify, and Scalar were not added: the existing authenticated shell, safe Markdown
+  boundary, JSON highlighter, route registry, and release artifact pipeline already cover the
+  project-specific requirement without another runtime, hosted dependency, or duplicate design
+  system.

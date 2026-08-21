@@ -37,6 +37,10 @@ describe("generated contract documentation", () => {
         expect(first.get("README.md")).toContain(
             "[Browser routes and features](routes-and-features.md)"
         );
+        expect(first.get("README.md")).toContain("[Database schema](database.md)");
+        expect(first.get("README.md")).toContain(
+            "[Raw HTTP OpenAPI 3.1](openapi.raw-http.json)"
+        );
         expect(first.get("README.md")).not.toContain(
             "database, configuration, and browser"
         );
@@ -192,7 +196,35 @@ describe("generated contract documentation", () => {
         expect(routeDocumentation).toContain(
             "| `/terminal` | Browser session | Terminal | `terminal` |"
         );
-        expect(routeDocumentation?.match(/^\| `\//gmu)).toHaveLength(18);
+        expect(routeDocumentation).toContain(
+            "| `/docs` | Browser session | Docs | `documentation` |"
+        );
+        expect(routeDocumentation?.match(/^\| `\//gmu)).toHaveLength(19);
+        expect(first.get("database.md")).toContain("## `users`");
+        expect(first.get("database.md")).toContain(
+            "| `password_hash` | `text` | No | No | No |"
+        );
+        const openApi = JSON.parse(first.get("openapi.raw-http.json") ?? "null") as {
+            openapi: string;
+            paths: Record<string, unknown>;
+        };
+        expect(openApi.openapi).toBe("3.1.0");
+        expect(openApi.paths).toHaveProperty("/api/health/live");
+        expect(openApi.paths).toHaveProperty(
+            "/api/chat/attachments/{ticketId}/{attachmentId}"
+        );
+        const browserReference = JSON.parse(
+            first.get("browser-reference.json") ?? "null"
+        ) as { content?: string; kind: string; path: string }[];
+        expect(browserReference).toContainEqual(
+            expect.objectContaining({
+                kind: "schema",
+                path: "schemas/auth.status.input.schema.json",
+            })
+        );
+        expect(
+            browserReference.find(({ path }) => path.startsWith("schemas/"))?.content
+        ).toBeUndefined();
         expect(first.has("schemas/files.upload.accepted.schema.json")).toBe(true);
         expect(first.has("schemas/logs.tail.output.schema.json")).toBe(true);
         expect(first.has("schemas/moltbook.feed.result.v1.schema.json")).toBe(true);

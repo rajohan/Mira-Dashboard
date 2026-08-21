@@ -21,6 +21,7 @@
         "src/browser/auth/AuthenticatedBrowserCacheBoundary.test.tsx": 1620,
         "src/browser/openClawCron/useOpenClawCronRealtimeInvalidation.test.tsx": 1431,
         "src/browser/chat/chatToolSource.test.ts": 1377,
+        "src/browser/docs/DocsRoute.test.tsx": 1247,
         "src/browser/files/WorkspaceFilesView.test.tsx": 1209,
         "src/browser/overview/OverviewServiceActionsSection.test.tsx": 1200,
         "src/browser/agents/AgentsRoute.test.tsx": 1176,
