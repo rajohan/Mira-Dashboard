@@ -121,12 +121,57 @@ const reviewedScriptBrowserTargets: ReadonlyMap<string, ReadonlySet<string>> = n
     ["scripts/developmentFrontend.ts", new Set(["src/browser/index.html"])],
 ]);
 
+const reviewedScriptMigrationTargets: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+    [
+        "scripts/documentation/artifacts.ts",
+        new Set(["migrations/20260804022252_dashboard-foundation/snapshot.json"]),
+    ],
+]);
+
+/**
+ * Checks the exact documentation-generator edge to the checked migration snapshot.
+ * @param importer Normalized script source.
+ * @param target Normalized migration artifact path.
+ * @returns Whether this exact generator input is reviewed.
+ */
+export function isReviewedScriptMigrationTarget(
+    importer: string,
+    target: string
+): boolean {
+    return reviewedScriptMigrationTargets.get(importer)?.has(target) === true;
+}
+
 const reviewedStorybookConfigScriptTargets: ReadonlyMap<
     string,
     ReadonlySet<string>
 > = new Map([
     [".storybook/vitest.config.ts", new Set(["scripts/storybookTestProjects.ts"])],
 ]);
+
+const reviewedBrowserGeneratedDocumentationTargets: ReadonlyMap<
+    string,
+    ReadonlySet<string>
+> = new Map([
+    [
+        "src/browser/docs/DocsRoute.tsx",
+        new Set(["docs/generated/browser-reference.json"]),
+    ],
+]);
+
+/**
+ * Checks the exact immutable generated-reference edge owned by `/docs`.
+ * @param importer Normalized browser route source.
+ * @param target Normalized checked-in generated manifest path.
+ * @returns Whether the browser may bundle this one secret-free release artifact.
+ */
+export function isReviewedBrowserGeneratedDocumentationTarget(
+    importer: string,
+    target: string
+): boolean {
+    return (
+        reviewedBrowserGeneratedDocumentationTargets.get(importer)?.has(target) === true
+    );
+}
 
 /**
  * Checks the one reviewed Bun full-stack HTML entry edge.

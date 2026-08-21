@@ -76,6 +76,11 @@ export const dashboardPageStoryRequirements = Object.freeze([
         path: "/database",
     },
     {
+        exports: ["Ready", "Search", "Schema"],
+        file: "src/browser/docs/stories/DocsRoute.stories.tsx",
+        path: "/docs",
+    },
+    {
         exports: [
             "Loading",
             "Populated",

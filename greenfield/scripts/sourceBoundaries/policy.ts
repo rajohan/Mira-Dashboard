@@ -9,7 +9,9 @@ import {
     environmentSourceFile,
     isTestPath,
     isReviewedApplicationServerTarget,
+    isReviewedBrowserGeneratedDocumentationTarget,
     isReviewedScriptBrowserTarget,
+    isReviewedScriptMigrationTarget,
     isReviewedStorybookConfigScriptTarget,
     normalizeRepositoryPath,
     relativeImportTarget,
@@ -305,6 +307,18 @@ export function validateSourceImport(
     }
 
     const targetRole = sourceRole(target);
+    if (
+        importerRole === "browser" &&
+        isReviewedBrowserGeneratedDocumentationTarget(normalizedImporter, target)
+    ) {
+        return undefined;
+    }
+    if (
+        importerRole === "scripts" &&
+        isReviewedScriptMigrationTarget(normalizedImporter, target)
+    ) {
+        return undefined;
+    }
     if (targetRole === "environment-source") {
         return isEvidenceRole || environmentSourceConsumers.has(normalizedImporter)
             ? undefined
