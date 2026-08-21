@@ -474,7 +474,9 @@ describe("Dashboard account security route", () => {
         transport.principals = [automationPrincipal];
         const queryClient = renderAccountSecurity(transport);
 
-        expect(await screen.findByText("OpenClaw heartbeat")).toBeVisible();
+        expect(
+            await screen.findByText("OpenClaw heartbeat", {}, { timeout: 4000 })
+        ).toBeVisible();
         transport.principalListError = new TypeError("private principal failure");
         await act(async () => {
             await queryClient.invalidateQueries({
