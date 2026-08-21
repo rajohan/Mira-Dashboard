@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/tanstack-react";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, fireEvent, userEvent, within } from "storybook/test";
 
 import { DashboardPageStory } from "../../storySupport/dashboardPageStoryHarness.tsx";
 import { dashboardStoryValue } from "../../storySupport/dashboardStoryTransport.ts";
@@ -31,11 +31,13 @@ export const Search: Story = {
     args: Ready.args,
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement);
-        await userEvent.type(
+        fireEvent.change(
             await canvas.findByRole("searchbox", { name: "Search documentation" }),
-            "Mira Dashboard raw HTTP API"
+            { target: { value: "Mira Dashboard raw HTTP API" } }
         );
-        await expect(canvas.getByText("openapi.raw http")).toBeVisible();
+        await expect(
+            canvas.getByText("openapi.raw-http.json", { selector: "p" })
+        ).toBeVisible();
     },
 };
 
