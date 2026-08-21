@@ -10,13 +10,10 @@
 
 <!-- Check everything you ran. Leave unchecked with a short reason if not applicable. -->
 
-- [ ] Repository lint: `bun run lint`
-- [ ] Repository formatting: `bun run format:check`
-- [ ] Source boundaries: `bun run check:boundaries`
-- [ ] TypeScript graphs: `bun run typecheck`
+- [ ] Repository checks (format, lint, types, boundaries, docs, database): `bun run check`
 - [ ] Dashboard tests: `bun run test`
-- [ ] Coverage threshold: `bun run test:coverage`
-- [ ] Generated docs and database graph: `bun run docs:check && bun run db:check`
+- [ ] Coverage threshold: `bun run test coverage`
+- [ ] Storybook build: `bun run build storybook`
 - [ ] Focused regression tests: <!-- command(s) -->
 - [ ] Manual UI/API smoke check, if relevant
 

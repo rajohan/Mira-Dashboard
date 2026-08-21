@@ -59,17 +59,17 @@ function releaseBuildFailure(): Error {
 
 function commandArguments(command: ReleaseBuildCommand): readonly string[] {
     switch (command) {
-        case "bun run build:browser": {
-            return [process.execPath, "run", "build:browser"];
+        case "bun run build browser": {
+            return [process.execPath, "run", "build", "browser"];
         }
-        case "bun run build:processes": {
-            return [process.execPath, "run", "build:processes"];
+        case "bun run build processes": {
+            return [process.execPath, "run", "build", "processes"];
         }
-        case "bun run docs:check": {
-            return [process.execPath, "run", "docs:check"];
+        case "bun run check docs": {
+            return [process.execPath, "run", "check", "docs"];
         }
-        case "bun run db:check": {
-            return [process.execPath, "run", "db:check"];
+        case "bun run check database": {
+            return [process.execPath, "run", "check", "database"];
         }
     }
 }

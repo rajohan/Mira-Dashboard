@@ -85,7 +85,7 @@ function errorReasonsLabel(contract: ProcedureContract): string {
  * @returns Generated Markdown index.
  */
 export function renderGeneratedIndex(): string {
-    return `${documentHeader("Generated Dashboard Reference", "bun run docs:generate")}The complete immutable reference is available in the authenticated Dashboard at \`/docs\`.\n\n- [tRPC procedures](procedures.md)\n- [Raw HTTP routes](raw-http.md)\n- [Raw HTTP OpenAPI 3.1](openapi.raw-http.json)\n- [Realtime events](realtime-events.md)\n- [Database schema](database.md)\n- [Browser routes and features](routes-and-features.md)\n- [Application configuration](configuration.md)\n- [Packages and runtime](packages-and-runtime.md)\n- [Transport schemas](schemas/)\n`;
+    return `${documentHeader("Generated Dashboard Reference", "bun run generate docs")}The complete immutable reference is available in the authenticated Dashboard at \`/docs\`.\n\n- [tRPC procedures](procedures.md)\n- [Raw HTTP routes](raw-http.md)\n- [Raw HTTP OpenAPI 3.1](openapi.raw-http.json)\n- [Realtime events](realtime-events.md)\n- [Database schema](database.md)\n- [Browser routes and features](routes-and-features.md)\n- [Application configuration](configuration.md)\n- [Packages and runtime](packages-and-runtime.md)\n- [Transport schemas](schemas/)\n`;
 }
 
 /** One immutable Drizzle table projected into generated documentation. */
@@ -158,7 +158,7 @@ export function renderDatabase(
             );
             return `## \`${markdownTableCell(table.name)}\`\n\n| Column | SQLite type | Nullable | Primary key | Default |\n| --- | --- | --- | --- | --- |\n${rows.join("\n")}\n\n### Foreign keys\n\n| Name | Columns | References | On update | On delete |\n| --- | --- | --- | --- | --- |\n${foreignKeys.length === 0 ? "| — | — | — | — | — |" : foreignKeys.join("\n")}\n\n### Indexes\n\n| Name | Columns | Unique | Predicate |\n| --- | --- | --- | --- |\n${indexes.length === 0 ? "| — | — | — | — |" : indexes.join("\n")}\n\n### Checks\n\n| Name | Expression |\n| --- | --- |\n${checks.length === 0 ? "| — | — |" : checks.join("\n")}`;
         });
-    return `${documentHeader("Database Schema", "bun run docs:generate")}This reference is generated from the exact Drizzle schema used by migrations and runtime composition.\n\n${sections.join("\n\n")}\n`;
+    return `${documentHeader("Database Schema", "bun run generate docs")}This reference is generated from the exact Drizzle schema used by migrations and runtime composition.\n\n${sections.join("\n\n")}\n`;
 }
 
 /** Browser route metadata required by generated documentation. */
@@ -198,7 +198,7 @@ export function renderBrowserRoutes(
                 `| \`${markdownTableCell(route.path)}\` | ${route.access === "public" ? "Public" : "Browser session"} | ${route.navigationLabel === null ? "Hidden" : markdownTableCell(route.navigationLabel)} | \`${markdownTableCell(route.featureOwner)}\` | ${markdownTableCell(route.summary)} |`
         );
 
-    return `${documentHeader("Browser Routes and Features", "bun run docs:generate")}| Path | Access | Navigation | Feature owner | Summary |\n| --- | --- | --- | --- | --- |\n${rows.join("\n")}\n`;
+    return `${documentHeader("Browser Routes and Features", "bun run generate docs")}| Path | Access | Navigation | Feature owner | Summary |\n| --- | --- | --- | --- | --- |\n${rows.join("\n")}\n`;
 }
 
 /** Registry metadata required to render one application configuration field. */
@@ -376,7 +376,7 @@ export function renderConfiguration(
                 `| \`${markdownTableCell(entry.environmentName)}\` | \`${markdownTableCell(entry.field)}\` | ${allowedValuesLabel(entry)} | ${markdownTableCell(entry.validationConstraints)} | ${defaultBehaviorLabel(entry)} | ${entry.roles.map((role) => `\`${markdownTableCell(role)}\``).join(", ")} | ${entry.secret ? "Yes" : "No"} | ${browserExposureLabel(entry.browserExposure)} | ${markdownTableCell(entry.operationalEffect)} | ${entry.restartRequired ? "Required" : "Not required"} | ${overridePolicyLabel(entry.overridePolicy)} | ${markdownTableCell(entry.description)} |`
         );
 
-    return `${documentHeader("Application Configuration", "bun run docs:generate")}Configuration metadata is generated from the immutable application registry. For secret fields, values, enumerated values, and defaults are never rendered.\n\n| Environment | Typed field | Type / enumerated values | Validation constraints | Default behavior | Process roles | Secret | Browser exposure | Operational effect | Restart | Development/test overrides | Description |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n${rows.join("\n")}\n`;
+    return `${documentHeader("Application Configuration", "bun run generate docs")}Configuration metadata is generated from the immutable application registry. For secret fields, values, enumerated values, and defaults are never rendered.\n\n| Environment | Typed field | Type / enumerated values | Validation constraints | Default behavior | Process roles | Secret | Browser exposure | Operational effect | Restart | Development/test overrides | Description |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n${rows.join("\n")}\n`;
 }
 
 /**
@@ -392,7 +392,7 @@ export function renderProcedures(contracts: readonly ProcedureContract[]): strin
                 `| \`${contract.name}\` | ${contract.kind} | ${contract.domain} | ${accessLabel(contract.access)} | [input](./schemas/${contract.inputSchemaId}.schema.json) | [output](./schemas/${contract.outputSchemaId}.schema.json) | ${errorsLabel(contract.errors)} | ${errorReasonsLabel(contract)} | ${contract.summary} |`
         );
 
-    return `${documentHeader("tRPC Procedures", "bun run docs:generate")}| Procedure | Kind | Domain | Access | Input | Output | Expected errors | Client action reasons | Summary |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n${rows.join("\n")}\n`;
+    return `${documentHeader("tRPC Procedures", "bun run generate docs")}| Procedure | Kind | Domain | Access | Input | Output | Expected errors | Client action reasons | Summary |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n${rows.join("\n")}\n`;
 }
 
 function rawHttpBodyLabel(body: RawHttpBodyContract): string {
@@ -444,7 +444,7 @@ export function renderRawHttp(contracts: readonly RawHttpContract[]): string {
             return `| ${contract.method} | \`${markdownTableCell(rawHttpPathLabel(contract))}\` | ${accessLabel(contract.access)} | ${contract.statusCodes.join(", ")} | ${rawHttpBodyLabel(contract.requestBody)} | ${rawHttpBodyLabel(contract.response)} | ${range} | ${contract.summary} |`;
         });
 
-    return `${documentHeader("Raw HTTP Routes", "bun run docs:generate")}| Method | Path | Access | Status | Request body | Response | Range requests | Summary |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n${rows.join("\n")}\n`;
+    return `${documentHeader("Raw HTTP Routes", "bun run generate docs")}| Method | Path | Access | Status | Request body | Response | Range requests | Summary |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n${rows.join("\n")}\n`;
 }
 
 /**
@@ -466,7 +466,7 @@ export function renderRealtimeEvents(
             ? "No standalone realtime topic references are published until their snapshot procedures are implemented.\n"
             : `| Topic | Payload | Snapshot | Retention | Summary |\n| --- | --- | --- | --- | --- |\n${rows.join("\n")}\n`;
 
-    return `${documentHeader("Realtime Events", "bun run docs:generate")}${body}`;
+    return `${documentHeader("Realtime Events", "bun run generate docs")}${body}`;
 }
 
 /** Direct dependency sections and Bun policy needed by generated documentation. */
@@ -513,5 +513,5 @@ export function renderPackagesAndRuntime(input: PackageDocumentationInput): stri
         ),
     ].join("\n");
 
-    return `${documentHeader("Packages and Runtime", "bun run docs:generate")}## Bun\n\n| Fact | Value |\n| --- | --- |\n| Repository channel | \`${input.runtime.channel}\` |\n| Required runtime version | \`${input.runtime.version}\` |\n| Release identity | Exact revision recorded by each immutable release |\n\n## Direct packages\n\n| Package | Declared | Resolved | Scope |\n| --- | --- | --- | --- |\n${packageTable}\n`;
+    return `${documentHeader("Packages and Runtime", "bun run generate docs")}## Bun\n\n| Fact | Value |\n| --- | --- |\n| Repository channel | \`${input.runtime.channel}\` |\n| Required runtime version | \`${input.runtime.version}\` |\n| Release identity | Exact revision recorded by each immutable release |\n\n## Direct packages\n\n| Package | Declared | Resolved | Scope |\n| --- | --- | --- | --- |\n${packageTable}\n`;
 }

@@ -7,17 +7,15 @@ future repository root; after cutover, the same commands run from the repository
 compatibility wrapper or path translation:
 
 ```bash
-bun run check:boundaries
-bun run typecheck
-bun run lint
-bun run format:check
+bun run check
 bun run test
-bun run test:coverage
-bun run build:storybook
-bun run docs:check
-bun run db:check
+bun run test coverage
+bun run build storybook
 git diff --check
 ```
+
+`bun run check` combines formatting, boundaries, lint, all three TypeScript graphs, generated docs,
+and database schema verification. Focused diagnosis uses `bun run check <gate>`.
 
 Use focused tests while iterating, then run the full affected suite before handoff. `bun run test`
 runs the Bun, Happy DOM, and real-browser Storybook partitions in that order. All three use the
@@ -31,7 +29,7 @@ for every file; the next batch starts in fresh worker processes. Three batches a
 the shared batching engine, not package-script or public CLI arguments; any attempted parallelism
 override fails closed.
 
-`bun run test:coverage` uses the same three-by-three batch plan and merges all nine private LCOV
+`bun run test coverage` uses the same three-by-three batch plan and merges all nine private LCOV
 reports into `coverage/lcov.info`. Storybook contributes V8 coverage hits for production browser
 modules. Stories, Storybook support and configuration, tests, and test support are excluded from
 the production denominator. The gate requires at least 85% aggregate production line coverage,
@@ -42,10 +40,12 @@ After adding, removing, or materially changing tests, refresh all three timing i
 push with:
 
 ```bash
-bun run test:timings:update
+bun run test timings bun
+bun run test timings browser
+bun run test timings storybook
 ```
 
-The top-level update runs all three partitions sequentially. Each timing inventory is staged and
+Run all three commands when changing shared timing behavior. Each timing inventory is staged and
 replaced atomically only after its own three batches pass; a failing partition keeps its tracked
 file unchanged and stops the remaining updates.
 

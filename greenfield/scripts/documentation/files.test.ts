@@ -56,7 +56,7 @@ describe("generated documentation files", () => {
             checkDocumentationArtifacts(outputDirectory, artifacts)
         );
         expect(missingInventory.message).toBe(
-            "Generated documentation file set is stale; run bun run docs:generate"
+            "Generated documentation file set is stale; run bun run generate docs"
         );
 
         await mkdir(outputDirectory, { recursive: true });
@@ -65,7 +65,7 @@ describe("generated documentation files", () => {
             checkDocumentationArtifacts(outputDirectory, artifacts)
         );
         expect(staleArtifact.message).toBe(
-            "Generated documentation is stale at README.md; run bun run docs:generate"
+            "Generated documentation is stale at README.md; run bun run generate docs"
         );
     });
 });

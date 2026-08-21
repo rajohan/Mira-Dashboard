@@ -504,7 +504,7 @@ async function restoreOwnedCandidate(
  * The unforgeable lease proves this runs inside the wider release/database transition.
  * @param lease Active deployment lease token.
  * @param paths Revalidated project-local production delivery paths.
- * @param sourceReleaseRoot Immutable local release artifact created by `build:release`.
+ * @param sourceReleaseRoot Immutable local release artifact created by `bun run build release`.
  * @param runtimeIdentity Exact Bun identity represented by the release.
  * @param testHooks Deterministic mutation hooks used only by tests.
  * @returns Idempotently published production release.

@@ -15,7 +15,7 @@ closes a phase; dated entries below provide the evidence, not a second status so
 | 3 — Core operator domains           | Complete                        | Task, agent, monitoring, report, incident, notification, Dashboard Jobs/schedules, cache, host metrics, and application-observability server/browser parity are implemented. `/jobs` includes the OpenClaw-cron projection, and `/` composes the complete operational overview with independent retained-data and unavailable states. The Phase 3 parity and browser gates pass.                                                                                                                                                                                     |
 | 4 — Gateway and chat                | Started                         | The installed OpenClaw source is hash-pinned for sessions, cron, chat, companion, task, and media. Process-owned Gateway lifecycle, durable realtime invalidation, sessions and agent availability, OpenClaw cron/tasks, heartbeat schema v5, chat journal/runtime, bounded history/reconciliation, transcript-authorized local-history media, and `/chat` are implemented. The immutable external heartbeat consumer is staged; live Gateway smoke/restart and the manual credential/config cutover plus authenticated one-collection/one-report proof remain open. |
 | 5 — Privileged and external domains | Complete in the greenfield tree | Files, Logs, Moltbook, Terminal, Settings, bounded Service Actions, Database observability, Docker, Delivery, Kopia/WAL-G status/control, quota, Git, and weather are implemented. The consumed generic-exec behavior maps to the bounded PTY and purpose-built durable actions, with the unused synchronous surface removed. Provider/root provisioning is release-owned and fail-closed pending production activation. No operator-facing database restore operation is introduced.                                                                                |
-| 6 — Parity, hardening, and cutover  | Started                         | All 16 legacy browser routes, full-page Storybook coverage, ordinary source-development production inventory parity, and 153 of 154 retained endpoint behaviors are implemented; the three reviewed removals stay removed. The external heartbeat consumer cutover and authenticated live smoke, remaining live Gateway/production smokes, restore/cutover rehearsal, fresh production activation, repository-wide simplification audit, legacy deletion, and full-cycle monitoring remain open.                                                                     |
+| 6 — Parity, hardening, and cutover  | Started                         | All 16 legacy browser routes, full-page Storybook coverage, ordinary source-development production inventory parity, and 153 of 154 retained endpoint behaviors are implemented; the three reviewed removals stay removed. The command surface, first-checkout bootstrap, unchanged-candidate preflight, and operator runbook set are implemented. External heartbeat cutover/live smoke, remaining Gateway/production smokes, restore/cutover rehearsal, fresh production activation, the `node:*` audit, legacy deletion, and full-cycle monitoring remain open.   |
 
 ### 2026-08-03 — Phase 0 started
 
@@ -1970,3 +1970,25 @@ full-browser parity, production rehearsal, cutover, and legacy deletion remain o
   boundary, JSON highlighter, route registry, and release artifact pipeline already cover the
   project-specific requirement without another runtime, hosted dependency, or duplicate design
   system.
+
+### 2026-08-21 — Bootstrap, command surface, and operational preflight implemented
+
+- The public `package.json` surface is reduced from 53 scripts to ten typed entrypoints. `dev`,
+  `check`, `build`, `generate`, `test`, `storybook`, and `delivery` own explicit subcommands; CI
+  calls those same entrypoints instead of internal runner files. The runtime partitions remain
+  independently selectable without publishing every implementation detail as a script.
+- `bun run bootstrap` is the idempotent first-checkout path: it enforces the exact `.bun-version`,
+  installs the frozen graph, checks generated docs and schema, prepares marked isolated state, and
+  starts development by default. Optional Chromium installation and fixed-allowlist Doppler start
+  are explicit; root provisioning, production mutation, and credential creation remain excluded.
+- Storybook tests and coverage now verify the repository-local pinned Chromium shell and install it
+  only when absent. The former public browser-install and SSE-evidence aliases are removed; the SSE
+  runner remains an explicit internal runtime-qualification artifact.
+- `bun run preflight` sequentially proves one unchanged candidate through frozen install, dependency
+  audit, the combined repository check, full coverage, Storybook build, and immutable release build.
+  It is deliberately separate from `delivery`, which owns stateful production preparation and
+  activation only.
+- The command reference and operator runbooks now cover first start, preflight, rehearsal,
+  activation, failed activation, paired rollback, isolated restore drills, PostgreSQL/PgBouncer and
+  heartbeat credential cutover, and one complete post-cutover monitoring cycle. These procedures do
+  not claim the still-required live rehearsal, smoke, privileged cutover, or monitoring evidence.

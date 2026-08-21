@@ -32,22 +32,22 @@ jobs:
               run: bun install --frozen-lockfile
 
             - name: Check source boundaries
-              run: bun run check:boundaries
+              run: bun run check boundaries
 
             - name: Type-check all source and tests
-              run: bun run typecheck
+              run: bun run check typecheck
 
             - name: Lint
-              run: bun run lint
+              run: bun run check lint
 
             - name: Check formatting
-              run: bun run format:check
+              run: bun run check format
 
             - name: Verify generated documentation
-              run: bun run docs:check
+              run: bun run check docs
 
             - name: Verify migration graph
-              run: bun run db:check
+              run: bun run check database
 
     dashboard-coverage:
         name: coverage-${{ matrix.partition }}
@@ -71,12 +71,8 @@ jobs:
             - name: Install dependencies
               run: bun install --frozen-lockfile
 
-            - name: Install Chromium
-              if: ${{ matrix.partition == 'storybook' }}
-              run: bun run storybook:install-browser
-
             - name: Test ${{ matrix.partition }} coverage
-              run: bun run test:coverage:${{ matrix.partition }}
+              run: bun run test coverage ${{ matrix.partition }}
 
             - name: Upload ${{ matrix.partition }} coverage artifact
               uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -139,7 +135,7 @@ jobs:
                   path: coverage
 
             - name: Merge and verify coverage
-              run: bun run test:coverage:merge
+              run: bun run test coverage merge
 
             - name: Upload coverage artifact
               uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -181,4 +177,4 @@ jobs:
               run: bun install --frozen-lockfile
 
             - name: Build Storybook
-              run: bun run build:storybook
+              run: bun run build storybook

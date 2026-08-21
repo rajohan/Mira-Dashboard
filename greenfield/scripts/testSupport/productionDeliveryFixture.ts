@@ -68,7 +68,7 @@ async function materializeCommandOutput(
     command: ReleaseBuildCommand,
     repositoryRoot: string
 ): Promise<void> {
-    if (command === "bun run build:browser") {
+    if (command === "bun run build browser") {
         await mkdir(path.join(repositoryRoot, "dist/browser/assets"), {
             recursive: true,
         });
@@ -80,7 +80,7 @@ async function materializeCommandOutput(
             ),
         ]);
     }
-    if (command === "bun run build:processes") {
+    if (command === "bun run build processes") {
         await mkdir(path.join(repositoryRoot, "dist/processes"), { recursive: true });
         await Promise.all([
             writeFile(

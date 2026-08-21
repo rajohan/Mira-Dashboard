@@ -15,13 +15,10 @@ Thanks for helping improve Mira Dashboard.
 Run the relevant checks locally when possible:
 
 ```bash
-bun run lint
-bun run format:check
-bun run check:boundaries
-bun run typecheck
+bun run check
 bun run test
-bun run docs:check
-bun run db:check
+bun run test coverage
+bun run build storybook
 ```
 
 Run focused tests while iterating, then run the applicable coverage suite before

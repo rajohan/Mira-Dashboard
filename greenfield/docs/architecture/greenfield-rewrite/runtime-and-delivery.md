@@ -251,9 +251,8 @@ adding their browser route remains part of full UI parity rather than the delive
 ### Generation commands and checks
 
 ```text
-bun run docs:generate   # write deterministic generated files
-bun run docs:check      # generate in a temporary directory and compare
-bun run docs:serve      # optional local docs view through the normal app
+bun run generate docs  # write deterministic generated files
+bun run check docs     # generate in a temporary directory and compare
 ```
 
 CI fails when:
@@ -479,27 +478,26 @@ Additional safeguards:
 
 ### Required scripts
 
-The exact naming may change as product areas arrive. The future-root package exposes one
-`typecheck` gate over the root solution; focused browser and Bun child checks may remain as
-developer aliases. There are no per-domain, server, worker, script, or qualification TypeScript
-projects. `check:boundaries` enforces the finer source roles. Retained Phase 0 mechanisms run
-through the ordinary Bun test graph. Product and
-cross-process integration tests live under `src/`; a focused test of a repository script may
-remain colocated with that script.
+The future-root package keeps a small stable command surface. Runtime partitions and operational
+subcommands are typed arguments behind repository-owned entrypoints instead of separate package
+scripts. There are no per-domain, server, worker, script, or qualification TypeScript projects.
+`check boundaries` remains the focused finer source-role gate. Retained Phase 0
+mechanisms run through the ordinary Bun test graph. Product and cross-process integration tests
+live under `src/`; a focused test of a repository script may remain colocated with that script.
 
 ```text
-dev                     local Bun server + worker + frontend development
-build                   deterministic browser and server/worker artifacts
-typecheck               root TypeScript solution (browser + Bun), no emit
-lint                    oxlint type-aware rules and type-check diagnostics, partitioned by runtime
-format / format:check   oxfmt
+bootstrap               frozen first install, generated checks, state preparation, local start
+dev [subcommand]         local stack, isolated state, and remote-route lifecycle
+check                    format, lint, typecheck, boundaries, docs, and database
+build [subcommand]       deterministic browser, process, Storybook, and release artifacts
 test                    Bun, Happy DOM browser, then real-browser Storybook graphs
-test:bun                scripts, server, worker, contracts, integration, and parity tests
-test:browser            Happy DOM + Testing Library behavior tests
-test:storybook          real Chromium stories, interactions, and accessibility tests
-test:coverage           all three test graphs + 85% executable-source line gate and LCOV
-docs:generate/check     deterministic generated documentation
-verify                  sequential local gate with explicit resource caps
+test bun                scripts, server, worker, contracts, integration, and parity tests
+test browser            Happy DOM + Testing Library behavior tests
+test storybook          real Chromium stories, interactions, and accessibility tests
+test coverage           all three graphs + 85% executable-source line gate and LCOV
+generate/check docs     deterministic generated documentation
+delivery [subcommand]   explicit state preparation and immutable release activation
+preflight               frozen audit, complete unchanged gates, and immutable release build
 ```
 
 `oxfmt` owns formatting, import sorting, package sorting, and Tailwind class sorting. `oxlint`
@@ -507,6 +505,11 @@ owns JavaScript/TypeScript lint. Type-aware Oxc rules are enabled in a separate 
 their TypeScript analysis has a different memory profile; they do not silently turn every
 editor lint into a large typecheck. TypeScript remains the authoritative compile-time project
 boundary check unless an evaluated Oxc type-check mode proves equivalent for this codebase.
+
+Lefthook `2.1.10` owns only local pre-commit/pre-push feedback and is installed idempotently by
+bootstrap; CI remains authoritative. Pino is not part of the runtime: the existing process-scoped
+structured logger and Effect bridge already own redaction, bounds, identity, sinks, and fallback,
+so a second logging implementation would weaken rather than simplify that boundary.
 
 ### Test strategy
 
@@ -753,7 +756,7 @@ runtime binaries, checkouts, and release artifacts remain inside those project d
 The first production cutover is an explicit operator-run replacement, not a rolling activation
 through the previously published user-systemd executor. The operator stops, disables, and removes
 the legacy user units, stages and runs the manifest-bound root installer, verifies the exact
-root-owned candidate units and principals, and only then invokes `bun run delivery:activate`
+root-owned candidate units and principals, and only then invokes `bun run delivery activate`
 directly from the verified candidate. It does not launch the previously published
 `server/productionDelivery.js` or its user-unit installer, and the legacy service pair is not
 recorded as a Greenfield rollback target. The candidate repository therefore contains no

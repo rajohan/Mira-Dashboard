@@ -8,17 +8,16 @@ Storybook-only development dependency.
 
 ```bash
 bun run storybook
-bun run test:storybook
-bun run build:storybook
+bun run test storybook
+bun run build storybook
 ```
 
 The development server listens on port 6006. The static verification build is written under
-`dist/storybook`. `bun run test:storybook` directly runs every story and `play` function in
+`dist/storybook`. `bun run test storybook` directly runs every story and `play` function in
 headless Chromium, with accessibility violations configured as errors. It is also the third
-partition of `bun run test`; `bun run test:coverage` runs it with V8 coverage and merges its three
-LCOV batches with the six Bun and Happy DOM batches. On a new development machine, install the
-pinned browser once with `bun run storybook:install-browser`. The project-local browser cache keeps
-Storybook's Playwright version isolated from other tools on the same host.
+partition of `bun run test`; `bun run test coverage` runs it with V8 coverage and merges its three
+LCOV batches with the six Bun and Happy DOM batches. The test command checks the project-local
+Playwright cache and installs the pinned Chromium shell automatically when it is missing.
 
 In CI, `coverage-storybook` alone installs Chromium and runs the coverage-owned Storybook tests.
 It executes concurrently with the Bun and Happy DOM coverage partitions and uploads three private

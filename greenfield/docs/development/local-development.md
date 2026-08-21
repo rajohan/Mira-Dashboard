@@ -7,8 +7,22 @@ isolated.
 
 ## Start
 
-Use the Bun revision selected by `.bun-version` and install the frozen dependency graph. Before
-starting the stack, provide its Gateway credential through either `OPENCLAW_GATEWAY_TOKEN` or the
+Use the Bun revision selected by `.bun-version`. A fresh checkout can install the frozen dependency
+graph, validate generated artifacts, prepare isolated state, and start the loopback Dashboard with:
+
+```bash
+bun run bootstrap
+```
+
+Use `bun run bootstrap --no-start` to prepare without starting, or add `--with-browser` to install
+the repository-owned Playwright Chromium runtime needed by Storybook tests. Bootstrap is
+idempotent and deliberately unprivileged: it never installs system units, mutates production,
+reads a secret manager, or changes credentials.
+
+On a configured owner host, `bun run bootstrap --doppler` performs the same preparation and starts
+through the fixed Doppler allowlist. It cannot be combined with `--no-start`.
+
+Before starting the stack, provide its Gateway credential through either `OPENCLAW_GATEWAY_TOKEN` or the
 absolute owner-only file named by `MIRA_DASHBOARD_DEV_GATEWAY_TOKEN_FILE`, and export the worker-only
 `MOLTBOOK_API_KEY`. `MOLTBOOK_AGENT_NAME` remains optional and defaults to `mira_2026`. Then start
 the loopback stack:
@@ -19,7 +33,7 @@ bun run dev
 ```
 
 The plain command has no secret-manager dependency. On the owner host, the explicit
-`bun run dev:doppler` convenience wrapper loads the required Gateway and Moltbook credentials plus
+`bun run dev doppler` loads the required Gateway and Moltbook credentials plus
 optional session durations from the configured Doppler project before invoking the same stack
 entrypoint.
 
@@ -27,7 +41,7 @@ The default listeners are:
 
 - browser and API proxy: `http://localhost:3205` (`127.0.0.1:3205` listener);
 - web process: `127.0.0.1:3206`;
-- remote Host/HMR bridge when `dev:remote` is active: `127.0.0.1:3207`;
+- remote Host/HMR bridge when `dev remote` is active: `127.0.0.1:3207`;
 - optional Tailscale HTTPS route: port `3445`.
 
 `bun run dev` couples all three child lifecycles. Bun's full-stack server owns HTML bundling, React
@@ -69,12 +83,12 @@ React Compiler output.
 For a stable WebAuthn origin and access from another Tailscale device:
 
 ```bash
-bun run dev:remote
+bun run dev remote
 ```
 
 This command uses the same exported Gateway-token or token-file and `MOLTBOOK_API_KEY` contract as
 `bun run dev` and does not require Doppler. The corresponding owner-host convenience wrapper is
-`bun run dev:remote:doppler`.
+`bun run dev doppler remote`.
 
 The command verifies that port `3445` is free or already maps exactly to the loopback remote bridge,
 creates `https://<MagicDNS>:3445 -> http://127.0.0.1:3207 -> http://127.0.0.1:3205` when needed,
@@ -90,9 +104,9 @@ untouched. Conflicting routes fail closed.
 Explicit route controls are available without starting the stack:
 
 ```bash
-bun run dev:remote:status
-bun run dev:remote:enable
-bun run dev:remote:disable
+bun run dev remote status
+bun run dev remote enable
+bun run dev remote disable
 ```
 
 ## Persistent Isolated State
@@ -132,9 +146,9 @@ keyring, workspace, OpenClaw config, and other state remain intact.
 Manual resets are deliberately separate:
 
 ```bash
-bun run dev:database:reset  # database and SQLite sidecars only
-bun run dev:state:reset     # complete owner-marked development root
-bun run dev:state:prepare
+bun run dev reset-database  # database and SQLite sidecars only
+bun run dev reset-state     # complete owner-marked development root
+bun run dev prepare-state
 ```
 
 Both reset paths validate the exact owner marker and refuse symlinked or ambiguous targets.

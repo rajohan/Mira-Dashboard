@@ -52,7 +52,7 @@ describe("generated documentation synchronization", () => {
         );
 
         expect(failure.message).toBe(
-            "Generated documentation file set is stale; run bun run docs:generate"
+            "Generated documentation file set is stale; run bun run generate docs"
         );
     });
 });

@@ -6,7 +6,7 @@ import {
 } from "./productionStateFilesystem.ts";
 
 const usage =
-    "Usage: bun run delivery:prepare-state --project-root=/absolute/dashboard/project/root";
+    "Usage: bun run delivery prepare-state --project-root=/absolute/dashboard/project/root";
 
 /** Explicit state-preparation operation parsed from the delivery CLI. */
 export interface PrepareProductionStateCliArguments {

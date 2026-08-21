@@ -57,7 +57,7 @@ export async function checkDocumentationArtifacts(
     const expectedFiles = [...artifacts.keys()];
     if (actualFiles.toSorted().join("\n") !== expectedFiles.toSorted().join("\n")) {
         throw new Error(
-            "Generated documentation file set is stale; run bun run docs:generate"
+            "Generated documentation file set is stale; run bun run generate docs"
         );
     }
 
@@ -65,7 +65,7 @@ export async function checkDocumentationArtifacts(
         const actual = await Bun.file(path.join(outputDirectory, relativePath)).text();
         if (actual !== expected) {
             throw new Error(
-                `Generated documentation is stale at ${relativePath}; run bun run docs:generate`
+                `Generated documentation is stale at ${relativePath}; run bun run generate docs`
             );
         }
     }

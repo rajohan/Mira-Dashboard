@@ -18,10 +18,10 @@ const maximumReleaseCommitTitleCharacters = 500;
 
 /** Commands whose successful output is represented by one release manifest. */
 export const releaseBuildCommands = Object.freeze([
-    "bun run build:browser",
-    "bun run build:processes",
-    "bun run docs:check",
-    "bun run db:check",
+    "bun run build browser",
+    "bun run build processes",
+    "bun run check docs",
+    "bun run check database",
 ] as const);
 
 /** Process roles that every production release must contain. */

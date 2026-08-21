@@ -53,7 +53,7 @@ describe("production release activation CLI", () => {
         ];
         for (const arguments_ of invalidArguments) {
             expect(() => parseActivateProductionReleaseArguments(arguments_)).toThrow(
-                "Usage: bun run delivery:activate"
+                "Usage: bun run delivery activate"
             );
         }
     });

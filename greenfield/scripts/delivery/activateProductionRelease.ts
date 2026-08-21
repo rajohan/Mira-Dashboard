@@ -34,7 +34,7 @@ import { createSystemdProductionServiceController } from "./systemdProductionSer
 
 const activationCliFailureMessage = "Production release activation failed";
 const activationCliUsage =
-    "Usage: bun run delivery:activate --project-root=/absolute/project --release-root=/absolute/release --readiness-url=http://127.0.0.1:PORT/api/health/ready [--runtime-source=/absolute/bun]";
+    "Usage: bun run delivery activate --project-root=/absolute/project --release-root=/absolute/release --readiness-url=http://127.0.0.1:PORT/api/health/ready [--runtime-source=/absolute/bun]";
 const absolutePathSchema = v.pipe(
     v.string(),
     v.maxLength(4096),

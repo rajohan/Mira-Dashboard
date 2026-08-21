@@ -127,21 +127,21 @@ async function materializeLifecycleBuildCommand(
     repositoryRoot: string
 ): Promise<void> {
     switch (command) {
-        case "bun run build:browser": {
+        case "bun run build browser": {
             const browserRoot = path.join(repositoryRoot, "dist/browser");
             await mkdir(browserRoot, { recursive: true });
             await writeFile(path.join(browserRoot, "index.html"), lifecycleBrowserHtml);
             return;
         }
-        case "bun run build:processes": {
+        case "bun run build processes": {
             await buildProcessArtifacts(
                 repositoryRoot,
                 path.join(repositoryRoot, "dist/processes")
             );
             return;
         }
-        case "bun run db:check":
-        case "bun run docs:check": {
+        case "bun run check database":
+        case "bun run check docs": {
             // Dedicated gates cover source validation; this test exercises built runtime bytes.
             return;
         }
