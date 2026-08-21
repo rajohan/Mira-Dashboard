@@ -41,6 +41,7 @@ import { jobRunSummarySchema } from "../../../contracts/jobModel.ts";
 import { jobRunDetailSchema } from "../../../contracts/jobs.ts";
 import { seedAuthenticationTestDatabase } from "../../../server/domains/security/testSupport/authentication.ts";
 import { dashboardSessionCookieName } from "../../../server/rawHttp/authenticationCredentials.ts";
+import type { ProductionActivationRecord } from "../../../shared/productionActivationRecord.ts";
 
 const sourceProjectRoot = path.resolve(import.meta.dir, "../../../..");
 const releaseId = "d".repeat(40);
@@ -279,6 +280,17 @@ async function runBundledWorkerSmoke(
     );
 }
 
+async function activationDiagnostics(stateDirectory: string): Promise<string> {
+    const entries = await Promise.all(
+        ["web", "worker"].map(async (processName) => {
+            const logPath = path.join(stateDirectory, `logs/${processName}.ndjson`);
+            const contents = await readFile(logPath, "utf8").catch(() => "<missing>");
+            return `${processName}: ${contents}`;
+        })
+    );
+    return entries.join("\n");
+}
+
 class DirectProcessController implements ProductionServiceController {
     readonly #lease: Parameters<typeof pointProductionProcessesAtRelease>[0];
     readonly #paths: Parameters<typeof pointProductionProcessesAtRelease>[1];
@@ -469,11 +481,24 @@ describe("disposable production release lifecycle", () => {
                 portReservation
             );
             try {
-                const activation = await Effect.runPromise(
-                    activatePublishedProductionRelease(lease, paths, release, runtime, {
-                        services,
-                    })
-                );
+                let activation: ProductionActivationRecord;
+                try {
+                    activation = await Effect.runPromise(
+                        activatePublishedProductionRelease(
+                            lease,
+                            paths,
+                            release,
+                            runtime,
+                            { services }
+                        )
+                    );
+                } catch (error) {
+                    throw new AggregateError(
+                        [error],
+                        `Production lifecycle activation diagnostics:\n${await activationDiagnostics(paths.stateDirectory)}`,
+                        { cause: error }
+                    );
+                }
                 expect(activation.current).toEqual({
                     releaseId,
                     runtimeRevision: Bun.revision,
