@@ -16,6 +16,7 @@ import {
 } from "../shared/releaseManifest.ts";
 import {
     type DashboardWebProcessDependencies,
+    resolveTerminalWorkspaceRoots,
     runDashboardWebProcess,
 } from "./dashboardServer.ts";
 import type { ApplicationServer } from "./server.ts";
@@ -82,6 +83,30 @@ const processOptions = Object.freeze({
         PORT: "3100",
     },
     releaseRoot: release.releaseRoot,
+});
+
+test("resolves configured terminal roots and includes canonical Docker storage", async () => {
+    const roots = await resolveTerminalWorkspaceRoots(
+        openClawRoot,
+        projectRoot,
+        (candidate) => Promise.resolve(candidate)
+    );
+
+    expect(roots).toEqual([
+        { id: "openclaw", label: "OpenClaw", path: openClawRoot },
+        { id: "docker", label: "Docker", path: "/opt/docker" },
+        { id: "dashboard", label: "Mira Dashboard", path: projectRoot },
+    ]);
+    expect(Object.isFrozen(roots)).toBe(true);
+    expect(roots.every((root) => Object.isFrozen(root))).toBe(true);
+});
+
+test("omits optional Docker storage when its canonical path is unavailable", async () => {
+    const roots = await resolveTerminalWorkspaceRoots(openClawRoot, projectRoot, () =>
+        Promise.reject(new Error("unavailable"))
+    );
+
+    expect(roots.map(({ id }) => id)).toEqual(["openclaw", "dashboard"]);
 });
 
 function unhandledFrontendAsset(): Promise<Response | undefined> {

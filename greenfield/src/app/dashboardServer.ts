@@ -1793,15 +1793,16 @@ export interface DashboardWebProcessDependencies {
     readonly resolveWorkspaceFileRoot: typeof resolveReviewedWorkspaceFileRoot;
 }
 
-async function resolveTerminalWorkspaceRoots(
+export async function resolveTerminalWorkspaceRoots(
     openClawRoot: string,
-    dashboardRoot: string
+    dashboardRoot: string,
+    resolvePath: (candidate: string) => Promise<string> = realpath
 ): Promise<readonly DashboardTerminalWorkspaceRoot[]> {
     const roots: DashboardTerminalWorkspaceRoot[] = [
         { id: "openclaw", label: "OpenClaw", path: openClawRoot },
     ];
     try {
-        if ((await realpath("/opt/docker")) === "/opt/docker") {
+        if ((await resolvePath("/opt/docker")) === "/opt/docker") {
             roots.push({ id: "docker", label: "Docker", path: "/opt/docker" });
         }
     } catch {
