@@ -129,6 +129,10 @@ function renderRawHttpOpenApi(schemas: ReadonlyMap<string, RegisteredSchema>): s
     for (const contract of rawHttpContracts) {
         const openApiPath = contract.path.replaceAll(/:([A-Za-z0-9_]+)/gu, "{$1}");
         const responseContent = openApiContent(contract.response);
+        const responseBodyStatusCodes = new Set(
+            contract.responseBodyStatusCodes ??
+                contract.statusCodes.filter((status) => status < 400)
+        );
         const operation: Record<string, unknown> = {
             responses: Object.fromEntries(
                 contract.statusCodes.map((status) => [
@@ -138,7 +142,8 @@ function renderRawHttpOpenApi(schemas: ReadonlyMap<string, RegisteredSchema>): s
                             status >= 400
                                 ? "Expected error response"
                                 : "Successful response",
-                        ...(status < 400 && responseContent !== undefined
+                        ...(responseBodyStatusCodes.has(status) &&
+                        responseContent !== undefined
                             ? { content: responseContent }
                             : {}),
                     },
@@ -147,6 +152,21 @@ function renderRawHttpOpenApi(schemas: ReadonlyMap<string, RegisteredSchema>): s
             summary: contract.summary,
             "x-access": contract.access,
         };
+        if (contract.response.kind === "websocket") {
+            operation["x-websocket"] = {
+                clientMaximumMessageBytes: contract.response.clientMaximumMessageBytes,
+                protocol: contract.response.protocol,
+                serverMaximumMessageBytes: contract.response.serverMaximumMessageBytes,
+            };
+        }
+        if (contract.rangeRequests === "single-byte-range") {
+            operation["x-byte-range"] = {
+                requestHeader: "Range",
+                requestSyntax: "bytes=start-end",
+                responseHeaders: ["Accept-Ranges", "Content-Range"],
+                unit: "bytes",
+            };
+        }
         const pathParameters = [...contract.path.matchAll(/:([A-Za-z0-9_]+)/gu)].map(
             ([, name]) => ({
                 in: "path",
@@ -219,7 +239,8 @@ function databaseTables() {
                             entry.entityType === "columns" && entry.table === tableName
                     )
                     .map((column) => ({
-                        defaulted: column.default !== null,
+                        autoincrement: column.autoincrement === true,
+                        defaultValue: optionalSnapshotText(column.default),
                         name: String(column.name),
                         notNull: column.notNull === true,
                         primaryKey: primaryKeys.has(

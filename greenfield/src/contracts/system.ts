@@ -877,6 +877,7 @@ export const systemRawHttpContracts = [
             schema: readinessStatusSchema,
             schemaId: "health.readiness.response",
         },
+        responseBodyStatusCodes: [200, 503],
         statusCodes: [200, 503],
         summary: "Reports whether critical application initialization is complete.",
     },

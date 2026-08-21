@@ -51571,6 +51571,15 @@
           "capabilityPolicy": "all",
           "kind": "authenticated"
         },
+        "x-byte-range": {
+          "requestHeader": "Range",
+          "requestSyntax": "bytes=start-end",
+          "responseHeaders": [
+            "Accept-Ranges",
+            "Content-Range"
+          ],
+          "unit": "bytes"
+        },
         "parameters": [
           {
             "in": "path",
@@ -51637,6 +51646,15 @@
           ],
           "capabilityPolicy": "all",
           "kind": "authenticated"
+        },
+        "x-byte-range": {
+          "requestHeader": "Range",
+          "requestSyntax": "bytes=start-end",
+          "responseHeaders": [
+            "Accept-Ranges",
+            "Content-Range"
+          ],
+          "unit": "bytes"
         },
         "parameters": [
           {
@@ -52151,6 +52169,15 @@
             "session"
           ]
         },
+        "x-byte-range": {
+          "requestHeader": "Range",
+          "requestSyntax": "bytes=start-end",
+          "responseHeaders": [
+            "Accept-Ranges",
+            "Content-Range"
+          ],
+          "unit": "bytes"
+        },
         "parameters": [
           {
             "in": "path",
@@ -52442,6 +52469,15 @@
           "principalKinds": [
             "session"
           ]
+        },
+        "x-byte-range": {
+          "requestHeader": "Range",
+          "requestSyntax": "bytes=start-end",
+          "responseHeaders": [
+            "Accept-Ranges",
+            "Content-Range"
+          ],
+          "unit": "bytes"
         },
         "parameters": [
           {
@@ -52828,7 +52864,14 @@
             }
           },
           "503": {
-            "description": "Expected error response"
+            "description": "Expected error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/health.readiness.response"
+                }
+              }
+            }
           }
         },
         "summary": "Reports whether critical application initialization is complete.",
@@ -52902,6 +52945,11 @@
           ],
           "whenMfaDisabled": "deny",
           "whenMfaEnabled": "mfa"
+        },
+        "x-websocket": {
+          "clientMaximumMessageBytes": 16384,
+          "protocol": "mira-terminal-v1",
+          "serverMaximumMessageBytes": 32768
         },
         "parameters": [
           {

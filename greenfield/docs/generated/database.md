@@ -8,18 +8,18 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Column | SQLite type | Nullable | Primary key | Default |
 | --- | --- | --- | --- | --- |
-| `agent_id` | `text` | No | No | No |
-| `completed_at` | `integer` | Yes | No | No |
-| `completed_by_id` | `text` | Yes | No | No |
-| `completed_by_kind` | `text` | Yes | No | No |
-| `id` | `text` | Yes | Yes | No |
-| `last_activity_at` | `integer` | No | No | No |
-| `last_updated_by_id` | `text` | No | No | No |
-| `last_updated_by_kind` | `text` | No | No | No |
-| `started_at` | `integer` | No | No | No |
-| `started_by_id` | `text` | No | No | No |
-| `started_by_kind` | `text` | No | No | No |
-| `task` | `text` | No | No | No |
+| `agent_id` | `text` | No | No | — |
+| `completed_at` | `integer` | Yes | No | — |
+| `completed_by_id` | `text` | Yes | No | — |
+| `completed_by_kind` | `text` | Yes | No | — |
+| `id` | `text` | Yes | Yes | — |
+| `last_activity_at` | `integer` | No | No | — |
+| `last_updated_by_id` | `text` | No | No | — |
+| `last_updated_by_kind` | `text` | No | No | — |
+| `started_at` | `integer` | No | No | — |
+| `started_by_id` | `text` | No | No | — |
+| `started_by_kind` | `text` | No | No | — |
+| `task` | `text` | No | No | — |
 
 ### Foreign keys
 
@@ -51,17 +51,17 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Column | SQLite type | Nullable | Primary key | Default |
 | --- | --- | --- | --- | --- |
-| `action` | `text` | No | No | No |
-| `actor_id` | `text` | No | No | No |
-| `actor_kind` | `text` | No | No | No |
-| `authenticator_id` | `text` | Yes | No | No |
-| `id` | `text` | Yes | Yes | No |
-| `metadata_json` | `text` | No | No | Yes |
-| `occurred_at` | `integer` | No | No | No |
-| `outcome` | `text` | No | No | No |
-| `request_id` | `text` | Yes | No | No |
-| `target_id` | `text` | No | No | No |
-| `target_type` | `text` | No | No | No |
+| `action` | `text` | No | No | — |
+| `actor_id` | `text` | No | No | — |
+| `actor_kind` | `text` | No | No | — |
+| `authenticator_id` | `text` | Yes | No | — |
+| `id` | `text` | Yes | Yes | — |
+| `metadata_json` | `text` | No | No | `'{}'` |
+| `occurred_at` | `integer` | No | No | — |
+| `outcome` | `text` | No | No | — |
+| `request_id` | `text` | Yes | No | — |
+| `target_id` | `text` | No | No | — |
+| `target_type` | `text` | No | No | — |
 
 ### Foreign keys
 
@@ -95,15 +95,15 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Column | SQLite type | Nullable | Primary key | Default |
 | --- | --- | --- | --- | --- |
-| `authentication_version` | `integer` | No | No | No |
-| `challenge` | `text` | No | No | No |
-| `config_fingerprint` | `text` | No | No | No |
-| `created_at` | `integer` | No | No | No |
-| `expires_at` | `integer` | No | No | No |
-| `id` | `text` | Yes | Yes | No |
-| `pending_login_id` | `text` | Yes | No | No |
-| `purpose` | `text` | No | No | No |
-| `session_id` | `text` | Yes | No | No |
+| `authentication_version` | `integer` | No | No | — |
+| `challenge` | `text` | No | No | — |
+| `config_fingerprint` | `text` | No | No | — |
+| `created_at` | `integer` | No | No | — |
+| `expires_at` | `integer` | No | No | — |
+| `id` | `text` | Yes | Yes | — |
+| `pending_login_id` | `text` | Yes | No | — |
+| `purpose` | `text` | No | No | — |
+| `session_id` | `text` | Yes | No | — |
 
 ### Foreign keys
 
@@ -135,20 +135,20 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Column | SQLite type | Nullable | Primary key | Default |
 | --- | --- | --- | --- | --- |
-| `allows_recovery` | `integer` | No | No | No |
-| `allows_totp` | `integer` | No | No | No |
-| `allows_webauthn` | `integer` | No | No | No |
-| `attempt_count` | `integer` | No | No | Yes |
-| `authentication_version` | `integer` | No | No | No |
-| `created_at` | `integer` | No | No | No |
-| `expires_at` | `integer` | No | No | No |
-| `id` | `text` | Yes | Yes | No |
-| `password_verified_at` | `integer` | No | No | No |
-| `replaced_session_id` | `text` | Yes | No | No |
-| `user_agent` | `text` | Yes | No | No |
-| `user_id` | `text` | No | No | No |
-| `validator_hash` | `text` | No | No | No |
-| `validator_version` | `integer` | No | No | Yes |
+| `allows_recovery` | `integer` | No | No | — |
+| `allows_totp` | `integer` | No | No | — |
+| `allows_webauthn` | `integer` | No | No | — |
+| `attempt_count` | `integer` | No | No | `0` |
+| `authentication_version` | `integer` | No | No | — |
+| `created_at` | `integer` | No | No | — |
+| `expires_at` | `integer` | No | No | — |
+| `id` | `text` | Yes | Yes | — |
+| `password_verified_at` | `integer` | No | No | — |
+| `replaced_session_id` | `text` | Yes | No | — |
+| `user_agent` | `text` | Yes | No | — |
+| `user_id` | `text` | No | No | — |
+| `validator_hash` | `text` | No | No | — |
+| `validator_version` | `integer` | No | No | `1` |
 
 ### Foreign keys
 
@@ -183,12 +183,12 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Column | SQLite type | Nullable | Primary key | Default |
 | --- | --- | --- | --- | --- |
-| `blocked_until` | `integer` | Yes | No | No |
-| `bucket_key` | `text` | Yes | Yes | No |
-| `failure_count` | `integer` | No | No | No |
-| `first_failed_at` | `integer` | No | No | No |
-| `kind` | `text` | No | No | No |
-| `updated_at` | `integer` | No | No | No |
+| `blocked_until` | `integer` | Yes | No | — |
+| `bucket_key` | `text` | Yes | Yes | — |
+| `failure_count` | `integer` | No | No | — |
+| `first_failed_at` | `integer` | No | No | — |
+| `kind` | `text` | No | No | — |
+| `updated_at` | `integer` | No | No | — |
 
 ### Foreign keys
 
@@ -216,19 +216,19 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Column | SQLite type | Nullable | Primary key | Default |
 | --- | --- | --- | --- | --- |
-| `authenticated_at` | `integer` | No | No | No |
-| `authentication_version` | `integer` | No | No | No |
-| `auth_method` | `text` | No | No | No |
-| `created_at` | `integer` | No | No | No |
-| `expires_at` | `integer` | No | No | No |
-| `id` | `text` | Yes | Yes | No |
-| `last_seen_at` | `integer` | No | No | No |
-| `mfa_verified_at` | `integer` | Yes | No | No |
-| `password_verified_at` | `integer` | No | No | No |
-| `user_agent` | `text` | Yes | No | No |
-| `user_id` | `text` | No | No | No |
-| `validator_hash` | `text` | No | No | No |
-| `validator_version` | `integer` | No | No | Yes |
+| `authenticated_at` | `integer` | No | No | — |
+| `authentication_version` | `integer` | No | No | — |
+| `auth_method` | `text` | No | No | — |
+| `created_at` | `integer` | No | No | — |
+| `expires_at` | `integer` | No | No | — |
+| `id` | `text` | Yes | Yes | — |
+| `last_seen_at` | `integer` | No | No | — |
+| `mfa_verified_at` | `integer` | Yes | No | — |
+| `password_verified_at` | `integer` | No | No | — |
+| `user_agent` | `text` | Yes | No | — |
+| `user_id` | `text` | No | No | — |
+| `validator_hash` | `text` | No | No | — |
+| `validator_version` | `integer` | No | No | `1` |
 
 ### Foreign keys
 
@@ -265,16 +265,16 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Column | SQLite type | Nullable | Primary key | Default |
 | --- | --- | --- | --- | --- |
-| `created_at` | `integer` | No | No | No |
-| `expires_at` | `integer` | Yes | No | No |
-| `id` | `text` | Yes | Yes | No |
-| `label` | `text` | No | No | No |
-| `prefix` | `text` | No | No | No |
-| `principal_id` | `text` | No | No | No |
-| `replaces_credential_id` | `text` | Yes | No | No |
-| `revoked_at` | `integer` | Yes | No | No |
-| `validator_hash` | `text` | No | No | No |
-| `validator_version` | `integer` | No | No | Yes |
+| `created_at` | `integer` | No | No | — |
+| `expires_at` | `integer` | Yes | No | — |
+| `id` | `text` | Yes | Yes | — |
+| `label` | `text` | No | No | — |
+| `prefix` | `text` | No | No | — |
+| `principal_id` | `text` | No | No | — |
+| `replaces_credential_id` | `text` | Yes | No | — |
+| `revoked_at` | `integer` | Yes | No | — |
+| `validator_hash` | `text` | No | No | — |
+| `validator_version` | `integer` | No | No | `1` |
 
 ### Foreign keys
 
@@ -310,9 +310,9 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Column | SQLite type | Nullable | Primary key | Default |
 | --- | --- | --- | --- | --- |
-| `capability` | `text` | No | Yes | No |
-| `granted_at` | `integer` | No | No | No |
-| `principal_id` | `text` | No | Yes | No |
+| `capability` | `text` | No | Yes | — |
+| `granted_at` | `integer` | No | No | — |
+| `principal_id` | `text` | No | Yes | — |
 
 ### Foreign keys
 
@@ -337,12 +337,12 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Column | SQLite type | Nullable | Primary key | Default |
 | --- | --- | --- | --- | --- |
-| `authorization_version` | `integer` | No | No | Yes |
-| `created_at` | `integer` | No | No | No |
-| `disabled_at` | `integer` | Yes | No | No |
-| `id` | `text` | Yes | Yes | No |
-| `label` | `text` | No | No | No |
-| `updated_at` | `integer` | No | No | No |
+| `authorization_version` | `integer` | No | No | `1` |
+| `created_at` | `integer` | No | No | — |
+| `disabled_at` | `integer` | Yes | No | — |
+| `id` | `text` | Yes | Yes | — |
+| `label` | `text` | No | No | — |
+| `updated_at` | `integer` | No | No | — |
 
 ### Foreign keys
 
@@ -370,22 +370,22 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Column | SQLite type | Nullable | Primary key | Default |
 | --- | --- | --- | --- | --- |
-| `consecutive_failures` | `integer` | No | No | Yes |
-| `expires_at` | `integer` | Yes | No | No |
-| `failure_code` | `text` | Yes | No | No |
-| `failure_message` | `text` | Yes | No | No |
-| `key` | `text` | Yes | Yes | No |
-| `last_attempt_at` | `integer` | No | No | No |
-| `last_attempt_duration_ms` | `integer` | No | No | No |
-| `last_attempt_number` | `integer` | No | No | No |
-| `last_attempt_run_id` | `text` | No | No | No |
-| `last_attempt_status` | `text` | No | No | No |
-| `last_success_at` | `integer` | Yes | No | No |
-| `metadata_json` | `text` | Yes | No | No |
-| `payload_json` | `text` | Yes | No | No |
-| `schema_id` | `text` | Yes | No | No |
-| `source` | `text` | Yes | No | No |
-| `updated_at` | `integer` | No | No | No |
+| `consecutive_failures` | `integer` | No | No | `0` |
+| `expires_at` | `integer` | Yes | No | — |
+| `failure_code` | `text` | Yes | No | — |
+| `failure_message` | `text` | Yes | No | — |
+| `key` | `text` | Yes | Yes | — |
+| `last_attempt_at` | `integer` | No | No | — |
+| `last_attempt_duration_ms` | `integer` | No | No | — |
+| `last_attempt_number` | `integer` | No | No | — |
+| `last_attempt_run_id` | `text` | No | No | — |
+| `last_attempt_status` | `text` | No | No | — |
+| `last_success_at` | `integer` | Yes | No | — |
+| `metadata_json` | `text` | Yes | No | — |
+| `payload_json` | `text` | Yes | No | — |
+| `schema_id` | `text` | Yes | No | — |
+| `source` | `text` | Yes | No | — |
+| `updated_at` | `integer` | No | No | — |
 
 ### Foreign keys
 
@@ -423,14 +423,14 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Column | SQLite type | Nullable | Primary key | Default |
 | --- | --- | --- | --- | --- |
-| `gateway_scope` | `text` | No | Yes | No |
-| `observation_epoch` | `integer` | No | No | No |
-| `schema_version` | `integer` | No | No | Yes |
-| `session_key` | `text` | No | Yes | No |
-| `snapshot_bytes` | `integer` | No | No | No |
-| `snapshot_json` | `text` | No | No | No |
-| `transcript_generation` | `integer` | No | No | No |
-| `updated_at` | `integer` | No | No | No |
+| `gateway_scope` | `text` | No | Yes | — |
+| `observation_epoch` | `integer` | No | No | — |
+| `schema_version` | `integer` | No | No | `1` |
+| `session_key` | `text` | No | Yes | — |
+| `snapshot_bytes` | `integer` | No | No | — |
+| `snapshot_json` | `text` | No | No | — |
+| `transcript_generation` | `integer` | No | No | — |
+| `updated_at` | `integer` | No | No | — |
 
 ### Foreign keys
 
@@ -460,15 +460,15 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Column | SQLite type | Nullable | Primary key | Default |
 | --- | --- | --- | --- | --- |
-| `chat_run_id` | `text` | No | No | No |
-| `id` | `integer` | Yes | Yes | No |
-| `kind` | `text` | No | No | No |
-| `occurred_at` | `integer` | No | No | No |
-| `payload_bytes` | `integer` | No | No | No |
-| `payload_json` | `text` | No | No | No |
-| `provider_sequence_end` | `integer` | Yes | No | No |
-| `provider_sequence_start` | `integer` | Yes | No | No |
-| `sequence` | `integer` | No | No | No |
+| `chat_run_id` | `text` | No | No | — |
+| `id` | `integer` | Yes | Yes | Autoincrement |
+| `kind` | `text` | No | No | — |
+| `occurred_at` | `integer` | No | No | — |
+| `payload_bytes` | `integer` | No | No | — |
+| `payload_json` | `text` | No | No | — |
+| `provider_sequence_end` | `integer` | Yes | No | — |
+| `provider_sequence_start` | `integer` | Yes | No | — |
+| `sequence` | `integer` | No | No | — |
 
 ### Foreign keys
 
@@ -498,33 +498,33 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Column | SQLite type | Nullable | Primary key | Default |
 | --- | --- | --- | --- | --- |
-| `actor_id` | `text` | No | No | No |
-| `actor_kind` | `text` | No | No | No |
-| `admitted_at` | `integer` | No | No | No |
-| `cancel_requested_at` | `integer` | Yes | No | No |
-| `dispatch_attempted_at` | `integer` | Yes | No | No |
-| `event_bytes` | `integer` | No | No | Yes |
-| `event_count` | `integer` | No | No | Yes |
-| `failure_code` | `text` | Yes | No | No |
-| `failure_message` | `text` | Yes | No | No |
-| `gateway_scope` | `text` | No | No | No |
-| `history_message_id` | `text` | Yes | No | No |
-| `id` | `text` | Yes | Yes | No |
-| `idempotency_key` | `text` | No | No | No |
-| `last_event_sequence` | `integer` | No | No | Yes |
-| `provider_acknowledged_at` | `integer` | Yes | No | No |
-| `provider_run_id` | `text` | Yes | No | No |
-| `reconciled_at` | `integer` | Yes | No | No |
-| `reconciliation_state` | `text` | No | No | Yes |
-| `request_json` | `text` | No | No | No |
-| `request_sha256` | `text` | No | No | No |
-| `retention_expires_at` | `integer` | Yes | No | No |
-| `session_key` | `text` | No | No | No |
-| `state` | `text` | No | No | Yes |
-| `state_version` | `integer` | No | No | Yes |
-| `terminal_at` | `integer` | Yes | No | No |
-| `transcript_generation` | `integer` | No | No | No |
-| `updated_at` | `integer` | No | No | No |
+| `actor_id` | `text` | No | No | — |
+| `actor_kind` | `text` | No | No | — |
+| `admitted_at` | `integer` | No | No | — |
+| `cancel_requested_at` | `integer` | Yes | No | — |
+| `dispatch_attempted_at` | `integer` | Yes | No | — |
+| `event_bytes` | `integer` | No | No | `0` |
+| `event_count` | `integer` | No | No | `0` |
+| `failure_code` | `text` | Yes | No | — |
+| `failure_message` | `text` | Yes | No | — |
+| `gateway_scope` | `text` | No | No | — |
+| `history_message_id` | `text` | Yes | No | — |
+| `id` | `text` | Yes | Yes | — |
+| `idempotency_key` | `text` | No | No | — |
+| `last_event_sequence` | `integer` | No | No | `0` |
+| `provider_acknowledged_at` | `integer` | Yes | No | — |
+| `provider_run_id` | `text` | Yes | No | — |
+| `reconciled_at` | `integer` | Yes | No | — |
+| `reconciliation_state` | `text` | No | No | `'pending'` |
+| `request_json` | `text` | No | No | — |
+| `request_sha256` | `text` | No | No | — |
+| `retention_expires_at` | `integer` | Yes | No | — |
+| `session_key` | `text` | No | No | — |
+| `state` | `text` | No | No | `'admitted'` |
+| `state_version` | `integer` | No | No | `1` |
+| `terminal_at` | `integer` | Yes | No | — |
+| `transcript_generation` | `integer` | No | No | — |
+| `updated_at` | `integer` | No | No | — |
 
 ### Foreign keys
 
@@ -572,13 +572,13 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Column | SQLite type | Nullable | Primary key | Default |
 | --- | --- | --- | --- | --- |
-| `chat_run_id` | `text` | Yes | Yes | No |
-| `first_sequence` | `integer` | No | No | No |
-| `schema_version` | `integer` | No | No | Yes |
-| `snapshot_bytes` | `integer` | No | No | No |
-| `snapshot_json` | `text` | No | No | No |
-| `through_sequence` | `integer` | No | No | No |
-| `updated_at` | `integer` | No | No | No |
+| `chat_run_id` | `text` | Yes | Yes | — |
+| `first_sequence` | `integer` | No | No | — |
+| `schema_version` | `integer` | No | No | `1` |
+| `snapshot_bytes` | `integer` | No | No | — |
+| `snapshot_json` | `text` | No | No | — |
+| `through_sequence` | `integer` | No | No | — |
+| `updated_at` | `integer` | No | No | — |
 
 ### Foreign keys
 
@@ -605,20 +605,20 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Column | SQLite type | Nullable | Primary key | Default |
 | --- | --- | --- | --- | --- |
-| `current_generation` | `integer` | No | No | Yes |
-| `gateway_scope` | `text` | No | Yes | No |
-| `last_boundary_action` | `text` | Yes | No | No |
-| `last_boundary_provider_updated_at` | `integer` | Yes | No | No |
-| `observed_at` | `integer` | Yes | No | No |
-| `pending_action` | `text` | Yes | No | No |
-| `pending_control_id` | `text` | Yes | No | No |
-| `pending_previous_status` | `text` | Yes | No | No |
-| `provider_session_id` | `text` | Yes | No | No |
-| `provider_updated_at` | `integer` | Yes | No | No |
-| `session_key` | `text` | No | Yes | No |
-| `status` | `text` | No | No | Yes |
-| `updated_at` | `integer` | No | No | No |
-| `version` | `integer` | No | No | Yes |
+| `current_generation` | `integer` | No | No | `1` |
+| `gateway_scope` | `text` | No | Yes | — |
+| `last_boundary_action` | `text` | Yes | No | — |
+| `last_boundary_provider_updated_at` | `integer` | Yes | No | — |
+| `observed_at` | `integer` | Yes | No | — |
+| `pending_action` | `text` | Yes | No | — |
+| `pending_control_id` | `text` | Yes | No | — |
+| `pending_previous_status` | `text` | Yes | No | — |
+| `provider_session_id` | `text` | Yes | No | — |
+| `provider_updated_at` | `integer` | Yes | No | — |
+| `session_key` | `text` | No | Yes | — |
+| `status` | `text` | No | No | `'ready'` |
+| `updated_at` | `integer` | No | No | — |
+| `version` | `integer` | No | No | `1` |
 
 ### Foreign keys
 
@@ -651,13 +651,13 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Column | SQLite type | Nullable | Primary key | Default |
 | --- | --- | --- | --- | --- |
-| `armed_at` | `integer` | No | No | No |
-| `boot_identity` | `text` | No | No | No |
-| `expires_at` | `integer` | No | No | No |
-| `id` | `integer` | Yes | Yes | No |
-| `job_run_id` | `text` | No | No | No |
-| `lease_token` | `text` | No | No | No |
-| `worker_instance_id` | `text` | No | No | No |
+| `armed_at` | `integer` | No | No | — |
+| `boot_identity` | `text` | No | No | — |
+| `expires_at` | `integer` | No | No | — |
+| `id` | `integer` | Yes | Yes | — |
+| `job_run_id` | `text` | No | No | — |
+| `lease_token` | `text` | No | No | — |
+| `worker_instance_id` | `text` | No | No | — |
 
 ### Foreign keys
 
@@ -685,15 +685,15 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Column | SQLite type | Nullable | Primary key | Default |
 | --- | --- | --- | --- | --- |
-| `details_json` | `text` | No | No | Yes |
-| `generation` | `integer` | No | No | No |
-| `id` | `integer` | Yes | Yes | No |
-| `incident_id` | `text` | No | No | No |
-| `kind` | `text` | No | No | No |
-| `monitor_run_id` | `text` | No | No | No |
-| `observed_at` | `integer` | No | No | No |
-| `severity` | `text` | No | No | No |
-| `title` | `text` | No | No | No |
+| `details_json` | `text` | No | No | `'{}'` |
+| `generation` | `integer` | No | No | — |
+| `id` | `integer` | Yes | Yes | Autoincrement |
+| `incident_id` | `text` | No | No | — |
+| `kind` | `text` | No | No | — |
+| `monitor_run_id` | `text` | No | No | — |
+| `observed_at` | `integer` | No | No | — |
+| `severity` | `text` | No | No | — |
+| `title` | `text` | No | No | — |
 
 ### Foreign keys
 
@@ -722,19 +722,19 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Column | SQLite type | Nullable | Primary key | Default |
 | --- | --- | --- | --- | --- |
-| `details_json` | `text` | No | No | Yes |
-| `fingerprint` | `text` | No | No | No |
-| `first_seen_at` | `integer` | No | No | No |
-| `generation` | `integer` | No | No | Yes |
-| `id` | `text` | Yes | Yes | No |
-| `kind` | `text` | No | No | No |
-| `last_seen_at` | `integer` | No | No | No |
-| `monitor_key` | `text` | No | No | No |
-| `occurrence_count` | `integer` | No | No | Yes |
-| `resolved_at` | `integer` | Yes | No | No |
-| `severity` | `text` | No | No | No |
-| `state` | `text` | No | No | No |
-| `title` | `text` | No | No | No |
+| `details_json` | `text` | No | No | `'{}'` |
+| `fingerprint` | `text` | No | No | — |
+| `first_seen_at` | `integer` | No | No | — |
+| `generation` | `integer` | No | No | `1` |
+| `id` | `text` | Yes | Yes | — |
+| `kind` | `text` | No | No | — |
+| `last_seen_at` | `integer` | No | No | — |
+| `monitor_key` | `text` | No | No | — |
+| `occurrence_count` | `integer` | No | No | `1` |
+| `resolved_at` | `integer` | Yes | No | — |
+| `severity` | `text` | No | No | — |
+| `state` | `text` | No | No | — |
+| `title` | `text` | No | No | — |
 
 ### Foreign keys
 
@@ -768,20 +768,20 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Column | SQLite type | Nullable | Primary key | Default |
 | --- | --- | --- | --- | --- |
-| `created_at` | `integer` | No | No | No |
-| `created_by_id` | `text` | No | No | No |
-| `created_by_kind` | `text` | No | No | No |
-| `ended_at` | `integer` | Yes | No | No |
-| `ended_by_id` | `text` | Yes | No | No |
-| `ended_by_kind` | `text` | Yes | No | No |
-| `ended_reason` | `text` | Yes | No | No |
-| `expires_at` | `integer` | Yes | No | No |
-| `external_job_id` | `text` | Yes | No | No |
-| `external_provider` | `text` | Yes | No | No |
-| `id` | `text` | Yes | Yes | No |
-| `reason` | `text` | No | No | No |
-| `scheduled_job_id` | `text` | Yes | No | No |
-| `target_kind` | `text` | No | No | No |
+| `created_at` | `integer` | No | No | — |
+| `created_by_id` | `text` | No | No | — |
+| `created_by_kind` | `text` | No | No | — |
+| `ended_at` | `integer` | Yes | No | — |
+| `ended_by_id` | `text` | Yes | No | — |
+| `ended_by_kind` | `text` | Yes | No | — |
+| `ended_reason` | `text` | Yes | No | — |
+| `expires_at` | `integer` | Yes | No | — |
+| `external_job_id` | `text` | Yes | No | — |
+| `external_provider` | `text` | Yes | No | — |
+| `id` | `text` | Yes | Yes | — |
+| `reason` | `text` | No | No | — |
+| `scheduled_job_id` | `text` | Yes | No | — |
+| `target_kind` | `text` | No | No | — |
 
 ### Foreign keys
 
@@ -816,14 +816,14 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Column | SQLite type | Nullable | Primary key | Default |
 | --- | --- | --- | --- | --- |
-| `attempt` | `integer` | No | No | No |
-| `job_run_id` | `text` | No | Yes | No |
-| `kind` | `text` | No | No | No |
-| `message` | `text` | Yes | No | No |
-| `occurred_at` | `integer` | No | No | No |
-| `progress_json` | `text` | Yes | No | No |
-| `sequence` | `integer` | No | Yes | No |
-| `worker_instance_id` | `text` | Yes | No | No |
+| `attempt` | `integer` | No | No | — |
+| `job_run_id` | `text` | No | Yes | — |
+| `kind` | `text` | No | No | — |
+| `message` | `text` | Yes | No | — |
+| `occurred_at` | `integer` | No | No | — |
+| `progress_json` | `text` | Yes | No | — |
+| `sequence` | `integer` | No | Yes | — |
+| `worker_instance_id` | `text` | Yes | No | — |
 
 ### Foreign keys
 
@@ -853,48 +853,48 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Column | SQLite type | Nullable | Primary key | Default |
 | --- | --- | --- | --- | --- |
-| `action_key` | `text` | No | No | No |
-| `attempt_count` | `integer` | No | No | Yes |
-| `attempt_limit` | `integer` | No | No | No |
-| `available_at` | `integer` | No | No | No |
-| `cancellation_policy` | `text` | No | No | No |
-| `cancel_requested_at` | `integer` | Yes | No | No |
-| `cancel_requested_by_id` | `text` | Yes | No | No |
-| `cancel_requested_by_kind` | `text` | Yes | No | No |
-| `display_name` | `text` | No | No | No |
-| `enqueue_sha256` | `text` | No | No | No |
-| `event_bytes` | `integer` | No | No | Yes |
-| `event_count` | `integer` | No | No | Yes |
-| `finished_at` | `integer` | Yes | No | No |
-| `first_started_at` | `integer` | Yes | No | No |
-| `heartbeat_at` | `integer` | Yes | No | No |
-| `id` | `text` | Yes | Yes | No |
-| `idempotency_key` | `text` | No | No | No |
-| `last_attempt_started_at` | `integer` | Yes | No | No |
-| `lease_expires_at` | `integer` | Yes | No | No |
-| `lease_owner_id` | `text` | Yes | No | No |
-| `lease_token` | `text` | Yes | No | No |
-| `payload_event_count` | `integer` | No | No | Yes |
-| `payload_json` | `text` | No | No | No |
-| `priority` | `integer` | No | No | No |
-| `queued_at` | `integer` | No | No | No |
-| `requested_by_id` | `text` | No | No | No |
-| `requested_by_kind` | `text` | No | No | No |
-| `required_worker_release_id` | `text` | Yes | No | No |
-| `resource_class` | `text` | No | No | No |
-| `resource_keys_json` | `text` | No | No | No |
-| `result_json` | `text` | Yes | No | No |
-| `retry_safe` | `integer` | No | No | No |
-| `scheduled_for_at` | `integer` | Yes | No | No |
-| `scheduled_job_id` | `text` | Yes | No | No |
-| `scheduled_job_version` | `integer` | Yes | No | No |
-| `state` | `text` | No | No | No |
-| `state_version` | `integer` | No | No | Yes |
-| `terminal_code` | `text` | Yes | No | No |
-| `terminal_message` | `text` | Yes | No | No |
-| `timeout_ms` | `integer` | No | No | No |
-| `trigger_type` | `text` | No | No | No |
-| `updated_at` | `integer` | No | No | No |
+| `action_key` | `text` | No | No | — |
+| `attempt_count` | `integer` | No | No | `0` |
+| `attempt_limit` | `integer` | No | No | — |
+| `available_at` | `integer` | No | No | — |
+| `cancellation_policy` | `text` | No | No | — |
+| `cancel_requested_at` | `integer` | Yes | No | — |
+| `cancel_requested_by_id` | `text` | Yes | No | — |
+| `cancel_requested_by_kind` | `text` | Yes | No | — |
+| `display_name` | `text` | No | No | — |
+| `enqueue_sha256` | `text` | No | No | — |
+| `event_bytes` | `integer` | No | No | `0` |
+| `event_count` | `integer` | No | No | `0` |
+| `finished_at` | `integer` | Yes | No | — |
+| `first_started_at` | `integer` | Yes | No | — |
+| `heartbeat_at` | `integer` | Yes | No | — |
+| `id` | `text` | Yes | Yes | — |
+| `idempotency_key` | `text` | No | No | — |
+| `last_attempt_started_at` | `integer` | Yes | No | — |
+| `lease_expires_at` | `integer` | Yes | No | — |
+| `lease_owner_id` | `text` | Yes | No | — |
+| `lease_token` | `text` | Yes | No | — |
+| `payload_event_count` | `integer` | No | No | `0` |
+| `payload_json` | `text` | No | No | — |
+| `priority` | `integer` | No | No | — |
+| `queued_at` | `integer` | No | No | — |
+| `requested_by_id` | `text` | No | No | — |
+| `requested_by_kind` | `text` | No | No | — |
+| `required_worker_release_id` | `text` | Yes | No | — |
+| `resource_class` | `text` | No | No | — |
+| `resource_keys_json` | `text` | No | No | — |
+| `result_json` | `text` | Yes | No | — |
+| `retry_safe` | `integer` | No | No | — |
+| `scheduled_for_at` | `integer` | Yes | No | — |
+| `scheduled_job_id` | `text` | Yes | No | — |
+| `scheduled_job_version` | `integer` | Yes | No | — |
+| `state` | `text` | No | No | — |
+| `state_version` | `integer` | No | No | `1` |
+| `terminal_code` | `text` | Yes | No | — |
+| `terminal_message` | `text` | Yes | No | — |
+| `timeout_ms` | `integer` | No | No | — |
+| `trigger_type` | `text` | No | No | — |
+| `updated_at` | `integer` | No | No | — |
 
 ### Foreign keys
 
@@ -956,12 +956,12 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Column | SQLite type | Nullable | Primary key | Default |
 | --- | --- | --- | --- | --- |
-| `claiming_paused` | `integer` | No | No | No |
-| `id` | `integer` | Yes | Yes | No |
-| `updated_at` | `integer` | No | No | No |
-| `updated_by_id` | `text` | Yes | No | No |
-| `updated_by_kind` | `text` | Yes | No | No |
-| `version` | `integer` | No | No | No |
+| `claiming_paused` | `integer` | No | No | — |
+| `id` | `integer` | Yes | Yes | — |
+| `updated_at` | `integer` | No | No | — |
+| `updated_by_id` | `text` | Yes | No | — |
+| `updated_by_kind` | `text` | Yes | No | — |
+| `version` | `integer` | No | No | — |
 
 ### Foreign keys
 
@@ -989,14 +989,14 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Column | SQLite type | Nullable | Primary key | Default |
 | --- | --- | --- | --- | --- |
-| `completed_at` | `integer` | Yes | No | No |
-| `complete_snapshot` | `integer` | No | No | No |
-| `id` | `text` | Yes | Yes | No |
-| `monitor_key` | `text` | No | No | No |
-| `report_id` | `text` | Yes | No | No |
-| `started_at` | `integer` | No | No | No |
-| `state` | `text` | No | No | No |
-| `submission_sha256` | `text` | No | No | No |
+| `completed_at` | `integer` | Yes | No | — |
+| `complete_snapshot` | `integer` | No | No | — |
+| `id` | `text` | Yes | Yes | — |
+| `monitor_key` | `text` | No | No | — |
+| `report_id` | `text` | Yes | No | — |
+| `started_at` | `integer` | No | No | — |
+| `state` | `text` | No | No | — |
+| `submission_sha256` | `text` | No | No | — |
 
 ### Foreign keys
 
@@ -1024,19 +1024,19 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Column | SQLite type | Nullable | Primary key | Default |
 | --- | --- | --- | --- | --- |
-| `channel` | `text` | No | No | No |
-| `id` | `text` | Yes | Yes | No |
-| `incident_generation` | `integer` | Yes | No | No |
-| `incident_id` | `text` | Yes | No | No |
-| `kind` | `text` | No | No | No |
-| `link_url` | `text` | Yes | No | No |
-| `message` | `text` | No | No | No |
-| `occurred_at` | `integer` | No | No | No |
-| `read_at` | `integer` | Yes | No | No |
-| `report_id` | `text` | Yes | No | No |
-| `severity` | `text` | No | No | No |
-| `source` | `text` | Yes | No | No |
-| `title` | `text` | No | No | No |
+| `channel` | `text` | No | No | — |
+| `id` | `text` | Yes | Yes | — |
+| `incident_generation` | `integer` | Yes | No | — |
+| `incident_id` | `text` | Yes | No | — |
+| `kind` | `text` | No | No | — |
+| `link_url` | `text` | Yes | No | — |
+| `message` | `text` | No | No | — |
+| `occurred_at` | `integer` | No | No | — |
+| `read_at` | `integer` | Yes | No | — |
+| `report_id` | `text` | Yes | No | — |
+| `severity` | `text` | No | No | — |
+| `source` | `text` | Yes | No | — |
+| `title` | `text` | No | No | — |
 
 ### Foreign keys
 
@@ -1068,14 +1068,14 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Column | SQLite type | Nullable | Primary key | Default |
 | --- | --- | --- | --- | --- |
-| `entity_id` | `text` | No | No | No |
-| `entity_type` | `text` | No | No | No |
-| `expires_at` | `integer` | No | No | No |
-| `id` | `integer` | Yes | Yes | No |
-| `occurred_at` | `integer` | No | No | No |
-| `operation` | `text` | No | No | No |
-| `payload_json` | `text` | No | No | No |
-| `topic` | `text` | No | No | No |
+| `entity_id` | `text` | No | No | — |
+| `entity_type` | `text` | No | No | — |
+| `expires_at` | `integer` | No | No | — |
+| `id` | `integer` | Yes | Yes | Autoincrement |
+| `occurred_at` | `integer` | No | No | — |
+| `operation` | `text` | No | No | — |
+| `payload_json` | `text` | No | No | — |
+| `topic` | `text` | No | No | — |
 
 ### Foreign keys
 
@@ -1102,16 +1102,16 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Column | SQLite type | Nullable | Primary key | Default |
 | --- | --- | --- | --- | --- |
-| `body_markdown` | `text` | No | No | No |
-| `id` | `text` | Yes | Yes | No |
-| `kind` | `text` | No | No | No |
-| `metadata_json` | `text` | No | No | Yes |
-| `occurred_at` | `integer` | No | No | No |
-| `source` | `text` | No | No | No |
-| `source_job_id` | `text` | Yes | No | No |
-| `status` | `text` | No | No | Yes |
-| `summary` | `text` | Yes | No | No |
-| `title` | `text` | No | No | No |
+| `body_markdown` | `text` | No | No | — |
+| `id` | `text` | Yes | Yes | — |
+| `kind` | `text` | No | No | — |
+| `metadata_json` | `text` | No | No | `'{}'` |
+| `occurred_at` | `integer` | No | No | — |
+| `source` | `text` | No | No | — |
+| `source_job_id` | `text` | Yes | No | — |
+| `status` | `text` | No | No | `'ok'` |
+| `summary` | `text` | Yes | No | — |
+| `title` | `text` | No | No | — |
 
 ### Foreign keys
 
@@ -1138,13 +1138,13 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Column | SQLite type | Nullable | Primary key | Default |
 | --- | --- | --- | --- | --- |
-| `acquired_at` | `integer` | No | No | No |
-| `expires_at` | `integer` | No | No | No |
-| `job_run_id` | `text` | No | No | No |
-| `lease_token` | `text` | No | No | No |
-| `renewed_at` | `integer` | No | No | No |
-| `resource_key` | `text` | Yes | Yes | No |
-| `worker_instance_id` | `text` | No | No | No |
+| `acquired_at` | `integer` | No | No | — |
+| `expires_at` | `integer` | No | No | — |
+| `job_run_id` | `text` | No | No | — |
+| `lease_token` | `text` | No | No | — |
+| `renewed_at` | `integer` | No | No | — |
+| `resource_key` | `text` | Yes | Yes | — |
+| `worker_instance_id` | `text` | No | No | — |
 
 ### Foreign keys
 
@@ -1172,28 +1172,28 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Column | SQLite type | Nullable | Primary key | Default |
 | --- | --- | --- | --- | --- |
-| `action_key` | `text` | No | No | No |
-| `action_payload_json` | `text` | No | No | No |
-| `attempt_limit` | `integer` | No | No | No |
-| `cancellation_policy` | `text` | No | No | No |
-| `created_at` | `integer` | No | No | No |
-| `cron_expression` | `text` | Yes | No | No |
-| `description` | `text` | No | No | No |
-| `enabled` | `integer` | No | No | No |
-| `id` | `text` | Yes | Yes | No |
-| `interval_ms` | `integer` | Yes | No | No |
-| `name` | `text` | No | No | No |
-| `next_run_at` | `integer` | Yes | No | No |
-| `priority` | `integer` | No | No | No |
-| `resource_class` | `text` | No | No | No |
-| `resource_keys_json` | `text` | No | No | No |
-| `retry_safe` | `integer` | No | No | No |
-| `schedule_kind` | `text` | No | No | No |
-| `time_of_day` | `text` | Yes | No | No |
-| `time_zone` | `text` | Yes | No | No |
-| `timeout_ms` | `integer` | No | No | No |
-| `updated_at` | `integer` | No | No | No |
-| `version` | `integer` | No | No | No |
+| `action_key` | `text` | No | No | — |
+| `action_payload_json` | `text` | No | No | — |
+| `attempt_limit` | `integer` | No | No | — |
+| `cancellation_policy` | `text` | No | No | — |
+| `created_at` | `integer` | No | No | — |
+| `cron_expression` | `text` | Yes | No | — |
+| `description` | `text` | No | No | — |
+| `enabled` | `integer` | No | No | — |
+| `id` | `text` | Yes | Yes | — |
+| `interval_ms` | `integer` | Yes | No | — |
+| `name` | `text` | No | No | — |
+| `next_run_at` | `integer` | Yes | No | — |
+| `priority` | `integer` | No | No | — |
+| `resource_class` | `text` | No | No | — |
+| `resource_keys_json` | `text` | No | No | — |
+| `retry_safe` | `integer` | No | No | — |
+| `schedule_kind` | `text` | No | No | — |
+| `time_of_day` | `text` | Yes | No | — |
+| `time_zone` | `text` | Yes | No | — |
+| `timeout_ms` | `integer` | No | No | — |
+| `updated_at` | `integer` | No | No | — |
+| `version` | `integer` | No | No | — |
 
 ### Foreign keys
 
@@ -1236,10 +1236,10 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Column | SQLite type | Nullable | Primary key | Default |
 | --- | --- | --- | --- | --- |
-| `applied_at` | `integer` | No | No | No |
-| `checksum` | `text` | No | No | No |
-| `id` | `text` | Yes | Yes | No |
-| `release_id` | `text` | No | No | No |
+| `applied_at` | `integer` | No | No | — |
+| `checksum` | `text` | No | No | — |
+| `id` | `text` | Yes | Yes | — |
+| `release_id` | `text` | No | No | — |
 
 ### Foreign keys
 
@@ -1266,14 +1266,14 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Column | SQLite type | Nullable | Primary key | Default |
 | --- | --- | --- | --- | --- |
-| `cron_job_id` | `text` | No | No | No |
-| `kind` | `text` | No | No | No |
-| `model` | `text` | Yes | No | No |
-| `recurring` | `integer` | No | No | No |
-| `schedule_summary` | `text` | Yes | No | No |
-| `session_target` | `text` | Yes | No | No |
-| `task_id` | `text` | Yes | Yes | No |
-| `thinking` | `text` | Yes | No | No |
+| `cron_job_id` | `text` | No | No | — |
+| `kind` | `text` | No | No | — |
+| `model` | `text` | Yes | No | — |
+| `recurring` | `integer` | No | No | — |
+| `schedule_summary` | `text` | Yes | No | — |
+| `session_target` | `text` | Yes | No | — |
+| `task_id` | `text` | Yes | Yes | — |
+| `thinking` | `text` | Yes | No | — |
 
 ### Foreign keys
 
@@ -1304,13 +1304,13 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Column | SQLite type | Nullable | Primary key | Default |
 | --- | --- | --- | --- | --- |
-| `actor_id` | `text` | No | No | No |
-| `actor_kind` | `text` | No | No | No |
-| `created_at` | `integer` | No | No | No |
-| `event_type` | `text` | No | No | No |
-| `id` | `text` | Yes | Yes | No |
-| `payload_json` | `text` | No | No | Yes |
-| `task_id` | `text` | No | No | No |
+| `actor_id` | `text` | No | No | — |
+| `actor_kind` | `text` | No | No | — |
+| `created_at` | `integer` | No | No | — |
+| `event_type` | `text` | No | No | — |
+| `id` | `text` | Yes | Yes | — |
+| `payload_json` | `text` | No | No | `'{}'` |
+| `task_id` | `text` | No | No | — |
 
 ### Foreign keys
 
@@ -1339,8 +1339,8 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Column | SQLite type | Nullable | Primary key | Default |
 | --- | --- | --- | --- | --- |
-| `label` | `text` | No | Yes | No |
-| `task_id` | `text` | No | Yes | No |
+| `label` | `text` | No | Yes | — |
+| `task_id` | `text` | No | Yes | — |
 
 ### Foreign keys
 
@@ -1365,14 +1365,14 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Column | SQLite type | Nullable | Primary key | Default |
 | --- | --- | --- | --- | --- |
-| `attempt_count` | `integer` | No | No | Yes |
-| `available_at` | `integer` | No | No | No |
-| `created_at` | `integer` | No | No | No |
-| `delivered_at` | `integer` | Yes | No | No |
-| `event_id` | `text` | Yes | Yes | No |
-| `lease_expires_at` | `integer` | Yes | No | No |
-| `lease_owner` | `text` | Yes | No | No |
-| `message` | `text` | No | No | No |
+| `attempt_count` | `integer` | No | No | `0` |
+| `available_at` | `integer` | No | No | — |
+| `created_at` | `integer` | No | No | — |
+| `delivered_at` | `integer` | Yes | No | — |
+| `event_id` | `text` | Yes | Yes | — |
+| `lease_expires_at` | `integer` | Yes | No | — |
+| `lease_owner` | `text` | Yes | No | — |
+| `message` | `text` | No | No | — |
 
 ### Foreign keys
 
@@ -1402,14 +1402,14 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Column | SQLite type | Nullable | Primary key | Default |
 | --- | --- | --- | --- | --- |
-| `author_id` | `text` | No | No | No |
-| `author_kind` | `text` | No | No | No |
-| `created_at` | `integer` | No | No | No |
-| `id` | `text` | Yes | Yes | No |
-| `message_markdown` | `text` | No | No | No |
-| `task_id` | `text` | No | No | No |
-| `updated_at` | `integer` | No | No | No |
-| `version` | `integer` | No | No | Yes |
+| `author_id` | `text` | No | No | — |
+| `author_kind` | `text` | No | No | — |
+| `created_at` | `integer` | No | No | — |
+| `id` | `text` | Yes | Yes | — |
+| `message_markdown` | `text` | No | No | — |
+| `task_id` | `text` | No | No | — |
+| `updated_at` | `integer` | No | No | — |
+| `version` | `integer` | No | No | `1` |
 
 ### Foreign keys
 
@@ -1438,16 +1438,16 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Column | SQLite type | Nullable | Primary key | Default |
 | --- | --- | --- | --- | --- |
-| `assignee` | `text` | Yes | No | No |
-| `body_markdown` | `text` | Yes | No | No |
-| `created_at` | `integer` | No | No | No |
-| `id` | `text` | No | No | No |
-| `number` | `integer` | Yes | Yes | No |
-| `priority` | `text` | No | No | No |
-| `status` | `text` | No | No | No |
-| `title` | `text` | No | No | No |
-| `updated_at` | `integer` | No | No | No |
-| `version` | `integer` | No | No | Yes |
+| `assignee` | `text` | Yes | No | — |
+| `body_markdown` | `text` | Yes | No | — |
+| `created_at` | `integer` | No | No | — |
+| `id` | `text` | No | No | — |
+| `number` | `integer` | Yes | Yes | Autoincrement |
+| `priority` | `text` | No | No | — |
+| `status` | `text` | No | No | — |
+| `title` | `text` | No | No | — |
+| `updated_at` | `integer` | No | No | — |
+| `version` | `integer` | No | No | `1` |
 
 ### Foreign keys
 
@@ -1482,12 +1482,12 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Column | SQLite type | Nullable | Primary key | Default |
 | --- | --- | --- | --- | --- |
-| `created_at` | `integer` | No | No | No |
-| `id` | `text` | Yes | Yes | No |
-| `selector` | `text` | No | No | No |
-| `used_at` | `integer` | Yes | No | No |
-| `user_id` | `text` | No | No | No |
-| `validator_hash` | `text` | No | No | No |
+| `created_at` | `integer` | No | No | — |
+| `id` | `text` | Yes | Yes | — |
+| `selector` | `text` | No | No | — |
+| `used_at` | `integer` | Yes | No | — |
+| `user_id` | `text` | No | No | — |
+| `validator_hash` | `text` | No | No | — |
 
 ### Foreign keys
 
@@ -1515,15 +1515,15 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Column | SQLite type | Nullable | Primary key | Default |
 | --- | --- | --- | --- | --- |
-| `confirmed_at` | `integer` | Yes | No | No |
-| `created_at` | `integer` | No | No | No |
-| `encrypted_secret` | `text` | No | No | No |
-| `enrollment_expires_at` | `integer` | No | No | No |
-| `id` | `text` | Yes | Yes | No |
-| `label` | `text` | No | No | No |
-| `last_used_step` | `integer` | Yes | No | No |
-| `secret_key_id` | `text` | No | No | No |
-| `user_id` | `text` | No | No | No |
+| `confirmed_at` | `integer` | Yes | No | — |
+| `created_at` | `integer` | No | No | — |
+| `encrypted_secret` | `text` | No | No | — |
+| `enrollment_expires_at` | `integer` | No | No | — |
+| `id` | `text` | Yes | Yes | — |
+| `label` | `text` | No | No | — |
+| `last_used_step` | `integer` | Yes | No | — |
+| `secret_key_id` | `text` | No | No | — |
+| `user_id` | `text` | No | No | — |
 
 ### Foreign keys
 
@@ -1554,19 +1554,19 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Column | SQLite type | Nullable | Primary key | Default |
 | --- | --- | --- | --- | --- |
-| `algorithm` | `integer` | No | No | No |
-| `backed_up` | `integer` | No | No | No |
-| `counter` | `integer` | No | No | No |
-| `created_at` | `integer` | No | No | No |
-| `credential_id` | `text` | No | No | No |
-| `device_type` | `text` | No | No | No |
-| `id` | `text` | Yes | Yes | No |
-| `label` | `text` | No | No | No |
-| `last_used_at` | `integer` | Yes | No | No |
-| `public_key` | `blob` | No | No | No |
-| `rp_id` | `text` | No | No | No |
-| `transport_mask` | `integer` | No | No | No |
-| `user_id` | `text` | No | No | No |
+| `algorithm` | `integer` | No | No | — |
+| `backed_up` | `integer` | No | No | — |
+| `counter` | `integer` | No | No | — |
+| `created_at` | `integer` | No | No | — |
+| `credential_id` | `text` | No | No | — |
+| `device_type` | `text` | No | No | — |
+| `id` | `text` | Yes | Yes | — |
+| `label` | `text` | No | No | — |
+| `last_used_at` | `integer` | Yes | No | — |
+| `public_key` | `blob` | No | No | — |
+| `rp_id` | `text` | No | No | — |
+| `transport_mask` | `integer` | No | No | — |
+| `user_id` | `text` | No | No | — |
 
 ### Foreign keys
 
@@ -1600,14 +1600,14 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Column | SQLite type | Nullable | Primary key | Default |
 | --- | --- | --- | --- | --- |
-| `authentication_version` | `integer` | No | No | Yes |
-| `created_at` | `integer` | No | No | No |
-| `disabled_at` | `integer` | Yes | No | No |
-| `id` | `text` | Yes | Yes | No |
-| `mfa_enabled_at` | `integer` | Yes | No | No |
-| `password_hash` | `text` | No | No | No |
-| `updated_at` | `integer` | No | No | No |
-| `username` | `text` | No | No | No |
+| `authentication_version` | `integer` | No | No | `1` |
+| `created_at` | `integer` | No | No | — |
+| `disabled_at` | `integer` | Yes | No | — |
+| `id` | `text` | Yes | Yes | — |
+| `mfa_enabled_at` | `integer` | Yes | No | — |
+| `password_hash` | `text` | No | No | — |
+| `updated_at` | `integer` | No | No | — |
+| `username` | `text` | No | No | — |
 
 ### Foreign keys
 
@@ -1637,16 +1637,16 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Column | SQLite type | Nullable | Primary key | Default |
 | --- | --- | --- | --- | --- |
-| `action_keys_json` | `text` | No | No | Yes |
-| `capacity` | `integer` | No | No | No |
-| `draining_at` | `integer` | Yes | No | No |
-| `heartbeat_at` | `integer` | No | No | No |
-| `id` | `text` | Yes | Yes | No |
-| `pid` | `integer` | No | No | No |
-| `release_id` | `text` | No | No | No |
-| `started_at` | `integer` | No | No | No |
-| `state` | `text` | No | No | No |
-| `stopped_at` | `integer` | Yes | No | No |
+| `action_keys_json` | `text` | No | No | `'[]'` |
+| `capacity` | `integer` | No | No | — |
+| `draining_at` | `integer` | Yes | No | — |
+| `heartbeat_at` | `integer` | No | No | — |
+| `id` | `text` | Yes | Yes | — |
+| `pid` | `integer` | No | No | — |
+| `release_id` | `text` | No | No | — |
+| `started_at` | `integer` | No | No | — |
+| `state` | `text` | No | No | — |
+| `stopped_at` | `integer` | Yes | No | — |
 
 ### Foreign keys
 

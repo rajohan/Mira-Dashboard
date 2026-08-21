@@ -169,6 +169,8 @@ export interface RawHttpContract {
     rangeRequests: "none" | "single-byte-range";
     requestBody: RawHttpBodyContract;
     response: RawHttpBodyContract;
+    /** Statuses that return the declared response body; defaults to non-error statuses. */
+    responseBodyStatusCodes?: readonly number[];
     statusCodes: readonly number[];
     summary: string;
 }

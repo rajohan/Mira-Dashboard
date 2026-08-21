@@ -92,7 +92,8 @@ export function renderGeneratedIndex(): string {
 export interface DatabaseTableDocumentationInput {
     readonly checks: readonly { readonly expression: string; readonly name: string }[];
     readonly columns: readonly {
-        readonly defaulted: boolean;
+        readonly autoincrement: boolean;
+        readonly defaultValue: string | null;
         readonly name: string;
         readonly notNull: boolean;
         readonly primaryKey: boolean;
@@ -115,6 +116,14 @@ export interface DatabaseTableDocumentationInput {
     }[];
 }
 
+function databaseDefaultLabel(
+    column: DatabaseTableDocumentationInput["columns"][number]
+): string {
+    if (column.autoincrement) return "Autoincrement";
+    if (column.defaultValue === null) return "—";
+    return `\`${markdownTableCell(column.defaultValue)}\``;
+}
+
 /**
  * Renders the authoritative SQLite table and column catalog.
  * @param tables Tables projected from the checked migration snapshot.
@@ -133,7 +142,7 @@ export function renderDatabase(
         .map((table) => {
             const rows = table.columns.map(
                 (column) =>
-                    `| \`${markdownTableCell(column.name)}\` | \`${markdownTableCell(column.type)}\` | ${column.notNull ? "No" : "Yes"} | ${column.primaryKey ? "Yes" : "No"} | ${column.defaulted ? "Yes" : "No"} |`
+                    `| \`${markdownTableCell(column.name)}\` | \`${markdownTableCell(column.type)}\` | ${column.notNull ? "No" : "Yes"} | ${column.primaryKey ? "Yes" : "No"} | ${databaseDefaultLabel(column)} |`
             );
             const foreignKeys = table.foreignKeys.map(
                 (foreignKey) =>

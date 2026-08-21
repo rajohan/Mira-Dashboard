@@ -208,6 +208,71 @@ describe("DocsRoute", () => {
         );
     });
 
+    test("caps rendered Markdown highlights", () => {
+        render(
+            <DocsRoute
+                documents={[
+                    {
+                        content: `${"match ".repeat(1200)}\n`,
+                        kind: "markdown",
+                        path: "README.md",
+                    },
+                    {
+                        content: "{}\n",
+                        kind: "json",
+                        path: "openapi.raw-http.json",
+                    },
+                ]}
+            />
+        );
+
+        fireEvent.change(
+            screen.getByRole("searchbox", { name: "Search documentation" }),
+            { target: { value: "match" } }
+        );
+        expect(screen.getByText("1 of 1000 matches", { selector: "p" })).toBeVisible();
+        expect(
+            screen
+                .getByText("README.md", { selector: "p" })
+                .closest("section")
+                ?.querySelectorAll("mark")
+        ).toHaveLength(1000);
+    });
+
+    test("clears search when an internal link opens a nonmatching document", () => {
+        render(
+            <DocsRoute
+                documents={[
+                    {
+                        content: "[Search needle](target.md)\n",
+                        kind: "markdown",
+                        path: "README.md",
+                    },
+                    {
+                        content: "Target content\n",
+                        kind: "markdown",
+                        path: "target.md",
+                    },
+                    {
+                        content: "{}\n",
+                        kind: "json",
+                        path: "openapi.raw-http.json",
+                    },
+                ]}
+            />
+        );
+
+        const search = screen.getByRole("searchbox", {
+            name: "Search documentation",
+        });
+        fireEvent.change(search, { target: { value: "needle" } });
+        fireEvent.click(screen.getByRole("link", { name: "Search needle" }));
+
+        expect(search).toHaveValue("");
+        expect(screen.getByText("target.md", { selector: "p" })).toBeVisible();
+        expect(screen.getByText("Target content")).toBeVisible();
+    });
+
     test("opens generated Markdown links and projects individual schemas", () => {
         renderDocsRoute();
 

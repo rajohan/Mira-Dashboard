@@ -202,7 +202,13 @@ describe("generated contract documentation", () => {
         expect(routeDocumentation?.match(/^\| `\//gmu)).toHaveLength(19);
         expect(first.get("database.md")).toContain("## `users`");
         expect(first.get("database.md")).toContain(
-            "| `password_hash` | `text` | No | No | No |"
+            "| `password_hash` | `text` | No | No | — |"
+        );
+        expect(first.get("database.md")).toContain(
+            "| `reconciliation_state` | `text` | No | No | `'pending'` |"
+        );
+        expect(first.get("database.md")).toContain(
+            "| `number` | `integer` | Yes | Yes | Autoincrement |"
         );
         const openApi = JSON.parse(first.get("openapi.raw-http.json") ?? "null") as {
             openapi: string;
@@ -231,6 +237,26 @@ describe("generated contract documentation", () => {
                     },
                 },
             },
+        });
+        expect(openApi.paths["/api/health/ready"]?.get?.responses).toMatchObject({
+            "503": { content: { "application/json": {} } },
+        });
+        expect(
+            openApi.paths["/api/terminal/sessions/{sessionId}/socket"]?.get?.[
+                "x-websocket"
+            ]
+        ).toEqual({
+            clientMaximumMessageBytes: 16_384,
+            protocol: "mira-terminal-v1",
+            serverMaximumMessageBytes: 32_768,
+        });
+        expect(
+            openApi.paths["/api/files/content/{ticketId}"]?.get?.["x-byte-range"]
+        ).toEqual({
+            requestHeader: "Range",
+            requestSyntax: "bytes=start-end",
+            responseHeaders: ["Accept-Ranges", "Content-Range"],
+            unit: "bytes",
         });
         expect(first.get("database.md")).toContain("### Foreign keys");
         expect(first.get("database.md")).toContain("### Indexes");

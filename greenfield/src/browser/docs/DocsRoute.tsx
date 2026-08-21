@@ -25,6 +25,8 @@ interface DocumentGroup {
 }
 
 const initialDocumentPath = "README.md";
+const maximumMarkdownHighlights = 1000;
+const maximumNavigationHighlights = 250;
 const visibleScrollbarClassName =
     "[scrollbar-gutter:stable] [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-primary-950 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-primary-500 [&::-webkit-scrollbar-thumb:hover]:bg-primary-400";
 function documentContent(
@@ -76,13 +78,21 @@ function groupDocuments(source: readonly GeneratedDocument[]): readonly Document
     }));
 }
 
-function highlightedText(value: string, query: string): ReactNode {
+interface HighlightBudget {
+    remaining: number;
+}
+
+function highlightedText(
+    value: string,
+    query: string,
+    budget?: HighlightBudget
+): ReactNode {
     if (query.length === 0) return value;
     const normalizedValue = value.toLowerCase();
     const parts: ReactNode[] = [];
     let cursor = 0;
     let match = normalizedValue.indexOf(query);
-    while (match >= 0) {
+    while (match >= 0 && (budget === undefined || budget.remaining > 0)) {
         if (match > cursor) parts.push(value.slice(cursor, match));
         parts.push(
             <mark
@@ -92,6 +102,7 @@ function highlightedText(value: string, query: string): ReactNode {
                 {value.slice(match, match + query.length)}
             </mark>
         );
+        if (budget !== undefined) budget.remaining -= 1;
         cursor = match + query.length;
         match = normalizedValue.indexOf(query, cursor);
     }
@@ -100,14 +111,16 @@ function highlightedText(value: string, query: string): ReactNode {
 }
 
 function HighlightedText({
+    budget,
     children,
     query,
 }: {
+    readonly budget: HighlightBudget;
     readonly children: ReactNode;
     readonly query: string;
 }) {
     return Children.map(children, (node) =>
-        typeof node === "string" ? highlightedText(node, query) : node
+        typeof node === "string" ? highlightedText(node, query, budget) : node
     );
 }
 
@@ -217,6 +230,12 @@ export function DocsRoute({
             }
     );
     const normalizedQuery = useDeferredValue(query.trim().toLowerCase());
+    const navigationHighlightBudget: HighlightBudget = {
+        remaining: maximumNavigationHighlights,
+    };
+    const viewerHighlightBudget: HighlightBudget = {
+        remaining: maximumMarkdownHighlights,
+    };
     const [searchIndex] = useState(() =>
         documents.map((document) => ({
             document,
@@ -295,13 +314,15 @@ export function DocsRoute({
                                             <span className="block truncate font-medium">
                                                 {highlightedText(
                                                     documentLabel(document.path),
-                                                    normalizedQuery
+                                                    normalizedQuery,
+                                                    navigationHighlightBudget
                                                 )}
                                             </span>
                                             <span className="text-primary-400 block truncate text-xs">
                                                 {highlightedText(
                                                     document.path,
-                                                    normalizedQuery
+                                                    normalizedQuery,
+                                                    navigationHighlightBudget
                                                 )}
                                             </span>
                                         </button>
@@ -357,16 +378,23 @@ export function DocsRoute({
                                                 href={`#${target}`}
                                                 onClick={(event) => {
                                                     event.preventDefault();
+                                                    setQuery("");
                                                     setSelectedPath(target!);
                                                 }}
                                             >
-                                                <HighlightedText query={normalizedQuery}>
+                                                <HighlightedText
+                                                    budget={viewerHighlightBudget}
+                                                    query={normalizedQuery}
+                                                >
                                                     {children}
                                                 </HighlightedText>
                                             </a>
                                         ) : (
                                             <span>
-                                                <HighlightedText query={normalizedQuery}>
+                                                <HighlightedText
+                                                    budget={viewerHighlightBudget}
+                                                    query={normalizedQuery}
+                                                >
                                                     {children}
                                                 </HighlightedText>
                                             </span>
@@ -380,63 +408,90 @@ export function DocsRoute({
                                                 className
                                             )}
                                         >
-                                            <HighlightedText query={normalizedQuery}>
+                                            <HighlightedText
+                                                budget={viewerHighlightBudget}
+                                                query={normalizedQuery}
+                                            >
                                                 {children}
                                             </HighlightedText>
                                         </code>
                                     ),
                                     h1: ({ children }) => (
                                         <h1>
-                                            <HighlightedText query={normalizedQuery}>
+                                            <HighlightedText
+                                                budget={viewerHighlightBudget}
+                                                query={normalizedQuery}
+                                            >
                                                 {children}
                                             </HighlightedText>
                                         </h1>
                                     ),
                                     h2: ({ children }) => (
                                         <h2>
-                                            <HighlightedText query={normalizedQuery}>
+                                            <HighlightedText
+                                                budget={viewerHighlightBudget}
+                                                query={normalizedQuery}
+                                            >
                                                 {children}
                                             </HighlightedText>
                                         </h2>
                                     ),
                                     h3: ({ children }) => (
                                         <h3>
-                                            <HighlightedText query={normalizedQuery}>
+                                            <HighlightedText
+                                                budget={viewerHighlightBudget}
+                                                query={normalizedQuery}
+                                            >
                                                 {children}
                                             </HighlightedText>
                                         </h3>
                                     ),
                                     h4: ({ children }) => (
                                         <h4>
-                                            <HighlightedText query={normalizedQuery}>
+                                            <HighlightedText
+                                                budget={viewerHighlightBudget}
+                                                query={normalizedQuery}
+                                            >
                                                 {children}
                                             </HighlightedText>
                                         </h4>
                                     ),
                                     li: ({ children }) => (
                                         <li>
-                                            <HighlightedText query={normalizedQuery}>
+                                            <HighlightedText
+                                                budget={viewerHighlightBudget}
+                                                query={normalizedQuery}
+                                            >
                                                 {children}
                                             </HighlightedText>
                                         </li>
                                     ),
                                     p: ({ children }) => (
                                         <p>
-                                            <HighlightedText query={normalizedQuery}>
+                                            <HighlightedText
+                                                budget={viewerHighlightBudget}
+                                                query={normalizedQuery}
+                                            >
                                                 {children}
                                             </HighlightedText>
                                         </p>
                                     ),
                                     td: ({ children }) => (
                                         <td>
-                                            <HighlightedText query={normalizedQuery}>
+                                            <HighlightedText
+                                                budget={viewerHighlightBudget}
+                                                query={normalizedQuery}
+                                            >
                                                 {children}
                                             </HighlightedText>
                                         </td>
                                     ),
                                     th: ({ children }) => (
                                         <th>
-                                            <HighlightedText query={normalizedQuery}>
+                                            <HighlightedText
+                                                budget={viewerHighlightBudget}
+                                                query={normalizedQuery}
+                                            >
                                                 {children}
                                             </HighlightedText>
                                         </th>
