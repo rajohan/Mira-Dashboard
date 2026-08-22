@@ -12,7 +12,13 @@ bun run test storybook
 bun run build storybook
 ```
 
-The development server listens on port 6006. The static verification build is written under
+The development server listens on loopback port 6007 by default. The Dashboard host's
+browser-facing proxy remains on port 6006, so moving between worktrees never requires answering
+Storybook's interactive fallback-port prompt. Set `MIRA_DASHBOARD_STORYBOOK_PORT` only when a
+different upstream port is intentionally required. When Tailscale is available, the command also
+discovers the machine's exact MagicDNS hostname and passes it through the same strict allowed-host
+validation; `MIRA_DASHBOARD_STORYBOOK_ALLOWED_HOST` remains the explicit override. The static
+verification build is written under
 `dist/storybook`. `bun run test storybook` directly runs every story and `play` function in
 headless Chromium, with accessibility violations configured as errors. It is also the third
 partition of `bun run test`; `bun run test coverage` runs it with V8 coverage and merges its three

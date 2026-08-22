@@ -11,7 +11,10 @@ import {
     productionPreflightCommands,
     runProductionPreflight,
 } from "./productionPreflight.ts";
-import { parseStorybookCommandArguments } from "./storybookCommand.ts";
+import {
+    parseStorybookCommandArguments,
+    parseTailscaleDnsName,
+} from "./storybookCommand.ts";
 import { parseTestCommandArguments } from "./testCommand.ts";
 
 describe("repository command entrypoints", () => {
@@ -69,6 +72,11 @@ describe("repository command entrypoints", () => {
             "scripts/generateDocs.ts",
         ]);
         expect(parseStorybookCommandArguments(["build"])).toContain("build");
+        expect(parseStorybookCommandArguments(["dev"], {})).toContain("6007");
+        expect(
+            parseTailscaleDnsName('{"Self":{"DNSName":"dashboard.example.ts.net."}}')
+        ).toBe("dashboard.example.ts.net");
+        expect(parseTailscaleDnsName("not json")).toBeUndefined();
         expect(
             parseStorybookCommandArguments(["dev"], {
                 MIRA_DASHBOARD_STORYBOOK_HOST: "127.0.0.1",
