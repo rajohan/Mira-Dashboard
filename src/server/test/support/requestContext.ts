@@ -426,11 +426,23 @@ export function createTestAuthenticationLifecycleService(
         changePassword:
             overrides.changePassword ??
             (() => Promise.resolve({ status: "session-changed" as const })),
+        changeEmail:
+            overrides.changeEmail ??
+            (() => Promise.resolve({ status: "session-changed" as const })),
         listSessions: overrides.listSessions ?? (() => []),
         login:
             overrides.login ??
             (() => Promise.resolve({ status: "bootstrap-required" as const })),
         logout: overrides.logout ?? (() => Promise.resolve(false)),
+        requestPasswordReset:
+            overrides.requestPasswordReset ??
+            (() => Promise.resolve({ status: "accepted" as const })),
+        resetPassword:
+            overrides.resetPassword ??
+            (() => Promise.resolve({ status: "invalid-token" as const })),
+        verifyEmail:
+            overrides.verifyEmail ??
+            (() => Promise.resolve({ status: "invalid-token" as const })),
         revokeAllSessions:
             overrides.revokeAllSessions ??
             (() => Promise.resolve({ revokedSessions: 0 })),

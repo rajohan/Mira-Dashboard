@@ -50,6 +50,7 @@ const authenticatedStoryRoutes = new Set<string>(
 
 export interface DashboardPageStoryProps {
     readonly fixtures?: DashboardStoryFixtures;
+    readonly initialEntry?: string;
     readonly querySeeds?: readonly DashboardPageStoryQuerySeed[];
     readonly route: DashboardStoryRoute;
     readonly terminalBrowserDependencies?: TerminalBrowserDependencies;
@@ -78,6 +79,7 @@ function createPageStoryQueryClient() {
 
 function createPageStoryDependencies({
     fixtures,
+    initialEntry,
     querySeeds = [],
     route,
 }: DashboardPageStoryProps) {
@@ -105,9 +107,12 @@ function createPageStoryDependencies({
         },
         queryClient,
         realtimeClient: noOpStoryRealtimeClient,
-        router: createDashboardRouter(createMemoryHistory({ initialEntries: [route] }), {
-            scrollRestoration: false,
-        }),
+        router: createDashboardRouter(
+            createMemoryHistory({ initialEntries: [initialEntry ?? route] }),
+            {
+                scrollRestoration: false,
+            }
+        ),
         securityVerification,
         trpcClient,
         webAuthnClient: unavailableStoryWebAuthnClient,
@@ -121,12 +126,13 @@ function createPageStoryDependencies({
  */
 export function DashboardPageStory({
     fixtures,
+    initialEntry,
     querySeeds,
     route,
     terminalBrowserDependencies,
 }: DashboardPageStoryProps): ReactElement {
     const [dependencies] = useState(() =>
-        createPageStoryDependencies({ fixtures, querySeeds, route })
+        createPageStoryDependencies({ fixtures, initialEntry, querySeeds, route })
     );
     useEffect(
         () => () => {

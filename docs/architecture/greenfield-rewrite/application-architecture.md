@@ -430,7 +430,7 @@ reviewed session, cron, agent-availability, realtime, and task-notification surf
 chat or OpenClaw adapter must extend that source audit before depending on additional semantics.
 Current-production Gateway/chat/session/agent/cron code supplies parity evidence, not protocol
 authority. The bootstrap controls and executable evidence remain in the
-[Phase 2 threat model](../../security/greenfield-phase-two-threat-model.md).
+[security threat model](../../security/security-threat-model.md).
 
 ### Persistent Gateway lifecycle
 

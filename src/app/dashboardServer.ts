@@ -70,8 +70,10 @@ import {
 import {
     type JobActionDefinition,
     hostSystemCleanupJobActionDefinition,
+    hostDashboardRestartJobActionDefinition,
     hostSystemRestartJobActionDefinition,
     hostSystemUpdateJobActionDefinition,
+    hostWorkerRestartJobActionDefinition,
     jobActionDefinitions,
     managedPreviewJobActionDefinitions,
     deliveryGitHubJobActionDefinition,
@@ -145,6 +147,10 @@ import {
 } from "../server/domains/security/mfa/totpSecretCipher.ts";
 import { createWebAuthnAdapter } from "../server/domains/security/mfa/webauthn/adapter.ts";
 import type { WebAuthnRelyingPartyConfiguration } from "../server/domains/security/mfa/webauthn/relyingPartyConfiguration.ts";
+import {
+    createResendPasswordRecoveryEmailSender,
+    type PasswordRecoveryEmailSender,
+} from "../server/domains/security/passwordRecoveryEmail.ts";
 import { createRequestAuthenticator } from "../server/domains/security/requestAuthentication.ts";
 import { createRequestAuthenticationRepository } from "../server/domains/security/requestAuthenticationRepository.ts";
 import { createSecurityAuditLifecycleService } from "../server/domains/security/securityAuditLifecycle.ts";
@@ -315,6 +321,7 @@ export interface DashboardServerOptions extends Omit<
     readonly openClawFileRoot?: WorkspaceFileRootConfiguration;
     /** Optional separate read-only OpenClaw root used only for transcript-authorized media. */
     readonly openClawMediaFileRoot?: WorkspaceFileRootConfiguration;
+    readonly passwordRecoveryEmailSender?: PasswordRecoveryEmailSender;
     readonly recentAuthenticationWindowMs?: number;
     readonly sessionIdleDurationMs?: number;
     /** Verified immutable release used to require a matching fresh worker. */
@@ -820,6 +827,8 @@ export async function createDashboardServer(
             ...(options.now !== undefined && { now: options.now }),
             passwordWorkBudget,
             passwordWorkGate,
+            passwordRecoveryEmailSender: options.passwordRecoveryEmailSender,
+            publicOrigin: browserOrigin,
             recentAuthenticationWindowMs: options.recentAuthenticationWindowMs,
             repository: createAuthenticationLifecycleRepository(
                 database,
@@ -975,12 +984,14 @@ export async function createDashboardServer(
             wakeEventPump,
         });
         const serviceActionDefinitions = Object.freeze({
+            "dashboard-restart": hostDashboardRestartJobActionDefinition,
             "openclaw-cleanup": openClawSessionsCleanupJobActionDefinition,
             "openclaw-restart": openClawGatewayRestartJobActionDefinition,
             "openclaw-update": openClawInstallationUpdateJobActionDefinition,
             "system-cleanup": hostSystemCleanupJobActionDefinition,
             "system-restart": hostSystemRestartJobActionDefinition,
             "system-update": hostSystemUpdateJobActionDefinition,
+            "worker-restart": hostWorkerRestartJobActionDefinition,
         });
         const serviceActionsService = createServiceActionsService({
             auditWriter: createSqliteServiceActionAuditWriter({
@@ -1969,6 +1980,15 @@ export async function runDashboardWebProcess(
             ...(configuration.elevenLabsApiKey === undefined
                 ? {}
                 : { elevenLabsApiKey: configuration.elevenLabsApiKey }),
+            ...(configuration.resend === undefined
+                ? {}
+                : {
+                      passwordRecoveryEmailSender:
+                          createResendPasswordRecoveryEmailSender({
+                              apiKey: Redacted.value(configuration.resend.apiKey),
+                              fromEmail: configuration.resend.fromEmail,
+                          }),
+                  }),
             frontendAssets,
             gatewayUrl: configuration.gatewayUrl,
             gatewayToken: configuration.gatewayToken,

@@ -25,7 +25,7 @@ import { Button } from "../ui/Button.tsx";
 import { ConfirmModal } from "../ui/ConfirmModal.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { Form } from "../ui/Form.tsx";
-import { firstFormFieldError } from "../ui/formErrors.ts";
+import { progressiveFormValidators, touchedFormFieldError } from "../ui/formErrors.ts";
 import { FormField } from "../ui/FormField.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { Input } from "../ui/Input.tsx";
@@ -137,7 +137,7 @@ export function AutomationCredentialPanel({ principal }: AutomationCredentialPan
                 formApi.setFieldValue("label", "");
             }
         },
-        validators: { onSubmit: automationCredentialSettingsSchema },
+        validators: progressiveFormValidators(automationCredentialSettingsSchema),
     });
 
     async function rotateCredential(credentialId: string, label: string) {
@@ -331,8 +331,8 @@ export function AutomationCredentialPanel({ principal }: AutomationCredentialPan
                                         <FormField
                                             disabled={action.busy}
                                             description="This name is used for a new token or a replacement created above."
-                                            error={firstFormFieldError(
-                                                field.state.meta.errors
+                                            error={touchedFormFieldError(
+                                                field.state.meta
                                             )}
                                             label="New token name"
                                         >

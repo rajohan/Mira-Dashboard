@@ -1,6 +1,6 @@
 # Repository commands
 
-`package.json` exposes ten stable entrypoints. Typed subcommands keep implementation partitions out
+`package.json` exposes nine stable entrypoints. Typed subcommands keep implementation partitions out
 of the package-script list while preserving explicit, shell-free argument handling.
 
 | Command                                                                      | Purpose                                                                                                     | Writes or starts processes                                          |
@@ -23,8 +23,7 @@ of the package-script list while preserving explicit, shell-free argument handli
 | `bun run test timings <bun\|browser\|storybook>`                             | Refresh one timing inventory after its complete partition passes                                            | Replaces one checked-in timing file                                 |
 | `bun run storybook [dev\|build]`                                             | Start the workbench or build static Storybook                                                               | Starts port 6006 or writes `dist/storybook`                         |
 | `bun run delivery <prepare-state\|activate> ...`                             | Prepare protected production state or activate an already-qualified immutable release                       | Production-sensitive; can change active production                  |
-| `bun run preflight`                                                          | Prove a clean candidate through audit, checks, coverage, builds, and immutable release creation             | Writes artifacts only; never activates production                   |
-| `bun run auth:reset-password -- --username NAME [--reset-mfa]`               | Active-release host password recovery                                                                       | Production-sensitive interactive recovery                           |
+| `bun run preflight [--parallel]`                                             | Prove a clean candidate through audit, checks, coverage, builds, and immutable release creation             | Sequential by default; `--parallel` uses bounded two-command phases |
 
 Internal files under `scripts/` are not additional public commands. CI uses the same entrypoints and
 passes explicit partitions rather than calling implementation files. The root provisioning
@@ -38,6 +37,10 @@ not an everyday package command and does not run implicitly during ordinary deve
 `preflight` and `delivery` deliberately remain separate: preflight proves that one unchanged source
 commit can produce a qualified immutable artifact, while delivery performs the stateful preparation
 or activation of that artifact. Passing preflight never grants or implies production authority.
+The optional `--parallel` mode still installs first and builds the immutable release last. Between
+those boundaries it runs audit with static checks, then coverage with the Storybook build. This
+bounded two-command concurrency is intended for an isolated worker with at least 4 vCPU and 8 GiB;
+the default remains the lower-risk sequential path.
 
 ## Tooling decisions
 
@@ -51,3 +54,8 @@ Pino is intentionally not installed. The Dashboard already owns one structured l
 Effect bridge, with recursive redaction, bounded fields and records, process/release identity,
 level policy, project-file output, and constant sink-failure fallback. Adding Pino would duplicate
 that process-wide logging boundary without closing an unmet capability.
+
+Storybook coverage is inventory-driven: every production route and each material route state must
+map to a real page/component story. Authentication coverage includes bootstrap, password login,
+forgot/reset password, email-verification success/error, pending MFA, and account-email change.
+Generic form-layout stories remain component examples and do not duplicate route-owned controls.

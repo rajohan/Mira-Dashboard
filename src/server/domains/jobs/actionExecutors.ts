@@ -78,6 +78,9 @@ import {
     dockerOperationJobActionKey,
     dockerOverviewCacheJobActionKey,
     dockerUpdaterJobActionKey,
+    hostDashboardRestartJobActionDefinition,
+    hostDashboardRestartJobActionKey,
+    hostDashboardServiceRestartJobResultSchema,
     hostSystemCleanupJobActionDefinition,
     hostSystemCleanupJobActionKey,
     hostSystemCleanupJobResultSchema,
@@ -87,6 +90,8 @@ import {
     hostSystemUpdateJobActionDefinition,
     hostSystemUpdateJobActionKey,
     hostSystemUpdateJobResultSchema,
+    hostWorkerRestartJobActionDefinition,
+    hostWorkerRestartJobActionKey,
     gitWorkspaceCacheJobActionKey,
     jobActionDefinitions,
     logMaintenanceJobActionKey,
@@ -587,6 +592,15 @@ export function createHostOperationJobExecutor(
                     });
                 }
                 const result = await hostOperations.request(operationId, signal);
+                if (
+                    operationId === "dashboard-restart" ||
+                    operationId === "worker-restart"
+                ) {
+                    return v.parse(hostDashboardServiceRestartJobResultSchema, {
+                        completedAtMs: context.nowMs(),
+                        status: result.status,
+                    });
+                }
                 if (operationId === "system-cleanup") {
                     return v.parse(hostSystemCleanupJobResultSchema, {
                         completedAtMs: context.nowMs(),
@@ -809,8 +823,10 @@ export function createJobWorkerActionResolver(
                 ? []
                 : [
                       hostSystemCleanupJobActionDefinition,
+                      hostDashboardRestartJobActionDefinition,
                       hostSystemRestartJobActionDefinition,
                       hostSystemUpdateJobActionDefinition,
+                      hostWorkerRestartJobActionDefinition,
                   ]),
             ...(workspaceFiles === undefined
                 ? []
@@ -1021,6 +1037,15 @@ export function createJobWorkerActionResolver(
                   )
         ),
         ...gatedExecutor(
+            hostDashboardRestartJobActionKey,
+            dependencies.hostOperations === undefined
+                ? undefined
+                : createHostOperationJobExecutor(
+                      dependencies.hostOperations,
+                      "dashboard-restart"
+                  )
+        ),
+        ...gatedExecutor(
             hostSystemCleanupJobActionKey,
             dependencies.hostOperations === undefined
                 ? undefined
@@ -1045,6 +1070,15 @@ export function createJobWorkerActionResolver(
                 : createHostOperationJobExecutor(
                       dependencies.hostOperations,
                       "system-update"
+                  )
+        ),
+        ...gatedExecutor(
+            hostWorkerRestartJobActionKey,
+            dependencies.hostOperations === undefined
+                ? undefined
+                : createHostOperationJobExecutor(
+                      dependencies.hostOperations,
+                      "worker-restart"
                   )
         ),
         ...gatedExecutor("system.worker-smoke", workerSmokeExecutor),

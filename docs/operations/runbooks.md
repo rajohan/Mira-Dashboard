@@ -25,6 +25,14 @@ Run against one clean reviewed candidate with the exact `.bun-version` runtime:
 bun run preflight
 ```
 
+An isolated 4-vCPU/8-GiB worker may use `bun run preflight --parallel`. It preserves install-first
+and immutable-release-last ordering while running only the independent middle gates in bounded
+two-command phases. Production hosts and constrained machines should keep the sequential default.
+The maintained Daytona/Crabbox Bun runner transfers enough repository metadata to preserve the
+current commit, branch, and configured stacked coverage base, so the ordinary command can run
+there without manually reconstructing Git state. Disposable workers must still be released after
+their result and artifacts are recovered.
+
 This performs frozen install, dependency audit, static checks, formatting check, complete coverage,
 Storybook build, and immutable release build sequentially. Record the candidate commit, Bun
 revision, release-manifest digest, and results in cutover evidence. Preflight qualifies an artifact;
@@ -123,37 +131,24 @@ Observe at least one full operational cycle before declaring Greenfield producti
 Unknown activation, failed heartbeat or backup, repeated restart, readiness loss, integrity
 failure, or a resource-limit event blocks completion and starts recovery.
 
-## Forgotten Dashboard password
+## Account email verification and forgotten password
 
-Use this host-local recovery path only when the Dashboard account cannot authenticate normally.
-It operates on the active production release and never accepts a password through arguments or
-environment variables.
+Bootstrap requires a valid email address and sends its verification link after creating the usable
+account. Before verification, the operator can sign in and correct or resend the address under
+Settings → Dashboard settings → Account email. The status badge shows **Unverified**, **Change
+pending**, or **Verified**. A verified address remains the active recovery destination while a
+replacement is pending, and is atomically replaced only when the new link is consumed. Links expire
+after 15 minutes and can be used once. The verification result page remains visible until the
+operator chooses **Continue**.
 
-1. Open an interactive terminal on the Dashboard host as the Dashboard operator.
-2. Run the password-only recovery command:
+For password recovery, choose **Forgot password?** on the sign-in page, enter the username, and
+follow the link sent by Resend. Recovery mail is sent only to a verified active address, while the
+browser response remains identical for known, unknown, and unverified accounts. Reset links contain
+a hashed-at-rest, single-use token, expire after 15 minutes, preserve MFA, and revoke every browser
+session and pending login when consumed.
 
-    ```bash
-    cd /home/ubuntu/projects/mira-dashboard/production/checkout
-    bun run auth:reset-password -- --username <username>
-    ```
-
-3. Enter the new password twice at the hidden prompts.
-4. Confirm the command reports that the password was reset and every session was revoked.
-5. Sign in again with the new password. Existing MFA remains required.
-
-If the user has also lost every MFA factor and recovery code, use the explicit break-glass mode:
-
-```bash
-cd /home/ubuntu/projects/mira-dashboard/production/checkout
-bun run auth:reset-password -- --username <username> --reset-mfa
-```
-
-`--reset-mfa` removes registered authenticator apps, security keys, and recovery codes in the same
-transaction as the password reset. Both modes revoke all sessions and pending login ceremonies,
-discard unconfirmed authenticator enrollment, clear only that user's account-password and
-account-MFA cooldowns, advance the authentication version, and append an `auth.password.reset`
-security-audit event. A failure rolls back the complete transaction; rerun only after resolving
-the reported host or release problem.
-
-Do not use a source checkout entrypoint, an unpinned Bun binary, a copied database, or a password
-provided through `--password`, stdin redirection, an environment variable, or a message.
+Production requires the paired `RESEND_API_KEY` and `MIRA_DASHBOARD_RESEND_FROM_EMAIL` settings.
+Use a verified transactional sender such as `Mira Dashboard <no-reply@account.rajohan.no>`.
+Keep click and open tracking disabled; no tracking subdomain is required. The configured public
+origin controls verification and reset-link URLs. If delivery is unavailable, repair Resend/DNS configuration;
+there is intentionally no release-bundled host password-reset executable.

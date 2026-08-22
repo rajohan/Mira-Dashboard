@@ -69,6 +69,66 @@ export const Bootstrap: Story = { args: loginStory(bootstrap) };
 
 export const Password: Story = { args: loginStory(anonymous) };
 
+export const ForgotPassword: Story = {
+    args: loginStory(anonymous),
+    play: async ({ canvasElement }) => {
+        const canvas = within(canvasElement);
+        await userEvent.click(
+            await canvas.findByRole("button", { name: "Forgot password?" })
+        );
+        await expect(
+            await canvas.findByRole("heading", { name: "Reset password" })
+        ).toBeVisible();
+    },
+};
+
+export const ResetPassword: Story = {
+    args: {
+        ...loginStory(anonymous),
+        initialEntry: `/login?resetToken=${"a".repeat(32)}.${"b".repeat(64)}`,
+    },
+};
+
+export const EmailVerification: Story = {
+    args: {
+        fixtures: {
+            mutations: {
+                "auth.verifyEmail": dashboardStoryValue({
+                    email: "operator@example.com",
+                }),
+            },
+            queries: { "auth.status": dashboardStoryValue(anonymous) },
+        },
+        initialEntry: `/login?verifyEmailToken=${"a".repeat(32)}.${"b".repeat(64)}`,
+        route: "/login",
+    },
+    play: async ({ canvasElement }) => {
+        const canvas = within(canvasElement);
+        await expect(
+            await canvas.findByText("operator@example.com is now verified.")
+        ).toBeVisible();
+    },
+};
+
+export const EmailVerificationError: Story = {
+    args: {
+        fixtures: {
+            mutations: {
+                "auth.verifyEmail": dashboardStoryFailure(
+                    new TypeError("Safe expired verification link")
+                ),
+            },
+            queries: { "auth.status": dashboardStoryValue(anonymous) },
+        },
+        initialEntry: `/login?verifyEmailToken=${"a".repeat(32)}.${"b".repeat(64)}`,
+        route: "/login",
+    },
+    play: async ({ canvasElement }) => {
+        const canvas = within(canvasElement);
+        await expect(await canvas.findByRole("alert")).toBeVisible();
+    },
+};
+
 export const PendingTotp: Story = {
     args: loginStory(pendingMfa),
     play: async ({ canvasElement }) => {

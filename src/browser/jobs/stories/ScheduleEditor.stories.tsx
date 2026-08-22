@@ -97,9 +97,8 @@ export const InvalidSubmission: Story = {
         await userEvent.clear(interval);
         await userEvent.type(interval, "59");
         await waitFor(async () => {
-            await expect(save).toBeEnabled();
+            await expect(save).toBeDisabled();
         });
-        await userEvent.click(save);
 
         const error = await canvas.findByText(
             "Use an interval from 60 to 31,536,000 seconds"
@@ -108,9 +107,7 @@ export const InvalidSubmission: Story = {
         await expect(error).toBeVisible();
         await expect(interval).toHaveAttribute("aria-invalid", "true");
         await expect(descriptionIds).toContain(error.id);
-        await waitFor(async () => {
-            await expect(interval).toHaveFocus();
-        });
+        await expect(interval).toHaveFocus();
         await expect(save).toBeDisabled();
         await expect(args.onSave).not.toHaveBeenCalled();
     },

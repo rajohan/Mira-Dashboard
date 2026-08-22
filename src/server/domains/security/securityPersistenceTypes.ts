@@ -77,6 +77,15 @@ export interface SecurityUserPasswordUpdateInput {
     readonly userId: string;
 }
 
+export interface SecurityUserEmailUpdateInput {
+    readonly email: string;
+    readonly emailVerifiedAt: Date;
+    readonly expectedAuthenticationVersion: number;
+    readonly expectedEmail: string;
+    readonly updatedAt: Date;
+    readonly userId: string;
+}
+
 export interface SecurityUserPasswordResetInput extends SecurityUserPasswordUpdateInput {
     readonly expectedMfaEnabledAt: Date | null;
     readonly resetMfa: boolean;

@@ -15,6 +15,8 @@ export const users = sqliteTable(
         authenticationVersion: integer("authentication_version").notNull().default(1),
         createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
         disabledAt: integer("disabled_at", { mode: "timestamp_ms" }),
+        email: text("email").notNull(),
+        emailVerifiedAt: integer("email_verified_at", { mode: "timestamp_ms" }),
         id: text("id").notNull().primaryKey(),
         mfaEnabledAt: integer("mfa_enabled_at", { mode: "timestamp_ms" }),
         passwordHash: text("password_hash").notNull(),
@@ -36,6 +38,14 @@ export const users = sqliteTable(
         ),
         check("users_id_check", uuidV7TextCheck(table.id)),
         check(
+            "users_email_check",
+            sql`length(${table.email}) BETWEEN 3 AND 254 AND ${nulFreeTextCheck(table.email)} AND ${table.email} = lower(${table.email}) AND instr(${table.email}, '@') BETWEEN 2 AND length(${table.email}) - 2 AND instr(${table.email}, ' ') = 0`
+        ),
+        check(
+            "users_email_verified_at_check",
+            sql`${table.emailVerifiedAt} IS NULL OR (${timestampMillisecondsCheck(table.emailVerifiedAt)} AND ${table.emailVerifiedAt} >= ${table.createdAt} AND ${table.emailVerifiedAt} <= ${table.updatedAt})`
+        ),
+        check(
             "users_mfa_enabled_at_check",
             sql`${table.mfaEnabledAt} IS NULL OR (${timestampMillisecondsCheck(table.mfaEnabledAt)} AND ${table.mfaEnabledAt} >= ${table.createdAt} AND ${table.mfaEnabledAt} <= ${table.updatedAt})`
         ),
@@ -48,5 +58,6 @@ export const users = sqliteTable(
             sql`length(${table.username}) BETWEEN 3 AND 32 AND ${nulFreeTextCheck(table.username)} AND ${table.username} = lower(${table.username}) AND substr(${table.username}, 1, 1) GLOB '[a-z0-9]' AND ${table.username} NOT GLOB '*[^a-z0-9._-]*'`
         ),
         uniqueIndex("users_username_unique").on(table.username),
+        uniqueIndex("users_email_unique").on(table.email),
     ]
 );

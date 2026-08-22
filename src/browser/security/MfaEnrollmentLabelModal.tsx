@@ -3,7 +3,7 @@ import type { LucideIcon } from "lucide-react";
 
 import { Button } from "../ui/Button.tsx";
 import { Form } from "../ui/Form.tsx";
-import { firstFormFieldError } from "../ui/formErrors.ts";
+import { progressiveFormValidators, touchedFormFieldError } from "../ui/formErrors.ts";
 import { FormField } from "../ui/FormField.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { Input } from "../ui/Input.tsx";
@@ -43,7 +43,7 @@ export function MfaEnrollmentLabelModal({
         onSubmit: async ({ value }) => {
             if (await onSubmit(value.label)) onCompleted();
         },
-        validators: { onSubmit: optionalFactorLabelFormSchema },
+        validators: progressiveFormValidators(optionalFactorLabelFormSchema),
     });
 
     return (
@@ -60,7 +60,7 @@ export function MfaEnrollmentLabelModal({
                     {(field) => (
                         <FormField
                             disabled={busy}
-                            error={firstFormFieldError(field.state.meta.errors)}
+                            error={touchedFormFieldError(field.state.meta)}
                             label={inputLabel}
                         >
                             <Input

@@ -23,6 +23,7 @@ export const dashboardPageStoryRequirements = Object.freeze([
         exports: [
             "Loading",
             "Ready",
+            "EmailChange",
             "InitialError",
             "DestructiveConfirmation",
             "EnrollmentSecret",
@@ -166,6 +167,10 @@ export const dashboardPageStoryRequirements = Object.freeze([
             "Unavailable",
             "Bootstrap",
             "Password",
+            "ForgotPassword",
+            "ResetPassword",
+            "EmailVerification",
+            "EmailVerificationError",
             "PendingTotp",
             "RecoveryCode",
             "WebAuthn",

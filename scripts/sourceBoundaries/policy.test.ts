@@ -77,44 +77,6 @@ describe("source-boundary policy", () => {
         ).toBeUndefined();
         expect(
             validateSourceImport(
-                "src/app/resetDashboardPassword.ts",
-                staticImport("../contracts/auth.ts")
-            )
-        ).toBeUndefined();
-        expect(
-            validateSourceImport(
-                "src/app/resetDashboardPassword.ts",
-                staticImport("../server/database/runtime/databaseService.ts")
-            )
-        ).toBeUndefined();
-        expect(
-            validateSourceImport(
-                "src/app/resetDashboardPassword.ts",
-                staticImport("../server/domains/security/hostPasswordRecovery.ts")
-            )
-        ).toBeUndefined();
-        expect(
-            validateSourceImport(
-                "src/app/resetDashboardPassword.ts",
-                staticImport(
-                    "../server/domains/security/hostPasswordRecoveryRepository.ts"
-                )
-            )
-        ).toBeUndefined();
-        expect(
-            validateSourceImport(
-                "src/app/resetDashboardPassword.ts",
-                staticImport("../server/platform/filesystem/projectLayout.ts")
-            )
-        ).toBeUndefined();
-        expect(
-            validateSourceImport(
-                "src/app/resetDashboardPassword.ts",
-                staticImport("../server/platform/release/runtimeRelease.ts")
-            )
-        ).toBeUndefined();
-        expect(
-            validateSourceImport(
                 "src/app/databaseMaintenance.ts",
                 staticImport("../server/database/runtime/databaseService.ts")
             )
@@ -214,12 +176,6 @@ describe("source-boundary policy", () => {
         ).toContain("worker-app may not import server");
         expect(
             validateSourceImport(
-                "src/app/resetDashboardPassword.ts",
-                staticImport("../server/trpc/appRouter.ts")
-            )?.message
-        ).toContain("maintenance-app may not import server");
-        expect(
-            validateSourceImport(
                 "src/browser/dashboard.ts",
                 staticImport("./ui/stories/Button.stories.tsx")
             )?.message
@@ -288,13 +244,11 @@ describe("source-boundary policy", () => {
         for (const file of [
             "src/app/dashboardChatRuntimeMaintenance.test.ts",
             "src/app/dashboardServer.test.ts",
-            "src/app/resetDashboardPassword.test.ts",
             "src/app/trpcHttpHandler.test.ts",
             "src/app/trpcRequestPolicy.test.ts",
         ]) {
             expect(validateSourceFile(file)).toBeUndefined();
         }
-        expect(validateSourceFile("src/app/resetDashboardPassword.ts")).toBeUndefined();
         expect(validateSourceFile("src/newRoot.ts")?.message).toContain(
             "explicit process role"
         );

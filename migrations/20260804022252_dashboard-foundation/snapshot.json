@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "a39b0947-942c-4fbc-bc33-7f2cf6d2bdeb",
+  "id": "b2dc2a0e-bef5-4d8e-bbc8-d2ca7ead0d0f",
   "prevIds": [
-    "7c6ad5b1-68a7-45c2-afc1-88c8b4ee4b09"
+    "00000000-0000-0000-0000-000000000000"
   ],
   "ddl": [
     {
@@ -16,6 +16,10 @@
     },
     {
       "name": "auth_challenges",
+      "entityType": "tables"
+    },
+    {
+      "name": "auth_password_reset_tokens",
       "entityType": "tables"
     },
     {
@@ -485,6 +489,96 @@
       "name": "session_id",
       "entityType": "columns",
       "table": "auth_challenges"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "authentication_version",
+      "entityType": "columns",
+      "table": "auth_password_reset_tokens"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "auth_password_reset_tokens"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "expires_at",
+      "entityType": "columns",
+      "table": "auth_password_reset_tokens"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "pending_email",
+      "entityType": "columns",
+      "table": "auth_password_reset_tokens"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "prefix",
+      "entityType": "columns",
+      "table": "auth_password_reset_tokens"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "purpose",
+      "entityType": "columns",
+      "table": "auth_password_reset_tokens"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "user_id",
+      "entityType": "columns",
+      "table": "auth_password_reset_tokens"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "validator_hash",
+      "entityType": "columns",
+      "table": "auth_password_reset_tokens"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "validator_version",
+      "entityType": "columns",
+      "table": "auth_password_reset_tokens"
     },
     {
       "type": "integer",
@@ -4268,6 +4362,26 @@
     },
     {
       "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "email",
+      "entityType": "columns",
+      "table": "users"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "email_verified_at",
+      "entityType": "columns",
+      "table": "users"
+    },
+    {
+      "type": "text",
       "notNull": false,
       "autoincrement": false,
       "default": null,
@@ -4445,6 +4559,21 @@
       "name": "fk_auth_challenges_session_id_auth_sessions_id_fk",
       "entityType": "fks",
       "table": "auth_challenges"
+    },
+    {
+      "columns": [
+        "user_id"
+      ],
+      "tableTo": "users",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_auth_password_reset_tokens_user_id_users_id_fk",
+      "entityType": "fks",
+      "table": "auth_password_reset_tokens"
     },
     {
       "columns": [
@@ -4992,6 +5121,15 @@
     },
     {
       "columns": [
+        "prefix"
+      ],
+      "nameExplicit": false,
+      "name": "auth_password_reset_tokens_pk",
+      "table": "auth_password_reset_tokens",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
         "id"
       ],
       "nameExplicit": false,
@@ -5451,6 +5589,42 @@
       "name": "auth_challenges_session_purpose_unique",
       "entityType": "indexes",
       "table": "auth_challenges"
+    },
+    {
+      "columns": [
+        {
+          "value": "expires_at",
+          "isExpression": false
+        },
+        {
+          "value": "prefix",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "auth_password_reset_tokens_expires_idx",
+      "entityType": "indexes",
+      "table": "auth_password_reset_tokens"
+    },
+    {
+      "columns": [
+        {
+          "value": "user_id",
+          "isExpression": false
+        },
+        {
+          "value": "purpose",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "auth_password_reset_tokens_user_purpose_unique",
+      "entityType": "indexes",
+      "table": "auth_password_reset_tokens"
     },
     {
       "columns": [
@@ -7117,6 +7291,20 @@
     {
       "columns": [
         {
+          "value": "email",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "users_email_unique",
+      "entityType": "indexes",
+      "table": "users"
+    },
+    {
+      "columns": [
+        {
           "value": "heartbeat_at",
           "isExpression": false
         },
@@ -7265,6 +7453,42 @@
       "table": "auth_challenges"
     },
     {
+      "value": "\"authentication_version\" BETWEEN 1 AND 9007199254740991",
+      "name": "auth_password_reset_tokens_authentication_version_check",
+      "entityType": "checks",
+      "table": "auth_password_reset_tokens"
+    },
+    {
+      "value": "(\"purpose\" = 'password-reset' AND \"pending_email\" IS NULL) OR (\"purpose\" = 'email-verification' AND length(\"pending_email\") BETWEEN 3 AND 254 AND instr(\"pending_email\", char(0)) = 0 AND \"pending_email\" = lower(\"pending_email\") AND instr(\"pending_email\", '@') BETWEEN 2 AND length(\"pending_email\") - 2 AND instr(\"pending_email\", ' ') = 0)",
+      "name": "auth_password_reset_tokens_pending_email_check",
+      "entityType": "checks",
+      "table": "auth_password_reset_tokens"
+    },
+    {
+      "value": "length(\"prefix\") = 32 AND instr(\"prefix\", char(0)) = 0 AND \"prefix\" NOT GLOB '*[^0-9a-f]*'",
+      "name": "auth_password_reset_tokens_prefix_check",
+      "entityType": "checks",
+      "table": "auth_password_reset_tokens"
+    },
+    {
+      "value": "length(\"validator_hash\") = 64 AND instr(\"validator_hash\", char(0)) = 0 AND \"validator_hash\" NOT GLOB '*[^0-9a-f]*'",
+      "name": "auth_password_reset_tokens_validator_hash_check",
+      "entityType": "checks",
+      "table": "auth_password_reset_tokens"
+    },
+    {
+      "value": "\"validator_version\" = ?",
+      "name": "auth_password_reset_tokens_validator_version_check",
+      "entityType": "checks",
+      "table": "auth_password_reset_tokens"
+    },
+    {
+      "value": "\"created_at\" BETWEEN 0 AND 8640000000000000 AND \"expires_at\" BETWEEN 0 AND 8640000000000000 AND \"expires_at\" > \"created_at\" AND \"expires_at\" <= \"created_at\" + ?",
+      "name": "auth_password_reset_tokens_time_check",
+      "entityType": "checks",
+      "table": "auth_password_reset_tokens"
+    },
+    {
       "value": "\"allows_recovery\" IN (0, 1) AND \"allows_totp\" IN (0, 1) AND \"allows_webauthn\" IN (0, 1) AND (\"allows_recovery\" + \"allows_totp\" + \"allows_webauthn\") >= 1",
       "name": "auth_pending_logins_methods_check",
       "entityType": "checks",
@@ -7331,7 +7555,7 @@
       "table": "auth_rate_limit_buckets"
     },
     {
-      "value": "\"kind\" IN ('account-mfa', 'account-password', 'bootstrap-gateway-global', 'bootstrap-gateway-source', 'login-mfa-global', 'login-mfa-source', 'login-password-global', 'login-password-source')",
+      "value": "\"kind\" IN ('account-mfa', 'account-password', 'bootstrap-gateway-global', 'bootstrap-gateway-source', 'login-mfa-global', 'login-mfa-source', 'login-password-global', 'login-password-source', 'password-reset-global', 'password-reset-source')",
       "name": "auth_rate_limit_buckets_kind_check",
       "entityType": "checks",
       "table": "auth_rate_limit_buckets"
@@ -8833,6 +9057,18 @@
     {
       "value": "length(\"id\") = 36 AND instr(\"id\", char(0)) = 0 AND length(replace(\"id\", '-', '')) = 32 AND replace(\"id\", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr(\"id\", 9, 1) = '-' AND substr(\"id\", 14, 1) = '-' AND substr(\"id\", 15, 1) = '7' AND substr(\"id\", 19, 1) = '-' AND substr(\"id\", 20, 1) GLOB '[89ab]' AND substr(\"id\", 24, 1) = '-'",
       "name": "users_id_check",
+      "entityType": "checks",
+      "table": "users"
+    },
+    {
+      "value": "length(\"email\") BETWEEN 3 AND 254 AND instr(\"email\", char(0)) = 0 AND \"email\" = lower(\"email\") AND instr(\"email\", '@') BETWEEN 2 AND length(\"email\") - 2 AND instr(\"email\", ' ') = 0",
+      "name": "users_email_check",
+      "entityType": "checks",
+      "table": "users"
+    },
+    {
+      "value": "\"email_verified_at\" IS NULL OR (\"email_verified_at\" BETWEEN 0 AND 8640000000000000 AND \"email_verified_at\" >= \"created_at\" AND \"email_verified_at\" <= \"updated_at\")",
+      "name": "users_email_verified_at_check",
       "entityType": "checks",
       "table": "users"
     },

@@ -19,4 +19,4 @@
 - [Data and security](greenfield-rewrite/data-and-security.md) defines SQLite, privileged operations, authentication, and trust boundaries.
 - [Runtime and delivery](greenfield-rewrite/runtime-and-delivery.md) covers the Bun baseline, configuration, documentation, operations, quality gates, deployment, packages, and cutover.
 - [Implementation plan](greenfield-rewrite/implementation-plan.md) contains the phased sequence, open decisions, definition of done, and reviewed sources.
-- [Phase 2 threat model](../security/greenfield-phase-two-threat-model.md) records the trust-and-transport assets, misuse cases, controls, executable evidence, and residual risks.
+- [Security threat model](../security/security-threat-model.md) records the trust-and-transport assets, misuse cases, controls, executable evidence, and residual risks.

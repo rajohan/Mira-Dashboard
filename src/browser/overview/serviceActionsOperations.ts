@@ -23,6 +23,17 @@ export interface ServiceActionPresentation {
 }
 
 export const serviceActionPresentations = Object.freeze({
+    "dashboard-restart": {
+        actionLabel: "Dashboard restart",
+        buttonLabel: "Restart Dashboard",
+        confirmationLabel: "Restart Dashboard",
+        confirmationTitle: "Restart the Dashboard?",
+        description:
+            "Restarts the Dashboard web process through the fixed systemd authority.",
+        retryLabel: "Retry Dashboard restart request",
+        warning:
+            "The browser will disconnect briefly while the Dashboard web process restarts. The worker and queued jobs continue running.",
+    },
     "openclaw-cleanup": {
         actionLabel: "OpenClaw cleanup",
         buttonLabel: "Queue OpenClaw cleanup",
@@ -88,6 +99,16 @@ export const serviceActionPresentations = Object.freeze({
         retryLabel: "Retry system update request",
         warning:
             "System updates can take a long time and may affect running services. Review Dashboard jobs for the durable result.",
+    },
+    "worker-restart": {
+        actionLabel: "Worker restart",
+        buttonLabel: "Restart worker",
+        confirmationLabel: "Restart worker",
+        confirmationTitle: "Restart the Dashboard worker?",
+        description: "Restarts the Dashboard worker through the fixed systemd authority.",
+        retryLabel: "Retry worker restart request",
+        warning:
+            "Active worker jobs are interrupted and recovered according to their durable job policy. The queued request confirms only that the fixed restart handoff was accepted.",
     },
 } satisfies Readonly<Record<ServiceActionId, ServiceActionPresentation>>);
 
@@ -199,6 +220,13 @@ export function serviceActionRequestInput(
     idempotencyKey: string
 ): RequestServiceActionInput {
     switch (actionId) {
+        case "dashboard-restart": {
+            return {
+                actionId,
+                confirmation: "restart-dashboard",
+                idempotencyKey,
+            };
+        }
         case "openclaw-cleanup": {
             return {
                 actionId,
@@ -238,6 +266,13 @@ export function serviceActionRequestInput(
             return {
                 actionId,
                 confirmation: "update-system",
+                idempotencyKey,
+            };
+        }
+        case "worker-restart": {
+            return {
+                actionId,
+                confirmation: "restart-worker",
                 idempotencyKey,
             };
         }

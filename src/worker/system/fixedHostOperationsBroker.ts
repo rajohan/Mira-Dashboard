@@ -184,6 +184,9 @@ export function createFixedHostOperationsBroker(
             const unit = fixedHostOperationUnits[operationId];
             if (unit === undefined) throw brokerFailure();
             const isRestart = operationId === "system-restart";
+            const isWorkerRestart = operationId === "worker-restart";
+            const isApplicationRestart =
+                operationId === "dashboard-restart" || isWorkerRestart;
             let deadlineMs = updateDeadlineMs;
             if (operationId === "system-cleanup") {
                 deadlineMs = cleanupDeadlineMs;
@@ -193,12 +196,16 @@ export function createFixedHostOperationsBroker(
             try {
                 const result = await execute(
                     executable,
-                    ["start", isRestart ? "--no-block" : "--wait", unit],
+                    [
+                        isApplicationRestart ? "restart" : "start",
+                        isRestart || isWorkerRestart ? "--no-block" : "--wait",
+                        unit,
+                    ],
                     operationSignal(signal, deadlineMs)
                 );
                 requireBoundedSuccess(result);
                 return Object.freeze({
-                    status: isRestart ? "accepted" : "completed",
+                    status: isRestart || isWorkerRestart ? "accepted" : "completed",
                 });
             } catch {
                 throw brokerFailure();

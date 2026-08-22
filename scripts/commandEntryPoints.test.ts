@@ -145,6 +145,19 @@ describe("repository command entrypoints", () => {
         expect(calls).toEqual(productionPreflightCommands.slice(0, 3));
     });
 
+    test("runs bounded parallel preflight phases around install and release", async () => {
+        const completed: string[] = [];
+        expect(
+            await runProductionPreflight(["--parallel"], "/source", (command) => {
+                completed.push(command.join(" "));
+                return Promise.resolve(0);
+            })
+        ).toBe(0);
+        expect(completed).toEqual(
+            productionPreflightCommands.map((command) => command.join(" "))
+        );
+    });
+
     test("keeps the public package surface bounded", async () => {
         const packageJson: unknown = JSON.parse(
             await Bun.file(new URL("../package.json", import.meta.url)).text()
@@ -161,7 +174,6 @@ describe("repository command entrypoints", () => {
         expect(Object.keys(packageJson.scripts)).toEqual([
             "bootstrap",
             "dev",
-            "auth:reset-password",
             "check",
             "build",
             "generate",

@@ -89,6 +89,7 @@ function fixture(
         statusReader: options.statuses ?? {
             read: () =>
                 Promise.resolve([
+                    { availability: "available", id: "dashboard-restart" },
                     { availability: "available", id: "openclaw-cleanup" },
                     { availability: "available", id: "openclaw-restart" },
                     { availability: "available", id: "openclaw-update" },
@@ -99,6 +100,7 @@ function fixture(
                         availability: "available",
                         id: "system-update",
                     },
+                    { availability: "available", id: "worker-restart" },
                 ]),
         },
     });
@@ -183,6 +185,7 @@ describe("service actions service", () => {
         const result = await fixture().service.getStatus();
         expect(result).toMatchObject({
             actions: [
+                { availability: "available", id: "dashboard-restart" },
                 { availability: "available", id: "openclaw-cleanup" },
                 { availability: "available", id: "openclaw-restart" },
                 { availability: "available", id: "openclaw-update" },
@@ -193,6 +196,7 @@ describe("service actions service", () => {
                     availability: "available",
                     id: "system-update",
                 },
+                { availability: "available", id: "worker-restart" },
             ],
             observedAtMs: 2000,
         });

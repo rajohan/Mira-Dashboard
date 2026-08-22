@@ -2,9 +2,13 @@ import type {
     AuthSessionSummary,
     AuthUser,
     FirstUserBootstrapInput,
+    EmailChangeInput,
+    EmailVerificationInput,
     PasswordChangeInput,
     PasswordLoginInput,
     PendingLoginSummary,
+    PasswordResetInput,
+    PasswordResetRequestInput,
 } from "../../../contracts/auth.ts";
 import type { GeneratedOpaqueToken } from "../../shared/opaqueToken.ts";
 import type { AuthenticationLifecycleRepository } from "./authenticationLifecycleRepository.ts";
@@ -21,6 +25,7 @@ import type {
     BeginPendingLoginInput,
     BeginPendingLoginResult,
 } from "./mfa/loginLifecycle.ts";
+import type { PasswordRecoveryEmailSender } from "./passwordRecoveryEmail.ts";
 
 export type VerifyGatewayCredential = (
     credential: string,
@@ -33,7 +38,9 @@ export interface PendingLoginLifecyclePort {
 
 export interface AuthenticationLifecycleDependencies {
     readonly generateId?: () => string;
+    readonly generateEmailVerificationToken?: () => GeneratedOpaqueToken;
     readonly generateSessionToken?: () => GeneratedOpaqueToken;
+    readonly generatePasswordResetToken?: () => GeneratedOpaqueToken;
     readonly gatewayVerificationTimeoutMs?: number;
     readonly gatewayWorkRuntime: Pick<
         AuthenticationWorkRuntimeService,
@@ -44,6 +51,8 @@ export interface AuthenticationLifecycleDependencies {
     readonly now?: () => Date;
     readonly passwordWorkBudget?: AuthenticationWorkBudget;
     readonly passwordWorkGate: AuthenticationWorkGate;
+    readonly passwordRecoveryEmailSender?: PasswordRecoveryEmailSender;
+    readonly publicOrigin?: string;
     readonly recentAuthenticationWindowMs?: number;
     readonly repository: AuthenticationLifecycleRepository;
     readonly sessionIdleDurationMs?: number;
@@ -95,6 +104,28 @@ export type RevokeSessionsResult =
     | { readonly revokedSessions: number }
     | { readonly status: "step-up-required" };
 
+export type ChangeEmailResult =
+    | { readonly status: "already-verified" }
+    | { readonly email: string; readonly status: "changed" }
+    | { readonly status: "session-changed" }
+    | { readonly status: "step-up-required" }
+    | { readonly status: "service-unavailable" };
+
+export type VerifyEmailResult =
+    | { readonly email: string; readonly status: "verified" }
+    | { readonly status: "conflict" }
+    | { readonly status: "invalid-token" };
+
+export type RequestPasswordResetResult =
+    | { readonly status: "accepted" }
+    | { readonly status: "service-unavailable" }
+    | { readonly retryAfterSeconds: number; readonly status: "rate-limited" };
+
+export type ResetPasswordResult =
+    | { readonly status: "reset" }
+    | { readonly status: "invalid-token" }
+    | { readonly retryAfterSeconds: number; readonly status: "rate-limited" };
+
 export type AuthenticationStatus =
     | { readonly authenticated: false; readonly isBootstrapRequired: boolean }
     | {
@@ -122,6 +153,11 @@ export interface AuthenticationLifecycleService {
         input: PasswordChangeInput,
         metadata: AuthenticationRequestMetadata
     ): Promise<ChangePasswordResult>;
+    changeEmail(
+        identity: AuthenticatedBrowserIdentity,
+        input: EmailChangeInput,
+        metadata: AuthenticationRequestMetadata
+    ): Promise<ChangeEmailResult>;
     listSessions(
         identity: AuthenticatedBrowserIdentity
     ): AuthSessionSummary[] | undefined;
@@ -130,6 +166,18 @@ export interface AuthenticationLifecycleService {
         metadata: AuthenticationRequestMetadata,
         currentIdentity?: AuthenticatedBrowserIdentity
     ): Promise<LoginResult>;
+    requestPasswordReset(
+        input: PasswordResetRequestInput,
+        metadata: AuthenticationRequestMetadata
+    ): Promise<RequestPasswordResetResult>;
+    resetPassword(
+        input: PasswordResetInput,
+        metadata: AuthenticationRequestMetadata
+    ): Promise<ResetPasswordResult>;
+    verifyEmail(
+        input: EmailVerificationInput,
+        metadata: AuthenticationRequestMetadata
+    ): Promise<VerifyEmailResult>;
     logout(
         identity: AuthenticatedBrowserIdentity | undefined,
         metadata: AuthenticationRequestMetadata

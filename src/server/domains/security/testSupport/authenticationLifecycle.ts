@@ -15,6 +15,7 @@ import {
 import { createAuthenticationLifecycleRepository } from "../authenticationLifecycleRepository.ts";
 import { type AuthenticationWorkBudget } from "../authenticationWorkBudget.ts";
 import type { AuthenticationWorkRuntimeService } from "../authenticationWorkGate.ts";
+import type { PasswordRecoveryEmailSender } from "../passwordRecoveryEmail.ts";
 
 export const authenticationLifecycleMetadata = Object.freeze({
     clientSourceId: "client-source-1",
@@ -41,6 +42,8 @@ export interface AuthenticationLifecycleHarnessOptions {
     readonly hashPassword?: (password: string) => Promise<string>;
     readonly mfaLoginLifecycle?: PendingLoginLifecyclePort;
     readonly passwordWorkBudget?: AuthenticationWorkBudget;
+    readonly passwordRecoveryEmailSender?: PasswordRecoveryEmailSender;
+    readonly publicOrigin?: string;
     readonly recentAuthenticationWindowMs?: number;
     readonly verifyGatewayCredential?: VerifyGatewayCredential;
     readonly verifyPassword?: (password: string, hash: string) => Promise<boolean>;
@@ -81,6 +84,12 @@ export async function createAuthenticationLifecycleHarness(
             passwordWorkBudget: options.passwordWorkBudget,
         }),
         passwordWorkGate: createTestAuthenticationWorkGate(),
+        ...(options.passwordRecoveryEmailSender !== undefined && {
+            passwordRecoveryEmailSender: options.passwordRecoveryEmailSender,
+        }),
+        ...(options.publicOrigin !== undefined && {
+            publicOrigin: options.publicOrigin,
+        }),
         ...(options.recentAuthenticationWindowMs !== undefined && {
             recentAuthenticationWindowMs: options.recentAuthenticationWindowMs,
         }),
@@ -135,6 +144,7 @@ export async function bootstrapAuthenticationLifecycle(
 ) {
     const result = await harness.service.bootstrap(
         {
+            email: "operator@example.com",
             gatewayCredential: "gateway-token",
             password,
             username: "operator",

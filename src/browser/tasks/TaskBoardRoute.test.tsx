@@ -75,6 +75,7 @@ const authenticatedStatus: AuthStatus = Object.freeze({
     },
     state: "authenticated",
     user: {
+        email: "operator@example.com",
         id: operatorUserId,
         username: "operator",
     },

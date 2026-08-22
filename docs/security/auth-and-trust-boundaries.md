@@ -1,22 +1,21 @@
 # Authentication and trust boundaries
 
-## Host-local password recovery
+## Email verification and password recovery
 
-Forgotten-password recovery is deliberately outside the browser, HTTP, tRPC, WebSocket, and
-automation-credential trust boundaries. It requires an interactive terminal on the Dashboard
-host and executes the recovery artifact from the active immutable release with its pinned Bun
-runtime. No network endpoint can invoke it, and the password is never accepted in argv or the
-environment.
+Bootstrap requires one canonical, validated account email and creates a usable but initially
+unverified account. The operator can sign in and correct or resend that address before
+verification. Password-recovery delivery is unavailable until an address is verified. A change
+from a verified address is staged separately: the old address remains the sole active recovery
+destination until the new address consumes its verification token, when one transaction replaces
+the address and removes the pending state.
 
-The CLI verifies the project layout, active release identity, runtime revision, private state
-directory, database ownership, and database migration state before mutation. Password hashing
-happens before the write transaction. The transaction then compare-and-swaps the user's current
-authentication state, updates the password once, revokes sessions and in-flight authentication
-ceremonies, clears only user-scoped account-password/account-MFA cooldowns, and records a redacted
-system audit event. `--reset-mfa` additionally removes every MFA factor and recovery code; without
-that flag, confirmed MFA remains intact while unconfirmed authenticator enrollment is discarded.
-Any concurrency conflict or persistence failure rolls the entire operation back.
+Verification and reset requests cross the public HTTP/tRPC boundary and therefore use generic
+responses, durable source/global rate limits, short-lived single-use opaque tokens, and validators
+stored only as purpose-separated hashes. Tokens expire after 15 minutes. Resend configuration is
+server-only and paired; link origins come only from the validated public Dashboard origin. Mail
+tracking is unnecessary and should remain disabled.
 
-The active-release executable is required release inventory but is not a long-running process
-role. This keeps break-glass authority out of both systemd services and normal application
-configuration while ensuring the reviewed code and runtime exactly match production.
+A successful password reset compare-and-swaps the current authentication state, preserves enrolled
+MFA, revokes all browser sessions and pending login ceremonies, and consumes the token atomically.
+The former host-local reset executable and its independent break-glass authority were removed; a
+deployment must repair Resend/DNS configuration rather than expose a second password mutation path.

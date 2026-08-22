@@ -200,12 +200,17 @@ describe("worker-only job executor registry", () => {
         const hostOperations = {
             availableOperations: () => Promise.resolve([]),
             request(
-                operationId: "system-cleanup" | "system-restart" | "system-update",
+                operationId:
+                    | "dashboard-restart"
+                    | "system-cleanup"
+                    | "system-restart"
+                    | "system-update"
+                    | "worker-restart",
                 signal?: AbortSignal
             ) {
                 calls.push({ operationId, signal });
                 return Promise.resolve(
-                    operationId === "system-restart"
+                    operationId === "system-restart" || operationId === "worker-restart"
                         ? ({ status: "accepted" } as const)
                         : ({ status: "completed" } as const)
                 );

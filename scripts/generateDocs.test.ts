@@ -19,6 +19,7 @@ afterEach(async () => {
 async function repositoryFixture(): Promise<string> {
     const root = await mkdtemp(path.join(tmpdir(), "mira-generate-docs-"));
     temporaryDirectories.push(root);
+    await mkdir(path.join(root, "docs", "operations"), { recursive: true });
     await Promise.all([
         mkdir(path.join(root, "docs", "generated"), { recursive: true }),
         writeFile(
@@ -26,6 +27,7 @@ async function repositoryFixture(): Promise<string> {
             `${JSON.stringify({ dependencies: {}, devDependencies: {} }, null, 2)}\n`
         ),
         writeFile(path.join(root, "bun.lock"), '{"packages":{}}\n'),
+        writeFile(path.join(root, "docs", "operations", "runbook.md"), "# Runbook\n"),
     ]);
     return root;
 }
@@ -39,6 +41,16 @@ describe("generated documentation synchronization", () => {
         expect(
             Bun.file(path.join(projectRoot, "docs/generated/README.md")).exists()
         ).resolves.toBe(true);
+        expect(
+            Bun.file(
+                path.join(projectRoot, "docs/generated/browser-reference.json")
+            ).json()
+        ).resolves.toContainEqual({
+            content: "# Runbook\n",
+            kind: "markdown",
+            path: "operations/runbook.md",
+            source: "maintained",
+        });
         expect(
             synchronizeGeneratedDocumentation(projectRoot, "check")
         ).resolves.toBeUndefined();

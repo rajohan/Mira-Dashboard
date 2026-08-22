@@ -247,6 +247,21 @@ describe("source-boundary repository discovery", () => {
         }
     });
 
+    test("allows the exact Crabbox worker metadata directory", async () => {
+        const projectRoot = await temporaryProject();
+        try {
+            await mkdir(path.join(projectRoot, ".crabbox"));
+
+            const violations = await checkSourceBoundaries(projectRoot);
+
+            expect(
+                violations.some((violation) => violation.importer === ".crabbox")
+            ).toBe(false);
+        } finally {
+            await rm(projectRoot, { force: true, recursive: true });
+        }
+    });
+
     test("rejects executable source hidden in an unknown root directory", async () => {
         const projectRoot = await temporaryProject();
         try {

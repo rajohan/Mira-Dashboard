@@ -32,11 +32,12 @@ describe("browser security identity schema", () => {
                 database.sqlite.run(
                     `INSERT INTO users (
                         created_at,
+                        email,
                         id,
                         password_hash,
                         updated_at,
                         username
-                    ) VALUES (1000, ?, ?, 1000, 'invalid-uuid')`,
+                    ) VALUES (1000, lower(hex(randomblob(16))) || '@example.com', ?, ?, 1000, 'invalid-uuid')`,
                     ["019fc968-1a9b-4773-bf1b-d5b863b0e7b4", securityIdentityPasswordHash]
                 )
             ).toThrow("users_id_check");
@@ -44,11 +45,12 @@ describe("browser security identity schema", () => {
                 database.sqlite.run(
                     `INSERT INTO users (
                         created_at,
+                        email,
                         id,
                         password_hash,
                         updated_at,
                         username
-                    ) VALUES (1000, ?, ?, 1000, 'nul-uuid')`,
+                    ) VALUES (1000, lower(hex(randomblob(16))) || '@example.com', ?, ?, 1000, 'nul-uuid')`,
                     [`${securityIdentityUserId}\0`, securityIdentityPasswordHash]
                 )
             ).toThrow("users_id_check");
@@ -56,11 +58,12 @@ describe("browser security identity schema", () => {
                 database.sqlite.run(
                     `INSERT INTO users (
                         created_at,
+                        email,
                         id,
                         password_hash,
                         updated_at,
                         username
-                    ) VALUES (1000, ?, ?, 1000, 'raymond')`,
+                    ) VALUES (1000, lower(hex(randomblob(16))) || '@example.com', ?, ?, 1000, 'raymond')`,
                     ["019fc968-1a9b-7773-bf1b-d5b863b0e7b4", securityIdentityPasswordHash]
                 )
             ).toThrow("UNIQUE constraint failed: users.username");
@@ -68,11 +71,12 @@ describe("browser security identity schema", () => {
                 database.sqlite.run(
                     `INSERT INTO users (
                         created_at,
+                        email,
                         id,
                         password_hash,
                         updated_at,
                         username
-                    ) VALUES (1000, ?, ?, 1000, ?)`,
+                    ) VALUES (1000, lower(hex(randomblob(16))) || '@example.com', ?, ?, 1000, ?)`,
                     [
                         "019fc968-1a9b-7775-bf1b-d5b863b0e7b4",
                         securityIdentityPasswordHash,
@@ -117,11 +121,12 @@ describe("browser security identity schema", () => {
                 database.sqlite.run(
                     `INSERT INTO users (
                         created_at,
+                        email,
                         id,
                         password_hash,
                         updated_at,
                         username
-                    ) VALUES (8640000000000001, ?, ?, 8640000000000001, 'future-user')`,
+                    ) VALUES (8640000000000001, lower(hex(randomblob(16))) || '@example.com', ?, ?, 8640000000000001, 'future-user')`,
                     ["019fc968-1a9b-7777-bf1b-d5b863b0e7b4", securityIdentityPasswordHash]
                 )
             ).toThrow("users_created_at_check");
@@ -153,11 +158,12 @@ describe("browser security identity schema", () => {
                 database.sqlite.run(
                     `INSERT INTO users (
                         created_at,
+                        email,
                         id,
                         password_hash,
                         updated_at,
                         username
-                    ) VALUES (1000, ?, ?, 1000, 'nul-password')`,
+                    ) VALUES (1000, lower(hex(randomblob(16))) || '@example.com', ?, ?, 1000, 'nul-password')`,
                     [
                         "019fc968-1a9b-7775-8f1b-d5b863b0e7b4",
                         `${securityIdentityPasswordHash}\0suffix`,
@@ -232,11 +238,12 @@ describe("browser security identity schema", () => {
                 database.sqlite.run(
                     `INSERT INTO users (
                         created_at,
+                        email,
                         id,
                         password_hash,
                         updated_at,
                         username
-                    ) VALUES (1000, ?, ?, 1000, 'unsafe-hash')`,
+                    ) VALUES (1000, lower(hex(randomblob(16))) || '@example.com', ?, ?, 1000, 'unsafe-hash')`,
                     ["019fc968-1a9b-7775-8f1b-d5b863b0e7b4", unreviewedHash]
                 )
             ).toThrow("users_password_hash_check");

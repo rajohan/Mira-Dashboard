@@ -22,6 +22,7 @@ describe("authentication lifecycle bootstrap", () => {
             expect(
                 await harness.service.bootstrap(
                     {
+                        email: "operator@example.com",
                         gatewayCredential: "invalid-gateway",
                         password: "current-password-1",
                         username: "operator",
@@ -32,6 +33,7 @@ describe("authentication lifecycle bootstrap", () => {
             expect(
                 await harness.service.bootstrap(
                     {
+                        email: "operator@example.com",
                         gatewayCredential: "another-invalid-gateway",
                         password: "current-password-1",
                         username: "operator",
@@ -108,6 +110,7 @@ describe("authentication lifecycle bootstrap", () => {
         try {
             const unavailable = await harness.service.bootstrap(
                 {
+                    email: "operator@example.com",
                     gatewayCredential: "gateway-token",
                     password: "current-password-1",
                     username: "operator",
@@ -141,6 +144,7 @@ describe("authentication lifecycle bootstrap", () => {
             for (const clientSourceId of ["source-1", "source-2"]) {
                 const unavailable = await harness.service.bootstrap(
                     {
+                        email: "operator@example.com",
                         gatewayCredential: "gateway-token",
                         password: "current-password-1",
                         username: "operator",
@@ -155,6 +159,7 @@ describe("authentication lifecycle bootstrap", () => {
 
             const limited = await harness.service.bootstrap(
                 {
+                    email: "operator@example.com",
                     gatewayCredential: "gateway-token",
                     password: "current-password-1",
                     username: "operator",
@@ -196,6 +201,7 @@ describe("authentication lifecycle bootstrap", () => {
             try {
                 const winner = harness.service.bootstrap(
                     {
+                        email: "operator@example.com",
                         gatewayCredential: "gateway-winner",
                         password: "current-password-1",
                         username: "operator",
@@ -207,6 +213,7 @@ describe("authentication lifecycle bootstrap", () => {
                 );
                 const late = harness.service.bootstrap(
                     {
+                        email: "operator@example.com",
                         gatewayCredential: "gateway-late",
                         password: "current-password-1",
                         username: "operator",
@@ -279,6 +286,7 @@ describe("authentication lifecycle bootstrap", () => {
         try {
             const pending = harness.service.bootstrap(
                 {
+                    email: "operator@example.com",
                     gatewayCredential: "gateway-token",
                     password: "current-password-1",
                     username: "operator",
@@ -322,6 +330,7 @@ describe("authentication lifecycle bootstrap", () => {
         try {
             const pending = harness.service.bootstrap(
                 {
+                    email: "operator@example.com",
                     gatewayCredential: "gateway-token",
                     password: "current-password-1",
                     username: "operator",
@@ -357,6 +366,7 @@ describe("authentication lifecycle bootstrap", () => {
             const results = await Promise.all([
                 harness.service.bootstrap(
                     {
+                        email: "operator@example.com",
                         gatewayCredential: "gateway-token",
                         password: "current-password-1",
                         username: "operator",
@@ -365,6 +375,7 @@ describe("authentication lifecycle bootstrap", () => {
                 ),
                 harness.service.bootstrap(
                     {
+                        email: "operator@example.com",
                         gatewayCredential: "gateway-token",
                         password: "replacement-password-2",
                         username: "operator-two",

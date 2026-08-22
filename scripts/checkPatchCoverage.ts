@@ -9,6 +9,27 @@ export interface PatchCoverageSummary {
 }
 
 /**
+ * Selects an explicit PR-relative coverage base without silently flattening a stack.
+ * @returns The Git revision used as the changed-line comparison base.
+ */
+export function selectPatchCoverageBase(
+    environment: Readonly<Record<string, string | undefined>>,
+    currentBranch: string,
+    branchBase: string | undefined
+): string {
+    const configuredBase = environment.MIRA_DASHBOARD_COVERAGE_BASE?.trim();
+    if (configuredBase) return configuredBase;
+    const githubBase = environment.GITHUB_BASE_REF?.trim();
+    if (githubBase) return `origin/${githubBase}`;
+    const localBase = branchBase?.trim();
+    if (localBase) return localBase;
+    if (currentBranch === "main") return "origin/main";
+    throw new Error(
+        `Coverage base is unknown for branch ${currentBranch || "(detached HEAD)"}; set branch.<name>.vscode-merge-base or MIRA_DASHBOARD_COVERAGE_BASE`
+    );
+}
+
+/**
  * Parses added line positions from a zero-context unified Git diff.
  * @param diff Unified Git diff text.
  * @returns Changed line positions grouped by repository-relative file.
@@ -83,6 +104,19 @@ async function capture(command: readonly string[], root: string): Promise<string
     return output;
 }
 
+async function captureOptional(
+    command: readonly string[],
+    root: string
+): Promise<string | undefined> {
+    const child = Bun.spawn([...command], {
+        cwd: root,
+        stdout: "pipe",
+        stderr: "ignore",
+    });
+    const output = await new Response(child.stdout).text();
+    return (await child.exited) === 0 ? output.trim() : undefined;
+}
+
 /**
  * Runs the PR-base-relative local patch-coverage gate.
  * @param lcovPath Merged LCOV path relative to the repository.
@@ -95,9 +129,15 @@ export async function checkPatchCoverage(
     root: string,
     environment: Readonly<Record<string, string | undefined>> = process.env
 ): Promise<PatchCoverageSummary> {
-    const configuredBase = environment.MIRA_DASHBOARD_COVERAGE_BASE?.trim();
-    const githubBase = environment.GITHUB_BASE_REF?.trim();
-    const base = configuredBase || (githubBase ? `origin/${githubBase}` : "origin/main");
+    const branchOutput = await capture(["git", "branch", "--show-current"], root);
+    const currentBranch = branchOutput.trim();
+    const branchBase = currentBranch
+        ? await captureOptional(
+              ["git", "config", "--get", `branch.${currentBranch}.vscode-merge-base`],
+              root
+          )
+        : undefined;
+    const base = selectPatchCoverageBase(environment, currentBranch, branchBase);
     const diff = await capture(
         [
             "git",

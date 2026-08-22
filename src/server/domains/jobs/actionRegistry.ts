@@ -124,12 +124,16 @@ export const openClawGatewayRestartJobActionKey = "openclaw.gateway.restart";
 export const openClawSessionsCleanupJobActionKey = "openclaw.sessions.cleanup";
 /** Fixed worker-only OpenClaw update identity selected by Service Actions. */
 export const openClawInstallationUpdateJobActionKey = "openclaw.installation.update";
+/** Fixed systemd-brokered Dashboard web restart selected by Service Actions. */
+export const hostDashboardRestartJobActionKey = "host.dashboard.restart";
 /** Fixed root-brokered host cleanup identity selected by Service Actions. */
 export const hostSystemCleanupJobActionKey = "host.system.cleanup";
 /** Fixed root-brokered host restart identity selected by Service Actions. */
 export const hostSystemRestartJobActionKey = "host.system.restart";
 /** Fixed root-brokered host update identity selected by Service Actions. */
 export const hostSystemUpdateJobActionKey = "host.system.update";
+/** Fixed systemd-brokered Dashboard worker restart selected by Service Actions. */
+export const hostWorkerRestartJobActionKey = "host.worker.restart";
 
 /** Secret-free terminal payload persisted by the fixed Gateway restart executor. */
 export const openClawGatewayRestartJobResultSchema = v.strictObject({
@@ -141,6 +145,12 @@ export const openClawGatewayRestartJobResultSchema = v.strictObject({
 export const hostSystemRestartJobResultSchema = v.strictObject({
     completedAtMs: jobTimestampSchema,
     status: v.literal("accepted", "Host restart result is invalid"),
+});
+
+/** Redacted result for a fixed Dashboard service restart. */
+export const hostDashboardServiceRestartJobResultSchema = v.strictObject({
+    completedAtMs: jobTimestampSchema,
+    status: v.picklist(["accepted", "completed"]),
 });
 
 /** Redacted terminal result for one fixed host cleanup unit. */
@@ -988,6 +998,14 @@ export const hostSystemCleanupJobActionDefinition = serviceActionDefinition({
     timeoutMs: 35 * 60_000,
 });
 
+/** Fixed Dashboard web-process restart through the reviewed systemd authority. */
+export const hostDashboardRestartJobActionDefinition = serviceActionDefinition({
+    actionKey: hostDashboardRestartJobActionKey,
+    description: "Restarts the Dashboard web process through fixed systemd authority.",
+    displayName: "Restart Dashboard",
+    timeoutMs: 60_000,
+});
+
 /** Accepted-only host restart request reserved for a separately privileged adapter. */
 export const hostSystemRestartJobActionDefinition = serviceActionDefinition({
     actionKey: hostSystemRestartJobActionKey,
@@ -1002,6 +1020,14 @@ export const hostSystemUpdateJobActionDefinition = serviceActionDefinition({
     description: "Runs a fixed host update through a separately privileged adapter.",
     displayName: "Update host system",
     timeoutMs: 2 * 60 * 60_000,
+});
+
+/** Accepted-only worker restart through the reviewed systemd authority. */
+export const hostWorkerRestartJobActionDefinition = serviceActionDefinition({
+    actionKey: hostWorkerRestartJobActionKey,
+    description: "Restarts the Dashboard worker through fixed systemd authority.",
+    displayName: "Restart Dashboard worker",
+    timeoutMs: 60_000,
 });
 
 /** Complete reviewed pure-definition registry for this slice. */

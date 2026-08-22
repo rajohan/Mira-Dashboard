@@ -2,6 +2,11 @@
   "$id": "urn:mira-dashboard:auth.bootstrap.input",
   "type": "object",
   "properties": {
+    "email": {
+      "type": "string",
+      "maxLength": 254,
+      "format": "email"
+    },
     "gatewayCredential": {
       "type": "string",
       "minLength": 1,
@@ -21,6 +26,7 @@
     }
   },
   "required": [
+    "email",
     "gatewayCredential",
     "password",
     "username"

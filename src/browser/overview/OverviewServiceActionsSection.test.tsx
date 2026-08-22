@@ -49,6 +49,7 @@ const authenticatedStatus = Object.freeze({
     state: "authenticated",
     user: {
         id: "019fd974-54a2-74dd-a64b-d4186f8d8828",
+        email: "operator@example.com",
         username: "operator",
     },
 } satisfies AuthStatus);
@@ -107,6 +108,10 @@ const actionStatus = Object.freeze({
     actions: [
         {
             availability: "available",
+            id: "dashboard-restart",
+        },
+        {
+            availability: "available",
             id: "openclaw-cleanup",
         },
         {
@@ -130,6 +135,10 @@ const actionStatus = Object.freeze({
             availability: "available",
             id: "system-update",
             latestRun: succeededRun,
+        },
+        {
+            availability: "available",
+            id: "worker-restart",
         },
     ],
     observedAtMs: timestampMs + 2000,

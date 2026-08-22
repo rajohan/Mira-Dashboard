@@ -27,6 +27,8 @@ export const webAuthnExternalCredentialId =
 export const validUserInsert = Object.freeze({
     createdAt: securityCreatedAt,
     disabledAt: null,
+    email: "operator@example.com",
+    emailVerifiedAt: null,
     id: securityUserId,
     mfaEnabledAt: null,
     passwordHash: testDashboardPasswordHash,

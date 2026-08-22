@@ -61,10 +61,12 @@ import {
     deliveryGitHubJobActionDefinition,
     deliveryPreviewJobActionDefinition,
     deliveryProductionJobActionDefinition,
+    hostDashboardRestartJobActionDefinition,
     jobActionDefinitions,
     hostSystemCleanupJobActionDefinition,
     hostSystemRestartJobActionDefinition,
     hostSystemUpdateJobActionDefinition,
+    hostWorkerRestartJobActionDefinition,
     openClawGatewayRestartJobActionDefinition,
     openClawInstallationUpdateJobActionDefinition,
     openClawSessionsCleanupJobActionDefinition,
@@ -634,11 +636,19 @@ export function createDashboardWorkerRuntime(
                 if (availableHostOperationSet.has("system-cleanup")) {
                     optionalActionDefinitions.push(hostSystemCleanupJobActionDefinition);
                 }
+                if (availableHostOperationSet.has("dashboard-restart")) {
+                    optionalActionDefinitions.push(
+                        hostDashboardRestartJobActionDefinition
+                    );
+                }
                 if (availableHostOperationSet.has("system-restart")) {
                     optionalActionDefinitions.push(hostSystemRestartJobActionDefinition);
                 }
                 if (availableHostOperationSet.has("system-update")) {
                     optionalActionDefinitions.push(hostSystemUpdateJobActionDefinition);
+                }
+                if (availableHostOperationSet.has("worker-restart")) {
+                    optionalActionDefinitions.push(hostWorkerRestartJobActionDefinition);
                 }
                 if (options.workspaceFiles !== undefined) {
                     optionalActionDefinitions.push(

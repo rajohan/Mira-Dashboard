@@ -67,7 +67,7 @@ describe("chat tool diff", () => {
                         diff: `@@ -33,2 +33,3 @@
  <LoginPanel
 + description="Log in with your dashboard username and password"
- footer="Forgotten passwords are reset with the host-local recovery command."`,
+ footer="Password recovery links are sent to the account email."`,
                         kind: { move_path: null, type: "update" },
                         path: "/workspace/src/browser/auth/PasswordLoginForm.tsx",
                         stat: { added: 1, removed: 0 },

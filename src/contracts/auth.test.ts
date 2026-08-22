@@ -35,11 +35,13 @@ describe("authentication contracts", () => {
     test("normalizes username casing without normalizing secrets", () => {
         expect(
             v.parse(firstUserBootstrapInputSchema, {
+                email: "operator@example.com",
                 gatewayCredential: "gateway-token",
                 password: "  correct horse battery staple  ",
                 username: "Operator.Name",
             })
         ).toEqual({
+            email: "operator@example.com",
             gatewayCredential: "gateway-token",
             password: "  correct horse battery staple  ",
             username: "operator.name",
@@ -197,6 +199,7 @@ describe("authentication contracts", () => {
                 state: "authenticated",
                 user: {
                     id: "019fc968-1a9b-7770-8f1b-d5b863b0e7b4",
+                    email: "operator@example.com",
                     username: "operator",
                 },
             })

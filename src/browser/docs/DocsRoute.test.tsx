@@ -59,6 +59,34 @@ describe("DocsRoute", () => {
         expect(authMenu).toHaveAttribute("aria-expanded", "false");
     });
 
+    test("orders every maintained group, including reference, before generated docs", () => {
+        renderDocsRoute();
+
+        const navigation = screen.getByRole("navigation", {
+            name: "Generated documentation",
+        });
+        const groupNames = within(navigation)
+            .getAllByRole("button")
+            .map((button) => button.textContent ?? "");
+        const architectureIndex = groupNames.findIndex((name) =>
+            name.startsWith("Architecture")
+        );
+        const generatedIndex = groupNames.findIndex((name) =>
+            name.startsWith("Generated")
+        );
+        const securityIndex = groupNames.findIndex((name) => name.startsWith("Security"));
+        const schemaIndex = groupNames.findIndex((name) => name.startsWith("Auth"));
+        const referenceIndex = groupNames.findIndex((name) =>
+            name.startsWith("Reference")
+        );
+
+        expect(architectureIndex).toBeGreaterThanOrEqual(0);
+        expect(securityIndex).toBe(architectureIndex + 1);
+        expect(referenceIndex).toBeGreaterThan(architectureIndex);
+        expect(generatedIndex).toBeGreaterThan(referenceIndex);
+        expect(schemaIndex).toBeGreaterThan(generatedIndex);
+    });
+
     test("lets the fixed viewer own horizontal scrolling for wide tables", () => {
         renderDocsRoute();
 
@@ -184,11 +212,13 @@ describe("DocsRoute", () => {
                             "[Visible label](hidden-target.md)\n\n```text\nfenced-only\n```\n",
                         kind: "markdown",
                         path: "README.md",
+                        source: "generated",
                     },
                     {
                         content: "{}\n",
                         kind: "json",
                         path: "openapi.raw-http.json",
+                        source: "generated",
                     },
                 ]}
             />
@@ -216,11 +246,13 @@ describe("DocsRoute", () => {
                         content: `${"match ".repeat(1200)}\n`,
                         kind: "markdown",
                         path: "README.md",
+                        source: "generated",
                     },
                     {
                         content: "{}\n",
                         kind: "json",
                         path: "openapi.raw-http.json",
+                        source: "generated",
                     },
                 ]}
             />
@@ -247,16 +279,19 @@ describe("DocsRoute", () => {
                         content: "[Search needle](target.md)\n",
                         kind: "markdown",
                         path: "README.md",
+                        source: "generated",
                     },
                     {
                         content: "Target content\n",
                         kind: "markdown",
                         path: "target.md",
+                        source: "generated",
                     },
                     {
                         content: "{}\n",
                         kind: "json",
                         path: "openapi.raw-http.json",
+                        source: "generated",
                     },
                 ]}
             />

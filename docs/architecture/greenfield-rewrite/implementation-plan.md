@@ -51,7 +51,7 @@ and terminal disablement affect new requests and renewable leases without a proc
 
 The server-side Phase 2 exit is now evidenced by the automation lifecycle, native one-shot Gateway
 credential verifier, authenticated resumable SSE, and the consolidated
-[Phase 2 threat model](../../security/greenfield-phase-two-threat-model.md). The Gateway verifier
+[security threat model](../../security/security-threat-model.md). The Gateway verifier
 uses a protocol-v4 handshake audited against installed OpenClaw `2026.7.2-beta.7 (dabe191)` and is
 restricted to the installed protocol's direct-loopback backend path. It requires token-mode proof
 in the authenticated hello and is bounded by the process-owned authentication Effect service. This

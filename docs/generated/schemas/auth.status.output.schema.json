@@ -178,12 +178,25 @@
         "user": {
           "type": "object",
           "properties": {
+            "email": {
+              "type": "string",
+              "maxLength": 254,
+              "format": "email"
+            },
+            "emailVerified": {
+              "type": "boolean"
+            },
             "id": {
               "type": "string",
               "minLength": 36,
               "maxLength": 36,
               "format": "uuid",
               "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            "pendingEmail": {
+              "type": "string",
+              "maxLength": 254,
+              "format": "email"
             },
             "username": {
               "type": "string",
@@ -193,6 +206,7 @@
             }
           },
           "required": [
+            "email",
             "id",
             "username"
           ],

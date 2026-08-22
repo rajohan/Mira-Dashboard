@@ -49,8 +49,6 @@ describe("Dashboard process artifacts", () => {
             outputDirectory: string;
             productionDeliveryGzipBytes: number;
             productionDeliveryRawBytes: number;
-            resetDashboardPasswordGzipBytes: number;
-            resetDashboardPasswordRawBytes: number;
             status: string;
             webGzipBytes: number;
             webRawBytes: number;
@@ -59,28 +57,20 @@ describe("Dashboard process artifacts", () => {
         };
         const directoryEntries = await readdir(outputDirectory);
         const files = directoryEntries.toSorted();
-        const [
-            databaseMaintenance,
-            openClawHeartbeat,
-            productionDelivery,
-            resetDashboardPassword,
-            web,
-            worker,
-        ] = await Promise.all([
-            readFile(path.join(outputDirectory, "databaseMaintenance.js"), "utf8"),
-            readFile(path.join(outputDirectory, "openClawHeartbeat.js"), "utf8"),
-            readFile(path.join(outputDirectory, "productionDelivery.js"), "utf8"),
-            readFile(path.join(outputDirectory, "resetDashboardPassword.js"), "utf8"),
-            readFile(path.join(outputDirectory, "web.js"), "utf8"),
-            readFile(path.join(outputDirectory, "worker.js"), "utf8"),
-        ]);
+        const [databaseMaintenance, openClawHeartbeat, productionDelivery, web, worker] =
+            await Promise.all([
+                readFile(path.join(outputDirectory, "databaseMaintenance.js"), "utf8"),
+                readFile(path.join(outputDirectory, "openClawHeartbeat.js"), "utf8"),
+                readFile(path.join(outputDirectory, "productionDelivery.js"), "utf8"),
+                readFile(path.join(outputDirectory, "web.js"), "utf8"),
+                readFile(path.join(outputDirectory, "worker.js"), "utf8"),
+            ]);
 
         expect(execution).toMatchObject({ exitCode: 0, stderr: "" });
         expect(files).toEqual([
             "databaseMaintenance.js",
             "openClawHeartbeat.js",
             "productionDelivery.js",
-            "resetDashboardPassword.js",
             "web.js",
             "worker.js",
         ]);
@@ -97,10 +87,6 @@ describe("Dashboard process artifacts", () => {
         expect(result.openClawHeartbeatRawBytes).toBeGreaterThan(
             result.openClawHeartbeatGzipBytes
         );
-        expect(result.resetDashboardPasswordGzipBytes).toBeGreaterThan(0);
-        expect(result.resetDashboardPasswordRawBytes).toBeGreaterThan(
-            result.resetDashboardPasswordGzipBytes
-        );
         expect(result.webGzipBytes).toBeGreaterThan(0);
         expect(result.workerGzipBytes).toBeGreaterThan(0);
         expect(result.webRawBytes).toBeGreaterThan(result.webGzipBytes);
@@ -109,14 +95,11 @@ describe("Dashboard process artifacts", () => {
         expect(databaseMaintenance).toContain("Dashboard database maintenance failed");
         expect(productionDelivery).toContain("Production Delivery executor failed");
         expect(openClawHeartbeat).toContain("OpenClaw heartbeat automation failed");
-        expect(resetDashboardPassword).toContain("Dashboard password recovery failed");
         expect(worker).toContain("Mira Dashboard worker startup failed");
         expect(web).not.toContain("sourceMappingURL");
         expect(databaseMaintenance).not.toContain("sourceMappingURL");
         expect(openClawHeartbeat).not.toContain("sourceMappingURL");
         expect(productionDelivery).not.toContain("sourceMappingURL");
-        expect(resetDashboardPassword).not.toContain("sourceMappingURL");
-        expect(web).not.toContain("openclaw-heartbeat.token");
         expect(worker).not.toContain("sourceMappingURL");
         expect(worker).not.toContain("openclaw-heartbeat.token");
     }, 60_000);

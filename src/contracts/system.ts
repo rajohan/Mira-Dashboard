@@ -25,6 +25,7 @@ export const documentationReferenceSchema = v.pipe(
             content: v.optional(v.string()),
             kind: v.picklist(["json", "markdown", "schema"]),
             path: v.string(),
+            source: v.picklist(["generated", "maintained"]),
         })
     ),
     v.maxLength(1000)

@@ -709,6 +709,12 @@ worker-only Gateway operations are already implemented and remain available only
 exact-release worker advertises them. Restart reuses the same fixed action provider as the Settings
 control rather than adding a second lifecycle executor.
 
+The same fixed broker exposes Dashboard web and worker restart as the exact
+`dashboard-restart` and `worker-restart` Service Actions. Web restart waits for the unit result so
+the independent worker can durably finish the job. Worker restart is dispatched without blocking
+the worker on its own shutdown; the accepted result is durable before systemd replaces the
+process. Neither action accepts a unit name, command, or caller-controlled argument.
+
 The fixed `system-cleanup` unit preserves the consumed cleanup behavior behind one reviewed
 authority. It attempts package autoremove and cache cleanup, journald rotate plus 14-day/1 GiB
 vacuum bounds, and Docker system prune for unused content older than 168 hours; it never passes
@@ -775,7 +781,6 @@ Recommended layout:
       server/
         openClawHeartbeat.js
         productionDelivery.js
-        resetDashboardPassword.js
       browser/
       migrations/
       docs/generated/
@@ -817,13 +822,22 @@ owns the live authority at `agents.entries.ops.heartbeat.prompt`; Dashboard buil
 retention, ordinary activation, and service restart never install or reset either that config value
 or the external credential.
 
-Every release also contains `server/resetDashboardPassword.js` as a manifest-required ancillary
-executable. It is not a managed process role or systemd service. The host-only
-`auth:reset-password` package command starts that executable from `releases/current` with the Bun
-binary from `runtimes/bun/current`, an empty environment except for `NODE_ENV=production`, and the
-fixed production project root. The executable resolves the immutable active release, validates
-its release/runtime identity, and opens only the protected production state owned by that project.
-The operator supplies the password only through a TTY prompt with echo disabled.
+Email verification and password recovery are part of the web trust boundary rather than ancillary
+release executables. Bootstrap requires one syntactically valid canonical account email, creates
+the usable account immediately, and sends a 15-minute, single-use verification link. An
+unverified account can sign in and can correct or resend its address from Account email, but it
+cannot receive password-recovery mail. Changing a verified address keeps the verified address
+active until the pending replacement is verified; successful verification atomically replaces it,
+so the account never owns two active addresses. The settings badge and pending-address notice are
+driven by the subscribed authentication status and update without a page refresh.
+
+Public recovery requests are enumeration-safe and durably source/global rate-limited. A verified
+Resend sender delivers 15-minute, single-use verification and reset tokens whose validators are
+stored only as domain-separated hashes. Successful password reset rotates the authentication
+version and revokes all sessions and pending logins while preserving enrolled MFA. Both Resend
+settings are paired server-only configuration; verification and reset URLs derive only from the
+validated public origin. Authentication and settings forms validate progressively after each
+field is touched, while submit still validates every field and cannot continue with invalid data.
 
 Heartbeat cutover is a manual one-time external transition after Greenfield is active and ready:
 

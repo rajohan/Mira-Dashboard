@@ -4,6 +4,7 @@ import { minutesToMilliseconds } from "date-fns";
 import { Redacted } from "effect";
 import * as v from "valibot";
 
+import { authEmailInputSchema } from "../../../contracts/auth.ts";
 import { webAuthnRpIdSchema } from "../../../contracts/webauthn.ts";
 import {
     applicationConfigurationLimits,
@@ -48,6 +49,10 @@ export interface WebConfiguration {
     readonly projectRoot: string;
     readonly publicOrigin: string;
     readonly recentAuthenticationWindowMs: number;
+    readonly resend?: {
+        readonly apiKey: Redacted.Redacted<string>;
+        readonly fromEmail: string;
+    };
     readonly sessionIdleDurationMs: number;
     readonly totpKeyring: Redacted.Redacted<string>;
     readonly trustedProxyAddresses: readonly string[];
@@ -67,6 +72,7 @@ export const webConfigurationEnvironmentSchema = v.object({
     MIRA_DASHBOARD_WORKSPACE_ROOT: optionalEnvironmentValueSchema,
     MIRA_DASHBOARD_PUBLIC_ORIGIN: optionalEnvironmentValueSchema,
     MIRA_DASHBOARD_RECENT_AUTH_MINUTES: optionalEnvironmentValueSchema,
+    MIRA_DASHBOARD_RESEND_FROM_EMAIL: optionalEnvironmentValueSchema,
     MIRA_DASHBOARD_SESSION_IDLE_MINUTES: optionalEnvironmentValueSchema,
     MIRA_DASHBOARD_TOTP_KEYRING: optionalEnvironmentValueSchema,
     MIRA_DASHBOARD_TRUSTED_PROXY_IPS: optionalEnvironmentValueSchema,
@@ -77,6 +83,7 @@ export const webConfigurationEnvironmentSchema = v.object({
     OPENCLAW_GATEWAY_TOKEN: optionalEnvironmentValueSchema,
     OPENCLAW_GATEWAY_URL: optionalEnvironmentValueSchema,
     PORT: optionalEnvironmentValueSchema,
+    RESEND_API_KEY: optionalEnvironmentValueSchema,
 });
 
 /** Registered environment names consumed by the web-process parser. */
@@ -253,6 +260,35 @@ function elevenLabsApiKey(
     return Object.freeze(Redacted.make(raw, { label: "elevenlabs-api-key" }));
 }
 
+function resendConfiguration(input: PickedApplicationEnvironment) {
+    const apiKeyField = "RESEND_API_KEY" as const;
+    const fromField = "MIRA_DASHBOARD_RESEND_FROM_EMAIL" as const;
+    const apiKeyPresent = input[apiKeyField] != null;
+    const fromPresent = input[fromField] != null;
+    if (apiKeyPresent !== fromPresent) configurationError(apiKeyField, "inconsistent");
+    if (!apiKeyPresent) return;
+    const apiKey = requiredConfigurationString(
+        input,
+        apiKeyField,
+        applicationConfigurationLimits.resendApiKeyMaximumLength
+    );
+    const fromEmail = requiredConfigurationString(
+        input,
+        fromField,
+        applicationConfigurationLimits.resendFromEmailMaximumLength
+    );
+    const parsedEmail = v.safeParse(authEmailInputSchema, fromEmail, {
+        abortEarly: true,
+    });
+    if (!parsedEmail.success || parsedEmail.output !== fromEmail) {
+        configurationError(fromField, "invalid");
+    }
+    return Object.freeze({
+        apiKey: Object.freeze(Redacted.make(apiKey, { label: "resend-api-key" })),
+        fromEmail,
+    });
+}
+
 function durationMs(
     input: PickedApplicationEnvironment,
     field: "MIRA_DASHBOARD_RECENT_AUTH_MINUTES" | "MIRA_DASHBOARD_SESSION_IDLE_MINUTES",
@@ -296,6 +332,7 @@ export function parseWebConfiguration(
         configurationError("MIRA_DASHBOARD_PUBLIC_ORIGIN", "inconsistent");
     }
     const speechApiKey = elevenLabsApiKey(input);
+    const resend = resendConfiguration(input);
     const configuration = Object.freeze({
         ...(speechApiKey === undefined ? {} : { elevenLabsApiKey: speechApiKey }),
         gatewayToken: configurationGatewayToken(input),
@@ -316,6 +353,7 @@ export function parseWebConfiguration(
             "MIRA_DASHBOARD_RECENT_AUTH_MINUTES",
             parseRecentAuthenticationWindowMs
         ),
+        ...(resend === undefined ? {} : { resend }),
         sessionIdleDurationMs: durationMs(
             input,
             "MIRA_DASHBOARD_SESSION_IDLE_MINUTES",

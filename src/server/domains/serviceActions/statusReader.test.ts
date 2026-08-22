@@ -93,6 +93,7 @@ describe("Service Action status reader", () => {
         });
 
         expect(await reader.read()).toEqual([
+            { availability: "unavailable", id: "dashboard-restart" },
             { availability: "available", id: "openclaw-cleanup" },
             { availability: "available", id: "openclaw-restart" },
             { availability: "unavailable", id: "openclaw-update" },
@@ -104,16 +105,19 @@ describe("Service Action status reader", () => {
                 id: "system-update",
                 latestRun: expect.objectContaining({ id: latest.id, state: "failed" }),
             },
+            { availability: "unavailable", id: "worker-restart" },
         ]);
         expect(availabilityInputs).toEqual([
             {
                 actionKeys: [
+                    "host.dashboard.restart",
                     "openclaw.sessions.cleanup",
                     "openclaw.gateway.restart",
                     "openclaw.installation.update",
                     "host.system.cleanup",
                     "host.system.restart",
                     "host.system.update",
+                    "host.worker.restart",
                 ],
                 expectedReleaseId,
                 minimumHeartbeatAt: new Date(10_000),

@@ -9,9 +9,11 @@ import { parseJsonText } from "../../../shared/json.ts";
 import { fullCommitShaSchema } from "../../../shared/validation.ts";
 import { sha256Hex } from "../../shared/crypto.ts";
 import {
+    hostDashboardRestartJobActionKey,
     hostSystemCleanupJobActionKey,
     hostSystemRestartJobActionKey,
     hostSystemUpdateJobActionKey,
+    hostWorkerRestartJobActionKey,
     openClawGatewayRestartJobActionKey,
     openClawInstallationUpdateJobActionKey,
     openClawSessionsCleanupJobActionKey,
@@ -29,12 +31,14 @@ const emptyPayloadSchema = v.strictObject({});
 
 /** Exact worker action selected by each browser-visible Service Action. */
 export const serviceActionJobActionKeys = Object.freeze({
+    "dashboard-restart": hostDashboardRestartJobActionKey,
     "openclaw-cleanup": openClawSessionsCleanupJobActionKey,
     "openclaw-restart": openClawGatewayRestartJobActionKey,
     "openclaw-update": openClawInstallationUpdateJobActionKey,
     "system-cleanup": hostSystemCleanupJobActionKey,
     "system-restart": hostSystemRestartJobActionKey,
     "system-update": hostSystemUpdateJobActionKey,
+    "worker-restart": hostWorkerRestartJobActionKey,
 } as const satisfies Readonly<Record<ServiceActionId, string>>);
 
 export type ServiceActionQueueErrorReason =

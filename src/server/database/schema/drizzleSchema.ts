@@ -6,6 +6,7 @@ export { auditEvents } from "./auditEvents.ts";
 export { agentTaskRuns } from "./agentTaskRuns.ts";
 export { authChallenges } from "./authChallenges.ts";
 export { authPendingLogins } from "./authPendingLogins.ts";
+export { authPasswordResetTokens } from "./authPasswordResetTokens.ts";
 export { authRateLimitBuckets } from "./authRateLimitBuckets.ts";
 export { authSessions } from "./authSessions.ts";
 export { automationCredentials } from "./automationCredentials.ts";

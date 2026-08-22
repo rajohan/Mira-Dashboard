@@ -12,11 +12,12 @@ export function insertSecurityIdentityUser(database: SecurityIdentityTestDatabas
     database.sqlite.run(
         `INSERT INTO users (
             created_at,
+            email,
             id,
             password_hash,
             updated_at,
             username
-        ) VALUES (1000, ?, ?, 1000, 'raymond')`,
+        ) VALUES (1000, lower(hex(randomblob(16))) || '@example.com', ?, ?, 1000, 'raymond')`,
         [securityIdentityUserId, securityIdentityPasswordHash]
     );
 }

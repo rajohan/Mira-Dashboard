@@ -38,8 +38,14 @@ export interface BrowserSessionIssueInput {
     readonly userAgent?: string;
 }
 
-export function authUser(user: SecurityUserRecord): AuthUser {
-    return Object.freeze({ id: user.id, username: user.username });
+export function authUser(user: SecurityUserRecord, pendingEmail?: string): AuthUser {
+    return Object.freeze({
+        email: user.email,
+        emailVerified: user.emailVerifiedAt !== null,
+        id: user.id,
+        ...(pendingEmail === undefined ? {} : { pendingEmail }),
+        username: user.username,
+    });
 }
 
 export function authSession(

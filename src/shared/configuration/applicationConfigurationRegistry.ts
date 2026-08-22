@@ -22,6 +22,8 @@ export const applicationConfigurationLimits = Object.freeze({
     workspaceRootMaximumLength: 4096,
     publicOriginMaximumLength: 2048,
     quotaApiKeyMaximumLength: 4096,
+    resendApiKeyMaximumLength: 4096,
+    resendFromEmailMaximumLength: 254,
     recentAuthenticationMinutes: Object.freeze({ maximum: 60, minimum: 1 }),
     sessionIdleMinutes: Object.freeze({ maximum: 1440, minimum: 5 }),
     totpKeyringMaximumLength: 4096,
@@ -57,6 +59,8 @@ export type ApplicationConfigurationField =
     | "quotaCredentials.openRouter"
     | "quotaCredentials.synthetic"
     | "recentAuthenticationWindowMs"
+    | "resendApiKey"
+    | "resendFromEmail"
     | "sessionIdleDurationMs"
     | "totpKeyring"
     | "trustedProxyAddresses"
@@ -92,6 +96,8 @@ export const applicationConfigurationEnvironmentNames = [
     "MIRA_DASHBOARD_WEBAUTHN_RP_NAME",
     "MIRA_DASHBOARD_SESSION_IDLE_MINUTES",
     "MIRA_DASHBOARD_RECENT_AUTH_MINUTES",
+    "RESEND_API_KEY",
+    "MIRA_DASHBOARD_RESEND_FROM_EMAIL",
     "MIRA_DASHBOARD_TOTP_KEYRING",
     "MIRA_DASHBOARD_LOG_LEVEL",
 ] as const;
@@ -121,6 +127,7 @@ export interface ApplicationConfigurationMetadata {
         | "absolute-path"
         | "domain-name"
         | "duration-minutes"
+        | "email-address"
         | "environment-mode"
         | "http-origin"
         | "http-origin-list"
@@ -567,6 +574,36 @@ export const applicationConfigurationRegistry: readonly ApplicationConfiguration
             secret: true,
             validationConstraints: `Version 1 JSON with one to eight unique AES-256 keys and one active key, at most ${applicationConfigurationLimits.totpKeyringMaximumLength} code units.`,
             valueType: "json-secret",
+        }),
+        metadata({
+            allowedValues: null,
+            browserExposure: "none",
+            defaultValue: null,
+            description: "Optional Resend credential for account security mail.",
+            environmentName: "RESEND_API_KEY",
+            field: "resendApiKey",
+            operationalEffect:
+                "Enables fixed-host transactional verification and password-recovery delivery when paired with a sender address.",
+            restartRequired: true,
+            roles: Object.freeze(["web"]),
+            secret: true,
+            validationConstraints: `Absent together with MIRA_DASHBOARD_RESEND_FROM_EMAIL, or a trimmed nonblank control-safe secret at most ${applicationConfigurationLimits.resendApiKeyMaximumLength} code units; never persisted, logged, or browser-exposed.`,
+            valueType: "opaque-secret",
+        }),
+        metadata({
+            allowedValues: null,
+            browserExposure: "none",
+            defaultValue: null,
+            description: "Verified Resend sender address for account recovery mail.",
+            environmentName: "MIRA_DASHBOARD_RESEND_FROM_EMAIL",
+            field: "resendFromEmail",
+            operationalEffect:
+                "Selects the verified sender address used for verification and password-recovery messages.",
+            restartRequired: true,
+            roles: Object.freeze(["web"]),
+            secret: false,
+            validationConstraints: `Absent together with RESEND_API_KEY, or one canonical lowercase email address at most ${applicationConfigurationLimits.resendFromEmailMaximumLength} code units.`,
+            valueType: "email-address",
         }),
         metadata({
             allowedValues: Object.freeze(["debug", "error", "info", "warn"]),

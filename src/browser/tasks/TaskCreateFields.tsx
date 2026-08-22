@@ -8,7 +8,7 @@ import { cn } from "../lib/classNames.ts";
 import { Button } from "../ui/Button.tsx";
 import { ExpandableCard } from "../ui/ExpandableCard.tsx";
 import { Fieldset } from "../ui/Fieldset.tsx";
-import { firstFormFieldError } from "../ui/formErrors.ts";
+import { touchedFormFieldError } from "../ui/formErrors.ts";
 import { FormField } from "../ui/FormField.tsx";
 import { Input } from "../ui/Input.tsx";
 import { Select, type SelectOption } from "../ui/Select.tsx";
@@ -63,7 +63,7 @@ export function TaskCreateFields({
                 {(field) => (
                     <FormField
                         disabled={busy}
-                        error={firstFormFieldError(field.state.meta.errors)}
+                        error={touchedFormFieldError(field.state.meta)}
                         label="Title"
                     >
                         <Input
@@ -85,7 +85,7 @@ export function TaskCreateFields({
                 {(field) => (
                     <FormField
                         disabled={busy}
-                        error={firstFormFieldError(field.state.meta.errors)}
+                        error={touchedFormFieldError(field.state.meta)}
                         label="Description (optional)"
                     >
                         <Textarea
@@ -104,7 +104,7 @@ export function TaskCreateFields({
             </form.Field>
             <form.Field name="priority">
                 {(field) => {
-                    const error = firstFormFieldError(field.state.meta.errors);
+                    const error = touchedFormFieldError(field.state.meta);
                     return (
                         <Fieldset disabled={busy} error={error} legend="Priority">
                             <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
@@ -138,7 +138,7 @@ export function TaskCreateFields({
             {creating && (
                 <form.Field name="assignee">
                     {(field) => {
-                        const error = firstFormFieldError(field.state.meta.errors);
+                        const error = touchedFormFieldError(field.state.meta);
                         return (
                             <Fieldset
                                 className="pt-2"
@@ -190,9 +190,7 @@ export function TaskCreateFields({
                                 {(field) => (
                                     <FormField
                                         disabled={busy}
-                                        error={firstFormFieldError(
-                                            field.state.meta.errors
-                                        )}
+                                        error={touchedFormFieldError(field.state.meta)}
                                         label="Status"
                                     >
                                         <Select

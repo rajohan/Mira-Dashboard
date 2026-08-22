@@ -23,7 +23,11 @@ const session = Object.freeze({
     isCurrent: true,
     lastSeenAtMs: 1_800_000_000_000,
 });
-const user = Object.freeze({ id: testSecurityUserId, username: "operator" });
+const user = Object.freeze({
+    email: "operator@example.com",
+    id: testSecurityUserId,
+    username: "operator",
+});
 
 afterEach(async () => {
     for (const server of servers.splice(0)) await server.stop(true);

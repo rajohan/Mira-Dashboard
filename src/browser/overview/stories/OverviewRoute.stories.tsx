@@ -517,12 +517,14 @@ const jobs = { runs: [], summary: queueSummary } satisfies ListJobRunsResult;
 
 const serviceActions = {
     actions: [
+        { availability: "unavailable", id: "dashboard-restart" },
         { availability: "unavailable", id: "openclaw-cleanup" },
         { availability: "unavailable", id: "openclaw-restart" },
         { availability: "unavailable", id: "openclaw-update" },
         { availability: "unavailable", id: "system-cleanup" },
         { availability: "unavailable", id: "system-restart" },
         { availability: "unavailable", id: "system-update" },
+        { availability: "unavailable", id: "worker-restart" },
     ],
     observedAtMs,
 } as const satisfies GetServiceActionsStatusResult;

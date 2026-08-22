@@ -1,5 +1,5 @@
 import { taskMaximumLabels } from "../../contracts/taskModel.ts";
-import { firstFormFieldError } from "../ui/formErrors.ts";
+import { touchedFormFieldError } from "../ui/formErrors.ts";
 import { FormField } from "../ui/FormField.tsx";
 import { TagInput } from "../ui/TagInput.tsx";
 import type { TaskEditorFormApi } from "./useTaskEditorController.ts";
@@ -29,7 +29,7 @@ export function TaskLabelsField({
                 <FormField
                     description="Press Enter to add a label."
                     disabled={busy}
-                    error={firstFormFieldError(field.state.meta.errors)}
+                    error={touchedFormFieldError(field.state.meta)}
                     label="Labels (optional)"
                 >
                     <TagInput

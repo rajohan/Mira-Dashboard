@@ -77,6 +77,7 @@ const authenticatedStatus: AuthStatus = {
     state: "authenticated",
     user: {
         id: "019fd974-54a2-74dd-a64b-d4186f8d8828",
+        email: "operator@example.com",
         username: "operator",
     },
 };
@@ -721,12 +722,14 @@ const jobRunPage = Object.freeze({
 
 const serviceActionsStatus = Object.freeze({
     actions: [
+        { availability: "unavailable", id: "dashboard-restart" },
         { availability: "unavailable", id: "openclaw-cleanup" },
         { availability: "unavailable", id: "openclaw-restart" },
         { availability: "unavailable", id: "openclaw-update" },
         { availability: "unavailable", id: "system-cleanup" },
         { availability: "unavailable", id: "system-restart" },
         { availability: "unavailable", id: "system-update" },
+        { availability: "unavailable", id: "worker-restart" },
     ],
     observedAtMs: timestampMs,
 } satisfies GetServiceActionsStatusResult);

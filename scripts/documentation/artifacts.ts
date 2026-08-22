@@ -284,7 +284,8 @@ function databaseTables() {
  * @returns Sorted artifact path/content pairs.
  */
 export function buildDocumentationArtifacts(
-    packageManifest: DocumentationPackageManifest
+    packageManifest: DocumentationPackageManifest,
+    sourceDocuments: ReadonlyMap<string, string> = new Map()
 ): ReadonlyMap<string, string> {
     const packageInput: PackageDocumentationInput = {
         dependencies: packageManifest.dependencies,
@@ -317,17 +318,30 @@ export function buildDocumentationArtifacts(
         );
     }
 
-    const browserDocuments = [...artifacts]
-        .filter(([artifactPath]) => artifactPath !== "browser-reference.json")
-        .map(([artifactPath, content]) =>
-            artifactPath.startsWith("schemas/")
-                ? { kind: "schema", path: artifactPath }
-                : {
-                      content,
-                      kind: artifactPath.endsWith(".json") ? "json" : "markdown",
-                      path: artifactPath,
-                  }
-        );
+    const browserDocuments = [
+        ...[...sourceDocuments].map(([artifactPath, content]) => ({
+            content,
+            kind: "markdown" as const,
+            path: artifactPath,
+            source: "maintained" as const,
+        })),
+        ...[...artifacts]
+            .filter(([artifactPath]) => artifactPath !== "browser-reference.json")
+            .map(([artifactPath, content]) =>
+                artifactPath.startsWith("schemas/")
+                    ? {
+                          kind: "schema",
+                          path: artifactPath,
+                          source: "generated" as const,
+                      }
+                    : {
+                          content,
+                          kind: artifactPath.endsWith(".json") ? "json" : "markdown",
+                          path: artifactPath,
+                          source: "generated" as const,
+                      }
+            ),
+    ];
     artifacts.set("browser-reference.json", `${JSON.stringify(browserDocuments)}\n`);
 
     return new Map(

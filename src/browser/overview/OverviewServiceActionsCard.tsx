@@ -117,7 +117,7 @@ function ServiceActionRow({
                 <Button
                     disabled={disabled}
                     onClick={() => onSelect(action.id)}
-                    variant={action.id === "system-restart" ? "danger" : "secondary"}
+                    variant={action.id.endsWith("-restart") ? "danger" : "secondary"}
                 >
                     {recoveryPending ? presentation.retryLabel : presentation.buttonLabel}
                 </Button>

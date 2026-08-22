@@ -137,6 +137,7 @@ export const procedureExpectedErrorPolicy = freezeProcedureExpectedErrorPolicy({
         "TOO_MANY_REQUESTS",
         "UNAUTHORIZED",
     ],
+    "auth.changeEmail": ["CONFLICT", "FORBIDDEN", "SERVICE_UNAVAILABLE", "UNAUTHORIZED"],
     "auth.login": [
         "CONFLICT",
         "SERVICE_UNAVAILABLE",
@@ -146,6 +147,8 @@ export const procedureExpectedErrorPolicy = freezeProcedureExpectedErrorPolicy({
     "auth.loginRecovery": ["SERVICE_UNAVAILABLE", "TOO_MANY_REQUESTS", "UNAUTHORIZED"],
     "auth.loginTotp": ["SERVICE_UNAVAILABLE", "TOO_MANY_REQUESTS", "UNAUTHORIZED"],
     "auth.loginWebAuthn": ["SERVICE_UNAVAILABLE", "TOO_MANY_REQUESTS", "UNAUTHORIZED"],
+    "auth.requestPasswordReset": ["SERVICE_UNAVAILABLE", "TOO_MANY_REQUESTS"],
+    "auth.resetPassword": ["TOO_MANY_REQUESTS", "UNAUTHORIZED"],
     "auth.logout": ["SERVICE_UNAVAILABLE"],
     "auth.revokeAllSessions": ["FORBIDDEN", "SERVICE_UNAVAILABLE", "UNAUTHORIZED"],
     "auth.revokeOtherSessions": ["FORBIDDEN", "SERVICE_UNAVAILABLE", "UNAUTHORIZED"],
@@ -153,6 +156,7 @@ export const procedureExpectedErrorPolicy = freezeProcedureExpectedErrorPolicy({
     "auth.sessions": ["FORBIDDEN", "UNAUTHORIZED"],
     "auth.status": [],
     "auth.touch": ["FORBIDDEN", "SERVICE_UNAVAILABLE", "UNAUTHORIZED"],
+    "auth.verifyEmail": ["CONFLICT", "UNAUTHORIZED"],
     "automationSecurity.createCredential": [
         "CONFLICT",
         "FORBIDDEN",

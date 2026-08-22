@@ -151,6 +151,7 @@ function postAbortableBootstrap(
 
 function bootstrapInput(gatewayCredential: string) {
     return {
+        email: "operator@example.com",
         gatewayCredential,
         password: "correct-horse-battery",
         username: "operator",

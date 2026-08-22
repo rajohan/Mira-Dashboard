@@ -5376,12 +5376,25 @@
               "user": {
                 "type": "object",
                 "properties": {
+                  "email": {
+                    "type": "string",
+                    "maxLength": 254,
+                    "format": "email"
+                  },
+                  "emailVerified": {
+                    "type": "boolean"
+                  },
                   "id": {
                     "type": "string",
                     "minLength": 36,
                     "maxLength": 36,
                     "format": "uuid",
                     "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  "pendingEmail": {
+                    "type": "string",
+                    "maxLength": 254,
+                    "format": "email"
                   },
                   "username": {
                     "type": "string",
@@ -5391,6 +5404,7 @@
                   }
                 },
                 "required": [
+                  "email",
                   "id",
                   "username"
                 ],
@@ -5411,6 +5425,11 @@
         "$id": "urn:mira-dashboard:auth.bootstrap.input",
         "type": "object",
         "properties": {
+          "email": {
+            "type": "string",
+            "maxLength": 254,
+            "format": "email"
+          },
           "gatewayCredential": {
             "type": "string",
             "minLength": 1,
@@ -5430,6 +5449,7 @@
           }
         },
         "required": [
+          "email",
           "gatewayCredential",
           "password",
           "username"
@@ -5503,12 +5523,25 @@
           "user": {
             "type": "object",
             "properties": {
+              "email": {
+                "type": "string",
+                "maxLength": 254,
+                "format": "email"
+              },
+              "emailVerified": {
+                "type": "boolean"
+              },
               "id": {
                 "type": "string",
                 "minLength": 36,
                 "maxLength": 36,
                 "format": "uuid",
                 "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              "pendingEmail": {
+                "type": "string",
+                "maxLength": 254,
+                "format": "email"
               },
               "username": {
                 "type": "string",
@@ -5518,6 +5551,7 @@
               }
             },
             "required": [
+              "email",
               "id",
               "username"
             ],
@@ -5625,12 +5659,25 @@
               "user": {
                 "type": "object",
                 "properties": {
+                  "email": {
+                    "type": "string",
+                    "maxLength": 254,
+                    "format": "email"
+                  },
+                  "emailVerified": {
+                    "type": "boolean"
+                  },
                   "id": {
                     "type": "string",
                     "minLength": 36,
                     "maxLength": 36,
                     "format": "uuid",
                     "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  "pendingEmail": {
+                    "type": "string",
+                    "maxLength": 254,
+                    "format": "email"
                   },
                   "username": {
                     "type": "string",
@@ -5640,6 +5687,7 @@
                   }
                 },
                 "required": [
+                  "email",
                   "id",
                   "username"
                 ],
@@ -5703,6 +5751,107 @@
             "additionalProperties": false
           }
         ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "auth.verifyEmail.input": {
+        "$id": "urn:mira-dashboard:auth.verifyEmail.input",
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "minLength": 97,
+            "maxLength": 97,
+            "pattern": "^[0-9a-f]{32}\\.[0-9a-f]{64}$"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "additionalProperties": false,
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "auth.verifyEmail.output": {
+        "$id": "urn:mira-dashboard:auth.verifyEmail.output",
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "maxLength": 254,
+            "format": "email"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "additionalProperties": false,
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "auth.requestPasswordReset.input": {
+        "$id": "urn:mira-dashboard:auth.requestPasswordReset.input",
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{2,31}$"
+          }
+        },
+        "required": [
+          "username"
+        ],
+        "additionalProperties": false,
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "auth.requestPasswordReset.output": {
+        "$id": "urn:mira-dashboard:auth.requestPasswordReset.output",
+        "type": "object",
+        "properties": {
+          "isOk": {
+            "const": true
+          }
+        },
+        "required": [
+          "isOk"
+        ],
+        "additionalProperties": false,
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "auth.resetPassword.input": {
+        "$id": "urn:mira-dashboard:auth.resetPassword.input",
+        "type": "object",
+        "properties": {
+          "password": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 256
+          },
+          "token": {
+            "type": "string",
+            "minLength": 97,
+            "maxLength": 97,
+            "pattern": "^[0-9a-f]{32}\\.[0-9a-f]{64}$"
+          }
+        },
+        "required": [
+          "password",
+          "token"
+        ],
+        "additionalProperties": false,
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "auth.resetPassword.output": {
+        "$id": "urn:mira-dashboard:auth.resetPassword.output",
+        "type": "object",
+        "properties": {
+          "reset": {
+            "const": true
+          }
+        },
+        "required": [
+          "reset"
+        ],
+        "additionalProperties": false,
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "auth.loginTotp.input": {
@@ -5788,12 +5937,25 @@
           "user": {
             "type": "object",
             "properties": {
+              "email": {
+                "type": "string",
+                "maxLength": 254,
+                "format": "email"
+              },
+              "emailVerified": {
+                "type": "boolean"
+              },
               "id": {
                 "type": "string",
                 "minLength": 36,
                 "maxLength": 36,
                 "format": "uuid",
                 "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              "pendingEmail": {
+                "type": "string",
+                "maxLength": 254,
+                "format": "email"
               },
               "username": {
                 "type": "string",
@@ -5803,6 +5965,7 @@
               }
             },
             "required": [
+              "email",
               "id",
               "username"
             ],
@@ -5898,12 +6061,25 @@
           "user": {
             "type": "object",
             "properties": {
+              "email": {
+                "type": "string",
+                "maxLength": 254,
+                "format": "email"
+              },
+              "emailVerified": {
+                "type": "boolean"
+              },
               "id": {
                 "type": "string",
                 "minLength": 36,
                 "maxLength": 36,
                 "format": "uuid",
                 "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              "pendingEmail": {
+                "type": "string",
+                "maxLength": 254,
+                "format": "email"
               },
               "username": {
                 "type": "string",
@@ -5913,6 +6089,7 @@
               }
             },
             "required": [
+              "email",
               "id",
               "username"
             ],
@@ -6178,12 +6355,25 @@
           "user": {
             "type": "object",
             "properties": {
+              "email": {
+                "type": "string",
+                "maxLength": 254,
+                "format": "email"
+              },
+              "emailVerified": {
+                "type": "boolean"
+              },
               "id": {
                 "type": "string",
                 "minLength": 36,
                 "maxLength": 36,
                 "format": "uuid",
                 "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              "pendingEmail": {
+                "type": "string",
+                "maxLength": 254,
+                "format": "email"
               },
               "username": {
                 "type": "string",
@@ -6193,6 +6383,7 @@
               }
             },
             "required": [
+              "email",
               "id",
               "username"
             ],
@@ -6414,6 +6605,38 @@
         },
         "required": [
           "revokedSessions"
+        ],
+        "additionalProperties": false,
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "auth.changeEmail.input": {
+        "$id": "urn:mira-dashboard:auth.changeEmail.input",
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "maxLength": 254,
+            "format": "email"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "additionalProperties": false,
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "auth.changeEmail.output": {
+        "$id": "urn:mira-dashboard:auth.changeEmail.output",
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "maxLength": 254,
+            "format": "email"
+          }
+        },
+        "required": [
+          "email"
         ],
         "additionalProperties": false,
         "$schema": "https://json-schema.org/draft/2020-12/schema"
@@ -46098,12 +46321,14 @@
                 },
                 "id": {
                   "enum": [
+                    "dashboard-restart",
                     "openclaw-cleanup",
                     "openclaw-restart",
                     "openclaw-update",
                     "system-cleanup",
                     "system-restart",
-                    "system-update"
+                    "system-update",
+                    "worker-restart"
                   ],
                   "type": "string"
                 },
@@ -46321,8 +46546,8 @@
               ],
               "additionalProperties": false
             },
-            "maxItems": 6,
-            "$comment": "Live Valibot validation additionally requires the six fixed service-action rows to be complete, unique, and canonically ordered."
+            "maxItems": 8,
+            "$comment": "Live Valibot validation additionally requires the eight fixed service-action rows to be complete, unique, and canonically ordered."
           },
           "observedAtMs": {
             "type": "integer",
@@ -46340,6 +46565,29 @@
       "serviceActions.request.input": {
         "$id": "urn:mira-dashboard:serviceActions.request.input",
         "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "actionId": {
+                "const": "dashboard-restart"
+              },
+              "confirmation": {
+                "const": "restart-dashboard"
+              },
+              "idempotencyKey": {
+                "type": "string",
+                "minLength": 32,
+                "maxLength": 128,
+                "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
+              }
+            },
+            "required": [
+              "actionId",
+              "confirmation",
+              "idempotencyKey"
+            ],
+            "additionalProperties": false
+          },
           {
             "type": "object",
             "properties": {
@@ -46477,6 +46725,29 @@
               "idempotencyKey"
             ],
             "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "actionId": {
+                "const": "worker-restart"
+              },
+              "confirmation": {
+                "const": "restart-worker"
+              },
+              "idempotencyKey": {
+                "type": "string",
+                "minLength": 32,
+                "maxLength": 128,
+                "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
+              }
+            },
+            "required": [
+              "actionId",
+              "confirmation",
+              "idempotencyKey"
+            ],
+            "additionalProperties": false
           }
         ],
         "$schema": "https://json-schema.org/draft/2020-12/schema"
@@ -46487,12 +46758,14 @@
         "properties": {
           "actionId": {
             "enum": [
+              "dashboard-restart",
               "openclaw-cleanup",
               "openclaw-restart",
               "openclaw-update",
               "system-cleanup",
               "system-restart",
-              "system-update"
+              "system-update",
+              "worker-restart"
             ],
             "type": "string"
           },
@@ -46543,11 +46816,19 @@
             },
             "path": {
               "type": "string"
+            },
+            "source": {
+              "enum": [
+                "generated",
+                "maintained"
+              ],
+              "type": "string"
             }
           },
           "required": [
             "kind",
-            "path"
+            "path",
+            "source"
           ],
           "additionalProperties": false
         },

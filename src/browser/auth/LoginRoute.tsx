@@ -1,12 +1,16 @@
 import { useQuery } from "@tanstack/react-query";
-import { Navigate } from "@tanstack/react-router";
+import { Navigate, useSearch } from "@tanstack/react-router";
+import { useState } from "react";
 
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { dashboardBrowserFailureMessage } from "../api/trpcError.ts";
 import { PageState } from "../ui/PageState.tsx";
 import { authStatusQueryOptions } from "./authQueries.ts";
 import { BootstrapForm } from "./BootstrapForm.tsx";
+import { EmailVerificationForm } from "./EmailVerificationForm.tsx";
+import { parseLoginRouteSearch } from "./loginRouteSearch.ts";
 import { PasswordLoginForm } from "./PasswordLoginForm.tsx";
+import { PasswordRecoveryForm } from "./PasswordRecoveryForm.tsx";
 import { PendingMfaForm } from "./PendingMfaForm.tsx";
 
 /**
@@ -14,6 +18,10 @@ import { PendingMfaForm } from "./PendingMfaForm.tsx";
  * @returns The current login step or an authenticated redirect.
  */
 export function LoginRoute() {
+    const { resetToken, verifyEmailToken } = parseLoginRouteSearch(
+        useSearch({ from: "/login" }) as unknown
+    );
+    const [recovering, setRecovering] = useState(resetToken !== undefined);
     const client = useDashboardTrpcClient();
     const status = useQuery({
         ...authStatusQueryOptions(client),
@@ -34,9 +42,24 @@ export function LoginRoute() {
             />
         );
     }
+    if (verifyEmailToken !== undefined) {
+        return (
+            <EmailVerificationForm
+                onBack={() => globalThis.location.assign("/login")}
+                token={verifyEmailToken}
+            />
+        );
+    }
     switch (status.data.state) {
         case "anonymous": {
-            return <PasswordLoginForm />;
+            return recovering ? (
+                <PasswordRecoveryForm
+                    onBack={() => setRecovering(false)}
+                    {...(resetToken === undefined ? {} : { token: resetToken })}
+                />
+            ) : (
+                <PasswordLoginForm onForgotPassword={() => setRecovering(true)} />
+            );
         }
         case "authenticated": {
             return <Navigate replace to="/" />;

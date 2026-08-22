@@ -521,6 +521,7 @@ describe("MFA account WebAuthn lifecycle", () => {
                 .values(
                     v.parse(userInsertSchema, {
                         ...validUserInsert,
+                        email: "collision-owner@example.com",
                         id: collisionOwnerId,
                         username: "collision-owner",
                     })

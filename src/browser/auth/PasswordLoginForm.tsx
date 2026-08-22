@@ -5,7 +5,7 @@ import { passwordLoginInputSchema } from "../../contracts/auth.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Form } from "../ui/Form.tsx";
-import { firstFormFieldError } from "../ui/formErrors.ts";
+import { progressiveFormValidators, touchedFormFieldError } from "../ui/formErrors.ts";
 import { FormField } from "../ui/FormField.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { Input } from "../ui/Input.tsx";
@@ -16,23 +16,26 @@ import { useAuthenticationAction } from "./useAuthenticationAction.ts";
  * Starts operator authentication with username and password.
  * @returns The primary sign-in form.
  */
-export function PasswordLoginForm() {
+export function PasswordLoginForm({
+    onForgotPassword,
+}: {
+    readonly onForgotPassword: () => void;
+}) {
     const { busy, client, error, run } = useAuthenticationAction();
     const form = useForm({
         defaultValues: { password: "", username: "" },
-        onSubmit: async ({ formApi, value }) => {
+        onSubmit: async ({ value }) => {
             await run(async () => {
                 await client.mutation("auth.login", value);
-                formApi.setFieldValue("password", "");
             });
         },
-        validators: { onSubmit: passwordLoginInputSchema },
+        validators: progressiveFormValidators(passwordLoginInputSchema),
     });
 
     return (
         <LoginPanel
             description="Log in with your dashboard username and password"
-            footer="Forgotten passwords are reset with the host-local recovery command."
+            footer="Password recovery links are sent to the email linked to your account."
             icon={KeyRound}
             showStepHeading={false}
             title="Sign in"
@@ -44,7 +47,7 @@ export function PasswordLoginForm() {
                         {(field) => (
                             <FormField
                                 disabled={busy}
-                                error={firstFormFieldError(field.state.meta.errors)}
+                                error={touchedFormFieldError(field.state.meta)}
                                 label="Username"
                             >
                                 <Input
@@ -68,7 +71,7 @@ export function PasswordLoginForm() {
                         {(field) => (
                             <FormField
                                 disabled={busy}
-                                error={firstFormFieldError(field.state.meta.errors)}
+                                error={touchedFormFieldError(field.state.meta)}
                                 label="Password"
                             >
                                 <Input
@@ -106,6 +109,15 @@ export function PasswordLoginForm() {
                     )}
                 </form.Subscribe>
             </Form>
+            <Button
+                className="mt-3"
+                fullWidth
+                onClick={onForgotPassword}
+                type="button"
+                variant="ghost"
+            >
+                Forgot password?
+            </Button>
         </LoginPanel>
     );
 }

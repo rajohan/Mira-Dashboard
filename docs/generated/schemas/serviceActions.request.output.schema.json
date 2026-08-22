@@ -4,12 +4,14 @@
   "properties": {
     "actionId": {
       "enum": [
+        "dashboard-restart",
         "openclaw-cleanup",
         "openclaw-restart",
         "openclaw-update",
         "system-cleanup",
         "system-restart",
-        "system-update"
+        "system-update",
+        "worker-restart"
       ],
       "type": "string"
     },

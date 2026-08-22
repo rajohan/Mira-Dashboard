@@ -20,6 +20,7 @@ import {
 import { createDashboardRouter } from "../router.tsx";
 import type { DashboardWebAuthnClient } from "../security/webauthn/webauthnClient.ts";
 import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
+import { authStatusQueryKey } from "./authQueries.ts";
 
 const { render, screen, waitFor } = await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
@@ -28,6 +29,8 @@ const userEvent = userEventModule.default;
 const timestampMs = Date.now();
 const user = Object.freeze({
     id: "019fd974-54a2-74dd-a64b-d4186f8d8828",
+    email: "operator@example.com",
+    emailVerified: true,
     username: "operator",
 });
 const session = Object.freeze({
@@ -93,7 +96,7 @@ const mountedViews: ReturnType<typeof render>[] = [];
 function renderAuthenticationRoute(
     transport: AuthenticationTransport,
     options: {
-        readonly initialEntry?: "/" | "/login";
+        readonly initialEntry?: string;
         readonly webAuthnClient?: DashboardWebAuthnClient;
     } = {}
 ) {
@@ -151,15 +154,132 @@ describe("Dashboard login route", () => {
         }
     });
 
+    test("requests a password reset without disclosing account existence", async () => {
+        const transport = new AuthenticationTransport({ state: "anonymous" });
+        transport.mutationHandler = (path, input) => {
+            expect(path).toBe("auth.requestPasswordReset");
+            expect(input).toEqual({ username: "operator" });
+            return Promise.resolve({ isOk: true });
+        };
+        renderAuthenticationRoute(transport);
+        const userActions = userEvent.setup();
+
+        await userActions.click(
+            await screen.findByRole("button", { name: "Forgot password?" })
+        );
+        await userActions.type(screen.getByLabelText("Username"), "operator");
+        await userActions.click(screen.getByRole("button", { name: "Send reset link" }));
+
+        expect(
+            await screen.findByText(
+                "If that account exists, a reset link has been sent to its email address."
+            )
+        ).toBeTruthy();
+    });
+
+    test("renders a classified password-reset request failure and can return", async () => {
+        const transport = new AuthenticationTransport({ state: "anonymous" });
+        transport.mutationHandler = () =>
+            Promise.reject(new TypeError("Safe reset request failure"));
+        renderAuthenticationRoute(transport);
+        const userActions = userEvent.setup();
+
+        await userActions.click(
+            await screen.findByRole("button", { name: "Forgot password?" })
+        );
+        await userActions.type(screen.getByLabelText("Username"), "operator");
+        await userActions.click(screen.getByRole("button", { name: "Send reset link" }));
+        expect(await screen.findByRole("alert")).toHaveTextContent(
+            "The request could not be completed. Try again."
+        );
+        await userActions.click(screen.getByRole("button", { name: "Back to sign in" }));
+        expect(
+            await screen.findByRole("heading", { level: 1, name: "Sign in" })
+        ).toBeTruthy();
+    });
+
+    test("consumes a password-reset token and returns to sign-in", async () => {
+        const token = `${"a".repeat(32)}.${"b".repeat(64)}`;
+        const transport = new AuthenticationTransport({ state: "anonymous" });
+        transport.mutationHandler = (path, input) => {
+            expect(path).toBe("auth.resetPassword");
+            expect(input).toEqual({
+                password: "new correct horse battery staple",
+                token,
+            });
+            return Promise.resolve({ reset: true });
+        };
+        renderAuthenticationRoute(transport, {
+            initialEntry: `/login?resetToken=${token}`,
+        });
+        const userActions = userEvent.setup();
+
+        await userActions.type(
+            await screen.findByLabelText("New password"),
+            "new correct horse battery staple"
+        );
+        await userActions.click(screen.getByRole("button", { name: "Change password" }));
+        expect(
+            await screen.findByText(
+                "Your password has been changed. You can now sign in."
+            )
+        ).toBeTruthy();
+        await userActions.click(screen.getByRole("button", { name: "Back to sign in" }));
+        expect(
+            await screen.findByRole("heading", { level: 1, name: "Sign in" })
+        ).toBeTruthy();
+    });
+
+    test("publishes status after consuming an email-verification token", async () => {
+        const token = `${"a".repeat(32)}.${"b".repeat(64)}`;
+        const transport = new AuthenticationTransport({ state: "anonymous" });
+        transport.mutationHandler = (path, input) => {
+            expect(path).toBe("auth.verifyEmail");
+            expect(input).toEqual({ token });
+            return Promise.resolve({ email: "operator@example.com" });
+        };
+        const { queryClient } = renderAuthenticationRoute(transport, {
+            initialEntry: `/login?verifyEmailToken=${token}`,
+        });
+
+        expect(
+            await screen.findByText("operator@example.com is now verified.")
+        ).toBeTruthy();
+        expect(queryClient.getQueryData(authStatusQueryKey)).toEqual({
+            state: "anonymous",
+        });
+    });
+
+    test("keeps an invalid email-verification link on its error path", async () => {
+        const token = `${"a".repeat(32)}.${"b".repeat(64)}`;
+        const transport = new AuthenticationTransport({ state: "anonymous" });
+        transport.mutationHandler = () =>
+            Promise.reject(new TypeError("Safe expired verification link"));
+        renderAuthenticationRoute(transport, {
+            initialEntry: `/login?verifyEmailToken=${token}`,
+        });
+
+        expect(await screen.findByRole("alert")).toHaveTextContent(
+            "The request could not be completed. Try again."
+        );
+        expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled();
+    });
+
     test("submits bootstrap secrets ephemerally and enters the authenticated route", async () => {
         const transport = new AuthenticationTransport({
             state: "bootstrap-required",
         });
         const password = "correct horse battery staple";
+        const email = "operator@example.com";
         const gatewayCredential = "gateway-bootstrap-credential";
         transport.mutationHandler = (path, input) => {
             expect(path).toBe("auth.bootstrap");
-            expect(input).toEqual({ gatewayCredential, password, username: "operator" });
+            expect(input).toEqual({
+                email,
+                gatewayCredential,
+                password,
+                username: "operator",
+            });
             transport.status = authenticatedStatus;
             return Promise.resolve({ session, user });
         };
@@ -175,6 +295,7 @@ describe("Dashboard login route", () => {
             "operator"
         );
         await userActions.type(screen.getByLabelText("Username"), "operator");
+        await userActions.type(screen.getByLabelText("Account email"), email);
         await userActions.type(screen.getByLabelText("Dashboard password"), password);
         await userActions.type(
             screen.getByLabelText("OpenClaw Gateway credential"),
@@ -191,6 +312,20 @@ describe("Dashboard login route", () => {
         ).toBeTruthy();
         expect(cachedBrowserData(queryClient)).not.toContain(password);
         expect(cachedBrowserData(queryClient)).not.toContain(gatewayCredential);
+    });
+
+    test("validates edited bootstrap fields before submit", async () => {
+        const transport = new AuthenticationTransport({
+            state: "bootstrap-required",
+        });
+        renderAuthenticationRoute(transport);
+        const userActions = userEvent.setup();
+
+        await screen.findByRole("heading", { name: "Set up Mira Dashboard" });
+        await userActions.type(screen.getByLabelText("Account email"), "not-an-email");
+
+        expect(await screen.findByText("Enter a valid email address.")).toBeVisible();
+        expect(transport.calls.some(({ kind }) => kind === "mutation")).toBeFalse();
     });
 
     test("moves password login into the pending MFA state without caching the password", async () => {

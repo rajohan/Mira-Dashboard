@@ -6,6 +6,8 @@ import {
     authSessionRevokeResultSchema,
     authSessionsRevokeResultSchema,
     authSessionTouchResultSchema,
+    emailChangeInputSchema,
+    emailChangeResultSchema,
     passwordChangeInputSchema,
     passwordChangeResultSchema,
     sessionRevokeInputSchema,
@@ -24,6 +26,46 @@ import {
 
 /** Authenticated password-change and browser-session management routes. */
 export const authSessionRoutes = {
+    changeEmail: sessionProcedure
+        .input(emailChangeInputSchema)
+        .output(emailChangeResultSchema)
+        .mutation(async ({ ctx, input }) => {
+            const result = await ctx.authenticationLifecycle.changeEmail(
+                ctx.sessionIdentity,
+                input,
+                authenticationRequestMetadata(ctx, undefined)
+            );
+            switch (result.status) {
+                case "already-verified": {
+                    throw new TRPCError({
+                        code: "CONFLICT",
+                        message: "Email address is already verified",
+                    });
+                }
+                case "changed": {
+                    return v.parse(emailChangeResultSchema, { email: result.email });
+                }
+                case "session-changed": {
+                    appendClearedDashboardSessionCookie(ctx.responseHeaders);
+                    throw new TRPCError({
+                        code: "UNAUTHORIZED",
+                        message: "Authentication state changed; sign in again",
+                    });
+                }
+                case "step-up-required": {
+                    throw authenticationPolicyError(
+                        "step_up_required",
+                        "Recent password or multi-factor authentication is required"
+                    );
+                }
+                case "service-unavailable": {
+                    throw new TRPCError({
+                        code: "SERVICE_UNAVAILABLE",
+                        message: "Email verification is temporarily unavailable",
+                    });
+                }
+            }
+        }),
     changePassword: sessionProcedure
         .input(passwordChangeInputSchema)
         .output(passwordChangeResultSchema)

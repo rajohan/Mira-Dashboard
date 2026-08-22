@@ -179,6 +179,7 @@ describe("Dashboard browser application", () => {
                     state: "authenticated",
                     user: {
                         id: "019fd974-54a2-74dd-a64b-d4186f8d8828",
+                        email: "operator@example.com",
                         username: "operator",
                     },
                 });
@@ -319,6 +320,7 @@ describe("Dashboard browser application", () => {
             state: "authenticated",
             user: {
                 id: "019fd974-54a2-74dd-a64b-d4186f8d8828",
+                email: "operator@example.com",
                 username: "operator",
             },
         };

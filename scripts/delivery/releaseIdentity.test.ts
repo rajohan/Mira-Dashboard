@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { constants } from "node:fs";
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -40,6 +41,7 @@ async function copyDirectory(source: string, destination: string): Promise<void>
     await cp(source, destination, {
         errorOnExist: true,
         force: false,
+        mode: constants.COPYFILE_FICLONE,
         recursive: true,
     });
 }
@@ -96,10 +98,6 @@ async function releaseFixture(): Promise<{
         writeFile(
             path.join(releaseRoot, "server/productionDelivery.js"),
             "production-delivery"
-        ),
-        writeFile(
-            path.join(releaseRoot, "server/resetDashboardPassword.js"),
-            "password-recovery"
         ),
         writeFile(path.join(releaseRoot, "server/web.js"), "web"),
         writeFile(path.join(releaseRoot, "server/worker.js"), "worker"),
@@ -200,12 +198,6 @@ describe("release identity", () => {
         expect(
             created.artifacts.some(
                 ({ path: artifactPath }) => artifactPath === "server/worker.js"
-            )
-        ).toBe(true);
-        expect(
-            created.artifacts.some(
-                ({ path: artifactPath }) =>
-                    artifactPath === "server/resetDashboardPassword.js"
             )
         ).toBe(true);
         expect(
@@ -389,16 +381,5 @@ describe("release identity", () => {
             verifyReleaseIdentity(fixture.releaseRoot, runtimeIdentity)
         );
         expect(tamperFailure.message).toBe("Release identity is invalid");
-    });
-
-    test("rejects a release without the host password-recovery executable", async () => {
-        const fixture = await releaseFixture();
-        await rm(path.join(fixture.releaseRoot, "server/resetDashboardPassword.js"));
-
-        const failure = await rejectionError(
-            createReleaseIdentity(creationOptions(fixture))
-        );
-
-        expect(failure.message).toBe("Release identity is invalid");
     });
 });

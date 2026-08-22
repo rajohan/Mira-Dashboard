@@ -5,6 +5,29 @@
       "type": "object",
       "properties": {
         "actionId": {
+          "const": "dashboard-restart"
+        },
+        "confirmation": {
+          "const": "restart-dashboard"
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 32,
+          "maxLength": 128,
+          "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
+        }
+      },
+      "required": [
+        "actionId",
+        "confirmation",
+        "idempotencyKey"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "actionId": {
           "const": "openclaw-cleanup"
         },
         "confirmation": {
@@ -124,6 +147,29 @@
         },
         "confirmation": {
           "const": "update-system"
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 32,
+          "maxLength": 128,
+          "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
+        }
+      },
+      "required": [
+        "actionId",
+        "confirmation",
+        "idempotencyKey"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "actionId": {
+          "const": "worker-restart"
+        },
+        "confirmation": {
+          "const": "restart-worker"
         },
         "idempotencyKey": {
           "type": "string",

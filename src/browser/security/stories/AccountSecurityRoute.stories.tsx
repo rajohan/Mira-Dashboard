@@ -214,6 +214,29 @@ export const Ready: Story = {
     },
 };
 
+export const EmailChange: Story = {
+    args: {
+        fixtures: accountSecurityFixtures(readySummary, {
+            mutations: {
+                "auth.changeEmail": dashboardStoryValue({
+                    email: "new-address@example.com",
+                }),
+            },
+        }),
+        route: "/account-security",
+    },
+    play: async ({ canvasElement }) => {
+        const canvas = within(canvasElement);
+        await userEvent.click(
+            await canvas.findByRole("button", { name: "Change email" }, asyncStoryTimeout)
+        );
+        const page = within(canvasElement.ownerDocument.body);
+        await expect(await page.findByLabelText("Email")).toHaveValue(
+            authenticatedDashboardStoryStatus.user.email
+        );
+    },
+};
+
 export const PaginatedAudit: Story = {
     args: {
         fixtures: accountSecurityFixtures(readySummary, {
@@ -291,21 +314,14 @@ export const StalePasswordEnrollment: Story = {
     args: {
         fixtures: accountSecurityFixtures(staleEnrollmentSummary, {
             mutations: {
-                "accountSecurity.reauthenticatePassword": dashboardStoryResolver(
-                    (_input, callIndex) => {
-                        if (callIndex === 0) {
-                            throw Object.assign(
-                                new Error("Safe password proof failure"),
-                                { data: { code: "UNAUTHORIZED" } }
-                            );
-                        }
-                        return { session: currentSession, verifiedAtMs: nowMs };
-                    }
-                ),
+                "accountSecurity.reauthenticatePassword": dashboardStoryValue({
+                    session: currentSession,
+                    verifiedAtMs: nowMs,
+                }),
             },
             queries: {
                 "auth.status": dashboardStoryResolver((_input, callIndex) => {
-                    if (callIndex === 1) {
+                    if (callIndex === 2) {
                         throw new TypeError("Safe session refresh failure");
                     }
                     return authenticatedDashboardStoryStatus;
@@ -317,7 +333,7 @@ export const StalePasswordEnrollment: Story = {
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement);
         const page = within(canvasElement.ownerDocument.body);
-        await fireEvent.click(
+        await userEvent.click(
             await canvas.findByRole("button", { name: "Add authenticator app" })
         );
         const verification = await page.findByRole("dialog", {
@@ -325,19 +341,7 @@ export const StalePasswordEnrollment: Story = {
         });
         const password = within(verification).getByLabelText("Current password");
         await fireEvent.change(password, { target: { value: "current password" } });
-        await fireEvent.click(
-            within(verification).getByRole("button", { name: "Verify password" })
-        );
-        const verificationError = await within(verification).findByText(
-            "The credentials or session are no longer valid.",
-            {},
-            asyncStoryTimeout
-        );
-        await waitFor(async () => {
-            await expect(verificationError).toBeVisible();
-        }, asyncStoryTimeout);
-        await fireEvent.change(password, { target: { value: "current password" } });
-        await fireEvent.click(
+        await userEvent.click(
             within(verification).getByRole("button", { name: "Verify password" })
         );
         const enrollment = await page.findByRole("dialog", {

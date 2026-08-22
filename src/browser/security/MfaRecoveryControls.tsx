@@ -7,7 +7,7 @@ import type { useExclusiveDashboardAction } from "../hooks/useExclusiveDashboard
 import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Form } from "../ui/Form.tsx";
-import { firstFormFieldError } from "../ui/formErrors.ts";
+import { progressiveFormValidators, touchedFormFieldError } from "../ui/formErrors.ts";
 import { FormField } from "../ui/FormField.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { Input } from "../ui/Input.tsx";
@@ -32,7 +32,7 @@ export function MfaRecoveryControls({ action, onDisable }: MfaRecoveryControlsPr
                 setOpen(false);
             }
         },
-        validators: { onSubmit: disableMfaInputSchema },
+        validators: progressiveFormValidators(disableMfaInputSchema),
     });
 
     function close(): void {
@@ -66,7 +66,7 @@ export function MfaRecoveryControls({ action, onDisable }: MfaRecoveryControlsPr
                         {(field) => (
                             <FormField
                                 disabled={action.busy}
-                                error={firstFormFieldError(field.state.meta.errors)}
+                                error={touchedFormFieldError(field.state.meta)}
                                 label="Current password"
                             >
                                 <Input

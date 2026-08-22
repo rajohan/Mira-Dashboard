@@ -1,4 +1,4 @@
-import { addMilliseconds, differenceInMilliseconds, getTime } from "date-fns";
+import { addMilliseconds, addMinutes, differenceInMilliseconds, getTime } from "date-fns";
 
 import { browserSessionMaximumPerUser } from "../../../contracts/auth.ts";
 import {
@@ -25,7 +25,10 @@ import { evaluateRecentAuthentication } from "./recentAuthentication.ts";
 type SessionsContext = Pick<
     AuthenticationLifecycleContext,
     | "audit"
+    | "generateEmailVerificationToken"
     | "now"
+    | "passwordRecoveryEmailSender"
+    | "publicOrigin"
     | "recentAuthenticationWindowMs"
     | "repository"
     | "sessionIdleDurationMs"
@@ -101,6 +104,7 @@ export function createAuthenticationSessionOperations(
 ): Pick<
     AuthenticationLifecycleService,
     | "authorizeRecentMfa"
+    | "changeEmail"
     | "listSessions"
     | "logout"
     | "revokeAllSessions"
@@ -114,6 +118,66 @@ export function createAuthenticationSessionOperations(
             return context.repository.withReadTransaction((reader) =>
                 recentMfaAccess(context, reader, identity, context.now())
             );
+        },
+        async changeEmail(identity, input, metadata) {
+            if (
+                context.passwordRecoveryEmailSender === undefined ||
+                context.publicOrigin === undefined
+            ) {
+                return { status: "service-unavailable" } as const;
+            }
+            const prepared = await context.repository.withImmediateTransaction((unit) => {
+                const changedAt = context.now();
+                const access = sessionMutationAccess(context, unit, identity, changedAt);
+                if (access !== "authorized") return { status: access } as const;
+                const user = unit.findUserById(identity.userId)!;
+                if (input.email === user.email && user.emailVerifiedAt !== null) {
+                    return { status: "already-verified" } as const;
+                }
+                const token = context.generateEmailVerificationToken();
+                unit.deletePasswordResetTokensForUserPurpose(
+                    user.id,
+                    "email-verification"
+                );
+                unit.insertPasswordResetToken({
+                    authenticationVersion: user.authenticationVersion,
+                    createdAt: changedAt,
+                    expiresAt: addMinutes(changedAt, 15),
+                    pendingEmail: input.email,
+                    prefix: token.prefix,
+                    purpose: "email-verification",
+                    userId: user.id,
+                    validatorHash: token.validatorHash,
+                    validatorVersion: token.validatorVersion,
+                });
+                context.audit(unit, {
+                    action: "auth.email.verification.request",
+                    actor: sessionActor(identity),
+                    occurredAt: changedAt,
+                    outcome: "succeeded",
+                    requestId: metadata.requestId,
+                    targetId: user.id,
+                    targetType: "user",
+                });
+                return { email: input.email, status: "deliver" as const, token };
+            });
+            if (prepared.status !== "deliver") return prepared;
+            const verificationUrl = new URL("/login", context.publicOrigin);
+            verificationUrl.searchParams.set("verifyEmailToken", prepared.token.token);
+            try {
+                await context.passwordRecoveryEmailSender.sendVerification({
+                    idempotencyKey: `email-verification/${prepared.token.prefix}`,
+                    signal: metadata.signal,
+                    to: prepared.email,
+                    verificationUrl: verificationUrl.href,
+                });
+            } catch {
+                await context.repository.withImmediateTransaction((unit) => {
+                    unit.deletePasswordResetToken(prepared.token.prefix);
+                });
+                return { status: "service-unavailable" } as const;
+            }
+            return { email: prepared.email, status: "changed" } as const;
         },
         listSessions(identity) {
             return context.repository.withReadTransaction((reader) => {
@@ -282,7 +346,13 @@ export function createAuthenticationSessionOperations(
                 authenticated: true,
                 isBootstrapRequired: false,
                 session: authSession(session, identity.sessionId),
-                user: authUser(user),
+                user: authUser(
+                    user,
+                    context.repository.findPasswordResetTokenForUserPurpose(
+                        user.id,
+                        "email-verification"
+                    )?.pendingEmail ?? undefined
+                ),
             };
         },
 

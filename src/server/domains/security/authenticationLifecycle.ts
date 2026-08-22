@@ -2,6 +2,7 @@ import { createAuthenticationBootstrapOperation } from "./authenticationLifecycl
 import { createAuthenticationLifecycleContext } from "./authenticationLifecycleContext.ts";
 import { createAuthenticationLoginOperation } from "./authenticationLifecycleLogin.ts";
 import { createAuthenticationPasswordOperation } from "./authenticationLifecyclePassword.ts";
+import { createAuthenticationPasswordRecoveryOperations } from "./authenticationLifecyclePasswordRecovery.ts";
 import { createAuthenticationSessionOperations } from "./authenticationLifecycleSessions.ts";
 import type {
     AuthenticationLifecycleDependencies,
@@ -37,6 +38,7 @@ export function createAuthenticationLifecycleService(
         ...createAuthenticationBootstrapOperation(context),
         ...createAuthenticationLoginOperation(context),
         ...createAuthenticationPasswordOperation(context),
+        ...createAuthenticationPasswordRecoveryOperations(context),
         ...createAuthenticationSessionOperations(context),
     });
 }

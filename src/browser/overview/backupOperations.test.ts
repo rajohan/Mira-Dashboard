@@ -55,6 +55,7 @@ describe("backup browser recovery", () => {
             state: "authenticated",
             user: {
                 id: "019fe200-0000-7000-8000-000000000002",
+                email: "operator@example.com",
                 username: "operator",
             },
         } satisfies AuthStatus);

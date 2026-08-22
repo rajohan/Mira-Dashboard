@@ -107,8 +107,8 @@ describe("contract JSON Schema conversion", () => {
             properties: {
                 actions: {
                     $comment:
-                        "Live Valibot validation additionally requires the six fixed service-action rows to be complete, unique, and canonically ordered.",
-                    maxItems: 6,
+                        "Live Valibot validation additionally requires the eight fixed service-action rows to be complete, unique, and canonically ordered.",
+                    maxItems: 8,
                 },
             },
         });

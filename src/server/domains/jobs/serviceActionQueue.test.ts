@@ -46,7 +46,7 @@ function definition(actionId: ServiceActionId): JobUnscheduledActionDefinition {
         manualExposure: "none",
         priority: 20,
         resourceClass: "exclusive",
-        resourceKeys: Object.freeze(["host.mutation", actionId]),
+        resourceKeys: Object.freeze(["host.mutation", actionId].toSorted()),
         retrySafe: false,
         timeoutMs: 60_000,
     });

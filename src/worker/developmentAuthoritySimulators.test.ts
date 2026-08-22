@@ -40,9 +40,11 @@ describe("source-development authority simulators", () => {
         });
 
         expect(await simulators.hostOperations.availableOperations()).toEqual([
+            "dashboard-restart",
             "system-cleanup",
             "system-restart",
             "system-update",
+            "worker-restart",
         ]);
         expect(await simulators.hostOperations.request("system-cleanup")).toEqual({
             status: "completed",

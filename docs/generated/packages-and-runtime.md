@@ -22,8 +22,8 @@
 | `@simplewebauthn/server` | `13.3.2` | `13.3.2` | runtime |
 | `@tailwindcss/typography` | `^0.5.20` | `0.5.20` | runtime |
 | `@tanstack/query-core` | `5.101.4` | `5.101.4` | runtime |
-| `@tanstack/query-db-collection` | `1.2.6` | `1.2.6` | runtime |
-| `@tanstack/react-db` | `0.3.1` | `0.3.1` | runtime |
+| `@tanstack/query-db-collection` | `1.2.7` | `1.2.7` | runtime |
+| `@tanstack/react-db` | `0.3.2` | `0.3.2` | runtime |
 | `@tanstack/react-form` | `^1.33.5` | `1.33.5` | runtime |
 | `@tanstack/react-query` | `^5.101.4` | `5.101.4` | runtime |
 | `@tanstack/react-router` | `^1.170.31` | `1.170.31` | runtime |
@@ -40,7 +40,7 @@
 | `effect` | `4.0.0-rc.111` | `4.0.0-rc.111` | runtime |
 | `json5` | `^2.2.3` | `2.2.3` | runtime |
 | `lucide-react` | `1.33.0` | `1.33.0` | runtime |
-| `otplib` | `13.4.1` | `13.4.1` | runtime |
+| `otplib` | `13.5.0` | `13.5.0` | runtime |
 | `qrcode.react` | `4.2.0` | `4.2.0` | runtime |
 | `react` | `^19.2.8` | `19.2.8` | runtime |
 | `react-dom` | `^19.2.8` | `19.2.8` | runtime |
@@ -60,7 +60,7 @@
 | `@testing-library/dom` | `^10.4.1` | `10.4.1` | development |
 | `@testing-library/jest-dom` | `^7.0.1` | `7.0.1` | development |
 | `@testing-library/react` | `^16.3.2` | `16.3.2` | development |
-| `@testing-library/user-event` | `^14.6.5` | `14.6.5` | development |
+| `@testing-library/user-event` | `14.6.6` | `14.6.6` | development |
 | `@types/node` | `26.2.0` | `26.2.0` | development |
 | `@types/react` | `^19.2.18` | `19.2.18` | development |
 | `@types/react-dom` | `^19.2.4` | `19.2.4` | development |

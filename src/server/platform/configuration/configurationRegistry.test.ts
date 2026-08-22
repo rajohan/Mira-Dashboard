@@ -36,10 +36,12 @@ describe("application configuration registry", () => {
             "MIRA_DASHBOARD_WEBAUTHN_RP_NAME",
             "MIRA_DASHBOARD_SESSION_IDLE_MINUTES",
             "MIRA_DASHBOARD_RECENT_AUTH_MINUTES",
+            "RESEND_API_KEY",
+            "MIRA_DASHBOARD_RESEND_FROM_EMAIL",
             "MIRA_DASHBOARD_TOTP_KEYRING",
             "MIRA_DASHBOARD_LOG_LEVEL",
         ]);
-        expect(applicationConfigurationRegistry).toHaveLength(27);
+        expect(applicationConfigurationRegistry).toHaveLength(29);
         expect(
             applicationConfigurationRegistry
                 .map((entry) => entry.environmentName)
@@ -95,6 +97,7 @@ describe("application configuration registry", () => {
             "MOLTBOOK_API_KEY",
             "OPENCLAW_GATEWAY_TOKEN",
             "MIRA_DASHBOARD_TOTP_KEYRING",
+            "RESEND_API_KEY",
         ]);
     });
 
@@ -121,6 +124,7 @@ describe("application configuration registry", () => {
             MIRA_DASHBOARD_PROJECT_ROOT: "projectRoot",
             MIRA_DASHBOARD_PUBLIC_ORIGIN: "publicOrigin",
             MIRA_DASHBOARD_RECENT_AUTH_MINUTES: "recentAuthenticationWindowMs",
+            MIRA_DASHBOARD_RESEND_FROM_EMAIL: "resendFromEmail",
             MIRA_DASHBOARD_SESSION_IDLE_MINUTES: "sessionIdleDurationMs",
             MIRA_DASHBOARD_TOTP_KEYRING: "totpKeyring",
             MIRA_DASHBOARD_TRUSTED_PROXY_IPS: "trustedProxyAddresses",
@@ -134,6 +138,7 @@ describe("application configuration registry", () => {
             OPENROUTER_API_KEY: "quotaCredentials.openRouter",
             PORT: "port",
             RAJOHAN_GITHUB_TOKEN: "githubCredentials.reviewerToken",
+            RESEND_API_KEY: "resendApiKey",
             SYNTHETIC_API_KEY: "quotaCredentials.synthetic",
         });
     });

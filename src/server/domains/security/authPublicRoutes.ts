@@ -4,10 +4,15 @@ import * as v from "valibot";
 import {
     authenticatedSessionResultSchema,
     authStatusSchema,
+    emailVerificationInputSchema,
+    emailVerificationResultSchema,
     firstUserBootstrapInputSchema,
     okResultSchema,
     passwordLoginInputSchema,
     passwordLoginResultSchema,
+    passwordResetInputSchema,
+    passwordResetRequestInputSchema,
+    passwordResetResultSchema,
 } from "../../../contracts/auth.ts";
 import { emptyInputSchema } from "../../../contracts/system.ts";
 import {
@@ -40,6 +45,28 @@ function currentSessionIdentity(
 
 /** Public bootstrap, password-login, logout, and authentication-status routes. */
 export const authPublicRoutes = {
+    verifyEmail: publicProcedure
+        .input(emailVerificationInputSchema)
+        .output(emailVerificationResultSchema)
+        .mutation(async ({ ctx, input, signal }) => {
+            const result = await ctx.authenticationLifecycle.verifyEmail(
+                input,
+                authenticationRequestMetadata(ctx, signal)
+            );
+            if (result.status === "verified") {
+                return v.parse(emailVerificationResultSchema, { email: result.email });
+            }
+            if (result.status === "conflict") {
+                throw new TRPCError({
+                    code: "CONFLICT",
+                    message: "Email address is already in use",
+                });
+            }
+            throw new TRPCError({
+                code: "UNAUTHORIZED",
+                message: "Email-verification link is invalid or expired",
+            });
+        }),
     bootstrap: publicProcedure
         .input(firstUserBootstrapInputSchema)
         .output(authenticatedSessionResultSchema)
@@ -130,6 +157,44 @@ export const authPublicRoutes = {
                     });
                 }
             }
+        }),
+    requestPasswordReset: publicProcedure
+        .input(passwordResetRequestInputSchema)
+        .output(okResultSchema)
+        .mutation(async ({ ctx, input, signal }) => {
+            const result = await ctx.authenticationLifecycle.requestPasswordReset(
+                input,
+                authenticationRequestMetadata(ctx, signal)
+            );
+            if (result.status === "service-unavailable") {
+                throw new TRPCError({
+                    code: "SERVICE_UNAVAILABLE",
+                    message: "Password recovery is unavailable",
+                });
+            }
+            if (result.status === "rate-limited") {
+                return throwAuthenticationRateLimit(ctx, result.retryAfterSeconds);
+            }
+            return { isOk: true } as const;
+        }),
+    resetPassword: publicProcedure
+        .input(passwordResetInputSchema)
+        .output(passwordResetResultSchema)
+        .mutation(async ({ ctx, input, signal }) => {
+            const result = await ctx.authenticationLifecycle.resetPassword(
+                input,
+                authenticationRequestMetadata(ctx, signal)
+            );
+            if (result.status === "rate-limited") {
+                return throwAuthenticationRateLimit(ctx, result.retryAfterSeconds);
+            }
+            if (result.status === "invalid-token") {
+                throw new TRPCError({
+                    code: "UNAUTHORIZED",
+                    message: "Password-reset link is invalid or expired",
+                });
+            }
+            return { reset: true } as const;
         }),
     logout: publicProcedure
         .input(emptyInputSchema)
