@@ -1284,6 +1284,7 @@ describe("Dashboard operational overview foundation", () => {
         expect(
             await screen.findByRole("heading", { level: 3, name: "Saved payload" })
         ).toBeTruthy();
+        expect(screen.getByLabelText("Saved payload JSON")).toHaveAttribute("readonly");
         expect(screen.getByText(/"hostname": "mira-vps"/u)).toBeTruthy();
         expect(screen.queryByText("never-render-this-metadata")).toBeNull();
         await waitFor(() =>

@@ -67,9 +67,12 @@ function CacheProjection({ entry }: { readonly entry: CacheEntry }) {
                 <Icon icon={DatabaseZap} size="md" tone="accent" />
                 <Heading level={3}>Saved payload</Heading>
             </div>
-            <pre className="border-primary-700 bg-primary-900/35 text-primary-100 mt-4 max-h-112 overflow-auto rounded-lg border p-3 font-mono text-xs leading-5">
-                {JSON.stringify(entry.payload, null, 2)}
-            </pre>
+            <textarea
+                aria-label="Saved payload JSON"
+                className="border-primary-700 bg-primary-900/35 text-primary-100 mt-4 h-112 w-full resize-none overflow-auto rounded-lg border p-3 font-mono text-xs leading-5"
+                readOnly
+                value={JSON.stringify(entry.payload, null, 2)}
+            />
         </Card>
     );
 }

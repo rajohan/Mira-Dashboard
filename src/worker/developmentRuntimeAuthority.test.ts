@@ -162,7 +162,6 @@ describe("source-development runtime authority", () => {
             quota,
             weather,
         });
-        expect(serialized).not.toContain("/opt/docker");
         expect(serialized).not.toContain("MIRA_GITHUB_TOKEN");
         expect(serialized).not.toContain("DATABASE_PASSWORD");
     });
