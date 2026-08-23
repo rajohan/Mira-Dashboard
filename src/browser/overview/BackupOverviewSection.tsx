@@ -323,6 +323,8 @@ export function BackupOverviewSectionView({
         sqlite.lifecycle.maintenance.state !== "unavailable"
             ? sqlite.lifecycle.maintenance.runs[0]
             : undefined;
+    const sqliteRunActive =
+        latestSqliteRun?.state === "queued" || latestSqliteRun?.state === "running";
     return (
         <section aria-label="Backup status">
             {error !== undefined && (
@@ -601,7 +603,8 @@ export function BackupOverviewSectionView({
                                 sqlite === undefined ||
                                 sqlite.state === "unavailable" ||
                                 controlsDisabled ||
-                                sqliteBusy
+                                sqliteBusy ||
+                                sqliteRunActive
                             }
                             onClick={onRunSqlite}
                             size="sm"
@@ -866,7 +869,11 @@ export function BackupOverviewSection() {
             onClearKopiaAttention={() => void submit("kopia", "clear-attention")}
             onClearWalgAttention={() => void submit("walg", "clear-attention")}
             onRetry={() => {
-                void Promise.allSettled([kopiaQuery.refetch(), walgQuery.refetch()]);
+                void Promise.allSettled([
+                    kopiaQuery.refetch(),
+                    walgQuery.refetch(),
+                    databaseQuery.refetch(),
+                ]);
             }}
             onRetryKopia={() => void kopiaQuery.refetch()}
             onRetryWalg={() => void walgQuery.refetch()}

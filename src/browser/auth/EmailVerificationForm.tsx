@@ -60,7 +60,7 @@ export function EmailVerificationForm({ onBack, token }: EmailVerificationFormPr
                     Verifying…
                 </Text>
             ) : null}
-            <Button className="mt-5" fullWidth onClick={onBack}>
+            <Button className="mt-5" disabled={busy} fullWidth onClick={onBack}>
                 Continue
             </Button>
         </LoginPanel>

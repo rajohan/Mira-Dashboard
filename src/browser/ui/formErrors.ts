@@ -24,15 +24,18 @@ export function firstFormFieldError(errors: readonly unknown[]): string | undefi
 }
 
 /**
- * Hides whole-form validation findings until the corresponding field was edited.
+ * Hides whole-form validation findings until the field was edited or submit validation ran.
  * @param metadata TanStack field interaction and error metadata.
  * @returns The first presentable error for a touched field.
  */
 export function touchedFormFieldError(metadata: {
+    readonly errorMap?: { readonly onSubmit?: unknown };
     readonly errors: readonly unknown[];
     readonly isTouched: boolean;
 }): string | undefined {
-    return metadata.isTouched ? firstFormFieldError(metadata.errors) : undefined;
+    return metadata.isTouched
+        ? firstFormFieldError(metadata.errors)
+        : firstFormFieldError([metadata.errorMap?.onSubmit]);
 }
 
 /**

@@ -290,6 +290,25 @@ describe("Dashboard login route", () => {
         );
     });
 
+    test("keeps Continue disabled until email verification settles", async () => {
+        const token = `${"a".repeat(32)}.${"b".repeat(64)}`;
+        const verification = Promise.withResolvers<{ readonly email: string }>();
+        const transport = new AuthenticationTransport({ state: "anonymous" });
+        transport.mutationHandler = () => verification.promise;
+        renderAuthenticationRoute(transport, {
+            initialEntry: `/login?verifyEmailToken=${token}`,
+        });
+
+        expect(await screen.findByText("Verifying…")).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+
+        verification.resolve({ email: "operator@example.com" });
+        expect(
+            await screen.findByText("operator@example.com is now verified.")
+        ).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled();
+    });
+
     test("keeps an invalid email-verification link on its error path", async () => {
         const token = `${"a".repeat(32)}.${"b".repeat(64)}`;
         const transport = new AuthenticationTransport({ state: "anonymous" });

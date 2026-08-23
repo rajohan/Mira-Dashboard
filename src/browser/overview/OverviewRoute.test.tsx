@@ -1395,6 +1395,35 @@ describe("Dashboard operational overview foundation", () => {
         );
     });
 
+    test("disables SQLite backup while maintenance is active", async () => {
+        const transport = new OverviewTransport({
+            databaseOverviewOutput: {
+                ...detailedDatabaseOverview,
+                sqlite: {
+                    ...detailedDatabaseOverview.sqlite,
+                    lifecycle: {
+                        ...detailedDatabaseOverview.sqlite.lifecycle,
+                        maintenance: {
+                            ...detailedDatabaseOverview.sqlite.lifecycle.maintenance,
+                            runs: [
+                                {
+                                    queuedAtMs: timestampMs,
+                                    runId: "019fc968-1a9b-7765-8f1b-d5b863b0e7c1",
+                                    state: "queued",
+                                },
+                            ],
+                        },
+                    },
+                },
+            },
+        });
+        await renderOverview(transport);
+
+        expect(
+            await screen.findByRole("button", { name: "Queue SQLite backup" })
+        ).toBeDisabled();
+    });
+
     test("does not present an empty truncated snapshot as a complete inventory", async () => {
         const transport = new OverviewTransport({
             cacheStatusOutputs: [
