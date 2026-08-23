@@ -5,6 +5,7 @@ import { type ReactNode, useState } from "react";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { cn } from "../lib/classNames.ts";
 import { Alert } from "../ui/Alert.tsx";
+import { Badge } from "../ui/Badge.tsx";
 import { Card } from "../ui/Card.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
@@ -76,6 +77,14 @@ export function CacheBrowser() {
                 <div className="mb-4 flex items-center gap-2">
                     <Icon icon={DatabaseZap} size="md" tone="accent" />
                     <Heading level={3}>Cache</Heading>
+                    {query.data.truncated && (
+                        <Badge
+                            aria-label={`${query.data.entries.length} of ${query.data.totalCount} saved data sources loaded`}
+                        >
+                            {query.data.entries.length.toLocaleString()} /{" "}
+                            {query.data.totalCount.toLocaleString()}
+                        </Badge>
+                    )}
                 </div>
                 <CacheStatusTable
                     entries={query.data.entries}

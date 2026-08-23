@@ -53,7 +53,7 @@ function quotaProviderResponse(
         });
     }
     if (url.endsWith("/api/v1/credits")) {
-        return jsonResponse({ data: { total_credits: 10 } });
+        return jsonResponse({ data: { total_credits: 10, total_usage: 4 } });
     }
     if (url.endsWith("/v2/quotas")) {
         return jsonResponse({
@@ -406,7 +406,7 @@ describe("overview collectors", () => {
             },
         ]);
         expect(payload.providers[2]).toMatchObject({
-            balance: 8,
+            balance: 6,
             periodUsage: 0.1344,
         });
         expect(JSON.stringify(payload)).not.toContain("private synchronous");
@@ -581,7 +581,7 @@ describe("overview collectors", () => {
                     }
                     if (url.endsWith("/api/v1/credits")) {
                         return Promise.resolve(
-                            jsonResponse({ data: { total_credits: 10 } })
+                            jsonResponse({ data: { total_credits: 10, total_usage: 4 } })
                         );
                     }
                     throw new Error("unexpected provider");
@@ -617,6 +617,7 @@ describe("overview collectors", () => {
                 ],
             }),
             expect.objectContaining({
+                balance: 6,
                 id: "openrouter",
                 remaining: 8,
                 status: "available",

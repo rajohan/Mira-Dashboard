@@ -50,6 +50,7 @@ import {
     createDashboardBrowserCollections,
     type DashboardBrowserCollections,
 } from "../data/dashboardCollections.ts";
+import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { createDashboardRouter } from "../router.tsx";
 import type { DashboardWebAuthnClient } from "../security/webauthn/webauthnClient.ts";
 import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
@@ -1413,6 +1414,34 @@ describe("Dashboard operational overview foundation", () => {
                 name: "Saved data list incomplete",
             })
         ).toBeTruthy();
+    });
+
+    test("indicates a bounded cache inventory without restoring removed disclosure copy", async () => {
+        await renderOverview(new OverviewTransport());
+
+        expect(
+            await screen.findByLabelText("2 of 129 saved data sources loaded")
+        ).toHaveTextContent("2 / 129");
+        expect(screen.queryByText(/Showing 2 of 129/iu)).toBeNull();
+    });
+
+    test("identifies the retained metrics sample after a refresh failure", async () => {
+        const transport = new OverviewTransport({
+            systemMetricsOutputs: [
+                systemMetrics,
+                new TypeError("hidden metrics transport detail"),
+            ],
+        });
+        const { queryClient } = await renderOverview(transport);
+
+        await act(async () => {
+            await queryClient.invalidateQueries({ queryKey: ["system", "metrics"] });
+        });
+
+        expect(await screen.findByText(/Last sample:/u)).toHaveTextContent(
+            `The system usage request could not be completed. Try again. Last sample: ${formatDashboardDateTime(timestampMs)}.`
+        );
+        expect(screen.queryByText("hidden metrics transport detail")).toBeNull();
     });
 
     test("reuses an ambiguous refresh key and presents a terminal replay accurately", async () => {

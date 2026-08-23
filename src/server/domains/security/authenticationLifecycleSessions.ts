@@ -134,11 +134,11 @@ export function createAuthenticationSessionOperations(
                 if (input.email === user.email && user.emailVerifiedAt !== null) {
                     return { status: "already-verified" } as const;
                 }
-                const token = context.generateEmailVerificationToken();
-                unit.deletePasswordResetTokensForUserPurpose(
+                const previousToken = unit.findPasswordResetTokenForUserPurpose(
                     user.id,
                     "email-verification"
                 );
+                const token = context.generateEmailVerificationToken();
                 unit.insertPasswordResetToken({
                     authenticationVersion: user.authenticationVersion,
                     createdAt: changedAt,
@@ -159,7 +159,12 @@ export function createAuthenticationSessionOperations(
                     targetId: user.id,
                     targetType: "user",
                 });
-                return { email: input.email, status: "deliver" as const, token };
+                return {
+                    email: input.email,
+                    previousTokenPrefix: previousToken?.prefix,
+                    status: "deliver" as const,
+                    token,
+                };
             });
             if (prepared.status !== "deliver") return prepared;
             const verificationUrl = new URL("/login", context.publicOrigin);
@@ -176,6 +181,12 @@ export function createAuthenticationSessionOperations(
                     unit.deletePasswordResetToken(prepared.token.prefix);
                 });
                 return { status: "service-unavailable" } as const;
+            }
+            if (prepared.previousTokenPrefix !== undefined) {
+                const previousTokenPrefix = prepared.previousTokenPrefix;
+                await context.repository.withImmediateTransaction((unit) => {
+                    unit.deletePasswordResetToken(previousTokenPrefix);
+                });
             }
             return { email: prepared.email, status: "changed" } as const;
         },

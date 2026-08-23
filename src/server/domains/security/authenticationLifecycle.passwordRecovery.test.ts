@@ -95,6 +95,59 @@ describe("authentication password recovery", () => {
         }
     });
 
+    test("keeps the delivered email-verification token when replacement delivery fails", async () => {
+        const verificationUrls: string[] = [];
+        let changeDeliveryCount = 0;
+        const harness = await createAuthenticationLifecycleHarness({
+            passwordRecoveryEmailSender: {
+                send: () => Promise.resolve(),
+                sendVerification(message) {
+                    verificationUrls.push(message.verificationUrl);
+                    changeDeliveryCount += 1;
+                    return changeDeliveryCount === 3
+                        ? Promise.reject(new Error("simulated delivery failure"))
+                        : Promise.resolve();
+                },
+            },
+            publicOrigin: "https://dashboard.example.com",
+        });
+        try {
+            const bootstrap = await bootstrapAuthenticationLifecycle(harness);
+            const identity = {
+                sessionId: bootstrap.session.id,
+                userId: bootstrap.user.id,
+            };
+            expect(
+                await harness.service.changeEmail(
+                    identity,
+                    { email: "first-replacement@example.com" },
+                    authenticationLifecycleMetadata
+                )
+            ).toEqual({ email: "first-replacement@example.com", status: "changed" });
+            expect(
+                await harness.service.changeEmail(
+                    identity,
+                    { email: "second-replacement@example.com" },
+                    authenticationLifecycleMetadata
+                )
+            ).toEqual({ status: "service-unavailable" });
+
+            const deliveredToken = new URL(verificationUrls[1] ?? "").searchParams.get(
+                "verifyEmailToken"
+            );
+            if (deliveredToken === null)
+                throw new Error("Verification URL omitted its token");
+            expect(
+                await harness.service.verifyEmail(
+                    { token: deliveredToken },
+                    authenticationLifecycleMetadata
+                )
+            ).toEqual({ email: "first-replacement@example.com", status: "verified" });
+        } finally {
+            harness.database.sqlite.close(true);
+        }
+    });
+
     test("keeps account discovery generic and consumes one emailed token", async () => {
         const messages: { readonly resetUrl: string; readonly to: string }[] = [];
         const verificationUrls: string[] = [];

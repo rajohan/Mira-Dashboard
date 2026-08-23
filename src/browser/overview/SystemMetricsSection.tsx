@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
+import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Card } from "../ui/Card.tsx";
 import { PageState } from "../ui/PageState.tsx";
@@ -54,7 +55,7 @@ export function SystemMetricsSection() {
                 <Alert
                     className="mt-4"
                     focusOnError={false}
-                    message={systemMetricsFailureMessage(query.error)}
+                    message={`${systemMetricsFailureMessage(query.error)} Last sample: ${formatDashboardDateTime(query.data.sampledAtMs)}.`}
                 />
             )}
             {query.data?.freshness === "stale" && query.error === null && (

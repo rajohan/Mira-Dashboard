@@ -27,7 +27,10 @@ const openRouterKeySchema = v.object({
     }),
 });
 const openRouterCreditsSchema = v.object({
-    data: v.object({ total_credits: nonnegativeFiniteSchema }),
+    data: v.object({
+        total_credits: nonnegativeFiniteSchema,
+        total_usage: nonnegativeFiniteSchema,
+    }),
 });
 const elevenLabsSchema = v.object({
     subscription: v.object({
@@ -179,12 +182,13 @@ async function collectOpenRouter(
             }),
         ]);
         const keyProjection = v.parse(openRouterKeySchema, key).data;
-        const total = v.parse(openRouterCreditsSchema, credits).data.total_credits;
+        const creditsProjection = v.parse(openRouterCreditsSchema, credits).data;
+        const total = creditsProjection.total_credits;
         const limit = keyProjection.limit ?? total;
         const remaining =
             keyProjection.limit_remaining ?? Math.max(total - keyProjection.usage, 0);
         return v.parse(quotaProviderProjectionSchema, {
-            balance: Math.max(total - keyProjection.usage, 0),
+            balance: Math.max(total - creditsProjection.total_usage, 0),
             id: "openrouter",
             label: "OpenRouter",
             limit,
