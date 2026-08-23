@@ -923,7 +923,9 @@ export const RefreshQueued: Story = {
     },
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement);
-        await userEvent.click(await canvas.findByRole("button", { name: "system.host" }));
+        await userEvent.click(
+            await canvas.findByRole("button", { name: "View system.host" })
+        );
         await userEvent.click(await canvas.findByRole("button", { name: "Refresh now" }));
         await expect(
             await canvas.findByText(/Refresh requested. Saved data updates/u)

@@ -106,13 +106,9 @@ describe("CacheStatusTable", () => {
                 onSelect={jest.fn()}
             />
         );
-        const navigation = screen.getByRole("navigation", {
-            name: "Saved data sources",
-        });
-        expect(navigation.querySelector("ul")).toHaveClass(
-            "max-h-176",
-            "overflow-y-auto"
-        );
+        expect(
+            screen.getByRole("region", { name: "Saved data sources scroll area" })
+        ).toHaveClass("max-h-176", "overflow-y-auto");
         expect(screen.getAllByRole("button", { name: /^View provider\./u })).toHaveLength(
             50
         );

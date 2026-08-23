@@ -6,7 +6,7 @@ import {
     type CacheEntryStatus,
     cacheStatusResultSchema,
 } from "../../../contracts/cache.ts";
-import { expectVirtualizedTable } from "../../storySupport/virtualizationAssertions.ts";
+import { expectVirtualizedList } from "../../storySupport/virtualizationAssertions.ts";
 import { CacheStatusTable } from "../CacheStatusTable.tsx";
 
 const timestampMs = 1_800_000_000_000;
@@ -73,7 +73,7 @@ const entries = validatedEntries([
     }),
 ]);
 
-const virtualizedEntries = validatedEntries(
+const largeInventoryEntries = validatedEntries(
     Array.from({ length: 50 }, (_, index) =>
         cacheStatus(`provider.${index.toString().padStart(3, "0")}`)
     )
@@ -98,7 +98,9 @@ type Story = StoryObj<typeof meta>;
 export const FreshStaleAndMissing: Story = {
     play: async ({ args, canvasElement }) => {
         await userEvent.click(
-            within(canvasElement).getByRole("button", { name: "weather.spydeberg" })
+            within(canvasElement).getByRole("button", {
+                name: "View weather.spydeberg",
+            })
         );
         await expect(args.onSelect).toHaveBeenCalledWith("weather.spydeberg");
     },
@@ -106,14 +108,14 @@ export const FreshStaleAndMissing: Story = {
 
 export const VirtualizedInventory: Story = {
     args: {
-        entries: virtualizedEntries,
-        selectedKey: virtualizedEntries[0]?.key,
+        entries: largeInventoryEntries,
+        selectedKey: largeInventoryEntries[0]?.key,
     },
     play: async ({ canvasElement }) => {
-        await expectVirtualizedTable({
+        await expectVirtualizedList({
             canvasElement,
+            itemCount: largeInventoryEntries.length,
             label: "Saved data sources",
-            rowCount: virtualizedEntries.length,
         });
     },
 };

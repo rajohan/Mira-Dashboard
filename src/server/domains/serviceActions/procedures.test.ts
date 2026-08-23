@@ -30,6 +30,10 @@ const jobRunId = "018f6f50-6a9e-7b88-8000-000000000001";
 const statusResult = Object.freeze({
     actions: [
         { availability: "available" as const, id: "dashboard-restart" as const },
+        {
+            availability: "available" as const,
+            id: "dashboard-stack-restart" as const,
+        },
         { availability: "available" as const, id: "openclaw-cleanup" as const },
         { availability: "available" as const, id: "openclaw-restart" as const },
         { availability: "available" as const, id: "openclaw-update" as const },
