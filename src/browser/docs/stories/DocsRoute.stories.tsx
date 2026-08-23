@@ -15,6 +15,20 @@ const fixtures = {
         "system.documentationReference": dashboardStoryValue(generatedDocuments),
     },
 };
+const focusedFixtures = {
+    queries: {
+        ...fixtures.queries,
+        "system.documentationReference": dashboardStoryValue(
+            generatedDocuments.filter(({ path }) =>
+                [
+                    "openapi.raw-http.json",
+                    "procedures.md",
+                    "schemas/accountSecurity.beginTotpEnrollment.input.schema.json",
+                ].includes(path)
+            )
+        ),
+    },
+};
 
 const meta = {
     component: DashboardPageStory,
@@ -30,7 +44,7 @@ export const Ready: Story = {
 };
 
 export const Search: Story = {
-    args: Ready.args,
+    args: { fixtures: focusedFixtures, route: "/docs" },
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement);
         await fireEvent.change(

@@ -352,7 +352,7 @@ export function BackupOverviewSectionView({
                                 walg === undefined ||
                                 controlsDisabled ||
                                 mutationBusy !== undefined ||
-                                (walg !== undefined && providerUnavailable(walg))
+                                providerUnavailable(walg)
                             }
                             onClick={onRunWalg}
                             size="sm"
@@ -393,7 +393,7 @@ export function BackupOverviewSectionView({
                                 kopia === undefined ||
                                 controlsDisabled ||
                                 mutationBusy !== undefined ||
-                                (kopia !== undefined && providerUnavailable(kopia))
+                                providerUnavailable(kopia)
                             }
                             onClick={onRunKopia}
                             size="sm"

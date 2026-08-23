@@ -26,6 +26,10 @@ const { render, screen, waitFor } = await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
 const userEvent = userEventModule.default;
 
+function findAuthenticatedDashboard() {
+    return screen.findByRole("link", { current: "page", name: "Dashboard" });
+}
+
 const timestampMs = Date.now();
 const user = Object.freeze({
     id: "019fd974-54a2-74dd-a64b-d4186f8d8828",
@@ -307,9 +311,7 @@ describe("Dashboard login route", () => {
         );
         await userActions.click(screen.getByRole("button", { name: "Create account" }));
 
-        expect(
-            await screen.findByRole("heading", { level: 1, name: "Mira Dashboard" })
-        ).toBeTruthy();
+        expect(await findAuthenticatedDashboard()).toBeTruthy();
         expect(cachedBrowserData(queryClient)).not.toContain(password);
         expect(cachedBrowserData(queryClient)).not.toContain(gatewayCredential);
     });
@@ -393,7 +395,7 @@ describe("Dashboard login route", () => {
         expect(screen.queryByLabelText("Recovery code")).toBeNull();
         await userActions.click(screen.getByRole("button", { name: "Verify code" }));
 
-        await screen.findByRole("heading", { level: 1, name: "Mira Dashboard" });
+        await findAuthenticatedDashboard();
         expect(cachedBrowserData(queryClient)).not.toContain(code);
     });
 
@@ -463,7 +465,7 @@ describe("Dashboard login route", () => {
             screen.getByRole("button", { name: "Use recovery code" })
         );
 
-        await screen.findByRole("heading", { level: 1, name: "Mira Dashboard" });
+        await findAuthenticatedDashboard();
         expect(cachedBrowserData(queryClient)).not.toContain(code);
     });
 
@@ -520,7 +522,7 @@ describe("Dashboard login route", () => {
             screen.getByRole("button", { name: "Use a security key" })
         );
 
-        await screen.findByRole("heading", { level: 1, name: "Mira Dashboard" });
+        await findAuthenticatedDashboard();
         expect(ceremonyInputs).toEqual([options]);
     });
 
