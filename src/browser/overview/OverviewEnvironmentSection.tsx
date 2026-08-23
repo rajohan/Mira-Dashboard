@@ -139,9 +139,7 @@ function weatherIcon(condition: WeatherCachePayload["condition"], className: str
     return <Cloud {...properties} />;
 }
 
-function osloTimeParts(
-    now: Date
-): readonly [time: string, weekday: string, date: string] {
+function osloTimeParts(now: Date): readonly [time: string, date: string] {
     const time = new Intl.DateTimeFormat("en-GB", {
         hour: "2-digit",
         minute: "2-digit",
@@ -151,14 +149,16 @@ function osloTimeParts(
     const weekday = new Intl.DateTimeFormat("en-GB", {
         timeZone: "Europe/Oslo",
         weekday: "long",
-    }).format(now);
+    })
+        .format(now)
+        .replaceAll("/", ".");
     const date = new Intl.DateTimeFormat("en-GB", {
-        day: "numeric",
-        month: "long",
+        day: "2-digit",
+        month: "2-digit",
         timeZone: "Europe/Oslo",
         year: "numeric",
     }).format(now);
-    return [time, `${weekday},`, date];
+    return [time, `${weekday}, ${date}`];
 }
 
 function forecastDayLabel(date: string, index: number): string {
@@ -175,7 +175,7 @@ function WeatherDetails({ payload }: { readonly payload: WeatherCachePayload }) 
         const timer = globalThis.setInterval(() => setNow(new Date()), 1000);
         return () => globalThis.clearInterval(timer);
     }, []);
-    const [localTime, localWeekday, localDate] = osloTimeParts(now);
+    const [localTime, localDate] = osloTimeParts(now);
 
     return (
         <div>
@@ -188,10 +188,7 @@ function WeatherDetails({ payload }: { readonly payload: WeatherCachePayload }) 
                     <div className="text-primary-50 text-2xl font-semibold tabular-nums">
                         {localTime}
                     </div>
-                    <div className="text-primary-300 text-sm capitalize">
-                        <span className="block">{localWeekday}</span>
-                        <span className="block">{localDate}</span>
-                    </div>
+                    <div className="text-primary-300 text-sm capitalize">{localDate}</div>
                 </div>
                 <div className="border-primary-700 bg-primary-900/30 xl:bg-primary-900/30 flex items-center gap-3 rounded-lg border p-3 sm:border-0 sm:bg-transparent sm:p-0 xl:border xl:p-3 2xl:border-0 2xl:bg-transparent 2xl:p-0">
                     {weatherIcon(payload.condition, "size-7 shrink-0 text-amber-300")}
