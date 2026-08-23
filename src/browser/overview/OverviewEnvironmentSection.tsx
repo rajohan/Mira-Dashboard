@@ -26,7 +26,9 @@ import type { WeatherCachePayload } from "../../contracts/weather.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import {
     formatDashboardDateTime,
+    formatDashboardDateTimeParts,
     formatDashboardDateTimeToMinute,
+    formatDashboardWeekdayDate,
 } from "../lib/formatDateTime.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Badge } from "../ui/Badge.tsx";
@@ -139,28 +141,6 @@ function weatherIcon(condition: WeatherCachePayload["condition"], className: str
     return <Cloud {...properties} />;
 }
 
-function osloTimeParts(now: Date): readonly [time: string, date: string] {
-    const time = new Intl.DateTimeFormat("en-GB", {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-        timeZone: "Europe/Oslo",
-    }).format(now);
-    const weekday = new Intl.DateTimeFormat("en-GB", {
-        timeZone: "Europe/Oslo",
-        weekday: "long",
-    })
-        .format(now)
-        .replaceAll("/", ".");
-    const date = new Intl.DateTimeFormat("en-GB", {
-        day: "2-digit",
-        month: "2-digit",
-        timeZone: "Europe/Oslo",
-        year: "numeric",
-    }).format(now);
-    return [time, `${weekday}, ${date}`];
-}
-
 function forecastDayLabel(date: string, index: number): string {
     if (index === 0) return "Today";
     return new Intl.DateTimeFormat("en-GB", {
@@ -175,7 +155,8 @@ function WeatherDetails({ payload }: { readonly payload: WeatherCachePayload }) 
         const timer = globalThis.setInterval(() => setNow(new Date()), 1000);
         return () => globalThis.clearInterval(timer);
     }, []);
-    const [localTime, localDate] = osloTimeParts(now);
+    const [, localTime] = formatDashboardDateTimeParts(now.getTime());
+    const localDate = formatDashboardWeekdayDate(now.getTime());
 
     return (
         <div>

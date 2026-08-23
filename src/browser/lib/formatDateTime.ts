@@ -23,6 +23,15 @@ export function formatDashboardDateTimeParts(
 }
 
 /**
+ * Formats a timestamp as a weekday followed by the shared day-first Dashboard date.
+ * @param timestampMs Unix epoch milliseconds.
+ * @returns Compact weekday and date such as `Sunday, 23.08.2026`.
+ */
+export function formatDashboardWeekdayDate(timestampMs: number): string {
+    return format(new Date(timestampMs), "EEEE, dd.MM.yyyy");
+}
+
+/**
  * Formats a timestamp as human relative activity copy.
  * @param timestampMs Unix epoch milliseconds.
  * @param referenceTimestampMs Reference clock used for deterministic callers and tests.

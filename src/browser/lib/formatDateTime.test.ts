@@ -2,8 +2,10 @@ import { describe, expect, test } from "bun:test";
 
 import {
     formatDashboardDateTime,
+    formatDashboardDateTimeParts,
     formatDashboardDateTimeToMinute,
     formatDashboardRelativeTime,
+    formatDashboardWeekdayDate,
 } from "./formatDateTime.ts";
 
 describe("formatDashboardDateTime", () => {
@@ -14,6 +16,11 @@ describe("formatDashboardDateTime", () => {
         expect(formatDashboardDateTimeToMinute(localTimestamp)).toBe(
             "08.08.2026 · 21:32"
         );
+        expect(formatDashboardDateTimeParts(localTimestamp)).toEqual([
+            "08.08.2026",
+            "21:32:45",
+        ]);
+        expect(formatDashboardWeekdayDate(localTimestamp)).toBe("Saturday, 08.08.2026");
     });
 
     test("formats activity relative to an explicit reference clock", () => {
