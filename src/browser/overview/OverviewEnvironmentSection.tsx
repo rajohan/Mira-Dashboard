@@ -13,6 +13,7 @@ import {
     GitBranch,
     Gauge,
     Sun,
+    Thermometer,
     Wind,
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
@@ -188,7 +189,7 @@ function WeatherDetails({ payload }: { readonly payload: WeatherCachePayload }) 
                 <span className="border-primary-700 bg-primary-800/40 flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-md border p-1 text-center">
                     <span className="text-primary-400">Feels</span>
                     <span className="text-primary-100 inline-flex items-center gap-1 whitespace-nowrap tabular-nums">
-                        <Cloud
+                        <Thermometer
                             aria-hidden="true"
                             className="text-primary-300 size-4 shrink-0"
                         />
