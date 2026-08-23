@@ -1,7 +1,21 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { clsx } from "clsx";
-import { CloudSun, GitBranch, Gauge } from "lucide-react";
-import type { ReactNode } from "react";
+import {
+    Cloud,
+    CloudDrizzle,
+    CloudFog,
+    CloudLightning,
+    CloudRain,
+    CloudSnow,
+    CloudSun,
+    Clock,
+    Droplets,
+    GitBranch,
+    Gauge,
+    Sun,
+    Wind,
+} from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import type { GitWorkspaceCachePayload } from "../../contracts/gitWorkspace.ts";
 import type {
@@ -110,37 +124,135 @@ function ProviderCard<TPayload extends { readonly observedAtMs: number }>({
 }
 
 function formatTemperature(value: number): string {
-    return `${Math.round(value)} °C`;
+    return `${Math.round(value)}°`;
+}
+
+function weatherIcon(condition: WeatherCachePayload["condition"], className: string) {
+    const properties = { "aria-hidden": true, className } as const;
+    if (condition === "clear") return <Sun {...properties} />;
+    if (condition === "cloudy") return <CloudSun {...properties} />;
+    if (condition === "drizzle") return <CloudDrizzle {...properties} />;
+    if (condition === "fog") return <CloudFog {...properties} />;
+    if (condition === "rain") return <CloudRain {...properties} />;
+    if (condition === "snow") return <CloudSnow {...properties} />;
+    if (condition === "thunderstorm") return <CloudLightning {...properties} />;
+    return <Cloud {...properties} />;
+}
+
+function osloTimeParts(
+    now: Date
+): readonly [time: string, weekday: string, date: string] {
+    const time = new Intl.DateTimeFormat("en-GB", {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        timeZone: "Europe/Oslo",
+    }).format(now);
+    const weekday = new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Europe/Oslo",
+        weekday: "long",
+    }).format(now);
+    const date = new Intl.DateTimeFormat("en-GB", {
+        day: "numeric",
+        month: "long",
+        timeZone: "Europe/Oslo",
+        year: "numeric",
+    }).format(now);
+    return [time, `${weekday},`, date];
+}
+
+function forecastDayLabel(date: string, index: number): string {
+    if (index === 0) return "Today";
+    return new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Europe/Oslo",
+        weekday: "short",
+    }).format(new Date(`${date}T12:00:00+02:00`));
 }
 
 function WeatherDetails({ payload }: { readonly payload: WeatherCachePayload }) {
+    const [now, setNow] = useState(() => new Date());
+    useEffect(() => {
+        const timer = globalThis.setInterval(() => setNow(new Date()), 1000);
+        return () => globalThis.clearInterval(timer);
+    }, []);
+    const [localTime, localWeekday, localDate] = osloTimeParts(now);
+
     return (
         <div>
-            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                <Text as="span" className="text-primary-50 text-3xl font-semibold">
-                    {formatTemperature(payload.temperatureC)}
-                </Text>
-                <Text as="span" tone="muted">
-                    Feels like {formatTemperature(payload.apparentTemperatureC)}
-                </Text>
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between xl:flex-col xl:items-stretch 2xl:flex-row 2xl:items-center">
+                <div className="min-w-0">
+                    <div className="text-primary-400 mb-1 flex items-center gap-2 text-xs tracking-wide uppercase">
+                        <Clock aria-hidden="true" className="size-3.5" />
+                        {payload.location}
+                    </div>
+                    <div className="text-primary-50 text-2xl font-semibold tabular-nums">
+                        {localTime}
+                    </div>
+                    <div className="text-primary-300 text-sm capitalize">
+                        <span className="block">{localWeekday}</span>
+                        <span className="block">{localDate}</span>
+                    </div>
+                </div>
+                <div className="border-primary-700 bg-primary-900/30 xl:bg-primary-900/30 flex items-center gap-3 rounded-lg border p-3 sm:border-0 sm:bg-transparent sm:p-0 xl:border xl:p-3 2xl:border-0 2xl:bg-transparent 2xl:p-0">
+                    {weatherIcon(payload.condition, "size-7 shrink-0 text-amber-300")}
+                    <div className="min-w-0">
+                        <div className="text-primary-50 text-2xl font-semibold">
+                            {formatTemperature(payload.temperatureC)}C
+                        </div>
+                        <div className="text-primary-300 text-xs capitalize">
+                            {payload.condition}
+                        </div>
+                    </div>
+                </div>
             </div>
-            <Text className="mt-2 capitalize">
-                {payload.condition} · {Math.round(payload.humidityPercent)}% humidity ·{" "}
-                {Math.round(payload.windKilometresPerHour)} km/h wind
-            </Text>
-            <ul className="mt-4 grid grid-cols-3 gap-2">
-                {payload.forecast.map((day) => (
-                    <li className="bg-primary-900/45 rounded-lg p-2" key={day.date}>
-                        <Text size="sm" tone="muted">
-                            {day.date}
-                        </Text>
-                        <Text className="mt-1 capitalize" size="sm">
-                            {day.condition}
-                        </Text>
-                        <Text className="mt-1" size="sm">
-                            {formatTemperature(day.minimumTemperatureC)}–
-                            {formatTemperature(day.maximumTemperatureC)}
-                        </Text>
+
+            <div className="text-primary-200 mt-3 grid grid-cols-3 gap-1 text-xs sm:gap-2 xl:grid-cols-1 2xl:grid-cols-3">
+                <span className="border-primary-700 bg-primary-800/40 inline-flex min-w-0 items-center justify-center gap-1 rounded-md border p-1">
+                    <Cloud
+                        aria-hidden="true"
+                        className="text-primary-400 size-4 shrink-0"
+                    />
+                    <span className="whitespace-nowrap">
+                        Feels {formatTemperature(payload.apparentTemperatureC)}
+                    </span>
+                </span>
+                <span className="border-primary-700 bg-primary-800/40 inline-flex min-w-0 items-center justify-center gap-1 rounded-md border p-1">
+                    <Droplets
+                        aria-hidden="true"
+                        className="text-accent-300 size-4 shrink-0"
+                    />
+                    <span className="whitespace-nowrap">
+                        {Math.round(payload.humidityPercent)}%
+                    </span>
+                </span>
+                <span className="border-primary-700 bg-primary-800/40 inline-flex min-w-0 items-center justify-center gap-1 rounded-md border p-1">
+                    <Wind
+                        aria-hidden="true"
+                        className="text-primary-400 size-4 shrink-0"
+                    />
+                    <span className="whitespace-nowrap">
+                        {Math.round(payload.windKilometresPerHour)} km/h
+                    </span>
+                </span>
+            </div>
+
+            <ul className="mt-3 grid grid-cols-3 gap-1 sm:gap-2 xl:grid-cols-1 2xl:grid-cols-3">
+                {payload.forecast.map((day, index) => (
+                    <li
+                        className="border-primary-700 bg-primary-800/40 flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-md border p-1 text-center text-xs sm:px-2"
+                        key={day.date}
+                    >
+                        <span className="text-primary-400 whitespace-nowrap">
+                            {forecastDayLabel(day.date, index)}
+                        </span>
+                        <span className="text-primary-100 inline-flex min-w-0 items-center gap-0.5 text-[11px] leading-none whitespace-nowrap tabular-nums sm:gap-1 sm:text-xs">
+                            {weatherIcon(
+                                day.condition,
+                                "size-4 shrink-0 text-primary-300"
+                            )}
+                            {formatTemperature(day.maximumTemperatureC)}/
+                            {formatTemperature(day.minimumTemperatureC)}
+                        </span>
                     </li>
                 ))}
             </ul>
@@ -153,16 +265,38 @@ export function WeatherOverviewCard({ className }: { readonly className?: string
     const client = useDashboardTrpcClient();
     const weather = useQuery(weatherOverviewQueryOptions(client));
 
+    let content: ReactNode;
+    if (weather.isPending && weather.data === undefined) {
+        content = <PageState label="Loading weather…" status="loading" />;
+    } else if (weather.data === undefined) {
+        content = (
+            <PageState
+                headingLevel={3}
+                message="The latest validated projection is not available."
+                onRetry={() => void weather.refetch()}
+                retryBusy={weather.isFetching}
+                status="error"
+                title="Weather unavailable"
+            />
+        );
+    } else {
+        content = <WeatherDetails payload={weather.data.payload} />;
+    }
+
     return (
-        <ProviderCard
-            className={className}
-            description="Current conditions and three-day forecast for Spydeberg."
-            icon={CloudSun}
-            query={weather}
-            title="Weather"
-        >
-            {(payload) => <WeatherDetails payload={payload} />}
-        </ProviderCard>
+        <Card className={clsx("min-w-0", className)}>
+            <Heading className="sr-only" level={3}>
+                Weather
+            </Heading>
+            {weather.error !== null && weather.data !== undefined && (
+                <Alert
+                    className="mb-3"
+                    focusOnError={false}
+                    message="The refresh failed. Showing the retained validated result."
+                />
+            )}
+            {content}
+        </Card>
     );
 }
 
@@ -232,21 +366,21 @@ function QuotaDetails({ payload }: { readonly payload: QuotaCachePayload }) {
                                 aria-label={`${provider.label} quota windows`}
                                 className="border-primary-700/70 mt-2 space-y-1 border-t pt-2"
                             >
-                                {windows.map((window) => (
+                                {windows.map((quotaWindow) => (
                                     <li
                                         className="flex flex-wrap justify-between gap-x-3 gap-y-1"
-                                        key={`${window.windowDurationMinutes}:${window.resetsAtMs}`}
+                                        key={`${quotaWindow.windowDurationMinutes}:${quotaWindow.resetsAtMs}`}
                                     >
                                         <Text as="span" size="sm" tone="muted">
                                             {quotaWindowDuration(
-                                                window.windowDurationMinutes
+                                                quotaWindow.windowDurationMinutes
                                             )}
                                         </Text>
                                         <Text as="span" size="sm">
-                                            {Math.round(window.usedPercent)}% used ·
+                                            {Math.round(quotaWindow.usedPercent)}% used ·
                                             resets{" "}
                                             <QuotaResetTime
-                                                resetsAtMs={window.resetsAtMs}
+                                                resetsAtMs={quotaWindow.resetsAtMs}
                                             />
                                         </Text>
                                     </li>

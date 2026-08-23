@@ -1063,6 +1063,16 @@ describe("Dashboard operational overview foundation", () => {
         const cpuCard = cpuHeading.closest("section");
         expect(cpuCard).toBeTruthy();
         expect(within(cpuCard as HTMLElement).getByText("50%")).toBeTruthy();
+        expect(within(cpuCard as HTMLElement).getByText("2, 1, 0.5")).toBeTruthy();
+        const memoryHeading = screen.getByRole("heading", { level: 3, name: "Memory" });
+        const memoryCard = memoryHeading.closest("section");
+        expect(memoryCard).toBeTruthy();
+        expect(
+            within(memoryCard as HTMLElement).getByText("6.0 GiB of 8.0 GiB")
+        ).toBeTruthy();
+        expect(screen.queryByText("Host uptime")).toBeNull();
+        expect(screen.queryByText("Current total download speed")).toBeNull();
+        expect(screen.queryByText("Current total upload speed")).toBeNull();
         expect(screen.getByText("12.3 Mbit/s")).toBeTruthy();
         expect(screen.getByText("All observed")).toBeTruthy();
         expect(screen.getByText("3 subscribers")).toBeTruthy();
@@ -1074,7 +1084,17 @@ describe("Dashboard operational overview foundation", () => {
         expect(
             within(hostMetrics).getByRole("heading", { level: 3, name: "Weather" })
         ).toBeTruthy();
-        expect(screen.getByText("15 °C")).toBeTruthy();
+        const weatherCard = within(hostMetrics)
+            .getByRole("heading", { level: 3, name: "Weather" })
+            .closest("section");
+        expect(weatherCard).toBeTruthy();
+        const weatherContent = within(weatherCard as HTMLElement);
+        expect(weatherContent.getByText("Spydeberg")).toBeTruthy();
+        expect(weatherContent.getByText("15°C")).toBeTruthy();
+        expect(weatherContent.getByText("Feels 13°")).toHaveClass("whitespace-nowrap");
+        expect(weatherContent.getByText("68%")).toBeTruthy();
+        expect(weatherContent.getByText("9 km/h")).toBeTruthy();
+        expect(weatherContent.getByText("Today")).toBeTruthy();
         expect(
             screen.getByRole("heading", { level: 3, name: "Provider quota" })
         ).toBeTruthy();

@@ -32,9 +32,11 @@ import { MetricCard } from "../ui/MetricCard.tsx";
 import { Text } from "../ui/Text.tsx";
 
 function capacityDescription(capacity: SystemMetrics["memory"]): string {
-    return `${formatByteCount(capacity.usedBytes)} / ${formatByteCount(
-        capacity.totalBytes
-    )} · ${formatByteCount(capacity.freeBytes)} free`;
+    return `${formatByteCount(capacity.usedBytes)} of ${formatByteCount(capacity.totalBytes)}`;
+}
+
+function loadAverageDescription(cpu: SystemMetrics["cpu"]): string {
+    return cpu.loadAverage.map((load) => formatLoadValue(load)).join(", ");
 }
 
 function networkValue(
@@ -129,7 +131,6 @@ export function SystemMetricsCards({
             </div>
         );
     }
-    const coreLabel = metrics.cpu.logicalCoreCount === 1 ? "CPU core" : "CPU cores";
     const applicationStatus = applicationRuntimeStatus(metrics.application);
     const httpTotals = httpMetricTotals(metrics.application.http.procedures);
     return (
@@ -140,7 +141,9 @@ export function SystemMetricsCards({
             >
                 {leadingCard}
                 <MetricCard
-                    description={`Average load over 1 minute: ${formatLoadValue(metrics.cpu.loadAverage[0])} · ${metrics.cpu.logicalCoreCount} ${coreLabel}`}
+                    compact
+                    compactSummary
+                    description={loadAverageDescription(metrics.cpu)}
                     icon={Cpu}
                     meter={{
                         label: "CPU load",
@@ -151,6 +154,8 @@ export function SystemMetricsCards({
                     value={formatPercent(metrics.cpu.loadPercent)}
                 />
                 <MetricCard
+                    compact
+                    compactSummary
                     description={capacityDescription(metrics.memory)}
                     icon={MemoryStick}
                     meter={{
@@ -162,6 +167,8 @@ export function SystemMetricsCards({
                     value={formatPercent(metrics.memory.usedPercent)}
                 />
                 <MetricCard
+                    compact
+                    compactSummary
                     description={capacityDescription(metrics.disk)}
                     icon={HardDrive}
                     meter={{
@@ -173,13 +180,13 @@ export function SystemMetricsCards({
                     value={formatPercent(metrics.disk.usedPercent)}
                 />
                 <MetricCard
-                    description="Host uptime"
+                    compact
                     icon={Clock}
                     title="Uptime"
                     value={formatUptime(metrics.uptimeSeconds)}
                 />
                 <MetricCard
-                    description="Current total download speed"
+                    compact
                     icon={ArrowDown}
                     title="Download"
                     value={networkValue(
@@ -188,7 +195,7 @@ export function SystemMetricsCards({
                     )}
                 />
                 <MetricCard
-                    description="Current total upload speed"
+                    compact
                     icon={ArrowUp}
                     title="Upload"
                     value={networkValue(
