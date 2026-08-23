@@ -9,6 +9,7 @@ import {
     compareStrings,
     nonnegativeSafeIntegerSchema,
 } from "../shared/validation.ts";
+import { jobRunIdSchema } from "./jobModel.ts";
 import type { ProcedureContract } from "./registry.ts";
 
 /** Maximum migration count accepted from the reviewed runtime graph. */
@@ -343,6 +344,7 @@ const sqliteRestoreVerificationSchema = v.variant("state", [
 const sqliteMaintenanceRunSchema = v.strictObject({
     finishedAtMs: v.optional(databaseObservabilityTimestampSchema),
     queuedAtMs: databaseObservabilityTimestampSchema,
+    runId: jobRunIdSchema,
     startedAtMs: v.optional(databaseObservabilityTimestampSchema),
     state: v.picklist([
         "cancelled",

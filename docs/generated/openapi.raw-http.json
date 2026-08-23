@@ -529,6 +529,51 @@
                               "minimum": 0,
                               "maximum": 9007199254740991
                             },
+                            "snapshots": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "completedAtMs": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 8640000000000000
+                                  },
+                                  "description": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 256,
+                                    "pattern": "^[^\\u0000]*$"
+                                  },
+                                  "fileCount": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 1000000
+                                  },
+                                  "retentionReasons": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 256,
+                                      "pattern": "^[^\\u0000]*$"
+                                    },
+                                    "maxItems": 16
+                                  },
+                                  "sizeBytes": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  }
+                                },
+                                "required": [
+                                  "completedAtMs",
+                                  "retentionReasons"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "maxItems": 16
+                            },
                             "snapshotCount": {
                               "type": "integer",
                               "minimum": 0,
@@ -849,6 +894,51 @@
                               "type": "integer",
                               "minimum": 0,
                               "maximum": 9007199254740991
+                            },
+                            "snapshots": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "completedAtMs": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 8640000000000000
+                                  },
+                                  "description": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 256,
+                                    "pattern": "^[^\\u0000]*$"
+                                  },
+                                  "fileCount": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 1000000
+                                  },
+                                  "retentionReasons": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 256,
+                                      "pattern": "^[^\\u0000]*$"
+                                    },
+                                    "maxItems": 16
+                                  },
+                                  "sizeBytes": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  }
+                                },
+                                "required": [
+                                  "completedAtMs",
+                                  "retentionReasons"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "maxItems": 16
                             },
                             "snapshotCount": {
                               "type": "integer",
@@ -1406,6 +1496,18 @@
                         "minimum": 0,
                         "maximum": 8640000000000000
                       },
+                      "latestBackupName": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "pattern": "^[^\\u0000]*$"
+                      },
+                      "latestWalFileName": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "pattern": "^[^\\u0000]*$"
+                      },
                       "type": {
                         "const": "walg"
                       }
@@ -1679,6 +1781,18 @@
                         "type": "integer",
                         "minimum": 0,
                         "maximum": 8640000000000000
+                      },
+                      "latestBackupName": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "pattern": "^[^\\u0000]*$"
+                      },
+                      "latestWalFileName": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "pattern": "^[^\\u0000]*$"
                       },
                       "type": {
                         "const": "walg"
@@ -17499,6 +17613,13 @@
                                       "minimum": 0,
                                       "maximum": 8640000000000000
                                     },
+                                    "runId": {
+                                      "type": "string",
+                                      "minLength": 36,
+                                      "maxLength": 36,
+                                      "format": "uuid",
+                                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                                    },
                                     "startedAtMs": {
                                       "type": "integer",
                                       "minimum": 0,
@@ -17518,6 +17639,7 @@
                                   },
                                   "required": [
                                     "queuedAtMs",
+                                    "runId",
                                     "state"
                                   ],
                                   "additionalProperties": false
@@ -17589,6 +17711,13 @@
                                       "minimum": 0,
                                       "maximum": 8640000000000000
                                     },
+                                    "runId": {
+                                      "type": "string",
+                                      "minLength": 36,
+                                      "maxLength": 36,
+                                      "format": "uuid",
+                                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                                    },
                                     "startedAtMs": {
                                       "type": "integer",
                                       "minimum": 0,
@@ -17608,6 +17737,7 @@
                                   },
                                   "required": [
                                     "queuedAtMs",
+                                    "runId",
                                     "state"
                                   ],
                                   "additionalProperties": false
@@ -18176,6 +18306,13 @@
                                       "minimum": 0,
                                       "maximum": 8640000000000000
                                     },
+                                    "runId": {
+                                      "type": "string",
+                                      "minLength": 36,
+                                      "maxLength": 36,
+                                      "format": "uuid",
+                                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                                    },
                                     "startedAtMs": {
                                       "type": "integer",
                                       "minimum": 0,
@@ -18195,6 +18332,7 @@
                                   },
                                   "required": [
                                     "queuedAtMs",
+                                    "runId",
                                     "state"
                                   ],
                                   "additionalProperties": false
@@ -18266,6 +18404,13 @@
                                       "minimum": 0,
                                       "maximum": 8640000000000000
                                     },
+                                    "runId": {
+                                      "type": "string",
+                                      "minLength": 36,
+                                      "maxLength": 36,
+                                      "format": "uuid",
+                                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                                    },
                                     "startedAtMs": {
                                       "type": "integer",
                                       "minimum": 0,
@@ -18285,6 +18430,7 @@
                                   },
                                   "required": [
                                     "queuedAtMs",
+                                    "runId",
                                     "state"
                                   ],
                                   "additionalProperties": false
@@ -46322,6 +46468,7 @@
                 "id": {
                   "enum": [
                     "dashboard-restart",
+                    "dashboard-stack-restart",
                     "openclaw-cleanup",
                     "openclaw-restart",
                     "openclaw-update",
@@ -46546,8 +46693,8 @@
               ],
               "additionalProperties": false
             },
-            "maxItems": 8,
-            "$comment": "Live Valibot validation additionally requires the eight fixed service-action rows to be complete, unique, and canonically ordered."
+            "maxItems": 9,
+            "$comment": "Live Valibot validation additionally requires the nine fixed service-action rows to be complete, unique, and canonically ordered."
           },
           "observedAtMs": {
             "type": "integer",
@@ -46573,6 +46720,29 @@
               },
               "confirmation": {
                 "const": "restart-dashboard"
+              },
+              "idempotencyKey": {
+                "type": "string",
+                "minLength": 32,
+                "maxLength": 128,
+                "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
+              }
+            },
+            "required": [
+              "actionId",
+              "confirmation",
+              "idempotencyKey"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "actionId": {
+                "const": "dashboard-stack-restart"
+              },
+              "confirmation": {
+                "const": "restart-dashboard-stack"
               },
               "idempotencyKey": {
                 "type": "string",
@@ -46759,6 +46929,7 @@
           "actionId": {
             "enum": [
               "dashboard-restart",
+              "dashboard-stack-restart",
               "openclaw-cleanup",
               "openclaw-restart",
               "openclaw-update",

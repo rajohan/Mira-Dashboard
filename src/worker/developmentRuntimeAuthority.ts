@@ -320,12 +320,46 @@ function backupPayload(type: BackupType, now: number): BackupCachePayload {
                           latestCompletedAtMs: now - 3_600_000,
                           latestFileCount: 120,
                           latestSizeBytes: 8 * 1024 * 1024,
+                          snapshots: [
+                              {
+                                  completedAtMs: now - 3_600_000,
+                                  description: "/opt/docker 2026-08-23",
+                                  fileCount: 120,
+                                  retentionReasons: ["daily-1", "weekly-1"],
+                                  sizeBytes: 8 * 1024 * 1024,
+                              },
+                              {
+                                  completedAtMs: now - 27 * 60 * 60_000,
+                                  description: "/opt/docker 2026-08-22",
+                                  fileCount: 118,
+                                  retentionReasons: ["daily-2"],
+                                  sizeBytes: 8_000_000,
+                              },
+                          ],
                           snapshotCount: 2,
                       },
                       {
                           health: "current",
                           id: "projects",
                           latestCompletedAtMs: now - 7_200_000,
+                          latestFileCount: 840,
+                          latestSizeBytes: 42 * 1024 * 1024,
+                          snapshots: [
+                              {
+                                  completedAtMs: now - 7_200_000,
+                                  description: "Projects 2026-08-23",
+                                  fileCount: 840,
+                                  retentionReasons: ["daily-1", "weekly-1"],
+                                  sizeBytes: 42 * 1024 * 1024,
+                              },
+                              {
+                                  completedAtMs: now - 28 * 60 * 60_000,
+                                  description: "Projects 2026-08-22",
+                                  fileCount: 832,
+                                  retentionReasons: ["daily-2"],
+                                  sizeBytes: 41 * 1024 * 1024,
+                              },
+                          ],
                           snapshotCount: 2,
                       },
                   ],
@@ -335,6 +369,8 @@ function backupPayload(type: BackupType, now: number): BackupCachePayload {
                   backupCount: 3,
                   healthy: true,
                   latestCompletedAtMs: now - 3_600_000,
+                  latestBackupName: "base_00000001000000000000000A",
+                  latestWalFileName: "00000001000000000000000A",
                   observedAtMs: now,
                   providerIdle: true,
                   sourceRevision,
@@ -387,38 +423,72 @@ function overviewProviders(nowMs: () => number): DevelopmentOverviewProviderColl
         quota: (signal?: AbortSignal): Promise<QuotaCachePayload> =>
             Promise.resolve().then(() => {
                 signal?.throwIfAborted();
+                const now = checkedNow(nowMs);
                 return v.parse(quotaCachePayloadSchema, {
-                    observedAtMs: checkedNow(nowMs),
+                    observedAtMs: now,
                     providers: [
                         {
                             id: "elevenlabs",
                             label: "ElevenLabs",
                             remaining: 80_000,
                             remainingPercent: 80,
+                            resetsAtMs: now + 30 * 24 * 60 * 60_000,
                             status: "available",
                             unit: "text-characters",
                         },
                         {
                             id: "openai",
-                            label: "OpenAI",
-                            remaining: 70,
-                            remainingPercent: 70,
+                            label: "OpenAI / Codex",
+                            remainingPercent: 66,
                             status: "available",
+                            usedPercent: 34,
+                            windows: [
+                                {
+                                    resetsAtMs: now + 5 * 60 * 60_000,
+                                    usedPercent: 0,
+                                    windowDurationMinutes: 300,
+                                },
+                                {
+                                    resetsAtMs: now + 4 * 24 * 60 * 60_000,
+                                    usedPercent: 34,
+                                    windowDurationMinutes: 10_080,
+                                },
+                            ],
                         },
                         {
+                            balance: 4.26,
                             id: "openrouter",
+                            limit: 1,
                             label: "OpenRouter",
-                            remaining: 8,
-                            remainingPercent: 80,
+                            periodUsage: 0.1344,
+                            remaining: 0.866,
+                            remainingPercent: 86.6,
                             status: "available",
+                            used: 0.134,
+                            usedPercent: 13.4,
                             unit: "currency-usd",
                         },
                         {
                             id: "synthetic",
-                            label: "Synthetic",
-                            remaining: 90,
-                            remainingPercent: 90,
+                            label: "Synthetic.new",
+                            remaining: 100,
+                            remainingPercent: 100,
                             status: "available",
+                            usedPercent: 39,
+                            windows: [
+                                {
+                                    regenerationPercent: 5,
+                                    resetsAtMs: now + 2 * 60 * 60_000,
+                                    usedPercent: 0,
+                                    windowDurationMinutes: 300,
+                                },
+                                {
+                                    regenerationPercent: 2,
+                                    resetsAtMs: now + 7 * 24 * 60 * 60_000,
+                                    usedPercent: 39,
+                                    windowDurationMinutes: 10_080,
+                                },
+                            ],
                         },
                     ],
                 });

@@ -62,6 +62,7 @@ import {
     deliveryPreviewJobActionDefinition,
     deliveryProductionJobActionDefinition,
     hostDashboardRestartJobActionDefinition,
+    hostDashboardStackRestartJobActionDefinition,
     jobActionDefinitions,
     hostSystemCleanupJobActionDefinition,
     hostSystemRestartJobActionDefinition,
@@ -639,6 +640,11 @@ export function createDashboardWorkerRuntime(
                 if (availableHostOperationSet.has("dashboard-restart")) {
                     optionalActionDefinitions.push(
                         hostDashboardRestartJobActionDefinition
+                    );
+                }
+                if (availableHostOperationSet.has("dashboard-stack-restart")) {
+                    optionalActionDefinitions.push(
+                        hostDashboardStackRestartJobActionDefinition
                     );
                 }
                 if (availableHostOperationSet.has("system-restart")) {

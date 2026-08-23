@@ -259,7 +259,7 @@ describe("BackupOverviewSectionView", () => {
         const walgCard = screen.getByLabelText("WAL-G backup");
         expect(within(walgCard).getByText("Fresh")).toBeTruthy();
         expect(
-            within(walgCard).getByRole("button", { name: "Run backup" })
+            screen.getByRole("button", { name: "Queue Postgres backup" })
         ).toBeEnabled();
     });
 
@@ -277,10 +277,7 @@ describe("BackupOverviewSectionView", () => {
 
         const kopiaCard = await screen.findByLabelText("Kopia backup");
         expect(within(kopiaCard).getByText("Last known good")).toBeTruthy();
-        expect(within(kopiaCard).getByText("1", { selector: "strong" })).toBeTruthy();
-        expect(
-            within(kopiaCard).getByRole("button", { name: "Run backup" })
-        ).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Queue Kopia backup" })).toBeDisabled();
     });
 
     test("keeps a terminal provider failure visible while the provider is busy", async () => {
@@ -326,12 +323,12 @@ describe("BackupOverviewSectionView", () => {
         expect(onClearKopiaAttention).toHaveBeenCalledTimes(1);
         expect(
             within(kopiaCard).getByRole("link", { name: "View job" }).getAttribute("href")
-        ).toBe(`/jobs?runId=${runId}`);
+        ).toBe(`/jobs?runId=${runId}&scheduleId=backup.kopia.run`);
 
         const walgCard = screen.getByLabelText("WAL-G backup");
         expect(within(walgCard).getByText("Busy")).toBeTruthy();
         expect(
-            within(walgCard).getByRole("button", { name: "Run backup" })
+            screen.getByRole("button", { name: "Queue Postgres backup" })
         ).toBeDisabled();
     });
 
@@ -359,11 +356,9 @@ describe("BackupOverviewSectionView", () => {
             )
         ).toBeTruthy();
         expect(
-            within(kopiaCard).getByText("Backup controls are disabled for this session.")
+            screen.getByText("Backup controls are disabled for this session.")
         ).toBeTruthy();
-        expect(
-            within(kopiaCard).getByRole("button", { name: "Run backup" })
-        ).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Queue Kopia backup" })).toBeDisabled();
 
         const walgCard = screen.getByLabelText("WAL-G backup");
         const retry = within(walgCard).getByRole("button", { name: "Retry" });
@@ -386,9 +381,9 @@ describe("BackupOverviewSectionView", () => {
 describe("BackupOverviewSection", () => {
     test("queues a validated source-fenced WAL-G run and clears its recovery key", async () => {
         const { transport } = renderConnectedSection(kopia, walg);
-        const walgCard = await screen.findByLabelText("WAL-G backup");
+        await screen.findByLabelText("WAL-G backup");
 
-        fireEvent.click(within(walgCard).getByRole("button", { name: "Run backup" }));
+        fireEvent.click(screen.getByRole("button", { name: "Queue Postgres backup" }));
 
         await waitFor(() => expect(transport.mutationCalls).toHaveLength(1));
         expect(transport.mutationCalls[0]).toMatchObject({

@@ -169,6 +169,7 @@ function projectMaintenance(
                 ? {}
                 : { finishedAtMs: getTime(record.finishedAt) }),
             queuedAtMs: getTime(record.queuedAt),
+            runId: record.id,
             ...(record.firstStartedAt === null
                 ? {}
                 : { startedAtMs: getTime(record.firstStartedAt) }),

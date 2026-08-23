@@ -211,6 +211,7 @@ export function createDevelopmentAuthoritySimulators(input: {
                 return Object.freeze({
                     status:
                         operationId === "system-restart" ||
+                        operationId === "dashboard-stack-restart" ||
                         operationId === "worker-restart"
                             ? "accepted"
                             : "completed",

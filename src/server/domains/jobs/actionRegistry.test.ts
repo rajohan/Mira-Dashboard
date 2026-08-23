@@ -227,7 +227,7 @@ describe("durable job action registry", () => {
         );
     });
 
-    test("publishes six fixed Service Actions with cross-domain exclusive locks", () => {
+    test("publishes fixed Service Actions with cross-domain exclusive locks", () => {
         for (const definition of [
             openClawSessionsCleanupJobActionDefinition,
             openClawGatewayRestartJobActionDefinition,

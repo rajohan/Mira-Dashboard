@@ -44,10 +44,7 @@ export function OverviewReportsSection() {
                     message={dashboardBrowserFailureMessage(query.error)}
                 />
             )}
-            <OverviewReportsCard
-                hasMore={query.data.nextCursor !== undefined}
-                reports={query.data.reports}
-            />
+            <OverviewReportsCard reports={query.data.reports} />
         </div>
     );
 }

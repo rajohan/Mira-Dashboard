@@ -71,6 +71,7 @@ import {
     type JobActionDefinition,
     hostSystemCleanupJobActionDefinition,
     hostDashboardRestartJobActionDefinition,
+    hostDashboardStackRestartJobActionDefinition,
     hostSystemRestartJobActionDefinition,
     hostSystemUpdateJobActionDefinition,
     hostWorkerRestartJobActionDefinition,
@@ -985,6 +986,7 @@ export async function createDashboardServer(
         });
         const serviceActionDefinitions = Object.freeze({
             "dashboard-restart": hostDashboardRestartJobActionDefinition,
+            "dashboard-stack-restart": hostDashboardStackRestartJobActionDefinition,
             "openclaw-cleanup": openClawSessionsCleanupJobActionDefinition,
             "openclaw-restart": openClawGatewayRestartJobActionDefinition,
             "openclaw-update": openClawInstallationUpdateJobActionDefinition,

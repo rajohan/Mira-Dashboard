@@ -90,6 +90,7 @@ function fixture(
             read: () =>
                 Promise.resolve([
                     { availability: "available", id: "dashboard-restart" },
+                    { availability: "available", id: "dashboard-stack-restart" },
                     { availability: "available", id: "openclaw-cleanup" },
                     { availability: "available", id: "openclaw-restart" },
                     { availability: "available", id: "openclaw-update" },
@@ -186,6 +187,7 @@ describe("service actions service", () => {
         expect(result).toMatchObject({
             actions: [
                 { availability: "available", id: "dashboard-restart" },
+                { availability: "available", id: "dashboard-stack-restart" },
                 { availability: "available", id: "openclaw-cleanup" },
                 { availability: "available", id: "openclaw-restart" },
                 { availability: "available", id: "openclaw-update" },

@@ -20,6 +20,33 @@ import { Icon } from "../ui/Icon.tsx";
 import { Text } from "../ui/Text.tsx";
 import { serviceActionPresentations } from "./serviceActionsOperations.ts";
 
+const serviceActionGroups = Object.freeze([
+    Object.freeze({
+        actionIds: Object.freeze([
+            "dashboard-restart",
+            "worker-restart",
+            "dashboard-stack-restart",
+        ] satisfies readonly ServiceActionId[]),
+        label: "Dashboard",
+    }),
+    Object.freeze({
+        actionIds: Object.freeze([
+            "system-cleanup",
+            "system-update",
+            "system-restart",
+        ] satisfies readonly ServiceActionId[]),
+        label: "System",
+    }),
+    Object.freeze({
+        actionIds: Object.freeze([
+            "openclaw-cleanup",
+            "openclaw-update",
+            "openclaw-restart",
+        ] satisfies readonly ServiceActionId[]),
+        label: "OpenClaw",
+    }),
+]);
+
 interface RunObservationProps {
     readonly label: string;
     readonly run: JobRunSummary | undefined;
@@ -83,25 +110,16 @@ function ServiceActionRow({
         globalBusy ||
         (action.availability === "unavailable" && !recoveryPending);
     return (
-        <li className="border-primary-700 bg-primary-900/35 rounded-lg border p-4">
-            <div className="flex flex-wrap items-start justify-between gap-4">
+        <li className="border-primary-700 bg-primary-900/35 flex h-full flex-col rounded-lg border p-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                         <Heading level={3}>{presentation.actionLabel}</Heading>
-                        <Badge
-                            variant={
-                                action.availability === "available"
-                                    ? "success"
-                                    : "warning"
-                            }
-                        >
-                            {action.availability}
-                        </Badge>
+                        {action.availability === "unavailable" && (
+                            <Badge variant="warning">Unavailable</Badge>
+                        )}
                         {active && <Badge variant="info">Active job</Badge>}
                     </div>
-                    <Text className="mt-2" size="sm" tone="muted">
-                        {presentation.description}
-                    </Text>
                     {action.availability === "unavailable" && (
                         <Text className="mt-2" size="sm" tone="warning">
                             No fresh worker currently advertises this fixed operation.
@@ -114,18 +132,28 @@ function ServiceActionRow({
                         </Text>
                     )}
                 </div>
+            </div>
+            {(action.activeRun !== undefined || action.latestRun !== undefined) && (
+                <dl className="mt-3 grid gap-3 sm:grid-cols-2">
+                    {action.activeRun !== undefined && (
+                        <RunObservation label="Active run" run={action.activeRun} />
+                    )}
+                    {action.latestRun !== undefined && (
+                        <RunObservation label="Latest run" run={action.latestRun} />
+                    )}
+                </dl>
+            )}
+            <div className="mt-auto pt-3">
                 <Button
+                    className="w-full"
                     disabled={disabled}
                     onClick={() => onSelect(action.id)}
+                    size="sm"
                     variant={action.id.endsWith("-restart") ? "danger" : "secondary"}
                 >
                     {recoveryPending ? presentation.retryLabel : presentation.buttonLabel}
                 </Button>
             </div>
-            <dl className="mt-4 grid gap-3 sm:grid-cols-2">
-                <RunObservation label="Active run" run={action.activeRun} />
-                <RunObservation label="Latest run" run={action.latestRun} />
-            </dl>
         </li>
     );
 }
@@ -134,14 +162,12 @@ export interface OverviewServiceActionsCardProps {
     readonly actions: GetServiceActionsStatusResult["actions"];
     readonly error?: string;
     readonly notice?: string;
-    readonly observedAtMs: number;
     readonly onClearError: () => void;
     readonly onClearNotice: () => void;
     readonly onRequest: (actionId: ServiceActionId, onConfirmed: () => void) => void;
     readonly recoveryPending: (actionId: ServiceActionId) => boolean;
     readonly requestActionId: ServiceActionId | undefined;
     readonly requestBusy: boolean;
-    readonly showJobsLink?: boolean;
 }
 
 /**
@@ -153,14 +179,12 @@ export function OverviewServiceActionsCard({
     actions,
     error,
     notice,
-    observedAtMs,
     onClearError,
     onClearNotice,
     onRequest,
     recoveryPending,
     requestActionId,
     requestBusy,
-    showJobsLink = true,
 }: OverviewServiceActionsCardProps) {
     const headingId = useId();
     const [selectedActionId, setSelectedActionId] = useState<ServiceActionId>();
@@ -175,26 +199,12 @@ export function OverviewServiceActionsCard({
     return (
         <Card aria-labelledby={headingId}>
             <div className="flex flex-wrap items-start justify-between gap-4">
-                <div className="flex min-w-0 items-start gap-3">
-                    <span className="bg-accent-500/10 shrink-0 rounded-lg p-2.5">
-                        <Icon icon={Wrench} tone="accent" />
-                    </span>
-                    <div className="min-w-0">
-                        <Heading id={headingId} level={2} size="subsection">
-                            Service actions
-                        </Heading>
-                        <Text className="mt-1" size="sm" tone="muted">
-                            Queue fixed, audited worker operations. Recent multi-factor
-                            authentication is required; arbitrary commands are not
-                            accepted.
-                        </Text>
-                    </div>
+                <div className="flex min-w-0 items-center gap-2">
+                    <Icon icon={Wrench} size="md" tone="accent" />
+                    <Heading id={headingId} level={2} size="subsection">
+                        Service actions
+                    </Heading>
                 </div>
-                {showJobsLink && (
-                    <ActionLink size="sm" to="/jobs" variant="secondary">
-                        View Dashboard jobs
-                    </ActionLink>
-                )}
             </div>
 
             <Alert
@@ -209,29 +219,45 @@ export function OverviewServiceActionsCard({
                 variant="success"
             />
 
-            <ul className="mt-5 grid gap-4 xl:grid-cols-2">
-                {actions.map((action) => (
-                    <ServiceActionRow
-                        action={action}
-                        globalBusy={requestBusy}
-                        key={action.id}
-                        onSelect={(actionId) => {
-                            onClearError();
-                            onClearNotice();
-                            setSelectedActionId(actionId);
-                        }}
-                        recoveryPending={recoveryPending(action.id)}
-                    />
+            <div className="mt-4 space-y-3">
+                {serviceActionGroups.map((group) => (
+                    <section
+                        aria-label={`${group.label} actions`}
+                        className="border-primary-700 bg-primary-900/35 rounded-lg border p-3"
+                        key={group.label}
+                    >
+                        <Heading
+                            className="text-primary-300 mb-2 text-xs tracking-wide uppercase"
+                            level={3}
+                        >
+                            {group.label}
+                        </Heading>
+                        <ul className="grid gap-3 lg:grid-cols-3">
+                            {group.actionIds
+                                .map((actionId) =>
+                                    actions.find(({ id }) => id === actionId)
+                                )
+                                .filter(
+                                    (action): action is ServiceActionStatus =>
+                                        action !== undefined
+                                )
+                                .map((action) => (
+                                    <ServiceActionRow
+                                        action={action}
+                                        globalBusy={requestBusy}
+                                        key={action.id}
+                                        onSelect={(actionId) => {
+                                            onClearError();
+                                            onClearNotice();
+                                            setSelectedActionId(actionId);
+                                        }}
+                                        recoveryPending={recoveryPending(action.id)}
+                                    />
+                                ))}
+                        </ul>
+                    </section>
                 ))}
-            </ul>
-
-            <Text className="mt-4" size="sm" tone="muted">
-                Status observed{" "}
-                <time dateTime={new Date(observedAtMs).toISOString()}>
-                    {formatDashboardDateTime(observedAtMs)}
-                </time>
-                . A queued response confirms only the durable Dashboard job run.
-            </Text>
+            </div>
 
             <ConfirmModal
                 busy={requestBusy && requestActionId === selectedActionId}

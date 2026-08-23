@@ -9,8 +9,6 @@ import { ActionLink } from "../ui/ActionLink.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import { Card } from "../ui/Card.tsx";
 import { Heading } from "../ui/Heading.tsx";
-import { Icon } from "../ui/Icon.tsx";
-import { Text } from "../ui/Text.tsx";
 
 const overviewRunStates = Object.freeze([
     "queued",
@@ -59,19 +57,11 @@ export function OverviewJobsCard({ summary }: OverviewJobsCardProps) {
     return (
         <Card aria-labelledby={headingId}>
             <div className="flex flex-wrap items-start justify-between gap-4">
-                <div className="flex min-w-0 items-start gap-3">
-                    <span className="bg-accent-500/10 shrink-0 rounded-lg p-2.5">
-                        <Icon icon={Server} tone="accent" />
-                    </span>
-                    <div className="min-w-0">
-                        <Heading id={headingId} level={2} size="subsection">
-                            Dashboard background jobs
-                        </Heading>
-                        <Text className="mt-1" size="sm" tone="muted">
-                            See recent Dashboard background jobs and whether processing is
-                            available. OpenClaw scheduled jobs are listed separately.
-                        </Text>
-                    </div>
+                <div className="flex min-w-0 items-center gap-2">
+                    <Server aria-hidden="true" className="text-accent-300 size-5" />
+                    <Heading id={headingId} level={2} size="subsection">
+                        Dashboard background jobs
+                    </Heading>
                 </div>
                 <div className="flex flex-wrap items-center justify-end gap-3">
                     <output aria-atomic="true" aria-live="polite">

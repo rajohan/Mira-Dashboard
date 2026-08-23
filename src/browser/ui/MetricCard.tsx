@@ -20,6 +20,7 @@ interface MetricCardProps {
     readonly compactSummary?: boolean;
     readonly description?: ReactNode;
     readonly icon: LucideIcon;
+    readonly iconPosition?: "leading" | "trailing";
     readonly meter?: MetricCardMeter;
     readonly title: string;
     readonly value: ReactNode;
@@ -32,6 +33,7 @@ export function MetricCard({
     compactSummary = false,
     description,
     icon,
+    iconPosition = "trailing",
     meter,
     title,
     value,
@@ -44,14 +46,23 @@ export function MetricCard({
         >
             <div
                 className={cn(
-                    "flex items-start justify-between",
+                    iconPosition === "trailing" && "flex items-start justify-between",
                     compact ? "gap-3" : "gap-4"
                 )}
             >
                 <div className="min-w-0">
-                    <Heading id={headingId} level={3}>
-                        {title}
-                    </Heading>
+                    <div
+                        className={cn(
+                            iconPosition === "leading" && "flex items-center gap-2"
+                        )}
+                    >
+                        {iconPosition === "leading" && (
+                            <Icon icon={icon} size="md" tone="accent" />
+                        )}
+                        <Heading id={headingId} level={3}>
+                            {title}
+                        </Heading>
+                    </div>
                     {!compactSummary && (
                         <p
                             className={cn(
@@ -63,14 +74,16 @@ export function MetricCard({
                         </p>
                     )}
                 </div>
-                <span
-                    className={cn(
-                        "bg-accent-500/10 shrink-0 rounded-lg",
-                        compact ? "p-2" : "p-2.5"
-                    )}
-                >
-                    <Icon icon={icon} size={compact ? "md" : "lg"} tone="accent" />
-                </span>
+                {iconPosition === "trailing" && (
+                    <span
+                        className={cn(
+                            "bg-accent-500/10 shrink-0 rounded-lg",
+                            compact ? "p-2" : "p-2.5"
+                        )}
+                    >
+                        <Icon icon={icon} size={compact ? "md" : "lg"} tone="accent" />
+                    </span>
+                )}
             </div>
             {compactSummary && (
                 <div className="mt-2 flex items-end justify-between gap-3">

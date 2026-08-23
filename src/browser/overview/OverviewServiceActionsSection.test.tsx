@@ -112,6 +112,10 @@ const actionStatus = Object.freeze({
         },
         {
             availability: "available",
+            id: "dashboard-stack-restart",
+        },
+        {
+            availability: "available",
             id: "openclaw-cleanup",
         },
         {
@@ -337,6 +341,28 @@ describe("OverviewServiceActionsSection", () => {
             await screen.findByRole("heading", { level: 2, name: "Service actions" })
         ).toBeTruthy();
         expect(harness.transport.queryCalls[0]?.input).toEqual({});
+        const dashboardRestart = screen.getByRole("heading", {
+            name: "Dashboard restart",
+        });
+        const combinedRestart = screen.getByRole("heading", {
+            name: "Dashboard + worker restart",
+        });
+        const systemCleanup = screen.getByRole("heading", { name: "System cleanup" });
+        const openClawCleanup = screen.getByRole("heading", {
+            name: "OpenClaw cleanup",
+        });
+        expect(
+            dashboardRestart.compareDocumentPosition(combinedRestart) &
+                Node.DOCUMENT_POSITION_FOLLOWING
+        ).toBeTruthy();
+        expect(
+            combinedRestart.compareDocumentPosition(systemCleanup) &
+                Node.DOCUMENT_POSITION_FOLLOWING
+        ).toBeTruthy();
+        expect(
+            systemCleanup.compareDocumentPosition(openClawCleanup) &
+                Node.DOCUMENT_POSITION_FOLLOWING
+        ).toBeTruthy();
         expect(screen.getByRole("heading", { name: "OpenClaw cleanup" })).toBeTruthy();
         expect(screen.getByRole("heading", { name: "OpenClaw restart" })).toBeTruthy();
         expect(screen.getByRole("heading", { name: "OpenClaw update" })).toBeTruthy();
@@ -356,10 +382,6 @@ describe("OverviewServiceActionsSection", () => {
         expect(screen.getByText("Active job")).toBeTruthy();
         expect(screen.getByText("succeeded")).toBeTruthy();
         expect(screen.getByText(succeededRun.id, { exact: false })).toBeTruthy();
-        expect(screen.getByRole("link", { name: "View Dashboard jobs" })).toHaveAttribute(
-            "href",
-            "/jobs"
-        );
         expect(
             screen.getByRole("link", {
                 name: `Open Dashboard job ${runningRun.id}`,
@@ -389,7 +411,6 @@ describe("OverviewServiceActionsSection", () => {
                 screen.getByRole("button", { name: "Queue system restart" })
             ).toBeEnabled()
         );
-        expect(screen.queryByText("Active job")).toBeNull();
         expect(harness.transport.queryCalls.length).toBeGreaterThan(
             callCountBeforeRealtimeChange
         );
@@ -467,7 +488,7 @@ describe("OverviewServiceActionsSection", () => {
 
         await user.click(screen.getByRole("button", { name: "Queue OpenClaw cleanup" }));
         expect(
-            screen.getByText(/source-owned OpenClaw session and artifact maintenance/iu)
+            screen.getByText(/OpenClaw's own bounded session and artifact maintenance/iu)
         ).toBeTruthy();
     });
 
@@ -480,7 +501,7 @@ describe("OverviewServiceActionsSection", () => {
         await screen.findByRole("heading", { name: "Service actions" });
         await user.click(screen.getByRole("button", { name: "Queue OpenClaw cleanup" }));
         expect(
-            screen.getByText(/source-owned OpenClaw session and artifact maintenance/iu)
+            screen.getByText(/OpenClaw's own bounded session and artifact maintenance/iu)
         ).toBeTruthy();
         await user.click(screen.getByRole("button", { name: "Queue cleanup" }));
         const unknownOutcomeMessages = await screen.findAllByText(
@@ -526,10 +547,6 @@ describe("OverviewServiceActionsSection", () => {
         expect(globalThis.sessionStorage.length).toBe(0);
         await waitFor(() =>
             expect(second.transport.queryCalls.length).toBeGreaterThan(1)
-        );
-        expect(screen.getByRole("link", { name: "View Dashboard jobs" })).toHaveAttribute(
-            "href",
-            "/jobs"
         );
     });
 

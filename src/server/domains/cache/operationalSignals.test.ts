@@ -118,7 +118,7 @@ describe("heartbeat operational signals", () => {
                             },
                         ],
                     },
-                    schemaId: "quotas.summary.v1",
+                    schemaId: "quotas.summary.v2",
                     source: "quota.providers",
                 }),
             ],

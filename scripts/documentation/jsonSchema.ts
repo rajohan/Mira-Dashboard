@@ -566,7 +566,7 @@ const runtimeCheckComments = new Map<unknown, string>([
     ],
     [
         serviceActionStatusesAreCanonical,
-        "Live Valibot validation additionally requires the eight fixed service-action rows to be complete, unique, and canonically ordered.",
+        "Live Valibot validation additionally requires the nine fixed service-action rows to be complete, unique, and canonically ordered.",
     ],
     [
         workspaceFileContentTicketIsConsistent,

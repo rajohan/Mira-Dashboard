@@ -10,14 +10,11 @@ import { useJobRealtimeInvalidation } from "./useJobRealtimeInvalidation.ts";
 
 function DashboardJobsContent() {
     useJobRealtimeInvalidation();
-    const [focusRunId, setFocusRunId] = useState<string>();
+    const search = parseJobsRouteSearch(useSearch({ from: "/jobs" }) as unknown);
+    const [focusRunId, setFocusRunId] = useState<string | undefined>(search.runId);
     return (
         <div className="space-y-4">
-            <JobRunBrowser
-                focusRunId={focusRunId}
-                onRequestRunFocus={setFocusRunId}
-                onRunFocusHandled={() => setFocusRunId(undefined)}
-            />
+            <JobRunBrowser onRequestRunFocus={setFocusRunId} />
             <ScheduleBrowser
                 focusRunId={focusRunId}
                 onRequestRunFocus={setFocusRunId}

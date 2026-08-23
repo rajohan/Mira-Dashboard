@@ -50,6 +50,7 @@ const freshOverview = {
                     {
                         finishedAtMs: observedAtMs - 3_600_000,
                         queuedAtMs: observedAtMs - 3_700_000,
+                        runId: "019fc968-1a9b-7765-8f1b-d5b863b0e7c0",
                         startedAtMs: observedAtMs - 3_650_000,
                         state: "succeeded",
                     },

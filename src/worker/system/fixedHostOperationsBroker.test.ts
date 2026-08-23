@@ -30,6 +30,7 @@ describe("fixed host operations broker", () => {
 
         expect(await broker.availableOperations()).toEqual([
             "dashboard-restart",
+            "dashboard-stack-restart",
             "system-cleanup",
             "system-restart",
             "system-update",
@@ -37,6 +38,9 @@ describe("fixed host operations broker", () => {
         ]);
         expect(await broker.request("dashboard-restart")).toEqual({
             status: "completed",
+        });
+        expect(await broker.request("dashboard-stack-restart")).toEqual({
+            status: "accepted",
         });
         expect(await broker.request("system-restart")).toEqual({
             status: "accepted",
@@ -56,7 +60,7 @@ describe("fixed host operations broker", () => {
                     "show",
                     "--property=LoadState",
                     "--value",
-                    fixedHostOperationUnits["dashboard-restart"],
+                    fixedHostOperationUnits["dashboard-restart"][0],
                 ],
                 executable: "/usr/bin/systemctl",
             },
@@ -65,7 +69,7 @@ describe("fixed host operations broker", () => {
                     "show",
                     "--property=LoadState",
                     "--value",
-                    fixedHostOperationUnits["system-cleanup"],
+                    "mira-dashboard-web.service",
                 ],
                 executable: "/usr/bin/systemctl",
             },
@@ -74,7 +78,7 @@ describe("fixed host operations broker", () => {
                     "show",
                     "--property=LoadState",
                     "--value",
-                    fixedHostOperationUnits["system-restart"],
+                    "mira-dashboard-worker.service",
                 ],
                 executable: "/usr/bin/systemctl",
             },
@@ -83,7 +87,7 @@ describe("fixed host operations broker", () => {
                     "show",
                     "--property=LoadState",
                     "--value",
-                    fixedHostOperationUnits["system-update"],
+                    fixedHostOperationUnits["system-cleanup"][0],
                 ],
                 executable: "/usr/bin/systemctl",
             },
@@ -92,12 +96,39 @@ describe("fixed host operations broker", () => {
                     "show",
                     "--property=LoadState",
                     "--value",
-                    fixedHostOperationUnits["worker-restart"],
+                    fixedHostOperationUnits["system-restart"][0],
+                ],
+                executable: "/usr/bin/systemctl",
+            },
+            {
+                arguments_: [
+                    "show",
+                    "--property=LoadState",
+                    "--value",
+                    fixedHostOperationUnits["system-update"][0],
+                ],
+                executable: "/usr/bin/systemctl",
+            },
+            {
+                arguments_: [
+                    "show",
+                    "--property=LoadState",
+                    "--value",
+                    fixedHostOperationUnits["worker-restart"][0],
                 ],
                 executable: "/usr/bin/systemctl",
             },
             {
                 arguments_: ["restart", "--wait", "mira-dashboard-web.service"],
+                executable: "/usr/bin/systemctl",
+            },
+            {
+                arguments_: [
+                    "restart",
+                    "--no-block",
+                    "mira-dashboard-web.service",
+                    "mira-dashboard-worker.service",
+                ],
                 executable: "/usr/bin/systemctl",
             },
             {
@@ -147,6 +178,7 @@ describe("fixed host operations broker", () => {
 
         expect(await broker.availableOperations()).toEqual([
             "dashboard-restart",
+            "dashboard-stack-restart",
             "system-cleanup",
             "system-update",
             "worker-restart",

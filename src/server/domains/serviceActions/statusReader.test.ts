@@ -94,6 +94,7 @@ describe("Service Action status reader", () => {
 
         expect(await reader.read()).toEqual([
             { availability: "unavailable", id: "dashboard-restart" },
+            { availability: "unavailable", id: "dashboard-stack-restart" },
             { availability: "available", id: "openclaw-cleanup" },
             { availability: "available", id: "openclaw-restart" },
             { availability: "unavailable", id: "openclaw-update" },
@@ -111,6 +112,7 @@ describe("Service Action status reader", () => {
             {
                 actionKeys: [
                     "host.dashboard.restart",
+                    "host.dashboard-stack.restart",
                     "openclaw.sessions.cleanup",
                     "openclaw.gateway.restart",
                     "openclaw.installation.update",

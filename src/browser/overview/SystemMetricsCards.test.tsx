@@ -50,20 +50,13 @@ describe("SystemMetricsCards", () => {
         render(<SystemMetricsCards metrics={metrics} />);
 
         expect(within(card("CPU")).getByText("248%")).toBeTruthy();
-        expect(
-            within(card("CPU")).getByText(/Average load over 1 minute: 9\.92/u)
-        ).toBeTruthy();
+        expect(within(card("CPU")).getByText("9.92, 4.2, 2.1")).toBeTruthy();
         expect(within(card("Memory")).getByText("75%")).toBeTruthy();
         expect(within(card("Disk")).getByText("60%")).toBeTruthy();
         expect(within(card("Uptime")).getByText("2d 3h")).toBeTruthy();
         expect(within(card("Download")).getByText("12.3 Mbit/s")).toBeTruthy();
-        expect(
-            screen.getByRole("heading", { name: "Application observability" })
-        ).toBeTruthy();
-        expect(screen.getByText("Runtime unavailable")).toBeTruthy();
         expect(within(card("Web runtime")).getByText("Unavailable")).toBeTruthy();
         expect(within(card("HTTP requests")).getByText("0")).toBeTruthy();
-        expect(screen.queryByText(/hostname|interface|model/iu)).toBeNull();
     });
 
     test("renders every observed application component independently", () => {
@@ -76,7 +69,6 @@ describe("SystemMetricsCards", () => {
             />
         );
 
-        expect(screen.getByText("All observed")).toBeTruthy();
         expect(within(card("Web runtime")).getByText("192 MiB")).toBeTruthy();
         expect(within(card("Durable operations")).getByText("2 active")).toBeTruthy();
         expect(within(card("Jobs")).getByText("2 running")).toBeTruthy();
@@ -121,7 +113,6 @@ describe("SystemMetricsCards", () => {
             />
         );
 
-        expect(screen.getByText("7 of 8 observed")).toBeTruthy();
         expect(within(card("Realtime")).getByText("Unavailable")).toBeTruthy();
         expect(within(card("Jobs")).getByText("2 running")).toBeTruthy();
     });

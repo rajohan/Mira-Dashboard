@@ -61,7 +61,7 @@ export const Loading: Story = {
 export const Fresh: Story = {
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement);
-        await expect(canvas.getByRole("heading", { name: "Backups" })).toBeVisible();
+        await expect(canvas.getByRole("region", { name: "Backup status" })).toBeVisible();
         await expect(canvas.getAllByText("Fresh")).toHaveLength(2);
     },
 };

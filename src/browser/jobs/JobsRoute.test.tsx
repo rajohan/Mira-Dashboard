@@ -701,6 +701,14 @@ describe("Dashboard jobs route", () => {
                 deepLinkReadinessWait
             )
         ).toBeTruthy();
+        await waitFor(() =>
+            expect(
+                screen.getByRole("heading", {
+                    level: 2,
+                    name: "Deep-linked durable run",
+                })
+            ).toHaveFocus()
+        );
         expect(
             await screen.findByRole(
                 "heading",
@@ -1133,7 +1141,7 @@ describe("Dashboard jobs route", () => {
         });
         transport.runs = [run];
         transport.addRunDetail(run);
-        await renderJobsRoute(`/jobs?runId=${runId}`, transport);
+        const { router } = await renderJobsRoute(`/jobs?runId=${runId}`, transport);
         const user = userEvent.setup();
 
         expect(
@@ -1142,6 +1150,18 @@ describe("Dashboard jobs route", () => {
                 name: "Cancellable queued run",
             })
         ).toBeTruthy();
+        expect(
+            within(screen.getByLabelText("Selected job run")).getByRole("heading", {
+                level: 2,
+                name: "Cancellable queued run",
+            })
+        ).toBeTruthy();
+        expect(
+            within(screen.getByLabelText("Job queue and workers")).queryByRole(
+                "heading",
+                { name: "Cancellable queued run" }
+            )
+        ).toBeNull();
         await user.click(
             await screen.findByRole("button", {
                 name: "Pause new jobs",
@@ -1175,6 +1195,18 @@ describe("Dashboard jobs route", () => {
         expect(
             screen.queryByRole("button", {
                 name: "Cancel queued run: Cancellable queued run",
+            })
+        ).toBeNull();
+        await user.click(
+            within(screen.getByLabelText("Selected job run")).getByRole("button", {
+                name: /Cancellable queued run/u,
+            })
+        );
+        expect(router.state.location.search).toEqual({ runId });
+        expect(
+            screen.queryByRole("heading", {
+                level: 2,
+                name: "Cancellable queued run",
             })
         ).toBeNull();
     });

@@ -16,6 +16,12 @@ export const backupTypes = ["kopia", "walg"] as const;
 export const backupTypeSchema = v.picklist(backupTypes, "Backup type is invalid");
 export type BackupType = v.InferOutput<typeof backupTypeSchema>;
 
+/** Durable schedule identities for provider backup runs and browser deep links. */
+export const backupRunScheduleIds = Object.freeze({
+    kopia: "backup.kopia.run",
+    walg: "backup.walg.run",
+} as const satisfies Readonly<Record<BackupType, string>>);
+
 /** Root-Compose capability labels accepted by worker discovery. */
 export const backupCapabilityByType = Object.freeze({
     kopia: "kopia-v1",
@@ -41,6 +47,8 @@ export const backupStatusCacheTtlMs = 5 * 60_000;
 export const backupStatusPayloadMaximumBytes = 64 * 1024;
 export const backupFreshnessMaximumAgeMs = 30 * 60 * 60_000;
 export const backupKopiaSourceMaximum = 64;
+export const backupKopiaSnapshotMaximum = 16;
+export const backupRetentionReasonMaximum = 16;
 export const backupCountMaximum = 1_000_000;
 
 const backupTimestampSchema = timestampMillisecondsSchema("Backup timestamp is invalid");
@@ -51,6 +59,27 @@ const backupCountSchema = v.pipe(
 const backupByteCountSchema = nonnegativeSafeIntegerSchema(
     "Backup byte count is invalid"
 );
+const backupDisplayTextSchema = v.pipe(
+    v.string("Backup display text is invalid"),
+    v.minLength(1, "Backup display text is invalid"),
+    v.maxLength(256, "Backup display text is outside its budget"),
+    noNulStringAction("Backup display text is invalid")
+);
+
+const kopiaSnapshotSummarySchema = v.strictObject({
+    completedAtMs: backupTimestampSchema,
+    description: v.optional(backupDisplayTextSchema),
+    fileCount: v.optional(backupCountSchema),
+    retentionReasons: v.pipe(
+        v.array(backupDisplayTextSchema),
+        v.maxLength(
+            backupRetentionReasonMaximum,
+            "Backup retention reasons are outside their budget"
+        )
+    ),
+    sizeBytes: v.optional(backupByteCountSchema),
+});
+export type BackupKopiaSnapshotSummary = v.InferOutput<typeof kopiaSnapshotSummarySchema>;
 
 /** Opaque revision of the exact provider, root Compose graph, and Engine state. */
 export const backupSourceRevisionSchema = lowercaseSha256Schema(
@@ -78,6 +107,15 @@ const kopiaSourceSummaryObjectSchema = v.strictObject({
     latestCompletedAtMs: v.optional(backupTimestampSchema),
     latestFileCount: v.optional(backupCountSchema),
     latestSizeBytes: v.optional(backupByteCountSchema),
+    snapshots: v.optional(
+        v.pipe(
+            v.array(kopiaSnapshotSummarySchema),
+            v.maxLength(
+                backupKopiaSnapshotMaximum,
+                "Backup snapshots are outside their budget"
+            )
+        )
+    ),
     snapshotCount: backupCountSchema,
 });
 export type BackupKopiaSourceSummary = v.InferOutput<
@@ -98,12 +136,26 @@ export function backupKopiaSourceSummaryIsConsistent(
     if (source.health === "missing") {
         return (
             source.snapshotCount === 0 &&
+            (source.snapshots?.length ?? 0) === 0 &&
             source.latestCompletedAtMs === undefined &&
             source.latestFileCount === undefined &&
             source.latestSizeBytes === undefined
         );
     }
-    if (source.snapshotCount === 0 || source.latestCompletedAtMs === undefined) {
+    if (
+        source.snapshotCount === 0 ||
+        source.latestCompletedAtMs === undefined ||
+        (source.snapshots !== undefined && source.snapshots.length === 0) ||
+        (source.snapshots?.length ?? 0) > source.snapshotCount ||
+        (source.snapshots !== undefined &&
+            source.snapshots[0]?.completedAtMs !== source.latestCompletedAtMs) ||
+        source.snapshots?.some(
+            (snapshot, index, snapshots) =>
+                snapshot.completedAtMs > observedAtMs ||
+                (index > 0 &&
+                    snapshots[index - 1]!.completedAtMs < snapshot.completedAtMs)
+        ) === true
+    ) {
         return false;
     }
     const ageMs = observedAtMs - source.latestCompletedAtMs;
@@ -167,6 +219,8 @@ const walgBackupCachePayloadObjectSchema = v.strictObject({
     backupCount: backupCountSchema,
     healthy: v.boolean("Backup health is invalid"),
     latestCompletedAtMs: v.optional(backupTimestampSchema),
+    latestBackupName: v.optional(backupDisplayTextSchema),
+    latestWalFileName: v.optional(backupDisplayTextSchema),
     type: v.literal("walg"),
 });
 export type WalgBackupCachePayload = v.InferOutput<
@@ -189,6 +243,9 @@ export function walgBackupCachePayloadIsConsistent(
         payload.observedAtMs - payload.latestCompletedAtMs <= backupFreshnessMaximumAgeMs;
     return (
         (payload.backupCount === 0) === (payload.latestCompletedAtMs === undefined) &&
+        (payload.latestCompletedAtMs !== undefined ||
+            (payload.latestBackupName === undefined &&
+                payload.latestWalFileName === undefined)) &&
         payload.healthy === current
     );
 }

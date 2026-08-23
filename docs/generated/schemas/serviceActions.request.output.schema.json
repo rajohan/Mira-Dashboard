@@ -5,6 +5,7 @@
     "actionId": {
       "enum": [
         "dashboard-restart",
+        "dashboard-stack-restart",
         "openclaw-cleanup",
         "openclaw-restart",
         "openclaw-update",

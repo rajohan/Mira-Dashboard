@@ -15,7 +15,6 @@ import { dockerClient } from "../docker/dockerClient.ts";
 import { dockerOverviewQueryOptions } from "../docker/dockerQueries.ts";
 import { jobRunStateBadgeVariant, jobRunStateLabel } from "../jobs/jobRunPresentation.ts";
 import type { DashboardRoutePath } from "../lib/dashboardRoutes.ts";
-import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { formatByteCount, formatPercent } from "../lib/formatMeasurements.ts";
 import { logClient } from "../logs/logClient.ts";
 import {
@@ -33,34 +32,23 @@ import { Text } from "../ui/Text.tsx";
 
 interface DomainCardProps {
     readonly children: ReactNode;
-    readonly description: string;
     readonly icon: LucideIcon;
     readonly linkLabel: string;
     readonly to: DashboardRoutePath;
     readonly title: string;
 }
 
-function DomainCard({
-    children,
-    description,
-    icon,
-    linkLabel,
-    to,
-    title,
-}: DomainCardProps) {
+function DomainCard({ children, icon, linkLabel, to, title }: DomainCardProps) {
     return (
         <Card className="min-w-0">
             <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                        <Icon icon={icon} size="md" />
+                        <Icon icon={icon} size="md" tone="accent" />
                         <Heading level={3}>{title}</Heading>
                     </div>
-                    <Text className="mt-1" tone="muted">
-                        {description}
-                    </Text>
                 </div>
-                <ActionLink size="sm" to={to} variant="ghost">
+                <ActionLink size="sm" to={to} variant="secondary">
                     {linkLabel}
                 </ActionLink>
             </div>
@@ -107,7 +95,9 @@ function DockerStatus({ overview }: { readonly overview: DockerOverview }) {
                 <Badge variant={overview.state === "fresh" ? "success" : "warning"}>
                     {overview.state === "fresh" ? "Fresh" : "Last known good"}
                 </Badge>
-                {unhealthy > 0 && <Badge variant="danger">{unhealthy} unhealthy</Badge>}
+                <Badge variant={unhealthy > 0 ? "danger" : "success"}>
+                    {unhealthy} unhealthy
+                </Badge>
                 {updates > 0 && <Badge variant="warning">{updates} updates</Badge>}
             </div>
             <Text className="mt-3">
@@ -248,13 +238,7 @@ function LogMaintenanceStatus({
 }) {
     return (
         <div className="border-primary-700/70 mt-4 border-t pt-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-                <Text className="font-medium">Maintenance policies</Text>
-                <Text size="sm" tone="muted">
-                    Observed {formatDashboardDateTime(maintenance.observedAtMs)}
-                </Text>
-            </div>
-            <ul aria-label="Log maintenance policies" className="mt-2 space-y-2">
+            <ul aria-label="Log maintenance policies" className="space-y-2">
                 {maintenance.policies.map((policy) => {
                     const projection = maintenancePolicyProjection(policy);
                     return (
@@ -302,16 +286,9 @@ export function OverviewDomainSection() {
     }
 
     return (
-        <section aria-labelledby="domain-overview-heading">
-            <Heading id="domain-overview-heading" level={2}>
-                Services and data
-            </Heading>
-            <Text className="mt-1" tone="muted">
-                Independent summaries link to the complete operational views.
-            </Text>
-            <div className="mt-5 grid gap-5 lg:grid-cols-3">
+        <section aria-label="Service summaries">
+            <div className="grid gap-4 lg:grid-cols-3">
                 <DomainCard
-                    description="Engine inventory, Compose updates, storage, and controls."
                     icon={Boxes}
                     linkLabel="View Docker"
                     to="/docker"
@@ -332,7 +309,6 @@ export function OverviewDomainSection() {
                     )}
                 </DomainCard>
                 <DomainCard
-                    description="SQLite and PostgreSQL health, maintenance, and backups."
                     icon={Database}
                     linkLabel="View databases"
                     to="/database"
@@ -352,13 +328,7 @@ export function OverviewDomainSection() {
                         <DatabaseStatus overview={database.data} />
                     )}
                 </DomainCard>
-                <DomainCard
-                    description="Named, bounded Dashboard, host, and OpenClaw log sources."
-                    icon={FileText}
-                    linkLabel="View logs"
-                    to="/logs"
-                    title="Logs"
-                >
+                <DomainCard icon={FileText} linkLabel="View logs" to="/logs" title="Logs">
                     {backgroundWarning(logs.error, logs.data !== undefined)}
                     {backgroundWarning(
                         logMaintenance.error,

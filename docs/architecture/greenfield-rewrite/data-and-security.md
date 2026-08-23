@@ -357,7 +357,7 @@ The action-status indexes intentionally mirror the repository's literal predicat
   `action_key = 'maintenance.rotate-logs'`, `length(CAST(payload_json AS BLOB)) <= 128`,
   and `state IN ('cancelled', 'failed', 'succeeded', 'timed-out')`.
 - `job_runs_service_action_terminal_idx` indexes
-  `(action_key, queued_at DESC, id DESC)` where `action_key` is one of the six fixed
+  `(action_key, queued_at DESC, id DESC)` where `action_key` is one of the nine fixed
   Service Action keys, `payload_json = '{}'`, and
   `state IN ('cancelled', 'failed', 'succeeded', 'timed-out')`.
 
@@ -478,9 +478,9 @@ snapshot so a restored database can rehydrate and settle the exact original Job 
 the external effect.
 
 Service Actions are a separate fixed-intent boundary, not a generic exec facade. The contract
-contains exactly `dashboard-restart`, `openclaw-cleanup`, `openclaw-restart`, `openclaw-update`,
-`system-cleanup`, `system-restart`, `system-update`, and `worker-restart`; a caller can supply only
-one of those IDs plus an actor-bound idempotency key.
+contains exactly `dashboard-restart`, `dashboard-stack-restart`, `worker-restart`,
+`openclaw-cleanup`, `openclaw-restart`, `openclaw-update`, `system-cleanup`, `system-restart`, and
+`system-update`; a caller can supply only one of those IDs plus an actor-bound idempotency key.
 Reads and requests are session-only under dedicated capabilities, requests require recent MFA, and
 audit attempt must commit before the durable enqueue handoff. That handoff rechecks exact-release
 worker availability, the current browser session, and recent MFA. Enqueue uncertainty is

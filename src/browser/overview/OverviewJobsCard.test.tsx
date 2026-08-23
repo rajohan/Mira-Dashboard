@@ -97,9 +97,6 @@ describe("OverviewJobsCard", () => {
         expect(
             screen.getByText(formatDashboardDateTime(summary.oldestQueuedAtMs))
         ).toHaveAttribute("dateTime", new Date(summary.oldestQueuedAtMs).toISOString());
-        expect(
-            screen.getByText(/OpenClaw scheduled jobs are listed separately/u)
-        ).toBeTruthy();
         expect(screen.getByRole("link", { name: "View Dashboard jobs" })).toHaveAttribute(
             "href",
             "/jobs"

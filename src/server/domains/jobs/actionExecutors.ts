@@ -80,6 +80,8 @@ import {
     dockerUpdaterJobActionKey,
     hostDashboardRestartJobActionDefinition,
     hostDashboardRestartJobActionKey,
+    hostDashboardStackRestartJobActionDefinition,
+    hostDashboardStackRestartJobActionKey,
     hostDashboardServiceRestartJobResultSchema,
     hostSystemCleanupJobActionDefinition,
     hostSystemCleanupJobActionKey,
@@ -594,6 +596,7 @@ export function createHostOperationJobExecutor(
                 const result = await hostOperations.request(operationId, signal);
                 if (
                     operationId === "dashboard-restart" ||
+                    operationId === "dashboard-stack-restart" ||
                     operationId === "worker-restart"
                 ) {
                     return v.parse(hostDashboardServiceRestartJobResultSchema, {
@@ -824,6 +827,7 @@ export function createJobWorkerActionResolver(
                 : [
                       hostSystemCleanupJobActionDefinition,
                       hostDashboardRestartJobActionDefinition,
+                      hostDashboardStackRestartJobActionDefinition,
                       hostSystemRestartJobActionDefinition,
                       hostSystemUpdateJobActionDefinition,
                       hostWorkerRestartJobActionDefinition,
@@ -1043,6 +1047,15 @@ export function createJobWorkerActionResolver(
                 : createHostOperationJobExecutor(
                       dependencies.hostOperations,
                       "dashboard-restart"
+                  )
+        ),
+        ...gatedExecutor(
+            hostDashboardStackRestartJobActionKey,
+            dependencies.hostOperations === undefined
+                ? undefined
+                : createHostOperationJobExecutor(
+                      dependencies.hostOperations,
+                      "dashboard-stack-restart"
                   )
         ),
         ...gatedExecutor(

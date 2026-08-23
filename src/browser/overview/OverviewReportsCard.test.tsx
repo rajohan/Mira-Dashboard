@@ -72,12 +72,12 @@ function countRow(label: string): HTMLElement {
 
 describe("OverviewReportsCard", () => {
     test("discloses its bounded window and newest validated summary", async () => {
-        renderCard({ hasMore: true, reports });
+        renderCard({ reports });
 
         expect(
             await screen.findByRole("heading", { level: 2, name: "Recent reports" })
         ).toBeTruthy();
-        expect(within(countRow("Shown")).getByText("3")).toBeTruthy();
+        expect(within(countRow("Reports")).getByText("3")).toBeTruthy();
         expect(within(countRow("Warnings")).getByText("1")).toBeTruthy();
         expect(within(countRow("Errors")).getByText("1")).toBeTruthy();
         expect(
@@ -91,7 +91,6 @@ describe("OverviewReportsCard", () => {
         expect(
             screen.getByText(formatDashboardDateTime(reports[0].occurredAtMs))
         ).toHaveAttribute("dateTime", new Date(reports[0].occurredAtMs).toISOString());
-        expect(screen.getByText("Open Reports to see older reports.")).toBeTruthy();
         expect(screen.getByRole("link", { name: "View reports" })).toHaveAttribute(
             "href",
             "/reports"
@@ -99,10 +98,10 @@ describe("OverviewReportsCard", () => {
     });
 
     test("renders an explicit empty window without claiming a total", async () => {
-        renderCard({ hasMore: false, reports: [] });
+        renderCard({ reports: [] });
 
         expect(await screen.findByText("No reports yet.")).toBeTruthy();
-        expect(screen.queryByText("Shown")).toBeNull();
+        expect(within(countRow("Reports")).getByText("0")).toBeTruthy();
         expect(screen.getByRole("link", { name: "View reports" })).toBeTruthy();
     });
 });

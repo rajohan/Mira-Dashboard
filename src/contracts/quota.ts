@@ -9,7 +9,7 @@ import {
 /** Stable cache identity for normalized external-provider usage limits. */
 export const quotaCacheKey = "quotas.summary";
 /** Exact schema identity retained with the quota cache row. */
-export const quotaCacheSchemaId = "quotas.summary.v1";
+export const quotaCacheSchemaId = "quotas.summary.v2";
 /** Aggregate source identity; individual provider authority remains worker-only. */
 export const quotaCacheSource = "quota.providers";
 /** Maximum fresh lifetime retained by the Dashboard cache. */
@@ -40,6 +40,7 @@ const quotaValueSchema = v.pipe(
 );
 
 export const quotaWindowSchema = v.strictObject({
+    regenerationPercent: v.optional(quotaPercentSchema),
     resetsAtMs: timestampMillisecondsSchema("Quota window reset is invalid"),
     usedPercent: quotaPercentSchema,
     windowDurationMinutes: nonnegativeSafeIntegerSchema(
@@ -51,7 +52,9 @@ export const quotaProviderProjectionSchema = v.pipe(
     v.strictObject({
         id: quotaProviderIdSchema,
         label: boundedControlSafeTextSchema(32, "Quota label is invalid"),
+        balance: v.optional(quotaValueSchema),
         limit: v.optional(quotaValueSchema),
+        periodUsage: v.optional(quotaValueSchema),
         remaining: v.optional(quotaValueSchema),
         remainingPercent: v.optional(quotaPercentSchema),
         resetsAtMs: v.optional(
@@ -83,6 +86,8 @@ export const quotaProviderProjectionSchema = v.pipe(
                   provider.remainingPercent !== undefined ||
                   provider.windows !== undefined
                 : provider.limit === undefined &&
+                  provider.balance === undefined &&
+                  provider.periodUsage === undefined &&
                   provider.remaining === undefined &&
                   provider.remainingPercent === undefined &&
                   provider.resetsAtMs === undefined &&

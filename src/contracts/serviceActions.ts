@@ -12,6 +12,7 @@ import type { ProcedureContract } from "./registry.ts";
 /** Fixed privileged operations accepted by the purpose-built service-actions boundary. */
 export const serviceActionIds = [
     "dashboard-restart",
+    "dashboard-stack-restart",
     "openclaw-cleanup",
     "openclaw-restart",
     "openclaw-update",
@@ -85,6 +86,14 @@ export const requestServiceActionInputSchema = v.variant("actionId", [
         confirmation: v.literal(
             "restart-dashboard",
             "Dashboard restart confirmation is invalid"
+        ),
+        ...serviceActionRequestBase,
+    }),
+    v.strictObject({
+        actionId: v.literal("dashboard-stack-restart"),
+        confirmation: v.literal(
+            "restart-dashboard-stack",
+            "Dashboard stack restart confirmation is invalid"
         ),
         ...serviceActionRequestBase,
     }),

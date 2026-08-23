@@ -51,11 +51,10 @@ describe("CacheStatusTable", () => {
         );
         expect(screen.getByText("Up to date")).toBeTruthy();
         expect(screen.getByText("Failed")).toBeTruthy();
-        expect(screen.getByText("Available")).toBeTruthy();
 
         await userEvent
             .setup()
-            .click(screen.getByRole("button", { name: "system.host" }));
+            .click(screen.getByRole("button", { name: "View system.host" }));
         expect(selected).toEqual(["system.host"]);
     });
 
@@ -85,20 +84,20 @@ describe("CacheStatusTable", () => {
         );
         expect(
             screen
-                .getByRole("button", { name: "system.host" })
+                .getByRole("button", { name: "View system.host" })
                 .getAttribute("aria-current")
         ).toBe("true");
-        expect(screen.getByRole("button", { name: "system.host" })).toHaveClass(
-            "min-h-8",
-            "underline"
+        expect(screen.getByRole("button", { name: "View system.host" })).toHaveClass(
+            "border-accent-500/60",
+            "bg-primary-800/70"
         );
         expect(
-            screen.getByRole("region", { name: "Saved data sources" })
-        ).not.toHaveAttribute("tabindex");
+            screen.getByRole("navigation", { name: "Saved data sources" })
+        ).toBeTruthy();
         expect(screen.queryAllByText("Unavailable")).toHaveLength(0);
     });
 
-    test("keeps a large bounded snapshot accessible before viewport measurement", () => {
+    test("keeps a large bounded snapshot in one compact scrollable list", () => {
         render(
             <CacheStatusTable
                 entries={Array.from({ length: 50 }, (_, index) =>
@@ -107,13 +106,15 @@ describe("CacheStatusTable", () => {
                 onSelect={jest.fn()}
             />
         );
-        const table = screen.getByRole("table", { name: "Saved data sources" });
-        expect(table.getAttribute("aria-rowcount")).toBe("51");
-        expect(table.querySelector("tbody")?.style.height).not.toBe("");
-        expect(table.querySelector("td[height]")).toBeNull();
-        expect(screen.getByRole("region", { name: "Saved data sources" }).tabIndex).toBe(
-            0
+        const navigation = screen.getByRole("navigation", {
+            name: "Saved data sources",
+        });
+        expect(navigation.querySelector("ul")).toHaveClass(
+            "max-h-176",
+            "overflow-y-auto"
         );
-        expect(screen.getAllByRole("button", { name: /^provider\./u })).toHaveLength(50);
+        expect(screen.getAllByRole("button", { name: /^View provider\./u })).toHaveLength(
+            50
+        );
     });
 });

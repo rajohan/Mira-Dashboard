@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink } from "lucide-react";
+import { DatabaseBackup, FolderArchive } from "lucide-react";
 import { useState } from "react";
 
 import type {
@@ -7,17 +7,22 @@ import type {
     KopiaBackupStatus,
     WalgBackupStatus,
 } from "../../contracts/backups.ts";
+import { backupRunScheduleIds } from "../../contracts/backups.ts";
+import type { DatabaseOverview } from "../../contracts/database.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { dashboardBrowserFailureMessage } from "../api/trpcError.ts";
 import { useAuthenticatedMutationBoundary } from "../auth/useAuthenticatedMutationBoundary.ts";
+import { databaseOverviewQueryOptions } from "../database/databaseQueries.ts";
+import { useRunScheduleMutation } from "../jobs/jobMutations.ts";
+import { jobRunStateBadgeVariant, jobRunStateLabel } from "../jobs/jobRunPresentation.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
+import { formatByteCount } from "../lib/formatMeasurements.ts";
 import { ActionLink } from "../ui/ActionLink.tsx";
 import { Alert } from "../ui/Alert.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Card } from "../ui/Card.tsx";
 import { Heading } from "../ui/Heading.tsx";
-import { Icon } from "../ui/Icon.tsx";
 import { PageState } from "../ui/PageState.tsx";
 import { Text } from "../ui/Text.tsx";
 import {
@@ -31,9 +36,11 @@ import {
 
 const backupKopiaStatusQueryKey = ["backups", "kopia"] as const;
 const backupWalgStatusQueryKey = ["backups", "walg"] as const;
+const sqliteMaintenanceScheduleId = "database.sqlite-maintenance";
 const statusRefreshIntervalMs = 60_000;
 
 type ProviderStatus = KopiaBackupStatus | WalgBackupStatus;
+type SqliteVerificationLevel = "manifest-verified" | "restore-copy-verified";
 
 export interface BackupOverviewSectionViewProps {
     readonly controlsDisabled?: boolean;
@@ -47,8 +54,11 @@ export interface BackupOverviewSectionViewProps {
     readonly onRetryKopia?: () => void;
     readonly onRetryWalg?: () => void;
     readonly onRunKopia?: () => void;
+    readonly onRunSqlite?: () => void;
     readonly onRunWalg?: () => void;
     readonly queued?: BackupRequestOperationResult;
+    readonly sqlite?: DatabaseOverview["sqlite"];
+    readonly sqliteBusy?: boolean;
     readonly walg?: WalgBackupStatus;
 }
 
@@ -58,6 +68,15 @@ function freshnessBadge(status: ProviderStatus) {
         return <Badge variant="warning">Last known good</Badge>;
     }
     return <Badge variant="danger">Unavailable</Badge>;
+}
+
+function sqliteVerificationLabel(
+    verificationLevel: SqliteVerificationLevel | undefined
+): string {
+    if (verificationLevel === undefined) return "Unknown";
+    return verificationLevel === "restore-copy-verified"
+        ? "Restore verified"
+        : "Manifest verified";
 }
 
 function activityBadge(status: ProviderStatus) {
@@ -84,109 +103,126 @@ function providerUnavailable(status: ProviderStatus): boolean {
     );
 }
 
+function providerType(status: ProviderStatus): "kopia" | "walg" {
+    return status.state === "unavailable" ? status.type : status.payload.type;
+}
+
+function sourceHealthLabel(health: "current" | "missing" | "stale"): string {
+    if (health === "current") return "Fresh";
+    return health === "stale" ? "Stale" : "Missing";
+}
+
+function sqliteFreshnessLabel(sqlite: DatabaseOverview["sqlite"] | undefined): string {
+    if (sqlite === undefined || sqlite.state === "unavailable") return "Unavailable";
+    return sqlite.state === "fresh" ? "Fresh" : "Last known good";
+}
+
 interface ProviderCardProps {
-    readonly controlsDisabled: boolean;
+    readonly ariaLabel?: string;
     readonly mutationBusy: boolean;
     readonly onClearAttention?: () => void;
-    readonly onRun?: () => void;
     readonly status: ProviderStatus;
     readonly title: string;
 }
 
 function ProviderCard({
-    controlsDisabled,
+    ariaLabel,
     mutationBusy,
     onClearAttention,
-    onRun,
     status,
     title,
 }: ProviderCardProps) {
     const needsAttention = status.activity.state === "needs-attention";
-    const disabled = controlsDisabled || providerUnavailable(status) || mutationBusy;
+    const disabled = providerUnavailable(status) || mutationBusy;
     return (
-        <Card aria-label={`${title} backup`} className="bg-primary-900/35">
+        <section
+            aria-label={ariaLabel ?? `${title} backup`}
+            className="border-primary-700 bg-primary-900/35 rounded-lg border p-3"
+        >
             <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                     <Heading level={3}>{title}</Heading>
-                    <Text className="mt-1" tone="muted">
-                        Checked {formatDashboardDateTime(status.checkedAtMs)}
-                    </Text>
                 </div>
                 <div className="flex flex-wrap gap-2">
                     {freshnessBadge(status)}
                     {activityBadge(status)}
                 </div>
             </div>
-            {status.state === "unavailable" ? (
+            {status.state === "unavailable" && (
                 <Text className="mt-5" tone="warning">
                     No trustworthy provider status is currently available.
                 </Text>
-            ) : (
-                <div className="mt-5 grid gap-2 text-sm sm:grid-cols-2">
-                    <Text>
-                        Backups <strong>{status.payload.backupCount}</strong>
-                    </Text>
-                    <Text tone={status.payload.healthy ? "success" : "warning"}>
-                        {status.payload.healthy ? "Healthy" : "Attention required"}
-                    </Text>
-                    {status.payload.type === "kopia" && (
-                        <Text className="sm:col-span-2" tone="muted">
-                            {status.payload.sources.length} validated read-only source
-                            {status.payload.sources.length === 1 ? "" : "s"}
+            )}
+            {status.state !== "unavailable" && status.payload.type === "walg" && (
+                <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+                    <div>
+                        <Text className="text-xs uppercase" size="sm" tone="muted">
+                            Latest Postgres backup
                         </Text>
-                    )}
-                    {status.payload.type === "walg" &&
-                        status.payload.latestCompletedAtMs !== undefined && (
-                            <Text className="sm:col-span-2" tone="muted">
-                                Latest backup{" "}
-                                {formatDashboardDateTime(
-                                    status.payload.latestCompletedAtMs
-                                )}
-                            </Text>
-                        )}
+                        <Text className="mt-1 font-mono text-xs break-all">
+                            {status.payload.latestBackupName ?? "Unknown"}
+                        </Text>
+                    </div>
+                    <div>
+                        <Text className="text-xs uppercase" size="sm" tone="muted">
+                            Finished
+                        </Text>
+                        <Text className="mt-1">
+                            {status.payload.latestCompletedAtMs === undefined
+                                ? "No backup yet"
+                                : formatDashboardDateTime(
+                                      status.payload.latestCompletedAtMs
+                                  )}
+                        </Text>
+                    </div>
+                    <div>
+                        <Text className="text-xs uppercase" size="sm" tone="muted">
+                            WAL file
+                        </Text>
+                        <Text className="mt-1 font-mono text-xs break-all">
+                            {status.payload.latestWalFileName ?? "Unknown"}
+                        </Text>
+                    </div>
+                    <div>
+                        <Text className="text-xs uppercase" size="sm" tone="muted">
+                            Backup count
+                        </Text>
+                        <Text className="mt-1 tabular-nums">
+                            {status.payload.backupCount}
+                        </Text>
+                    </div>
                 </div>
             )}
-            <div className="mt-5 flex flex-wrap gap-2">
-                {needsAttention ? (
-                    <Button
-                        busy={mutationBusy}
-                        busyLabel={`Clearing ${title} attention…`}
-                        disabled={disabled}
-                        onClick={onClearAttention}
-                        size="sm"
-                        variant="danger"
-                    >
-                        Clear attention
-                    </Button>
-                ) : (
-                    <Button
-                        busy={mutationBusy}
-                        busyLabel={`Queuing ${title} backup…`}
-                        disabled={disabled}
-                        onClick={onRun}
-                        size="sm"
-                    >
-                        Run backup
-                    </Button>
-                )}
-                {status.activity.state !== "idle" && (
-                    <ActionLink
-                        search={{ runId: status.activity.jobRunId }}
-                        size="sm"
-                        to="/jobs"
-                        variant="ghost"
-                    >
-                        <Icon icon={ExternalLink} size="sm" />
-                        View job
-                    </ActionLink>
-                )}
-            </div>
-            {controlsDisabled && (
-                <Text className="mt-3" size="sm" tone="muted">
-                    Backup controls are disabled for this session.
-                </Text>
+            {(needsAttention || status.activity.state !== "idle") && (
+                <div className="mt-4 flex flex-wrap gap-2">
+                    {needsAttention && (
+                        <Button
+                            busy={mutationBusy}
+                            busyLabel={`Clearing ${title} attention…`}
+                            disabled={disabled}
+                            onClick={onClearAttention}
+                            size="sm"
+                            variant="danger"
+                        >
+                            Clear attention
+                        </Button>
+                    )}
+                    {status.activity.state !== "idle" && (
+                        <ActionLink
+                            search={{
+                                runId: status.activity.jobRunId,
+                                scheduleId: backupRunScheduleIds[providerType(status)],
+                            }}
+                            size="sm"
+                            to="/jobs"
+                            variant="secondary"
+                        >
+                            View job
+                        </ActionLink>
+                    )}
+                </div>
             )}
-        </Card>
+        </section>
     );
 }
 
@@ -200,7 +236,10 @@ function MissingProviderCard({
     readonly title: string;
 }) {
     return (
-        <Card aria-label={`${title} backup`} className="bg-primary-900/35">
+        <section
+            aria-label={`${title} backup`}
+            className="border-primary-700 bg-primary-900/35 rounded-lg border p-3"
+        >
             <Heading level={3}>{title}</Heading>
             {loading ? (
                 <PageState label={`Loading ${title} backup status…`} status="loading" />
@@ -221,7 +260,7 @@ function MissingProviderCard({
                     )}
                 </div>
             )}
-        </Card>
+        </section>
     );
 }
 
@@ -243,8 +282,11 @@ export function BackupOverviewSectionView({
     onRetryKopia,
     onRetryWalg,
     onRunKopia,
+    onRunSqlite,
     onRunWalg,
     queued,
+    sqlite,
+    sqliteBusy = false,
     walg,
 }: BackupOverviewSectionViewProps) {
     if (loading && kopia === undefined && walg === undefined) {
@@ -265,22 +307,24 @@ export function BackupOverviewSectionView({
             />
         );
     }
+    const sqliteInventory =
+        sqlite !== undefined &&
+        sqlite.state !== "unavailable" &&
+        sqlite.lifecycle.backupInventory.state !== "unavailable"
+            ? sqlite.lifecycle.backupInventory
+            : undefined;
+    const latestSqliteBackup = sqliteInventory?.backups[0];
+    const latestSqliteVerification = sqliteVerificationLabel(
+        latestSqliteBackup?.verificationLevel
+    );
+    const latestSqliteRun =
+        sqlite !== undefined &&
+        sqlite.state !== "unavailable" &&
+        sqlite.lifecycle.maintenance.state !== "unavailable"
+            ? sqlite.lifecycle.maintenance.runs[0]
+            : undefined;
     return (
-        <section aria-labelledby="backup-overview-heading">
-            <div className="flex flex-wrap items-end justify-between gap-3">
-                <div>
-                    <Heading id="backup-overview-heading" level={2}>
-                        Backups
-                    </Heading>
-                    <Text className="mt-1" tone="muted">
-                        Durable Kopia and WAL-G operations with independent saved status.
-                    </Text>
-                </div>
-                <ActionLink size="sm" to="/jobs" variant="ghost">
-                    <Icon icon={ExternalLink} size="sm" />
-                    All backup jobs
-                </ActionLink>
-            </div>
+        <section aria-label="Backup status">
             {error !== undefined && (
                 <Alert className="mt-4" message={error} variant="error" />
             )}
@@ -292,40 +336,393 @@ export function BackupOverviewSectionView({
                     variant="success"
                 />
             )}
-            <div className="mt-4 grid gap-4 xl:grid-cols-2">
-                {kopia === undefined ? (
-                    <MissingProviderCard
-                        loading={loading}
-                        onRetry={onRetryKopia ?? onRetry}
-                        title="Kopia"
-                    />
-                ) : (
-                    <ProviderCard
-                        controlsDisabled={controlsDisabled}
-                        mutationBusy={mutationBusy === "kopia"}
-                        onClearAttention={onClearKopiaAttention}
-                        onRun={onRunKopia}
-                        status={kopia}
-                        title="Kopia"
-                    />
-                )}
-                {walg === undefined ? (
-                    <MissingProviderCard
-                        loading={loading}
-                        onRetry={onRetryWalg ?? onRetry}
-                        title="WAL-G"
-                    />
-                ) : (
-                    <ProviderCard
-                        controlsDisabled={controlsDisabled}
-                        mutationBusy={mutationBusy === "walg"}
-                        onClearAttention={onClearWalgAttention}
-                        onRun={onRunWalg}
-                        status={walg}
-                        title="WAL-G"
-                    />
-                )}
+            <div className="grid gap-4 xl:grid-cols-3">
+                <Card className="order-2 h-full">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="flex min-w-0 gap-2">
+                            <DatabaseBackup
+                                aria-hidden="true"
+                                className="text-accent-300 mt-0.5 size-5 shrink-0"
+                            />
+                            <Heading level={3}>Postgres backup</Heading>
+                        </div>
+                        <Button
+                            aria-label="Queue Postgres backup"
+                            disabled={
+                                walg === undefined ||
+                                controlsDisabled ||
+                                mutationBusy !== undefined ||
+                                (walg !== undefined && providerUnavailable(walg))
+                            }
+                            onClick={onRunWalg}
+                            size="sm"
+                        >
+                            Queue backup
+                        </Button>
+                    </div>
+                    <div className="mt-4">
+                        {walg === undefined ? (
+                            <MissingProviderCard
+                                loading={loading}
+                                onRetry={onRetryWalg ?? onRetry}
+                                title="WAL-G"
+                            />
+                        ) : (
+                            <ProviderCard
+                                ariaLabel="WAL-G backup"
+                                mutationBusy={mutationBusy === "walg"}
+                                onClearAttention={onClearWalgAttention}
+                                status={walg}
+                                title="Postgres backup"
+                            />
+                        )}
+                    </div>
+                </Card>
+                <Card className="order-1 h-full">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="flex min-w-0 gap-2">
+                            <FolderArchive
+                                aria-hidden="true"
+                                className="text-accent-300 mt-0.5 size-5 shrink-0"
+                            />
+                            <Heading level={3}>Kopia backup</Heading>
+                        </div>
+                        <Button
+                            aria-label="Queue Kopia backup"
+                            disabled={
+                                kopia === undefined ||
+                                controlsDisabled ||
+                                mutationBusy !== undefined ||
+                                (kopia !== undefined && providerUnavailable(kopia))
+                            }
+                            onClick={onRunKopia}
+                            size="sm"
+                        >
+                            Queue backup
+                        </Button>
+                    </div>
+                    <div className="mt-4">
+                        {kopia === undefined && (
+                            <MissingProviderCard
+                                loading={loading}
+                                onRetry={onRetryKopia ?? onRetry}
+                                title="Kopia"
+                            />
+                        )}
+                        {kopia !== undefined && kopia.state === "unavailable" && (
+                            <ProviderCard
+                                mutationBusy={mutationBusy === "kopia"}
+                                onClearAttention={onClearKopiaAttention}
+                                status={kopia}
+                                title="Kopia"
+                            />
+                        )}
+                        {kopia !== undefined && kopia.state !== "unavailable" && (
+                            <section aria-label="Kopia backup">
+                                {(kopia.state !== "fresh" ||
+                                    kopia.activity.state !== "succeeded") && (
+                                    <div className="mb-3 flex flex-wrap justify-end gap-2">
+                                        {freshnessBadge(kopia)}
+                                        {activityBadge(kopia)}
+                                    </div>
+                                )}
+                                <ul className="max-h-112 min-h-88 space-y-4 overflow-y-auto pr-2">
+                                    {kopia.payload.sources.map((source) => (
+                                        <li
+                                            className="border-primary-700 bg-primary-900/35 rounded-lg border p-3"
+                                            key={source.id}
+                                        >
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div>
+                                                    <Text className="font-medium capitalize">
+                                                        {source.id}
+                                                    </Text>
+                                                    <Text
+                                                        className="mt-1"
+                                                        size="sm"
+                                                        tone="muted"
+                                                    >
+                                                        {source.snapshotCount} snapshot
+                                                        {source.snapshotCount === 1
+                                                            ? ""
+                                                            : "s"}
+                                                    </Text>
+                                                </div>
+                                                <div className="flex flex-wrap justify-end gap-2">
+                                                    <Badge
+                                                        variant={
+                                                            source.health === "current"
+                                                                ? "success"
+                                                                : "warning"
+                                                        }
+                                                    >
+                                                        {sourceHealthLabel(source.health)}
+                                                    </Badge>
+                                                    {source.health === "current" && (
+                                                        <Badge variant="success">
+                                                            Succeeded
+                                                        </Badge>
+                                                    )}
+                                                </div>
+                                            </div>
+                                            <div className="mt-3 space-y-2">
+                                                {(
+                                                    source.snapshots ??
+                                                    (source.latestCompletedAtMs ===
+                                                    undefined
+                                                        ? []
+                                                        : [
+                                                              {
+                                                                  completedAtMs:
+                                                                      source.latestCompletedAtMs,
+                                                                  fileCount:
+                                                                      source.latestFileCount,
+                                                                  retentionReasons: [],
+                                                                  sizeBytes:
+                                                                      source.latestSizeBytes,
+                                                              },
+                                                          ])
+                                                ).map((snapshot) => (
+                                                    <div
+                                                        className="border-primary-700 bg-primary-900/35 rounded-md border p-2"
+                                                        key={`${source.id}-${snapshot.completedAtMs}`}
+                                                    >
+                                                        <div className="flex flex-wrap items-start justify-between gap-3 text-sm">
+                                                            <div className="min-w-0 flex-1">
+                                                                <Text className="truncate">
+                                                                    {snapshot.description ??
+                                                                        "Unnamed snapshot"}
+                                                                </Text>
+                                                                <Text
+                                                                    className="mt-1"
+                                                                    size="sm"
+                                                                    tone="muted"
+                                                                >
+                                                                    Finished:{" "}
+                                                                    {formatDashboardDateTime(
+                                                                        snapshot.completedAtMs
+                                                                    )}
+                                                                </Text>
+                                                                {snapshot.retentionReasons
+                                                                    .length > 0 && (
+                                                                    <div className="mt-2 flex flex-wrap gap-1">
+                                                                        {snapshot.retentionReasons.map(
+                                                                            (reason) => (
+                                                                                <Badge
+                                                                                    key={
+                                                                                        reason
+                                                                                    }
+                                                                                >
+                                                                                    {
+                                                                                        reason
+                                                                                    }
+                                                                                </Badge>
+                                                                            )
+                                                                        )}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                            <div className="text-right">
+                                                                <Text>
+                                                                    {snapshot.sizeBytes ===
+                                                                    undefined
+                                                                        ? "Unknown"
+                                                                        : formatByteCount(
+                                                                              snapshot.sizeBytes
+                                                                          )}
+                                                                </Text>
+                                                                <Text
+                                                                    className="mt-1"
+                                                                    size="sm"
+                                                                    tone="muted"
+                                                                >
+                                                                    {snapshot.fileCount ??
+                                                                        "Unknown"}{" "}
+                                                                    files
+                                                                </Text>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </li>
+                                    ))}
+                                </ul>
+                                {(kopia.activity.state === "needs-attention" ||
+                                    kopia.activity.state !== "idle") && (
+                                    <div className="mt-4 flex flex-wrap gap-2">
+                                        {kopia.activity.state === "needs-attention" && (
+                                            <Button
+                                                busy={mutationBusy === "kopia"}
+                                                busyLabel="Clearing Kopia attention…"
+                                                disabled={
+                                                    controlsDisabled ||
+                                                    providerUnavailable(kopia) ||
+                                                    mutationBusy !== undefined
+                                                }
+                                                onClick={onClearKopiaAttention}
+                                                size="sm"
+                                                variant="danger"
+                                            >
+                                                Clear attention
+                                            </Button>
+                                        )}
+                                        <ActionLink
+                                            search={{
+                                                runId: kopia.activity.jobRunId,
+                                                scheduleId: backupRunScheduleIds.kopia,
+                                            }}
+                                            size="sm"
+                                            to="/jobs"
+                                            variant="secondary"
+                                        >
+                                            View job
+                                        </ActionLink>
+                                    </div>
+                                )}
+                            </section>
+                        )}
+                    </div>
+                </Card>
+                <Card className="order-3 h-full">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="flex min-w-0 gap-2">
+                            <DatabaseBackup
+                                aria-hidden="true"
+                                className="text-accent-300 mt-0.5 size-5 shrink-0"
+                            />
+                            <Heading level={3}>SQLite backup</Heading>
+                        </div>
+                        <Button
+                            aria-label="Queue SQLite backup"
+                            busy={sqliteBusy}
+                            busyLabel="Queuing SQLite backup…"
+                            disabled={
+                                sqlite === undefined ||
+                                sqlite.state === "unavailable" ||
+                                controlsDisabled ||
+                                sqliteBusy
+                            }
+                            onClick={onRunSqlite}
+                            size="sm"
+                        >
+                            Queue backup
+                        </Button>
+                    </div>
+                    <section
+                        aria-label="SQLite backup"
+                        className="border-primary-700 bg-primary-900/35 mt-4 rounded-lg border p-3"
+                    >
+                        <div className="flex items-start justify-between gap-3">
+                            <Heading level={3}>SQLite backup</Heading>
+                            <div className="flex flex-wrap justify-end gap-2">
+                                <Badge
+                                    variant={
+                                        sqlite !== undefined && sqlite.state === "fresh"
+                                            ? "success"
+                                            : "warning"
+                                    }
+                                >
+                                    {sqliteFreshnessLabel(sqlite)}
+                                </Badge>
+                                {latestSqliteRun !== undefined && (
+                                    <Badge
+                                        variant={jobRunStateBadgeVariant(
+                                            latestSqliteRun.state
+                                        )}
+                                    >
+                                        {jobRunStateLabel(latestSqliteRun.state)}
+                                    </Badge>
+                                )}
+                            </div>
+                        </div>
+                        {sqliteInventory === undefined ? (
+                            <Text className="mt-5" tone="warning">
+                                SQLite backup inventory is unavailable.
+                            </Text>
+                        ) : (
+                            <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+                                <div>
+                                    <Text
+                                        className="text-xs uppercase"
+                                        size="sm"
+                                        tone="muted"
+                                    >
+                                        Latest SQLite backup
+                                    </Text>
+                                    <Text className="mt-1 capitalize">
+                                        {latestSqliteBackup === undefined
+                                            ? "No backup yet"
+                                            : `${latestSqliteBackup.kind} snapshot`}
+                                    </Text>
+                                </div>
+                                <div>
+                                    <Text
+                                        className="text-xs uppercase"
+                                        size="sm"
+                                        tone="muted"
+                                    >
+                                        Finished
+                                    </Text>
+                                    <Text className="mt-1">
+                                        {latestSqliteBackup === undefined
+                                            ? "No backup yet"
+                                            : formatDashboardDateTime(
+                                                  latestSqliteBackup.createdAtMs
+                                              )}
+                                    </Text>
+                                </div>
+                                <div>
+                                    <Text
+                                        className="text-xs uppercase"
+                                        size="sm"
+                                        tone="muted"
+                                    >
+                                        Verification
+                                    </Text>
+                                    <Text className="mt-1">
+                                        {latestSqliteVerification}
+                                    </Text>
+                                </div>
+                                <div>
+                                    <Text
+                                        className="text-xs uppercase"
+                                        size="sm"
+                                        tone="muted"
+                                    >
+                                        Size
+                                    </Text>
+                                    <Text className="mt-1">
+                                        {latestSqliteBackup === undefined
+                                            ? "Unknown"
+                                            : formatByteCount(latestSqliteBackup.bytes)}
+                                    </Text>
+                                </div>
+                            </div>
+                        )}
+                        <div className="mt-4 flex justify-end">
+                            <ActionLink
+                                search={{
+                                    ...(latestSqliteRun === undefined
+                                        ? {}
+                                        : { runId: latestSqliteRun.runId }),
+                                    scheduleId: sqliteMaintenanceScheduleId,
+                                }}
+                                size="sm"
+                                to="/jobs"
+                                variant="secondary"
+                            >
+                                View job
+                            </ActionLink>
+                        </div>
+                    </section>
+                </Card>
             </div>
+            {controlsDisabled && (
+                <Text className="mt-3" size="sm" tone="muted">
+                    Backup controls are disabled for this session.
+                </Text>
+            )}
         </section>
     );
 }
@@ -342,6 +739,8 @@ export function BackupOverviewSection() {
     const [mutationBusy, setMutationBusy] = useState<"kopia" | "walg">();
     const [mutationError, setMutationError] = useState<string>();
     const [queued, setQueued] = useState<BackupRequestOperationResult>();
+    const databaseQuery = useQuery(databaseOverviewQueryOptions(client));
+    const sqliteRun = useRunScheduleMutation();
     const kopiaQuery = useQuery({
         queryFn: ({ signal }) => client.query("backups.getKopiaStatus", {}, { signal }),
         queryKey: backupKopiaStatusQueryKey,
@@ -450,7 +849,7 @@ export function BackupOverviewSection() {
         }
     }
 
-    const readError = kopiaQuery.error ?? walgQuery.error;
+    const readError = kopiaQuery.error ?? walgQuery.error ?? databaseQuery.error;
     return (
         <BackupOverviewSectionView
             error={
@@ -460,7 +859,9 @@ export function BackupOverviewSection() {
                     : dashboardBrowserFailureMessage(readError))
             }
             kopia={kopiaQuery.data}
-            loading={kopiaQuery.isPending || walgQuery.isPending}
+            loading={
+                kopiaQuery.isPending || walgQuery.isPending || databaseQuery.isPending
+            }
             mutationBusy={mutationBusy}
             onClearKopiaAttention={() => void submit("kopia", "clear-attention")}
             onClearWalgAttention={() => void submit("walg", "clear-attention")}
@@ -470,8 +871,23 @@ export function BackupOverviewSection() {
             onRetryKopia={() => void kopiaQuery.refetch()}
             onRetryWalg={() => void walgQuery.refetch()}
             onRunKopia={() => void submit("kopia", "run")}
+            onRunSqlite={() =>
+                sqliteRun.mutate(
+                    { id: sqliteMaintenanceScheduleId },
+                    {
+                        onError: (error) =>
+                            setMutationError(dashboardBrowserFailureMessage(error)),
+                        onSuccess: () => {
+                            setMutationError(undefined);
+                            void databaseQuery.refetch();
+                        },
+                    }
+                )
+            }
             onRunWalg={() => void submit("walg", "run")}
             queued={queued}
+            sqlite={databaseQuery.data?.sqlite}
+            sqliteBusy={sqliteRun.isPending}
             walg={walgQuery.data}
         />
     );

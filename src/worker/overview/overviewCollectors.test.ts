@@ -48,6 +48,7 @@ function quotaProviderResponse(
                     invalidProvider === "openrouter" ? Number.MAX_SAFE_INTEGER + 1 : 10,
                 limit_remaining: 8,
                 usage: 2,
+                usage_monthly: 0.1344,
             },
         });
     }
@@ -58,7 +59,15 @@ function quotaProviderResponse(
         return jsonResponse({
             rollingFiveHourLimit: {
                 max: invalidProvider === "synthetic" ? Number.MAX_SAFE_INTEGER + 1 : 10,
+                nextTickAt: "2026-08-23T13:16:00.000Z",
                 remaining: 8,
+                tickPercent: 0.05,
+            },
+            weeklyTokenLimit: {
+                maxCredits: "$100",
+                nextRegenAt: "2026-08-23T14:39:00.000Z",
+                nextRegenCredits: "$2",
+                percentRemaining: 72,
             },
         });
     }
@@ -281,9 +290,9 @@ describe("overview collectors", () => {
 
         expect(payload.providers).toEqual([
             { id: "elevenlabs", label: "ElevenLabs", status: "unavailable" },
-            { id: "openai", label: "OpenAI", status: "unavailable" },
+            { id: "openai", label: "OpenAI / Codex", status: "unavailable" },
             { id: "openrouter", label: "OpenRouter", status: "not-configured" },
-            { id: "synthetic", label: "Synthetic", status: "not-configured" },
+            { id: "synthetic", label: "Synthetic.new", status: "not-configured" },
         ]);
     });
 
@@ -378,10 +387,28 @@ describe("overview collectors", () => {
 
         expect(payload.providers).toEqual([
             expect.objectContaining({ id: "elevenlabs", status: "available" }),
-            { id: "openai", label: "OpenAI", status: "unavailable" },
+            { id: "openai", label: "OpenAI / Codex", status: "unavailable" },
             expect.objectContaining({ id: "openrouter", status: "available" }),
             expect.objectContaining({ id: "synthetic", status: "available" }),
         ]);
+        expect(payload.providers[3]?.windows).toEqual([
+            {
+                regenerationPercent: 5,
+                resetsAtMs: Date.parse("2026-08-23T13:16:00.000Z"),
+                usedPercent: 20,
+                windowDurationMinutes: 300,
+            },
+            {
+                regenerationPercent: 2,
+                resetsAtMs: Date.parse("2026-08-23T14:39:00.000Z"),
+                usedPercent: 28,
+                windowDurationMinutes: 10_080,
+            },
+        ]);
+        expect(payload.providers[2]).toMatchObject({
+            balance: 8,
+            periodUsage: 0.1344,
+        });
         expect(JSON.stringify(payload)).not.toContain("private synchronous");
     });
 
@@ -594,7 +621,7 @@ describe("overview collectors", () => {
                 remaining: 8,
                 status: "available",
             }),
-            { id: "synthetic", label: "Synthetic", status: "not-configured" },
+            { id: "synthetic", label: "Synthetic.new", status: "not-configured" },
         ]);
         expect(appServerInput.join("\n")).toContain('"account/rateLimits/read"');
         expect(appServerInput.join("\n")).not.toContain("/status");

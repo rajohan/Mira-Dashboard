@@ -709,11 +709,12 @@ worker-only Gateway operations are already implemented and remain available only
 exact-release worker advertises them. Restart reuses the same fixed action provider as the Settings
 control rather than adding a second lifecycle executor.
 
-The same fixed broker exposes Dashboard web and worker restart as the exact
-`dashboard-restart` and `worker-restart` Service Actions. Web restart waits for the unit result so
-the independent worker can durably finish the job. Worker restart is dispatched without blocking
-the worker on its own shutdown; the accepted result is durable before systemd replaces the
-process. Neither action accepts a unit name, command, or caller-controlled argument.
+The same fixed broker exposes Dashboard web restart, worker restart, and their combined restart as
+the exact `dashboard-restart`, `worker-restart`, and `dashboard-stack-restart` Service Actions. Web
+restart waits for the unit result so the independent worker can durably finish the job. Worker and
+combined restart are dispatched without blocking the worker on its own shutdown; the accepted
+result is durable before systemd replaces the process. None accepts a unit name, command, or
+caller-controlled argument.
 
 The fixed `system-cleanup` unit preserves the consumed cleanup behavior behind one reviewed
 authority. It attempts package autoremove and cache cleanup, journald rotate plus 14-day/1 GiB

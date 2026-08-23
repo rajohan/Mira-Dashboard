@@ -163,15 +163,20 @@ export function createFixedHostOperationsBroker(
             for (const operationId of Object.keys(
                 fixedHostOperationUnits
             ) as HostOperationId[]) {
-                const unit = fixedHostOperationUnits[operationId];
+                const units = fixedHostOperationUnits[operationId];
                 try {
-                    const result = await execute(
-                        executable,
-                        ["show", "--property=LoadState", "--value", unit],
-                        operationSignal(signal, availabilityDeadlineMs)
+                    const states = await Promise.all(
+                        units.map(async (unit) => {
+                            const result = await execute(
+                                executable,
+                                ["show", "--property=LoadState", "--value", unit],
+                                operationSignal(signal, availabilityDeadlineMs)
+                            );
+                            requireBoundedSuccess(result);
+                            return new TextDecoder().decode(result.stdout).trim();
+                        })
                     );
-                    requireBoundedSuccess(result);
-                    if (new TextDecoder().decode(result.stdout).trim() === "loaded") {
+                    if (states.every((state) => state === "loaded")) {
                         available.push(operationId);
                     }
                 } catch {
@@ -181,12 +186,14 @@ export function createFixedHostOperationsBroker(
             return Object.freeze(available);
         },
         async request(operationId: HostOperationId, signal?: AbortSignal) {
-            const unit = fixedHostOperationUnits[operationId];
-            if (unit === undefined) throw brokerFailure();
+            const units = fixedHostOperationUnits[operationId];
+            if (units === undefined) throw brokerFailure();
             const isRestart = operationId === "system-restart";
             const isWorkerRestart = operationId === "worker-restart";
             const isApplicationRestart =
-                operationId === "dashboard-restart" || isWorkerRestart;
+                operationId === "dashboard-restart" ||
+                operationId === "dashboard-stack-restart" ||
+                isWorkerRestart;
             let deadlineMs = updateDeadlineMs;
             if (operationId === "system-cleanup") {
                 deadlineMs = cleanupDeadlineMs;
@@ -198,14 +205,23 @@ export function createFixedHostOperationsBroker(
                     executable,
                     [
                         isApplicationRestart ? "restart" : "start",
-                        isRestart || isWorkerRestart ? "--no-block" : "--wait",
-                        unit,
+                        isRestart ||
+                        isWorkerRestart ||
+                        operationId === "dashboard-stack-restart"
+                            ? "--no-block"
+                            : "--wait",
+                        ...units,
                     ],
                     operationSignal(signal, deadlineMs)
                 );
                 requireBoundedSuccess(result);
                 return Object.freeze({
-                    status: isRestart || isWorkerRestart ? "accepted" : "completed",
+                    status:
+                        isRestart ||
+                        isWorkerRestart ||
+                        operationId === "dashboard-stack-restart"
+                            ? "accepted"
+                            : "completed",
                 });
             } catch {
                 throw brokerFailure();

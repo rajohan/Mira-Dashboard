@@ -21,12 +21,12 @@
 | `@simplewebauthn/browser` | `13.3.0` | `13.3.0` | runtime |
 | `@simplewebauthn/server` | `13.3.2` | `13.3.2` | runtime |
 | `@tailwindcss/typography` | `^0.5.20` | `0.5.20` | runtime |
-| `@tanstack/query-core` | `5.101.4` | `5.101.4` | runtime |
+| `@tanstack/query-core` | `5.102.1` | `5.102.1` | runtime |
 | `@tanstack/query-db-collection` | `1.2.7` | `1.2.7` | runtime |
 | `@tanstack/react-db` | `0.3.2` | `0.3.2` | runtime |
 | `@tanstack/react-form` | `^1.33.5` | `1.33.5` | runtime |
-| `@tanstack/react-query` | `^5.101.4` | `5.101.4` | runtime |
-| `@tanstack/react-router` | `^1.170.31` | `1.170.31` | runtime |
+| `@tanstack/react-query` | `^5.102.1` | `5.102.1` | runtime |
+| `@tanstack/react-router` | `^1.170.32` | `1.170.32` | runtime |
 | `@tanstack/react-store` | `0.11.1` | `0.11.1` | runtime |
 | `@tanstack/react-table` | `^9.1.2` | `9.1.2` | runtime |
 | `@tanstack/react-virtual` | `^3.14.10` | `3.14.10` | runtime |

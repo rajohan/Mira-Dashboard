@@ -46,10 +46,7 @@ export function OverviewIncidentsSection() {
                     message={dashboardBrowserFailureMessage(query.error)}
                 />
             )}
-            <OverviewIncidentsCard
-                hasMore={query.data.nextCursor !== undefined}
-                incidents={query.data.incidents}
-            />
+            <OverviewIncidentsCard incidents={query.data.incidents} />
         </div>
     );
 }

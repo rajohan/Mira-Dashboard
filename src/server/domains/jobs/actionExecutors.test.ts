@@ -202,6 +202,7 @@ describe("worker-only job executor registry", () => {
             request(
                 operationId:
                     | "dashboard-restart"
+                    | "dashboard-stack-restart"
                     | "system-cleanup"
                     | "system-restart"
                     | "system-update"

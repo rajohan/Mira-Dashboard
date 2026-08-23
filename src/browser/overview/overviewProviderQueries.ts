@@ -65,12 +65,10 @@ export interface OverviewProviderProjection<TPayload> {
     readonly payload: TPayload;
 }
 
-async function readProviderProjection<TPayload>(
-    client: DashboardTrpcClient,
-    contract: OverviewProviderContract<TPayload>,
-    signal: AbortSignal
-): Promise<OverviewProviderProjection<TPayload>> {
-    const entry = await client.query("cache.getEntry", { key: contract.key }, { signal });
+function projectProviderEntry<TPayload>(
+    entry: CacheEntry,
+    contract: OverviewProviderContract<TPayload>
+): OverviewProviderProjection<TPayload> {
     if (
         entry.key !== contract.key ||
         entry.schemaId !== contract.schemaId ||
@@ -91,10 +89,12 @@ function providerQueryOptions<TPayload>(
     contract: OverviewProviderContract<TPayload>
 ) {
     return queryOptions({
-        queryFn: ({ signal }) => readProviderProjection(client, contract, signal),
+        queryFn: ({ signal }) =>
+            client.query("cache.getEntry", { key: contract.key }, { signal }),
         queryKey: cacheEntryQueryKey(contract.key),
         refetchInterval: cacheStatusRefreshIntervalMs,
         refetchOnMount: "always",
+        select: (entry) => projectProviderEntry(entry, contract),
         staleTime: cacheStatusRefreshIntervalMs,
     });
 }

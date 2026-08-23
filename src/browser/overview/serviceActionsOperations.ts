@@ -17,7 +17,6 @@ export interface ServiceActionPresentation {
     readonly buttonLabel: string;
     readonly confirmationLabel: string;
     readonly confirmationTitle: string;
-    readonly description: string;
     readonly retryLabel: string;
     readonly warning: string;
 }
@@ -28,19 +27,24 @@ export const serviceActionPresentations = Object.freeze({
         buttonLabel: "Restart Dashboard",
         confirmationLabel: "Restart Dashboard",
         confirmationTitle: "Restart the Dashboard?",
-        description:
-            "Restarts the Dashboard web process through the fixed systemd authority.",
         retryLabel: "Retry Dashboard restart request",
         warning:
             "The browser will disconnect briefly while the Dashboard web process restarts. The worker and queued jobs continue running.",
+    },
+    "dashboard-stack-restart": {
+        actionLabel: "Dashboard + worker restart",
+        buttonLabel: "Restart both",
+        confirmationLabel: "Restart both",
+        confirmationTitle: "Restart the Dashboard and worker?",
+        retryLabel: "Retry combined restart request",
+        warning:
+            "The Dashboard web process and worker will both restart. Active worker jobs are interrupted and recovered according to their durable job policy.",
     },
     "openclaw-cleanup": {
         actionLabel: "OpenClaw cleanup",
         buttonLabel: "Queue OpenClaw cleanup",
         confirmationLabel: "Queue cleanup",
         confirmationTitle: "Queue OpenClaw cleanup?",
-        description:
-            "Runs source-owned OpenClaw session and artifact maintenance without generic filesystem or Docker cleanup.",
         retryLabel: "Retry OpenClaw cleanup request",
         warning:
             "This queues OpenClaw's own bounded session and artifact maintenance. Review Dashboard jobs for the durable result.",
@@ -50,8 +54,6 @@ export const serviceActionPresentations = Object.freeze({
         buttonLabel: "Queue OpenClaw restart",
         confirmationLabel: "Queue restart",
         confirmationTitle: "Queue an OpenClaw restart?",
-        description:
-            "Restarts the OpenClaw Gateway through the existing fixed worker-owned lifecycle action.",
         retryLabel: "Retry OpenClaw restart request",
         warning:
             "Restarting the OpenClaw Gateway interrupts active Gateway sessions. Review Dashboard jobs for the durable result. A queued request does not confirm that the restart completed.",
@@ -61,8 +63,6 @@ export const serviceActionPresentations = Object.freeze({
         buttonLabel: "Queue OpenClaw update",
         confirmationLabel: "Queue update",
         confirmationTitle: "Queue OpenClaw update?",
-        description:
-            "Requests the source-owned OpenClaw update workflow through a fixed worker action.",
         retryLabel: "Retry OpenClaw update request",
         warning:
             "OpenClaw updates can take time and may restart the Gateway. The Dashboard only confirms that the durable request was queued.",
@@ -72,8 +72,6 @@ export const serviceActionPresentations = Object.freeze({
         buttonLabel: "Queue system cleanup",
         confirmationLabel: "Queue cleanup",
         confirmationTitle: "Queue a system cleanup?",
-        description:
-            "Cleans orphan packages and caches, bounds journal retention, and removes unused Docker content older than seven days without deleting volumes.",
         retryLabel: "Retry system cleanup request",
         warning:
             "System cleanup removes only fixed categories: orphan packages and caches, bounded journal history, and unused Docker content older than seven days. Docker volumes are never deleted. Review Dashboard jobs for the durable result.",
@@ -83,8 +81,6 @@ export const serviceActionPresentations = Object.freeze({
         buttonLabel: "Queue system restart",
         confirmationLabel: "Queue restart",
         confirmationTitle: "Queue a system restart?",
-        description:
-            "Requests a fixed host restart through the separately provisioned worker boundary.",
         retryLabel: "Retry system restart request",
         warning:
             "A system restart request interrupts Dashboard, OpenClaw, and other host services. Success here means the restart request was accepted for durable processing, not that the host restarted.",
@@ -94,8 +90,6 @@ export const serviceActionPresentations = Object.freeze({
         buttonLabel: "Queue system update",
         confirmationLabel: "Queue update",
         confirmationTitle: "Queue a system update?",
-        description:
-            "Runs the fixed host package-update workflow through the separately provisioned worker boundary.",
         retryLabel: "Retry system update request",
         warning:
             "System updates can take a long time and may affect running services. Review Dashboard jobs for the durable result.",
@@ -105,7 +99,6 @@ export const serviceActionPresentations = Object.freeze({
         buttonLabel: "Restart worker",
         confirmationLabel: "Restart worker",
         confirmationTitle: "Restart the Dashboard worker?",
-        description: "Restarts the Dashboard worker through the fixed systemd authority.",
         retryLabel: "Retry worker restart request",
         warning:
             "Active worker jobs are interrupted and recovered according to their durable job policy. The queued request confirms only that the fixed restart handoff was accepted.",
@@ -224,6 +217,13 @@ export function serviceActionRequestInput(
             return {
                 actionId,
                 confirmation: "restart-dashboard",
+                idempotencyKey,
+            };
+        }
+        case "dashboard-stack-restart": {
+            return {
+                actionId,
+                confirmation: "restart-dashboard-stack",
                 idempotencyKey,
             };
         }

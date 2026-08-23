@@ -82,11 +82,18 @@ describe("service action browser operations", () => {
         queryClient.clear();
     });
 
-    test("builds only the eight exact confirmation inputs", () => {
+    test("builds only the nine exact confirmation inputs", () => {
         const idempotencyKey = "a".repeat(32);
         expect(serviceActionRequestInput("dashboard-restart", idempotencyKey)).toEqual({
             actionId: "dashboard-restart",
             confirmation: "restart-dashboard",
+            idempotencyKey,
+        });
+        expect(
+            serviceActionRequestInput("dashboard-stack-restart", idempotencyKey)
+        ).toEqual({
+            actionId: "dashboard-stack-restart",
+            confirmation: "restart-dashboard-stack",
             idempotencyKey,
         });
         expect(serviceActionRequestInput("openclaw-cleanup", idempotencyKey)).toEqual({
@@ -136,6 +143,7 @@ describe("service action browser operations", () => {
             )
         ).toEqual({
             "dashboard-restart": "Retry Dashboard restart request",
+            "dashboard-stack-restart": "Retry combined restart request",
             "openclaw-cleanup": "Retry OpenClaw cleanup request",
             "openclaw-restart": "Retry OpenClaw restart request",
             "openclaw-update": "Retry OpenClaw update request",
@@ -149,8 +157,6 @@ describe("service action browser operations", () => {
     test("states the bounded system cleanup policy without volume deletion", () => {
         const presentation = serviceActionPresentations["system-cleanup"];
 
-        expect(presentation.description).toContain("orphan packages and caches");
-        expect(presentation.description).toContain("older than seven days");
         expect(presentation.warning).toContain("volumes are never deleted");
     });
 

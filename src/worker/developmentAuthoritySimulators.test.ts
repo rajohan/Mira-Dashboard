@@ -41,6 +41,7 @@ describe("source-development authority simulators", () => {
 
         expect(await simulators.hostOperations.availableOperations()).toEqual([
             "dashboard-restart",
+            "dashboard-stack-restart",
             "system-cleanup",
             "system-restart",
             "system-update",
@@ -52,6 +53,9 @@ describe("source-development authority simulators", () => {
         expect(await simulators.hostOperations.request("system-restart")).toEqual({
             status: "accepted",
         });
+        expect(
+            await simulators.hostOperations.request("dashboard-stack-restart")
+        ).toEqual({ status: "accepted" });
         await simulators.openClawGateway.restart();
         expect(await simulators.openClawServiceActions.cleanupSessions()).toMatchObject({
             status: "completed",
@@ -78,6 +82,11 @@ describe("source-development authority simulators", () => {
             {
                 completedAtMs: 1_800_000_000_000,
                 operation: "system-restart",
+                outcome: "simulated",
+            },
+            {
+                completedAtMs: 1_800_000_000_000,
+                operation: "dashboard-stack-restart",
                 outcome: "simulated",
             },
             {

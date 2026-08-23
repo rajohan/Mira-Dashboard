@@ -71,6 +71,7 @@ describe("source-development runtime authority", () => {
             "available",
             "available",
         ]);
+        expect(quota.providers[3]?.windows).toHaveLength(2);
         expect(weather.location).toBe("Spydeberg");
         expect(deliverySections.map(({ section }) => section)).toEqual([
             "pull-requests",

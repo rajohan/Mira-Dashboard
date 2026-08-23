@@ -4,13 +4,11 @@ import { type ReactNode, useState } from "react";
 
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { cn } from "../lib/classNames.ts";
-import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { Alert } from "../ui/Alert.tsx";
-import { Badge } from "../ui/Badge.tsx";
 import { Card } from "../ui/Card.tsx";
 import { Heading } from "../ui/Heading.tsx";
+import { Icon } from "../ui/Icon.tsx";
 import { PageState } from "../ui/PageState.tsx";
-import { Text } from "../ui/Text.tsx";
 import { CacheEntryDetail } from "./CacheEntryDetail.tsx";
 import { cacheBrowserFailureMessage } from "./cachePresentation.ts";
 import { cacheStatusQueryOptions } from "./cacheQueries.ts";
@@ -24,6 +22,14 @@ export function CacheBrowser() {
     const query = useQuery(cacheStatusQueryOptions(client));
     const [selectedKey, setSelectedKey] = useState<string>();
     const hasSelectableEntries = (query.data?.entries.length ?? 0) > 0;
+    const effectiveSelectedKey = query.data?.entries.some(
+        ({ key }) => key === selectedKey
+    )
+        ? selectedKey
+        : query.data?.entries[0]?.key;
+    const selectedStatus = query.data?.entries.find(
+        ({ key }) => key === effectiveSelectedKey
+    );
     let inventory: ReactNode;
 
     if (query.isPending && query.data === undefined) {
@@ -67,40 +73,21 @@ export function CacheBrowser() {
     } else {
         inventory = (
             <Card className="min-w-0">
+                <div className="mb-4 flex items-center gap-2">
+                    <Icon icon={DatabaseZap} size="md" tone="accent" />
+                    <Heading level={3}>Cache</Heading>
+                </div>
                 <CacheStatusTable
                     entries={query.data.entries}
                     onSelect={setSelectedKey}
-                    selectedKey={selectedKey}
+                    selectedKey={effectiveSelectedKey}
                 />
             </Card>
         );
     }
 
     return (
-        <section aria-labelledby="cache-browser-heading">
-            <div className="flex flex-wrap items-end justify-between gap-4">
-                <div>
-                    <Heading id="cache-browser-heading" level={2}>
-                        Saved system data
-                    </Heading>
-                    <Text className="mt-1" tone="muted">
-                        Saved results from background checks and the latest refresh
-                        status.
-                    </Text>
-                </div>
-                {query.data !== undefined && (
-                    <div className="flex flex-wrap items-center gap-2">
-                        <Badge>
-                            {query.data.truncated
-                                ? `Showing ${query.data.entries.length} of ${query.data.totalCount}`
-                                : `${query.data.totalCount} ${query.data.totalCount === 1 ? "source" : "sources"}`}
-                        </Badge>
-                        <Text size="sm" tone="muted">
-                            Checked {formatDashboardDateTime(query.data.generatedAtMs)}
-                        </Text>
-                    </div>
-                )}
-            </div>
+        <section aria-label="Saved data browser">
             {query.error !== null && query.data !== undefined && (
                 <Alert
                     className="mt-4"
@@ -110,14 +97,15 @@ export function CacheBrowser() {
             )}
             <div
                 className={cn(
-                    "mt-5 grid grid-cols-1 gap-5",
+                    "grid grid-cols-1 gap-4",
                     hasSelectableEntries &&
-                        "xl:grid-cols-[minmax(32rem,1.2fr)_minmax(24rem,1fr)]"
+                        "xl:grid-cols-[minmax(17rem,0.65fr)_minmax(0,1.35fr)]"
                 )}
             >
                 {inventory}
                 {hasSelectableEntries &&
-                    (selectedKey === undefined ? (
+                    (effectiveSelectedKey === undefined ||
+                    selectedStatus === undefined ? (
                         <PageState
                             description="Choose a data source to view its saved result and latest refresh details."
                             headingLevel={3}
@@ -126,7 +114,11 @@ export function CacheBrowser() {
                             title="Select a data source"
                         />
                     ) : (
-                        <CacheEntryDetail cacheKey={selectedKey} key={selectedKey} />
+                        <CacheEntryDetail
+                            cacheKey={effectiveSelectedKey}
+                            fallbackStatus={selectedStatus}
+                            key={effectiveSelectedKey}
+                        />
                     ))}
             </div>
         </section>

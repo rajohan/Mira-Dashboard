@@ -219,31 +219,62 @@ const quotaEntry = Object.freeze({
                 id: "elevenlabs",
                 label: "ElevenLabs",
                 remainingPercent: 72,
+                resetsAtMs: timestampMs + 24 * 60 * 60_000,
                 status: "available",
             },
             {
                 id: "openai",
-                label: "OpenAI Codex",
+                label: "OpenAI / Codex",
                 status: "available",
+                usedPercent: 34,
                 windows: [
                     {
                         resetsAtMs: timestampMs + 60_000,
-                        usedPercent: 24,
+                        usedPercent: 0,
                         windowDurationMinutes: 300,
+                    },
+                    {
+                        resetsAtMs: timestampMs + 4 * 24 * 60 * 60_000,
+                        usedPercent: 34,
+                        windowDurationMinutes: 10_080,
                     },
                 ],
             },
             {
+                balance: 4.26,
                 id: "openrouter",
                 label: "OpenRouter",
-                remaining: 12,
+                limit: 1,
+                periodUsage: 0.1344,
+                remaining: 0.866,
                 status: "available",
+                usedPercent: 13.4,
                 unit: "currency-usd",
             },
-            { id: "synthetic", label: "Synthetic", status: "not-configured" },
+            {
+                id: "synthetic",
+                label: "Synthetic.new",
+                remainingPercent: 64,
+                status: "available",
+                usedPercent: 36,
+                windows: [
+                    {
+                        regenerationPercent: 5,
+                        resetsAtMs: timestampMs + 2 * 60_000,
+                        usedPercent: 36,
+                        windowDurationMinutes: 300,
+                    },
+                    {
+                        regenerationPercent: 2,
+                        resetsAtMs: timestampMs + 7 * 24 * 60 * 60_000,
+                        usedPercent: 28,
+                        windowDurationMinutes: 10_080,
+                    },
+                ],
+            },
         ],
     },
-    schemaId: "quotas.summary.v1",
+    schemaId: "quotas.summary.v2",
     source: "quota.providers",
     updatedAtMs: timestampMs,
 } as const satisfies CacheEntry);
@@ -276,7 +307,7 @@ const gitEntry = Object.freeze({
             },
             {
                 branch: "main",
-                changedFileCount: 1,
+                changedFileCount: 2,
                 detached: false,
                 headSha: "b".repeat(40),
                 id: "docker",
@@ -542,7 +573,23 @@ const detailedDatabaseOverview = Object.freeze({
         fileName: "mira-dashboard.db",
         lifecycle: {
             backupInventory: { reason: "inventory-unavailable", state: "unavailable" },
-            maintenance: { reason: "maintenance-unavailable", state: "unavailable" },
+            maintenance: {
+                enabled: true,
+                latestSuccessfulAtMs: timestampMs - 60_000,
+                nextRunAtMs: timestampMs + 86_400_000,
+                observedAtMs: timestampMs,
+                runs: [
+                    {
+                        finishedAtMs: timestampMs - 60_000,
+                        queuedAtMs: timestampMs - 120_000,
+                        runId: "019fc968-1a9b-7765-8f1b-d5b863b0e7c0",
+                        startedAtMs: timestampMs - 90_000,
+                        state: "succeeded",
+                    },
+                ],
+                schedule: { timeOfDay: "02:40", timeZone: "Europe/Oslo" },
+                state: "available",
+            },
             restoreVerification: {
                 reason: "verification-unavailable",
                 state: "unavailable",
@@ -723,6 +770,7 @@ const jobRunPage = Object.freeze({
 const serviceActionsStatus = Object.freeze({
     actions: [
         { availability: "unavailable", id: "dashboard-restart" },
+        { availability: "unavailable", id: "dashboard-stack-restart" },
         { availability: "unavailable", id: "openclaw-cleanup" },
         { availability: "unavailable", id: "openclaw-restart" },
         { availability: "unavailable", id: "openclaw-update" },
@@ -1045,20 +1093,6 @@ describe("Dashboard operational overview foundation", () => {
             await screen.findByRole("heading", { level: 2, name: "Service actions" })
         ).toBeTruthy();
 
-        expect(screen.queryByText("Operations")).toBeNull();
-        expect(screen.queryByRole("heading", { name: "Mira Dashboard" })).toBeNull();
-        expect(screen.queryByRole("heading", { name: "System usage" })).toBeNull();
-        expect(
-            screen.queryByText(
-                "See current system activity, recent work, alerts, and saved background-check results in one place."
-            )
-        ).toBeNull();
-        expect(
-            screen.queryByText(
-                "Current host gauges and independently available application runtime observations."
-            )
-        ).toBeNull();
-        expect(screen.queryByText(/^Measured /u)).toBeNull();
         const cpuHeading = screen.getByRole("heading", { level: 3, name: "CPU" });
         const cpuCard = cpuHeading.closest("section");
         expect(cpuCard).toBeTruthy();
@@ -1070,16 +1104,8 @@ describe("Dashboard operational overview foundation", () => {
         expect(
             within(memoryCard as HTMLElement).getByText("6.0 GiB of 8.0 GiB")
         ).toBeTruthy();
-        expect(screen.queryByText("Host uptime")).toBeNull();
-        expect(screen.queryByText("Current total download speed")).toBeNull();
-        expect(screen.queryByText("Current total upload speed")).toBeNull();
         expect(screen.getByText("12.3 Mbit/s")).toBeTruthy();
-        expect(screen.getByText("All observed")).toBeTruthy();
         expect(screen.getByText("3 subscribers")).toBeTruthy();
-        expect(screen.queryByText("mira-vps")).toBeNull();
-        expect(
-            await screen.findByRole("heading", { level: 2, name: "Environment" })
-        ).toBeTruthy();
         const hostMetrics = screen.getByLabelText("Host metrics");
         expect(
             within(hostMetrics).getByRole("heading", { level: 3, name: "Weather" })
@@ -1102,19 +1128,55 @@ describe("Dashboard operational overview foundation", () => {
             screen.getByRole("heading", { level: 3, name: "Provider quota" })
         ).toBeTruthy();
         expect(screen.getByText("72% remaining")).toBeTruthy();
-        expect(screen.getByText("1 active window")).toBeTruthy();
-        expect(screen.getByText("5h window")).toBeTruthy();
-        expect(screen.getByText(/24% used · resets/u)).toBeTruthy();
+        expect(screen.getByText("$0.866 left / $1 monthly quota")).toBeTruthy();
+        expect(screen.getByText("$4.26 balance · $0.1344 this month")).toBeTruthy();
+        expect(screen.getByText("5h 100% left · weekly 66% left")).toBeTruthy();
         expect(
-            screen.getByRole("heading", { level: 3, name: "Managed Git" })
+            screen.getByText(
+                /^Resets: 5h \d{2}:\d{2} · weekly \d{2}\.\d{2}\.\d{4}, \d{2}:\d{2}$/u
+            )
         ).toBeTruthy();
-        expect(screen.getByText("1 changed")).toBeTruthy();
-        expect(screen.getByText("0 staged · 1 untracked")).toBeTruthy();
         expect(
-            await screen.findByRole("heading", {
-                level: 2,
-                name: "Services and data",
-            })
+            screen.getByText(
+                (_content, element) =>
+                    element?.tagName === "P" &&
+                    /^Reset \d{2}\.\d{2}\.\d{4}, \d{2}:\d{2}$/u.test(
+                        element.textContent ?? ""
+                    )
+            )
+        ).toBeTruthy();
+        expect(
+            screen.getByText(
+                /^Regen: 5h \d{2}:\d{2} \(\+5%\) · weekly \d{2}\.\d{2}\.\d{4}, \d{2}:\d{2} \(\+2%\)$/u
+            )
+        ).toBeTruthy();
+        const managedGitHeading = screen.getByRole("heading", {
+            level: 3,
+            name: "Managed Git",
+        });
+        const managedGitCard = managedGitHeading.closest("section");
+        expect(managedGitCard).toBeTruthy();
+        expect(
+            screen.getByRole("link", { name: "Open Mira Dashboard on GitHub" })
+        ).toHaveAttribute("href", "https://github.com/rajohan/Mira-Dashboard");
+        expect(
+            screen.getByRole("link", { name: "Open Docker infrastructure on GitHub" })
+        ).toHaveAttribute("href", "https://github.com/rajohan/stremio");
+        expect(
+            screen.getByRole("link", { name: "Open Mira Workspace on GitHub" })
+        ).toHaveAttribute("href", "https://github.com/rajohan/Mira-Workspace");
+        expect(screen.getByText("2 changed")).toBeTruthy();
+        expect(screen.getByText("1 modified · 0 staged · 1 untracked")).toBeTruthy();
+        const operationalSummaries = screen.getByRole("region", {
+            name: "Operational summaries",
+        });
+        const webRuntime = screen.getByRole("heading", { name: "Web runtime" });
+        expect(
+            operationalSummaries.compareDocumentPosition(webRuntime) &
+                Node.DOCUMENT_POSITION_FOLLOWING
+        ).toBeTruthy();
+        expect(
+            await screen.findByRole("region", { name: "Service summaries" })
         ).toBeTruthy();
         expect(screen.getByText("Docker inventory is unavailable.")).toBeTruthy();
         expect(screen.getByText("SQLite: Unavailable")).toBeTruthy();
@@ -1127,18 +1189,14 @@ describe("Dashboard operational overview foundation", () => {
             "href",
             "/docker"
         );
-        expect(
-            await screen.findByRole("heading", { level: 2, name: "Backups" })
-        ).toBeTruthy();
+        expect(await screen.findByRole("region", { name: "Backup status" })).toBeTruthy();
         expect(
             await screen.findByRole("heading", {
                 level: 2,
                 name: "Unfinished tasks",
             })
         ).toBeTruthy();
-        expect(screen.getAllByText("Complete the core operations overview")).toHaveLength(
-            2
-        );
+        expect(screen.getByText("Complete the core operations overview")).toBeTruthy();
         expect(screen.getByRole("link", { name: "View tasks" })).toHaveAttribute(
             "href",
             "/tasks"
@@ -1153,16 +1211,8 @@ describe("Dashboard operational overview foundation", () => {
             },
         ]);
         expect(
-            await screen.findByRole("heading", { level: 2, name: "Agent activity" })
-        ).toBeTruthy();
-        expect(screen.getByRole("link", { name: "View agents" })).toHaveAttribute(
-            "href",
-            "/agents"
-        );
-        expect(
-            await screen.findByRole("heading", { level: 2, name: "Notifications" })
-        ).toBeTruthy();
-        expect(screen.getByText("Overview notification")).toBeTruthy();
+            transport.queryCalls.filter(({ path }) => path.startsWith("agents."))
+        ).toHaveLength(0);
         expect(
             transport.queryCalls.filter(({ path }) => path === "notifications.list")
         ).toEqual([{ input: { limit: 100 }, path: "notifications.list" }]);
@@ -1213,7 +1263,9 @@ describe("Dashboard operational overview foundation", () => {
             "href",
             "/reports"
         );
-        expect(await screen.findByText("Showing 2 of 129")).toBeTruthy();
+        expect(
+            await screen.findByRole("navigation", { name: "Saved data sources" })
+        ).toBeTruthy();
         await waitFor(() =>
             expect(
                 transport.queryCalls.filter(
@@ -1228,11 +1280,11 @@ describe("Dashboard operational overview foundation", () => {
         expect(screen.getAllByText("Up to date").length).toBeGreaterThan(0);
         expect(screen.getAllByText("Failed").length).toBeGreaterThan(0);
 
-        await user.click(screen.getByRole("button", { name: "system.host" }));
+        await user.click(screen.getByRole("button", { name: "View system.host" }));
         expect(
-            await screen.findByRole("heading", { level: 3, name: "mira-vps" })
+            await screen.findByRole("heading", { level: 3, name: "Saved payload" })
         ).toBeTruthy();
-        expect(screen.getByText("75% used · 2.0 GiB free")).toBeTruthy();
+        expect(screen.getByText(/"hostname": "mira-vps"/u)).toBeTruthy();
         expect(screen.queryByText("never-render-this-metadata")).toBeNull();
         await waitFor(() =>
             expect(
@@ -1272,8 +1324,8 @@ describe("Dashboard operational overview foundation", () => {
         });
         const { user } = await renderOverview(transport);
 
-        const kopiaCard = await screen.findByLabelText("Kopia backup");
-        await user.click(within(kopiaCard).getByRole("button", { name: "Run backup" }));
+        await screen.findByLabelText("Kopia backup");
+        await user.click(screen.getByRole("button", { name: "Queue Kopia backup" }));
 
         await waitFor(() =>
             expect(
@@ -1304,8 +1356,9 @@ describe("Dashboard operational overview foundation", () => {
                 "The latest check failed. Showing the most recent reading, which is no more than 30 seconds old."
             )
         ).toBeTruthy();
-        expect(screen.getAllByText("Out of date")).not.toHaveLength(0);
-        expect(await screen.findByText("Showing 2 of 129")).toBeTruthy();
+        expect(
+            await screen.findByRole("navigation", { name: "Saved data sources" })
+        ).toBeTruthy();
     });
 
     test("renders complete Docker, database, and log-maintenance summaries", async () => {
@@ -1317,6 +1370,7 @@ describe("Dashboard operational overview foundation", () => {
         await renderOverview(transport);
 
         expect(await screen.findByText(/1 images · 512 MiB/u)).toBeTruthy();
+        expect(screen.getByText("0 unhealthy")).toBeTruthy();
         expect(screen.getByText(/1 volumes · 2\.0 GiB across 1 measured/u)).toBeTruthy();
         expect(
             screen.getByText(/SQLite 64 MiB database · 68 MiB total · 4\.0 MiB reusable/u)
@@ -1329,6 +1383,14 @@ describe("Dashboard operational overview foundation", () => {
         ).toBeTruthy();
         expect(screen.getByText("Maintenance review")).toBeTruthy();
         expect(screen.getByText("Last failed")).toBeTruthy();
+        const sqliteBackupCard = screen.getByLabelText("SQLite backup");
+        expect(
+            within(sqliteBackupCard)
+                .getByRole("link", { name: "View job" })
+                .getAttribute("href")
+        ).toBe(
+            "/jobs?runId=019fc968-1a9b-7765-8f1b-d5b863b0e7c0&scheduleId=database.sqlite-maintenance"
+        );
     });
 
     test("does not present an empty truncated snapshot as a complete inventory", async () => {
@@ -1345,16 +1407,11 @@ describe("Dashboard operational overview foundation", () => {
         await renderOverview(transport);
 
         expect(
-            await screen.findByText("Showing 0 of 1", {}, { timeout: 5000 })
-        ).toBeTruthy();
-        expect(
-            screen.getByRole("heading", {
+            await screen.findByRole("heading", {
                 level: 3,
                 name: "Saved data list incomplete",
             })
         ).toBeTruthy();
-        expect(screen.queryByText("No saved data yet")).toBeNull();
-        expect(screen.queryByText("Select a data source")).toBeNull();
     });
 
     test("reuses an ambiguous refresh key and presents a terminal replay accurately", async () => {
@@ -1364,9 +1421,9 @@ describe("Dashboard operational overview foundation", () => {
         });
         const { user } = await renderOverview(transport);
 
-        await screen.findByText("Showing 2 of 129");
-        await user.click(screen.getByRole("button", { name: "system.host" }));
-        await screen.findByRole("heading", { level: 3, name: "mira-vps" });
+        await screen.findByRole("navigation", { name: "Saved data sources" });
+        await user.click(screen.getByRole("button", { name: "View system.host" }));
+        await screen.findByRole("heading", { level: 3, name: "Saved payload" });
         await user.click(screen.getByRole("button", { name: "Refresh now" }));
         expect(
             await screen.findByText("The request could not be completed. Try again.")
@@ -1400,9 +1457,9 @@ describe("Dashboard operational overview foundation", () => {
         });
         const { user } = await renderOverview(transport);
 
-        await screen.findByText("Showing 2 of 129");
-        await user.click(screen.getByRole("button", { name: "system.host" }));
-        await screen.findByRole("heading", { level: 3, name: "mira-vps" });
+        await screen.findByRole("navigation", { name: "Saved data sources" });
+        await user.click(screen.getByRole("button", { name: "View system.host" }));
+        await screen.findByRole("heading", { level: 3, name: "Saved payload" });
         await user.click(screen.getByRole("button", { name: "Refresh now" }));
         await waitFor(() =>
             expect(

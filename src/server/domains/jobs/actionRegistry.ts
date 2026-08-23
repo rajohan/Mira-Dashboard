@@ -126,6 +126,8 @@ export const openClawSessionsCleanupJobActionKey = "openclaw.sessions.cleanup";
 export const openClawInstallationUpdateJobActionKey = "openclaw.installation.update";
 /** Fixed systemd-brokered Dashboard web restart selected by Service Actions. */
 export const hostDashboardRestartJobActionKey = "host.dashboard.restart";
+/** Fixed systemd-brokered Dashboard web and worker restart selected by Service Actions. */
+export const hostDashboardStackRestartJobActionKey = "host.dashboard-stack.restart";
 /** Fixed root-brokered host cleanup identity selected by Service Actions. */
 export const hostSystemCleanupJobActionKey = "host.system.cleanup";
 /** Fixed root-brokered host restart identity selected by Service Actions. */
@@ -1003,6 +1005,15 @@ export const hostDashboardRestartJobActionDefinition = serviceActionDefinition({
     actionKey: hostDashboardRestartJobActionKey,
     description: "Restarts the Dashboard web process through fixed systemd authority.",
     displayName: "Restart Dashboard",
+    timeoutMs: 60_000,
+});
+
+/** Accepted-only combined Dashboard web and worker restart. */
+export const hostDashboardStackRestartJobActionDefinition = serviceActionDefinition({
+    actionKey: hostDashboardStackRestartJobActionKey,
+    description:
+        "Restarts the Dashboard web process and worker through fixed systemd authority.",
+    displayName: "Restart Dashboard and worker",
     timeoutMs: 60_000,
 });
 

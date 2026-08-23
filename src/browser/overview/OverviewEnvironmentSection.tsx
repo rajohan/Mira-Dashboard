@@ -9,12 +9,16 @@ import {
     CloudSnow,
     CloudSun,
     Clock,
+    DollarSign,
     Droplets,
     GitBranch,
+    GitCommitHorizontal,
     Gauge,
     Sun,
     Thermometer,
+    Waves,
     Wind,
+    Zap,
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
@@ -26,14 +30,13 @@ import type {
 import type { WeatherCachePayload } from "../../contracts/weather.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import {
-    formatDashboardDateTime,
     formatDashboardDateTimeParts,
-    formatDashboardDateTimeToMinute,
     formatDashboardWeekdayDate,
 } from "../lib/formatDateTime.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import { Card } from "../ui/Card.tsx";
+import { ExternalLink } from "../ui/ExternalLink.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { PageState } from "../ui/PageState.tsx";
 import { Text } from "../ui/Text.tsx";
@@ -47,9 +50,9 @@ import {
 interface ProviderCardProps<TPayload extends { readonly observedAtMs: number }> {
     readonly children: (payload: TPayload) => ReactNode;
     readonly className?: string;
-    readonly description: string;
     readonly icon: typeof CloudSun;
     readonly query: UseQueryResult<OverviewProviderProjection<TPayload>, Error>;
+    readonly showFreshness?: boolean;
     readonly title: string;
 }
 
@@ -67,9 +70,9 @@ function freshnessLabel<TPayload>(
 function ProviderCard<TPayload extends { readonly observedAtMs: number }>({
     children,
     className,
-    description,
     icon: Icon,
     query,
+    showFreshness = true,
     title,
 }: ProviderCardProps<TPayload>) {
     const freshness = freshnessLabel(query);
@@ -101,11 +104,8 @@ function ProviderCard<TPayload extends { readonly observedAtMs: number }>({
                         <Icon aria-hidden="true" className="text-accent-300 size-5" />
                         <Heading level={3}>{title}</Heading>
                     </div>
-                    <Text className="mt-1" tone="muted">
-                        {description}
-                    </Text>
                 </div>
-                {freshness !== undefined && (
+                {showFreshness && freshness !== undefined && (
                     <Badge variant={freshness.variant}>{freshness.label}</Badge>
                 )}
             </div>
@@ -117,11 +117,6 @@ function ProviderCard<TPayload extends { readonly observedAtMs: number }>({
                 />
             )}
             <div className="mt-5">{content}</div>
-            {query.data !== undefined && (
-                <Text className="mt-4" size="sm" tone="muted">
-                    Observed {formatDashboardDateTime(query.data.payload.observedAtMs)}
-                </Text>
-            )}
         </Card>
     );
 }
@@ -172,7 +167,7 @@ function WeatherDetails({ payload }: { readonly payload: WeatherCachePayload }) 
                     </div>
                     <div className="text-primary-300 text-sm capitalize">{localDate}</div>
                 </div>
-                <div className="border-primary-700 bg-primary-900/30 xl:bg-primary-900/30 flex items-center gap-3 rounded-lg border p-3 sm:border-0 sm:bg-transparent sm:p-0 xl:border xl:p-3 2xl:border-0 2xl:bg-transparent 2xl:p-0">
+                <div className="border-primary-700 bg-primary-900/35 xl:bg-primary-900/35 flex items-center gap-3 rounded-lg border p-3 sm:border-0 sm:bg-transparent sm:p-0 xl:border xl:p-3 2xl:border-0 2xl:bg-transparent 2xl:p-0">
                     {weatherIcon(payload.condition, "size-7 shrink-0 text-amber-300")}
                     <div className="min-w-0">
                         <div className="text-primary-50 text-2xl font-semibold">
@@ -186,7 +181,7 @@ function WeatherDetails({ payload }: { readonly payload: WeatherCachePayload }) 
             </div>
 
             <div className="text-primary-200 mt-3 grid grid-cols-3 gap-1 text-xs sm:gap-2 xl:grid-cols-1 2xl:grid-cols-3">
-                <span className="border-primary-700 bg-primary-800/40 flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-md border p-1 text-center">
+                <span className="border-primary-700 bg-primary-900/35 flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-md border p-1 text-center">
                     <span className="text-primary-400">Feels</span>
                     <span className="text-primary-100 inline-flex items-center gap-1 whitespace-nowrap tabular-nums">
                         <Thermometer
@@ -196,7 +191,7 @@ function WeatherDetails({ payload }: { readonly payload: WeatherCachePayload }) 
                         {formatTemperature(payload.apparentTemperatureC)}
                     </span>
                 </span>
-                <span className="border-primary-700 bg-primary-800/40 flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-md border p-1 text-center">
+                <span className="border-primary-700 bg-primary-900/35 flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-md border p-1 text-center">
                     <span className="text-primary-400">Humidity</span>
                     <span className="text-primary-100 inline-flex items-center gap-1 whitespace-nowrap tabular-nums">
                         <Droplets
@@ -206,7 +201,7 @@ function WeatherDetails({ payload }: { readonly payload: WeatherCachePayload }) 
                         {Math.round(payload.humidityPercent)}%
                     </span>
                 </span>
-                <span className="border-primary-700 bg-primary-800/40 flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-md border p-1 text-center">
+                <span className="border-primary-700 bg-primary-900/35 flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-md border p-1 text-center">
                     <span className="text-primary-400">Wind</span>
                     <span className="text-primary-100 inline-flex items-center gap-1 whitespace-nowrap tabular-nums">
                         <Wind
@@ -221,7 +216,7 @@ function WeatherDetails({ payload }: { readonly payload: WeatherCachePayload }) 
             <ul className="mt-3 grid grid-cols-3 gap-1 sm:gap-2 xl:grid-cols-1 2xl:grid-cols-3">
                 {payload.forecast.map((day, index) => (
                     <li
-                        className="border-primary-700 bg-primary-800/40 flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-md border p-1 text-center text-xs sm:px-2"
+                        className="border-primary-700 bg-primary-900/35 flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-md border p-1 text-center text-xs sm:px-2"
                         key={day.date}
                     >
                         <span className="text-primary-400 whitespace-nowrap">
@@ -285,6 +280,23 @@ export function WeatherOverviewCard({ className }: { readonly className?: string
 function quotaSummary(provider: QuotaProviderProjection): string {
     if (provider.status === "not-configured") return "Not configured";
     if (provider.status === "unavailable") return "Unavailable";
+    if (
+        (provider.id === "synthetic" || provider.id === "openai") &&
+        provider.windows !== undefined
+    ) {
+        return provider.windows
+            .map((window) => {
+                const label =
+                    window.windowDurationMinutes === 10_080
+                        ? "weekly"
+                        : quotaWindowDuration(window.windowDurationMinutes).replace(
+                              " window",
+                              ""
+                          );
+                return `${label} ${Math.round(100 - window.usedPercent)}% left`;
+            })
+            .join(" · ");
+    }
     if (provider.remainingPercent !== undefined) {
         return `${Math.round(provider.remainingPercent)}% remaining`;
     }
@@ -295,6 +307,49 @@ function quotaSummary(provider: QuotaProviderProjection): string {
         return `${provider.windows.length} active window${provider.windows.length === 1 ? "" : "s"}`;
     if (provider.remaining !== undefined) return `${provider.remaining} remaining`;
     return `${provider.used ?? 0} used`;
+}
+
+function formatDollarAmount(value: number, maximumFractionDigits: number): string {
+    return `$${value.toLocaleString("en-US", {
+        maximumFractionDigits,
+        minimumFractionDigits: 0,
+        useGrouping: false,
+    })}`;
+}
+
+function openRouterQuotaSummary(provider: QuotaProviderProjection): string | undefined {
+    if (provider.remaining === undefined || provider.limit === undefined)
+        return undefined;
+    return `${formatDollarAmount(provider.remaining, 3)} left / ${formatDollarAmount(provider.limit, 3)} monthly quota`;
+}
+
+function openRouterBalanceSummary(provider: QuotaProviderProjection): string | undefined {
+    if (provider.balance === undefined || provider.periodUsage === undefined)
+        return undefined;
+    return `${formatDollarAmount(provider.balance, 2)} balance · ${formatDollarAmount(provider.periodUsage, 4)} this month`;
+}
+
+function quotaUsedPercent(provider: QuotaProviderProjection): number | undefined {
+    if (provider.usedPercent !== undefined) return provider.usedPercent;
+    if (provider.remainingPercent !== undefined) return 100 - provider.remainingPercent;
+    return undefined;
+}
+
+function quotaBadgeVariant(percent: number): "danger" | "success" | "warning" {
+    if (percent < 80) return "success";
+    if (percent < 95) return "warning";
+    return "danger";
+}
+
+function quotaProviderIcon(providerId: QuotaProviderProjection["id"]): ReactNode {
+    const className = "text-primary-300 size-4 shrink-0";
+    if (providerId === "openrouter") {
+        return <Waves aria-hidden="true" className={className} />;
+    }
+    if (providerId === "openai") {
+        return <DollarSign aria-hidden="true" className={className} />;
+    }
+    return <Zap aria-hidden="true" className={className} />;
 }
 
 function quotaWindowDuration(minutes: number): string {
@@ -308,71 +363,191 @@ export function QuotaResetTime({ resetsAtMs }: { readonly resetsAtMs: number }) 
     if (Number.isNaN(resetDate.getTime())) {
         return <span>Unavailable</span>;
     }
+    const [date, time] = formatDashboardDateTimeParts(resetsAtMs);
     return (
         <time dateTime={resetDate.toISOString()}>
-            {formatDashboardDateTimeToMinute(resetsAtMs)}
+            {date}, {time.slice(0, 5)}
         </time>
     );
 }
 
+function quotaWindowReset(
+    window: NonNullable<QuotaProviderProjection["windows"]>[number]
+): string {
+    const [date, time] = formatDashboardDateTimeParts(window.resetsAtMs);
+    return window.windowDurationMinutes < 1440
+        ? time.slice(0, 5)
+        : `${date}, ${time.slice(0, 5)}`;
+}
+
+function quotaRegenerationSummary(
+    windows: NonNullable<QuotaProviderProjection["windows"]>
+): string {
+    const segments = windows.map((window) => {
+        const label =
+            window.windowDurationMinutes === 10_080
+                ? "weekly"
+                : quotaWindowDuration(window.windowDurationMinutes).replace(
+                      " window",
+                      ""
+                  );
+        const regeneration =
+            window.regenerationPercent === undefined
+                ? ""
+                : ` (+${Math.round(window.regenerationPercent)}%)`;
+        return `${label} ${quotaWindowReset(window)}${regeneration}`;
+    });
+    return `Regen: ${segments.join(" · ")}`;
+}
+
+function quotaWindowResetSummary(
+    windows: NonNullable<QuotaProviderProjection["windows"]>
+): string {
+    return `Resets: ${windows
+        .map((window) => {
+            const label =
+                window.windowDurationMinutes === 10_080
+                    ? "weekly"
+                    : quotaWindowDuration(window.windowDurationMinutes).replace(
+                          " window",
+                          ""
+                      );
+            return `${label} ${quotaWindowReset(window)}`;
+        })
+        .join(" · ")}`;
+}
+
 function QuotaDetails({ payload }: { readonly payload: QuotaCachePayload }) {
+    const providers = payload.providers.toSorted(
+        (left, right) =>
+            ["openrouter", "elevenlabs", "synthetic", "openai"].indexOf(left.id) -
+            ["openrouter", "elevenlabs", "synthetic", "openai"].indexOf(right.id)
+    );
     return (
         <ul className="space-y-2">
-            {payload.providers.map((provider) => {
+            {providers.map((provider) => {
                 const windows = provider.windows ?? [];
+                const usedPercent = quotaUsedPercent(provider);
+                let windowDetails: ReactNode;
+                if (provider.id === "synthetic" && windows.length > 0) {
+                    windowDetails = (
+                        <Text className="mt-1" size="sm" tone="muted">
+                            {quotaRegenerationSummary(windows)}
+                        </Text>
+                    );
+                } else if (provider.id === "openai" && windows.length > 0) {
+                    windowDetails = (
+                        <Text className="mt-1" size="sm" tone="muted">
+                            {quotaWindowResetSummary(windows)}
+                        </Text>
+                    );
+                } else if (windows.length > 0) {
+                    windowDetails = (
+                        <ul
+                            aria-label={`${provider.label} quota windows`}
+                            className="border-primary-700/70 mt-2 space-y-1 border-t pt-2"
+                        >
+                            {windows.map((quotaWindow) => (
+                                <li
+                                    className="flex flex-wrap justify-between gap-x-3 gap-y-1"
+                                    key={`${quotaWindow.windowDurationMinutes}:${quotaWindow.resetsAtMs}`}
+                                >
+                                    <Text as="span" size="sm" tone="muted">
+                                        {quotaWindowDuration(
+                                            quotaWindow.windowDurationMinutes
+                                        )}
+                                    </Text>
+                                    <Text as="span" size="sm">
+                                        {Math.round(quotaWindow.usedPercent)}% used ·
+                                        resets{" "}
+                                        <QuotaResetTime
+                                            resetsAtMs={quotaWindow.resetsAtMs}
+                                        />
+                                    </Text>
+                                </li>
+                            ))}
+                        </ul>
+                    );
+                }
                 return (
                     <li
-                        className="bg-primary-900/45 rounded-lg px-3 py-2"
+                        className="border-primary-700 bg-primary-900/35 rounded-lg border px-3 py-2"
                         key={provider.id}
                     >
-                        <div className="flex items-center justify-between gap-3">
-                            <Text className="font-medium">{provider.label}</Text>
-                            <Text
-                                as="span"
-                                size="sm"
-                                tone={
-                                    provider.status === "available" ? "default" : "muted"
-                                }
-                            >
-                                {quotaSummary(provider)}
-                            </Text>
+                        <div className="mb-1 flex items-start justify-between gap-2">
+                            <div className="text-primary-100 inline-flex min-w-0 items-center gap-2 text-sm">
+                                {quotaProviderIcon(provider.id)}
+                                <span>{provider.label}</span>
+                            </div>
+                            {usedPercent !== undefined && (
+                                <Badge variant={quotaBadgeVariant(usedPercent)}>
+                                    {Math.round(usedPercent)}%
+                                </Badge>
+                            )}
                         </div>
+                        <Text size="sm">
+                            {provider.id === "openrouter"
+                                ? (openRouterQuotaSummary(provider) ??
+                                  quotaSummary(provider))
+                                : quotaSummary(provider)}
+                        </Text>
+                        {provider.id === "openrouter" && (
+                            <Text className="mt-1" size="sm" tone="muted">
+                                {openRouterBalanceSummary(provider)}
+                            </Text>
+                        )}
                         {provider.resetsAtMs === undefined ||
                         windows.length > 0 ? null : (
                             <Text className="mt-1" size="sm" tone="muted">
-                                Resets <QuotaResetTime resetsAtMs={provider.resetsAtMs} />
+                                Reset <QuotaResetTime resetsAtMs={provider.resetsAtMs} />
                             </Text>
                         )}
-                        {windows.length === 0 ? null : (
-                            <ul
-                                aria-label={`${provider.label} quota windows`}
-                                className="border-primary-700/70 mt-2 space-y-1 border-t pt-2"
-                            >
-                                {windows.map((quotaWindow) => (
-                                    <li
-                                        className="flex flex-wrap justify-between gap-x-3 gap-y-1"
-                                        key={`${quotaWindow.windowDurationMinutes}:${quotaWindow.resetsAtMs}`}
-                                    >
-                                        <Text as="span" size="sm" tone="muted">
-                                            {quotaWindowDuration(
-                                                quotaWindow.windowDurationMinutes
-                                            )}
-                                        </Text>
-                                        <Text as="span" size="sm">
-                                            {Math.round(quotaWindow.usedPercent)}% used ·
-                                            resets{" "}
-                                            <QuotaResetTime
-                                                resetsAtMs={quotaWindow.resetsAtMs}
-                                            />
-                                        </Text>
-                                    </li>
-                                ))}
-                            </ul>
-                        )}
+                        {windowDetails}
                     </li>
                 );
             })}
         </ul>
+    );
+}
+
+function QuotaOverviewCard({
+    query,
+}: {
+    readonly query: UseQueryResult<OverviewProviderProjection<QuotaCachePayload>, Error>;
+}) {
+    let content: ReactNode;
+    if (query.isPending && query.data === undefined) {
+        content = <PageState label="Loading provider quota…" status="loading" />;
+    } else if (query.data === undefined) {
+        content = (
+            <PageState
+                headingLevel={3}
+                message="The latest validated projection is not available."
+                onRetry={() => void query.refetch()}
+                retryBusy={query.isFetching}
+                status="error"
+                title="Provider quota unavailable"
+            />
+        );
+    } else {
+        content = <QuotaDetails payload={query.data.payload} />;
+    }
+
+    return (
+        <Card className="min-w-0">
+            <div className="mb-3 flex items-center gap-2">
+                <Gauge aria-hidden="true" className="text-accent-300 size-5" />
+                <Heading level={3}>Provider quota</Heading>
+            </div>
+            {query.error !== null && query.data !== undefined && (
+                <Alert
+                    className="mb-3"
+                    focusOnError={false}
+                    message="The refresh failed. Showing the retained validated result."
+                />
+            )}
+            {content}
+        </Card>
     );
 }
 
@@ -384,27 +559,54 @@ function gitRepositoryDetail(
     return `${repository.branch ?? "Detached"} · ${repository.headSha?.slice(0, 7)}`;
 }
 
+const managedGitRepositoryPresentation = Object.freeze({
+    dashboard: Object.freeze({
+        label: "Mira Dashboard",
+        url: "https://github.com/rajohan/Mira-Dashboard",
+    }),
+    docker: Object.freeze({
+        label: "Docker infrastructure",
+        url: "https://github.com/rajohan/stremio",
+    }),
+    openclaw: Object.freeze({
+        label: "Mira Workspace",
+        url: "https://github.com/rajohan/Mira-Workspace",
+    }),
+});
+
 function GitDetails({ payload }: { readonly payload: GitWorkspaceCachePayload }) {
     return (
         <ul className="space-y-2">
             {payload.repositories.map((repository) => {
                 const changes = repository.changedFileCount;
+                const modified = Math.max(0, changes - repository.untrackedFileCount);
+                const presentation = managedGitRepositoryPresentation[repository.id];
                 return (
                     <li
-                        className="bg-primary-900/45 flex items-center justify-between gap-3 rounded-lg px-3 py-2"
+                        className="border-primary-700 bg-primary-900/35 flex items-center justify-between gap-3 rounded-lg border px-3 py-2"
                         key={repository.id}
                     >
                         <div className="min-w-0">
-                            <Text className="font-medium capitalize">
-                                {repository.id}
-                            </Text>
+                            <div className="flex min-w-0 items-center gap-2">
+                                <GitCommitHorizontal
+                                    aria-hidden="true"
+                                    className="text-primary-400 size-3.5 shrink-0"
+                                />
+                                <ExternalLink
+                                    aria-label={`Open ${presentation.label} on GitHub`}
+                                    className="min-w-0 truncate text-sm font-medium"
+                                    href={presentation.url}
+                                >
+                                    <span className="truncate">{presentation.label}</span>
+                                </ExternalLink>
+                            </div>
                             <Text className="truncate" size="sm" tone="muted">
                                 {gitRepositoryDetail(repository)}
                             </Text>
                             {repository.state === "available" && changes > 0 ? (
                                 <Text size="sm" tone="muted">
-                                    {repository.stagedFileCount} staged ·{" "}
-                                    {repository.untrackedFileCount} untracked
+                                    {modified} modified · {repository.stagedFileCount}{" "}
+                                    staged · {repository.untrackedFileCount} untracked
                                 </Text>
                             ) : null}
                         </div>
@@ -421,38 +623,22 @@ function GitDetails({ payload }: { readonly payload: GitWorkspaceCachePayload })
 }
 
 /** @returns Independent quota and managed-Git overview cards. */
-export function OverviewEnvironmentSection() {
+export function OverviewEnvironmentCards() {
     const client = useDashboardTrpcClient();
     const quota = useQuery(quotaOverviewQueryOptions(client));
     const git = useQuery(gitOverviewQueryOptions(client));
 
     return (
-        <section aria-labelledby="environment-overview-heading">
-            <Heading id="environment-overview-heading" level={2}>
-                Environment
-            </Heading>
-            <Text className="mt-1" tone="muted">
-                Provider limits and managed repository state from independent background
-                checks.
-            </Text>
-            <div className="mt-5 grid gap-5 lg:grid-cols-2">
-                <ProviderCard
-                    description="Normalized limits for configured AI and media providers."
-                    icon={Gauge}
-                    query={quota}
-                    title="Provider quota"
-                >
-                    {(payload) => <QuotaDetails payload={payload} />}
-                </ProviderCard>
-                <ProviderCard
-                    description="Path-free status for Dashboard, Docker, and OpenClaw."
-                    icon={GitBranch}
-                    query={git}
-                    title="Managed Git"
-                >
-                    {(payload) => <GitDetails payload={payload} />}
-                </ProviderCard>
-            </div>
-        </section>
+        <>
+            <QuotaOverviewCard query={quota} />
+            <ProviderCard
+                icon={GitBranch}
+                query={git}
+                showFreshness={false}
+                title="Managed Git"
+            >
+                {(payload) => <GitDetails payload={payload} />}
+            </ProviderCard>
+        </>
     );
 }
