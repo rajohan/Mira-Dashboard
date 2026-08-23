@@ -47,7 +47,6 @@ export function PasswordChangeForm({
     const queryClient = mutationBoundary.queryClient;
     const form = useForm({
         defaultValues: {
-            confirmPassword: "",
             currentPassword: "",
             newPassword: "",
         },
@@ -77,7 +76,7 @@ export function PasswordChangeForm({
                     mutation.isActive
                 );
                 if (!published) throw new AuthenticatedMutationExpiredError();
-            }, "Password changed. Your other browsers were signed out.");
+            }, "Password changed. Your other sessions were signed out.");
             if (succeeded) {
                 formApi.reset();
                 onClose();
@@ -99,7 +98,7 @@ export function PasswordChangeForm({
             onClose={close}
             open={open}
             size="sm"
-            title="Change Dashboard password"
+            title="Change password"
         >
             <Alert className="mb-4" message={action.error} />
             <Form className="space-y-4" onSubmit={() => void form.handleSubmit()}>
@@ -144,29 +143,6 @@ export function PasswordChangeForm({
                                     field.handleChange(event.currentTarget.value)
                                 }
                                 placeholder="Use at least 8 characters"
-                                required
-                                type="password"
-                                value={field.state.value}
-                            />
-                        </FormField>
-                    )}
-                </form.Field>
-                <form.Field name="confirmPassword">
-                    {(field) => (
-                        <FormField
-                            disabled={action.busy}
-                            error={touchedFormFieldError(field.state.meta)}
-                            label="Confirm new password"
-                        >
-                            <Input
-                                autoComplete="new-password"
-                                className="mt-2"
-                                name={field.name}
-                                onBlur={field.handleBlur}
-                                onChange={(event) =>
-                                    field.handleChange(event.currentTarget.value)
-                                }
-                                placeholder="Re-enter your new password"
                                 required
                                 type="password"
                                 value={field.state.value}

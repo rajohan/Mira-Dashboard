@@ -21,8 +21,8 @@ const focusedFixtures = {
         "system.documentationReference": dashboardStoryValue(
             generatedDocuments.filter(({ path }) =>
                 [
-                    "openapi.raw-http.json",
-                    "procedures.md",
+                    "generated/openapi.raw-http.json",
+                    "generated/procedures.md",
                     "generated/schemas/accountSecurity.beginTotpEnrollment.input.schema.json",
                 ].includes(path)
             )
@@ -52,7 +52,7 @@ export const Search: Story = {
             { target: { value: "Mira Dashboard raw HTTP API" } }
         );
         await expect(
-            canvas.getByText("openapi.raw-http.json", { selector: "p" })
+            canvas.getByText("generated/openapi.raw-http.json", { selector: "p" })
         ).toBeVisible();
     },
 };

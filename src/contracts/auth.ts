@@ -214,9 +214,9 @@ export const emailVerificationResultSchema = v.strictObject({
 });
 
 const passwordResetTokenSchema = v.pipe(
-    v.string("Password-reset link is invalid or expired."),
-    v.length(97, "Password-reset link is invalid or expired."),
-    v.regex(/^[0-9a-f]{32}\.[0-9a-f]{64}$/u, "Password-reset link is invalid or expired.")
+    v.string("Password reset link is invalid or expired."),
+    v.length(97, "Password reset link is invalid or expired."),
+    v.regex(/^[0-9a-f]{32}\.[0-9a-f]{64}$/u, "Password reset link is invalid or expired.")
 );
 
 export const passwordResetRequestInputSchema = v.strictObject({

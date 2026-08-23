@@ -267,6 +267,7 @@ describe("authentication password recovery", () => {
                     authenticationLifecycleMetadata
                 )
             ).toEqual({ status: "accepted" });
+            await Bun.sleep(0);
             expect(messages).toHaveLength(1);
             expect(messages[0]?.to).toBe("operator@example.com");
             const token = new URL(messages[0]?.resetUrl ?? "").searchParams.get(
@@ -293,6 +294,95 @@ describe("authentication password recovery", () => {
                 )
             ).toEqual({ status: "invalid-token" });
         } finally {
+            harness.database.sqlite.close(true);
+        }
+    });
+
+    test("serializes overlapping reset deliveries and retains only the newest token", async () => {
+        const messages: { readonly resetUrl: string }[] = [];
+        const deliveries: Array<ReturnType<typeof Promise.withResolvers<void>>> = [];
+        const verificationUrls: string[] = [];
+        const harness = await createAuthenticationLifecycleHarness({
+            passwordRecoveryEmailSender: {
+                send(message) {
+                    messages.push(message);
+                    const delivery = Promise.withResolvers<void>();
+                    deliveries.push(delivery);
+                    return delivery.promise;
+                },
+                sendVerification(message) {
+                    verificationUrls.push(message.verificationUrl);
+                    return Promise.resolve();
+                },
+            },
+            publicOrigin: "https://dashboard.example.com",
+        });
+        try {
+            const waitForMessageCount = async (count: number) => {
+                for (let attempt = 0; attempt < 100; attempt += 1) {
+                    if (messages.length === count) return;
+                    await Bun.sleep(1);
+                }
+                expect(messages).toHaveLength(count);
+            };
+            await bootstrapAuthenticationLifecycle(harness);
+            const verificationToken = new URL(
+                verificationUrls.at(-1) ?? ""
+            ).searchParams.get("verifyEmailToken");
+            if (verificationToken === null) {
+                throw new Error("Verification URL omitted its token");
+            }
+            expect(
+                await harness.service.verifyEmail(
+                    { token: verificationToken },
+                    authenticationLifecycleMetadata
+                )
+            ).toMatchObject({ status: "verified" });
+            for (const clientSourceId of ["source-a", "source-b", "source-c"]) {
+                expect(
+                    await harness.service.requestPasswordReset(
+                        { username: "operator" },
+                        { ...authenticationLifecycleMetadata, clientSourceId }
+                    )
+                ).toEqual({ status: "accepted" });
+            }
+            await waitForMessageCount(1);
+            expect(messages).toHaveLength(1);
+            deliveries[0]?.resolve();
+            await waitForMessageCount(2);
+            expect(messages).toHaveLength(2);
+            deliveries[1]?.resolve();
+            await waitForMessageCount(3);
+            expect(messages).toHaveLength(3);
+            deliveries[2]?.resolve();
+            await Bun.sleep(0);
+
+            const tokens = messages.map(({ resetUrl }) =>
+                new URL(resetUrl).searchParams.get("resetToken")
+            );
+            if (tokens.some((token) => token === null)) {
+                throw new Error("Reset URL omitted its token");
+            }
+            expect(
+                await harness.service.resetPassword(
+                    { password: "replacement-password-2", token: tokens[0]! },
+                    authenticationLifecycleMetadata
+                )
+            ).toEqual({ status: "invalid-token" });
+            expect(
+                await harness.service.resetPassword(
+                    { password: "replacement-password-2", token: tokens[1]! },
+                    authenticationLifecycleMetadata
+                )
+            ).toEqual({ status: "invalid-token" });
+            expect(
+                await harness.service.resetPassword(
+                    { password: "replacement-password-2", token: tokens[2]! },
+                    authenticationLifecycleMetadata
+                )
+            ).toEqual({ status: "reset" });
+        } finally {
+            for (const delivery of deliveries) delivery.resolve();
             harness.database.sqlite.close(true);
         }
     });

@@ -30,6 +30,9 @@ export function LoginRoute() {
     });
 
     if (verifyEmailToken !== undefined) {
+        if (status.isPending) {
+            return <PageState label="Loading sign-in…" status="loading" />;
+        }
         return (
             <EmailVerificationForm
                 onBack={() => globalThis.location.assign("/login")}

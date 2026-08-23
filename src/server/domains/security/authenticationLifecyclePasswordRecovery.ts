@@ -42,6 +42,30 @@ export function createAuthenticationPasswordRecoveryOperations(
     AuthenticationLifecycleService,
     "requestPasswordReset" | "resetPassword" | "verifyEmail"
 > {
+    const passwordResetDeliveryTails = new Map<string, Promise<void>>();
+
+    async function serializePasswordResetDelivery(
+        userId: string,
+        operation: () => Promise<void>
+    ): Promise<void> {
+        const previous = passwordResetDeliveryTails.get(userId) ?? Promise.resolve();
+        let release!: () => void;
+        const current = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        const tail = previous.then(() => current);
+        passwordResetDeliveryTails.set(userId, tail);
+        await previous;
+        try {
+            await operation();
+        } finally {
+            release();
+            if (passwordResetDeliveryTails.get(userId) === tail) {
+                passwordResetDeliveryTails.delete(userId);
+            }
+        }
+    }
+
     return {
         async requestPasswordReset(input, metadata) {
             if (
@@ -74,22 +98,6 @@ export function createAuthenticationPasswordRecoveryOperations(
                 ) {
                     return { ...recorded, status: "accepted" } as const;
                 }
-                const previousToken = unit.findPasswordResetTokenForUserPurpose(
-                    user.id,
-                    "password-reset"
-                );
-                const token = context.generatePasswordResetToken();
-                unit.insertPasswordResetToken({
-                    authenticationVersion: user.authenticationVersion,
-                    createdAt: checkedAt,
-                    expiresAt: addMinutes(checkedAt, 15),
-                    pendingEmail: null,
-                    prefix: token.prefix,
-                    purpose: "password-reset",
-                    userId: user.id,
-                    validatorHash: token.validatorHash,
-                    validatorVersion: token.validatorVersion,
-                });
                 context.audit(unit, {
                     action: "auth.password.reset.request",
                     actor: context.anonymousActor,
@@ -102,9 +110,7 @@ export function createAuthenticationPasswordRecoveryOperations(
                 });
                 return {
                     ...recorded,
-                    previousTokenPrefix: previousToken?.prefix,
                     status: "deliver" as const,
-                    token,
                     user,
                 };
             });
@@ -118,28 +124,58 @@ export function createAuthenticationPasswordRecoveryOperations(
             }
             if (prepared.status === "accepted") return { status: "accepted" };
 
-            const resetUrl = new URL("/login", context.publicOrigin);
-            resetUrl.searchParams.set("resetToken", prepared.token.token);
-            void context.passwordRecoveryEmailSender
-                .send({
-                    idempotencyKey: `password-reset/${prepared.token.prefix}`,
-                    resetUrl: resetUrl.href,
-                    to: prepared.user.email,
-                })
-                .then(() =>
-                    prepared.previousTokenPrefix === undefined
-                        ? undefined
-                        : context.repository.withImmediateTransaction((unit) => {
-                              unit.deletePasswordResetToken(
-                                  prepared.previousTokenPrefix!
-                              );
-                          })
-                )
-                .catch(() =>
-                    context.repository.withImmediateTransaction((unit) => {
-                        unit.deletePasswordResetToken(prepared.token.prefix);
-                    })
-                );
+            void serializePasswordResetDelivery(prepared.user.id, async () => {
+                const token = context.generatePasswordResetToken();
+                const previousTokenPrefix =
+                    await context.repository.withImmediateTransaction((unit) => {
+                        const currentUser = unit.findUserById(prepared.user.id);
+                        if (
+                            currentUser === undefined ||
+                            currentUser.disabledAt !== null ||
+                            currentUser.authenticationVersion !==
+                                prepared.user.authenticationVersion ||
+                            currentUser.email !== prepared.user.email ||
+                            currentUser.emailVerifiedAt === null
+                        ) {
+                            return;
+                        }
+                        const previousToken = unit.findPasswordResetTokenForUserPurpose(
+                            currentUser.id,
+                            "password-reset"
+                        );
+                        unit.insertPasswordResetToken({
+                            authenticationVersion: currentUser.authenticationVersion,
+                            createdAt: checkedAt,
+                            expiresAt: addMinutes(checkedAt, 15),
+                            pendingEmail: null,
+                            prefix: token.prefix,
+                            purpose: "password-reset",
+                            userId: currentUser.id,
+                            validatorHash: token.validatorHash,
+                            validatorVersion: token.validatorVersion,
+                        });
+                        return previousToken?.prefix ?? null;
+                    });
+                if (previousTokenPrefix === undefined) return;
+                const resetUrl = new URL("/login", context.publicOrigin);
+                resetUrl.searchParams.set("resetToken", token.token);
+                try {
+                    await context.passwordRecoveryEmailSender!.send({
+                        idempotencyKey: `password-reset/${token.prefix}`,
+                        resetUrl: resetUrl.href,
+                        to: prepared.user.email,
+                    });
+                    if (previousTokenPrefix !== null) {
+                        await context.repository.withImmediateTransaction((unit) => {
+                            unit.deletePasswordResetToken(previousTokenPrefix);
+                        });
+                    }
+                } catch {
+                    await context.repository.withImmediateTransaction((unit) => {
+                        unit.deletePasswordResetToken(token.prefix);
+                    });
+                }
+            }).catch(() => {});
             return { status: "accepted" };
         },
 

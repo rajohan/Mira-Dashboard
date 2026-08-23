@@ -21,6 +21,7 @@ import { Heading } from "../ui/Heading.tsx";
 import { Input } from "../ui/Input.tsx";
 import { Modal } from "../ui/Modal.tsx";
 import { PasswordChangeForm } from "./PasswordChangeForm.tsx";
+import { useSecurityActionNotice } from "./securityActionNoticeContextValue.ts";
 import { SecurityProofControls } from "./SecurityProofControls.tsx";
 import { refreshSecurityQueries } from "./securityQueries.ts";
 import { SecuritySection } from "./SecurityUi.tsx";
@@ -29,26 +30,33 @@ interface SecurityVerificationSectionProps {
     readonly summary: AccountSecuritySummary;
 }
 
-function useSecurityActionCompletion() {
+function useSecurityActionCompletion(noticeChannel?: "password") {
     const action = useExclusiveDashboardAction();
     const queryClient = useQueryClient();
-    const [notice, setNotice] = useState<string>();
+    const [localNotice, setLocalNotice] = useState<string>();
+    const retainedNotice = useSecurityActionNotice("password");
+    const notice = noticeChannel === undefined ? localNotice : retainedNotice.notice;
+    const dismissNotice =
+        noticeChannel === undefined
+            ? () => setLocalNotice(undefined)
+            : retainedNotice.dismiss;
 
     async function complete(
         operation: () => Promise<unknown>,
         successMessage: string
     ): Promise<boolean> {
-        setNotice(undefined);
+        dismissNotice();
         const result = await action.run(async () => {
             await operation();
             await refreshSecurityQueries(queryClient);
         });
         if (result.status !== "success") return false;
-        setNotice(successMessage);
+        if (noticeChannel === undefined) setLocalNotice(successMessage);
+        else retainedNotice.present(successMessage);
         return true;
     }
 
-    return { action, complete, dismissNotice: () => setNotice(undefined), notice };
+    return { action, complete, dismissNotice, notice };
 }
 
 /**
@@ -137,7 +145,8 @@ export function SecurityVerificationSection({
  * @returns The Dashboard-password management section.
  */
 export function DashboardPasswordSection() {
-    const { action, complete, dismissNotice, notice } = useSecurityActionCompletion();
+    const { action, complete, dismissNotice, notice } =
+        useSecurityActionCompletion("password");
     const [open, setOpen] = useState(false);
 
     return (
@@ -175,7 +184,8 @@ export function DashboardPasswordSection() {
 export function AccountEmailSection() {
     const client = useDashboardTrpcClient();
     const queryClient = useQueryClient();
-    const { action, complete, dismissNotice, notice } = useSecurityActionCompletion();
+    const action = useExclusiveDashboardAction();
+    const emailNotice = useSecurityActionNotice("account-email");
     const [open, setOpen] = useState(false);
     const { data: status } = useQuery(authStatusQueryOptions(client));
     const currentEmail = status?.state === "authenticated" ? status.user.email : "";
@@ -194,19 +204,26 @@ export function AccountEmailSection() {
     const form = useForm({
         defaultValues: { email: currentEmail },
         onSubmit: async ({ value }) => {
-            const changed = await complete(async () => {
+            emailNotice.dismiss();
+            const result = await action.run(async () => {
                 const result = await client.mutation("auth.changeEmail", value);
+                emailNotice.present("Verification email sent.");
                 const freshStatus = await client.query("auth.status", {});
                 await publishAuthenticationStatus(queryClient, freshStatus);
+                await refreshSecurityQueries(queryClient);
                 return result;
-            }, "Verification email sent.");
-            if (changed) setOpen(false);
+            });
+            if (result.status === "success") setOpen(false);
         },
         validators: progressiveFormValidators(emailChangeInputSchema),
     });
     return (
         <div className="contents">
-            <Alert message={notice} onDismiss={dismissNotice} variant="success" />
+            <Alert
+                message={emailNotice.notice}
+                onDismiss={emailNotice.dismiss}
+                variant="success"
+            />
             <SecuritySection
                 actions={
                     <Button onClick={() => setOpen(true)} variant="secondary">
@@ -225,7 +242,7 @@ export function AccountEmailSection() {
                 onClose={() => setOpen(false)}
                 open={open}
                 size="sm"
-                title="Change account email"
+                title="Change email"
             >
                 <Alert className="mb-4" message={action.error} />
                 <Alert

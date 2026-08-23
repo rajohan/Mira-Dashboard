@@ -361,9 +361,11 @@ function openRouterQuotaSummary(provider: QuotaProviderProjection): string | und
 }
 
 function openRouterBalanceSummary(provider: QuotaProviderProjection): string | undefined {
-    if (provider.balance === undefined || provider.periodUsage === undefined)
-        return undefined;
-    return `${formatDollarAmount(provider.balance, 2)} balance · ${formatDollarAmount(provider.periodUsage, 4)} this month`;
+    if (provider.balance === undefined) return undefined;
+    const balance = `${formatDollarAmount(provider.balance, 2)} balance`;
+    return provider.periodUsage === undefined
+        ? balance
+        : `${balance} · ${formatDollarAmount(provider.periodUsage, 4)} this month`;
 }
 
 function quotaUsedPercent(provider: QuotaProviderProjection): number | undefined {
@@ -581,6 +583,13 @@ function QuotaOverviewCard({
                     className="mb-3"
                     focusOnError={false}
                     message="The refresh failed. Showing the retained validated result."
+                />
+            )}
+            {query.error === null && query.data?.entry.freshness === "stale" && (
+                <Alert
+                    className="mb-3"
+                    focusOnError={false}
+                    message="Showing the last known good quota result."
                 />
             )}
             {content}

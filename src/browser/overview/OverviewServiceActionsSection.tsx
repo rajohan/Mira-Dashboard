@@ -22,6 +22,7 @@ import {
     jobRealtimeFallbackRefreshIntervalMs,
     jobRealtimeRefreshDelayMs,
 } from "../jobs/useJobRealtimeInvalidation.ts";
+import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Card } from "../ui/Card.tsx";
 import { PageState } from "../ui/PageState.tsx";
@@ -185,7 +186,7 @@ export function OverviewServiceActionsSection() {
                 <Alert
                     className="mb-4"
                     focusOnError={false}
-                    message={dashboardBrowserFailureMessage(query.error)}
+                    message={`${dashboardBrowserFailureMessage(query.error)} Status observed: ${formatDashboardDateTime(query.data.observedAtMs)}.`}
                 />
             )}
             <OverviewServiceActionsCard

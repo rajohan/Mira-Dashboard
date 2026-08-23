@@ -438,8 +438,11 @@ describe("OverviewServiceActionsSection", () => {
             type: "active",
         });
         expect(
-            await screen.findByText("The request could not be completed. Try again.")
+            await screen.findByText(
+                /The request could not be completed\. Try again\. Status observed:/u
+            )
         ).toBeTruthy();
+        expect(screen.getByText(/Status observed:/u)).toBeTruthy();
         expect(screen.getByRole("heading", { name: "OpenClaw cleanup" })).toBeTruthy();
         expect(screen.queryByText(failure.message)).toBeNull();
     });

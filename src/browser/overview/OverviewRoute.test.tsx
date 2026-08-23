@@ -204,7 +204,7 @@ const weatherEntry = Object.freeze({
 const quotaEntry = Object.freeze({
     consecutiveFailures: 0,
     expiresAtMs: timestampMs + 60 * 60_000,
-    freshness: "fresh",
+    freshness: "stale",
     key: "quotas.summary",
     lastAttemptAtMs: timestampMs,
     lastAttemptDurationMs: 120,
@@ -1087,10 +1087,36 @@ async function renderOverview(transport: OverviewTransport) {
 }
 
 describe("Dashboard operational overview foundation", () => {
+    test("shows an OpenRouter account balance without monthly usage", async () => {
+        const providers = quotaEntry.payload.providers.map((provider) => {
+            if (provider.id !== "openrouter") return provider;
+            const { periodUsage: _periodUsage, ...withoutMonthlyUsage } = provider;
+            return withoutMonthlyUsage;
+        });
+        overviewProviderEntries.set(quotaEntry.key, {
+            ...quotaEntry,
+            payload: { ...quotaEntry.payload, providers },
+        });
+        try {
+            await renderOverview(new OverviewTransport());
+
+            expect(await screen.findByText("$4.26 balance")).toBeTruthy();
+            expect(screen.queryByText(/\$0\.1344 this month/u)).toBeNull();
+        } finally {
+            overviewProviderEntries.set(quotaEntry.key, quotaEntry);
+        }
+    });
+
     test("loads bounded status before exact payload and queues refresh as a job", async () => {
         const transport = new OverviewTransport();
         const { user } = await renderOverview(transport);
 
+        expect(
+            await screen.findByRole("heading", { level: 1, name: "Dashboard" })
+        ).toBeTruthy();
+        expect(
+            screen.getByRole("heading", { level: 2, name: "Host metrics" })
+        ).toBeTruthy();
         expect(
             await screen.findByRole("heading", { level: 2, name: "Service actions" })
         ).toBeTruthy();
@@ -1136,6 +1162,9 @@ describe("Dashboard operational overview foundation", () => {
         expect(screen.getByText("72% remaining")).toBeTruthy();
         expect(screen.getByText("$0.866 left / $1 quota")).toBeTruthy();
         expect(screen.getByText("$4.26 balance · $0.1344 this month")).toBeTruthy();
+        expect(
+            screen.getByText("Showing the last known good quota result.")
+        ).toBeTruthy();
         expect(screen.getByText("5h 100% left · weekly 66% left")).toBeTruthy();
         expect(
             screen.getByText(

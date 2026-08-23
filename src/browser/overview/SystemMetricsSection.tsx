@@ -50,7 +50,10 @@ export function SystemMetricsSection() {
     }
 
     return (
-        <section aria-label="System overview">
+        <section>
+            <h2 className="sr-only" id="host-metrics-heading">
+                Host metrics
+            </h2>
             {query.error !== null && query.data !== undefined && (
                 <Alert
                     className="mt-4"

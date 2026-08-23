@@ -180,6 +180,10 @@ describe("authentication procedures", () => {
                 });
             if (testCase.code === undefined) {
                 expect(await operation()).toEqual({ reset: true });
+                expect(context.responseHeaders.getSetCookie()).toEqual([
+                    expect.stringContaining(`${dashboardSessionCookieName}=`),
+                    expect.stringContaining(`${dashboardPendingLoginCookieName}=`),
+                ]);
             } else {
                 const failure = await captureFailure(operation);
                 expect(failure).toBeInstanceOf(TRPCError);

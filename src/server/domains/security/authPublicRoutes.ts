@@ -191,9 +191,11 @@ export const authPublicRoutes = {
             if (result.status === "invalid-token") {
                 throw new TRPCError({
                     code: "UNAUTHORIZED",
-                    message: "Password-reset link is invalid or expired",
+                    message: "Password reset link is invalid or expired",
                 });
             }
+            appendClearedDashboardSessionCookie(ctx.responseHeaders);
+            appendClearedPendingLoginCookie(ctx.responseHeaders);
             return { reset: true } as const;
         }),
     logout: publicProcedure

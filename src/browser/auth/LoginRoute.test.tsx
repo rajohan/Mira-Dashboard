@@ -20,7 +20,6 @@ import {
 import { createDashboardRouter } from "../router.tsx";
 import type { DashboardWebAuthnClient } from "../security/webauthn/webauthnClient.ts";
 import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
-import { authStatusQueryKey } from "./authQueries.ts";
 
 const { render, screen, waitFor } = await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
@@ -222,16 +221,8 @@ describe("Dashboard login route", () => {
             await screen.findByLabelText("New password"),
             "new correct horse battery staple"
         );
-        await userActions.type(
-            screen.getByLabelText("Confirm new password"),
-            "new correct horse battery staple"
-        );
         await userActions.click(screen.getByRole("button", { name: "Change password" }));
-        expect(
-            await screen.findByText(
-                "Your password has been changed. You can now sign in."
-            )
-        ).toBeTruthy();
+        expect(await screen.findByText("Your password has been changed.")).toBeTruthy();
         await userActions.click(screen.getByRole("button", { name: "Back to sign in" }));
         expect(
             await screen.findByRole("heading", { level: 1, name: "Sign in" })
@@ -240,20 +231,39 @@ describe("Dashboard login route", () => {
 
     test("honors a password-reset link for an authenticated session", async () => {
         const token = `${"a".repeat(32)}.${"b".repeat(64)}`;
-        renderAuthenticationRoute(new AuthenticationTransport(authenticatedStatus), {
+        const transport = new AuthenticationTransport(authenticatedStatus);
+        transport.mutationHandler = () => {
+            transport.status = { state: "anonymous" };
+            return Promise.resolve({ reset: true });
+        };
+        renderAuthenticationRoute(transport, {
             initialEntry: `/login?resetToken=${token}`,
         });
+        const userActions = userEvent.setup();
 
         expect(
             await screen.findByRole("heading", { level: 1, name: "Reset password" })
         ).toBeTruthy();
         expect(screen.getByLabelText("New password")).toBeTruthy();
-        expect(screen.getByLabelText("Confirm new password")).toBeTruthy();
+        await userActions.type(screen.getByLabelText("New password"), "replacement");
+        await userActions.click(screen.getByRole("button", { name: "Change password" }));
+        await userActions.click(
+            await screen.findByRole("button", { name: "Back to sign in" })
+        );
+        expect(
+            await screen.findByRole("heading", { level: 1, name: "Sign in" })
+        ).toBeTruthy();
     });
 
-    test("does not consume a password-reset token when confirmation differs", async () => {
+    test("does not show success when a password-reset token is rejected", async () => {
         const token = `${"a".repeat(32)}.${"b".repeat(64)}`;
         const transport = new AuthenticationTransport({ state: "anonymous" });
+        transport.mutationHandler = () =>
+            Promise.reject(
+                Object.assign(new Error("Consumed reset token"), {
+                    data: { code: "UNAUTHORIZED" },
+                })
+            );
         renderAuthenticationRoute(transport, {
             initialEntry: `/login?resetToken=${token}`,
         });
@@ -263,48 +273,56 @@ describe("Dashboard login route", () => {
             await screen.findByLabelText("New password"),
             "new correct horse battery staple"
         );
-        await userActions.type(
-            screen.getByLabelText("Confirm new password"),
-            "different correct horse battery staple"
-        );
         await userActions.click(screen.getByRole("button", { name: "Change password" }));
 
-        expect(await screen.findByText("New passwords do not match.")).toBeTruthy();
+        expect(await screen.findByRole("alert")).toHaveTextContent(
+            "Password reset link is invalid or expired."
+        );
+        expect(screen.queryByText("Your password has been changed.")).toBeNull();
+        expect(screen.getByRole("button", { name: "Change password" })).toBeTruthy();
+    });
+
+    test("renders an invalid password-reset token as an error instead of a dead form", async () => {
+        const transport = new AuthenticationTransport({ state: "anonymous" });
+        renderAuthenticationRoute(transport, {
+            initialEntry: "/login?resetToken=invalid",
+        });
+
+        expect(await screen.findByRole("alert")).toHaveTextContent(
+            "Password reset link is invalid or expired."
+        );
+        expect(screen.queryByLabelText("New password")).toBeNull();
+        expect(screen.queryByRole("button", { name: "Change password" })).toBeNull();
         expect(
             transport.calls.filter(({ path }) => path === "auth.resetPassword")
         ).toHaveLength(0);
     });
 
-    test("publishes status after consuming an email-verification token", async () => {
+    test("keeps email-verification success stable until the next navigation", async () => {
         const token = `${"a".repeat(32)}.${"b".repeat(64)}`;
-        const transport = new AuthenticationTransport({ state: "anonymous" });
+        const transport = new AuthenticationTransport(authenticatedStatus);
         transport.mutationHandler = (path, input) => {
             expect(path).toBe("auth.verifyEmail");
             expect(input).toEqual({ token });
             return Promise.resolve({ email: "operator@example.com" });
         };
-        const { queryClient } = renderAuthenticationRoute(transport, {
+        renderAuthenticationRoute(transport, {
             initialEntry: `/login?verifyEmailToken=${token}`,
         });
 
         expect(
             await screen.findByText("operator@example.com is now verified.")
         ).toBeTruthy();
-        expect(queryClient.getQueryData(authStatusQueryKey)).toEqual({
-            state: "anonymous",
-        });
+        expect(
+            transport.calls.filter(({ path }) => path === "auth.verifyEmail")
+        ).toHaveLength(1);
     });
 
-    test("preserves verification success when the status refresh fails", async () => {
+    test("does not reconsume a verified token when a stale session cannot refresh", async () => {
         const token = `${"a".repeat(32)}.${"b".repeat(64)}`;
         const transport = new AuthenticationTransport({ state: "anonymous" });
-        let statusCalls = 0;
-        transport.statusQueryHandler = () => {
-            statusCalls += 1;
-            return statusCalls === 1
-                ? Promise.resolve({ state: "anonymous" })
-                : Promise.reject(new TypeError("Status refresh failed"));
-        };
+        transport.statusQueryHandler = () =>
+            Promise.reject(new TypeError("Stale session cannot refresh"));
         transport.mutationHandler = () =>
             Promise.resolve({ email: "operator@example.com" });
         renderAuthenticationRoute(transport, {
@@ -317,6 +335,9 @@ describe("Dashboard login route", () => {
         expect(screen.getByRole("status")).toHaveTextContent(
             "operator@example.com is now verified."
         );
+        expect(
+            transport.calls.filter(({ path }) => path === "auth.verifyEmail")
+        ).toHaveLength(1);
     });
 
     test("keeps Continue disabled until email verification settles", async () => {

@@ -148,7 +148,10 @@ describe("system documentation reference procedure", () => {
         const system = await caller();
         const documents = await system.documentationReference();
         expect(documents).toContainEqual(
-            expect.objectContaining({ kind: "markdown", path: "README.md" })
+            expect.objectContaining({
+                kind: "markdown",
+                path: "generated/README.md",
+            })
         );
 
         const anonymous = await caller({ kind: "anonymous" });

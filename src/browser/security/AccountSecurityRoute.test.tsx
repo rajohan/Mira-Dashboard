@@ -770,7 +770,7 @@ describe("Dashboard account security route", () => {
 
         await userActions.click(screen.getByRole("button", { name: "Change password" }));
         const passwordChangeDialog = screen.getByRole("dialog", {
-            name: "Change Dashboard password",
+            name: "Change password",
         });
         await userActions.type(
             within(passwordChangeDialog).getByLabelText("Current password"),
@@ -778,10 +778,6 @@ describe("Dashboard account security route", () => {
         );
         await userActions.type(
             within(passwordChangeDialog).getByLabelText("New password"),
-            "new strong password"
-        );
-        await userActions.type(
-            within(passwordChangeDialog).getByLabelText("Confirm new password"),
             "new strong password"
         );
         await userActions.click(
@@ -895,7 +891,7 @@ describe("Dashboard account security route", () => {
                 screen.getByRole("button", { name: "Change password" })
             );
             const passwordChangeDialog = screen.getByRole("dialog", {
-                name: "Change Dashboard password",
+                name: "Change password",
             });
             await userActions.type(
                 within(passwordChangeDialog).getByLabelText("Current password"),
@@ -903,10 +899,6 @@ describe("Dashboard account security route", () => {
             );
             await userActions.type(
                 within(passwordChangeDialog).getByLabelText("New password"),
-                "new strong password"
-            );
-            await userActions.type(
-                within(passwordChangeDialog).getByLabelText("Confirm new password"),
                 "new strong password"
             );
             await userActions.click(
@@ -957,7 +949,7 @@ describe("Dashboard account security route", () => {
             );
             expect(
                 screen.queryByText(
-                    "Password changed. Your other browsers were signed out."
+                    "Password changed. Your other sessions were signed out."
                 )
             ).toBeNull();
 

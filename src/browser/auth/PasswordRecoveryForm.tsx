@@ -4,10 +4,10 @@ import { useState } from "react";
 import * as v from "valibot";
 
 import {
-    authPasswordInputSchema,
     passwordResetInputSchema,
     passwordResetRequestInputSchema,
 } from "../../contracts/auth.ts";
+import { classifyDashboardBrowserFailure } from "../api/trpcError.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Form } from "../ui/Form.tsx";
@@ -23,20 +23,11 @@ interface PasswordRecoveryFormProps {
     readonly token?: string;
 }
 
-const passwordResetFormSchema = v.pipe(
-    v.strictObject({
-        confirmPassword: authPasswordInputSchema,
-        password: authPasswordInputSchema,
-        token: passwordResetInputSchema.entries.token,
-    }),
-    v.forward(
-        v.check(
-            (value) => value.password === value.confirmPassword,
-            "New passwords do not match."
-        ),
-        ["confirmPassword"]
-    )
-);
+function passwordResetFailureMessage(error: unknown): string | undefined {
+    return classifyDashboardBrowserFailure(error) === "unauthorized"
+        ? "Password reset link is invalid or expired."
+        : undefined;
+}
 
 /**
  * Requests a generic recovery email or consumes the token delivered by it.
@@ -48,33 +39,41 @@ export function PasswordRecoveryForm({ onBack, token }: PasswordRecoveryFormProp
     const requestForm = useForm({
         defaultValues: { username: "" },
         onSubmit: async ({ value }) => {
-            await run(async () => {
-                await client.mutation("auth.requestPasswordReset", value);
-                setComplete(true);
-            });
+            const succeeded = await run(() =>
+                client.mutation("auth.requestPasswordReset", value)
+            );
+            if (succeeded) setComplete(true);
         },
         validators: progressiveFormValidators(passwordResetRequestInputSchema),
     });
     const resetForm = useForm({
-        defaultValues: { confirmPassword: "", password: "", token: token ?? "" },
+        defaultValues: { password: "", token: token ?? "" },
         onSubmit: async ({ value }) => {
-            await run(async () => {
-                await client.mutation("auth.resetPassword", {
-                    password: value.password,
-                    token: value.token,
-                });
-                setComplete(true);
-            });
+            const succeeded = await run(
+                () =>
+                    client.mutation("auth.resetPassword", {
+                        password: value.password,
+                        token: value.token,
+                    }),
+                { state: "anonymous" },
+                passwordResetFailureMessage
+            );
+            if (succeeded) setComplete(true);
         },
-        validators: progressiveFormValidators(passwordResetFormSchema),
+        validators: progressiveFormValidators(passwordResetInputSchema),
     });
     const isReset = token !== undefined;
+    const isResetTokenValid =
+        token === undefined ||
+        v.safeParse(passwordResetInputSchema.entries.token, token).success;
     const message = isReset
-        ? "Your password has been changed. You can now sign in."
+        ? "Your password has been changed."
         : "If that account exists, a reset link has been sent to its email address.";
     let content;
     if (complete) {
         content = <Alert message={message} variant="success" />;
+    } else if (isReset && !isResetTokenValid) {
+        content = <Alert message="Password reset link is invalid or expired." />;
     } else if (isReset) {
         content = (
             <Form onSubmit={() => void resetForm.handleSubmit()}>
@@ -84,28 +83,6 @@ export function PasswordRecoveryForm({ onBack, token }: PasswordRecoveryFormProp
                             disabled={busy}
                             error={touchedFormFieldError(field.state.meta)}
                             label="New password"
-                        >
-                            <Input
-                                autoComplete="new-password"
-                                className="mt-2"
-                                name={field.name}
-                                onBlur={field.handleBlur}
-                                onChange={(event) =>
-                                    field.handleChange(event.currentTarget.value)
-                                }
-                                required
-                                type="password"
-                                value={field.state.value}
-                            />
-                        </FormField>
-                    )}
-                </resetForm.Field>
-                <resetForm.Field name="confirmPassword">
-                    {(field) => (
-                        <FormField
-                            disabled={busy}
-                            error={touchedFormFieldError(field.state.meta)}
-                            label="Confirm new password"
                         >
                             <Input
                                 autoComplete="new-password"

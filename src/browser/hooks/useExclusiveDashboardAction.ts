@@ -7,6 +7,9 @@ export type DashboardActionResult<TValue> =
     | Readonly<{ status: "failure" }>
     | Readonly<{ status: "success"; value: TValue }>;
 
+/** Optional scoped fixed-message selector for one known operation failure. */
+export type DashboardActionFailureMessage = (error: unknown) => string | undefined;
+
 interface DashboardActionState {
     readonly busy: boolean;
     readonly error: string | undefined;
@@ -32,7 +35,8 @@ export function useExclusiveDashboardAction() {
     }
 
     async function run<TValue>(
-        action: () => Promise<TValue>
+        action: () => Promise<TValue>,
+        failureMessage?: DashboardActionFailureMessage
     ): Promise<DashboardActionResult<TValue>> {
         if (inFlight.current) return { status: "failure" };
         inFlight.current = true;
@@ -42,7 +46,10 @@ export function useExclusiveDashboardAction() {
             setState({ busy: false, error: undefined });
             return { status: "success", value };
         } catch (error: unknown) {
-            setState({ busy: false, error: dashboardBrowserFailureMessage(error) });
+            setState({
+                busy: false,
+                error: failureMessage?.(error) ?? dashboardBrowserFailureMessage(error),
+            });
             return { status: "failure" };
         } finally {
             inFlight.current = false;
