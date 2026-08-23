@@ -1,4 +1,5 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
+import { clsx } from "clsx";
 import { CloudSun, GitBranch, Gauge } from "lucide-react";
 import type { ReactNode } from "react";
 
@@ -28,6 +29,7 @@ import {
 
 interface ProviderCardProps<TPayload extends { readonly observedAtMs: number }> {
     readonly children: (payload: TPayload) => ReactNode;
+    readonly className?: string;
     readonly description: string;
     readonly icon: typeof CloudSun;
     readonly query: UseQueryResult<OverviewProviderProjection<TPayload>, Error>;
@@ -47,6 +49,7 @@ function freshnessLabel<TPayload>(
 
 function ProviderCard<TPayload extends { readonly observedAtMs: number }>({
     children,
+    className,
     description,
     icon: Icon,
     query,
@@ -74,7 +77,7 @@ function ProviderCard<TPayload extends { readonly observedAtMs: number }>({
     }
 
     return (
-        <Card className="min-w-0">
+        <Card className={clsx("min-w-0", className)}>
             <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                     <div className="flex items-center gap-2">
@@ -142,6 +145,24 @@ function WeatherDetails({ payload }: { readonly payload: WeatherCachePayload }) 
                 ))}
             </ul>
         </div>
+    );
+}
+
+/** @returns The independently degradable Spydeberg weather card. */
+export function WeatherOverviewCard({ className }: { readonly className?: string }) {
+    const client = useDashboardTrpcClient();
+    const weather = useQuery(weatherOverviewQueryOptions(client));
+
+    return (
+        <ProviderCard
+            className={className}
+            description="Current conditions and three-day forecast for Spydeberg."
+            icon={CloudSun}
+            query={weather}
+            title="Weather"
+        >
+            {(payload) => <WeatherDetails payload={payload} />}
+        </ProviderCard>
     );
 }
 
@@ -283,10 +304,9 @@ function GitDetails({ payload }: { readonly payload: GitWorkspaceCachePayload })
     );
 }
 
-/** @returns Independent weather, quota, and managed-Git overview cards. */
+/** @returns Independent quota and managed-Git overview cards. */
 export function OverviewEnvironmentSection() {
     const client = useDashboardTrpcClient();
-    const weather = useQuery(weatherOverviewQueryOptions(client));
     const quota = useQuery(quotaOverviewQueryOptions(client));
     const git = useQuery(gitOverviewQueryOptions(client));
 
@@ -296,18 +316,10 @@ export function OverviewEnvironmentSection() {
                 Environment
             </Heading>
             <Text className="mt-1" tone="muted">
-                Weather, provider limits, and managed repository state from independent
-                background checks.
+                Provider limits and managed repository state from independent background
+                checks.
             </Text>
-            <div className="mt-5 grid gap-5 lg:grid-cols-3">
-                <ProviderCard
-                    description="Current conditions and three-day forecast for Spydeberg."
-                    icon={CloudSun}
-                    query={weather}
-                    title="Weather"
-                >
-                    {(payload) => <WeatherDetails payload={payload} />}
-                </ProviderCard>
+            <div className="mt-5 grid gap-5 lg:grid-cols-2">
                 <ProviderCard
                     description="Normalized limits for configured AI and media providers."
                     icon={Gauge}

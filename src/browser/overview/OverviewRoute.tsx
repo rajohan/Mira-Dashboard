@@ -1,5 +1,4 @@
 import { CacheBrowser } from "../cache/CacheBrowser.tsx";
-import { PageHeader } from "../ui/PageHeader.tsx";
 import { BackupOverviewSection } from "./BackupOverviewSection.tsx";
 import { OverviewAgentsSection } from "./OverviewAgentsSection.tsx";
 import { OverviewDomainSection } from "./OverviewDomainSection.tsx";
@@ -16,14 +15,7 @@ import { SystemMetricsSection } from "./SystemMetricsSection.tsx";
 export function OverviewRoute() {
     return (
         <div>
-            <PageHeader
-                description="See current system activity, recent work, alerts, and saved background-check results in one place."
-                eyebrow="Operations"
-                title="Mira Dashboard"
-            />
-            <div className="mt-8">
-                <SystemMetricsSection />
-            </div>
+            <SystemMetricsSection />
             <div className="mt-10">
                 <OverviewEnvironmentSection />
             </div>

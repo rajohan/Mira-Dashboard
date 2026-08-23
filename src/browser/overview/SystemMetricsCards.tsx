@@ -15,6 +15,7 @@ import {
     Server,
     Workflow,
 } from "lucide-react";
+import type { ReactNode } from "react";
 
 import type { SystemMetrics } from "../../contracts/system.ts";
 import {
@@ -44,7 +45,9 @@ function networkValue(
 }
 
 interface SystemMetricsCardsProps {
-    readonly metrics: SystemMetrics;
+    readonly fallback?: ReactNode;
+    readonly leadingCard?: ReactNode;
+    readonly metrics?: SystemMetrics;
 }
 
 function applicationRuntimeStatus(application: SystemMetrics["application"]): Readonly<{
@@ -108,7 +111,24 @@ function httpMetricTotals(
 }
 
 /** @returns Host gauges and independently degradable application observations. */
-export function SystemMetricsCards({ metrics }: SystemMetricsCardsProps) {
+export function SystemMetricsCards({
+    fallback,
+    leadingCard,
+    metrics,
+}: SystemMetricsCardsProps) {
+    if (metrics === undefined) {
+        return (
+            <div className="space-y-8">
+                <div
+                    aria-label="Host metrics"
+                    className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+                >
+                    {leadingCard}
+                    {fallback}
+                </div>
+            </div>
+        );
+    }
     const coreLabel = metrics.cpu.logicalCoreCount === 1 ? "CPU core" : "CPU cores";
     const applicationStatus = applicationRuntimeStatus(metrics.application);
     const httpTotals = httpMetricTotals(metrics.application.http.procedures);
@@ -116,8 +136,9 @@ export function SystemMetricsCards({ metrics }: SystemMetricsCardsProps) {
         <div className="space-y-8">
             <div
                 aria-label="Host metrics"
-                className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3"
+                className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
             >
+                {leadingCard}
                 <MetricCard
                     description={`Average load over 1 minute: ${formatLoadValue(metrics.cpu.loadAverage[0])} · ${metrics.cpu.logicalCoreCount} ${coreLabel}`}
                     icon={Cpu}

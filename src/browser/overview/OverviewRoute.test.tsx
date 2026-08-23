@@ -1045,12 +1045,20 @@ describe("Dashboard operational overview foundation", () => {
             await screen.findByRole("heading", { level: 2, name: "Service actions" })
         ).toBeTruthy();
 
+        expect(screen.queryByText("Operations")).toBeNull();
+        expect(screen.queryByRole("heading", { name: "Mira Dashboard" })).toBeNull();
+        expect(screen.queryByRole("heading", { name: "System usage" })).toBeNull();
         expect(
-            await screen.findByRole("heading", { level: 1, name: "Mira Dashboard" })
-        ).toBeTruthy();
+            screen.queryByText(
+                "See current system activity, recent work, alerts, and saved background-check results in one place."
+            )
+        ).toBeNull();
         expect(
-            await screen.findByRole("heading", { level: 2, name: "System usage" })
-        ).toBeTruthy();
+            screen.queryByText(
+                "Current host gauges and independently available application runtime observations."
+            )
+        ).toBeNull();
+        expect(screen.queryByText(/^Measured /u)).toBeNull();
         const cpuHeading = screen.getByRole("heading", { level: 3, name: "CPU" });
         const cpuCard = cpuHeading.closest("section");
         expect(cpuCard).toBeTruthy();
@@ -1062,7 +1070,10 @@ describe("Dashboard operational overview foundation", () => {
         expect(
             await screen.findByRole("heading", { level: 2, name: "Environment" })
         ).toBeTruthy();
-        expect(screen.getByRole("heading", { level: 3, name: "Weather" })).toBeTruthy();
+        const hostMetrics = screen.getByLabelText("Host metrics");
+        expect(
+            within(hostMetrics).getByRole("heading", { level: 3, name: "Weather" })
+        ).toBeTruthy();
         expect(screen.getByText("15 °C")).toBeTruthy();
         expect(
             screen.getByRole("heading", { level: 3, name: "Provider quota" })
