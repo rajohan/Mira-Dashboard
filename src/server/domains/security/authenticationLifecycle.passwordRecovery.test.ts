@@ -7,6 +7,41 @@ import {
 } from "./testSupport/authenticationLifecycle.ts";
 
 describe("authentication password recovery", () => {
+    test("stops projecting an expired pending email change", async () => {
+        const harness = await createAuthenticationLifecycleHarness({
+            passwordRecoveryEmailSender: {
+                send: () => Promise.resolve(),
+                sendVerification: () => Promise.resolve(),
+            },
+            publicOrigin: "https://dashboard.example.com",
+        });
+        try {
+            const bootstrap = await bootstrapAuthenticationLifecycle(harness);
+            const identity = {
+                sessionId: bootstrap.session.id,
+                userId: bootstrap.user.id,
+            };
+            await harness.service.changeEmail(
+                identity,
+                { email: "replacement@example.com" },
+                authenticationLifecycleMetadata
+            );
+            expect(harness.service.status(identity)).toMatchObject({
+                user: { pendingEmail: "replacement@example.com" },
+            });
+            harness.advanceSeconds(15 * 60 + 1);
+            const expiredStatus = harness.service.status(identity);
+            expect(expiredStatus).toMatchObject({
+                user: { email: "operator@example.com" },
+            });
+            expect(expiredStatus.authenticated).toBeTrue();
+            if (!expiredStatus.authenticated) throw new Error("Session expired early");
+            expect("pendingEmail" in expiredStatus.user).toBeFalse();
+        } finally {
+            harness.database.sqlite.close(true);
+        }
+    });
+
     test("keeps the old address active until a changed email is verified", async () => {
         const verificationUrls: string[] = [];
         const harness = await createAuthenticationLifecycleHarness({

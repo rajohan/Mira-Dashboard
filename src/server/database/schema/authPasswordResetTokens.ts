@@ -1,12 +1,5 @@
 import { sql } from "drizzle-orm";
-import {
-    check,
-    index,
-    integer,
-    sqliteTable,
-    text,
-    uniqueIndex,
-} from "drizzle-orm/sqlite-core";
+import { check, index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 import { opaqueTokenValidatorVersion } from "../../shared/opaqueToken.ts";
 import {
@@ -62,7 +55,7 @@ export const authPasswordResetTokens = sqliteTable(
             sql`${timestampMillisecondsCheck(table.createdAt)} AND ${timestampMillisecondsCheck(table.expiresAt)} AND ${table.expiresAt} > ${table.createdAt} AND ${table.expiresAt} <= ${table.createdAt} + ${passwordResetTokenLifetimeMaximumMs}`
         ),
         index("auth_password_reset_tokens_expires_idx").on(table.expiresAt, table.prefix),
-        uniqueIndex("auth_password_reset_tokens_user_purpose_unique").on(
+        index("auth_password_reset_tokens_user_purpose_idx").on(
             table.userId,
             table.purpose
         ),

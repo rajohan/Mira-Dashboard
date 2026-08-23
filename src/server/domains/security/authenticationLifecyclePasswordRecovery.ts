@@ -55,6 +55,9 @@ export function createAuthenticationPasswordRecoveryOperations(
 
             const prepared = await context.repository.withImmediateTransaction((unit) => {
                 const recorded = recordAuthenticationFailures(unit, targets, checkedAt);
+                if (recorded.retryAfterSeconds !== undefined) {
+                    return { ...recorded, status: "rate-limited" } as const;
+                }
                 const user = unit.findUserByUsername(input.username);
                 if (
                     user === undefined ||
@@ -63,8 +66,11 @@ export function createAuthenticationPasswordRecoveryOperations(
                 ) {
                     return { ...recorded, status: "accepted" } as const;
                 }
+                const previousToken = unit.findPasswordResetTokenForUserPurpose(
+                    user.id,
+                    "password-reset"
+                );
                 const token = context.generatePasswordResetToken();
-                unit.deletePasswordResetTokensForUserPurpose(user.id, "password-reset");
                 unit.insertPasswordResetToken({
                     authenticationVersion: user.authenticationVersion,
                     createdAt: checkedAt,
@@ -86,11 +92,19 @@ export function createAuthenticationPasswordRecoveryOperations(
                     targetId: user.id,
                     targetType: "user",
                 });
-                return { ...recorded, status: "deliver" as const, token, user };
-            });
-            if (prepared.retryAfterSeconds !== undefined) {
                 return {
-                    retryAfterSeconds: prepared.retryAfterSeconds,
+                    ...recorded,
+                    previousTokenPrefix: previousToken?.prefix,
+                    status: "deliver" as const,
+                    token,
+                    user,
+                };
+            });
+            if (prepared.status === "rate-limited") {
+                return {
+                    retryAfterSeconds:
+                        prepared.retryAfterSeconds ??
+                        saturatedAuthenticationRetryAfterSeconds,
                     status: "rate-limited",
                 };
             }
@@ -98,18 +112,26 @@ export function createAuthenticationPasswordRecoveryOperations(
 
             const resetUrl = new URL("/login", context.publicOrigin);
             resetUrl.searchParams.set("resetToken", prepared.token.token);
-            try {
-                await context.passwordRecoveryEmailSender.send({
+            void context.passwordRecoveryEmailSender
+                .send({
                     idempotencyKey: `password-reset/${prepared.token.prefix}`,
                     resetUrl: resetUrl.href,
-                    signal: metadata.signal,
                     to: prepared.user.email,
-                });
-            } catch {
-                await context.repository.withImmediateTransaction((unit) => {
-                    unit.deletePasswordResetToken(prepared.token.prefix);
-                });
-            }
+                })
+                .then(() =>
+                    prepared.previousTokenPrefix === undefined
+                        ? undefined
+                        : context.repository.withImmediateTransaction((unit) => {
+                              unit.deletePasswordResetToken(
+                                  prepared.previousTokenPrefix!
+                              );
+                          })
+                )
+                .catch(() =>
+                    context.repository.withImmediateTransaction((unit) => {
+                        unit.deletePasswordResetToken(prepared.token.prefix);
+                    })
+                );
             return { status: "accepted" };
         },
 

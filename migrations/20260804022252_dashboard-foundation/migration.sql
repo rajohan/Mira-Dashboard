@@ -555,7 +555,7 @@ CREATE INDEX `auth_pending_logins_replaced_session_id_idx` ON `auth_pending_logi
 CREATE INDEX `auth_pending_logins_user_expires_at_idx` ON `auth_pending_logins` (`user_id`,`expires_at`,`id`);--> statement-breakpoint
 CREATE UNIQUE INDEX `auth_pending_logins_validator_hash_unique` ON `auth_pending_logins` (`validator_hash`);--> statement-breakpoint
 CREATE INDEX `auth_password_reset_tokens_expires_idx` ON `auth_password_reset_tokens` (`expires_at`,`prefix`);--> statement-breakpoint
-CREATE UNIQUE INDEX `auth_password_reset_tokens_user_purpose_unique` ON `auth_password_reset_tokens` (`user_id`,`purpose`);--> statement-breakpoint
+CREATE INDEX `auth_password_reset_tokens_user_purpose_idx` ON `auth_password_reset_tokens` (`user_id`,`purpose`);--> statement-breakpoint
 CREATE INDEX `auth_rate_limit_buckets_kind_updated_at_idx` ON `auth_rate_limit_buckets` (`kind`,`updated_at`,`bucket_key`);--> statement-breakpoint
 CREATE INDEX `auth_sessions_expires_at_idx` ON `auth_sessions` (`expires_at`);--> statement-breakpoint
 CREATE INDEX `auth_sessions_user_last_seen_idx` ON `auth_sessions` (`user_id`,`last_seen_at`,`created_at`,`id`);--> statement-breakpoint

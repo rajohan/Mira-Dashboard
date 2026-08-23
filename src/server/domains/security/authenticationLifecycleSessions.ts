@@ -342,17 +342,22 @@ export function createAuthenticationSessionOperations(
             ) {
                 return { authenticated: false, isBootstrapRequired: false };
             }
+            const checkedAt = context.now();
+            const pendingEmailRecord =
+                context.repository.findPasswordResetTokenForUserPurpose(
+                    user.id,
+                    "email-verification"
+                );
+            const pendingEmail =
+                pendingEmailRecord !== undefined &&
+                +pendingEmailRecord.expiresAt > +checkedAt
+                    ? (pendingEmailRecord.pendingEmail ?? undefined)
+                    : undefined;
             return {
                 authenticated: true,
                 isBootstrapRequired: false,
                 session: authSession(session, identity.sessionId),
-                user: authUser(
-                    user,
-                    context.repository.findPasswordResetTokenForUserPurpose(
-                        user.id,
-                        "email-verification"
-                    )?.pendingEmail ?? undefined
-                ),
+                user: authUser(user, pendingEmail),
             };
         },
 

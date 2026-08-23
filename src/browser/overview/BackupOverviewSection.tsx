@@ -296,7 +296,7 @@ export function BackupOverviewSectionView({
             </Card>
         );
     }
-    if (kopia === undefined && walg === undefined) {
+    if (kopia === undefined && walg === undefined && sqlite === undefined) {
         return (
             <PageState
                 headingLevel={2}

@@ -333,6 +333,9 @@ export function parseWebConfiguration(
     }
     const speechApiKey = elevenLabsApiKey(input);
     const resend = resendConfiguration(input);
+    if (nodeEnvironment === "production" && resend === undefined) {
+        configurationError("RESEND_API_KEY", "missing");
+    }
     const configuration = Object.freeze({
         ...(speechApiKey === undefined ? {} : { elevenLabsApiKey: speechApiKey }),
         gatewayToken: configurationGatewayToken(input),

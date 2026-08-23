@@ -579,7 +579,8 @@ export const applicationConfigurationRegistry: readonly ApplicationConfiguration
             allowedValues: null,
             browserExposure: "none",
             defaultValue: null,
-            description: "Optional Resend credential for account security mail.",
+            description:
+                "Resend credential required for production account security mail.",
             environmentName: "RESEND_API_KEY",
             field: "resendApiKey",
             operationalEffect:
@@ -587,7 +588,7 @@ export const applicationConfigurationRegistry: readonly ApplicationConfiguration
             restartRequired: true,
             roles: Object.freeze(["web"]),
             secret: true,
-            validationConstraints: `Absent together with MIRA_DASHBOARD_RESEND_FROM_EMAIL, or a trimmed nonblank control-safe secret at most ${applicationConfigurationLimits.resendApiKeyMaximumLength} code units; never persisted, logged, or browser-exposed.`,
+            validationConstraints: `Required with MIRA_DASHBOARD_RESEND_FROM_EMAIL in production; otherwise absent together or a trimmed nonblank control-safe secret at most ${applicationConfigurationLimits.resendApiKeyMaximumLength} code units; never persisted, logged, or browser-exposed.`,
             valueType: "opaque-secret",
         }),
         metadata({
@@ -602,7 +603,7 @@ export const applicationConfigurationRegistry: readonly ApplicationConfiguration
             restartRequired: true,
             roles: Object.freeze(["web"]),
             secret: false,
-            validationConstraints: `Absent together with RESEND_API_KEY, or one canonical lowercase email address at most ${applicationConfigurationLimits.resendFromEmailMaximumLength} code units.`,
+            validationConstraints: `Required with RESEND_API_KEY in production; otherwise absent together or one canonical lowercase email address at most ${applicationConfigurationLimits.resendFromEmailMaximumLength} code units.`,
             valueType: "email-address",
         }),
         metadata({

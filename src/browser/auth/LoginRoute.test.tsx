@@ -234,6 +234,18 @@ describe("Dashboard login route", () => {
         ).toBeTruthy();
     });
 
+    test("honors a password-reset link for an authenticated session", async () => {
+        const token = `${"a".repeat(32)}.${"b".repeat(64)}`;
+        renderAuthenticationRoute(new AuthenticationTransport(authenticatedStatus), {
+            initialEntry: `/login?resetToken=${token}`,
+        });
+
+        expect(
+            await screen.findByRole("heading", { level: 1, name: "Reset password" })
+        ).toBeTruthy();
+        expect(screen.getByLabelText("New password")).toBeTruthy();
+    });
+
     test("publishes status after consuming an email-verification token", async () => {
         const token = `${"a".repeat(32)}.${"b".repeat(64)}`;
         const transport = new AuthenticationTransport({ state: "anonymous" });
@@ -252,6 +264,30 @@ describe("Dashboard login route", () => {
         expect(queryClient.getQueryData(authStatusQueryKey)).toEqual({
             state: "anonymous",
         });
+    });
+
+    test("preserves verification success when the status refresh fails", async () => {
+        const token = `${"a".repeat(32)}.${"b".repeat(64)}`;
+        const transport = new AuthenticationTransport({ state: "anonymous" });
+        let statusCalls = 0;
+        transport.statusQueryHandler = () => {
+            statusCalls += 1;
+            return statusCalls === 1
+                ? Promise.resolve({ state: "anonymous" })
+                : Promise.reject(new TypeError("Status refresh failed"));
+        };
+        transport.mutationHandler = () =>
+            Promise.resolve({ email: "operator@example.com" });
+        renderAuthenticationRoute(transport, {
+            initialEntry: `/login?verifyEmailToken=${token}`,
+        });
+
+        expect(
+            await screen.findByText("operator@example.com is now verified.")
+        ).toBeTruthy();
+        expect(screen.getByRole("status")).toHaveTextContent(
+            "operator@example.com is now verified."
+        );
     });
 
     test("keeps an invalid email-verification link on its error path", async () => {

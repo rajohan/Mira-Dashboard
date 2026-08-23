@@ -31,7 +31,7 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Name | Columns | Unique | Predicate |
 | --- | --- | --- | --- |
-| `agent_task_runs_one_active_agent_idx` | `agent_id` | Yes | `"agent_task_runs"."completed_at" IS NULL` |
+| `agent_task_runs_one_active_agent_idx` | `agent_id` | No | `"agent_task_runs"."completed_at" IS NULL` |
 | `agent_task_runs_started_id_idx` | `started_at, id` | No | — |
 | `agent_task_runs_agent_started_id_idx` | `agent_id, started_at, id` | No | — |
 
@@ -156,7 +156,7 @@ This reference is generated from the exact Drizzle schema used by migrations and
 | Name | Columns | Unique | Predicate |
 | --- | --- | --- | --- |
 | `auth_password_reset_tokens_expires_idx` | `expires_at, prefix` | No | — |
-| `auth_password_reset_tokens_user_purpose_unique` | `user_id, purpose` | Yes | — |
+| `auth_password_reset_tokens_user_purpose_idx` | `user_id, purpose` | Yes | — |
 
 ### Checks
 

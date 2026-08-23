@@ -29,10 +29,7 @@ import type {
 } from "../../contracts/quota.ts";
 import type { WeatherCachePayload } from "../../contracts/weather.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
-import {
-    formatDashboardDateTimeParts,
-    formatDashboardWeekdayDate,
-} from "../lib/formatDateTime.ts";
+import { formatDashboardDateTimeParts } from "../lib/formatDateTime.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import { Card } from "../ui/Card.tsx";
@@ -151,8 +148,25 @@ function WeatherDetails({ payload }: { readonly payload: WeatherCachePayload }) 
         const timer = globalThis.setInterval(() => setNow(new Date()), 1000);
         return () => globalThis.clearInterval(timer);
     }, []);
-    const [, localTime] = formatDashboardDateTimeParts(now.getTime());
-    const localDate = formatDashboardWeekdayDate(now.getTime());
+    const localTime = new Intl.DateTimeFormat("en-GB", {
+        hour: "2-digit",
+        hourCycle: "h23",
+        minute: "2-digit",
+        second: "2-digit",
+        timeZone: payload.timezone,
+    }).format(now);
+    const localDate = Object.fromEntries(
+        new Intl.DateTimeFormat("en-GB", {
+            day: "2-digit",
+            month: "2-digit",
+            timeZone: payload.timezone,
+            weekday: "long",
+            year: "numeric",
+        })
+            .formatToParts(now)
+            .map((part) => [part.type, part.value])
+    );
+    const localDateLabel = `${localDate.weekday}, ${localDate.day}.${localDate.month}.${localDate.year}`;
 
     return (
         <div>
@@ -165,7 +179,9 @@ function WeatherDetails({ payload }: { readonly payload: WeatherCachePayload }) 
                     <div className="text-primary-50 text-2xl font-semibold tabular-nums">
                         {localTime}
                     </div>
-                    <div className="text-primary-300 text-sm capitalize">{localDate}</div>
+                    <div className="text-primary-300 text-sm capitalize">
+                        {localDateLabel}
+                    </div>
                 </div>
                 <div className="border-primary-700 bg-primary-900/35 xl:bg-primary-900/35 flex items-center gap-3 rounded-lg border p-3 sm:border-0 sm:bg-transparent sm:p-0 xl:border xl:p-3 2xl:border-0 2xl:bg-transparent 2xl:p-0">
                     {weatherIcon(payload.condition, "size-7 shrink-0 text-amber-300")}

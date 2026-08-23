@@ -192,11 +192,22 @@ export function CacheEntryDetail({ cacheKey, fallbackStatus }: CacheEntryDetailP
                     className="mt-4"
                     focusOnError={false}
                     message={
-                        detail.error === null || detail.data === undefined
+                        detail.error === null
                             ? undefined
                             : cacheBrowserFailureMessage(detail.error)
                     }
                 />
+                {detail.error !== null && (
+                    <Button
+                        className="mt-3"
+                        disabled={detail.isFetching}
+                        onClick={() => void detail.refetch()}
+                        size="sm"
+                        variant="secondary"
+                    >
+                        Retry detail
+                    </Button>
+                )}
                 <Alert
                     className="mt-4"
                     focusOnError={false}

@@ -189,27 +189,27 @@ export function createFixedHostOperationsBroker(
             const units = fixedHostOperationUnits[operationId];
             if (units === undefined) throw brokerFailure();
             const isRestart = operationId === "system-restart";
-            const isWorkerRestart = operationId === "worker-restart";
-            const isApplicationRestart =
-                operationId === "dashboard-restart" ||
+            const isDeferredApplicationRestart =
                 operationId === "dashboard-stack-restart" ||
-                isWorkerRestart;
+                operationId === "worker-restart";
             let deadlineMs = updateDeadlineMs;
             if (operationId === "system-cleanup") {
                 deadlineMs = cleanupDeadlineMs;
             } else if (isRestart) {
                 deadlineMs = restartDeadlineMs;
             }
+            let waitArguments: readonly string[] = ["--wait"];
+            if (isRestart || isDeferredApplicationRestart) {
+                waitArguments = ["--no-block"];
+            } else if (operationId === "dashboard-restart") {
+                waitArguments = [];
+            }
             try {
                 const result = await execute(
                     executable,
                     [
-                        isApplicationRestart ? "restart" : "start",
-                        isRestart ||
-                        isWorkerRestart ||
-                        operationId === "dashboard-stack-restart"
-                            ? "--no-block"
-                            : "--wait",
+                        operationId === "dashboard-restart" ? "restart" : "start",
+                        ...waitArguments,
                         ...units,
                     ],
                     operationSignal(signal, deadlineMs)
@@ -217,9 +217,7 @@ export function createFixedHostOperationsBroker(
                 requireBoundedSuccess(result);
                 return Object.freeze({
                     status:
-                        isRestart ||
-                        isWorkerRestart ||
-                        operationId === "dashboard-stack-restart"
+                        isRestart || isDeferredApplicationRestart
                             ? "accepted"
                             : "completed",
                 });

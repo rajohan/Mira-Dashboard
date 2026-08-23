@@ -30,6 +30,7 @@ function validEnvironment(): Record<string, unknown> {
         MIRA_DASHBOARD_PROJECT_ROOT: "/srv/mira-dashboard",
         MIRA_DASHBOARD_PUBLIC_ORIGIN: "https://dashboard.example.com",
         MIRA_DASHBOARD_RECENT_AUTH_MINUTES: "10",
+        MIRA_DASHBOARD_RESEND_FROM_EMAIL: "no-reply@example.com",
         MIRA_DASHBOARD_SESSION_IDLE_MINUTES: "30",
         MIRA_DASHBOARD_TOTP_KEYRING: serializedKeyring(),
         MIRA_DASHBOARD_TRUSTED_PROXY_IPS: "127.0.0.1,::1",
@@ -42,6 +43,7 @@ function validEnvironment(): Record<string, unknown> {
         OPENCLAW_GATEWAY_TOKEN: "gateway-token-test-value",
         OPENCLAW_GATEWAY_URL: "ws://127.0.0.1:18789",
         PORT: "3100",
+        RESEND_API_KEY: "resend-api-key-test-value",
     };
 }
 
@@ -60,6 +62,20 @@ function expectConfigurationError(
 }
 
 describe("web application configuration", () => {
+    test("requires the paired recovery-mail settings in production", () => {
+        const environment = validEnvironment();
+        delete environment.RESEND_API_KEY;
+        delete environment.MIRA_DASHBOARD_RESEND_FROM_EMAIL;
+        expectConfigurationError(environment, "RESEND_API_KEY", "missing");
+
+        expect(
+            parseWebConfiguration({
+                ...environment,
+                NODE_ENV: "development",
+            }).resend
+        ).toBeUndefined();
+    });
+
     test("parses defaults, domain policy, secrets, and deeply frozen output", () => {
         const environment = validEnvironment();
         delete environment.MIRA_DASHBOARD_LOG_LEVEL;

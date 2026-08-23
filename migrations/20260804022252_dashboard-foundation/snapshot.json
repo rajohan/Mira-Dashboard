@@ -5423,7 +5423,7 @@
           "isExpression": false
         }
       ],
-      "isUnique": true,
+      "isUnique": false,
       "where": "\"agent_task_runs\".\"completed_at\" IS NULL",
       "origin": "manual",
       "name": "agent_task_runs_one_active_agent_idx",
@@ -5622,7 +5622,7 @@
       "isUnique": true,
       "where": null,
       "origin": "manual",
-      "name": "auth_password_reset_tokens_user_purpose_unique",
+      "name": "auth_password_reset_tokens_user_purpose_idx",
       "entityType": "indexes",
       "table": "auth_password_reset_tokens"
     },

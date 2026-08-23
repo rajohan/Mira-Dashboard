@@ -102,4 +102,13 @@ describe("OverviewIncidentsCard", () => {
         expect(await screen.findByText("No active incidents.")).toBeTruthy();
         expect(within(metric("Incidents")).getByText("0")).toBeTruthy();
     });
+
+    test("marks every bounded count as a lower bound when more incidents exist", async () => {
+        renderCard({ incidents, truncated: true });
+        await screen.findByText("Incidents");
+
+        expect(within(metric("Incidents")).getByText("2+")).toBeTruthy();
+        expect(within(metric("Critical")).getByText("1+")).toBeTruthy();
+        expect(within(metric("Error")).getByText("0+")).toBeTruthy();
+    });
 });

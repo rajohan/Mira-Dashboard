@@ -69,16 +69,7 @@ describe("fixed host operations broker", () => {
                     "show",
                     "--property=LoadState",
                     "--value",
-                    "mira-dashboard-web.service",
-                ],
-                executable: "/usr/bin/systemctl",
-            },
-            {
-                arguments_: [
-                    "show",
-                    "--property=LoadState",
-                    "--value",
-                    "mira-dashboard-worker.service",
+                    "mira-dashboard-deferred-stack-restart.timer",
                 ],
                 executable: "/usr/bin/systemctl",
             },
@@ -119,15 +110,14 @@ describe("fixed host operations broker", () => {
                 executable: "/usr/bin/systemctl",
             },
             {
-                arguments_: ["restart", "--wait", "mira-dashboard-web.service"],
+                arguments_: ["restart", "mira-dashboard-web.service"],
                 executable: "/usr/bin/systemctl",
             },
             {
                 arguments_: [
-                    "restart",
+                    "start",
                     "--no-block",
-                    "mira-dashboard-web.service",
-                    "mira-dashboard-worker.service",
+                    "mira-dashboard-deferred-stack-restart.timer",
                 ],
                 executable: "/usr/bin/systemctl",
             },
@@ -156,7 +146,11 @@ describe("fixed host operations broker", () => {
                 executable: "/usr/bin/systemctl",
             },
             {
-                arguments_: ["restart", "--no-block", "mira-dashboard-worker.service"],
+                arguments_: [
+                    "start",
+                    "--no-block",
+                    "mira-dashboard-deferred-worker-restart.timer",
+                ],
                 executable: "/usr/bin/systemctl",
             },
         ]);
@@ -178,10 +172,8 @@ describe("fixed host operations broker", () => {
 
         expect(await broker.availableOperations()).toEqual([
             "dashboard-restart",
-            "dashboard-stack-restart",
             "system-cleanup",
             "system-update",
-            "worker-restart",
         ]);
         try {
             await broker.request("system-update");

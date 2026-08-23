@@ -17,11 +17,10 @@ export const fixedHostOperationUnits: Readonly<
 > = Object.freeze({
     "dashboard-restart": Object.freeze(["mira-dashboard-web.service"]),
     "dashboard-stack-restart": Object.freeze([
-        "mira-dashboard-web.service",
-        "mira-dashboard-worker.service",
+        "mira-dashboard-deferred-stack-restart.timer",
     ]),
     "system-cleanup": Object.freeze(["mira-dashboard-host-system-cleanup.service"]),
     "system-restart": Object.freeze(["mira-dashboard-host-system-restart.service"]),
     "system-update": Object.freeze(["mira-dashboard-host-system-update.service"]),
-    "worker-restart": Object.freeze(["mira-dashboard-worker.service"]),
+    "worker-restart": Object.freeze(["mira-dashboard-deferred-worker-restart.timer"]),
 });

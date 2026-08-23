@@ -11,7 +11,9 @@ polkit.addRule(function (action, subject) {
     var hostOperations = [
         "mira-dashboard-host-system-cleanup.service",
         "mira-dashboard-host-system-restart.service",
-        "mira-dashboard-host-system-update.service"
+        "mira-dashboard-host-system-update.service",
+        "mira-dashboard-deferred-stack-restart.timer",
+        "mira-dashboard-deferred-worker-restart.timer"
     ];
     if (verb === "start" && hostOperations.indexOf(unit) !== -1) {
         return polkit.Result.YES;

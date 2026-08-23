@@ -12,6 +12,7 @@ import { Text } from "../ui/Text.tsx";
 
 export interface OverviewIncidentsCardProps {
     readonly incidents: readonly IncidentSummary[];
+    readonly truncated?: boolean;
 }
 
 /**
@@ -19,7 +20,10 @@ export interface OverviewIncidentsCardProps {
  * @param properties Validated persisted incident generations and continuation state.
  * @returns Read-only active-incident overview with exact incident navigation.
  */
-export function OverviewIncidentsCard({ incidents }: OverviewIncidentsCardProps) {
+export function OverviewIncidentsCard({
+    incidents,
+    truncated = false,
+}: OverviewIncidentsCardProps) {
     const headingId = useId();
     const latestHeadingId = useId();
     const latest = incidents[0];
@@ -60,6 +64,7 @@ export function OverviewIncidentsCard({ incidents }: OverviewIncidentsCardProps)
                         <dt className="text-primary-400 text-xs">{label}</dt>
                         <dd className="text-primary-50 mt-2 text-2xl font-semibold tabular-nums">
                             {value}
+                            {truncated ? "+" : ""}
                         </dd>
                     </div>
                 ))}

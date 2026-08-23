@@ -22,12 +22,32 @@ export function LoginRoute() {
         useSearch({ from: "/login" }) as unknown
     );
     const [recovering, setRecovering] = useState(resetToken !== undefined);
+    const [resetLinkActive, setResetLinkActive] = useState(resetToken !== undefined);
     const client = useDashboardTrpcClient();
     const status = useQuery({
         ...authStatusQueryOptions(client),
         refetchOnMount: false,
     });
 
+    if (verifyEmailToken !== undefined) {
+        return (
+            <EmailVerificationForm
+                onBack={() => globalThis.location.assign("/login")}
+                token={verifyEmailToken}
+            />
+        );
+    }
+    if (resetToken !== undefined && resetLinkActive) {
+        return (
+            <PasswordRecoveryForm
+                onBack={() => {
+                    setResetLinkActive(false);
+                    setRecovering(false);
+                }}
+                token={resetToken}
+            />
+        );
+    }
     if (status.isPending) {
         return <PageState label="Loading sign-in…" status="loading" />;
     }
@@ -39,14 +59,6 @@ export function LoginRoute() {
                 retryBusy={status.isFetching}
                 status="error"
                 title="Sign-in unavailable"
-            />
-        );
-    }
-    if (verifyEmailToken !== undefined) {
-        return (
-            <EmailVerificationForm
-                onBack={() => globalThis.location.assign("/login")}
-                token={verifyEmailToken}
             />
         );
     }

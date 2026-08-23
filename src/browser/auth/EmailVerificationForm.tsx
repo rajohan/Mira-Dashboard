@@ -29,9 +29,14 @@ export function EmailVerificationForm({ onBack, token }: EmailVerificationFormPr
         started.current = true;
         void run(async () => {
             const result = await client.mutation("auth.verifyEmail", { token });
-            const status = await client.query("auth.status", {});
-            await publishAuthenticationStatus(queryClient, status);
             setVerifiedEmail(result.email);
+            try {
+                const status = await client.query("auth.status", {});
+                await publishAuthenticationStatus(queryClient, status);
+            } catch {
+                // The single-use mutation succeeded. Keep its durable success visible;
+                // the next authenticated navigation will refresh status normally.
+            }
         });
     }, [client, queryClient, run, token]);
 

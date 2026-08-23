@@ -15,6 +15,7 @@ import { Text } from "../ui/Text.tsx";
 
 export interface OverviewReportsCardProps {
     readonly reports: readonly ReportSummary[];
+    readonly truncated?: boolean;
 }
 
 /**
@@ -22,7 +23,10 @@ export interface OverviewReportsCardProps {
  * @param properties Validated summaries and continuation state.
  * @returns Read-only reports overview with a route link.
  */
-export function OverviewReportsCard({ reports }: OverviewReportsCardProps) {
+export function OverviewReportsCard({
+    reports,
+    truncated = false,
+}: OverviewReportsCardProps) {
     const headingId = useId();
     const latestHeadingId = useId();
     const latest = reports[0];
@@ -56,6 +60,7 @@ export function OverviewReportsCard({ reports }: OverviewReportsCardProps) {
                         <dt className="text-primary-400 text-xs">{label}</dt>
                         <dd className="text-primary-50 mt-2 text-2xl font-semibold tabular-nums">
                             {value}
+                            {truncated ? "+" : ""}
                         </dd>
                     </div>
                 ))}

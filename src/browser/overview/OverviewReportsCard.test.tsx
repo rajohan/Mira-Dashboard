@@ -104,4 +104,13 @@ describe("OverviewReportsCard", () => {
         expect(within(countRow("Reports")).getByText("0")).toBeTruthy();
         expect(screen.getByRole("link", { name: "View reports" })).toBeTruthy();
     });
+
+    test("marks every bounded count as a lower bound when more reports exist", async () => {
+        renderCard({ reports, truncated: true });
+        await screen.findByText("Reports");
+
+        expect(within(countRow("Reports")).getByText("3+")).toBeTruthy();
+        expect(within(countRow("Warnings")).getByText("1+")).toBeTruthy();
+        expect(within(countRow("Errors")).getByText("1+")).toBeTruthy();
+    });
 });
