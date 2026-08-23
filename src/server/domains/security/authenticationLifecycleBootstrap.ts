@@ -303,7 +303,9 @@ export function createAuthenticationBootstrapOperation(
                         verificationUrl: verificationUrl.href,
                     });
                 } catch {
-                    // Bootstrap remains usable; the authenticated settings flow can resend.
+                    await context.repository.withImmediateTransaction((unit) => {
+                        unit.deletePasswordResetToken(result.verificationToken.prefix);
+                    });
                 }
             }
             return result;

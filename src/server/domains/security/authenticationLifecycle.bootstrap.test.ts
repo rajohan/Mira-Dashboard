@@ -10,6 +10,31 @@ import {
 } from "./testSupport/authenticationLifecycle.ts";
 
 describe("authentication lifecycle bootstrap", () => {
+    test("does not retain pending email verification when bootstrap delivery fails", async () => {
+        const harness = await createAuthenticationLifecycleHarness({
+            passwordRecoveryEmailSender: {
+                send: () => Promise.resolve(),
+                sendVerification: () => Promise.reject(new Error("delivery failed")),
+            },
+            publicOrigin: "https://dashboard.example.com",
+        });
+
+        try {
+            const created = await bootstrapAuthenticationLifecycle(harness);
+
+            expect(created.status).toBe("created");
+            expect(
+                harness.database.sqlite
+                    .query<{ count: number }, []>(
+                        "SELECT count(*) AS count FROM auth_password_reset_tokens"
+                    )
+                    .get()
+            ).toEqual({ count: 0 });
+        } finally {
+            harness.database.sqlite.close(true);
+        }
+    });
+
     test("bootstraps the sole user and persists only the session validator", async () => {
         const harness = await createAuthenticationLifecycleHarness();
 

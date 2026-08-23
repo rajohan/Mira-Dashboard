@@ -1,6 +1,12 @@
 import { describe, expect, jest, test } from "bun:test";
 
+import { QueryClientProvider } from "@tanstack/react-query";
+
 import type { CacheEntryStatus } from "../../contracts/cache.ts";
+import { createDashboardQueryClient } from "../api/queryClient.ts";
+import type { DashboardTrpcClient } from "../api/trpcClient.ts";
+import { DashboardTrpcProvider } from "../api/trpcContext.tsx";
+import { CacheEntryDetail } from "./CacheEntryDetail.tsx";
 import { CacheStatusTable } from "./CacheStatusTable.tsx";
 
 const { render, screen } = await import("@testing-library/react");
@@ -34,6 +40,39 @@ function status(
 }
 
 describe("CacheStatusTable", () => {
+    test("keeps detail loading until the exact payload query settles", () => {
+        const pending = Promise.withResolvers<unknown>();
+        const client = {
+            mutation: () => Promise.reject(new Error("Unexpected mutation")),
+            query: () => pending.promise,
+        } as unknown as DashboardTrpcClient;
+        const queryClient = createDashboardQueryClient();
+        const fallbackStatus = status("system.host");
+
+        try {
+            render(
+                <QueryClientProvider client={queryClient}>
+                    <DashboardTrpcProvider client={client}>
+                        <CacheEntryDetail
+                            cacheKey={fallbackStatus.key}
+                            fallbackStatus={fallbackStatus}
+                        />
+                    </DashboardTrpcProvider>
+                </QueryClientProvider>
+            );
+
+            expect(
+                screen.getByRole("status", {
+                    name: "Loading system.host saved data…",
+                })
+            ).toBeVisible();
+            expect(screen.queryByText("No saved data")).toBeNull();
+        } finally {
+            pending.resolve(undefined);
+            queryClient.clear();
+        }
+    });
+
     test("shows freshness separately from the latest failed attempt", async () => {
         const selected: string[] = [];
         render(

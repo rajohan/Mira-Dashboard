@@ -14,6 +14,7 @@ import { Card } from "../ui/Card.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
+import { LoadingState } from "../ui/LoadingState.tsx";
 import { Text } from "../ui/Text.tsx";
 import { useRefreshCacheEntryMutation } from "./cacheMutations.ts";
 import {
@@ -150,6 +151,16 @@ export function CacheEntryDetail({ cacheKey, fallbackStatus }: CacheEntryDetailP
             resetRefresh();
         }
     }, [detailKey, detailRunId, refreshKey, refreshRunId, resetRefresh]);
+
+    if (detail.data === undefined && detail.error === null) {
+        return (
+            <section aria-label={`${cacheKey} saved data detail`} className="min-w-0">
+                <Card>
+                    <LoadingState label={`Loading ${cacheKey} saved data…`} />
+                </Card>
+            </section>
+        );
+    }
 
     const entry: CacheEntry = detail.data ?? { ...fallbackStatus, payload: undefined };
     const refreshRun =
