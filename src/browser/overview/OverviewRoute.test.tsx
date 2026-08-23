@@ -51,6 +51,7 @@ import {
     type DashboardBrowserCollections,
 } from "../data/dashboardCollections.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
+import { logMaintenanceQueryKey } from "../logs/logQueries.ts";
 import { createDashboardRouter } from "../router.tsx";
 import type { DashboardWebAuthnClient } from "../security/webauthn/webauthnClient.ts";
 import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
@@ -1124,7 +1125,8 @@ describe("Dashboard operational overview foundation", () => {
         expect(weatherContent.getByText("Wind")).toBeTruthy();
         expect(weatherContent.getByText("68%")).toBeTruthy();
         expect(weatherContent.getByText("9 km/h")).toBeTruthy();
-        expect(weatherContent.getByText("Today")).toBeTruthy();
+        expect(weatherContent.getByText("Thu")).toBeTruthy();
+        expect(weatherContent.queryByText("Today")).toBeNull();
         expect(
             screen.getByRole("heading", { level: 3, name: "Provider quota" })
         ).toBeTruthy();
@@ -1393,6 +1395,25 @@ describe("Dashboard operational overview foundation", () => {
         ).toBe(
             "/jobs?runId=019fc968-1a9b-7765-8f1b-d5b863b0e7c0&scheduleId=database.sqlite-maintenance"
         );
+    });
+
+    test("identifies retained log-maintenance data after refresh failure", async () => {
+        const transport = new OverviewTransport({
+            logMaintenanceOutputs: [
+                logMaintenance,
+                new TypeError("hidden log maintenance transport detail"),
+            ],
+        });
+        const { queryClient } = await renderOverview(transport);
+
+        await act(async () => {
+            await queryClient.invalidateQueries({ queryKey: logMaintenanceQueryKey });
+        });
+
+        expect(await screen.findByText(/Last sample:/u)).toHaveTextContent(
+            `The refresh failed. Showing the retained validated result. Last sample: ${formatDashboardDateTime(timestampMs)}.`
+        );
+        expect(screen.queryByText("hidden log maintenance transport detail")).toBeNull();
     });
 
     test("disables SQLite backup while maintenance is active", async () => {

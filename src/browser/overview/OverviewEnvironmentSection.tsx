@@ -134,12 +134,26 @@ function weatherIcon(condition: WeatherCachePayload["condition"], className: str
     return <Cloud {...properties} />;
 }
 
-function forecastDayLabel(date: string, index: number): string {
-    if (index === 0) return "Today";
+function dateInTimeZone(date: Date, timeZone: string): string {
+    const parts = Object.fromEntries(
+        new Intl.DateTimeFormat("en-GB", {
+            day: "2-digit",
+            month: "2-digit",
+            timeZone,
+            year: "numeric",
+        })
+            .formatToParts(date)
+            .map((part) => [part.type, part.value])
+    );
+    return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function forecastDayLabel(date: string, now: Date, timeZone: string): string {
+    if (date === dateInTimeZone(now, timeZone)) return "Today";
     return new Intl.DateTimeFormat("en-GB", {
-        timeZone: "Europe/Oslo",
+        timeZone,
         weekday: "short",
-    }).format(new Date(`${date}T12:00:00+02:00`));
+    }).format(new Date(`${date}T12:00:00Z`));
 }
 
 function WeatherDetails({ payload }: { readonly payload: WeatherCachePayload }) {
@@ -230,13 +244,13 @@ function WeatherDetails({ payload }: { readonly payload: WeatherCachePayload }) 
             </div>
 
             <ul className="mt-3 grid grid-cols-3 gap-1 sm:gap-2 xl:grid-cols-1 2xl:grid-cols-3">
-                {payload.forecast.map((day, index) => (
+                {payload.forecast.map((day) => (
                     <li
                         className="border-primary-700 bg-primary-900/35 flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-md border p-1 text-center text-xs sm:px-2"
                         key={day.date}
                     >
                         <span className="text-primary-400 whitespace-nowrap">
-                            {forecastDayLabel(day.date, index)}
+                            {forecastDayLabel(day.date, now, payload.timezone)}
                         </span>
                         <span className="text-primary-100 inline-flex min-w-0 items-center gap-0.5 text-[11px] leading-none whitespace-nowrap tabular-nums sm:gap-1 sm:text-xs">
                             {weatherIcon(

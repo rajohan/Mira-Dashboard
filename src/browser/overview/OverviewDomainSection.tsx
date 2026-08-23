@@ -15,6 +15,7 @@ import { dockerClient } from "../docker/dockerClient.ts";
 import { dockerOverviewQueryOptions } from "../docker/dockerQueries.ts";
 import { jobRunStateBadgeVariant, jobRunStateLabel } from "../jobs/jobRunPresentation.ts";
 import type { DashboardRoutePath } from "../lib/dashboardRoutes.ts";
+import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { formatByteCount, formatPercent } from "../lib/formatMeasurements.ts";
 import { logClient } from "../logs/logClient.ts";
 import {
@@ -57,12 +58,16 @@ function DomainCard({ children, icon, linkLabel, to, title }: DomainCardProps) {
     );
 }
 
-function backgroundWarning(error: Error | null, available: boolean) {
+function backgroundWarning(
+    error: Error | null,
+    available: boolean,
+    sampledAtMs?: number
+) {
     return error !== null && available ? (
         <Alert
             className="mb-4"
             focusOnError={false}
-            message="The refresh failed. Showing the retained validated result."
+            message={`The refresh failed. Showing the retained validated result.${sampledAtMs === undefined ? "" : ` Last sample: ${formatDashboardDateTime(sampledAtMs)}.`}`}
         />
     ) : null;
 }
@@ -332,7 +337,8 @@ export function OverviewDomainSection() {
                     {backgroundWarning(logs.error, logs.data !== undefined)}
                     {backgroundWarning(
                         logMaintenance.error,
-                        logMaintenance.data !== undefined
+                        logMaintenance.data !== undefined,
+                        logMaintenance.data?.observedAtMs
                     )}
                     {logs.data === undefined ? (
                         <PageState

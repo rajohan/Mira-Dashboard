@@ -148,6 +148,82 @@ describe("authentication password recovery", () => {
         }
     });
 
+    test("serializes overlapping email changes and invalidates superseded links", async () => {
+        const verificationUrls: string[] = [];
+        const deliveries: Array<ReturnType<typeof Promise.withResolvers<void>>> = [];
+        const harness = await createAuthenticationLifecycleHarness({
+            passwordRecoveryEmailSender: {
+                send: () => Promise.resolve(),
+                sendVerification(message) {
+                    verificationUrls.push(message.verificationUrl);
+                    if (verificationUrls.length === 1) return Promise.resolve();
+                    const delivery = Promise.withResolvers<void>();
+                    deliveries.push(delivery);
+                    return delivery.promise;
+                },
+            },
+            publicOrigin: "https://dashboard.example.com",
+        });
+        try {
+            const bootstrap = await bootstrapAuthenticationLifecycle(harness);
+            const identity = {
+                sessionId: bootstrap.session.id,
+                userId: bootstrap.user.id,
+            };
+            const first = harness.service.changeEmail(
+                identity,
+                { email: "first-overlap@example.com" },
+                authenticationLifecycleMetadata
+            );
+            await Bun.sleep(0);
+            const second = harness.service.changeEmail(
+                identity,
+                { email: "second-overlap@example.com" },
+                authenticationLifecycleMetadata
+            );
+            await Bun.sleep(0);
+            expect(verificationUrls).toHaveLength(2);
+
+            deliveries[0]?.resolve();
+            expect(await first).toEqual({
+                email: "first-overlap@example.com",
+                status: "changed",
+            });
+            await Bun.sleep(0);
+            expect(verificationUrls).toHaveLength(3);
+            deliveries[1]?.resolve();
+            expect(await second).toEqual({
+                email: "second-overlap@example.com",
+                status: "changed",
+            });
+
+            const firstToken = new URL(verificationUrls[1] ?? "").searchParams.get(
+                "verifyEmailToken"
+            );
+            const secondToken = new URL(verificationUrls[2] ?? "").searchParams.get(
+                "verifyEmailToken"
+            );
+            if (firstToken === null || secondToken === null) {
+                throw new Error("Verification URL omitted its token");
+            }
+            expect(
+                await harness.service.verifyEmail(
+                    { token: firstToken },
+                    authenticationLifecycleMetadata
+                )
+            ).toEqual({ status: "invalid-token" });
+            expect(
+                await harness.service.verifyEmail(
+                    { token: secondToken },
+                    authenticationLifecycleMetadata
+                )
+            ).toEqual({ email: "second-overlap@example.com", status: "verified" });
+        } finally {
+            for (const delivery of deliveries) delivery.resolve();
+            harness.database.sqlite.close(true);
+        }
+    });
+
     test("keeps account discovery generic and consumes one emailed token", async () => {
         const messages: { readonly resetUrl: string; readonly to: string }[] = [];
         const verificationUrls: string[] = [];

@@ -113,6 +113,28 @@ export function createAuthenticationSessionOperations(
     | "status"
     | "touchSession"
 > {
+    const emailChangeTails = new Map<string, Promise<void>>();
+
+    async function serializeEmailChange<T>(
+        userId: string,
+        operation: () => Promise<T>
+    ): Promise<T> {
+        const previous = emailChangeTails.get(userId) ?? Promise.resolve();
+        let release!: () => void;
+        const current = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        const tail = previous.then(() => current);
+        emailChangeTails.set(userId, tail);
+        await previous;
+        try {
+            return await operation();
+        } finally {
+            release();
+            if (emailChangeTails.get(userId) === tail) emailChangeTails.delete(userId);
+        }
+    }
+
     return {
         authorizeRecentMfa(identity) {
             return context.repository.withReadTransaction((reader) =>
@@ -120,75 +142,88 @@ export function createAuthenticationSessionOperations(
             );
         },
         async changeEmail(identity, input, metadata) {
-            if (
-                context.passwordRecoveryEmailSender === undefined ||
-                context.publicOrigin === undefined
-            ) {
-                return { status: "service-unavailable" } as const;
-            }
-            const prepared = await context.repository.withImmediateTransaction((unit) => {
-                const changedAt = context.now();
-                const access = sessionMutationAccess(context, unit, identity, changedAt);
-                if (access !== "authorized") return { status: access } as const;
-                const user = unit.findUserById(identity.userId)!;
-                if (input.email === user.email && user.emailVerifiedAt !== null) {
-                    return { status: "already-verified" } as const;
+            return serializeEmailChange(identity.userId, async () => {
+                if (
+                    context.passwordRecoveryEmailSender === undefined ||
+                    context.publicOrigin === undefined
+                ) {
+                    return { status: "service-unavailable" } as const;
                 }
-                const previousToken = unit.findPasswordResetTokenForUserPurpose(
-                    user.id,
-                    "email-verification"
+                const prepared = await context.repository.withImmediateTransaction(
+                    (unit) => {
+                        const changedAt = context.now();
+                        const access = sessionMutationAccess(
+                            context,
+                            unit,
+                            identity,
+                            changedAt
+                        );
+                        if (access !== "authorized") return { status: access } as const;
+                        const user = unit.findUserById(identity.userId)!;
+                        if (input.email === user.email && user.emailVerifiedAt !== null) {
+                            return { status: "already-verified" } as const;
+                        }
+                        const token = context.generateEmailVerificationToken();
+                        unit.insertPasswordResetToken({
+                            authenticationVersion: user.authenticationVersion,
+                            createdAt: changedAt,
+                            expiresAt: addMinutes(changedAt, 15),
+                            pendingEmail: input.email,
+                            prefix: token.prefix,
+                            purpose: "email-verification",
+                            userId: user.id,
+                            validatorHash: token.validatorHash,
+                            validatorVersion: token.validatorVersion,
+                        });
+                        context.audit(unit, {
+                            action: "auth.email.verification.request",
+                            actor: sessionActor(identity),
+                            occurredAt: changedAt,
+                            outcome: "succeeded",
+                            requestId: metadata.requestId,
+                            targetId: user.id,
+                            targetType: "user",
+                        });
+                        return {
+                            email: input.email,
+                            status: "deliver" as const,
+                            token,
+                            userId: user.id,
+                        };
+                    }
                 );
-                const token = context.generateEmailVerificationToken();
-                unit.insertPasswordResetToken({
-                    authenticationVersion: user.authenticationVersion,
-                    createdAt: changedAt,
-                    expiresAt: addMinutes(changedAt, 15),
-                    pendingEmail: input.email,
-                    prefix: token.prefix,
-                    purpose: "email-verification",
-                    userId: user.id,
-                    validatorHash: token.validatorHash,
-                    validatorVersion: token.validatorVersion,
+                if (prepared.status !== "deliver") return prepared;
+                const verificationUrl = new URL("/login", context.publicOrigin);
+                verificationUrl.searchParams.set(
+                    "verifyEmailToken",
+                    prepared.token.token
+                );
+                try {
+                    await context.passwordRecoveryEmailSender.sendVerification({
+                        idempotencyKey: `email-verification/${prepared.token.prefix}`,
+                        signal: metadata.signal,
+                        to: prepared.email,
+                        verificationUrl: verificationUrl.href,
+                    });
+                } catch {
+                    await context.repository.withImmediateTransaction((unit) => {
+                        unit.deletePasswordResetToken(prepared.token.prefix);
+                    });
+                    return { status: "service-unavailable" } as const;
+                }
+                await context.repository.withImmediateTransaction((unit) => {
+                    const deliveredToken = unit.findPasswordResetToken(
+                        prepared.token.prefix
+                    );
+                    if (deliveredToken === undefined) return;
+                    unit.deletePasswordResetTokensForUserPurpose(
+                        prepared.userId,
+                        "email-verification"
+                    );
+                    unit.insertPasswordResetToken(deliveredToken);
                 });
-                context.audit(unit, {
-                    action: "auth.email.verification.request",
-                    actor: sessionActor(identity),
-                    occurredAt: changedAt,
-                    outcome: "succeeded",
-                    requestId: metadata.requestId,
-                    targetId: user.id,
-                    targetType: "user",
-                });
-                return {
-                    email: input.email,
-                    previousTokenPrefix: previousToken?.prefix,
-                    status: "deliver" as const,
-                    token,
-                };
+                return { email: prepared.email, status: "changed" } as const;
             });
-            if (prepared.status !== "deliver") return prepared;
-            const verificationUrl = new URL("/login", context.publicOrigin);
-            verificationUrl.searchParams.set("verifyEmailToken", prepared.token.token);
-            try {
-                await context.passwordRecoveryEmailSender.sendVerification({
-                    idempotencyKey: `email-verification/${prepared.token.prefix}`,
-                    signal: metadata.signal,
-                    to: prepared.email,
-                    verificationUrl: verificationUrl.href,
-                });
-            } catch {
-                await context.repository.withImmediateTransaction((unit) => {
-                    unit.deletePasswordResetToken(prepared.token.prefix);
-                });
-                return { status: "service-unavailable" } as const;
-            }
-            if (prepared.previousTokenPrefix !== undefined) {
-                const previousTokenPrefix = prepared.previousTokenPrefix;
-                await context.repository.withImmediateTransaction((unit) => {
-                    unit.deletePasswordResetToken(previousTokenPrefix);
-                });
-            }
-            return { email: prepared.email, status: "changed" } as const;
         },
         listSessions(identity) {
             return context.repository.withReadTransaction((reader) => {

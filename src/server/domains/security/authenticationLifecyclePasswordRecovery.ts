@@ -246,7 +246,10 @@ export function createAuthenticationPasswordRecoveryOperations(
                     return { status: "conflict" } as const;
                 }
                 if (changed === undefined) return { status: "invalid-token" } as const;
-                unit.deletePasswordResetToken(record.prefix);
+                unit.deletePasswordResetTokensForUserPurpose(
+                    user.id,
+                    "email-verification"
+                );
                 unit.deletePasswordResetTokensForUserPurpose(user.id, "password-reset");
                 context.audit(unit, {
                     action: "auth.email.verify",
