@@ -35,7 +35,7 @@ describe("DocsRoute", () => {
             "tagName",
             "MARK"
         );
-        expect(screen.getByText("README.md", { selector: "p" })).toBeVisible();
+        expect(screen.getByText("generated/README.md", { selector: "p" })).toBeVisible();
     });
 
     test("groups schema documents into collapsible domain menus", () => {
@@ -67,6 +67,7 @@ describe("DocsRoute", () => {
         });
         const groupNames = within(navigation)
             .getAllByRole("button")
+            .filter((button) => button.hasAttribute("aria-expanded"))
             .map((button) => button.textContent ?? "");
         const architectureIndex = groupNames.findIndex((name) =>
             name.startsWith("Architecture")
@@ -91,7 +92,9 @@ describe("DocsRoute", () => {
         renderDocsRoute();
 
         fireEvent.click(
-            screen.getByRole("button", { name: /packages and runtime packages/u })
+            screen.getByRole("button", {
+                name: /packages and runtime generated\/packages/u,
+            })
         );
 
         const table = screen.getAllByRole("table")[0]!;
@@ -116,7 +119,7 @@ describe("DocsRoute", () => {
         try {
             renderDocsRoute();
 
-            const path = screen.getByText("README.md", { selector: "p" });
+            const path = screen.getByText("generated/README.md", { selector: "p" });
             const viewerCard = path.closest("section")!;
             expect(viewerCard).toHaveClass("h-[78vh]", "overflow-hidden");
             expect(viewerCard.lastElementChild).toHaveClass(
@@ -171,7 +174,7 @@ describe("DocsRoute", () => {
 
         fireEvent.click(
             screen.getByRole("button", {
-                name: /routes and features routes-and-features\.md/u,
+                name: /routes and features generated\/routes-and-features\.md/u,
             })
         );
         fireEvent.change(
@@ -180,7 +183,7 @@ describe("DocsRoute", () => {
         );
 
         const viewerCard = screen
-            .getByText("routes-and-features.md", { selector: "p" })
+            .getByText("generated/routes-and-features.md", { selector: "p" })
             .closest("section")!;
         const matchCount = viewerCard.querySelectorAll("mark").length;
         expect(matchCount).toBeGreaterThan(1);
@@ -312,7 +315,9 @@ describe("DocsRoute", () => {
         renderDocsRoute();
 
         fireEvent.click(screen.getByRole("link", { name: "tRPC procedures" }));
-        expect(screen.getByText("procedures.md", { selector: "p" })).toBeVisible();
+        expect(
+            screen.getByText("generated/procedures.md", { selector: "p" })
+        ).toBeVisible();
 
         fireEvent.click(screen.getAllByRole("link", { name: "input" })[0]!);
         expect(screen.getByTestId("source-viewer-toolbar")).toHaveTextContent("JSON");

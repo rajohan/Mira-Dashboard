@@ -23,7 +23,7 @@ const focusedFixtures = {
                 [
                     "openapi.raw-http.json",
                     "procedures.md",
-                    "schemas/accountSecurity.beginTotpEnrollment.input.schema.json",
+                    "generated/schemas/accountSecurity.beginTotpEnrollment.input.schema.json",
                 ].includes(path)
             )
         ),

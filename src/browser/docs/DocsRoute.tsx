@@ -25,7 +25,7 @@ interface DocumentGroup {
     readonly label: string;
 }
 
-const initialDocumentPath = "README.md";
+const initialDocumentPath = "generated/README.md";
 const maximumMarkdownHighlights = 1000;
 const maximumNavigationHighlights = 250;
 const visibleScrollbarClassName =
@@ -38,14 +38,15 @@ function documentContent(
 ): string {
     if (document.kind !== "schema") return document.content ?? "";
     const schemaId = document.path
-        .replace(/^schemas\//u, "")
+        .replace(/^(?:generated\/)?schemas\//u, "")
         .replace(/\.schema\.json$/u, "");
     return `${JSON.stringify(openApiDocument.components?.schemas?.[schemaId] ?? {}, null, 2)}\n`;
 }
 
 function documentLabel(path: string): string {
     return path
-        .replace(/^schemas\//u, "")
+        .replace(/^generated\//u, "")
+        .replace(/^(?:generated\/)?schemas\//u, "")
         .replace(/\.(?:md|json)$/u, "")
         .replaceAll("-", " ");
 }
@@ -61,7 +62,8 @@ function documentGroupId(document: GeneratedDocument): string {
     if (document.kind !== "schema") {
         return document.path.includes("/") ? document.path.split("/")[0]! : "reference";
     }
-    const namespace = document.path.replace(/^schemas\//u, "").split(".")[0] ?? "other";
+    const namespace =
+        document.path.replace(/^(?:generated\/)?schemas\//u, "").split(".")[0] ?? "other";
     const normalizedNamespace = namespace.toLowerCase().startsWith("openclaw")
         ? "openClaw"
         : namespace;
@@ -265,8 +267,8 @@ export function DocsRoute({
     const [openApiDocument] = useState(
         () =>
             JSON.parse(
-                documents.find(({ path }) => path === "openapi.raw-http.json")?.content ??
-                    "{}"
+                documents.find(({ path }) => path === "generated/openapi.raw-http.json")
+                    ?.content ?? "{}"
             ) as {
                 readonly components?: {
                     readonly schemas?: Readonly<Record<string, unknown>>;
