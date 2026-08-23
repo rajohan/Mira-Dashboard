@@ -302,6 +302,13 @@ export function WeatherOverviewCard({ className }: { readonly className?: string
                     message="The refresh failed. Showing the retained validated result."
                 />
             )}
+            {weather.error === null && weather.data?.entry.freshness === "stale" && (
+                <Alert
+                    className="mb-3"
+                    focusOnError={false}
+                    message="Showing the last known good weather result."
+                />
+            )}
             {content}
         </Card>
     );
@@ -350,7 +357,7 @@ function formatDollarAmount(value: number, maximumFractionDigits: number): strin
 function openRouterQuotaSummary(provider: QuotaProviderProjection): string | undefined {
     if (provider.remaining === undefined || provider.limit === undefined)
         return undefined;
-    return `${formatDollarAmount(provider.remaining, 3)} left / ${formatDollarAmount(provider.limit, 3)} monthly quota`;
+    return `${formatDollarAmount(provider.remaining, 3)} left / ${formatDollarAmount(provider.limit, 3)} quota`;
 }
 
 function openRouterBalanceSummary(provider: QuotaProviderProjection): string | undefined {

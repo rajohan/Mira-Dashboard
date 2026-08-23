@@ -186,7 +186,8 @@ async function collectOpenRouter(
         const total = creditsProjection.total_credits;
         const limit = keyProjection.limit ?? total;
         const remaining =
-            keyProjection.limit_remaining ?? Math.max(total - keyProjection.usage, 0);
+            keyProjection.limit_remaining ??
+            Math.max(total - creditsProjection.total_usage, 0);
         return v.parse(quotaProviderProjectionSchema, {
             balance: Math.max(total - creditsProjection.total_usage, 0),
             id: "openrouter",

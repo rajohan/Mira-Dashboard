@@ -1,8 +1,10 @@
 import { useForm } from "@tanstack/react-form";
 import { KeyRound, Mail } from "lucide-react";
 import { useState } from "react";
+import * as v from "valibot";
 
 import {
+    authPasswordInputSchema,
     passwordResetInputSchema,
     passwordResetRequestInputSchema,
 } from "../../contracts/auth.ts";
@@ -20,6 +22,21 @@ interface PasswordRecoveryFormProps {
     readonly onBack: () => void;
     readonly token?: string;
 }
+
+const passwordResetFormSchema = v.pipe(
+    v.strictObject({
+        confirmPassword: authPasswordInputSchema,
+        password: authPasswordInputSchema,
+        token: passwordResetInputSchema.entries.token,
+    }),
+    v.forward(
+        v.check(
+            (value) => value.password === value.confirmPassword,
+            "New passwords do not match."
+        ),
+        ["confirmPassword"]
+    )
+);
 
 /**
  * Requests a generic recovery email or consumes the token delivered by it.
@@ -39,14 +56,17 @@ export function PasswordRecoveryForm({ onBack, token }: PasswordRecoveryFormProp
         validators: progressiveFormValidators(passwordResetRequestInputSchema),
     });
     const resetForm = useForm({
-        defaultValues: { password: "", token: token ?? "" },
+        defaultValues: { confirmPassword: "", password: "", token: token ?? "" },
         onSubmit: async ({ value }) => {
             await run(async () => {
-                await client.mutation("auth.resetPassword", value);
+                await client.mutation("auth.resetPassword", {
+                    password: value.password,
+                    token: value.token,
+                });
                 setComplete(true);
             });
         },
-        validators: progressiveFormValidators(passwordResetInputSchema),
+        validators: progressiveFormValidators(passwordResetFormSchema),
     });
     const isReset = token !== undefined;
     const message = isReset
@@ -64,6 +84,28 @@ export function PasswordRecoveryForm({ onBack, token }: PasswordRecoveryFormProp
                             disabled={busy}
                             error={touchedFormFieldError(field.state.meta)}
                             label="New password"
+                        >
+                            <Input
+                                autoComplete="new-password"
+                                className="mt-2"
+                                name={field.name}
+                                onBlur={field.handleBlur}
+                                onChange={(event) =>
+                                    field.handleChange(event.currentTarget.value)
+                                }
+                                required
+                                type="password"
+                                value={field.state.value}
+                            />
+                        </FormField>
+                    )}
+                </resetForm.Field>
+                <resetForm.Field name="confirmPassword">
+                    {(field) => (
+                        <FormField
+                            disabled={busy}
+                            error={touchedFormFieldError(field.state.meta)}
+                            label="Confirm new password"
                         >
                             <Input
                                 autoComplete="new-password"

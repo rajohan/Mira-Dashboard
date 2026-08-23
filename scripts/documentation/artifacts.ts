@@ -331,13 +331,13 @@ export function buildDocumentationArtifacts(
                 artifactPath.startsWith("schemas/")
                     ? {
                           kind: "schema",
-                          path: artifactPath,
+                          path: `generated/${artifactPath}`,
                           source: "generated" as const,
                       }
                     : {
                           content,
                           kind: artifactPath.endsWith(".json") ? "json" : "markdown",
-                          path: artifactPath,
+                          path: `generated/${artifactPath}`,
                           source: "generated" as const,
                       }
             ),

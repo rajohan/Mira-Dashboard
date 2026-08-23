@@ -156,7 +156,7 @@ const hostStatus = Object.freeze(
 const weatherEntry = Object.freeze({
     consecutiveFailures: 0,
     expiresAtMs: timestampMs + 90 * 60_000,
-    freshness: "fresh",
+    freshness: "stale",
     key: "weather.spydeberg",
     lastAttemptAtMs: timestampMs,
     lastAttemptDurationMs: 120,
@@ -1118,6 +1118,9 @@ describe("Dashboard operational overview foundation", () => {
         expect(weatherCard).toBeTruthy();
         const weatherContent = within(weatherCard as HTMLElement);
         expect(weatherContent.getByText("Spydeberg")).toBeTruthy();
+        expect(
+            weatherContent.getByText("Showing the last known good weather result.")
+        ).toBeTruthy();
         expect(weatherContent.getByText("15°C")).toBeTruthy();
         expect(weatherContent.getByText("Feels")).toBeTruthy();
         expect(weatherContent.getByText("13°")).toHaveClass("whitespace-nowrap");
@@ -1131,7 +1134,7 @@ describe("Dashboard operational overview foundation", () => {
             screen.getByRole("heading", { level: 3, name: "Provider quota" })
         ).toBeTruthy();
         expect(screen.getByText("72% remaining")).toBeTruthy();
-        expect(screen.getByText("$0.866 left / $1 monthly quota")).toBeTruthy();
+        expect(screen.getByText("$0.866 left / $1 quota")).toBeTruthy();
         expect(screen.getByText("$4.26 balance · $0.1344 this month")).toBeTruthy();
         expect(screen.getByText("5h 100% left · weekly 66% left")).toBeTruthy();
         expect(

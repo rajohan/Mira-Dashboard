@@ -412,6 +412,41 @@ describe("overview collectors", () => {
         expect(JSON.stringify(payload)).not.toContain("private synchronous");
     });
 
+    test("uses account-wide OpenRouter usage when the key has no limit", async () => {
+        const payload = await collectQuotaPayload(
+            { openRouter: Redacted.make("router-secret") },
+            undefined,
+            {
+                fetch: ((input) => {
+                    const url = inputUrl(input);
+                    if (url.endsWith("/api/v1/key")) {
+                        return Promise.resolve(
+                            jsonResponse({
+                                data: {
+                                    limit: null,
+                                    limit_remaining: null,
+                                    usage: 2,
+                                    usage_monthly: 1,
+                                },
+                            })
+                        );
+                    }
+                    return Promise.resolve(
+                        jsonResponse({ data: { total_credits: 10, total_usage: 4 } })
+                    );
+                }) as typeof fetch,
+                nowMs: () => 5000,
+            }
+        );
+
+        expect(payload.providers.find(({ id }) => id === "openrouter")).toMatchObject({
+            balance: 6,
+            limit: 10,
+            remaining: 6,
+            remainingPercent: 60,
+        });
+    });
+
     for (const invalidProvider of [
         "elevenlabs",
         "openai",

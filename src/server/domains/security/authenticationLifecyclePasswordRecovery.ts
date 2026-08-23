@@ -24,6 +24,14 @@ type RecoveryContext = Pick<
     | "repository"
 >;
 
+function isUniqueEmailConstraintFailure(error: unknown): boolean {
+    return (
+        error instanceof Error &&
+        "code" in error &&
+        error.code === "SQLITE_CONSTRAINT_UNIQUE"
+    );
+}
+
 /**
  * Creates enumeration-safe email request and single-use password-reset operations.
  * @returns Password-recovery lifecycle operations.
@@ -242,8 +250,11 @@ export function createAuthenticationPasswordRecoveryOperations(
                         updatedAt: verifiedAt,
                         userId: user.id,
                     });
-                } catch {
-                    return { status: "conflict" } as const;
+                } catch (error) {
+                    if (isUniqueEmailConstraintFailure(error)) {
+                        return { status: "conflict" } as const;
+                    }
+                    throw error;
                 }
                 if (changed === undefined) return { status: "invalid-token" } as const;
                 unit.deletePasswordResetTokensForUserPurpose(

@@ -267,12 +267,16 @@ describe("generated contract documentation", () => {
         expect(browserReference).toContainEqual(
             expect.objectContaining({
                 kind: "schema",
-                path: "schemas/auth.status.input.schema.json",
+                path: "generated/schemas/auth.status.input.schema.json",
             })
         );
         expect(
-            browserReference.find(({ path }) => path.startsWith("schemas/"))?.content
+            browserReference.find(({ path }) => path.startsWith("generated/schemas/"))
+                ?.content
         ).toBeUndefined();
+        expect(browserReference).toContainEqual(
+            expect.objectContaining({ path: "generated/README.md" })
+        );
         expect(first.has("schemas/files.upload.accepted.schema.json")).toBe(true);
         expect(first.has("schemas/logs.tail.output.schema.json")).toBe(true);
         expect(first.has("schemas/moltbook.feed.result.v1.schema.json")).toBe(true);

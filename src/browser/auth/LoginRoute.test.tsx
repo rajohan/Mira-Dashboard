@@ -222,6 +222,10 @@ describe("Dashboard login route", () => {
             await screen.findByLabelText("New password"),
             "new correct horse battery staple"
         );
+        await userActions.type(
+            screen.getByLabelText("Confirm new password"),
+            "new correct horse battery staple"
+        );
         await userActions.click(screen.getByRole("button", { name: "Change password" }));
         expect(
             await screen.findByText(
@@ -244,6 +248,31 @@ describe("Dashboard login route", () => {
             await screen.findByRole("heading", { level: 1, name: "Reset password" })
         ).toBeTruthy();
         expect(screen.getByLabelText("New password")).toBeTruthy();
+        expect(screen.getByLabelText("Confirm new password")).toBeTruthy();
+    });
+
+    test("does not consume a password-reset token when confirmation differs", async () => {
+        const token = `${"a".repeat(32)}.${"b".repeat(64)}`;
+        const transport = new AuthenticationTransport({ state: "anonymous" });
+        renderAuthenticationRoute(transport, {
+            initialEntry: `/login?resetToken=${token}`,
+        });
+        const userActions = userEvent.setup();
+
+        await userActions.type(
+            await screen.findByLabelText("New password"),
+            "new correct horse battery staple"
+        );
+        await userActions.type(
+            screen.getByLabelText("Confirm new password"),
+            "different correct horse battery staple"
+        );
+        await userActions.click(screen.getByRole("button", { name: "Change password" }));
+
+        expect(await screen.findByText("New passwords do not match.")).toBeTruthy();
+        expect(
+            transport.calls.filter(({ path }) => path === "auth.resetPassword")
+        ).toHaveLength(0);
     });
 
     test("publishes status after consuming an email-verification token", async () => {
