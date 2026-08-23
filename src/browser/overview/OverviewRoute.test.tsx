@@ -1091,7 +1091,10 @@ describe("Dashboard operational overview foundation", () => {
         const weatherContent = within(weatherCard as HTMLElement);
         expect(weatherContent.getByText("Spydeberg")).toBeTruthy();
         expect(weatherContent.getByText("15°C")).toBeTruthy();
-        expect(weatherContent.getByText("Feels 13°")).toHaveClass("whitespace-nowrap");
+        expect(weatherContent.getByText("Feels")).toBeTruthy();
+        expect(weatherContent.getByText("13°")).toHaveClass("whitespace-nowrap");
+        expect(weatherContent.getByText("Humidity")).toBeTruthy();
+        expect(weatherContent.getByText("Wind")).toBeTruthy();
         expect(weatherContent.getByText("68%")).toBeTruthy();
         expect(weatherContent.getByText("9 km/h")).toBeTruthy();
         expect(weatherContent.getByText("Today")).toBeTruthy();

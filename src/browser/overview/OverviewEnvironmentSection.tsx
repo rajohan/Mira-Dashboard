@@ -185,30 +185,33 @@ function WeatherDetails({ payload }: { readonly payload: WeatherCachePayload }) 
             </div>
 
             <div className="text-primary-200 mt-3 grid grid-cols-3 gap-1 text-xs sm:gap-2 xl:grid-cols-1 2xl:grid-cols-3">
-                <span className="border-primary-700 bg-primary-800/40 inline-flex min-w-0 items-center justify-center gap-1 rounded-md border p-1">
-                    <Cloud
-                        aria-hidden="true"
-                        className="text-primary-400 size-4 shrink-0"
-                    />
-                    <span className="whitespace-nowrap">
-                        Feels {formatTemperature(payload.apparentTemperatureC)}
+                <span className="border-primary-700 bg-primary-800/40 flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-md border p-1 text-center">
+                    <span className="text-primary-400">Feels</span>
+                    <span className="text-primary-100 inline-flex items-center gap-1 whitespace-nowrap tabular-nums">
+                        <Cloud
+                            aria-hidden="true"
+                            className="text-primary-300 size-4 shrink-0"
+                        />
+                        {formatTemperature(payload.apparentTemperatureC)}
                     </span>
                 </span>
-                <span className="border-primary-700 bg-primary-800/40 inline-flex min-w-0 items-center justify-center gap-1 rounded-md border p-1">
-                    <Droplets
-                        aria-hidden="true"
-                        className="text-accent-300 size-4 shrink-0"
-                    />
-                    <span className="whitespace-nowrap">
+                <span className="border-primary-700 bg-primary-800/40 flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-md border p-1 text-center">
+                    <span className="text-primary-400">Humidity</span>
+                    <span className="text-primary-100 inline-flex items-center gap-1 whitespace-nowrap tabular-nums">
+                        <Droplets
+                            aria-hidden="true"
+                            className="text-accent-300 size-4 shrink-0"
+                        />
                         {Math.round(payload.humidityPercent)}%
                     </span>
                 </span>
-                <span className="border-primary-700 bg-primary-800/40 inline-flex min-w-0 items-center justify-center gap-1 rounded-md border p-1">
-                    <Wind
-                        aria-hidden="true"
-                        className="text-primary-400 size-4 shrink-0"
-                    />
-                    <span className="whitespace-nowrap">
+                <span className="border-primary-700 bg-primary-800/40 flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-md border p-1 text-center">
+                    <span className="text-primary-400">Wind</span>
+                    <span className="text-primary-100 inline-flex items-center gap-1 whitespace-nowrap tabular-nums">
+                        <Wind
+                            aria-hidden="true"
+                            className="text-primary-300 size-4 shrink-0"
+                        />
                         {Math.round(payload.windKilometresPerHour)} km/h
                     </span>
                 </span>
