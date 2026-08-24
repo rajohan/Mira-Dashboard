@@ -10,6 +10,7 @@ import {
 } from "../api/trpcClient.ts";
 import {
     incidentListQueryOptions,
+    incidentOverviewQueryOptions,
     reportListQueryOptions,
     reportOverviewQueryOptions,
     uniqueMonitoringRows,
@@ -73,6 +74,39 @@ class MonitoringQueryTransport implements DashboardTrpcTransport {
 }
 
 describe("monitoring browser queries", () => {
+    test("isolates one cancellable newest-active incident window", async () => {
+        const transport = new MonitoringQueryTransport({
+            "incidents.list": [{ incidents: [incident] }],
+        });
+        const queryClient = createDashboardQueryClient();
+
+        try {
+            const client = createDashboardTrpcClient(transport);
+            const overviewOptions = incidentOverviewQueryOptions(client);
+            const listOptions = incidentListQueryOptions(client, {
+                states: ["active"],
+            });
+            await queryClient.fetchQuery(overviewOptions);
+
+            expect(overviewOptions.queryKey).toEqual([
+                "monitoring",
+                "incidents",
+                "list",
+                "overview",
+            ]);
+            expect(overviewOptions.queryKey).not.toEqual(listOptions.queryKey);
+            expect(transport.calls.map(({ input, path }) => ({ input, path }))).toEqual([
+                {
+                    input: { filters: { states: ["active"] }, limit: 12 },
+                    path: "incidents.list",
+                },
+            ]);
+            expect(transport.calls[0]?.signal).toBeInstanceOf(AbortSignal);
+        } finally {
+            queryClient.clear();
+        }
+    });
+
     test("isolates the overview to one cancellable newest-report page", async () => {
         const transport = new MonitoringQueryTransport({
             "reports.list": [{ reports: [report] }],

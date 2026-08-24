@@ -16,11 +16,19 @@ type ReportCursor = NonNullable<ListReportsInput["cursor"]>;
 
 export const monitoringQueryKey = ["monitoring"] as const;
 export const incidentQueryKey = [...monitoringQueryKey, "incidents"] as const;
+export const incidentListQueryRoot = [...incidentQueryKey, "list"] as const;
+export const incidentOverviewQueryKey = [...incidentListQueryRoot, "overview"] as const;
 export const reportQueryKey = [...monitoringQueryKey, "reports"] as const;
 export const reportListQueryRoot = [...reportQueryKey, "list"] as const;
 export const reportOverviewQueryKey = [...reportQueryKey, "overview"] as const;
 /** Bounded newest-first report window shared by list and overview surfaces. */
 export const reportListPageSize = 50;
+/** Compact newest-active window rendered on the operational overview. */
+export const incidentOverviewPageSize = 12;
+
+const incidentOverviewFilters = Object.freeze({
+    states: ["active"],
+} as const satisfies NonNullable<ListIncidentsInput["filters"]>);
 
 /**
  * Removes repeated identities while preserving the first, newest-page occurrence.
@@ -43,7 +51,7 @@ export function uniqueMonitoringRows<TValue extends { readonly id: string }>(
  * @returns Stable key for one filtered incident catalog.
  */
 export function incidentListQueryKey(filters: ListIncidentsInput["filters"]) {
-    return [...incidentQueryKey, "list", filters ?? null] as const;
+    return [...incidentListQueryRoot, filters ?? null] as const;
 }
 
 /**
@@ -93,6 +101,27 @@ export function incidentListQueryOptions(
             ),
         getNextPageParam: (lastPage) => lastPage.nextCursor,
         queryKey: incidentListQueryKey(filters),
+        staleTime: 10_000,
+    });
+}
+
+/**
+ * Loads one isolated newest-active incident window for the root overview.
+ * @param client Validated browser tRPC client.
+ * @returns Bounded persisted active-incident overview options.
+ */
+export function incidentOverviewQueryOptions(client: DashboardTrpcClient) {
+    return queryOptions({
+        queryFn: ({ signal }): Promise<ListIncidentsResult> =>
+            client.query(
+                "incidents.list",
+                {
+                    filters: incidentOverviewFilters,
+                    limit: incidentOverviewPageSize,
+                },
+                { signal }
+            ),
+        queryKey: incidentOverviewQueryKey,
         staleTime: 10_000,
     });
 }

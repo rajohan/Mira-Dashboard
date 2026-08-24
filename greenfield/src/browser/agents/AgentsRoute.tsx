@@ -43,7 +43,11 @@ export function AgentsRoute() {
         history.error;
     const pending = configuration.isLoading || statuses.isLoading || history.isPending;
     const hasCompleteData =
-        configuration.isReady && statuses.isReady && history.data !== undefined;
+        configuration.isReady &&
+        statuses.isReady &&
+        collectionQueries.configuration?.data !== undefined &&
+        collectionQueries.statuses?.data !== undefined &&
+        history.data !== undefined;
 
     const refresh = () => {
         void Promise.allSettled([

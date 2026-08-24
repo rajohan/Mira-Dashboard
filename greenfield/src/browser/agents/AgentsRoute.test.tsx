@@ -19,7 +19,7 @@ import {
 import { createDashboardRouter } from "../router.tsx";
 import type { DashboardWebAuthnClient } from "../security/webauthn/webauthnClient.ts";
 import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
-import { agentStatusesQueryKey } from "./agentQueries.ts";
+import { agentConfigurationQueryKey, agentStatusesQueryKey } from "./agentQueries.ts";
 
 const { render, screen, waitFor } = await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
@@ -50,6 +50,7 @@ const unexpectedWebAuthnClient: DashboardWebAuthnClient = Object.freeze({
 
 class AgentTransport implements DashboardTrpcTransport {
     configurationQueryCount = 0;
+    configurationQueryResponse: Promise<unknown> | undefined;
     mainStatus: AgentStatus = {
         agentId: "main",
         currentTask: "Implement agents route",
@@ -71,6 +72,9 @@ class AgentTransport implements DashboardTrpcTransport {
             }
             case "agents.getConfiguration": {
                 this.configurationQueryCount += 1;
+                if (this.configurationQueryResponse !== undefined) {
+                    return this.configurationQueryResponse;
+                }
                 return Promise.resolve({
                     agents: [
                         {
@@ -186,7 +190,89 @@ afterEach(async () => {
     for (const queryClient of queryClients.splice(0)) queryClient.clear();
 });
 
+function renderAgentRoute(
+    transport: AgentTransport,
+    queryClient: ReturnType<typeof createDashboardQueryClient>
+): void {
+    queryClients.push(queryClient);
+    const trpcClient = createDashboardTrpcClient(transport);
+    const collections = createDashboardBrowserCollections(queryClient, trpcClient);
+    collectionRegistries.push(collections);
+    mountedViews.push(
+        render(
+            <DashboardBrowserApplication
+                collections={collections}
+                queryClient={queryClient}
+                realtimeClient={noOpDashboardRealtimeClient}
+                router={createDashboardRouter(
+                    createMemoryHistory({ initialEntries: ["/agents"] })
+                )}
+                trpcClient={trpcClient}
+                webAuthnClient={unexpectedWebAuthnClient}
+            />
+        )
+    );
+}
+
 describe("Dashboard agents route", () => {
+    test("recovers an initial configuration failure through explicit retry", async () => {
+        const transport = new AgentTransport();
+        const queryClient = createDashboardQueryClient();
+        queryClient.setQueryDefaults(agentConfigurationQueryKey, { retry: false });
+        const configurationRequest = Promise.withResolvers<unknown>();
+        transport.configurationQueryResponse = configurationRequest.promise;
+        renderAgentRoute(transport, queryClient);
+
+        const consoleError = spyOn(console, "error").mockImplementation(() => {});
+        try {
+            await act(async () => {
+                configurationRequest.reject(
+                    new TypeError("redacted initial configuration failure")
+                );
+                await configurationRequest.promise.catch(() => {});
+            });
+            expect(await screen.findByRole("alert")).toBeTruthy();
+            expect(screen.queryByText(/redacted initial configuration/u)).toBeNull();
+            expect(screen.queryByRole("heading", { name: "Mira" })).toBeNull();
+
+            transport.configurationQueryResponse = undefined;
+            await userEvent
+                .setup()
+                .click(screen.getByRole("button", { name: "Try again" }));
+            await expectAgentShellReady();
+        } finally {
+            consoleError.mockRestore();
+        }
+    });
+
+    test("recovers an initial status failure through explicit retry", async () => {
+        const transport = new AgentTransport();
+        const queryClient = createDashboardQueryClient();
+        queryClient.setQueryDefaults(agentStatusesQueryKey, { retry: false });
+        const statusRequest = Promise.withResolvers<unknown>();
+        transport.statusQueryResponse = statusRequest.promise;
+        renderAgentRoute(transport, queryClient);
+
+        const consoleError = spyOn(console, "error").mockImplementation(() => {});
+        try {
+            await act(async () => {
+                statusRequest.reject(new TypeError("redacted initial status failure"));
+                await statusRequest.promise.catch(() => {});
+            });
+            expect(await screen.findByRole("alert")).toBeTruthy();
+            expect(screen.queryByText(/redacted initial status/u)).toBeNull();
+            expect(screen.queryByRole("heading", { name: "Mira" })).toBeNull();
+
+            transport.statusQueryResponse = undefined;
+            await userEvent
+                .setup()
+                .click(screen.getByRole("button", { name: "Try again" }));
+            await expectAgentShellReady();
+        } finally {
+            consoleError.mockRestore();
+        }
+    });
+
     test("renders reviewed roles, live status, and durable history", async () => {
         const transport = new AgentTransport();
         const queryClient = createDashboardQueryClient();

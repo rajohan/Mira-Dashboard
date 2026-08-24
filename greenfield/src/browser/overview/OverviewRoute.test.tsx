@@ -2,6 +2,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 
 import { createMemoryHistory } from "@tanstack/react-router";
 
+import type { AgentConfiguration, AgentStatus } from "../../contracts/agentModel.ts";
+import type { ListAgentStatusesResult } from "../../contracts/agents.ts";
 import type { AuthStatus } from "../../contracts/auth.ts";
 import type {
     CacheEntry,
@@ -9,10 +11,19 @@ import type {
     CacheStatusResult,
     RefreshCacheEntryInput,
 } from "../../contracts/cache.ts";
+import type { ListIncidentsResult } from "../../contracts/incidents.ts";
 import type { JobRunSummary } from "../../contracts/jobModel.ts";
-import type { ReportSummary } from "../../contracts/monitoring.ts";
+import type { JobQueueSummary, ListJobRunsResult } from "../../contracts/jobs.ts";
+import type {
+    IncidentSummary,
+    NotificationRecord,
+    ReportSummary,
+} from "../../contracts/monitoring.ts";
+import type { ListNotificationsResult } from "../../contracts/notifications.ts";
 import type { ListReportsResult } from "../../contracts/reports.ts";
 import type { SystemMetrics } from "../../contracts/system.ts";
+import type { TaskSummary } from "../../contracts/taskModel.ts";
+import type { ListTasksResult } from "../../contracts/tasks.ts";
 import { createDashboardQueryClient } from "../api/queryClient.ts";
 import {
     createDashboardTrpcClient,
@@ -25,7 +36,6 @@ import {
 } from "../data/dashboardCollections.ts";
 import { createDashboardRouter } from "../router.tsx";
 import type { DashboardWebAuthnClient } from "../security/webauthn/webauthnClient.ts";
-import { emptyNotificationListResult } from "../test/notifications.ts";
 import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
 
 const { render, screen, waitFor, within } = await import("@testing-library/react");
@@ -195,6 +205,114 @@ const reportPage = Object.freeze({
     reports: [overviewReport],
 } as const satisfies ListReportsResult);
 
+const overviewQueueSummary = Object.freeze({
+    activeResourceClasses: ["light"],
+    control: { claimingPaused: false, updatedAtMs: timestampMs, version: 1 },
+    oldestQueuedAtMs: timestampMs - 60_000,
+    stateCounts: {
+        cancelled: 0,
+        failed: 1,
+        queued: 2,
+        running: 1,
+        succeeded: 12,
+        "timed-out": 0,
+    },
+    workers: [],
+} satisfies JobQueueSummary);
+
+const jobRunPage = Object.freeze({
+    runs: [],
+    summary: overviewQueueSummary,
+} satisfies ListJobRunsResult);
+
+const overviewTask = Object.freeze({
+    assignee: "mira-2026",
+    createdAtMs: timestampMs - 3000,
+    id: "019fe300-0000-7000-8000-000000000031",
+    labels: ["rewrite"],
+    priority: "high",
+    status: "in-progress",
+    title: "Complete the core operations overview",
+    updatedAtMs: timestampMs,
+    version: 2,
+} as const satisfies TaskSummary);
+
+const overviewTaskPage = Object.freeze({
+    tasks: [overviewTask],
+} satisfies ListTasksResult);
+
+const agentConfiguration = Object.freeze({
+    agents: [
+        {
+            description: "Primary Dashboard operator",
+            displayName: "Mira",
+            id: "main",
+            role: "primary",
+        },
+        {
+            description: "Focused research specialist",
+            displayName: "Researcher",
+            id: "researcher",
+            role: "specialist",
+        },
+    ],
+} as const satisfies AgentConfiguration);
+
+const mainAgentStatus = Object.freeze({
+    agentId: "main",
+    currentTask: "Complete the core operations overview",
+    lastActivityAtMs: timestampMs,
+    startedAtMs: timestampMs - 60_000,
+    state: "working",
+} as const satisfies AgentStatus);
+
+const agentStatusPage = Object.freeze({
+    statuses: [
+        mainAgentStatus,
+        {
+            agentId: "researcher",
+            lastActivityAtMs: timestampMs - 120_000,
+            state: "idle",
+        },
+    ],
+} as const satisfies ListAgentStatusesResult);
+
+const overviewNotification = Object.freeze({
+    id: "019fe300-0000-7000-8000-000000000041",
+    incidentGeneration: 1,
+    incidentId: "019fe300-0000-7000-8000-000000000051",
+    kind: "heartbeat",
+    message: "One reviewed notification is still unread.",
+    occurredAtMs: timestampMs,
+    severity: "warning",
+    source: "monitor",
+    title: "Overview notification",
+} as const satisfies NotificationRecord);
+
+const notificationPage = Object.freeze({
+    notifications: [overviewNotification],
+    readCount: 8,
+    unreadCount: 3,
+} satisfies ListNotificationsResult);
+
+const overviewIncident = Object.freeze({
+    fingerprint: "a".repeat(64),
+    firstSeenAtMs: timestampMs - 10_000,
+    generation: 1,
+    id: "019fe300-0000-7000-8000-000000000051",
+    kind: "filesystem",
+    lastSeenAtMs: timestampMs,
+    monitorKey: "ops-check",
+    occurrenceCount: 2,
+    severity: "warning",
+    state: "active",
+    title: "Overview active incident",
+} as const satisfies IncidentSummary);
+
+const incidentPage = Object.freeze({
+    incidents: [overviewIncident],
+} satisfies ListIncidentsResult);
+
 const unexpectedWebAuthnClient: DashboardWebAuthnClient = Object.freeze({
     authenticate: () => Promise.reject(new TypeError("Unexpected authentication")),
     register: () => Promise.reject(new TypeError("Unexpected registration")),
@@ -208,6 +326,7 @@ interface TransportCall {
 interface OverviewTransportOptions {
     readonly cacheEntryOutputs?: readonly (CacheEntry | Error)[];
     readonly cacheStatusOutputs?: readonly (CacheStatusResult | Error)[];
+    readonly jobOutputs?: readonly (ListJobRunsResult | Error)[];
     readonly refreshOutputs?: readonly (JobRunSummary | Error)[];
     readonly reportOutputs?: readonly (ListReportsResult | Error)[];
     readonly systemMetricsOutputs?: readonly (SystemMetrics | Error)[];
@@ -228,6 +347,7 @@ function transportOutput(
 class OverviewTransport implements DashboardTrpcTransport {
     readonly #cacheEntryOutputs: readonly (CacheEntry | Error)[];
     readonly #cacheStatusOutputs: readonly (CacheStatusResult | Error)[];
+    readonly #jobOutputs: readonly (ListJobRunsResult | Error)[];
     readonly #refreshOutputs: readonly (JobRunSummary | Error)[];
     readonly #reportOutputs: readonly (ListReportsResult | Error)[];
     readonly #systemMetricsOutputs: readonly (SystemMetrics | Error)[];
@@ -237,6 +357,7 @@ class OverviewTransport implements DashboardTrpcTransport {
     constructor(options: OverviewTransportOptions = {}) {
         this.#cacheEntryOutputs = options.cacheEntryOutputs ?? [hostEntry];
         this.#cacheStatusOutputs = options.cacheStatusOutputs ?? [cacheStatus];
+        this.#jobOutputs = options.jobOutputs ?? [jobRunPage];
         this.#refreshOutputs = options.refreshOutputs ?? [queuedRefresh];
         this.#reportOutputs = options.reportOutputs ?? [reportPage];
         this.#systemMetricsOutputs = options.systemMetricsOutputs ?? [systemMetrics];
@@ -261,20 +382,35 @@ class OverviewTransport implements DashboardTrpcTransport {
             case "auth.status": {
                 return Promise.resolve(authenticatedStatus);
             }
+            case "agents.getConfiguration": {
+                return Promise.resolve(agentConfiguration);
+            }
+            case "agents.listStatuses": {
+                return Promise.resolve(agentStatusPage);
+            }
             case "cache.getEntry": {
                 return transportOutput(this.#cacheEntryOutputs, callIndex, path);
             }
             case "cache.getStatus": {
                 return transportOutput(this.#cacheStatusOutputs, callIndex, path);
             }
+            case "jobs.listRuns": {
+                return transportOutput(this.#jobOutputs, callIndex, path);
+            }
+            case "incidents.list": {
+                return Promise.resolve(incidentPage);
+            }
             case "notifications.list": {
-                return Promise.resolve(emptyNotificationListResult);
+                return Promise.resolve(notificationPage);
             }
             case "reports.list": {
                 return transportOutput(this.#reportOutputs, callIndex, path);
             }
             case "system.metrics": {
                 return transportOutput(this.#systemMetricsOutputs, callIndex, path);
+            }
+            case "tasks.list": {
+                return Promise.resolve(overviewTaskPage);
             }
             default: {
                 return Promise.reject(new TypeError(`Unexpected query: ${path}`));
@@ -335,6 +471,76 @@ describe("Dashboard operational overview foundation", () => {
         expect(within(cpuCard as HTMLElement).getByText("50%")).toBeTruthy();
         expect(screen.getByText("12.3 Mbit/s")).toBeTruthy();
         expect(screen.queryByText("mira-vps")).toBeNull();
+        expect(
+            await screen.findByRole("heading", {
+                level: 2,
+                name: "Unfinished tasks",
+            })
+        ).toBeTruthy();
+        expect(screen.getAllByText("Complete the core operations overview")).toHaveLength(
+            2
+        );
+        expect(screen.getByRole("link", { name: "View tasks" })).toHaveAttribute(
+            "href",
+            "/tasks"
+        );
+        expect(transport.queryCalls.filter(({ path }) => path === "tasks.list")).toEqual([
+            {
+                input: {
+                    filters: { statuses: ["blocked", "in-progress", "todo"] },
+                    limit: 100,
+                },
+                path: "tasks.list",
+            },
+        ]);
+        expect(
+            await screen.findByRole("heading", { level: 2, name: "Agent activity" })
+        ).toBeTruthy();
+        expect(screen.getByRole("link", { name: "View agents" })).toHaveAttribute(
+            "href",
+            "/agents"
+        );
+        expect(
+            await screen.findByRole("heading", { level: 2, name: "Notifications" })
+        ).toBeTruthy();
+        expect(screen.getByText("Overview notification")).toBeTruthy();
+        expect(
+            transport.queryCalls.filter(({ path }) => path === "notifications.list")
+        ).toEqual([{ input: { limit: 100 }, path: "notifications.list" }]);
+        expect(
+            await screen.findByRole("heading", { level: 2, name: "Active incidents" })
+        ).toBeTruthy();
+        expect(screen.getByText("Overview active incident")).toBeTruthy();
+        expect(screen.getByRole("link", { name: "View incidents" })).toHaveAttribute(
+            "href",
+            "/incidents"
+        );
+        expect(
+            transport.queryCalls.filter(({ path }) => path === "incidents.list")
+        ).toEqual([
+            {
+                input: { filters: { states: ["active"] }, limit: 12 },
+                path: "incidents.list",
+            },
+        ]);
+        expect(
+            await screen.findByRole("heading", {
+                level: 2,
+                name: "Dashboard job queue",
+            })
+        ).toBeTruthy();
+        expect(screen.getByText("Claiming active")).toBeTruthy();
+        expect(screen.getByRole("link", { name: "View Dashboard jobs" })).toHaveAttribute(
+            "href",
+            "/jobs"
+        );
+        const jobSummaryCalls = transport.queryCalls.filter(
+            ({ path }) => path === "jobs.listRuns"
+        );
+        expect(jobSummaryCalls.length).toBeGreaterThan(0);
+        for (const call of jobSummaryCalls) {
+            expect(call).toEqual({ input: { limit: 1 }, path: "jobs.listRuns" });
+        }
         expect(
             await screen.findByRole("heading", {
                 level: 2,
@@ -415,7 +621,9 @@ describe("Dashboard operational overview foundation", () => {
         });
         renderOverview(transport);
 
-        expect(await screen.findByText("Showing 0 of 1")).toBeTruthy();
+        expect(
+            await screen.findByText("Showing 0 of 1", {}, { timeout: 5000 })
+        ).toBeTruthy();
         expect(
             screen.getByRole("heading", {
                 level: 3,

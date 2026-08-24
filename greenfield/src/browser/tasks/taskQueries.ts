@@ -17,6 +17,14 @@ type TaskProgressCursor = NonNullable<ListTaskProgressInput["cursor"]>;
 
 export const taskQueryKey = ["tasks"] as const;
 export const taskListQueryRoot = [...taskQueryKey, "list"] as const;
+export const taskOverviewQueryKey = [...taskListQueryRoot, "overview"] as const;
+
+/** Bounded unfinished-task window rendered on the operational overview. */
+export const taskOverviewPageSize = 100;
+
+const taskOverviewFilters = Object.freeze({
+    statuses: ["blocked", "in-progress", "todo"],
+} as const satisfies NonNullable<ListTasksInput["filters"]>);
 
 /**
  * @param filters Canonical task filters.
@@ -61,6 +69,24 @@ export function taskListQueryOptions(
             ),
         getNextPageParam: (lastPage) => lastPage.nextCursor,
         queryKey: taskListQueryKey(filters),
+        staleTime: 10_000,
+    });
+}
+
+/**
+ * Loads one independent newest-unfinished-task window so root refreshes cannot
+ * widen to every paginated task-board page.
+ * @returns Bounded unfinished-task overview options.
+ */
+export function taskOverviewQueryOptions(client: DashboardTrpcClient) {
+    return queryOptions({
+        queryFn: ({ signal }): Promise<ListTasksResult> =>
+            client.query(
+                "tasks.list",
+                { filters: taskOverviewFilters, limit: taskOverviewPageSize },
+                { signal }
+            ),
+        queryKey: taskOverviewQueryKey,
         staleTime: 10_000,
     });
 }

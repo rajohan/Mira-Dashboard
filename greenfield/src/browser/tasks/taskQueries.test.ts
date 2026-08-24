@@ -5,7 +5,11 @@ import {
     createDashboardTrpcClient,
     type DashboardTrpcTransport,
 } from "../api/trpcClient.ts";
-import { taskListQueryOptions } from "./taskQueries.ts";
+import {
+    taskListQueryOptions,
+    taskListQueryRoot,
+    taskOverviewQueryOptions,
+} from "./taskQueries.ts";
 
 class TaskQueryTransport implements DashboardTrpcTransport {
     input: unknown;
@@ -24,6 +28,26 @@ class TaskQueryTransport implements DashboardTrpcTransport {
 }
 
 describe("task browser queries", () => {
+    test("isolates a bounded unfinished overview beneath the task-list root", async () => {
+        const transport = new TaskQueryTransport();
+        const queryClient = createDashboardQueryClient();
+
+        try {
+            const options = taskOverviewQueryOptions(
+                createDashboardTrpcClient(transport)
+            );
+            await queryClient.fetchQuery(options);
+
+            expect(options.queryKey).toEqual([...taskListQueryRoot, "overview"]);
+            expect(transport.input).toEqual({
+                filters: { statuses: ["blocked", "in-progress", "todo"] },
+                limit: 100,
+            });
+        } finally {
+            queryClient.clear();
+        }
+    });
+
     test("sends bounded server filters through the validated task contract", async () => {
         const transport = new TaskQueryTransport();
         const queryClient = createDashboardQueryClient();
