@@ -223,7 +223,9 @@ async function runtimeSourceBytes(sourceExecutable: string): Promise<bigint> {
  * @param sourceExecutable Canonical runtime executable path.
  * @returns Whether root exclusively controls the complete parent path.
  */
-async function rootControlsRuntimeSource(sourceExecutable: string): Promise<boolean> {
+export async function rootControlsRuntimeSource(
+    sourceExecutable: string
+): Promise<boolean> {
     let candidate = path.dirname(sourceExecutable);
     while (true) {
         const status = await lstat(candidate, { bigint: true });

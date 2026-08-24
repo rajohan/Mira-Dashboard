@@ -71,6 +71,32 @@ async function fixture(): Promise<{
 }
 
 describe("production Bun runtime", () => {
+    test("installs a root-owned runtime from a root-controlled source path", async () => {
+        const { projectRoot } = await fixture();
+        const sourceExecutable = "/usr/bin/true";
+        const sourceStatus = await stat(sourceExecutable);
+        expect(sourceStatus.uid).toBe(0);
+        const state = await prepareProtectedProductionStatePath(projectRoot);
+
+        const installed = await withDeploymentLease(
+            state.stateDirectory,
+            async (lease) => {
+                const paths = await prepareProductionDeliveryDirectories(state);
+                return installProductionRuntime(lease, paths, runtimeIdentity, {
+                    probeRuntime: () => Promise.resolve(runtimeIdentity),
+                    sourceExecutable,
+                });
+            }
+        );
+
+        const installedStatus = await stat(installed.executable);
+        if (typeof process.getuid !== "function") {
+            throw new TypeError("POSIX uid support is required by this test");
+        }
+        expect(installedStatus.uid).toBe(process.getuid());
+        expect(installedStatus.mode & 0o777).toBe(0o500);
+    });
+
     test("installs one immutable exact runtime idempotently inside production", async () => {
         const { projectRoot, sourceExecutable } = await fixture();
         const state = await prepareProtectedProductionStatePath(projectRoot);
