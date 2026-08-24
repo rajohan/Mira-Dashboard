@@ -31,6 +31,11 @@ describe("user row schemas", () => {
         { username: "Raymond" },
         { username: "ab" },
         { passwordHash: "not-an-argon2id-hash" },
+        {
+            passwordHash: validUserInsert.passwordHash.replace("t=3", "t=9"),
+        },
+        { passwordHash: validUserInsert.passwordHash.replace("p=1", "p=2") },
+        { passwordHash: `${validUserInsert.passwordHash}=` },
         { passwordHash: `${validUserInsert.passwordHash}\0suffix` },
         { updatedAt: subMilliseconds(securityCreatedAt, 1) },
         { unexpected: true },

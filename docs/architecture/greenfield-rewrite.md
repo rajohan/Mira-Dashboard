@@ -228,10 +228,10 @@
   hashes canonical JSON for immutable run idempotency. Bounded JSON objects reject cycles,
   non-JSON values, sparse arrays, excessive depth, and payloads over 64 KiB; report
   bodies and problem counts have separate explicit limits.
-- `Bun.serve` rejects request bodies above 16 MiB before the tRPC Fetch adapter parses them. The
-  transport ceiling covers the bounded worst-case monitoring snapshot, including JSON escaping,
-  while preventing Bun's much larger default request-body allowance from becoming an unauthenticated
-  memory-amplification path.
+- The current `Bun.serve` boundary rejects every request body above 64 KiB before the tRPC Fetch
+  adapter parses it. The monitoring submission API is not exposed yet; before it is, its serialized
+  worst case must fit that ceiling or use a separately qualified bounded raw/streaming route. The
+  process-wide allowance is not silently raised to accommodate a hypothetical future payload.
 - The synchronous transaction core and narrow Drizzle repository execute every accepted snapshot
   inside one SQLite `IMMEDIATE` transaction. The transaction inserts the immutable report and monitor run,
   creates or updates incidents, records one immutable observation per run and incident, resolves
@@ -381,6 +381,57 @@
   were removed. Until cutover, schema work regenerates this one baseline and updates its reviewed
   checksums; after cutover, the baseline is immutable and later production changes append real
   forward migrations.
+
+### 2026-08-05 — First-user and password session lifecycle implemented
+
+- The public `auth.status`, `auth.bootstrap`, `auth.login`, and `auth.logout` procedures and the
+  browser-session-only session list, touch, revoke, and password-change procedures now have one
+  generated Valibot/tRPC contract surface. Automation principals cannot cross the browser-session
+  boundary.
+- Bootstrap verifies the submitted Gateway credential through a required injected verifier and
+  never persists that credential. Passwords use the exact canonical Bun Argon2id PHC form
+  `v=19,m=65536,t=3,p=1` with fixed 32-byte salt and digest fields; persisted hashes are validated
+  before Bun can consume their work parameters. Durable sessions store only the SHA-256 validator
+  hash and deliver the one-time validator through an always-`Secure`, `HttpOnly`,
+  `SameSite=Strict` cookie.
+- Password login and bootstrap combine a hashed direct-client-source cooldown with a higher global
+  circuit, so rotating attacker-controlled usernames or client sources cannot bypass all durable
+  throttling. Source buckets untouched for 24 hours are pruned opportunistically on a later failure
+  of that kind and capped at 256 rows per source-scoped kind; successful bootstrap clears every
+  bootstrap bucket because the endpoint closes. Trusted forwarding identity is accepted only from
+  exact configured proxy peers; raw addresses never leave the HTTP boundary.
+- Expensive Argon2 work uses one active operation, a bounded three-item queue, and a rolling
+  process-wide budget of 30 verification/hash units per minute, including successful work. Gateway
+  checks have a separate two-active/four-queued gate, an enforced five-second deadline, and request
+  abort propagation. Underlying verifier promises remain counted until they settle even if they
+  ignore cancellation, preventing timed-out work from accumulating without bound. Failure
+  timestamps are captured after expensive work so every committed cooldown receives its complete
+  duration.
+- Password change increments the authentication version, rotates the current session, and revokes
+  every older session in one immediate transaction. Status, listing, and activity-touch boundaries
+  independently reject stale authentication versions. Session listing and revocation revalidate
+  the caller inside their read/write transaction; repeat revocation of a missing target does not
+  grow the immutable audit ledger. Login and bootstrap transactionally prune inactive sessions and
+  cap each user at 16 active browser sessions.
+- Authentication batching is fail-closed: only the read-only `auth.status` and `auth.sessions`
+  procedures are allowlisted, and every tRPC request is capped at eight procedures, preventing
+  future state-changing auth procedures from inheriting a shared stale request context or public
+  status reads from becoming one-request database amplification. Exact Origin and Fetch Metadata checks still run before
+  authentication or lifecycle work. Any simultaneous bearer and Dashboard-cookie credentials are
+  rejected before context creation. Auth request bodies have a 16 KiB pre-parse ceiling, every
+  current request has a Bun-level 64 KiB ceiling, and every application-handled tRPC success,
+  error, and raw auth rejection uses `Cache-Control: no-store`. A trusted reverse proxy owns the
+  total body-read deadline because Bun buffers request bodies before invoking the Fetch handler;
+  the production composition is hard-bound to `127.0.0.1` so remote access cannot bypass that
+  ingress. The listener uses a 10-second general idle timeout; after its body is fully bounded, an
+  authentication handler receives 120 seconds so the maximum reviewed Gateway queue/deadline can
+  return normally, while `events.stream` explicitly disables the socket timeout. tRPC `HEAD` is
+  rejected at the raw boundary with `no-store`. Cutover qualification must verify the proxy's
+  absolute deadline rather than infer it from Bun's inactivity timeout.
+- The one unpublished fresh-database baseline now includes the `STRICT`
+  `auth_rate_limit_buckets` table. Drizzle reports `no_changes`; checksum, schema, repository,
+  lifecycle, procedure, cookie, batching, and real Fetch-adapter tests cover the slice. Native
+  Gateway transport plus MFA, WebAuthn, recovery, and recent-auth remain later Phase 2 slices.
 
 ## Executive Decision
 

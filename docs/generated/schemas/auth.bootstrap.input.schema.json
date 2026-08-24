@@ -1,0 +1,29 @@
+{
+  "$id": "urn:mira-dashboard:auth.bootstrap.input",
+  "type": "object",
+  "properties": {
+    "gatewayCredential": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "pattern": "^[\\u0021-\\u007E]+$"
+    },
+    "password": {
+      "type": "string",
+      "minLength": 8,
+      "maxLength": 256
+    },
+    "username": {
+      "type": "string",
+      "maxLength": 32,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{2,31}$"
+    }
+  },
+  "required": [
+    "gatewayCredential",
+    "password",
+    "username"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

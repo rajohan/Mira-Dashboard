@@ -18,6 +18,7 @@ import type { AppRouter } from "../../trpc/appRouter.ts";
 import { withTestTimeout } from "../support/promise.ts";
 import {
     createTestApplicationRuntime,
+    createTestAuthenticationLifecycleService,
     createTestAuthenticationResolution,
     createTestSessionAuthentication,
 } from "../support/requestContext.ts";
@@ -45,15 +46,24 @@ afterEach(async () => {
     }
 });
 
-function eventSourceFetchWithCookie(cookie: string) {
-    return (url: string | URL, init: EventSourceFetchInit): Promise<Response> => {
+function eventSourceFetchWithCookie(
+    cookie: string,
+    observeResponse?: (response: Response) => void
+) {
+    return async (url: string | URL, init: EventSourceFetchInit): Promise<Response> => {
         const headers = new Headers(init.headers);
         headers.set("cookie", cookie);
-        return fetch(url, { ...init, headers });
+        const response = await fetch(url, { ...init, headers });
+        observeResponse?.(response);
+        return response;
     };
 }
 
-function createEventsClient(server: ApplicationServer, cookie?: string) {
+function createEventsClient(
+    server: ApplicationServer,
+    cookie?: string,
+    observeResponse?: (response: Response) => void
+) {
     return createTRPCClient<AppRouter>({
         links: [
             httpSubscriptionLink({
@@ -61,7 +71,7 @@ function createEventsClient(server: ApplicationServer, cookie?: string) {
                 ...(cookie
                     ? {
                           eventSourceOptions: {
-                              fetch: eventSourceFetchWithCookie(cookie),
+                              fetch: eventSourceFetchWithCookie(cookie, observeResponse),
                           },
                       }
                     : {}),
@@ -77,6 +87,7 @@ async function startRealtimeServer(
 ): Promise<ApplicationServer> {
     const server = await createServer({
         applicationRuntime,
+        authenticationLifecycle: createTestAuthenticationLifecycleService(),
         authenticateRequest: (request) =>
             request.headers.get("cookie") === sessionCookie
                 ? createTestAuthenticationResolution(
@@ -126,7 +137,14 @@ describe("application server realtime transport", () => {
         });
         const server = await startRealtimeServer(runtime);
 
-        const authenticatedClient = createEventsClient(server, sessionCookie);
+        const observedCacheControl: string[] = [];
+        const authenticatedClient = createEventsClient(
+            server,
+            sessionCookie,
+            (response) => {
+                observedCacheControl.push(response.headers.get("cache-control") ?? "");
+            }
+        );
         const firstEvent = Promise.withResolvers<RealtimeStreamOutput>();
         const authenticatedSubscription = authenticatedClient.events.stream.subscribe(
             { topics: [monitoringRealtimeTopics.reports] },
@@ -155,6 +173,9 @@ describe("application server realtime transport", () => {
         });
         expect(streamCalls).toBe(1);
         expect(streamSignal?.aborted).toBe(false);
+        expect(observedCacheControl[0]).toContain("no-cache");
+        expect(observedCacheControl[0]).toContain("no-store");
+        expect(observedCacheControl[0]).toContain("no-transform");
 
         authenticatedSubscription.unsubscribe();
         await withTestTimeout(
@@ -215,9 +236,9 @@ describe("application server realtime transport", () => {
                 applicationRuntime: runtime,
                 browserOrigin: "https://dashboard.example",
                 database: fixture.database.orm,
-                hostname: "127.0.0.1",
                 port: 0,
                 readiness: createReadinessController(),
+                verifyGatewayCredential: () => Promise.resolve(false),
             });
             servers.push(server);
             const client = createEventsClient(

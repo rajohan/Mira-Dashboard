@@ -1,0 +1,17 @@
+{
+  "$id": "urn:mira-dashboard:auth.revokeSession.input",
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string",
+      "minLength": 32,
+      "maxLength": 32,
+      "pattern": "^[0-9a-f]{32}$"
+    }
+  },
+  "required": [
+    "sessionId"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

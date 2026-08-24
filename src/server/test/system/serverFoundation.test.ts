@@ -15,7 +15,10 @@ import {
 } from "../../platform/readiness/readinessState.ts";
 import * as runtimeIdentityModule from "../../platform/runtime/readRuntimeIdentity.ts";
 import type { AppRouter } from "../../trpc/appRouter.ts";
-import { createTestApplicationRuntime } from "../support/requestContext.ts";
+import {
+    createTestApplicationRuntime,
+    createTestAuthenticationLifecycleService,
+} from "../support/requestContext.ts";
 
 const servers: ApplicationServer[] = [];
 
@@ -26,6 +29,7 @@ async function startServer(): Promise<{
     const readiness = createReadinessController();
     const server = await createServer({
         applicationRuntime: createTestApplicationRuntime(),
+        authenticationLifecycle: createTestAuthenticationLifecycleService(),
         authenticateRequest: () => ({ authentication: { kind: "anonymous" } }),
         hostname: "127.0.0.1",
         port: 0,
@@ -121,6 +125,7 @@ describe("system foundation", () => {
         let authenticationCalls = 0;
         const server = await createServer({
             applicationRuntime: createTestApplicationRuntime(),
+            authenticationLifecycle: createTestAuthenticationLifecycleService(),
             authenticateRequest: () => {
                 authenticationCalls += 1;
                 return { authentication: { kind: "anonymous" } };
@@ -173,6 +178,7 @@ describe("system foundation", () => {
                     return Promise.resolve();
                 },
             }),
+            authenticationLifecycle: createTestAuthenticationLifecycleService(),
             authenticateRequest: () => ({ authentication: { kind: "anonymous" } }),
             hostname: "127.0.0.1",
             port: 0,
@@ -211,6 +217,7 @@ describe("system foundation", () => {
                             return Promise.resolve();
                         },
                     }),
+                    authenticationLifecycle: createTestAuthenticationLifecycleService(),
                     authenticateRequest: () => ({
                         authentication: { kind: "anonymous" },
                     }),
@@ -280,6 +287,7 @@ describe("system foundation", () => {
                             return Promise.resolve();
                         },
                     }),
+                    authenticationLifecycle: createTestAuthenticationLifecycleService(),
                     authenticateRequest: () => ({
                         authentication: { kind: "anonymous" },
                     }),

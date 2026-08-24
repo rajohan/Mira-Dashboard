@@ -1,13 +1,17 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "747702a8-ac08-40e0-8c80-dd4d28e2b51b",
+  "id": "5853ef70-399a-4623-a392-e4c8d5ede95a",
   "prevIds": [
     "00000000-0000-0000-0000-000000000000"
   ],
   "ddl": [
     {
       "name": "audit_events",
+      "entityType": "tables"
+    },
+    {
+      "name": "auth_rate_limit_buckets",
       "entityType": "tables"
     },
     {
@@ -167,6 +171,66 @@
       "name": "target_type",
       "entityType": "columns",
       "table": "audit_events"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "blocked_until",
+      "entityType": "columns",
+      "table": "auth_rate_limit_buckets"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "bucket_key",
+      "entityType": "columns",
+      "table": "auth_rate_limit_buckets"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "failure_count",
+      "entityType": "columns",
+      "table": "auth_rate_limit_buckets"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "first_failed_at",
+      "entityType": "columns",
+      "table": "auth_rate_limit_buckets"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "kind",
+      "entityType": "columns",
+      "table": "auth_rate_limit_buckets"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "table": "auth_rate_limit_buckets"
     },
     {
       "type": "integer",
@@ -1304,6 +1368,15 @@
     },
     {
       "columns": [
+        "bucket_key"
+      ],
+      "nameExplicit": false,
+      "name": "auth_rate_limit_buckets_pk",
+      "table": "auth_rate_limit_buckets",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
         "id"
       ],
       "nameExplicit": false,
@@ -1466,6 +1539,28 @@
       "name": "audit_events_target_occurred_idx",
       "entityType": "indexes",
       "table": "audit_events"
+    },
+    {
+      "columns": [
+        {
+          "value": "kind",
+          "isExpression": false
+        },
+        {
+          "value": "updated_at",
+          "isExpression": false
+        },
+        {
+          "value": "bucket_key",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "auth_rate_limit_buckets_kind_updated_at_idx",
+      "entityType": "indexes",
+      "table": "auth_rate_limit_buckets"
     },
     {
       "columns": [
@@ -1876,6 +1971,36 @@
       "table": "audit_events"
     },
     {
+      "value": "\"blocked_until\" IS NULL OR (\"blocked_until\" BETWEEN 0 AND 8640000000000000 AND \"blocked_until\" > \"updated_at\")",
+      "name": "auth_rate_limit_buckets_blocked_until_check",
+      "entityType": "checks",
+      "table": "auth_rate_limit_buckets"
+    },
+    {
+      "value": "length(\"bucket_key\") = 64 AND instr(\"bucket_key\", char(0)) = 0 AND \"bucket_key\" NOT GLOB '*[^0-9a-f]*'",
+      "name": "auth_rate_limit_buckets_bucket_key_check",
+      "entityType": "checks",
+      "table": "auth_rate_limit_buckets"
+    },
+    {
+      "value": "\"failure_count\" BETWEEN 1 AND 9007199254740991",
+      "name": "auth_rate_limit_buckets_failure_count_check",
+      "entityType": "checks",
+      "table": "auth_rate_limit_buckets"
+    },
+    {
+      "value": "\"kind\" IN ('account-password', 'bootstrap-gateway-global', 'bootstrap-gateway-source', 'login-password-global', 'login-password-source')",
+      "name": "auth_rate_limit_buckets_kind_check",
+      "entityType": "checks",
+      "table": "auth_rate_limit_buckets"
+    },
+    {
+      "value": "\"first_failed_at\" BETWEEN 0 AND 8640000000000000 AND \"updated_at\" BETWEEN 0 AND 8640000000000000 AND \"updated_at\" >= \"first_failed_at\"",
+      "name": "auth_rate_limit_buckets_timestamps_check",
+      "entityType": "checks",
+      "table": "auth_rate_limit_buckets"
+    },
+    {
       "value": "\"authentication_version\" BETWEEN 1 AND 9007199254740991",
       "name": "auth_sessions_authentication_version_check",
       "entityType": "checks",
@@ -2200,7 +2325,7 @@
       "table": "users"
     },
     {
-      "value": "length(\"password_hash\") BETWEEN 32 AND 512 AND instr(\"password_hash\", char(0)) = 0 AND substr(\"password_hash\", 1, 10) = '$argon2id$'",
+      "value": "length(\"password_hash\") = 118 AND instr(\"password_hash\", char(0)) = 0 AND substr(\"password_hash\", 1, 31) = '$argon2id$v=19$m=65536,t=3,p=1$' AND substr(\"password_hash\", 75, 1) = '$' AND substr(\"password_hash\", 32, 43) NOT GLOB '*[^A-Za-z0-9+/]*' AND substr(\"password_hash\", 76, 43) NOT GLOB '*[^A-Za-z0-9+/]*' AND substr(\"password_hash\", 74, 1) GLOB '[AEIMQUYcgkosw048]' AND substr(\"password_hash\", 118, 1) GLOB '[AEIMQUYcgkosw048]'",
       "name": "users_password_hash_check",
       "entityType": "checks",
       "table": "users"

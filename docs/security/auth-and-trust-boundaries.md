@@ -11,39 +11,64 @@ important trust boundaries:
 
 ## Route Authentication
 
-All `/api/*` routes require a Dashboard session except the exact public
-bootstrap/login surface:
+The greenfield server exposes only these public authentication operations:
 
-- `GET|HEAD /api/health/live`
-- `GET|HEAD /api/health/ready`
-- `GET /api/auth/bootstrap`
-- `GET /api/auth/session`
-- `POST /api/auth/register-first-user`
-- `POST /api/auth/login`
-- `POST /api/auth/login/{totp,recovery}`
-- `POST /api/auth/login/webauthn/{options,verify}`
-- `POST /api/auth/logout`
+- `auth.status`
+- `auth.bootstrap`
+- `auth.login`
+- `auth.logout`
+
+`system.runtimeIdentity` and the raw `GET|HEAD /api/health/{live,ready}` probes
+are also public. `auth.sessions`, `auth.touch`, `auth.revokeSession`, and
+`auth.changePassword` require a browser-session principal; an automation
+principal is rejected even if it is otherwise authenticated. Other procedures
+declare their session/automation capability policy in the generated contract
+registry.
 
 An explicitly scoped automation credential can replace the session only for the
 small route allowlist documented below. It cannot authenticate WebSockets or
 other Dashboard route families. Account-security routes are never public merely
 because they contain authentication functionality.
 
-The browser session is stored in the `mira_dashboard_session` HTTP-only cookie.
-The cookie is SameSite Strict and is Secure only when the request is HTTPS or a
-trusted forwarded proto says HTTPS. Sessions use a 30-day absolute lifetime and
-a configurable 30-minute idle lifetime
+The browser session is stored in the `__Host-mira_dashboard_session` HTTP-only cookie.
+The cookie is always `Secure`, `SameSite=Strict`, host-only, and scoped to `/`;
+local browser development therefore uses HTTPS. Sessions use a 30-day absolute
+lifetime and a configurable 30-minute idle lifetime
 (`MIRA_DASHBOARD_SESSION_IDLE_MINUTES`). Polling does not extend idle time;
 frontend requests only touch activity after recent keyboard, pointer, touch, or
 focus activity. Each token combines a non-secret 128-bit selector with an
 independent 256-bit validator. Client-readable session responses expose only the
 selector for identity and revocation; the validator remains in the HTTP-only
 cookie and is stored by Dashboard only as a SHA-256 hash.
+Each user has at most 16 active browser sessions. Session creation
+transactionally removes expired, idle, and authentication-version-stale rows
+before evicting the oldest overflow rows.
 
-Auth routes are rate-limited more tightly than general API routes. Password,
-second-factor, and account-password failures also use persistent, hashed,
-account-scoped buckets with progressive cooldowns. Pending MFA logins expire
-after five minutes and are consumed after success or eight failed attempts.
+Bootstrap, password login, and account-password failures use persistent hashed
+buckets with progressive cooldowns. Login and bootstrap layer a direct-client
+source budget over a higher global circuit; neither budget uses an
+attacker-controlled username. The Bun boundary accepts forwarded client
+identity only from an exact configured proxy peer, canonicalizes the address,
+and exposes only its SHA-256 source identifier to authentication services.
+Source-scoped bucket kinds discard rows untouched for 24 hours and cap their
+cardinality at 256 while retaining the just-written bucket. Cleanup is
+opportunistic when that bucket kind next records a failure; it is not a
+background retention promise. A successful first-user bootstrap closes the
+endpoint and removes every persisted bootstrap source/global bucket.
+
+Argon2 work uses one active operation plus a bounded three-request queue and a
+process-wide rolling budget of 30 work units per minute, including successful
+password verification and hashing. Persisted password hashes must use the one
+canonical Bun Argon2id PHC form `v=19,m=65536,t=3,p=1` with 32-byte salt and
+digest fields. Dashboard rejects every other PHC form before calling Bun, so a
+corrupt or future write path cannot select an attacker-sized Argon2 cost.
+Gateway verification has a separate two-operation/four-item gate, a
+five-second deadline, and request-abort propagation. Timed-out underlying
+verifier promises remain counted until they actually settle; a verifier that
+ignores cancellation therefore cannot accumulate unbounded orphan work.
+Overflow or an exhausted budget fails with `TOO_MANY_REQUESTS`; queued attempts
+recheck durable cooldown state before consuming resources. Pending MFA budgets
+are added with the MFA slice.
 
 ## Two-Step Login And Step-Up
 
@@ -168,11 +193,12 @@ restart, backup actions, cache refreshes, log rotation, scheduled-job mutation,
 and all other unmapped routes are denied even if a credential contains every
 known scope. Add a new route or capability only through a reviewed code change.
 
-On protected routes, a bearer header takes precedence over cookie
-authentication. An invalid bearer returns `401`. A valid credential without the
-exact route scope returns `403`. Neither falls back to broader authentication.
-Allowed and denied automation mutations use the credential id as the
-append-only audit actor.
+Requests carrying both an `Authorization` header and any occurrence of the
+Dashboard session cookie are rejected before authentication, including
+malformed or duplicate cookie values. A lone invalid bearer returns `401`. A
+valid credential without the exact route scope returns `403`; neither case
+falls back to broader authentication. Allowed and denied automation mutations
+use the credential id as the append-only audit actor.
 
 The Dashboard repository tracks a fixed local wrapper and one credential
 profile per OpenClaw caller. On the current host the runtime layout is:
@@ -244,14 +270,16 @@ mutations are rejected before authentication or route execution. Direct API
 clients that do not emit browser provenance headers remain supported and still
 require a scoped credential or session.
 
-Only set `MIRA_DASHBOARD_TRUSTED_PROXY_IPS` when the proxy strips or overwrites
-untrusted forwarding headers. A misconfigured trusted proxy can make rate limits
-and secure-cookie decisions trust attacker-controlled headers.
+Only configure trusted proxy addresses when each named proxy strips or
+overwrites untrusted forwarding headers. The default trusted-proxy list is
+empty; loopback is not implicitly trusted. Untrusted peers cannot influence
+authentication source identity with `X-Real-IP` or `X-Forwarded-For`.
 
-Loopback proxy peers are trusted by default even when
-`MIRA_DASHBOARD_TRUSTED_PROXY_IPS` is unset. If Dashboard is behind a same-host
-reverse proxy, that proxy must still strip or overwrite client-supplied
-forwarding headers before forwarding to Dashboard.
+For an exact trusted peer, Dashboard accepts one canonical address from
+`X-Real-IP` or a single-value `X-Forwarded-For`. If both are present they must
+canonicalize to the same address. Duplicates, chains, conflicts, and malformed
+values fall back to the immediate proxy peer's source bucket. A misconfigured
+trusted proxy can still make rate limits trust attacker-controlled headers.
 
 The tracked frontend development proxy overwrites forwarding identity with the
 actual client peer. If Bun cannot resolve that peer, it forwards an explicit
@@ -268,6 +296,23 @@ operator can correlate a client failure without logging request bodies or
 credentials.
 
 Dashboard responses also set a central browser policy:
+
+- Every application-handled tRPC response, including raw auth transport
+  rejections, uses `Cache-Control: no-store`. Authentication procedure bodies
+  have a 16 KiB raw byte ceiling enforced before JSON parsing; every current
+  request has a Bun-level 64 KiB ceiling, and a tRPC request contains at most
+  eight procedures. Bodyless tRPC `HEAD` requests are rejected at the raw
+  boundary instead of bypassing response metadata. A future route that genuinely needs a
+  larger payload must introduce and qualify a deliberate bounded raw/streaming
+  transport instead of silently raising the process-wide allowance. Bun
+  buffers an incoming body before invoking this Fetch boundary, so the trusted
+  reverse proxy must also enforce a total body-read deadline. The production
+  Dashboard composition is hard-bound to `127.0.0.1`, so it cannot be exposed
+  remotely while bypassing that ingress prerequisite. Bun's listener uses a
+  10-second general idle timeout. Once an auth body has been bounded, its handler
+  receives a 120-second idle budget so the maximum reviewed Gateway queue and
+  verification deadline can complete; the authenticated `events.stream` SSE
+  route disables that socket timeout and owns its heartbeat lifecycle.
 
 - CSP defaults resources to self, blocks object/embed and framing, and keeps the
   existing same-origin WebSocket, HTTPS image/media preview, inline style, and
@@ -293,6 +338,11 @@ Cross-origin requests, missing sessions on protected routes, and requests
 rejected by rate limiting are stopped before audit insertion so they cannot
 grow the immutable table without reaching a handler. Permitted authentication
 route attempts and authenticated route-level denials retain their outcome.
+Session listing and revocation revalidate the caller inside the same database
+transaction as their read/write. Revoking a missing session returns
+`revoked: false` without appending a repeatable no-op event; a successful
+deletion is audited atomically. Repeating logout after its session is gone is
+likewise not appended to the immutable ledger.
 
 Worker-owned execution rows add their own lifecycle events:
 
@@ -305,9 +355,9 @@ Worker-owned execution rows add their own lifecycle events:
 Async job events inherit the initiating request actor and `X-Request-ID`.
 Automatic schedule/startup/system work uses an explicit system actor. Scoped
 credentials use a distinct automation actor type, separate from users. Callers
-select only operational lifecycle fields for audit metadata. The persistence
-layer also bounds depth/size and defensively redacts keys that look like
-credentials, request bodies, payloads, content, or process output. Command
+select only operational lifecycle fields for audit metadata. The authentication
+audit boundary persists only an explicit allowlist of reason and revocation
+fields; unknown fields are dropped rather than heuristically treated as safe. Command
 arguments, file content, config bodies, cookies, tokens, stdout, and stderr are
 never copied into the audit table.
 
@@ -324,16 +374,18 @@ First-user bootstrap is special because it is unauthenticated by design. It must
 stay narrow:
 
 - reject once users exist;
-- validate the submitted OpenClaw Gateway token, then encrypt and persist it,
-  before creating the first user;
-- serialize overlapping attempts;
+- validate the submitted OpenClaw Gateway credential through the injected
+  Gateway verifier without persisting the submitted credential;
+- bound overlapping Gateway and Argon2 work;
 - avoid publishing a usable Dashboard user while Gateway validation is pending;
-- roll back submitted token and user/session state on failure;
-- restore the previously active Gateway token, or shut Gateway down if no
-  previous token existed.
+- recheck the empty-user invariant inside the immediate creation transaction;
+  and
+- atomically create the user, hashed-validator session, audit event, and
+  cooldown cleanup.
 
-After bootstrap is complete, `/api/auth/register-first-user` should behave as a
-closed setup endpoint and must not switch Gateway tokens.
+After bootstrap is complete, `auth.bootstrap` returns `CONFLICT`. It verifies a
+credential already owned by the Gateway composition root and never switches or
+stores Gateway credentials.
 
 Bootstrap still creates an ordinary password-authenticated session after
 Gateway validation. It does not require a physical key during initial setup.
@@ -351,20 +403,11 @@ Other allowed config files retain their existing bounded file policy.
 
 ## Gateway Token Handling
 
-Do not print Gateway token values. `app_config.gateway_token` contains a
-versioned AES-256-GCM envelope bound to its storage context; the external
-`MIRA_DASHBOARD_SECRET_ENCRYPTION_KEY` remains outside SQLite. Persisted values
-must already use the authenticated envelope format; unsupported plaintext or
-malformed values fail startup closed. Inspect only metadata such as length and
-timestamps.
-
-Startup token precedence:
-
-1. `OPENCLAW_GATEWAY_TOKEN`
-2. persisted `app_config.gateway_token`
-
-If an environment token exists, it should be considered the source of truth for
-production.
+Do not print Gateway credential values. Infrastructure credentials remain in
+the environment/Doppler composition boundary and outside SQLite. First-user
+bootstrap passes the submitted value directly to the bounded Gateway verifier,
+then discards it. Dashboard stores neither plaintext nor an encrypted copy of
+that bootstrap credential.
 
 ## Host Operations
 

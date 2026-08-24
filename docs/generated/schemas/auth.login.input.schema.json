@@ -1,0 +1,22 @@
+{
+  "$id": "urn:mira-dashboard:auth.login.input",
+  "type": "object",
+  "properties": {
+    "password": {
+      "type": "string",
+      "minLength": 8,
+      "maxLength": 256
+    },
+    "username": {
+      "type": "string",
+      "maxLength": 32,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{2,31}$"
+    }
+  },
+  "required": [
+    "password",
+    "username"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

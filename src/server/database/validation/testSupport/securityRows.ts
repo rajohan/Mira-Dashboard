@@ -1,5 +1,7 @@
 import { addDays, addMinutes, parseISO } from "date-fns";
 
+import { testDashboardPasswordHash } from "../../../test/support/securityPassword.ts";
+
 export const securityCreatedAt = parseISO("2026-08-05T01:00:00.000Z");
 export const securityUpdatedAt = addMinutes(securityCreatedAt, 1);
 export const securityExpiresAt = addDays(securityCreatedAt, 30);
@@ -15,7 +17,7 @@ export const validUserInsert = Object.freeze({
     createdAt: securityCreatedAt,
     disabledAt: null,
     id: securityUserId,
-    passwordHash: "$argon2id$v=19$m=65536,t=3,p=1$c2FsdA$aGFzaGVkLXZhbGlkYXRvci1ieXRlcw",
+    passwordHash: testDashboardPasswordHash,
     updatedAt: securityUpdatedAt,
     username: "raymond",
 });

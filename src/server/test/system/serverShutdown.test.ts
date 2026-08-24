@@ -5,7 +5,10 @@ import { secondsToMilliseconds } from "date-fns";
 import { createServer } from "../../../app/server.ts";
 import { createReadinessController } from "../../platform/readiness/readinessState.ts";
 import { captureFailure } from "../support/promise.ts";
-import { createTestApplicationRuntime } from "../support/requestContext.ts";
+import {
+    createTestApplicationRuntime,
+    createTestAuthenticationLifecycleService,
+} from "../support/requestContext.ts";
 
 function createPendingBunServer(): {
     readonly server: ReturnType<typeof Bun.serve>;
@@ -50,6 +53,7 @@ describe("application server shutdown", () => {
                         return Promise.resolve();
                     },
                 }),
+                authenticationLifecycle: createTestAuthenticationLifecycleService(),
                 authenticateRequest: () => ({
                     authentication: { kind: "anonymous" },
                 }),
@@ -88,6 +92,7 @@ describe("application server shutdown", () => {
                             return Promise.reject(disposalError);
                         },
                     }),
+                    authenticationLifecycle: createTestAuthenticationLifecycleService(),
                     authenticateRequest: () => ({
                         authentication: { kind: "anonymous" },
                     }),
@@ -125,6 +130,8 @@ describe("application server shutdown", () => {
                                 return Promise.resolve();
                             },
                         }),
+                        authenticationLifecycle:
+                            createTestAuthenticationLifecycleService(),
                         authenticateRequest: () => ({
                             authentication: { kind: "anonymous" },
                         }),

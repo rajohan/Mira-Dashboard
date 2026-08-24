@@ -13,6 +13,7 @@ import { automationPrincipalInsertSchema } from "../../../database/validation/au
 import { userInsertSchema } from "../../../database/validation/users.ts";
 import { generateOpaqueToken } from "../../../shared/opaqueToken.ts";
 import { openFreshMigratedDatabase } from "../../../test/support/freshDatabase.ts";
+import { testDashboardPasswordHash } from "../../../test/support/securityPassword.ts";
 import { createAuthenticationRepository } from "../repository.ts";
 
 export const authenticationTestNow = parseISO("2026-08-05T01:00:00.000Z");
@@ -39,8 +40,7 @@ export async function openAuthenticationTestDatabase(now = authenticationTestNow
                     createdAt: now,
                     disabledAt: null,
                     id: authenticationTestUserId,
-                    passwordHash:
-                        "$argon2id$v=19$m=65536,t=3,p=1$c2FsdA$aGFzaGVkLXZhbGlkYXRvci1ieXRlcw",
+                    passwordHash: testDashboardPasswordHash,
                     updatedAt: now,
                     username: "raymond",
                 })
