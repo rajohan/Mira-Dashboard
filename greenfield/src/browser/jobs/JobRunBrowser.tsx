@@ -510,7 +510,7 @@ export function JobRunBrowser({
                             setScheduleFilterError(undefined);
                             setScheduleDraft(event.currentTarget.value);
                         }}
-                        placeholder="Example: system.worker-smoke"
+                        placeholder="system.worker-smoke"
                         ref={scheduleFilterInputRef}
                         value={scheduleDraft}
                     />

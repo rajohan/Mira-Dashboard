@@ -40,9 +40,9 @@ const sampleReportPaths = Object.freeze(samplePlans.map(({ reportPath }) => repo
 describe("coverage runner", () => {
     test("discovers exact current inventories and creates nine complete batches", async () => {
         const inventories = await loadCoverageTestInventories(projectRoot);
-        expect(inventories.bun).toHaveLength(503);
-        expect(inventories.browser).toHaveLength(179);
-        expect(inventories.storybook).toHaveLength(85);
+        expect(inventories.bun).toHaveLength(508);
+        expect(inventories.browser).toHaveLength(188);
+        expect(inventories.storybook).toHaveLength(87);
 
         const plans = createCoveragePartitionPlan("/tmp/coverage", inventories);
         expect(plans.map(({ name }) => name)).toEqual([
@@ -67,21 +67,21 @@ describe("coverage runner", () => {
                     .filter(({ partition }) => partition === "bun")
                     .flatMap(({ testFiles }) => testFiles)
             ).size
-        ).toBe(503);
+        ).toBe(508);
         expect(
             new Set(
                 plans
                     .filter(({ partition }) => partition === "browser")
                     .flatMap(({ testFiles }) => testFiles)
             ).size
-        ).toBe(179);
+        ).toBe(188);
         expect(
             new Set(
                 plans
                     .filter(({ partition }) => partition === "storybook")
                     .flatMap(({ testFiles }) => testFiles)
             ).size
-        ).toBe(85);
+        ).toBe(87);
     });
 
     test("keeps timing scheduling and exact parallel-3 in every child", () => {

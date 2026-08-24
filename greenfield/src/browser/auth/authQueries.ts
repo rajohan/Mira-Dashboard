@@ -7,6 +7,15 @@ import type { DashboardBrowserCollections } from "../data/dashboardCollections.t
 export const authStatusQueryKey = ["auth", "status"] as const;
 const authenticatedBrowserCacheGenerations = new WeakMap<QueryClient, number>();
 const authenticatedMutationControllers = new WeakMap<QueryClient, Set<AbortController>>();
+interface AuthenticationStatusHoldState {
+    dirty: boolean;
+    holdCount: number;
+}
+
+const authenticationStatusHolds = new WeakMap<
+    QueryClient,
+    AuthenticationStatusHoldState
+>();
 interface AuthenticationStatusTransition {
     readonly completion: Promise<unknown>;
 }
@@ -112,13 +121,24 @@ export async function publishAuthenticationStatus(
  * current at the serialized write point.
  * @returns Whether the guarded status was published.
  */
+interface AuthenticationStatusPublicationOptions {
+    readonly bypassPublicationHold?: boolean;
+}
+
 export async function publishAuthenticationStatusIfCurrent(
     queryClient: QueryClient,
     status: AuthStatus,
-    isCurrent: () => boolean
+    isCurrent: () => boolean,
+    options: AuthenticationStatusPublicationOptions = {}
 ): Promise<boolean> {
+    const { bypassPublicationHold = false } = options;
     return runAuthenticationStatusTransition(queryClient, async () => {
         if (!isCurrent()) return false;
+        const hold = authenticationStatusHolds.get(queryClient);
+        if (!bypassPublicationHold && hold !== undefined) {
+            hold.dirty = true;
+            return true;
+        }
         await queryClient.cancelQueries({
             exact: true,
             queryKey: authStatusQueryKey,
@@ -126,6 +146,56 @@ export async function publishAuthenticationStatusIfCurrent(
         if (!isCurrent()) return false;
         queryClient.setQueryData(authStatusQueryKey, status);
         return true;
+    });
+}
+
+/**
+ * Defers background auth-status publication while a proof rotates the session and
+ * the exact protected operation is replayed against the new cookie.
+ * @returns An idempotent release function for the acquired hold.
+ */
+export function holdAuthenticationStatusPublication(
+    queryClient: QueryClient
+): (reconciled?: boolean) => Promise<void> {
+    const state = authenticationStatusHolds.get(queryClient) ?? {
+        dirty: false,
+        holdCount: 0,
+    };
+    state.holdCount += 1;
+    authenticationStatusHolds.set(queryClient, state);
+    let active = true;
+    return async (reconciled = false) => {
+        if (!active) return;
+        active = false;
+        state.holdCount -= 1;
+        if (state.holdCount > 0) return;
+        if (authenticationStatusHolds.get(queryClient) === state) {
+            authenticationStatusHolds.delete(queryClient);
+        }
+        if (state.dirty && !reconciled) {
+            await queryClient.invalidateQueries({
+                exact: true,
+                queryKey: authStatusQueryKey,
+            });
+        }
+    };
+}
+
+/**
+ * Invalidates auth.status immediately unless a security-verification replay owns a
+ * publication hold. Held invalidations are reconciled from the server afterward.
+ */
+export async function invalidateAuthenticationStatusWhenAllowed(
+    queryClient: QueryClient
+): Promise<void> {
+    const hold = authenticationStatusHolds.get(queryClient);
+    if (hold !== undefined) {
+        hold.dirty = true;
+        return;
+    }
+    await queryClient.invalidateQueries({
+        exact: true,
+        queryKey: authStatusQueryKey,
     });
 }
 

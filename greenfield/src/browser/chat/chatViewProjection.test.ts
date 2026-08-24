@@ -6,7 +6,9 @@ import {
     type GatewaySession,
     type ListGatewaySessionsResult,
 } from "../../contracts/gatewaySessions.ts";
+import { projectChatExternalRun } from "./chatContractAdapter.ts";
 import { sortChatDisplayMessages } from "./chatMessageOrdering.ts";
+import { chatRuntimeMessages, createChatRuntimeStore } from "./chatRuntimeStore.ts";
 import {
     mergeChatMessages,
     projectChatHistory,
@@ -1020,7 +1022,7 @@ describe("chat view projection", () => {
         }
     });
 
-    test("anchors repeated same-text steers to the exact provider run", () => {
+    test("anchors repeated same-text steers to the exact canonical message id", () => {
         const canonicalUser = (id: string, providerRunId: string, sequence: number) => ({
             attachments: [],
             id,
@@ -1033,11 +1035,15 @@ describe("chat view projection", () => {
         const external = (
             id: string,
             sequence: number,
-            precedingUserTextAnchor?: string
+            precedingUserTextAnchor?: string,
+            precedingUserMessageIdAnchor?: string
         ) => ({
             attachments: [],
             id,
             parts: [{ kind: "thinking" as const, status: "running" as const, text: id }],
+            ...(precedingUserMessageIdAnchor === undefined
+                ? {}
+                : { precedingUserMessageIdAnchor }),
             ...(precedingUserTextAnchor === undefined ? {} : { precedingUserTextAnchor }),
             providerRunId: "provider-current",
             role: "assistant" as const,
@@ -1048,10 +1054,13 @@ describe("chat view projection", () => {
         const activityAfterId = "external:provider-current:segment:activity-after";
         const merged = mergeChatMessages(
             [
-                canonicalUser("older-same-text", "provider-older", 1),
+                canonicalUser("older-same-text", "provider-current", 1),
                 canonicalUser("current-steer", "provider-current", 3),
             ],
-            [external(activityBeforeId, 2), external(activityAfterId, 4, "Continue")],
+            [
+                external(activityBeforeId, 2),
+                external(activityAfterId, 4, "Continue", "current-steer"),
+            ],
             new Set()
         );
 
@@ -1063,7 +1072,55 @@ describe("chat view projection", () => {
         ]);
     });
 
-    test("retires every external segment only when canonical assistant coverage arrives", () => {
+    test("does not text-fallback when an exact user anchor is outside the history window", () => {
+        const external = (
+            id: string,
+            sequence: number,
+            precedingUserMessageIdAnchor?: string
+        ) => ({
+            attachments: [],
+            id,
+            parts: [{ kind: "thinking" as const, status: "running" as const, text: id }],
+            ...(precedingUserMessageIdAnchor === undefined
+                ? {}
+                : {
+                      precedingUserMessageIdAnchor,
+                      precedingUserTextAnchor: "Continue",
+                  }),
+            providerRunId: "provider-current",
+            role: "assistant" as const,
+            sequence,
+            sessionKey,
+        });
+        const activityBeforeId = "external:provider-current:segment:activity-before";
+        const activityAfterId = "external:provider-current:segment:activity-after";
+        const merged = mergeChatMessages(
+            [
+                {
+                    attachments: [],
+                    id: "older-same-text",
+                    parts: [{ kind: "text" as const, text: "Continue" }],
+                    providerRunId: "provider-current",
+                    role: "user" as const,
+                    sequence: 1,
+                    sessionKey,
+                },
+            ],
+            [
+                external(activityBeforeId, 2),
+                external(activityAfterId, 4, "current-steer-not-loaded"),
+            ],
+            new Set()
+        );
+
+        expect(merged.map(({ id }) => id)).toEqual([
+            "older-same-text",
+            activityBeforeId,
+            activityAfterId,
+        ]);
+    });
+
+    test("merges richer live activity into an incomplete canonical assistant snapshot", () => {
         const runtime = [
             {
                 attachments: [],
@@ -1110,21 +1167,437 @@ describe("chat view projection", () => {
             mergeChatMessages([canonicalUser], runtime, new Set()).map(({ id }) => id)
         ).toContain("external:provider:segment:tool");
 
-        expect(
-            mergeChatMessages(
-                [
-                    canonicalUser,
+        const merged = mergeChatMessages(
+            [
+                canonicalUser,
+                {
+                    ...canonicalUser,
+                    id: "canonical-assistant",
+                    parts: [{ kind: "text" as const, text: "Done" }],
+                    role: "assistant" as const,
+                    sequence: 2,
+                },
+            ],
+            runtime,
+            new Set()
+        );
+        expect(merged.map(({ id }) => id)).toEqual([
+            "canonical-user",
+            "canonical-assistant",
+        ]);
+        expect(merged[1]?.parts).toEqual([
+            { kind: "thinking", status: "running", text: "Working" },
+            {
+                callId: "call-1",
+                kind: "tool",
+                name: "bash",
+                status: "completed",
+            },
+            { kind: "text", text: "Done" },
+        ]);
+    });
+
+    test("keeps canonical steer between active-run lanes during history echo", () => {
+        const providerRunId = "provider-active-steer";
+        const store = createChatRuntimeStore();
+        store.installExternalRuns(sessionKey, [
+            projectChatExternalRun({
+                continuity: "complete",
+                lifecycle: "active" as const,
+                hasUnprojectedActivity: false,
+                observationEpoch: 1,
+                observedAtMs: 1_800_000_000_000,
+                parts: [
                     {
-                        ...canonicalUser,
-                        id: "canonical-assistant",
-                        parts: [{ kind: "text" as const, text: "Done" }],
-                        role: "assistant" as const,
+                        kind: "thinking",
+                        segmentId: "thinking-before-steer",
+                        sequence: 1,
+                        streamId: "agent:reasoning",
+                        text: "Reasoning before the steer with live detail",
+                    },
+                    {
+                        callId: "tool-before-steer",
+                        input: '{"cmd":"inspect"}',
+                        isError: false,
+                        kind: "tool",
+                        name: "bash",
+                        phase: "started",
                         sequence: 2,
                     },
+                    {
+                        kind: "user",
+                        messageId: "canonical-steer",
+                        sequence: 3,
+                        text: "Adjust the active run",
+                    },
+                    {
+                        kind: "thinking",
+                        segmentId: "thinking-after-steer",
+                        sequence: 4,
+                        streamId: "agent:reasoning",
+                        text: "Reasoning after the steer",
+                    },
+                    {
+                        callId: "tool-after-steer",
+                        input: '{"cmd":"continue"}',
+                        isError: false,
+                        kind: "tool",
+                        name: "bash",
+                        phase: "started",
+                        sequence: 5,
+                    },
                 ],
-                runtime,
-                new Set()
-            ).map(({ id }) => id)
-        ).toEqual(["canonical-user", "canonical-assistant"]);
+                projectionTruncated: false,
+                providerRunId,
+                sessionKey,
+                source: "provider-runtime",
+                text: "",
+                updatedAtMs: 1_800_000_000_000,
+            }),
+        ]);
+        const canonicalUser = {
+            attachments: [],
+            id: "canonical-steer",
+            idempotencyKey: "steer-idempotency-key",
+            parts: [{ kind: "text" as const, text: "Adjust the active run" }],
+            role: "user" as const,
+            sequence: 3,
+            sessionKey,
+        };
+        const canonicalAssistant = {
+            attachments: [],
+            id: "canonical-active-assistant",
+            parts: [
+                {
+                    kind: "thinking" as const,
+                    status: "complete" as const,
+                    text: "Reasoning before the steer",
+                },
+                {
+                    callId: "tool-before-steer",
+                    kind: "tool" as const,
+                    name: "bash",
+                    output: "inspected",
+                    status: "completed" as const,
+                },
+                {
+                    callId: "tool-after-steer",
+                    kind: "tool" as const,
+                    name: "bash",
+                    output: "continued",
+                    status: "completed" as const,
+                },
+                { kind: "text" as const, text: "Continuing with the adjustment." },
+            ],
+            providerRunId,
+            role: "assistant" as const,
+            sequence: 6,
+            sessionKey,
+        };
+        const afterEcho = mergeChatMessages(
+            [canonicalUser, canonicalAssistant],
+            chatRuntimeMessages(store.state, sessionKey),
+            new Set()
+        );
+
+        expect(afterEcho.map(({ id }) => id)).toEqual([
+            `external:${sessionKey}:${providerRunId}:segment:thinking:thinking-before-steer`,
+            `external:${sessionKey}:${providerRunId}:segment:tool:tool-before-steer`,
+            canonicalUser.id,
+            `external:${sessionKey}:${providerRunId}:segment:thinking:thinking-after-steer`,
+            `external:${sessionKey}:${providerRunId}:segment:tool:tool-after-steer`,
+            canonicalAssistant.id,
+        ]);
+        expect(afterEcho[0]?.parts).toEqual([
+            {
+                kind: "thinking",
+                sourceKey: `${providerRunId}:thinking-before-steer`,
+                sourceStreamKey: `${providerRunId}:agent:reasoning`,
+                status: "complete",
+                text: "Reasoning before the steer with live detail",
+            },
+        ]);
+        expect(afterEcho[1]?.parts).toEqual([
+            {
+                callId: "tool-before-steer",
+                input: '{"cmd":"inspect"}',
+                kind: "tool",
+                name: "bash",
+                output: "inspected",
+                status: "completed",
+            },
+        ]);
+        expect(afterEcho[3]?.parts).toEqual([
+            expect.objectContaining({
+                kind: "thinking",
+                text: "Reasoning after the steer",
+            }),
+        ]);
+        expect(afterEcho[4]?.parts).toEqual([
+            {
+                callId: "tool-after-steer",
+                input: '{"cmd":"continue"}',
+                kind: "tool",
+                name: "bash",
+                output: "continued",
+                status: "completed",
+            },
+        ]);
+        expect(afterEcho[5]?.parts).toEqual([
+            { kind: "text", text: "Continuing with the adjustment." },
+        ]);
+    });
+
+    test("keeps a cumulative canonical thinking suffix after the steer boundary", () => {
+        const providerRunId = "provider-cumulative-steer";
+        const externalThinking = (
+            id: string,
+            sequence: number,
+            text: string,
+            anchored = false
+        ) => ({
+            attachments: [],
+            id: `external:${providerRunId}:segment:thinking:${id}`,
+            parts: [{ kind: "thinking" as const, status: "running" as const, text }],
+            ...(anchored
+                ? {
+                      precedingUserMessageIdAnchor: "canonical-cumulative-steer",
+                      precedingUserTextAnchor: "Adjust the active run",
+                  }
+                : {}),
+            providerRunId,
+            role: "assistant" as const,
+            sequence,
+            sessionKey,
+        });
+        const before = externalThinking("before", 1, "Before the steer. ");
+        const after = externalThinking("after", 4, "After the steer.", true);
+        const steer = {
+            attachments: [],
+            id: "canonical-cumulative-steer",
+            parts: [{ kind: "text" as const, text: "Adjust the active run" }],
+            role: "user" as const,
+            sequence: 3,
+            sessionKey,
+        };
+        const canonicalAssistant = {
+            attachments: [],
+            id: "canonical-cumulative-assistant",
+            parts: [
+                {
+                    kind: "thinking" as const,
+                    status: "complete" as const,
+                    text: "Before the steer. After the steer.",
+                },
+                { kind: "text" as const, text: "Done." },
+            ],
+            providerRunId,
+            role: "assistant" as const,
+            sequence: 5,
+            sessionKey,
+        };
+
+        const merged = mergeChatMessages(
+            [steer, canonicalAssistant],
+            [before, after],
+            new Set()
+        );
+
+        expect(merged.map(({ id }) => id)).toEqual([
+            before.id,
+            steer.id,
+            after.id,
+            canonicalAssistant.id,
+        ]);
+        expect(merged[0]?.parts).toEqual([
+            { kind: "thinking", status: "running", text: "Before the steer. " },
+        ]);
+        expect(merged[2]?.parts).toEqual([
+            { kind: "thinking", status: "complete", text: "After the steer." },
+        ]);
+        expect(merged[3]?.parts).toEqual([{ kind: "text", text: "Done." }]);
+    });
+
+    test("does not downgrade a rich live turn across reconnect and history resync", () => {
+        const providerRunId = "provider-reconnect";
+        const store = createChatRuntimeStore();
+        store.installExternalRuns(sessionKey, [
+            projectChatExternalRun({
+                continuity: "complete",
+                lifecycle: "active" as const,
+                hasUnprojectedActivity: false,
+                observationEpoch: 1,
+                observedAtMs: 1_800_000_000_000,
+                parts: [
+                    {
+                        kind: "thinking",
+                        segmentId: "reasoning-1",
+                        sequence: 1,
+                        streamId: "agent:reasoning",
+                        text: "Inspecting the configuration.",
+                    },
+                    {
+                        callId: "call-1",
+                        input: '{"cmd":"inspect"}',
+                        isError: false,
+                        kind: "tool",
+                        name: "bash",
+                        output: "done",
+                        phase: "succeeded",
+                        sequence: 2,
+                    },
+                    {
+                        kind: "assistant",
+                        segmentId: "answer-1",
+                        sequence: 3,
+                        streamId: "assistant",
+                        text: "Finished.",
+                    },
+                ],
+                projectionTruncated: false,
+                providerRunId,
+                sessionKey,
+                source: "provider-runtime",
+                text: "Finished.",
+                updatedAtMs: 1_800_000_000_000,
+            }),
+        ]);
+        store.installExternalRuns(sessionKey, [
+            projectChatExternalRun({
+                continuity: "complete",
+                lifecycle: "active" as const,
+                hasUnprojectedActivity: false,
+                observationEpoch: 2,
+                observedAtMs: 1_800_000_000_100,
+                parts: [
+                    {
+                        kind: "assistant",
+                        segmentId: "answer-1",
+                        sequence: 3,
+                        streamId: "assistant",
+                        text: "Finished.",
+                    },
+                ],
+                projectionTruncated: false,
+                providerRunId,
+                sessionKey,
+                source: "provider-in-flight",
+                text: "Finished.",
+                updatedAtMs: 1_800_000_000_100,
+            }),
+        ]);
+        store.installExternalRuns(sessionKey, []);
+        store.installExternalRuns(sessionKey, []);
+
+        const canonicalUser = {
+            attachments: [],
+            id: "canonical-reconnect-user",
+            parts: [{ kind: "text" as const, text: "Inspect" }],
+            providerRunId,
+            role: "user" as const,
+            sequence: 1,
+            sessionKey,
+        };
+        const canonicalAssistant = {
+            attachments: [],
+            id: "canonical-reconnect-assistant",
+            parts: [{ kind: "text" as const, text: "Finished." }],
+            providerRunId,
+            role: "assistant" as const,
+            sequence: 3,
+            sessionKey,
+        };
+        const merged = mergeChatMessages(
+            [canonicalUser, canonicalAssistant],
+            chatRuntimeMessages(store.state, sessionKey),
+            new Set()
+        );
+
+        expect(
+            store.state.sessions[sessionKey]?.externalRuns[providerRunId]?.omissionCount
+        ).toBe(2);
+        expect(merged.map(({ id }) => id)).toEqual([
+            canonicalUser.id,
+            canonicalAssistant.id,
+        ]);
+        expect(merged[1]?.parts).toEqual([
+            {
+                kind: "thinking",
+                sourceKey: `${providerRunId}:reasoning-1`,
+                sourceStreamKey: `${providerRunId}:agent:reasoning`,
+                status: "complete",
+                text: "Inspecting the configuration.",
+            },
+            {
+                callId: "call-1",
+                input: '{"cmd":"inspect"}',
+                kind: "tool",
+                name: "bash",
+                output: "done",
+                status: "completed",
+            },
+            { kind: "text", text: "Finished." },
+        ]);
+    });
+
+    test("keeps repeated synthetic same-name tool calls distinct during live-history merge", () => {
+        const providerRunId = "provider-repeated-tools";
+        const canonical = [
+            {
+                attachments: [],
+                id: "canonical-repeated-tools",
+                parts: [
+                    {
+                        callId: "history-call-1",
+                        callIdSource: "synthetic" as const,
+                        input: '{"cmd":"pwd"}',
+                        kind: "tool" as const,
+                        name: "bash",
+                        output: "/workspace",
+                        status: "completed" as const,
+                    },
+                    {
+                        callId: "history-call-2",
+                        callIdSource: "synthetic" as const,
+                        input: '{"cmd":"pwd"}',
+                        kind: "tool" as const,
+                        name: "bash",
+                        output: "/workspace",
+                        status: "completed" as const,
+                    },
+                ],
+                providerRunId,
+                role: "assistant" as const,
+                sequence: 3,
+                sessionKey,
+            },
+        ];
+        const runtime = [1, 2].map((sequence) => ({
+            attachments: [],
+            id: `external:${providerRunId}:segment:tool-${sequence}`,
+            parts: [
+                {
+                    callId: `runtime-call-${sequence}`,
+                    callIdSource: "synthetic" as const,
+                    input: '{"cmd":"pwd"}',
+                    kind: "tool" as const,
+                    name: "bash",
+                    output: "/workspace",
+                    status: "completed" as const,
+                },
+            ],
+            providerRunId,
+            role: "assistant" as const,
+            sequence,
+            sessionKey,
+        }));
+
+        const merged = mergeChatMessages(canonical, runtime, new Set());
+        const tools = merged[0]?.parts.filter((part) => part.kind === "tool");
+        expect(tools).toHaveLength(2);
+        expect(tools?.map((part) => (part.kind === "tool" ? part.callId : ""))).toEqual([
+            "history-call-1",
+            "history-call-2",
+        ]);
     });
 });

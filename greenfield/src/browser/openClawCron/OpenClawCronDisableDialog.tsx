@@ -268,7 +268,7 @@ export function OpenClawCronDisableDialog({
                                 setReason(event.target.value);
                                 setReasonError(undefined);
                             }}
-                            placeholder="Example: Paused during database maintenance"
+                            placeholder="Paused during database maintenance"
                             value={reason}
                         />
                     </FormField>

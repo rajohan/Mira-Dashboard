@@ -16,7 +16,8 @@ interface MfaEnrollmentLabelModalProps {
     readonly description: string;
     readonly icon: LucideIcon;
     readonly inputLabel: string;
-    readonly onClose: () => void;
+    readonly onCancel: () => void;
+    readonly onCompleted: () => void;
     readonly onSubmit: (label: string) => Promise<boolean>;
     readonly placeholder: string;
     readonly submitLabel: string;
@@ -30,7 +31,8 @@ export function MfaEnrollmentLabelModal({
     description,
     icon,
     inputLabel,
-    onClose,
+    onCancel,
+    onCompleted,
     onSubmit,
     placeholder,
     submitLabel,
@@ -39,7 +41,7 @@ export function MfaEnrollmentLabelModal({
     const form = useForm({
         defaultValues: { label: "" },
         onSubmit: async ({ value }) => {
-            if (await onSubmit(value.label)) onClose();
+            if (await onSubmit(value.label)) onCompleted();
         },
         validators: { onSubmit: optionalFactorLabelFormSchema },
     });
@@ -48,7 +50,7 @@ export function MfaEnrollmentLabelModal({
         <Modal
             description={description}
             dismissible={!busy}
-            onClose={onClose}
+            onClose={onCancel}
             open
             size="sm"
             title={title}
@@ -82,7 +84,7 @@ export function MfaEnrollmentLabelModal({
                         <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                             <Button
                                 disabled={busy || isSubmitting}
-                                onClick={onClose}
+                                onClick={onCancel}
                                 type="button"
                                 variant="secondary"
                             >

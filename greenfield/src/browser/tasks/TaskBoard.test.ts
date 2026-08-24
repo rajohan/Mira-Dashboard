@@ -8,6 +8,7 @@ const task: TaskSummary = Object.freeze({
     createdAtMs: 1_800_000_000_000,
     id: "019fd984-63e8-7404-a7da-80c6f243794f",
     labels: [],
+    number: 232,
     priority: "high",
     status: "todo",
     title: "Move task",

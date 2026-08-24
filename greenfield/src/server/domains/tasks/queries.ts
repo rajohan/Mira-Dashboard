@@ -1,12 +1,14 @@
 import { getTime } from "date-fns";
 
 import type { TaskDetail } from "../../../contracts/taskModel.ts";
-import type {
-    GetTaskInput,
-    ListTaskProgressInput,
-    ListTaskProgressResult,
-    ListTasksInput,
-    ListTasksResult,
+import {
+    type GetTaskInput,
+    type ListTaskLabelsResult,
+    type ListTaskProgressInput,
+    type ListTaskProgressResult,
+    type ListTasksInput,
+    type ListTasksResult,
+    taskLabelSuggestionMaximum,
 } from "../../../contracts/tasks.ts";
 import { TaskNotFoundError } from "./errors.ts";
 import type { TaskRepository } from "./repositoryTypes.ts";
@@ -15,6 +17,7 @@ import { toTaskDetail, toTaskProgressUpdate, toTaskSummary } from "./serviceReco
 /** Synchronous, snapshot-consistent task queries used by the Effect service. */
 export interface TaskQueryOperations {
     readonly getTask: (input: GetTaskInput) => TaskDetail;
+    readonly listTaskLabels: () => ListTaskLabelsResult;
     readonly listTaskProgress: (input: ListTaskProgressInput) => ListTaskProgressResult;
     readonly listTasks: (input: ListTasksInput) => ListTasksResult;
 }
@@ -37,6 +40,13 @@ export function createTaskQueryOperations(
                 });
             }
             return toTaskDetail(record);
+        },
+        listTaskLabels() {
+            const labels = repository.listTaskLabels();
+            return {
+                labels: labels.slice(0, taskLabelSuggestionMaximum),
+                truncated: labels.length > taskLabelSuggestionMaximum,
+            };
         },
         listTaskProgress(input) {
             return repository.withReadTransaction((reader) => {

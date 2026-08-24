@@ -70,12 +70,24 @@ export const Bootstrap: Story = { args: loginStory(bootstrap) };
 
 export const Password: Story = { args: loginStory(anonymous) };
 
-export const PendingTotp: Story = { args: loginStory(pendingMfa) };
+export const PendingTotp: Story = {
+    args: loginStory(pendingMfa),
+    play: async ({ canvasElement }) => {
+        const canvas = within(canvasElement);
+        await userEvent.click(
+            await canvas.findByRole("button", { name: "Use authenticator app" })
+        );
+        await expect(await canvas.findByLabelText("Authenticator code")).toBeVisible();
+    },
+};
 
 export const RecoveryCode: Story = {
     args: loginStory(pendingMfa),
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement);
+        await userEvent.click(
+            await canvas.findByRole("button", { name: "Use recovery code" })
+        );
         await userEvent.click(await canvas.findByLabelText("Recovery code"));
         await expect(canvas.getByLabelText("Recovery code")).toHaveFocus();
     },
@@ -105,6 +117,9 @@ export const ProofError: Story = {
     },
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement);
+        await userEvent.click(
+            await canvas.findByRole("button", { name: "Use authenticator app" })
+        );
         await userEvent.type(
             await canvas.findByLabelText("Authenticator code"),
             "123456"

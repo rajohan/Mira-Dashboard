@@ -2,13 +2,17 @@ import { useQuery } from "@tanstack/react-query";
 
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { dashboardBrowserFailureMessage } from "../api/trpcError.ts";
-import { PageHeader } from "../ui/PageHeader.tsx";
+import { Heading } from "../ui/Heading.tsx";
 import { PageState } from "../ui/PageState.tsx";
 import { AutomationSecuritySection } from "./AutomationSecuritySection.tsx";
+import { MfaDisableSection } from "./MfaDisableSection.tsx";
 import { MfaManagementSection } from "./MfaManagementSection.tsx";
 import { SecurityAuditSection } from "./SecurityAuditSection.tsx";
 import { accountSecuritySummaryQueryOptions } from "./securityQueries.ts";
-import { SecurityVerificationSection } from "./SecurityVerificationSection.tsx";
+import {
+    DashboardPasswordSection,
+    SecurityVerificationSection,
+} from "./SecurityVerificationSection.tsx";
 import { SessionManagementSection } from "./SessionManagementSection.tsx";
 
 /**
@@ -36,15 +40,15 @@ export function AccountSecurityRoute() {
 
     return (
         <div>
-            <PageHeader
-                description="Manage your password, multi-factor authentication, signed-in browsers, automation access, and security history."
-                eyebrow="Security"
-                title="Account security"
-            />
-            <div className="mt-8 grid gap-6">
+            <Heading className="sr-only" level={1}>
+                Account security
+            </Heading>
+            <div className="grid gap-4">
                 <SecurityVerificationSection summary={summary.data} />
                 <MfaManagementSection summary={summary.data} />
+                <DashboardPasswordSection />
                 <SessionManagementSection />
+                <MfaDisableSection summary={summary.data} />
                 <AutomationSecuritySection />
                 <SecurityAuditSection />
             </div>

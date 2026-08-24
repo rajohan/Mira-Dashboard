@@ -55,20 +55,32 @@ export function isValidSecurityLabel(value: string): boolean {
 
 /** Control-safe label shared by account factors and automation identities. */
 export const securityLabelSchema = v.pipe(
-    v.string("Security label is invalid"),
-    v.minLength(1, "Security label is invalid"),
+    v.string("Enter a name."),
+    v.minLength(1, "Enter a name."),
     // Valibot counts UTF-16 code units. Two units per code point preserves the
     // full astral-character budget before the domain predicate runs.
-    v.maxLength(securityLabelMaximumLength * 2, "Security label is invalid"),
-    v.check(isValidSecurityLabel, "Security label is invalid")
+    v.maxLength(
+        securityLabelMaximumLength * 2,
+        "Use 1–128 visible characters without control characters."
+    ),
+    v.check(
+        isValidSecurityLabel,
+        "Use 1–128 visible characters without control characters."
+    )
 );
 
 /** Stable identifier for a named automation caller, independent of its credentials. */
 export const automationPrincipalIdSchema = v.pipe(
-    v.string("Automation principal id is invalid"),
-    v.minLength(1, "Automation principal id is invalid"),
-    v.maxLength(64, "Automation principal id is invalid"),
-    v.regex(/^[a-z0-9][a-z0-9._-]*$/u, "Automation principal id is invalid")
+    v.string("Enter an account ID."),
+    v.minLength(1, "Enter an account ID."),
+    v.maxLength(
+        64,
+        "Use 1–64 lowercase letters, numbers, periods, underscores, or hyphens. Start with a letter or number."
+    ),
+    v.regex(
+        /^[a-z0-9][a-z0-9._-]*$/u,
+        "Use 1–64 lowercase letters, numbers, periods, underscores, or hyphens. Start with a letter or number."
+    )
 );
 
 /** Non-secret 128-bit selector used to identify an opaque token. */

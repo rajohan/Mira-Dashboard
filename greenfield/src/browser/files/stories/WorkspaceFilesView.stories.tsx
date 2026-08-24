@@ -262,6 +262,19 @@ export const BoundedInventory: Story = {
     },
 };
 
+export const PreviewError: Story = {
+    args: {
+        onPreview: fn(() => Promise.reject(new Error("Private Storybook failure"))),
+    },
+    play: async ({ canvasElement }) => {
+        const canvas = within(canvasElement);
+        await userEvent.click(canvas.getByRole("button", { name: "README.md" }));
+        await expect(await canvas.findByRole("alert")).toHaveTextContent(
+            "The request could not be completed. Try again."
+        );
+    },
+};
+
 export const EditorActionsStayInViewport: Story = {
     parameters: { layout: "fullscreen" },
     play: async ({ canvasElement }) => {

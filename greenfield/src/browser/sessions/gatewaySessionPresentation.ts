@@ -8,6 +8,7 @@ import {
     compareGatewaySessions,
     gatewayPrimarySessionKey,
 } from "../../contracts/gatewaySessions.ts";
+import { formatCompactCount } from "../lib/formatMeasurements.ts";
 
 export const gatewaySessionFilterLabels: Readonly<Record<GatewaySessionFilter, string>> =
     {
@@ -116,18 +117,45 @@ export function gatewaySessionMatchesFilter(
     return filter === "ALL" || session.kind === filter.toLowerCase();
 }
 
-/** @returns Compact token-count copy that preserves unknown and explicit stale states. */
-export function gatewaySessionTokenLabel(
+export interface GatewaySessionTokenPresentation {
+    readonly accessibleLabel: string;
+    readonly compactLabel: string;
+    readonly maximum?: number;
+    readonly value?: number;
+}
+
+/** @returns Compact token copy, exact accessible detail, and a fresh bounded meter. */
+export function gatewaySessionTokenPresentation(
     session: Pick<GatewaySession, "contextTokens" | "totalTokens" | "totalTokensFresh">
-): string {
-    if (session.totalTokens === undefined) return "Unknown";
+): GatewaySessionTokenPresentation {
+    if (session.totalTokens === undefined) {
+        return {
+            accessibleLabel: "Session token use: Unknown",
+            compactLabel: "Unknown",
+        };
+    }
     const formatter = new Intl.NumberFormat();
-    const count = formatter.format(session.totalTokens);
-    const usage =
+    const exactUsage =
         session.contextTokens === undefined
-            ? count
-            : `${count} / ${formatter.format(session.contextTokens)}`;
-    return session.totalTokensFresh ? usage : `~${usage} (last known)`;
+            ? formatter.format(session.totalTokens)
+            : `${formatter.format(session.totalTokens)} of ${formatter.format(session.contextTokens)}`;
+    const compactUsage =
+        session.contextTokens === undefined
+            ? formatCompactCount(session.totalTokens)
+            : `${formatCompactCount(session.totalTokens)} / ${formatCompactCount(session.contextTokens)}`;
+    const current = session.totalTokensFresh;
+    return {
+        accessibleLabel: `Session token use: ${exactUsage}, ${current ? "current" : "out of date"}`,
+        compactLabel: `${current ? "" : "~"}${compactUsage}${current ? "" : " (last known)"}`,
+        maximum:
+            current && session.contextTokens !== undefined
+                ? session.contextTokens
+                : undefined,
+        value:
+            current && session.contextTokens !== undefined
+                ? session.totalTokens
+                : undefined,
+    };
 }
 
 /** @returns Visual kind treatment without implying online health. */
@@ -163,31 +191,31 @@ export interface GatewaySessionConfirmationCopy {
 /** @returns Exact confirmation copy for one explicit upstream control. */
 export function gatewaySessionConfirmationCopy(
     action: GatewaySessionAction,
-    displayName: string
+    session: Pick<GatewaySession, "displayName" | "key">
 ): GatewaySessionConfirmationCopy {
     switch (action) {
         case "compact": {
             return {
-                confirmLabel: "Summarize session",
+                confirmLabel: "Compact session",
                 danger: false,
-                description: `Summarize older context for “${displayName}”? This keeps the session but reduces how much previous conversation it carries forward.`,
-                title: "Summarize older context?",
+                description: `Compact older context for “${session.displayName}”? This keeps the session but reduces how much previous conversation it carries forward. Exact session key: ${session.key}`,
+                title: "Compact session?",
             };
         }
         case "reset": {
             return {
                 confirmLabel: "Reset session",
                 danger: true,
-                description: `Reset “${displayName}”? Its active context will be replaced before the next run.`,
+                description: `Reset “${session.displayName}”? Its active context will be replaced before the next run. Exact session key: ${session.key}`,
                 title: "Reset session?",
             };
         }
         case "delete": {
             return {
-                confirmLabel: "Delete transcript",
+                confirmLabel: "Delete session",
                 danger: true,
-                description: `Delete “${displayName}” and its OpenClaw transcript? This cannot be undone from the Dashboard.`,
-                title: "Delete session transcript?",
+                description: `Delete “${session.displayName}” and its OpenClaw transcript? This cannot be undone from the Dashboard. Exact session key: ${session.key}`,
+                title: "Delete session?",
             };
         }
     }

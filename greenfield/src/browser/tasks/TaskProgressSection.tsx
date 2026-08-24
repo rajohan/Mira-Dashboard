@@ -5,7 +5,7 @@ import { useState } from "react";
 import type { TaskProgressUpdate } from "../../contracts/taskModel.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { dashboardBrowserFailureMessage } from "../api/trpcError.ts";
-import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
+import { formatDashboardDateTimeToMinute } from "../lib/formatDateTime.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
 import { ConfirmModal } from "../ui/ConfirmModal.tsx";
@@ -20,7 +20,9 @@ import { TaskProgressForm } from "./TaskProgressForm.tsx";
 import { taskProgressQueryOptions } from "./taskQueries.ts";
 
 function taskProgressAuthorLabel(update: TaskProgressUpdate): string {
-    return `${update.author.kind}:${update.author.id}`;
+    return update.author.kind === "user"
+        ? `@${update.author.username}`
+        : `Automation · ${update.author.label}`;
 }
 
 interface TaskProgressEntryProps {
@@ -43,18 +45,19 @@ function TaskProgressEntry({
     update,
 }: TaskProgressEntryProps) {
     return (
-        <li className="border-primary-700 bg-primary-800/55 rounded-lg border p-4">
+        <li className="border-primary-700 bg-primary-900/40 rounded border p-3">
             <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                    <Text className="break-all" size="sm">
-                        {taskProgressAuthorLabel(update)}
-                    </Text>
-                    <time
-                        className="text-primary-500 mt-0.5 block text-xs"
-                        dateTime={new Date(update.createdAtMs).toISOString()}
+                    <Text
+                        className="wrap-break-word"
+                        size="sm"
+                        title={`Audit identity: ${update.author.kind}:${update.author.id}`}
                     >
-                        {formatDashboardDateTime(update.createdAtMs)}
-                    </time>
+                        {taskProgressAuthorLabel(update)} ·{" "}
+                        <time dateTime={new Date(update.createdAtMs).toISOString()}>
+                            {formatDashboardDateTimeToMinute(update.createdAtMs)}
+                        </time>
+                    </Text>
                 </div>
                 {!editing && (
                     <div className="flex shrink-0 gap-1">
@@ -131,7 +134,7 @@ export function TaskProgressSection({ taskId }: TaskProgressSectionProps) {
                     failure === null ? undefined : dashboardBrowserFailureMessage(failure)
                 }
             />
-            <div className="border-primary-700 mt-4 border-t pt-5">
+            <div className="mt-4">
                 <TaskProgressForm
                     busy={busy}
                     onSubmit={async (messageMarkdown) => {
@@ -144,6 +147,7 @@ export function TaskProgressSection({ taskId }: TaskProgressSectionProps) {
             )}
             {progress.isSuccess && updates.length === 0 && (
                 <EmptyState
+                    className="mt-5"
                     description="Add an update when work begins or circumstances change."
                     title="No progress updates"
                 />

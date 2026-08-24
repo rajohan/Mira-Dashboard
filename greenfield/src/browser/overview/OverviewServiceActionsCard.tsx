@@ -1,4 +1,3 @@
-import { Link } from "@tanstack/react-router";
 import { Wrench } from "lucide-react";
 import { useId, useState } from "react";
 
@@ -51,14 +50,14 @@ function RunObservation({ label, run }: RunObservationProps) {
             </dd>
             <dd className="text-primary-400 mt-1 text-xs break-all">
                 Run{" "}
-                <Link
+                <ActionLink
                     aria-label={`Open Dashboard job ${run.id}`}
                     className="text-accent-300 hover:text-accent-200 font-mono"
                     search={{ runId: run.id }}
                     to="/jobs"
                 >
                     {run.id}
-                </Link>
+                </ActionLink>
             </dd>
         </div>
     );

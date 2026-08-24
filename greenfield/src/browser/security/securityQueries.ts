@@ -1,7 +1,7 @@
 import { queryOptions, type QueryClient } from "@tanstack/react-query";
 
 import type { DashboardTrpcClient } from "../api/trpcClient.ts";
-import { authStatusQueryKey } from "../auth/authQueries.ts";
+import { invalidateAuthenticationStatusWhenAllowed } from "../auth/authQueries.ts";
 
 export const accountSecuritySummaryQueryKey = ["account-security", "summary"] as const;
 export const browserSessionsQueryKey = ["auth", "sessions"] as const;
@@ -47,7 +47,7 @@ export function browserSessionsQueryOptions(client: DashboardTrpcClient) {
 export async function refreshSecurityQueries(queryClient: QueryClient): Promise<void> {
     await Promise.all([
         queryClient.invalidateQueries({ queryKey: accountSecuritySummaryQueryKey }),
-        queryClient.invalidateQueries({ queryKey: authStatusQueryKey }),
+        invalidateAuthenticationStatusWhenAllowed(queryClient),
         queryClient.invalidateQueries({ queryKey: automationPrincipalsQueryKey }),
         queryClient.invalidateQueries({ queryKey: browserSessionsQueryKey }),
         queryClient.invalidateQueries({ queryKey: securityAuditQueryKey }),

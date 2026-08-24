@@ -2,11 +2,14 @@ import { describe, expect, test } from "bun:test";
 
 import { Cause, Effect, Exit } from "effect";
 
+import { taskLabelSuggestionMaximum } from "../../../contracts/tasks.ts";
 import { realtimeEvents } from "../../database/schema/realtime.ts";
 import { taskEvents } from "../../database/schema/taskEvents.ts";
 import { taskLabels } from "../../database/schema/taskLabels.ts";
 import { tasks } from "../../database/schema/tasks.ts";
 import { taskUpdates } from "../../database/schema/taskUpdates.ts";
+import { users } from "../../database/schema/users.ts";
+import { testDashboardPasswordHash } from "../../test/support/securityPassword.ts";
 import { TaskConflictError } from "./errors.ts";
 import {
     openFreshMigratedDatabase,
@@ -27,10 +30,59 @@ function rowCount(
 }
 
 describe("task service", () => {
+    test("returns a bounded persisted label catalog with explicit truncation", async () => {
+        const database = await openFreshMigratedDatabase();
+        const service = taskServiceFor(database);
+        const rowCount = taskLabelSuggestionMaximum + 1;
+
+        try {
+            database.orm
+                .insert(tasks)
+                .values(
+                    Array.from({ length: rowCount }, (_, index) => ({
+                        createdAt: new Date(1000),
+                        id: taskTestUuid(40_000 + index),
+                        priority: "medium" as const,
+                        status: "todo" as const,
+                        title: `Label catalog task ${index}`,
+                        updatedAt: new Date(1000),
+                    }))
+                )
+                .run();
+            database.orm
+                .insert(taskLabels)
+                .values(
+                    Array.from({ length: rowCount }, (_, index) => ({
+                        label: `label-${String(index).padStart(3, "0")}`,
+                        taskId: taskTestUuid(40_000 + index),
+                    }))
+                )
+                .run();
+
+            const result = await runTaskEffect(service.listTaskLabels());
+            expect(result).toMatchObject({ truncated: true });
+            expect(result.labels).toHaveLength(taskLabelSuggestionMaximum);
+            expect(result.labels.at(0)).toBe("label-000");
+            expect(result.labels.at(-1)).toBe("label-199");
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
     test("commits the complete task and progress lifecycle with audit and realtime", async () => {
         const database = await openFreshMigratedDatabase();
         let nowMs = 10_000;
         let wakeups = 0;
+        database.orm
+            .insert(users)
+            .values({
+                createdAt: new Date(1000),
+                id: taskTestPrincipal.id,
+                passwordHash: testDashboardPasswordHash,
+                updatedAt: new Date(1000),
+                username: "raymond",
+            })
+            .run();
         const service = taskServiceFor(database, {
             nowMs: () => nowMs,
             wakeEventPump: () => {
@@ -57,6 +109,7 @@ describe("task service", () => {
             expect(created).toMatchObject({
                 assignee: "mira-2026",
                 labels: ["automation", "ops"],
+                number: 1,
                 priority: "high",
                 status: "todo",
                 version: 1,
@@ -101,6 +154,11 @@ describe("task service", () => {
                     taskId: moved.id,
                 })
             );
+            expect(progress.author).toEqual({
+                id: taskTestPrincipal.id,
+                kind: "user",
+                username: "raymond",
+            });
             const editedProgress = await runTaskEffect(
                 service.updateTaskProgress(taskTestPrincipal, {
                     expectedVersion: progress.version,
@@ -109,6 +167,7 @@ describe("task service", () => {
                     updateId: progress.id,
                 })
             );
+            expect(editedProgress.author).toEqual(progress.author);
             await runTaskEffect(
                 service.deleteTaskProgress(taskTestPrincipal, {
                     expectedVersion: editedProgress.version,
@@ -128,6 +187,7 @@ describe("task service", () => {
                 automation: { cronJobId: "cron-task-1" },
                 bodyMarkdown: "Updated task body",
                 labels: ["ops"],
+                number: 1,
                 status: "in-progress",
                 version: 9,
             });
@@ -135,7 +195,9 @@ describe("task service", () => {
                 await runTaskEffect(
                     service.listTaskProgress({ limit: 20, taskId: moved.id })
                 )
-            ).toMatchObject({ updates: [{ id: retainedProgress.id }] });
+            ).toMatchObject({
+                updates: [{ author: progress.author, id: retainedProgress.id }],
+            });
 
             await runTaskEffect(
                 service.deleteTask(taskTestPrincipal, {

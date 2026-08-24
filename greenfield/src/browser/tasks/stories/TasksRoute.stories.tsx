@@ -1,7 +1,15 @@
 import type { Meta, StoryObj } from "@storybook/tanstack-react";
 import { expect, userEvent, waitFor, within } from "storybook/test";
 
-import type { TaskDetail, TaskSummary } from "../../../contracts/taskModel.ts";
+import type {
+    GetOpenClawCronResult,
+    ListOpenClawCronResult,
+} from "../../../contracts/openClawCron.ts";
+import type {
+    TaskDetail,
+    TaskProgressUpdate,
+    TaskSummary,
+} from "../../../contracts/taskModel.ts";
 import { DashboardPageStory } from "../../storySupport/dashboardPageStoryHarness.tsx";
 import {
     dashboardStoryFailure,
@@ -10,13 +18,14 @@ import {
     type DashboardStoryFixtures,
 } from "../../storySupport/dashboardStoryTransport.ts";
 
-const observedAtMs = 1_800_000_000_000;
+const observedAtMs = Date.now();
 const taskId = "019fe900-0000-7000-8000-000000000020";
 const task = {
     assignee: "mira-2026",
     createdAtMs: observedAtMs - 86_400_000,
     id: taskId,
     labels: ["frontend", "storybook"],
+    number: 232,
     priority: "high",
     status: "todo",
     title: "Review every full-page Dashboard story",
@@ -28,24 +37,193 @@ const taskDetail = {
     bodyMarkdown:
         "Verify the populated, empty, loading, failure, confirmation and mobile states.",
 } as const satisfies TaskDetail;
-const taskPage = { tasks: [task] } as const;
+const recurringBoardTask = {
+    assignee: "mira-2026",
+    automation: {
+        cronJobId: "storybook-recurring-maintenance",
+        kind: "openclaw-cron",
+        model: "openai/gpt-5.6-sol",
+        recurring: true,
+        scheduleSummary: "Every hour",
+        sessionTarget: "isolated",
+        thinking: "high",
+    },
+    createdAtMs: observedAtMs - 8 * 86_400_000,
+    id: "019fe900-0000-7000-8000-000000000023",
+    labels: ["automation", "operations"],
+    number: 233,
+    priority: "medium",
+    status: "in-progress",
+    title: "Run recurring Dashboard maintenance",
+    updatedAtMs: observedAtMs - 12 * 60_000,
+    version: 4,
+} as const satisfies TaskSummary;
+const populatedTask = {
+    ...task,
+    automation: {
+        cronJobId: "storybook-task-detail-refresh",
+        kind: "openclaw-cron",
+        model: "openai/gpt-5.6-sol",
+        recurring: true,
+        scheduleSummary: "Every 15 minutes",
+        sessionTarget: "isolated",
+        thinking: "high",
+    },
+    labels: ["automation", "frontend", "markdown", "storybook"],
+    status: "in-progress",
+    updatedAtMs: observedAtMs - 8 * 60_000,
+    version: 8,
+} as const satisfies TaskSummary;
+const populatedTaskDetail = {
+    ...populatedTask,
+    bodyMarkdown: [
+        "## Goal",
+        "",
+        "Render a realistic task detail with **GitHub-flavored Markdown**, linked automation and auditable progress.",
+        "",
+        "### Acceptance criteria",
+        "",
+        "- Load labels and automation metadata",
+        "- Render fenced code through the shared highlighter",
+        "- Complete the final visual review",
+        "",
+        "~~~tsx",
+        'type DetailState = { progressUpdates: number; state: "ready" };',
+        'const detail: DetailState = { progressUpdates: 2, state: "ready" };',
+        "~~~",
+    ].join("\n"),
+} satisfies TaskDetail;
+const populatedTaskCron = {
+    freshness: { kind: "fresh", observedAtMs },
+    job: {
+        agentId: "main",
+        agentIdTruncated: false,
+        createdAtMs: observedAtMs - 30 * 86_400_000,
+        deliveryMode: "unspecified",
+        descriptionTruncated: false,
+        enabled: true,
+        id: "storybook-task-detail-refresh",
+        name: "Task detail refresh",
+        nameTruncated: false,
+        payload: {
+            kind: "agent-turn",
+            message: "Refresh the linked task detail",
+            model: "openai/gpt-5.6-sol",
+            thinking: "high",
+            truncated: false,
+        },
+        schedule: { everyMs: 15 * 60_000, kind: "every", truncated: false },
+        sessionTarget: "isolated",
+        source: "openclaw",
+        state: {
+            lastDurationMs: 42_000,
+            lastRunAtMs: observedAtMs - 7 * 60_000,
+            lastRunStatus: "ok",
+            nextRunAtMs: observedAtMs + 8 * 60_000,
+        },
+        synchronization: { state: "confirmed" },
+        updatedAtMs: observedAtMs - 7 * 60_000,
+        wakeMode: "now",
+    },
+} as const satisfies GetOpenClawCronResult;
+const disabledPopulatedTaskCron = {
+    ...populatedTaskCron,
+    job: { ...populatedTaskCron.job, enabled: false },
+} as const satisfies GetOpenClawCronResult;
+const recurringBoardCronJob = {
+    ...populatedTaskCron.job,
+    enabled: false,
+    id: "storybook-recurring-maintenance",
+    name: "Recurring Dashboard maintenance",
+    schedule: { everyMs: 3_600_000, kind: "every", truncated: false },
+} as const satisfies GetOpenClawCronResult["job"];
+
+function cronInventory(
+    jobs: readonly GetOpenClawCronResult["job"][]
+): ListOpenClawCronResult {
+    return {
+        freshness: { kind: "fresh", observedAtMs },
+        hasMore: false,
+        jobs: [...jobs],
+        limit: 100,
+        offset: 0,
+        snapshotRevision: `sha256:${"A".repeat(43)}`,
+        total: jobs.length,
+    };
+}
+
+const recurringBoardCronInventory = cronInventory([recurringBoardCronJob]);
+const populatedCronInventory = cronInventory([populatedTaskCron.job]);
+const disabledPopulatedCronInventory = cronInventory([disabledPopulatedTaskCron.job]);
+const populatedTaskProgressUpdates = [
+    {
+        author: {
+            id: "storybook-task-runner",
+            kind: "automation",
+            label: "Storybook task runner",
+        },
+        createdAtMs: observedAtMs - 10 * 60_000,
+        id: "019fe900-0000-7000-8000-000000000022",
+        messageMarkdown: [
+            "Published the populated detail fixture and verified its contract output.",
+            "",
+            "~~~json",
+            '{ "detail": "populated", "progressUpdates": 2 }',
+            "~~~",
+        ].join("\n"),
+        taskId,
+        updatedAtMs: observedAtMs - 9 * 60_000,
+        version: 2,
+    },
+    {
+        author: {
+            id: "019fd974-54a2-74dd-a64b-d4186f8d8828",
+            kind: "user",
+            username: "raymond",
+        },
+        createdAtMs: observedAtMs - 45 * 60_000,
+        id: "019fe900-0000-7000-8000-000000000021",
+        messageMarkdown:
+            "### Review notes\n\n- Confirmed labels wrap without clipping.\n- Kept raw HTML disabled.",
+        taskId,
+        updatedAtMs: observedAtMs - 45 * 60_000,
+        version: 1,
+    },
+] as const satisfies readonly TaskProgressUpdate[];
+const taskPage = { tasks: [task, recurringBoardTask] } as const;
+const populatedTaskPage = { tasks: [populatedTask] } as const;
 const emptyTaskPage = { tasks: [] } as const;
+const taskLabelSuggestions = {
+    labels: ["automation", "frontend", "markdown", "operations", "storybook"],
+    truncated: false,
+} as const;
 const notifications = { notifications: [], readCount: 0, unreadCount: 0 } as const;
 
 function taskFixtures({
+    cron,
+    cronList = dashboardStoryValue(recurringBoardCronInventory),
+    detail = dashboardStoryValue(taskDetail),
     list = dashboardStoryValue(taskPage),
     mutations = {},
+    progress = dashboardStoryValue({ updates: [] }),
 }: {
+    readonly cron?: ReturnType<typeof dashboardStoryValue>;
+    readonly cronList?: ReturnType<typeof dashboardStoryValue>;
+    readonly detail?: ReturnType<typeof dashboardStoryValue>;
     readonly list?: ReturnType<typeof dashboardStoryValue>;
     readonly mutations?: DashboardStoryFixtures["mutations"];
+    readonly progress?: ReturnType<typeof dashboardStoryValue>;
 } = {}): DashboardStoryFixtures {
     return {
         mutations,
         queries: {
+            ...(cron === undefined ? {} : { "openClawCron.get": cron }),
+            "openClawCron.list": cronList,
             "notifications.list": dashboardStoryValue(notifications),
-            "tasks.get": dashboardStoryValue(taskDetail),
+            "tasks.get": detail,
             "tasks.list": list,
-            "tasks.listUpdates": dashboardStoryValue({ updates: [] }),
+            "tasks.listLabels": dashboardStoryValue(taskLabelSuggestions),
+            "tasks.listUpdates": progress,
         },
     };
 }
@@ -58,10 +236,10 @@ const pending = dashboardStoryResolver(
 );
 
 async function moveFirstTask(canvasElement: HTMLElement) {
-    const moveHandle = await within(canvasElement).findByRole("button", {
-        name: `Move task: ${task.title}`,
+    const taskAction = await within(canvasElement).findByRole("button", {
+        name: `Open task #${task.number}: ${task.title}`,
     });
-    moveHandle.focus();
+    taskAction.focus();
     await userEvent.keyboard("[Space]");
     await userEvent.keyboard(
         "{Shift>}{ArrowRight}{ArrowRight}{ArrowRight}{ArrowRight}{ArrowRight}{ArrowRight}{/Shift}"
@@ -164,7 +342,7 @@ export const Busy: Story = {
         await moveFirstTask(canvasElement);
         await expect(
             within(canvasElement).getByRole("button", {
-                name: `Move task: ${task.title}`,
+                name: `Open task #${task.number}: ${task.title}`,
             })
         ).toBeDisabled();
     },
@@ -223,10 +401,134 @@ export const DetailModal: Story = {
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement);
         await userEvent.click(
-            await canvas.findByRole("button", { name: `Open task: ${task.title}` })
+            await canvas.findByRole("button", {
+                name: `Open task #${task.number}: ${task.title}`,
+            })
         );
         const body = within(canvasElement.ownerDocument.body);
-        await expect(await body.findByRole("dialog", { name: task.title })).toBeVisible();
+        await expect(
+            await body.findByRole("dialog", {
+                name: `#${task.number}: ${task.title}`,
+            })
+        ).toBeVisible();
+    },
+};
+
+export const PopulatedDetailModal: Story = {
+    args: {
+        fixtures: taskFixtures({
+            cron: dashboardStoryValue(populatedTaskCron),
+            cronList: dashboardStoryValue(populatedCronInventory),
+            detail: dashboardStoryValue(populatedTaskDetail),
+            list: dashboardStoryValue(populatedTaskPage),
+            progress: dashboardStoryValue({
+                updates: populatedTaskProgressUpdates,
+            }),
+        }),
+        route: "/tasks",
+    },
+    play: async ({ canvasElement }) => {
+        const canvas = within(canvasElement);
+        await userEvent.click(
+            await canvas.findByRole("button", {
+                name: `Open task #${populatedTask.number}: ${populatedTask.title}`,
+            })
+        );
+        const body = within(canvasElement.ownerDocument.body);
+        const dialog = await body.findByRole("dialog", {
+            name: `#${populatedTask.number}: ${populatedTask.title}`,
+        });
+        const detail = within(dialog);
+
+        await expect(detail.getByText("markdown")).toBeVisible();
+        await expect(
+            detail.getByRole("link", {
+                name: "Open OpenClaw cron job storybook-task-detail-refresh",
+            })
+        ).toBeVisible();
+        await expect(await detail.findByText("Succeeded")).toBeVisible();
+        await expect(detail.getByText("Recurring")).toBeVisible();
+        await expect(detail.getByText("Task detail refresh")).toBeVisible();
+        await expect(detail.getByText("Every 15 minutes")).toBeVisible();
+        await expect(
+            detail.getByRole("heading", { name: "Acceptance criteria" })
+        ).toBeVisible();
+        await expect(
+            await detail.findByText(
+                "Published the populated detail fixture and verified its contract output."
+            )
+        ).toBeVisible();
+        const automationUpdateAuthor = detail.getByTitle(
+            "Audit identity: automation:storybook-task-runner"
+        );
+        await expect(automationUpdateAuthor).toBeVisible();
+        await expect(automationUpdateAuthor).toHaveTextContent(
+            "Automation · Storybook task runner"
+        );
+        const userUpdateAuthor = detail.getByTitle(
+            "Audit identity: user:019fd974-54a2-74dd-a64b-d4186f8d8828"
+        );
+        await expect(userUpdateAuthor).toBeVisible();
+        await expect(userUpdateAuthor).toHaveTextContent("@raymond");
+        await expect(detail.queryByText("No progress updates")).not.toBeInTheDocument();
+
+        const highlightedSources = await detail.findAllByTestId(
+            "syntax-highlighted-source"
+        );
+        await expect(highlightedSources).toHaveLength(2);
+        await expect(highlightedSources[0]).toHaveAttribute(
+            "data-language",
+            "typescript"
+        );
+        await expect(
+            highlightedSources[0]?.querySelector(".hljs-keyword")
+        ).toHaveTextContent("type");
+        await expect(highlightedSources[1]).toHaveAttribute("data-language", "json");
+    },
+};
+
+export const DisabledAutomationDetailModal: Story = {
+    args: {
+        fixtures: taskFixtures({
+            cron: dashboardStoryValue(disabledPopulatedTaskCron),
+            cronList: dashboardStoryValue(disabledPopulatedCronInventory),
+            detail: dashboardStoryValue(populatedTaskDetail),
+            list: dashboardStoryValue(populatedTaskPage),
+            progress: dashboardStoryValue({ updates: populatedTaskProgressUpdates }),
+        }),
+        route: "/tasks",
+    },
+    play: async ({ canvasElement }) => {
+        const canvas = within(canvasElement);
+        const taskAction = await canvas.findByRole(
+            "button",
+            {
+                name: `Open task #${populatedTask.number}: ${populatedTask.title}`,
+            },
+            { timeout: 5000 }
+        );
+        const taskCard = taskAction.closest("article");
+        if (taskCard === null) throw new TypeError("Task card is missing");
+        await expect(within(taskCard).getByText("Recurring")).toBeVisible();
+        await expect(
+            await within(taskCard).findByText("Disabled", {}, { timeout: 5000 })
+        ).toBeVisible();
+
+        await userEvent.click(taskAction);
+        const dialog = await within(canvasElement.ownerDocument.body).findByRole(
+            "dialog",
+            {
+                name: `#${populatedTask.number}: ${populatedTask.title}`,
+            }
+        );
+        const detail = within(dialog);
+        await expect(await detail.findByText("Disabled")).toBeVisible();
+        await expect(detail.getByText("Recurring")).toBeVisible();
+
+        await userEvent.click(detail.getByRole("button", { name: "Close dialog" }));
+        await waitFor(() => expect(dialog).not.toBeInTheDocument());
+        await expect(canvas.getByText("Recurring")).toBeVisible();
+        await expect(canvas.getByText("Disabled")).toBeVisible();
     },
 };
 

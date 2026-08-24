@@ -6,6 +6,7 @@ import {
     type DockerUpdaterService,
 } from "../../contracts/docker.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
+import { ActionLink } from "../ui/ActionLink.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Card } from "../ui/Card.tsx";
@@ -310,15 +311,13 @@ export function DockerUpdaterPanel({
                                         {event.summary}
                                     </Text>
                                     {event.jobRunId !== undefined && (
-                                        <a
+                                        <ActionLink
                                             className="text-accent-300 hover:text-accent-200 mt-2 block text-xs font-medium wrap-anywhere"
-                                            href={
-                                                "/jobs?runId=" +
-                                                encodeURIComponent(event.jobRunId)
-                                            }
+                                            search={{ runId: event.jobRunId }}
+                                            to="/jobs"
                                         >
                                             Open job {event.jobRunId}
-                                        </a>
+                                        </ActionLink>
                                     )}
                                 </li>
                             ))}

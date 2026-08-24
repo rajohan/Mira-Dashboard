@@ -12,6 +12,7 @@ import {
 } from "../../contracts/terminal.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { classifyDashboardBrowserFailure } from "../api/trpcError.ts";
+import { authenticatedAbortSignal } from "../auth/authenticatedOperationRegistry.ts";
 import { useAuthenticatedMutationBoundary } from "../auth/useAuthenticatedMutationBoundary.ts";
 import { PageState } from "../ui/PageState.tsx";
 import { TerminalCanvas } from "./TerminalCanvas.tsx";
@@ -406,7 +407,11 @@ export function TerminalBrowser({
                         client.mutation(
                             "terminal.prepareResume",
                             { afterSequence: cursor, sessionId },
-                            { signal: AbortSignal.any([signal, controller.signal]) }
+                            {
+                                signal: authenticatedAbortSignal(signal, [
+                                    controller.signal,
+                                ]),
+                            }
                         )
                     );
                     if (controller.signal.aborted) return;
@@ -427,7 +432,9 @@ export function TerminalBrowser({
                             "terminal.getActiveSession",
                             {},
                             {
-                                signal: AbortSignal.any([signal, controller.signal]),
+                                signal: authenticatedAbortSignal(signal, [
+                                    controller.signal,
+                                ]),
                             }
                         )
                     );

@@ -11,7 +11,9 @@ import { openClawTasksRealtimeTopic } from "../../contracts/openClawTasksRealtim
 import { taskRealtimeTopic } from "../../contracts/taskRealtime.ts";
 import { createDashboardQueryClient } from "../api/queryClient.ts";
 import { DashboardRealtimeProvider } from "../api/realtimeContext.tsx";
+import { gatewaySessionQueryKey } from "../sessions/gatewaySessionQueries.ts";
 import { ControlledDashboardRealtimeClient } from "../test/realtime.ts";
+import { projectChatExternalRun } from "./chatContractAdapter.ts";
 import {
     chatHistoryQueryKey,
     chatRuntimeQueryKey,
@@ -20,7 +22,11 @@ import {
     openClawTaskListQueryKey,
     openClawTaskListSessionQueryKey,
 } from "./chatQueries.ts";
-import { createChatRuntimeStore, type ChatRuntimeStore } from "./chatRuntimeStore.ts";
+import {
+    chatRuntimeMessages,
+    createChatRuntimeStore,
+    type ChatRuntimeStore,
+} from "./chatRuntimeStore.ts";
 import { useChatRealtimeInvalidation } from "./useChatRealtimeInvalidation.ts";
 
 const { act, render } = await import("@testing-library/react");
@@ -77,6 +83,170 @@ function change(
 }
 
 describe("chat realtime invalidation", () => {
+    test("keeps a single safety refresh active when realtime stays silently connected", async () => {
+        jest.useFakeTimers();
+        const queryClient = createDashboardQueryClient();
+        const realtimeClient = new ControlledDashboardRealtimeClient();
+        const store = createChatRuntimeStore();
+        store.setConnection("connected");
+        const invalidate = jest
+            .spyOn(queryClient, "invalidateQueries")
+            .mockResolvedValue();
+        const interval = jest.spyOn(globalThis, "setInterval");
+        const view = render(
+            <QueryClientProvider client={queryClient}>
+                <DashboardRealtimeProvider client={realtimeClient}>
+                    <Probe store={store} />
+                </DashboardRealtimeProvider>
+            </QueryClientProvider>
+        );
+        try {
+            expect(interval).toHaveBeenCalledTimes(1);
+            expect(store.state.connection).toBe("connected");
+
+            await act(async () => {
+                jest.advanceTimersByTime(29_999);
+                await Promise.resolve();
+            });
+            expect(invalidate).not.toHaveBeenCalled();
+
+            await act(async () => {
+                jest.advanceTimersByTime(1);
+                await Promise.resolve();
+                await Promise.resolve();
+            });
+            const safetyKeys = invalidate.mock.calls.map(
+                ([filters]) => filters?.queryKey
+            );
+            expect(safetyKeys).toContainEqual(chatHistoryQueryKey(sessionKey));
+            expect(safetyKeys).toContainEqual(chatRuntimeQueryKey(sessionKey));
+            expect(safetyKeys).toContainEqual(gatewaySessionQueryKey);
+            expect(safetyKeys).toContainEqual(
+                openClawTaskListSessionQueryKey(sessionKey)
+            );
+            expect(safetyKeys).toContainEqual(openClawTaskDetailQueryRoot);
+            expect(store.state.connection).toBe("connected");
+
+            await act(async () => {
+                realtimeClient.fail();
+                await Promise.resolve();
+                await Promise.resolve();
+            });
+            expect(interval).toHaveBeenCalledTimes(1);
+            expect(store.state.connection).toBe("disconnected");
+        } finally {
+            view.unmount();
+            interval.mockRestore();
+            queryClient.clear();
+            jest.useRealTimers();
+        }
+    });
+
+    test("reconciles a stale compaction through history before the safety runtime snapshot", async () => {
+        jest.useFakeTimers();
+        const queryClient = createDashboardQueryClient();
+        const realtimeClient = new ControlledDashboardRealtimeClient();
+        const store = createChatRuntimeStore();
+        store.installExternalRuns(sessionKey, [
+            projectChatExternalRun({
+                continuity: "complete",
+                lifecycle: "active" as const,
+                hasUnprojectedActivity: false,
+                observationEpoch: 1,
+                observedAtMs: 1000,
+                parts: [
+                    {
+                        id: "compaction:silent-restart",
+                        kind: "item",
+                        occurredAtMs: 1000,
+                        sequence: 1,
+                        text: "Compacting context",
+                        type: "compaction",
+                    },
+                ],
+                projectionTruncated: false,
+                providerRunId: "silent-restart",
+                sessionKey,
+                source: "provider-runtime",
+                text: "",
+                updatedAtMs: 1000,
+            }),
+        ]);
+        const historyGate = Promise.withResolvers<void>();
+        let historyReconciled = false;
+        let runtimeRead = false;
+        const invalidate = jest
+            .spyOn(queryClient, "invalidateQueries")
+            .mockImplementation((filters) => {
+                const key = JSON.stringify(filters?.queryKey);
+                if (key === JSON.stringify(chatHistoryQueryKey(sessionKey))) {
+                    return (async () => {
+                        await historyGate.promise;
+                        historyReconciled = true;
+                    })();
+                }
+                if (key === JSON.stringify(chatRuntimeQueryKey(sessionKey))) {
+                    expect(historyReconciled).toBeTrue();
+                    runtimeRead = true;
+                    // The provider-backed history observation has removed the
+                    // completed run from the following authoritative inventory.
+                    store.installExternalRuns(sessionKey, []);
+                }
+                return Promise.resolve();
+            });
+        const view = render(
+            <QueryClientProvider client={queryClient}>
+                <DashboardRealtimeProvider client={realtimeClient}>
+                    <Probe store={store} />
+                </DashboardRealtimeProvider>
+            </QueryClientProvider>
+        );
+        try {
+            await act(async () => {
+                jest.advanceTimersByTime(30_000);
+                await Promise.resolve();
+            });
+            expect(runtimeRead).toBeFalse();
+            expect(chatRuntimeMessages(store.state, sessionKey)[0]?.parts).toEqual([
+                {
+                    activity: "running",
+                    kind: "control",
+                    text: "Compacting context",
+                    tone: "muted",
+                },
+            ]);
+
+            await act(async () => {
+                historyGate.resolve();
+                await historyGate.promise;
+                await Promise.resolve();
+                await Promise.resolve();
+            });
+            expect(runtimeRead).toBeTrue();
+            expect(chatRuntimeMessages(store.state, sessionKey)[0]?.parts).toEqual([
+                {
+                    activity: "complete",
+                    kind: "control",
+                    text: "Compacting context",
+                    tone: "muted",
+                },
+            ]);
+            expect(store.state.connection).toBe("reconnecting");
+            expect(
+                invalidate.mock.calls.some(
+                    ([filters]) =>
+                        JSON.stringify(filters?.queryKey) ===
+                        JSON.stringify(chatRuntimeQueryKey(sessionKey))
+                )
+            ).toBeTrue();
+        } finally {
+            historyGate.resolve();
+            view.unmount();
+            queryClient.clear();
+            jest.useRealTimers();
+        }
+    });
+
     test("bounds a marker burst and carries trailing dirtiness into one backed-off refresh", async () => {
         jest.useFakeTimers();
         const queryClient = createDashboardQueryClient();

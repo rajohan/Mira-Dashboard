@@ -5,6 +5,7 @@ import {
 } from "@tanstack/react-query";
 
 import type {
+    ListTaskLabelsResult,
     ListTaskProgressInput,
     ListTaskProgressResult,
     ListTasksInput,
@@ -17,6 +18,7 @@ type TaskProgressCursor = NonNullable<ListTaskProgressInput["cursor"]>;
 
 export const taskQueryKey = ["tasks"] as const;
 export const taskListQueryRoot = [...taskQueryKey, "list"] as const;
+export const taskLabelSuggestionsQueryKey = [...taskListQueryRoot, "labels"] as const;
 export const taskOverviewQueryKey = [...taskListQueryRoot, "overview"] as const;
 
 /** Bounded unfinished-task window rendered on the operational overview. */
@@ -69,6 +71,16 @@ export function taskListQueryOptions(
             ),
         getNextPageParam: (lastPage) => lastPage.nextCursor,
         queryKey: taskListQueryKey(filters),
+        staleTime: 10_000,
+    });
+}
+
+/** @returns Bounded persisted task-label suggestion catalog options. */
+export function taskLabelSuggestionsQueryOptions(client: DashboardTrpcClient) {
+    return queryOptions({
+        queryFn: ({ signal }): Promise<ListTaskLabelsResult> =>
+            client.query("tasks.listLabels", {}, { signal }),
+        queryKey: taskLabelSuggestionsQueryKey,
         staleTime: 10_000,
     });
 }

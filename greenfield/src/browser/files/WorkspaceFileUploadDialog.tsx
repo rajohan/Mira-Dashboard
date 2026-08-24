@@ -1,16 +1,16 @@
 import { Upload } from "lucide-react";
-import { useState } from "react";
+import { useId, useRef, useState } from "react";
 
 import type {
     WorkspaceFileEntry,
     WorkspaceFileWriteStatus,
 } from "../../contracts/files.ts";
+import { formatByteCount } from "../lib/formatMeasurements.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
+import { FileDropZone } from "../ui/FileDropZone.tsx";
 import { Form } from "../ui/Form.tsx";
-import { FormField } from "../ui/FormField.tsx";
 import { Icon } from "../ui/Icon.tsx";
-import { Input } from "../ui/Input.tsx";
 import { Modal } from "../ui/Modal.tsx";
 import { workspaceFileFailureMessage } from "./workspaceFilePresentation.ts";
 import { validateWorkspaceFileSelection } from "./workspaceFileTransfers.ts";
@@ -36,6 +36,8 @@ export function WorkspaceFileUploadDialog({
     onComplete,
     onSubmit,
 }: WorkspaceFileUploadDialogProps) {
+    const fileInput = useRef<HTMLInputElement>(null);
+    const selectionErrorId = useId();
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string>();
     const [file, setFile] = useState<File>();
@@ -46,6 +48,19 @@ export function WorkspaceFileUploadDialog({
     const replacedEntry = intent.kind === "replace" ? intent.entry : undefined;
     const title =
         replacedEntry === undefined ? "Upload file" : `Replace ${replacedEntry.name}`;
+
+    function selectFiles(files: FileList): void {
+        setError(undefined);
+        if (files.length !== 1) {
+            setFile(undefined);
+            setSelectionError("Choose one file at a time.");
+            return;
+        }
+        const nextFile = files.item(0);
+        if (nextFile === null) return;
+        setFile(nextFile);
+        setSelectionError(validateWorkspaceFileSelection(nextFile, !replacing));
+    }
 
     async function submit() {
         if (file === undefined || busy) return;
@@ -74,28 +89,54 @@ export function WorkspaceFileUploadDialog({
             dismissible={!busy}
             onClose={onClose}
             open
+            size="lg"
             title={title}
         >
             <Form className="space-y-4" onSubmit={submit}>
                 <Alert focusOnError message={error} />
-                <FormField
-                    description="Maximum file size: 16 MiB."
-                    error={selectionError}
-                    label={replacing ? "Replacement content" : "File"}
-                >
-                    <Input
-                        className="mt-2 file:mr-3 file:rounded file:border-0 file:px-2 file:py-1"
-                        disabled={busy}
-                        onChange={(event) => {
-                            const nextFile = event.currentTarget.files?.[0];
-                            setFile(nextFile);
-                            setSelectionError(undefined);
-                            setError(undefined);
-                        }}
-                        required
-                        type="file"
-                    />
-                </FormField>
+                <input
+                    aria-label={replacing ? "Replacement content" : "File"}
+                    className="sr-only"
+                    disabled={busy}
+                    onChange={(event) => {
+                        if (event.currentTarget.files !== null) {
+                            selectFiles(event.currentTarget.files);
+                        }
+                        event.currentTarget.value = "";
+                    }}
+                    ref={fileInput}
+                    tabIndex={-1}
+                    type="file"
+                />
+                <FileDropZone
+                    ariaDescribedBy={
+                        selectionError === undefined ? undefined : selectionErrorId
+                    }
+                    description={
+                        file === undefined
+                            ? "One file · 16 MiB maximum"
+                            : `${formatByteCount(file.size)} · Drop or choose another file to change selection`
+                    }
+                    disabled={busy}
+                    invalid={selectionError !== undefined}
+                    label={
+                        file?.name ??
+                        (replacing
+                            ? "Drop the replacement here or choose a file"
+                            : "Drop a file here or choose a file")
+                    }
+                    onChooseFiles={() => fileInput.current?.click()}
+                    onFilesSelected={selectFiles}
+                />
+                {selectionError !== undefined && (
+                    <p
+                        className="text-sm text-red-300"
+                        id={selectionErrorId}
+                        role="alert"
+                    >
+                        {selectionError}
+                    </p>
+                )}
                 <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                     <Button disabled={busy} onClick={onClose} variant="secondary">
                         Cancel
@@ -103,7 +144,7 @@ export function WorkspaceFileUploadDialog({
                     <Button
                         busy={busy}
                         busyLabel={replacing ? "Replacing…" : "Uploading…"}
-                        disabled={file === undefined}
+                        disabled={file === undefined || selectionError !== undefined}
                         type="submit"
                     >
                         <Icon icon={Upload} size="sm" tone="inherit" />

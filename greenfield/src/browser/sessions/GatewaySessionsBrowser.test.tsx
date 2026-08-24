@@ -69,6 +69,29 @@ function deferred<T>() {
     return { promise, resolve: resolveDeferred };
 }
 
+interface SessionActionUser {
+    readonly click: (element: Element) => Promise<void>;
+}
+
+async function requestPrimaryReset(user: SessionActionUser): Promise<HTMLButtonElement> {
+    const mobileSessions = await screen.findByRole("list", {
+        name: "Current OpenClaw sessions",
+    });
+    const trigger = within(mobileSessions).getByRole("button", {
+        name: `Actions for Primary main; key ${gatewayPrimarySessionKey}`,
+    });
+    if (!(trigger instanceof HTMLButtonElement)) {
+        throw new TypeError("Session action trigger is not a button");
+    }
+    await user.click(trigger);
+    await user.click(
+        await screen.findByRole("menuitem", {
+            name: /Reset session/u,
+        })
+    );
+    return trigger;
+}
+
 async function exhaustUnavailableReadRetries(
     queryClient: ReturnType<typeof createDashboardQueryClient>
 ): Promise<void> {
@@ -172,7 +195,13 @@ describe("Gateway sessions browser", () => {
                     "A background refresh failed"
                 )
             );
-            expect(screen.getByText("Primary main")).toBeTruthy();
+            expect(
+                within(
+                    screen.getByRole("table", {
+                        name: "Current OpenClaw sessions",
+                    })
+                ).getByText("Primary main")
+            ).toBeTruthy();
             expect(screen.queryByText(/private background detail/u)).toBeNull();
         } finally {
             queryClient.clear();
@@ -200,11 +229,11 @@ describe("Gateway sessions browser", () => {
         const user = userEvent.setup();
 
         try {
-            const trigger = await screen.findByRole("button", {
-                name: `Reset Primary main; key ${gatewayPrimarySessionKey}`,
-            });
-            await user.click(trigger);
+            const trigger = await requestPrimaryReset(user);
             const dialog = screen.getByRole("dialog", { name: "Reset session?" });
+            expect(dialog).toHaveTextContent(
+                `Exact session key: ${gatewayPrimarySessionKey}`
+            );
             await user.click(
                 within(dialog).getByRole("button", { name: "Reset session" })
             );
@@ -271,10 +300,10 @@ describe("Gateway sessions browser", () => {
         const user = userEvent.setup();
 
         try {
-            const trigger = await screen.findByRole("button", {
-                name: `Reset Primary main; key ${gatewayPrimarySessionKey}`,
+            const sessionsTable = await screen.findByRole("table", {
+                name: "Current OpenClaw sessions",
             });
-            await user.click(trigger);
+            await requestPrimaryReset(user);
             await user.click(
                 within(screen.getByRole("dialog", { name: "Reset session?" })).getByRole(
                     "button",
@@ -288,7 +317,7 @@ describe("Gateway sessions browser", () => {
                 )
             ).toBeTruthy();
             await waitFor(() => expect(query).toHaveBeenCalledTimes(2));
-            expect(screen.getByText("Primary main")).toBeTruthy();
+            expect(within(sessionsTable).getByText("Primary main")).toBeTruthy();
             expect(screen.queryByText(/private reconciliation failure/u)).toBeNull();
             const unresolvedDialog = screen.getByRole("dialog", {
                 name: "Reset session?",
@@ -321,7 +350,9 @@ describe("Gateway sessions browser", () => {
             await user.click(screen.getByRole("button", { name: "Try refresh again" }));
 
             expect(
-                await screen.findByText("Primary main after reconciliation")
+                await within(sessionsTable).findByText(
+                    "Primary main after reconciliation"
+                )
             ).toBeTruthy();
             await waitFor(() =>
                 expect(
@@ -376,11 +407,7 @@ describe("Gateway sessions browser", () => {
         const user = userEvent.setup();
 
         try {
-            await user.click(
-                await screen.findByRole("button", {
-                    name: `Reset Primary main; key ${gatewayPrimarySessionKey}`,
-                })
-            );
+            await requestPrimaryReset(user);
             const dialog = screen.getByRole("dialog", { name: "Reset session?" });
             const confirm = within(dialog).getByRole("button", {
                 name: "Reset session",
@@ -445,11 +472,7 @@ describe("Gateway sessions browser", () => {
         const user = userEvent.setup();
 
         try {
-            await user.click(
-                await screen.findByRole("button", {
-                    name: `Reset Primary main; key ${gatewayPrimarySessionKey}`,
-                })
-            );
+            await requestPrimaryReset(user);
             await user.click(
                 within(screen.getByRole("dialog", { name: "Reset session?" })).getByRole(
                     "button",
@@ -524,11 +547,10 @@ describe("Gateway sessions browser", () => {
         const user = userEvent.setup();
 
         try {
-            await user.click(
-                await screen.findByRole("button", {
-                    name: `Reset Primary main; key ${gatewayPrimarySessionKey}`,
-                })
-            );
+            const sessionsTable = await screen.findByRole("table", {
+                name: "Current OpenClaw sessions",
+            });
+            await requestPrimaryReset(user);
             await user.click(
                 within(screen.getByRole("dialog", { name: "Reset session?" })).getByRole(
                     "button",
@@ -545,7 +567,7 @@ describe("Gateway sessions browser", () => {
                     name: "Reset session",
                 })
             ).toBeDisabled();
-            expect(screen.getByText("Unchanged observation")).toBeTruthy();
+            expect(within(sessionsTable).getByText("Unchanged observation")).toBeTruthy();
 
             await user.click(
                 within(blockedDialog).getByRole("button", {
@@ -553,7 +575,9 @@ describe("Gateway sessions browser", () => {
                 })
             );
 
-            expect(await screen.findByText("Observed after mutation")).toBeTruthy();
+            expect(
+                await within(sessionsTable).findByText("Observed after mutation")
+            ).toBeTruthy();
             await waitFor(() =>
                 expect(
                     screen.queryByRole("dialog", { name: "Reset session?" })
@@ -599,11 +623,7 @@ describe("Gateway sessions browser", () => {
         });
 
         try {
-            await user.click(
-                await screen.findByRole("button", {
-                    name: `Reset Primary main; key ${gatewayPrimarySessionKey}`,
-                })
-            );
+            await requestPrimaryReset(user);
             await user.click(
                 within(screen.getByRole("dialog", { name: "Reset session?" })).getByRole(
                     "button",
@@ -668,11 +688,7 @@ describe("Gateway sessions browser", () => {
         const user = userEvent.setup();
 
         try {
-            await user.click(
-                await screen.findByRole("button", {
-                    name: `Reset Primary main; key ${gatewayPrimarySessionKey}`,
-                })
-            );
+            await requestPrimaryReset(user);
             await user.click(
                 within(screen.getByRole("dialog", { name: "Reset session?" })).getByRole(
                     "button",
@@ -713,13 +729,26 @@ describe("Gateway sessions browser", () => {
         const rendered = renderBrowser(client);
 
         try {
-            expect(await screen.findByText("Truncated")).toBeTruthy();
+            const mobileSessions = await screen.findByRole("list", {
+                name: "Current OpenClaw sessions",
+            });
+            const mobileSession = within(mobileSessions).getByRole("listitem", {
+                name: `${incompleteSession.displayName} session`,
+            });
+            expect(within(mobileSession).getByText("Truncated")).toBeTruthy();
+            expect(within(mobileSession).getByText(incompleteSession.key)).toBeTruthy();
             expect(
                 screen.getByText(
                     "Some details were not shown: channel, model, modelProvider"
                 )
             ).toBeTruthy();
-            expect(screen.getByText("Unknown")).toBeTruthy();
+            expect(
+                within(
+                    screen.getByRole("table", {
+                        name: "Current OpenClaw sessions",
+                    })
+                ).getAllByText("Unknown").length
+            ).toBeGreaterThan(0);
         } finally {
             rendered.queryClient.clear();
         }

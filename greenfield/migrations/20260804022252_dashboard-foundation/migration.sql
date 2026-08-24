@@ -251,6 +251,26 @@ CREATE TABLE `chat_transcript_generations` (
 	CONSTRAINT "chat_transcript_generations_absent_check" CHECK("status" <> 'absent' OR "provider_session_id" IS NULL)
 ) STRICT, WITHOUT ROWID;
 --> statement-breakpoint
+CREATE TABLE `chat_external_runtime_snapshots` (
+	`gateway_scope` text NOT NULL,
+	`observation_epoch` integer NOT NULL,
+	`schema_version` integer DEFAULT 1 NOT NULL,
+	`session_key` text NOT NULL,
+	`snapshot_bytes` integer NOT NULL,
+	`snapshot_json` text NOT NULL,
+	`transcript_generation` integer NOT NULL,
+	`updated_at` integer NOT NULL,
+	CONSTRAINT `chat_external_runtime_snapshots_pk` PRIMARY KEY(`gateway_scope`, `session_key`),
+	CONSTRAINT `chat_external_runtime_snapshots_transcript_fk` FOREIGN KEY (`gateway_scope`,`session_key`) REFERENCES `chat_transcript_generations`(`gateway_scope`,`session_key`) ON UPDATE RESTRICT ON DELETE CASCADE,
+	CONSTRAINT "chat_external_runtime_snapshots_gateway_scope_check" CHECK(length("gateway_scope") BETWEEN 1 AND 64 AND instr("gateway_scope", char(0)) = 0 AND length(trim("gateway_scope", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND "gateway_scope" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8232) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*')),
+	CONSTRAINT "chat_external_runtime_snapshots_session_key_check" CHECK(length("session_key") BETWEEN 1 AND 512 AND instr("session_key", char(0)) = 0 AND length(trim("session_key", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND "session_key" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8232) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*')),
+	CONSTRAINT "chat_external_runtime_snapshots_transcript_generation_check" CHECK("transcript_generation" BETWEEN 1 AND 9007199254740991),
+	CONSTRAINT "chat_external_runtime_snapshots_observation_epoch_check" CHECK("observation_epoch" BETWEEN 0 AND 9007199254740991),
+	CONSTRAINT "chat_external_runtime_snapshots_schema_version_check" CHECK("schema_version" = 1),
+	CONSTRAINT "chat_external_runtime_snapshots_payload_check" CHECK(length(CAST("snapshot_json" AS BLOB)) <= 5242880 AND CASE WHEN json_valid("snapshot_json") THEN json_type("snapshot_json") = 'object' ELSE 0 END AND "snapshot_bytes" = length(CAST("snapshot_json" AS BLOB))),
+	CONSTRAINT "chat_external_runtime_snapshots_updated_at_check" CHECK("updated_at" BETWEEN 0 AND 8640000000000000)
+) STRICT, WITHOUT ROWID;
+--> statement-breakpoint
 CREATE TABLE `chat_runtime_snapshots` (
 	`chat_run_id` text PRIMARY KEY,
 	`first_sequence` integer NOT NULL,
@@ -620,7 +640,8 @@ CREATE TABLE `tasks` (
 	`assignee` text,
 	`body_markdown` text,
 	`created_at` integer NOT NULL,
-	`id` text PRIMARY KEY NOT NULL,
+	`id` text NOT NULL,
+	`number` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`priority` text NOT NULL,
 	`status` text NOT NULL,
 	`title` text NOT NULL,
@@ -629,6 +650,7 @@ CREATE TABLE `tasks` (
 	CONSTRAINT "tasks_assignee_check" CHECK("assignee" IS NULL OR "assignee" IN ('mira-2026', 'rajohan')),
 	CONSTRAINT "tasks_body_markdown_check" CHECK("body_markdown" IS NULL OR (length("body_markdown") BETWEEN 1 AND 100000 AND instr("body_markdown", char(0)) = 0 AND length(trim("body_markdown", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0)),
 	CONSTRAINT "tasks_id_check" CHECK(length("id") = 36 AND instr("id", char(0)) = 0 AND length(replace("id", '-', '')) = 32 AND replace("id", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr("id", 9, 1) = '-' AND substr("id", 14, 1) = '-' AND substr("id", 15, 1) = '7' AND substr("id", 19, 1) = '-' AND substr("id", 20, 1) GLOB '[89ab]' AND substr("id", 24, 1) = '-'),
+	CONSTRAINT "tasks_number_check" CHECK("number" BETWEEN 1 AND 9007199254740991),
 	CONSTRAINT "tasks_priority_check" CHECK("priority" IN ('low', 'medium', 'high')),
 	CONSTRAINT "tasks_status_check" CHECK("status" IN ('todo', 'in-progress', 'blocked', 'done')),
 	CONSTRAINT "tasks_title_check" CHECK(length("title") BETWEEN 1 AND 240 AND instr("title", char(0)) = 0 AND length(trim("title", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND "title" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8232) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*')),
@@ -644,6 +666,7 @@ CREATE INDEX `task_updates_task_created_id_idx` ON `task_updates` (`task_id`,`cr
 CREATE INDEX `tasks_updated_id_idx` ON `tasks` (`updated_at`,`id`);--> statement-breakpoint
 CREATE INDEX `tasks_status_priority_updated_id_idx` ON `tasks` (`status`,`priority`,`updated_at`,`id`);--> statement-breakpoint
 CREATE INDEX `tasks_assignee_status_updated_id_idx` ON `tasks` (`assignee`,`status`,`updated_at`,`id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `tasks_id_unique` ON `tasks` (`id`);--> statement-breakpoint
 CREATE TABLE `agent_task_runs` (
 	`agent_id` text NOT NULL,
 	`completed_at` integer,
@@ -775,6 +798,80 @@ CREATE TRIGGER chat_transcript_generations_reject_delete
 BEFORE DELETE ON chat_transcript_generations
 BEGIN
 	SELECT RAISE(ABORT, 'chat transcript pointers are durable');
+END;
+--> statement-breakpoint
+CREATE TRIGGER chat_external_runtime_snapshots_reject_replace
+BEFORE INSERT ON chat_external_runtime_snapshots
+WHEN EXISTS (
+	SELECT 1
+	FROM chat_external_runtime_snapshots
+	WHERE gateway_scope = NEW.gateway_scope AND session_key = NEW.session_key
+)
+BEGIN
+	SELECT RAISE(ABORT, 'chat external runtime snapshot identity is immutable');
+END;
+--> statement-breakpoint
+CREATE TRIGGER chat_external_runtime_snapshots_validate_current_insert
+BEFORE INSERT ON chat_external_runtime_snapshots
+WHEN NOT EXISTS (
+	SELECT 1
+	FROM chat_transcript_generations
+	WHERE gateway_scope = NEW.gateway_scope
+		AND session_key = NEW.session_key
+		AND current_generation = NEW.transcript_generation
+		AND status = 'ready'
+)
+BEGIN
+	SELECT RAISE(ABORT, 'chat external runtime snapshot transcript is not current');
+END;
+--> statement-breakpoint
+CREATE TRIGGER chat_external_runtime_snapshots_reject_identity_update
+BEFORE UPDATE OF gateway_scope, session_key, schema_version, transcript_generation
+ON chat_external_runtime_snapshots
+BEGIN
+	SELECT RAISE(ABORT, 'chat external runtime snapshot identity is immutable');
+END;
+--> statement-breakpoint
+CREATE TRIGGER chat_external_runtime_snapshots_validate_monotonic_update
+BEFORE UPDATE ON chat_external_runtime_snapshots
+WHEN NEW.observation_epoch < OLD.observation_epoch
+	OR (
+		NEW.observation_epoch = OLD.observation_epoch
+		AND NEW.updated_at < OLD.updated_at
+	)
+	OR (
+		NEW.observation_epoch = OLD.observation_epoch
+		AND NEW.updated_at = OLD.updated_at
+		AND (
+			NEW.snapshot_bytes IS NOT OLD.snapshot_bytes
+			OR NEW.snapshot_json IS NOT OLD.snapshot_json
+		)
+	)
+BEGIN
+	SELECT RAISE(ABORT, 'chat external runtime snapshot must advance monotonically');
+END;
+--> statement-breakpoint
+CREATE TRIGGER chat_external_runtime_snapshots_validate_capacity_insert
+BEFORE INSERT ON chat_external_runtime_snapshots
+WHEN (
+	SELECT COALESCE(SUM(json_array_length(snapshot_json, '$.entries')), 0)
+	FROM chat_external_runtime_snapshots
+	WHERE gateway_scope = NEW.gateway_scope
+) + COALESCE(json_array_length(NEW.snapshot_json, '$.entries'), 0) > 32
+BEGIN
+	SELECT RAISE(ABORT, 'chat external runtime snapshot process capacity exceeded');
+END;
+--> statement-breakpoint
+CREATE TRIGGER chat_external_runtime_snapshots_validate_capacity_update
+BEFORE UPDATE OF snapshot_json ON chat_external_runtime_snapshots
+WHEN (
+	SELECT COALESCE(SUM(json_array_length(snapshot_json, '$.entries')), 0)
+	FROM chat_external_runtime_snapshots
+	WHERE gateway_scope = NEW.gateway_scope
+		AND session_key <> NEW.session_key
+) + COALESCE(json_array_length(NEW.snapshot_json, '$.entries'), 0) > 32
+BEGIN
+	SELECT RAISE(ABORT, 'chat external runtime snapshot process capacity exceeded');
 END;
 --> statement-breakpoint
 CREATE TRIGGER chat_runtime_snapshots_reject_replace

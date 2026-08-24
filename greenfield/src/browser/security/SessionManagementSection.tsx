@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { LogOut, MonitorX, RefreshCw, ShieldX, Trash2 } from "lucide-react";
+import { Laptop, LogOut, MonitorX, RefreshCw } from "lucide-react";
 import { useState } from "react";
 
 import type { AuthStatus } from "../../contracts/auth.ts";
@@ -25,33 +25,41 @@ import { SecuritySection } from "./SecurityUi.tsx";
 const anonymousAuthStatus: AuthStatus = Object.freeze({ state: "anonymous" });
 
 type SessionConfirmation =
+    | Readonly<{ kind: "logout-current" }>
     | Readonly<{ kind: "revoke-all" }>
     | Readonly<{ kind: "revoke-others" }>
     | Readonly<{ kind: "revoke-session"; sessionId: string }>;
 
 function sessionConfirmationCopy(confirmation: SessionConfirmation) {
     switch (confirmation.kind) {
+        case "logout-current": {
+            return {
+                confirmLabel: "Log out",
+                description: "This browser will be signed out immediately.",
+                title: "Log out this browser?",
+            };
+        }
         case "revoke-session": {
             return {
-                confirmLabel: "Sign out browser",
-                description: "This browser will be signed out and must sign in again.",
-                title: "Sign out this browser?",
+                confirmLabel: "Revoke",
+                description: "This browser session will be revoked immediately.",
+                title: "Revoke this session?",
             };
         }
         case "revoke-others": {
             return {
-                confirmLabel: "Sign out other browsers",
+                confirmLabel: "Log out others",
                 description:
                     "Every browser except this one will be signed out and must sign in again.",
-                title: "Sign out every other browser?",
+                title: "Log out every other browser?",
             };
         }
         case "revoke-all": {
             return {
-                confirmLabel: "Sign out every browser",
+                confirmLabel: "Log out all",
                 description:
                     "Every browser, including this one, will be signed out immediately.",
-                title: "Sign out every browser?",
+                title: "Log out every browser?",
             };
         }
     }
@@ -109,6 +117,12 @@ export function SessionManagementSection() {
                     );
                     break;
                 }
+                case "logout-current": {
+                    await leaveAuthenticatedBrowser(() =>
+                        client.mutation("auth.logout", {})
+                    );
+                    break;
+                }
             }
         } finally {
             setConfirmation(undefined);
@@ -120,9 +134,37 @@ export function SessionManagementSection() {
 
     return (
         <SecuritySection
-            description="See where you are signed in and sign out one browser or all of them."
+            actions={
+                <div className="flex flex-wrap gap-2">
+                    <Button
+                        busy={action.busy}
+                        busyLabel="Logging out…"
+                        disabled={
+                            !sessions.isSuccess || sessions.data.sessions.length <= 1
+                        }
+                        onClick={() => setConfirmation({ kind: "revoke-others" })}
+                        size="sm"
+                        variant="secondary"
+                    >
+                        Log out others
+                    </Button>
+                    <Button
+                        busy={action.busy}
+                        busyLabel="Logging out…"
+                        disabled={!sessions.isSuccess}
+                        onClick={() => setConfirmation({ kind: "revoke-all" })}
+                        size="sm"
+                        variant="danger"
+                    >
+                        <Icon icon={LogOut} size="sm" tone="inherit" />
+                        Log out all
+                    </Button>
+                </div>
+            }
+            description="Sessions expire after inactivity and can be revoked independently."
             id="session-management-heading"
-            title="Browser sessions"
+            icon={Laptop}
+            title="Active sessions"
         >
             <Alert className="mb-4" message={action.error} />
             {sessions.isPending && (
@@ -146,94 +188,59 @@ export function SessionManagementSection() {
                 <EmptyState
                     description="There are no signed-in browsers to show."
                     icon={MonitorX}
-                    title="No browser sessions"
+                    title="No active sessions"
                 />
             )}
             {sessions.isSuccess && (
-                <ul className="space-y-3">
+                <ul className="space-y-2">
                     {sessions.data.sessions.map((session) => (
                         <li
-                            className="border-primary-700 rounded-lg border p-3 text-sm"
+                            className="border-primary-700 bg-primary-900/40 flex flex-col gap-3 rounded-lg border p-3 text-sm sm:flex-row sm:items-center sm:justify-between"
                             key={session.id}
                         >
-                            <div className="flex flex-wrap items-start justify-between gap-3">
-                                <div>
-                                    <p className="text-primary-100 font-medium">
-                                        {session.isCurrent
-                                            ? "Current browser"
-                                            : "Browser session"}
-                                        {session.isCurrent && (
-                                            <Badge className="ml-2" variant="success">
-                                                Current
-                                            </Badge>
-                                        )}
-                                    </p>
-                                    <p className="text-primary-400 mt-1">
-                                        {session.authMethod} · last active{" "}
-                                        {formatDashboardDateTime(session.lastSeenAtMs)}
-                                    </p>
-                                    {session.userAgent !== undefined && (
-                                        <p className="text-primary-500 mt-1 break-all">
-                                            {session.userAgent}
-                                        </p>
+                            <div className="min-w-0">
+                                <div className="text-primary-100 flex min-w-0 items-center gap-2 font-medium">
+                                    <span className="truncate">
+                                        {session.userAgent ?? "Unknown browser"}
+                                    </span>
+                                    {session.isCurrent && (
+                                        <Badge className="shrink-0" variant="success">
+                                            Current
+                                        </Badge>
                                     )}
                                 </div>
-                                {!session.isCurrent && (
-                                    <Button
-                                        aria-label={`Sign out browser ${session.userAgent ?? "unnamed browser"}`}
-                                        busy={action.busy}
-                                        busyLabel="Signing out…"
-                                        onClick={() =>
-                                            setConfirmation({
-                                                kind: "revoke-session",
-                                                sessionId: session.id,
-                                            })
-                                        }
-                                        size="sm"
-                                        variant="danger"
-                                    >
-                                        <Icon icon={Trash2} size="sm" tone="inherit" />
-                                        Sign out
-                                    </Button>
-                                )}
+                                <p className="text-primary-400 mt-1 text-xs">
+                                    Last active{" "}
+                                    {formatDashboardDateTime(session.lastSeenAtMs)} ·{" "}
+                                    {session.authMethod}
+                                </p>
                             </div>
+                            <Button
+                                aria-label={`${session.isCurrent ? "Log out" : "Revoke"} ${session.userAgent ?? "unknown browser"}`}
+                                busy={action.busy}
+                                busyLabel={
+                                    session.isCurrent ? "Logging out…" : "Revoking…"
+                                }
+                                className="shrink-0"
+                                onClick={() =>
+                                    setConfirmation(
+                                        session.isCurrent
+                                            ? { kind: "logout-current" }
+                                            : {
+                                                  kind: "revoke-session",
+                                                  sessionId: session.id,
+                                              }
+                                    )
+                                }
+                                size="sm"
+                                variant={session.isCurrent ? "danger" : "secondary"}
+                            >
+                                {session.isCurrent ? "Log out" : "Revoke"}
+                            </Button>
                         </li>
                     ))}
                 </ul>
             )}
-            <div className="border-primary-700 mt-5 flex flex-wrap gap-3 border-t pt-5">
-                <Button
-                    busy={action.busy}
-                    busyLabel="Signing out…"
-                    onClick={() => setConfirmation({ kind: "revoke-others" })}
-                    variant="secondary"
-                >
-                    <Icon icon={MonitorX} size="sm" tone="inherit" />
-                    Sign out other browsers
-                </Button>
-                <Button
-                    busy={action.busy}
-                    busyLabel="Signing out…"
-                    onClick={() => setConfirmation({ kind: "revoke-all" })}
-                    variant="danger"
-                >
-                    <Icon icon={ShieldX} size="sm" tone="inherit" />
-                    Sign out every browser
-                </Button>
-                <Button
-                    busy={action.busy}
-                    busyLabel="Signing out…"
-                    onClick={() =>
-                        void leaveAuthenticatedBrowser(() =>
-                            client.mutation("auth.logout", {})
-                        )
-                    }
-                    variant="secondary"
-                >
-                    <Icon icon={LogOut} size="sm" tone="inherit" />
-                    Sign out this browser
-                </Button>
-            </div>
             <ConfirmModal
                 busy={action.busy}
                 confirmLabel={confirmationCopy?.confirmLabel}

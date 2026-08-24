@@ -566,6 +566,9 @@ export type ChatRuntimeEvent = v.InferOutput<typeof chatRuntimeEventSchema>;
 const chatRuntimeProjectionPartVariantSchema = v.variant("kind", [
     v.strictObject({
         kind: v.literal("assistant"),
+        occurredAtMs: v.optional(
+            timestampMillisecondsSchema("Chat assistant timestamp is invalid")
+        ),
         segmentId: v.optional(chatProjectionSegmentIdSchema),
         sequence: chatRuntimeEventSequenceSchema,
         streamId: v.optional(chatProjectionStreamIdSchema),
@@ -573,6 +576,9 @@ const chatRuntimeProjectionPartVariantSchema = v.variant("kind", [
     }),
     v.strictObject({
         kind: v.literal("thinking"),
+        occurredAtMs: v.optional(
+            timestampMillisecondsSchema("Chat thinking timestamp is invalid")
+        ),
         segmentId: v.optional(chatProjectionSegmentIdSchema),
         sequence: chatRuntimeEventSequenceSchema,
         streamId: v.optional(chatProjectionStreamIdSchema),
@@ -586,6 +592,9 @@ const chatRuntimeProjectionPartVariantSchema = v.variant("kind", [
         kind: v.literal("tool"),
         name: chatToolNameSchema,
         nameSource: v.optional(v.literal("synthetic")),
+        occurredAtMs: v.optional(
+            timestampMillisecondsSchema("Chat tool timestamp is invalid")
+        ),
         output: v.optional(chatDiagnosticTextSchema),
         phase: v.picklist(["started", "running", "succeeded", "failed"]),
         sequence: chatRuntimeEventSequenceSchema,
@@ -602,6 +611,10 @@ const chatRuntimeProjectionPartVariantSchema = v.variant("kind", [
     }),
     v.strictObject({
         kind: v.literal("user"),
+        messageId: v.optional(chatMessageIdSchema),
+        occurredAtMs: v.optional(
+            timestampMillisecondsSchema("Chat user timestamp is invalid")
+        ),
         sequence: chatRuntimeEventSequenceSchema,
         text: chatMessageTextSchema,
     }),
@@ -730,6 +743,8 @@ const chatExternalRunObjectSchema = v.strictObject({
     abortBoundary: v.optional(chatExternalAbortBoundarySchema),
     continuity: v.picklist(["complete", "interrupted"]),
     hasUnprojectedActivity: v.boolean(),
+    /** Runtime truth may stop before canonical history exposes the final message. */
+    lifecycle: v.optional(v.picklist(["active", "terminal-pending-history"]), "active"),
     /** Process-local receipt/start epoch; processing completion never advances it. */
     observationEpoch: v.optional(
         nonnegativeSafeIntegerSchema("External chat observation epoch is invalid"),

@@ -10,6 +10,11 @@ import {
     type ChatRuntimeSnapshot,
 } from "../../../contracts/chatModel.ts";
 import { parseJsonText } from "../../../shared/json.ts";
+import {
+    parseChatExternalRuntimeSnapshotPayload,
+    type ChatExternalRuntimeSnapshotPayload,
+    type ChatExternalRuntimeSnapshotRow,
+} from "../../database/validation/chatExternalRuntimeSnapshots.ts";
 import type { ChatRunEventRow } from "../../database/validation/chatRunEvents.ts";
 import type { ChatRunRow } from "../../database/validation/chatRuns.ts";
 import type { ChatRuntimeSnapshotRow } from "../../database/validation/chatRuntimeSnapshots.ts";
@@ -48,4 +53,28 @@ export function toChatRuntimeSnapshot(
     record: ChatRuntimeSnapshotRow
 ): ChatRuntimeSnapshot {
     return v.parse(chatRuntimeSnapshotSchema, parseJsonText(record.snapshotJson));
+}
+
+export interface ChatExternalRuntimeSnapshotRecord {
+    readonly observationEpoch: number;
+    readonly payload: ChatExternalRuntimeSnapshotPayload;
+    readonly sessionKey: string;
+    readonly transcriptGeneration: number;
+    readonly updatedAtMs: number;
+}
+
+/**
+ * Hydrates one validated provider-origin session snapshot from strict storage JSON.
+ * @returns Immutable provider-origin restart state.
+ */
+export function toChatExternalRuntimeSnapshot(
+    record: ChatExternalRuntimeSnapshotRow
+): ChatExternalRuntimeSnapshotRecord {
+    return Object.freeze({
+        observationEpoch: record.observationEpoch,
+        payload: parseChatExternalRuntimeSnapshotPayload(record.snapshotJson),
+        sessionKey: record.sessionKey,
+        transcriptGeneration: record.transcriptGeneration,
+        updatedAtMs: getTime(record.updatedAt),
+    });
 }

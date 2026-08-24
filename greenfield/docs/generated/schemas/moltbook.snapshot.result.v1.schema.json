@@ -465,6 +465,12 @@
     "profile": {
       "type": "object",
       "properties": {
+        "avatarUrl": {
+          "type": "string",
+          "maxLength": 2048,
+          "format": "uri",
+          "$comment": "Live Valibot validation additionally restricts profile avatars to the fixed Moltbook CDN /avatars/ path without credentials or fragments."
+        },
         "commentsCount": {
           "type": "integer",
           "minimum": 0,

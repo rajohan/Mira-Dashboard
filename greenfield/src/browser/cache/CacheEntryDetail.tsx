@@ -1,5 +1,4 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
 import { DatabaseZap, RefreshCw } from "lucide-react";
 import { useEffect } from "react";
 
@@ -7,10 +6,10 @@ import type { CacheEntry } from "../../contracts/cache.ts";
 import type { JobRunState } from "../../contracts/jobModel.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
+import { ActionLink } from "../ui/ActionLink.tsx";
 import { Alert } from "../ui/Alert.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
-import { buttonClassNames } from "../ui/buttonStyles.ts";
 import { Card } from "../ui/Card.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { Heading } from "../ui/Heading.tsx";
@@ -255,13 +254,13 @@ export function CacheEntryDetail({ cacheKey }: CacheEntryDetailProps) {
                             Background job
                         </dt>
                         <dd className="mt-1 text-sm">
-                            <Link
+                            <ActionLink
                                 className="text-accent-300 hover:text-accent-200 font-mono wrap-break-word"
                                 search={{ runId: entry.lastAttemptRunId }}
                                 to="/jobs"
                             >
                                 {entry.lastAttemptRunId}
-                            </Link>
+                            </ActionLink>
                         </dd>
                     </div>
                 </dl>
@@ -281,16 +280,14 @@ export function CacheEntryDetail({ cacheKey }: CacheEntryDetailProps) {
                         <Text tone="muted">Manual refresh is unavailable.</Text>
                     )}
                     {refreshRun !== undefined && (
-                        <Link
-                            className={buttonClassNames({
-                                size: "sm",
-                                variant: "secondary",
-                            })}
+                        <ActionLink
                             search={{ runId: refreshRun.id }}
+                            size="sm"
                             to="/jobs"
+                            variant="secondary"
                         >
                             View background job
-                        </Link>
+                        </ActionLink>
                     )}
                 </div>
             </Card>

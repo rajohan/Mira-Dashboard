@@ -23,9 +23,12 @@ import {
     openClawCronInventoryInput,
     openClawCronQueryKey,
 } from "./openClawCronQueries.ts";
-import { parseOpenClawCronPatchJson } from "./presentation.ts";
+import {
+    openClawCronOperationalStatus,
+    parseOpenClawCronPatchJson,
+} from "./presentation.ts";
 
-const { fireEvent, render, screen, waitFor, within } =
+const { act, fireEvent, render, screen, waitFor, within } =
     await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
 const userEvent = userEventModule.default;
@@ -149,6 +152,37 @@ function renderBrowser(
 }
 
 describe("OpenClaw scheduled jobs browser", () => {
+    test("presents running, disabled, last-run, and scheduled status in priority order", () => {
+        expect(
+            openClawCronOperationalStatus({
+                ...disabledAlpha,
+                state: { lastRunStatus: "error", runningAtMs: timestampMs },
+            })
+        ).toEqual({ label: "Running", variant: "warning" });
+        expect(
+            openClawCronOperationalStatus({
+                ...disabledAlpha,
+                state: { lastRunStatus: "ok" },
+            })
+        ).toEqual({ label: "Disabled", variant: "default" });
+        expect(
+            openClawCronOperationalStatus({
+                ...enabledBeta,
+                state: { lastRunStatus: "ok" },
+            })
+        ).toEqual({ label: "Succeeded", variant: "success" });
+        expect(
+            openClawCronOperationalStatus({
+                ...enabledBeta,
+                state: { lastRunStatus: "error" },
+            })
+        ).toEqual({ label: "Failed", variant: "danger" });
+        expect(openClawCronOperationalStatus(enabledBeta)).toEqual({
+            label: "Scheduled",
+            variant: "default",
+        });
+    });
+
     test("validates the full delivery patch inline and disables Save until valid", async () => {
         const onClose = jest.fn();
         const onSubmit = jest.fn(() => Promise.resolve());
@@ -414,12 +448,12 @@ describe("OpenClaw scheduled jobs browser", () => {
             expect(onSelectedJobChange).toHaveBeenCalledWith(enabledBeta.id);
 
             onSelectedJobChange.mockClear();
-            nextCardTarget.focus();
+            act(() => nextCardTarget.focus());
             await user.keyboard("[Enter]");
             expect(onSelectedJobChange).toHaveBeenCalledWith(enabledBeta.id);
 
             onSelectedJobChange.mockClear();
-            selectedCardTarget.focus();
+            act(() => selectedCardTarget.focus());
             await user.keyboard(" ");
             expect(onSelectedJobChange).toHaveBeenCalledWith(disabledAlpha.id);
         } finally {

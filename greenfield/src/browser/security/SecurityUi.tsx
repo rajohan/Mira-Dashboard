@@ -1,32 +1,60 @@
+import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { cn } from "../lib/classNames.ts";
 import { Button } from "../ui/Button.tsx";
 import { Card } from "../ui/Card.tsx";
 import { Heading } from "../ui/Heading.tsx";
+import { Icon } from "../ui/Icon.tsx";
 import { Text } from "../ui/Text.tsx";
 
 interface SecuritySectionProps {
-    readonly children: ReactNode;
+    readonly actions?: ReactNode;
+    readonly badge?: ReactNode;
+    readonly children?: ReactNode;
+    readonly className?: string;
     readonly description: string;
     readonly id: string;
+    readonly icon: LucideIcon;
     readonly title: string;
 }
 
 export function SecuritySection({
+    actions,
+    badge,
     children,
+    className,
     description,
     id,
+    icon,
     title,
 }: SecuritySectionProps) {
     return (
-        <Card aria-labelledby={id}>
-            <Heading id={id} level={2}>
-                {title}
-            </Heading>
-            <Text className="mt-2" tone="muted">
-                {description}
-            </Text>
-            <div className="mt-5">{children}</div>
+        <Card
+            aria-labelledby={id}
+            className={cn(
+                "bg-primary-800 rounded-lg p-4 wrap-anywhere shadow-none",
+                className
+            )}
+        >
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                        <Icon icon={icon} tone="accent" />
+                        <Heading id={id} level={2} size="subsection">
+                            {title}
+                        </Heading>
+                        {badge}
+                    </div>
+                    <Text className="mt-1" tone="muted">
+                        {description}
+                    </Text>
+                </div>
+                {actions}
+            </div>
+            {children !== undefined && children !== null && children !== false && (
+                <div className="mt-4">{children}</div>
+            )}
         </Card>
     );
 }

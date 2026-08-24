@@ -119,6 +119,7 @@ describe("Dashboard data table and virtualizer", () => {
         expect(scrollRegion).not.toHaveAttribute("tabindex");
         expect(scrollRegion.parentElement).toHaveClass(
             "dashboard-data-table-query-container",
+            "@container",
             "w-full",
             "max-w-full",
             "min-w-0"
@@ -129,7 +130,9 @@ describe("Dashboard data table and virtualizer", () => {
             "min-w-0",
             "max-w-full",
             "overflow-x-auto",
-            "overscroll-x-contain"
+            "@max-[66rem]:overflow-x-hidden",
+            "rounded-lg",
+            "border"
         );
         expect(scrollRegion).not.toHaveAttribute("data-virtualized");
         const table = screen.getByRole("table", { name: "Fixture rows" });
@@ -137,6 +140,7 @@ describe("Dashboard data table and virtualizer", () => {
             "dashboard-data-table",
             "w-full",
             "min-w-full",
+            "bg-primary-950/40",
             "border-separate",
             "border-spacing-0"
         );
@@ -145,6 +149,7 @@ describe("Dashboard data table and virtualizer", () => {
         );
         const firstCell = within(table).getByText("First row").closest("td");
         expect(firstCell).not.toBeNull();
+        expect(firstCell).toHaveClass("border-b", "border-primary-700/60");
         const mobileLabel = firstCell?.querySelector(".dashboard-data-table-label");
         expect(mobileLabel).toHaveTextContent("Label");
         expect(mobileLabel).toHaveAttribute("aria-hidden", "true");
@@ -164,8 +169,8 @@ describe("Dashboard data table and virtualizer", () => {
         expect(scrollRegion).toHaveClass(
             "max-h-128",
             "overflow-x-auto",
+            "@max-[66rem]:overflow-x-hidden",
             "overflow-y-auto",
-            "overscroll-x-contain",
             "[-webkit-overflow-scrolling:touch]",
             "focus-visible:ring-2"
         );

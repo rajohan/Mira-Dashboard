@@ -119,6 +119,7 @@ export interface ChatDisplayMessage {
     readonly hydration?: "error" | "loading" | "required";
     readonly parts: readonly ChatMessagePart[];
     /** Provider user echo used only to place the matching canonical/local user row. */
+    readonly precedingUserMessageIdAnchor?: string;
     readonly precedingUserTextAnchor?: string;
     readonly providerRunId?: string;
     readonly role: "assistant" | "control" | "user";

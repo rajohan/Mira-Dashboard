@@ -161,6 +161,11 @@
             "uniqueItems": true,
             "$comment": "Live Valibot validation additionally requires task strings to use canonical code-unit order."
           },
+          "number": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
           "priority": {
             "enum": [
               "low",
@@ -208,6 +213,7 @@
           "createdAtMs",
           "id",
           "labels",
+          "number",
           "priority",
           "status",
           "title",

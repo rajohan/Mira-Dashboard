@@ -4,7 +4,8 @@ import { safeChatMarkdownLink } from "./chatMarkdownPolicy.ts";
 import { ChatMessageBubble } from "./ChatMessageBubble.tsx";
 import { toolDisplayName } from "./chatToolPresentation.ts";
 
-const { render, screen, waitFor, within } = await import("@testing-library/react");
+const { fireEvent, render, screen, waitFor, within } =
+    await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
 const userEvent = userEventModule.default;
 
@@ -35,6 +36,7 @@ describe("chat message bubble", () => {
                         role: "assistant",
                         sequence: 1,
                         sessionKey: "agent:main:main",
+                        timestampMs: Date.UTC(2026, 7, 14, 20, 15),
                     }}
                 />
                 <ChatMessageBubble
@@ -58,9 +60,18 @@ describe("chat message bubble", () => {
             </>
         );
 
-        const running = screen.getByRole("status", { name: "Thinking…" });
+        const [thinkingMessage] = screen.getAllByRole("article", {
+            name: "Mira message",
+        });
+        expect(within(thinkingMessage!).getByText("Mira")).toBeVisible();
+        expect(within(thinkingMessage!).queryByText("Mira (thinking)")).toBeNull();
+        const running = within(thinkingMessage!).getByRole("status", {
+            name: "Thinking…",
+        });
         expect(running).toBeVisible();
+        expect(running).toHaveClass("text-sm", "[&_.loading-state-dots]:text-lg");
         expect(running.textContent).toBe("Thinking...");
+        expect(thinkingMessage!.querySelector("time")).not.toBeNull();
         expect(screen.getByRole("status", { name: "Context compacted" })).toBeVisible();
     });
 
@@ -154,38 +165,55 @@ describe("chat message bubble", () => {
         });
     });
 
-    test("exposes tool lifecycle through an expandable accessible region", async () => {
+    test("keeps failed tools collapsed by default while preserving local and global expansion", async () => {
         const user = userEvent.setup();
-        render(
-            <ChatMessageBubble
-                display={display}
-                message={{
-                    attachments: [],
-                    id: "message-tool",
-                    parts: [
-                        {
-                            callId: "call-1",
-                            error: "Unavailable",
-                            kind: "tool",
-                            name: "status",
-                            output: "Unavailable",
-                            status: "failed",
-                        },
-                    ],
-                    role: "assistant",
-                    sequence: 1,
-                    sessionKey: "agent:main:main",
-                }}
-            />
+        const message = {
+            attachments: [],
+            id: "message-tool",
+            parts: [
+                {
+                    callId: "call-1",
+                    error: "Unavailable",
+                    kind: "tool" as const,
+                    name: "status",
+                    output: "Unavailable",
+                    status: "failed" as const,
+                },
+            ],
+            role: "assistant" as const,
+            sequence: 1,
+            sessionKey: "agent:main:main",
+        };
+        const rendered = render(
+            <ChatMessageBubble display={display} message={message} />
         );
         const toggle = screen.getByRole("button", { name: /status failed/iu });
+        expect(screen.getByRole("region", { name: "Status, failed" })).toHaveClass(
+            "border-red-500/30",
+            "bg-red-500/10"
+        );
+        expect(toggle).toHaveAttribute("aria-expanded", "false");
+        expect(toggle.querySelector(".lucide-chevron-right")).not.toHaveClass(
+            "rotate-90"
+        );
+        expect(toggle.querySelector(".lucide-circle-alert")).toBeNull();
+        expect(within(toggle).getByText("failed")).toBeVisible();
+        expect(screen.queryByRole("region", { name: "Status tool output" })).toBeNull();
+        await user.click(toggle);
         expect(toggle).toHaveAttribute("aria-expanded", "true");
-        expect(screen.getAllByText("Unavailable")).toHaveLength(1);
         expect(
             screen.getByRole("region", { name: "Status tool output" })
         ).toHaveAttribute("tabindex", "0");
         await user.click(toggle);
         expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+        rendered.rerender(
+            <ChatMessageBubble
+                display={{ ...display, toolsExpanded: true }}
+                message={message}
+            />
+        );
+        expect(toggle).toHaveAttribute("aria-expanded", "true");
     });
 
     test("groups tool description, input, and output in one completed bubble", async () => {
@@ -219,15 +247,26 @@ describe("chat message bubble", () => {
         const tool = screen.getByRole("region", {
             name: "Bash, completed",
         });
+        expect(tool).toHaveClass("border-amber-500/30", "bg-amber-500/10");
         const toggle = screen.getByRole("button", {
             name: "Bash bun test (mira-dashboard) completed",
         });
+        expect(toggle).toHaveClass("items-start");
         expect(toggle).toHaveAttribute("aria-expanded", "false");
+        expect(toggle.querySelector(".lucide-chevron-right")).not.toHaveClass("mt-0.5");
+        expect(toggle.querySelector(".lucide-chevron-right")).not.toHaveClass(
+            "rotate-90"
+        );
+        expect(toggle.querySelector('[data-tool-status="completed"]')).toHaveClass(
+            "mt-0.5",
+            "uppercase"
+        );
+        expect(toggle.querySelector(".lucide-circle-check")).toBeNull();
         expect(within(tool).getByText("bun test (mira-dashboard)")).toBeVisible();
         expect(within(tool).queryByText("Tool output")).toBeNull();
         await user.click(toggle);
         expect(within(tool).getByText("Description")).toBeVisible();
-        expect(within(tool).getAllByText("bun test (mira-dashboard)")).toHaveLength(2);
+        expect(within(tool).getAllByText("bun test (mira-dashboard)")).toHaveLength(1);
         expect(within(tool).getByText("Tool input")).toBeVisible();
         expect(within(tool).getByText("Tool output")).toBeVisible();
         expect(within(tool).getByText(/8 pass/iu)).toBeVisible();
@@ -241,7 +280,241 @@ describe("chat message bubble", () => {
         expect(inputRegion).toHaveAttribute("tabindex", "0");
         expect(outputRegion).toHaveAttribute("data-virtualizer-scroll-region");
         expect(outputRegion).toHaveAttribute("tabindex", "0");
+        Object.defineProperties(inputRegion, {
+            clientHeight: { configurable: true, value: 100 },
+            scrollHeight: { configurable: true, value: 500 },
+            scrollTop: { configurable: true, value: 0, writable: true },
+        });
+        fireEvent.scroll(inputRegion);
+        const toBottom = within(tool).getByRole("button", {
+            name: "Bash tool input: scroll to bottom",
+        });
+        await user.click(toBottom);
+        expect(inputRegion.scrollTop).toBe(500);
+        expect(toggle.querySelector(".lucide-chevron-right")).toHaveClass("rotate-90");
         expect(within(tool).queryByText("running")).toBeNull();
+    });
+
+    test("highlights structured tool data without interpreting plain output as Markdown", () => {
+        render(
+            <ChatMessageBubble
+                display={{ ...display, toolsExpanded: true }}
+                message={{
+                    attachments: [],
+                    id: "message-tool-source",
+                    parts: [
+                        {
+                            callId: "call-json",
+                            input: { query: "select 1", values: [1, true] },
+                            kind: "tool",
+                            name: "database_query",
+                            output: '{"rows":[{"healthy":true}]}',
+                            status: "completed",
+                        },
+                        {
+                            callId: "call-plain",
+                            input: "printf '# literal'",
+                            kind: "tool",
+                            name: "functions.exec_command",
+                            output: "# Not a heading\n**not emphasized**",
+                            status: "completed",
+                        },
+                    ],
+                    role: "assistant",
+                    sequence: 1,
+                    sessionKey: "agent:main:main",
+                }}
+            />
+        );
+
+        const jsonTool = screen.getByRole("region", {
+            name: "Database query, completed",
+        });
+        const jsonInput = within(jsonTool).getByRole("region", {
+            name: "Database query tool input",
+        });
+        const jsonOutput = within(jsonTool).getByRole("region", {
+            name: "Database query tool output",
+        });
+        expect(
+            within(jsonInput).getByTestId("syntax-highlighted-source")
+        ).toHaveAttribute("data-language", "json");
+        expect(
+            within(jsonOutput).getByTestId("syntax-highlighted-source")
+        ).toHaveAttribute("data-language", "json");
+
+        const plainTool = screen.getByRole("region", { name: "Bash, completed" });
+        const plainOutput = within(plainTool).getByRole("region", {
+            name: "Bash tool output",
+        });
+        expect(
+            plainOutput.querySelector('[data-language="plaintext"]')?.textContent
+        ).toBe("# Not a heading\n**not emphasized**");
+        expect(within(plainOutput).queryByRole("heading")).toBeNull();
+        expect(within(plainOutput).queryByTestId("syntax-highlighted-source")).toBeNull();
+    });
+
+    test("unwraps browser result content into highlighted and readable blocks", () => {
+        render(
+            <ChatMessageBubble
+                display={{ ...display, toolsExpanded: true }}
+                message={{
+                    attachments: [],
+                    id: "message-browser-tool",
+                    parts: [
+                        {
+                            callId: "call-browser",
+                            input: {
+                                action: "navigate",
+                                targetId: "greenfield-apply-patch-diff",
+                            },
+                            kind: "tool",
+                            name: "openclaw__browser",
+                            output: JSON.stringify({
+                                content: [
+                                    {
+                                        text: JSON.stringify({
+                                            ok: true,
+                                            targetId: "browser-target",
+                                        }),
+                                        type: "text",
+                                    },
+                                    {
+                                        text: "SECURITY NOTICE\n- Untrusted content",
+                                        type: "text",
+                                    },
+                                ],
+                            }),
+                            status: "completed",
+                        },
+                    ],
+                    role: "assistant",
+                    sequence: 1,
+                    sessionKey: "agent:main:main",
+                }}
+            />
+        );
+
+        const output = screen.getByRole("region", {
+            name: /browser tool output/iu,
+        });
+        expect(within(output).getByTestId("syntax-highlighted-source")).toHaveAttribute(
+            "data-language",
+            "json"
+        );
+        expect(output).toHaveTextContent("browser-target");
+        expect(output).toHaveTextContent("SECURITY NOTICE");
+        expect(output).toHaveTextContent("- Untrusted content");
+        expect(output).not.toHaveTextContent('"content"');
+    });
+
+    test("highlights numbered command output per source file", () => {
+        render(
+            <ChatMessageBubble
+                display={{ ...display, toolsExpanded: true }}
+                message={{
+                    attachments: [],
+                    id: "message-numbered-source-tool",
+                    parts: [
+                        {
+                            callId: "call-numbered-source",
+                            input: {
+                                command:
+                                    "/bin/bash -lc \"nl -ba package.json | sed -n '1,3p'; nl -ba src/browser/auth/PasswordLoginForm.tsx | sed -n '27,28p'\"",
+                                cwd: "/workspace",
+                            },
+                            kind: "tool",
+                            name: "functions.exec_command",
+                            output: ` 1 {
+ 2   "name": "mira-dashboard"
+ 3 }
+ 27 return (
+ 28   <LoginPanel>`,
+                            status: "completed",
+                        },
+                    ],
+                    role: "assistant",
+                    sequence: 1,
+                    sessionKey: "agent:main:main",
+                }}
+            />
+        );
+
+        const output = screen.getByRole("region", { name: "Bash tool output" });
+        expect(within(output).getByText("package.json · lines 1–3")).toBeVisible();
+        expect(
+            within(output).getByText(
+                "src/browser/auth/PasswordLoginForm.tsx · lines 27–28"
+            )
+        ).toBeVisible();
+        expect(
+            within(output)
+                .getAllByTestId("syntax-highlighted-source")
+                .map((source) => source.dataset.language)
+        ).toEqual(["json", "typescript"]);
+        expect(output.querySelector(".hljs-attr")).not.toBeNull();
+        expect(output.querySelector(".hljs-keyword")).not.toBeNull();
+    });
+
+    test("renders apply-patch input as a colored file diff", async () => {
+        render(
+            <ChatMessageBubble
+                display={{ ...display, toolsExpanded: true }}
+                message={{
+                    attachments: [],
+                    id: "message-apply-patch",
+                    parts: [
+                        {
+                            callId: "call-patch",
+                            input: {
+                                patch: `*** Begin Patch
+*** Update File: src/example.ts
+@@ -8,2 +8,2 @@
+-const color = "gray";
++const color = "green";
+ export { color };
+*** End Patch`,
+                            },
+                            kind: "tool",
+                            name: "functions.apply_patch",
+                            output: "Done!",
+                            status: "completed",
+                        },
+                    ],
+                    role: "assistant",
+                    sequence: 1,
+                    sessionKey: "agent:main:main",
+                }}
+            />
+        );
+
+        const tool = screen.getByRole("region", {
+            name: "Apply patch, completed",
+        });
+        const diff = within(tool).getByRole("figure", {
+            name: "Apply patch file changes",
+        });
+        expect(within(diff).getByText("src/example.ts")).toBeVisible();
+        expect(within(diff).getByText("+1")).toHaveClass("text-emerald-300");
+        expect(within(diff).getByText("-1")).toHaveClass("text-red-300");
+        await waitFor(() =>
+            expect(diff.querySelector('[data-diff-line="add"]')).not.toBeNull()
+        );
+        expect(diff.querySelector('[data-diff-line="add"]')).toHaveClass(
+            "bg-emerald-500/10"
+        );
+        expect(diff.querySelector('[data-diff-line="delete"]')).toHaveClass(
+            "bg-red-500/10"
+        );
+        expect(within(diff).getAllByTestId("syntax-highlighted-source")).not.toHaveLength(
+            0
+        );
+        for (const source of within(diff).getAllByTestId("syntax-highlighted-source")) {
+            expect(source).toHaveAttribute("data-language", "typescript");
+        }
+        expect(within(tool).queryByText("Description")).toBeNull();
+        expect(within(tool).queryByText("Tool input")).toBeNull();
+        expect(within(tool).getByText("Tool output")).toBeVisible();
     });
 
     test("bounds collapsed tool summaries without exposing unrelated input or output", () => {
@@ -541,7 +814,7 @@ describe("chat message bubble", () => {
         const surface = screen.getByTestId("chat-message-surface-assistant");
         expect(surface).toHaveClass("bg-primary-950");
         expect(surface.className).not.toMatch(/(?:border|shadow)/u);
-        expect(screen.getByText("Private working surface").parentElement).toHaveClass(
+        expect(screen.getByText("Private working surface").closest("aside")).toHaveClass(
             "bg-primary-800"
         );
     });
@@ -764,5 +1037,96 @@ describe("chat message bubble", () => {
             />
         );
         expect(screen.queryByText("Evidence")).toBeNull();
+    });
+
+    test("renders thinking through the shared safe Markdown and syntax pipeline", () => {
+        render(
+            <ChatMessageBubble
+                display={display}
+                message={{
+                    attachments: [],
+                    id: "message-thinking-markdown",
+                    parts: [
+                        {
+                            kind: "thinking",
+                            status: "running",
+                            text: [
+                                "## Working plan",
+                                "",
+                                "Inspect `chat.history` before reconciling.",
+                                "",
+                                "```json",
+                                '{"next":"inspect"}',
+                                "```",
+                            ].join("\n"),
+                        },
+                    ],
+                    role: "assistant",
+                    sequence: 1,
+                    sessionKey: "agent:main:main",
+                }}
+            />
+        );
+
+        expect(screen.getByRole("heading", { name: "Working plan" })).toBeVisible();
+        expect(screen.getByText("Mira (thinking)")).toBeVisible();
+        expect(screen.queryByText("Thinking…")).toBeNull();
+        expect(screen.queryByRole("status", { name: "Thinking…" })).toBeNull();
+        const inlineCode = screen.getByText("chat.history", { selector: "code" });
+        expect(inlineCode).toHaveClass(
+            "rounded",
+            "bg-black/25",
+            "px-1",
+            "py-0.5",
+            "font-mono",
+            "text-[0.92em]"
+        );
+        expect(inlineCode.closest("pre")).toBeNull();
+        expect(screen.getByTestId("syntax-highlighted-source")).toHaveAttribute(
+            "data-language",
+            "json"
+        );
+    });
+
+    test("styles inline code consistently in user and final Markdown", () => {
+        render(
+            <>
+                <ChatMessageBubble
+                    display={display}
+                    message={{
+                        attachments: [],
+                        id: "message-user-inline-code",
+                        parts: [{ kind: "text", text: "Run `bun test` now." }],
+                        role: "user",
+                        sequence: 1,
+                        sessionKey: "agent:main:main",
+                    }}
+                />
+                <ChatMessageBubble
+                    display={display}
+                    message={{
+                        attachments: [],
+                        id: "message-final-inline-code",
+                        parts: [{ kind: "text", text: "Returned `exitCode=0`." }],
+                        role: "assistant",
+                        sequence: 2,
+                        sessionKey: "agent:main:main",
+                    }}
+                />
+            </>
+        );
+
+        for (const content of ["bun test", "exitCode=0"]) {
+            const inlineCode = screen.getByText(content, { selector: "code" });
+            expect(inlineCode).toHaveClass(
+                "rounded",
+                "bg-black/25",
+                "px-1",
+                "py-0.5",
+                "font-mono",
+                "text-[0.92em]"
+            );
+            expect(inlineCode.closest("pre")).toBeNull();
+        }
     });
 });

@@ -40,6 +40,7 @@ const applicationCompositionTestFiles: ReadonlySet<string> = new Set([
     "src/app/dashboardServerProcess.test.ts",
     "src/app/databaseMaintenance.test.ts",
     "src/app/developmentProcesses.test.ts",
+    "src/app/resetDashboardPassword.test.ts",
     "src/app/runtimeAuthorityBundle.test.ts",
     "src/app/trpcHttpHandler.test.ts",
     "src/app/trpcRequestPolicy.test.ts",
@@ -91,6 +92,16 @@ const reviewedApplicationServerTargets: ReadonlyMap<
             "src/server/database/runtime/databaseCandidateMigrationOwner.ts",
             "src/server/database/runtime/databaseService.ts",
             "src/server/database/runtime/databaseSnapshot.ts",
+        ]),
+    ],
+    [
+        "src/app/resetDashboardPassword.ts",
+        new Set([
+            "src/server/database/runtime/databaseService.ts",
+            "src/server/domains/security/hostPasswordRecovery.ts",
+            "src/server/domains/security/hostPasswordRecoveryRepository.ts",
+            "src/server/platform/filesystem/projectLayout.ts",
+            "src/server/platform/release/runtimeRelease.ts",
         ]),
     ],
 ]);
@@ -158,7 +169,7 @@ export const allowedTargets: Readonly<Record<SourceRole, ReadonlySet<SourceRole>
     browser: new Set(["browser", "contracts", "shared"]),
     contracts: new Set(["contracts", "shared"]),
     "environment-source": new Set(["shared"]),
-    "maintenance-app": new Set(["maintenance-app", "shared"]),
+    "maintenance-app": new Set(["contracts", "maintenance-app", "shared"]),
     scripts: new Set(["contracts", "scripts", "shared"]),
     server: new Set(["contracts", "server", "shared"]),
     shared: new Set(["shared"]),
@@ -243,7 +254,12 @@ export function sourceRole(filePath: string): SourceRole {
     }
     if (isTestPath(filePath)) return "test";
     if (filePath === environmentSourceFile) return "environment-source";
-    if (filePath === "src/app/databaseMaintenance.ts") return "maintenance-app";
+    if (
+        filePath === "src/app/databaseMaintenance.ts" ||
+        filePath === "src/app/resetDashboardPassword.ts"
+    ) {
+        return "maintenance-app";
+    }
     if (webApplicationFiles.has(filePath)) return "web-app";
     if (workerApplicationFiles.has(filePath)) return "worker-app";
     if (filePath.startsWith("src/app/")) return "unclassified-app";

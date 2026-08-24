@@ -1,6 +1,7 @@
 import { useInfiniteQuery, infiniteQueryOptions } from "@tanstack/react-query";
 import { createColumnHelper, tableFeatures, useTable } from "@tanstack/react-table";
 import { RefreshCw, ScrollText } from "lucide-react";
+import { useEffect, useRef, type ReactNode, type UIEvent } from "react";
 
 import type {
     ListSecurityAuditEventsInput,
@@ -9,7 +10,7 @@ import type {
 } from "../../contracts/securityAudit.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { dashboardBrowserFailureMessage } from "../api/trpcError.ts";
-import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
+import { formatDashboardDateTimeParts } from "../lib/formatDateTime.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -27,6 +28,14 @@ const emptyAuditEvents: readonly SecurityAuditEventSummary[] = Object.freeze([])
 const minimumVirtualizedAuditRows = 50;
 
 const auditTableFeatures = tableFeatures({});
+const auditTableClassName = "min-w-240 table-fixed";
+const auditColumnWidths = Object.freeze({
+    action: "17%",
+    actor: "20%",
+    metadata: "30%",
+    occurredAtMs: "13%",
+    target: "20%",
+});
 const auditColumnHelper = createColumnHelper<
     typeof auditTableFeatures,
     SecurityAuditEventSummary
@@ -102,14 +111,22 @@ const auditColumns = auditColumnHelper.columns([
         id: "target",
     }),
     auditColumnHelper.accessor("occurredAtMs", {
-        cell: ({ getValue }) => (
-            <time
-                className="text-primary-400 whitespace-nowrap"
-                dateTime={new Date(getValue()).toISOString()}
-            >
-                {formatDashboardDateTime(getValue())}
-            </time>
-        ),
+        cell: ({ getValue }) => {
+            const timestampMs = getValue();
+            const [date, time] = formatDashboardDateTimeParts(timestampMs);
+            return (
+                <time
+                    className="text-primary-400 flex flex-col whitespace-nowrap @max-[66rem]:flex-row @max-[66rem]:gap-1"
+                    dateTime={new Date(timestampMs).toISOString()}
+                >
+                    <span>{date}</span>
+                    <span aria-hidden="true" className="hidden @max-[66rem]:inline">
+                        ·
+                    </span>
+                    <span>{time}</span>
+                </time>
+            );
+        },
         header: "Time",
     }),
     auditColumnHelper.accessor((event) => metadataLabel(event.metadata), {
@@ -123,9 +140,20 @@ const auditColumns = auditColumnHelper.columns([
 
 interface SecurityAuditTableProps {
     readonly events: readonly SecurityAuditEventSummary[];
+    readonly hasMore: boolean;
+    readonly loadMoreError?: string;
+    readonly loadingMore: boolean;
+    readonly onLoadMore: () => void;
 }
 
-function SecurityAuditTable({ events }: SecurityAuditTableProps) {
+function SecurityAuditTable({
+    events,
+    hasMore,
+    loadMoreError,
+    loadingMore,
+    onLoadMore,
+}: SecurityAuditTableProps) {
+    const loadRequestedRef = useRef(false);
     const table = useTable({
         columns: auditColumns,
         data: events,
@@ -134,12 +162,67 @@ function SecurityAuditTable({ events }: SecurityAuditTableProps) {
     });
     const rows = table.getRowModel().rows;
 
+    useEffect(() => {
+        if (!loadingMore) loadRequestedRef.current = false;
+    }, [loadingMore]);
+
+    function loadMoreNearBottom(event: UIEvent<HTMLElement>): void {
+        if (
+            !hasMore ||
+            loadMoreError !== undefined ||
+            loadingMore ||
+            loadRequestedRef.current
+        ) {
+            return;
+        }
+        const container = event.currentTarget;
+        if (
+            container.scrollHeight - container.scrollTop - container.clientHeight <=
+            320
+        ) {
+            loadRequestedRef.current = true;
+            onLoadMore();
+        }
+    }
+
+    let footer: ReactNode;
+    if (loadingMore) {
+        footer = (
+            <LoadingState className="min-h-16" label="Loading older events…" size="sm" />
+        );
+    } else if (loadMoreError !== undefined) {
+        footer = (
+            <div className="p-3">
+                <Alert message={loadMoreError} />
+                <Button
+                    className="mt-3"
+                    onClick={onLoadMore}
+                    size="sm"
+                    variant="secondary"
+                >
+                    <Icon icon={RefreshCw} size="sm" tone="inherit" />
+                    Try again
+                </Button>
+            </div>
+        );
+    } else if (hasMore && rows.length < minimumVirtualizedAuditRows) {
+        footer = (
+            <div className="p-3">
+                <Button onClick={onLoadMore} size="sm" variant="secondary">
+                    Load older events
+                </Button>
+            </div>
+        );
+    }
+
     if (rows.length < minimumVirtualizedAuditRows) {
         return (
             <DataTable
+                columnWidths={auditColumnWidths}
+                footer={footer}
                 label="Security audit events"
                 table={table}
-                tableClassName="min-w-240"
+                tableClassName={auditTableClassName}
             />
         );
     }
@@ -152,11 +235,14 @@ function SecurityAuditTable({ events }: SecurityAuditTableProps) {
         >
             {(virtualization) => (
                 <DataTable
+                    columnWidths={auditColumnWidths}
+                    footer={footer}
                     label="Security audit events"
+                    onScroll={loadMoreNearBottom}
                     rowWindow={virtualization}
                     scrollContainerRef={virtualization.scrollContainerRef}
                     table={table}
-                    tableClassName="min-w-240"
+                    tableClassName={auditTableClassName}
                 />
             )}
         </Virtualizer>
@@ -193,12 +279,13 @@ export function SecurityAuditSection() {
         <SecuritySection
             description="A read-only history of security changes. Sensitive details are hidden."
             id="security-audit-heading"
+            icon={ScrollText}
             title="Security audit"
         >
             {events.isPending && (
                 <LoadingState label="Loading security events…" size="sm" />
             )}
-            {events.isError && (
+            {events.isError && auditEvents.length === 0 && (
                 <div>
                     <Alert message={dashboardBrowserFailureMessage(events.error)} />
                     <Button
@@ -219,17 +306,18 @@ export function SecurityAuditSection() {
                     title="No security events"
                 />
             )}
-            {auditEvents.length > 0 && <SecurityAuditTable events={auditEvents} />}
-            {events.hasNextPage && (
-                <Button
-                    busy={events.isFetchingNextPage}
-                    busyLabel="Loading…"
-                    className="mt-4"
-                    onClick={() => void events.fetchNextPage()}
-                    variant="secondary"
-                >
-                    Load older events
-                </Button>
+            {auditEvents.length > 0 && (
+                <SecurityAuditTable
+                    events={auditEvents}
+                    hasMore={events.hasNextPage}
+                    loadMoreError={
+                        events.isFetchNextPageError
+                            ? dashboardBrowserFailureMessage(events.error)
+                            : undefined
+                    }
+                    loadingMore={events.isFetchingNextPage}
+                    onLoadMore={() => void events.fetchNextPage()}
+                />
             )}
         </SecuritySection>
     );

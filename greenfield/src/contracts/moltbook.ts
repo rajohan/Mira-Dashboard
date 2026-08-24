@@ -14,6 +14,7 @@ export const moltbookFeedMaximumPosts = 25;
 export const moltbookOwnPostsMaximum = 25;
 export const moltbookOwnCommentsMaximum = 50;
 export const moltbookNextActionsMaximum = 8;
+export const moltbookAvatarOrigin = "https://d3r1u9brut0jdf.cloudfront.net";
 
 function boundedTextSchema(maximumLength: number, message: string) {
     return v.pipe(
@@ -43,6 +44,28 @@ const moltbookKarmaSchema = v.pipe(
 );
 const moltbookTimestampSchema = timestampMillisecondsSchema(
     "Moltbook timestamp is invalid"
+);
+
+export function moltbookAvatarUrlIsTrusted(value: string): boolean {
+    try {
+        const url = new URL(value);
+        return (
+            url.origin === moltbookAvatarOrigin &&
+            url.pathname.startsWith("/avatars/") &&
+            url.hash === "" &&
+            url.username === "" &&
+            url.password === ""
+        );
+    } catch {
+        return false;
+    }
+}
+
+export const moltbookAvatarUrlSchema = v.pipe(
+    v.string("Moltbook profile avatar URL is invalid"),
+    v.maxLength(2048, "Moltbook profile avatar URL is invalid"),
+    v.url("Moltbook profile avatar URL is invalid"),
+    v.check(moltbookAvatarUrlIsTrusted, "Moltbook profile avatar URL is invalid")
 );
 
 export const moltbookAuthorSchema = v.strictObject({
@@ -77,6 +100,7 @@ export const moltbookFeedSchema = v.strictObject({
 });
 
 export const moltbookProfileSchema = v.strictObject({
+    avatarUrl: v.optional(moltbookAvatarUrlSchema),
     commentsCount: moltbookCountSchema,
     description: boundedTextSchema(4000, "Moltbook profile description is invalid"),
     displayName: boundedDisplayTextSchema(

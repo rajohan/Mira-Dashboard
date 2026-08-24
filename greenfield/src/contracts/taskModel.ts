@@ -9,7 +9,12 @@ import {
     lowercaseUuidV7Schema,
     positiveSafeIntegerSchema,
 } from "../shared/validation.ts";
-import { automationPrincipalIdSchema, securityRecordIdSchema } from "./security.ts";
+import {
+    automationPrincipalIdSchema,
+    securityRecordIdSchema,
+    securityLabelSchema,
+    securityUsernameSchema,
+} from "./security.ts";
 
 /** Stable task-board columns in their displayed order. */
 export const taskStatuses = ["todo", "in-progress", "blocked", "done"] as const;
@@ -54,6 +59,7 @@ export const taskIdSchema = lowercaseUuidV7Schema("Task id is invalid");
 export const taskProgressUpdateIdSchema = lowercaseUuidV7Schema(
     "Task progress update id is invalid"
 );
+export const taskNumberSchema = positiveSafeIntegerSchema("Task number is invalid");
 export const taskStatusSchema = v.picklist(taskStatuses, "Task status is invalid");
 export const taskPrioritySchema = v.picklist(taskPriorities, "Task priority is invalid");
 export const taskAssigneeIdSchema = v.picklist(
@@ -79,19 +85,19 @@ function canonicalControlSafeTextSchema(maximumLength: number, message: string) 
 
 export const taskTitleSchema = canonicalControlSafeTextSchema(
     taskTitleMaximumLength,
-    "Task title is invalid"
+    "Use 1–240 visible characters with no leading or trailing spaces."
 );
 export const taskLabelSchema = canonicalControlSafeTextSchema(
     taskLabelMaximumLength,
-    "Task label is invalid"
+    "Use no more than 64 visible characters with no leading or trailing spaces."
 );
 export const taskBodyMarkdownSchema = boundedNonBlankTextSchema(
     taskBodyMaximumLength,
-    "Task body is invalid"
+    "Use no more than 100,000 characters and include non-space text, or leave it blank."
 );
 export const taskProgressMarkdownSchema = boundedNonBlankTextSchema(
     taskProgressMaximumLength,
-    "Task progress update is invalid"
+    "Enter a progress update of no more than 20,000 characters."
 );
 
 /**
@@ -125,9 +131,18 @@ export function canonicalizeTaskStrings<TValue extends string>(
 
 /** Shared bounded task-label sequence before input/output canonicalization. */
 export const taskLabelArraySchema = v.pipe(
-    v.array(taskLabelSchema, "Task labels are invalid"),
-    v.maxLength(taskMaximumLabels, "Task label count is outside its budget"),
-    v.check(hasUniqueArrayItems<string>, "Task labels must be unique")
+    v.array(
+        taskLabelSchema,
+        "Use at most 20 unique labels; each label may contain up to 64 visible characters."
+    ),
+    v.maxLength(
+        taskMaximumLabels,
+        "Use at most 20 unique labels; each label may contain up to 64 visible characters."
+    ),
+    v.check(
+        hasUniqueArrayItems<string>,
+        "Use at most 20 unique labels; each label may contain up to 64 visible characters."
+    )
 );
 
 /** Canonical task-label list accepted from callers. */
@@ -179,6 +194,7 @@ const taskBaseEntries = {
     createdAtMs: taskTimestampSchema,
     id: taskIdSchema,
     labels: taskLabelListSchema,
+    number: taskNumberSchema,
     priority: taskPrioritySchema,
     status: taskStatusSchema,
     title: taskTitleSchema,
@@ -229,10 +245,12 @@ export const taskProgressAuthorSchema = v.variant("kind", [
     v.strictObject({
         id: automationPrincipalIdSchema,
         kind: v.literal("automation"),
+        label: securityLabelSchema,
     }),
     v.strictObject({
         id: securityRecordIdSchema,
         kind: v.literal("user"),
+        username: securityUsernameSchema,
     }),
 ]);
 

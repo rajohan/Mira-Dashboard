@@ -65,38 +65,35 @@ export function PageState(properties: PageStateProps) {
             return (
                 <Card
                     aria-labelledby={errorHeadingId}
-                    className="mx-auto w-full max-w-xl border-red-900/60"
+                    className="w-full py-10 text-center"
                     role="alert"
                 >
-                    <div className="flex items-start gap-3">
-                        <Icon
-                            className="mt-0.5 shrink-0"
-                            icon={TriangleAlert}
-                            tone="danger"
-                        />
-                        <div className="min-w-0">
-                            <Heading
-                                id={errorHeadingId}
-                                level={properties.headingLevel ?? 1}
-                                size="subsection"
-                            >
-                                {properties.title ?? "Dashboard unavailable"}
-                            </Heading>
-                            <Text className="mt-2">{properties.message}</Text>
-                            {properties.onRetry !== undefined && (
-                                <Button
-                                    busy={properties.retryBusy}
-                                    busyLabel="Retrying…"
-                                    className="mt-4"
-                                    onClick={properties.onRetry}
-                                    variant="secondary"
-                                >
-                                    <Icon icon={RotateCw} size="sm" tone="inherit" />
-                                    {properties.retryLabel ?? "Try again"}
-                                </Button>
-                            )}
-                        </div>
-                    </div>
+                    <span className="mx-auto flex size-12 items-center justify-center rounded-full border border-red-900/70 bg-red-950/50">
+                        <Icon icon={TriangleAlert} size="lg" tone="danger" />
+                    </span>
+                    <Heading
+                        className="text-primary-100 mt-4"
+                        id={errorHeadingId}
+                        level={properties.headingLevel ?? 1}
+                        size="subsection"
+                    >
+                        {properties.title ?? "Dashboard unavailable"}
+                    </Heading>
+                    <Text className="mx-auto mt-2 max-w-md" tone="muted">
+                        {properties.message}
+                    </Text>
+                    {properties.onRetry !== undefined && (
+                        <Button
+                            busy={properties.retryBusy}
+                            busyLabel="Retrying…"
+                            className="mt-5"
+                            onClick={properties.onRetry}
+                            variant="secondary"
+                        >
+                            <Icon icon={RotateCw} size="sm" tone="inherit" />
+                            {properties.retryLabel ?? "Try again"}
+                        </Button>
+                    )}
                 </Card>
             );
         }

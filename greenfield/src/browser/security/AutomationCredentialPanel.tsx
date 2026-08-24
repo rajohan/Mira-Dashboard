@@ -7,6 +7,7 @@ import {
 import { KeyRound, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useState } from "react";
 
+import type { AuthStatus } from "../../contracts/auth.ts";
 import {
     automationCredentialSettingsSchema,
     type AutomationCredentialCursor,
@@ -16,6 +17,7 @@ import {
 } from "../../contracts/automationSecurity.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { dashboardBrowserFailureMessage } from "../api/trpcError.ts";
+import { authStatusQueryKey } from "../auth/authQueries.ts";
 import { useExclusiveDashboardAction } from "../hooks/useExclusiveDashboardAction.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { Alert } from "../ui/Alert.tsx";
@@ -28,6 +30,7 @@ import { FormField } from "../ui/FormField.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { Input } from "../ui/Input.tsx";
 import { LoadingState } from "../ui/LoadingState.tsx";
+import { useAutomationTokenPresenter } from "./automationTokenPresentationContextValue.ts";
 import { revealIssuedAutomationToken } from "./issuedAutomationToken.ts";
 import {
     automationCredentialsQueryKey,
@@ -35,7 +38,6 @@ import {
 } from "./securityQueries.ts";
 
 interface AutomationCredentialPanelProps {
-    readonly onIssuedToken: (token: string) => void;
     readonly principal: AutomationPrincipalSummary;
 }
 
@@ -66,11 +68,9 @@ function credentialStatus(
  * Manages the credential lifecycle for one automation principal.
  * @returns A paginated credential inventory and create/rotate/revoke controls.
  */
-export function AutomationCredentialPanel({
-    onIssuedToken,
-    principal,
-}: AutomationCredentialPanelProps) {
+export function AutomationCredentialPanel({ principal }: AutomationCredentialPanelProps) {
     const action = useExclusiveDashboardAction();
+    const automationTokenPresenter = useAutomationTokenPresenter();
     const client = useDashboardTrpcClient();
     const queryClient = useQueryClient();
     const [credentialConfirmation, setCredentialConfirmation] = useState<
@@ -105,6 +105,14 @@ export function AutomationCredentialPanel({
         defaultValues: { label: "" },
         onSubmit: async ({ formApi, value }) => {
             const result = await action.run(async () => {
+                const authentication =
+                    queryClient.getQueryData<AuthStatus>(authStatusQueryKey);
+                if (authentication?.state !== "authenticated") {
+                    throw new TypeError(
+                        "Authenticated automation-token owner unavailable"
+                    );
+                }
+                const ownerUserId = authentication.user.id;
                 const created = await client.mutation(
                     "automationSecurity.createCredential",
                     {
@@ -113,8 +121,12 @@ export function AutomationCredentialPanel({
                         principalId: principal.id,
                     }
                 );
-                await revealIssuedAutomationToken(created.token, onIssuedToken, () =>
-                    refreshSecurityQueries(queryClient)
+                await revealIssuedAutomationToken(
+                    created.token,
+                    (token) => {
+                        automationTokenPresenter.present(ownerUserId, token);
+                    },
+                    () => refreshSecurityQueries(queryClient)
                 );
             });
             if (result.status === "success") {
@@ -126,14 +138,24 @@ export function AutomationCredentialPanel({
 
     async function rotateCredential(credentialId: string, label: string) {
         const result = await action.run(async () => {
+            const authentication =
+                queryClient.getQueryData<AuthStatus>(authStatusQueryKey);
+            if (authentication?.state !== "authenticated") {
+                throw new TypeError("Authenticated automation-token owner unavailable");
+            }
+            const ownerUserId = authentication.user.id;
             const rotated = await client.mutation("automationSecurity.rotateCredential", {
                 credentialId,
                 expectedAuthorizationVersion: principal.authorizationVersion,
                 principalId: principal.id,
                 replacement: { label },
             });
-            await revealIssuedAutomationToken(rotated.token, onIssuedToken, () =>
-                refreshSecurityQueries(queryClient)
+            await revealIssuedAutomationToken(
+                rotated.token,
+                (token) => {
+                    automationTokenPresenter.present(ownerUserId, token);
+                },
+                () => refreshSecurityQueries(queryClient)
             );
         });
         if (result.status === "success") {
@@ -318,7 +340,7 @@ export function AutomationCredentialPanel({
                                                         event.currentTarget.value
                                                     )
                                                 }
-                                                placeholder="Example: August rotation"
+                                                placeholder="August rotation"
                                                 required
                                                 value={field.state.value}
                                             />

@@ -18,10 +18,11 @@ import {
 } from "../../storySupport/dashboardStoryTransport.ts";
 import { gatewaySessionQueryKey } from "../gatewaySessionQueries.ts";
 
-const observedAtMs = 1_800_000_000_000;
+const observedAtMs = Date.now();
 const sessions = [
     {
         displayName: "Primary main",
+        contextTokens: 272_000,
         hasActiveRun: true,
         key: gatewayPrimarySessionKey,
         kind: "main",
@@ -34,6 +35,7 @@ const sessions = [
     },
     {
         channel: "webchat",
+        contextTokens: 272_000,
         displayName: "Delivery review",
         hasActiveRun: false,
         key: "agent:main:subagent:delivery-review",
@@ -167,10 +169,13 @@ export const ActionBusy: Story = {
         const canvas = within(canvasElement);
         await userEvent.click(
             await canvas.findByRole("button", {
-                name: `Reset Primary main; key ${gatewayPrimarySessionKey}`,
+                name: `Actions for Primary main; key ${gatewayPrimarySessionKey}`,
             })
         );
         const body = within(canvasElement.ownerDocument.body);
+        await userEvent.click(
+            await body.findByRole("menuitem", { name: /Reset session/u })
+        );
         const dialog = within(
             await body.findByRole("dialog", { name: "Reset session?" })
         );
@@ -206,10 +211,13 @@ export const UnknownOutcome: Story = {
         const canvas = within(canvasElement);
         await userEvent.click(
             await canvas.findByRole("button", {
-                name: `Reset Primary main; key ${gatewayPrimarySessionKey}`,
+                name: `Actions for Primary main; key ${gatewayPrimarySessionKey}`,
             })
         );
         const body = within(canvasElement.ownerDocument.body);
+        await userEvent.click(
+            await body.findByRole("menuitem", { name: /Reset session/u })
+        );
         const dialog = within(
             await body.findByRole("dialog", { name: "Reset session?" })
         );

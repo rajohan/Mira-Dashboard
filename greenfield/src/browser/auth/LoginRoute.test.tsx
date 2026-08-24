@@ -172,7 +172,7 @@ describe("Dashboard login route", () => {
         });
         expect(screen.getByLabelText("Username")).toHaveAttribute(
             "placeholder",
-            "Example: operator"
+            "operator"
         );
         await userActions.type(screen.getByLabelText("Username"), "operator");
         await userActions.type(screen.getByLabelText("Dashboard password"), password);
@@ -221,9 +221,11 @@ describe("Dashboard login route", () => {
             })
         ).toBeTruthy();
         expect(cachedBrowserData(queryClient)).not.toContain(password);
-        expect(screen.getByLabelText("Authenticator code")).toBeTruthy();
-        expect(screen.getByLabelText("Recovery code")).toBeTruthy();
         expect(screen.getByRole("button", { name: "Use a security key" })).toBeTruthy();
+        expect(
+            screen.getByRole("button", { name: "Use authenticator app" })
+        ).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Use recovery code" })).toBeTruthy();
     });
 
     test("keeps TOTP and recovery proofs independent and completes TOTP login", async () => {
@@ -245,12 +247,15 @@ describe("Dashboard login route", () => {
             level: 1,
             name: "Multi-factor authentication",
         });
+        await userActions.click(
+            screen.getByRole("button", { name: "Use authenticator app" })
+        );
         expect(screen.getByLabelText("Authenticator code")).toHaveAttribute(
             "placeholder",
-            "Example: 123456"
+            "123456"
         );
         await userActions.type(screen.getByLabelText("Authenticator code"), code);
-        expect(screen.getByLabelText<HTMLInputElement>("Recovery code").value).toBe("");
+        expect(screen.queryByLabelText("Recovery code")).toBeNull();
         await userActions.click(screen.getByRole("button", { name: "Verify code" }));
 
         await screen.findByRole("heading", { level: 1, name: "Mira Dashboard" });
@@ -279,6 +284,9 @@ describe("Dashboard login route", () => {
             level: 1,
             name: "Multi-factor authentication",
         });
+        await userActions.click(
+            screen.getByRole("button", { name: "Use authenticator app" })
+        );
         await userActions.type(screen.getByLabelText("Authenticator code"), "123456");
         await userActions.click(screen.getByRole("button", { name: "Verify code" }));
 
@@ -312,6 +320,9 @@ describe("Dashboard login route", () => {
             level: 1,
             name: "Multi-factor authentication",
         });
+        await userActions.click(
+            screen.getByRole("button", { name: "Use recovery code" })
+        );
         await userActions.type(screen.getByLabelText("Recovery code"), code);
         await userActions.click(
             screen.getByRole("button", { name: "Use recovery code" })

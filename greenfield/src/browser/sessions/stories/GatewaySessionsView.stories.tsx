@@ -13,7 +13,7 @@ import {
 } from "../../../contracts/gatewaySessions.ts";
 import { GatewaySessionsView } from "../GatewaySessionsView.tsx";
 
-const timestampMs = 1_800_000_000_000;
+const timestampMs = Date.now();
 
 function session(
     key: string,
@@ -24,6 +24,7 @@ function session(
 ): GatewaySession {
     return {
         displayName,
+        contextTokens: 272_000,
         hasActiveRun: false,
         key,
         kind,
@@ -103,21 +104,22 @@ type Story = StoryObj<typeof meta>;
 export const FreshCurrentSessions: Story = {
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement);
-        await expect(canvas.getByText("Connected")).toBeVisible();
         await expect(
-            canvas.getByText(
-                "Updates automatically every 10 seconds and when OpenClaw reports a change."
-            )
-        ).toBeVisible();
+            canvas.queryByRole("heading", { name: "Current status" })
+        ).not.toBeInTheDocument();
+        await expect(canvas.queryByText("Connected")).not.toBeInTheDocument();
         await expect(
             canvas.queryByRole("button", { name: "Refresh" })
         ).not.toBeInTheDocument();
-        await expect(
-            canvas.getByRole("table", { name: "Current OpenClaw sessions" })
-        ).toBeVisible();
+        const table = canvas.getByRole("table", {
+            name: "Current OpenClaw sessions",
+        });
+        await expect(table).toBeVisible();
+        await expect(canvas.getByText("Tokens (known only)")).toBeVisible();
+        await expect(canvas.getByText("48k / 272k")).toBeVisible();
         await userEvent.click(canvas.getByRole("button", { name: "CRON" }));
-        await expect(canvas.getByText("Daily summary")).toBeVisible();
-        await expect(canvas.queryByText("Primary main")).not.toBeInTheDocument();
+        await expect(within(table).getByText("Daily summary")).toBeVisible();
+        await expect(within(table).queryByText("Primary main")).not.toBeInTheDocument();
     },
 };
 
@@ -135,7 +137,7 @@ export const LastKnownGood: Story = {
     },
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement);
-        await expect(canvas.getByText("Last known")).toBeVisible();
+        await expect(canvas.queryByText("Last known")).not.toBeInTheDocument();
         await expect(canvas.getByRole("alert")).toHaveTextContent(
             "Showing session data from"
         );

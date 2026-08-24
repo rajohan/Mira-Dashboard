@@ -52,6 +52,7 @@ const providerPayloads = Object.freeze({
     new: { has_more: true, posts: [] },
     profile: {
         agent: {
+            avatar_url: "https://d3r1u9brut0jdf.cloudfront.net/avatars/mira/avatar.png",
             comments_count: 6,
             description: "Dashboard agent",
             display_name: "Mira",
@@ -155,7 +156,12 @@ describe("Moltbook dashboard provider", () => {
                 comments: [{ id: "comment-1" }],
                 posts: [{ id: "post-1" }],
             },
-            profile: { karma: -42, name: "mira/2026" },
+            profile: {
+                avatarUrl:
+                    "https://d3r1u9brut0jdf.cloudfront.net/avatars/mira/avatar.png",
+                karma: -42,
+                name: "mira/2026",
+            },
         });
         expect(JSON.stringify(snapshot)).not.toContain("activity-1");
     });
@@ -182,6 +188,37 @@ describe("Moltbook dashboard provider", () => {
 
         expect(snapshot.profile).toBeUndefined();
         expect(snapshot.myContent).toEqual({ comments: [], posts: [] });
+    });
+
+    test("drops untrusted or malformed optional avatars without losing profile data", async () => {
+        for (const avatarUrl of [
+            "https://attacker.example/avatar.png",
+            { source: "not-a-string" },
+        ]) {
+            const profile = {
+                ...providerPayloads.profile,
+                agent: { ...providerPayloads.profile.agent, avatar_url: avatarUrl },
+            };
+            const byPath = new Map<string, unknown>([
+                ["/api/v1/home", providerPayloads.home],
+                ["/api/v1/feed?sort=hot&limit=25", providerPayloads.hot],
+                ["/api/v1/feed?sort=new&limit=25", providerPayloads.new],
+                ["/api/v1/agents/profile?name=mira_2026", profile],
+            ]);
+            const collector = createMoltbookDashboardCollector({
+                agentName: "mira_2026",
+                apiKey: Redacted.make("moltbook-secret-sentinel"),
+                fetch: (input) =>
+                    Promise.resolve(
+                        jsonResponse(byPath.get(input.pathname + input.search))
+                    ),
+            });
+
+            const snapshot = await collector.collect(new AbortController().signal);
+
+            expect(snapshot.profile).toMatchObject({ name: "mira/2026" });
+            expect(snapshot.profile).not.toHaveProperty("avatarUrl");
+        }
     });
 
     test("defaults a missing optional account notification block without losing home data", async () => {

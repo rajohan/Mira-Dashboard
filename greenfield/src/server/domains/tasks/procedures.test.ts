@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { TRPCError } from "@trpc/server";
 
+import { automationPrincipals } from "../../database/schema/automationPrincipals.ts";
 import { captureFailure } from "../../test/support/promise.ts";
 import {
     createTestApplicationRuntime,
@@ -49,6 +50,15 @@ describe("task procedures", () => {
 
     test("serves validated task outputs to session and automation callers", async () => {
         const database = await openFreshMigratedDatabase();
+        database.orm
+            .insert(automationPrincipals)
+            .values({
+                createdAt: new Date(1000),
+                id: "test-automation",
+                label: "Test automation",
+                updatedAt: new Date(1000),
+            })
+            .run();
         const taskService = taskServiceFor(database);
 
         try {
@@ -67,6 +77,10 @@ describe("task procedures", () => {
                 status: "todo",
                 version: 1,
             });
+            expect(await sessionCaller.listLabels({})).toEqual({
+                labels: ["ops", "security"],
+                truncated: false,
+            });
 
             const automationContext = await createTestRequestContext(
                 createTestAutomationAuthentication(["tasks:read", "tasks:write"]),
@@ -83,7 +97,11 @@ describe("task procedures", () => {
                     taskId: created.id,
                 })
             ).toMatchObject({
-                author: { id: "test-automation", kind: "automation" },
+                author: {
+                    id: "test-automation",
+                    kind: "automation",
+                    label: "Test automation",
+                },
                 taskId: created.id,
             });
         } finally {

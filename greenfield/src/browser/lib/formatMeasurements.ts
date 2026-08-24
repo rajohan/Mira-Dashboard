@@ -9,6 +9,22 @@ function compactDecimal(value: number, maximumDigits: number): string {
 }
 
 /**
+ * @param value - Validated nonnegative count.
+ * @returns Compact decimal count with a lowercase thousands or millions suffix.
+ */
+export function formatCompactCount(value: number): string {
+    if (value < 1000) return new Intl.NumberFormat().format(value);
+    const useMillions = value >= 999_500;
+    const divisor = useMillions ? 1_000_000 : 1000;
+    const suffix = useMillions ? "m" : "k";
+    const scaled = value / divisor;
+    const maximumFractionDigits = scaled < 10 && !Number.isInteger(scaled) ? 1 : 0;
+    return `${new Intl.NumberFormat(undefined, {
+        maximumFractionDigits,
+    }).format(scaled)}${suffix}`;
+}
+
+/**
  * @param bytes - Validated nonnegative byte count.
  * @returns Compact binary byte capacity.
  */

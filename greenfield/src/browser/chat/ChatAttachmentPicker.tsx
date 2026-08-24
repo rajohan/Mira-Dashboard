@@ -1,12 +1,13 @@
 import { CircleAlert, CircleCheck, Paperclip, Upload, X } from "lucide-react";
-import { type DragEvent, useState } from "react";
 
 import { chatAttachmentLimits } from "../../contracts/chatMedia.ts";
 import { cn } from "../lib/classNames.ts";
 import { Button } from "../ui/Button.tsx";
+import { FileDropZone } from "../ui/FileDropZone.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { IconOnlyButton } from "../ui/IconOnlyButton.tsx";
 import { Modal } from "../ui/Modal.tsx";
+import { ProgressBar } from "../ui/ProgressBar.tsx";
 import {
     chatAttachmentIcon,
     chatAttachmentStatusLabel,
@@ -72,11 +73,12 @@ export function ChatAttachmentRow({
                 className="border-primary-700 bg-primary-800 hover:border-primary-500 hover:bg-primary-700 relative flex min-h-12 w-full max-w-sm flex-[1_1_18rem] items-center gap-1 rounded-lg border p-1 text-xs transition-colors"
                 data-compact="true"
             >
-                <button
+                <Button
                     aria-label={`Preview ${attachment.name}`}
-                    className="focus-visible:ring-accent-400 flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-0.5 text-left outline-none focus-visible:ring-2"
+                    className="flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-0.5 text-left"
                     onClick={() => onPreview(attachment.id)}
                     type="button"
+                    variant="unstyled"
                 >
                     <span className="bg-primary-700 flex size-8 shrink-0 items-center justify-center rounded-md">
                         <Icon icon={chatAttachmentIcon(attachment.mediaType)} size="sm" />
@@ -94,7 +96,7 @@ export function ChatAttachmentRow({
                             {secondaryLabel}
                         </span>
                     </span>
-                </button>
+                </Button>
                 <IconOnlyButton
                     icon={X}
                     label={`Remove ${attachment.name}`}
@@ -103,14 +105,13 @@ export function ChatAttachmentRow({
                     variant="ghost"
                 />
                 {pending && (
-                    <span className="absolute inset-x-1 bottom-0 flex h-0.5">
-                        <progress
-                            aria-label={`Upload progress for ${attachment.name}`}
-                            className="accent-accent-400 size-full"
-                            max={100}
-                            value={attachment.progress}
-                        />
-                    </span>
+                    <ProgressBar
+                        className="absolute inset-x-1 bottom-0 h-0.5"
+                        label={`Upload progress for ${attachment.name}`}
+                        size="sm"
+                        tone="accent"
+                        value={attachment.progress}
+                    />
                 )}
             </li>
         );
@@ -118,11 +119,12 @@ export function ChatAttachmentRow({
 
     return (
         <li className="border-primary-600 bg-primary-900 grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-lg border p-2.5">
-            <button
+            <Button
                 aria-label={`Preview ${attachment.name}`}
-                className="hover:bg-primary-800 focus-visible:ring-accent-400 grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded-md p-1 text-left transition-colors outline-none focus-visible:ring-2"
+                className="hover:bg-primary-800 grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded-md p-1 text-left transition-colors"
                 onClick={() => onPreview(attachment.id)}
                 type="button"
+                variant="unstyled"
             >
                 <span className="bg-primary-700 rounded-md p-1.5">
                     <Icon icon={chatAttachmentIcon(attachment.mediaType)} size="sm" />
@@ -157,10 +159,11 @@ export function ChatAttachmentRow({
                         {chatAttachmentStatusLabel(attachment)}
                     </span>
                     {pending && (
-                        <progress
-                            aria-label={`Upload progress for ${attachment.name}`}
-                            className="accent-accent-400 mt-1 h-1.5 w-full"
-                            max={100}
+                        <ProgressBar
+                            className="mt-1 w-full"
+                            label={`Upload progress for ${attachment.name}`}
+                            size="sm"
+                            tone="accent"
                             value={attachment.progress}
                         />
                     )}
@@ -170,7 +173,7 @@ export function ChatAttachmentRow({
                         </span>
                     )}
                 </span>
-            </button>
+            </Button>
             <IconOnlyButton
                 icon={X}
                 label={`Remove ${attachment.name}`}
@@ -197,15 +200,7 @@ export function ChatAttachmentPicker({
     onRemove,
     open,
 }: ChatAttachmentPickerProps) {
-    const [dragging, setDragging] = useState(false);
     const remaining = Math.max(0, chatAttachmentLimits.maximumFiles - attachments.length);
-
-    function handleDrop(event: DragEvent<HTMLButtonElement>): void {
-        event.preventDefault();
-        setDragging(false);
-        if (disabled || event.dataTransfer.files.length === 0) return;
-        onFilesSelected(event.dataTransfer.files);
-    }
 
     return (
         <Modal
@@ -216,36 +211,14 @@ export function ChatAttachmentPicker({
             title="Attach files"
         >
             <div className="min-w-0 space-y-4">
-                <button
-                    className={cn(
-                        "border-primary-500 bg-primary-950 hover:border-accent-400 focus-visible:ring-accent-400 flex min-h-32 w-full min-w-0 flex-col items-center justify-center rounded-xl border border-dashed p-4 text-center transition-colors outline-none focus-visible:ring-2",
-                        dragging && "border-accent-400 bg-primary-900"
-                    )}
+                <FileDropZone
+                    description={`${remaining} ${remaining === 1 ? "slot" : "slots"} remaining`}
                     disabled={disabled || remaining === 0}
-                    onClick={onChooseFiles}
-                    onDragEnter={(event) => {
-                        event.preventDefault();
-                        if (!disabled && remaining > 0) setDragging(true);
-                    }}
-                    onDragLeave={(event) => {
-                        if (!event.currentTarget.contains(event.relatedTarget as Node)) {
-                            setDragging(false);
-                        }
-                    }}
-                    onDragOver={(event) => event.preventDefault()}
-                    onDrop={handleDrop}
-                    type="button"
-                >
-                    <span className="bg-primary-700 rounded-full p-2.5">
-                        <Icon icon={Paperclip} size="lg" tone="accent" />
-                    </span>
-                    <span className="text-primary-100 mt-3 font-medium">
-                        Drop files here or choose files
-                    </span>
-                    <span className="text-primary-400 mt-1 text-sm">
-                        {remaining} {remaining === 1 ? "slot" : "slots"} remaining
-                    </span>
-                </button>
+                    icon={Paperclip}
+                    label="Drop files here or choose files"
+                    onChooseFiles={onChooseFiles}
+                    onFilesSelected={onFilesSelected}
+                />
 
                 {error !== undefined && (
                     <p className="text-sm text-red-300" role="alert">

@@ -1,11 +1,12 @@
 import type { Meta, StoryObj } from "@storybook/tanstack-react";
-import { expect, userEvent, waitFor, within } from "storybook/test";
+import { expect, fireEvent, userEvent, waitFor, within } from "storybook/test";
 
 import type { AccountSecuritySummary } from "../../../contracts/accountSecurity.ts";
 import type { AuthSessionSummary } from "../../../contracts/auth.ts";
 import type { SecurityAuditEventSummary } from "../../../contracts/securityAudit.ts";
 import { DashboardPageStory } from "../../storySupport/dashboardPageStoryHarness.tsx";
 import {
+    authenticatedDashboardStoryStatus,
     dashboardStoryFailure,
     dashboardStoryResolver,
     dashboardStoryValue,
@@ -69,6 +70,43 @@ const enrollmentSummary = {
     recentAuth: { mfa: { recent: false }, password: recentVerification },
     webAuthn: { available: true, rpId: "dashboard.test" },
 } as const satisfies AccountSecuritySummary;
+const staleEnrollmentSummary = {
+    ...enrollmentSummary,
+    recentAuth: { mfa: { recent: false }, password: { recent: false } },
+} as const satisfies AccountSecuritySummary;
+const allMfaStaleSummary = {
+    ...readySummary,
+    mfa: {
+        ...readySummary.mfa,
+        methods: ["recovery", "totp", "webauthn"],
+        webAuthnCredentials: [
+            {
+                backedUp: false,
+                createdAtMs: nowMs - 86_400_000,
+                deviceType: "singleDevice",
+                id: "019fd978-1e89-7819-b845-0c843bec6937",
+                label: "Storybook security key",
+                transports: ["usb"],
+                usable: true,
+            },
+        ],
+    },
+    recentAuth: { ...readySummary.recentAuth, mfa: { recent: false } },
+} as const satisfies AccountSecuritySummary;
+const storyRecoveryCodes = Array.from(
+    { length: 10 },
+    (_, index) =>
+        `${index.toString(16).padStart(32, "0")}-${(index + 16)
+            .toString(16)
+            .padStart(32, "0")}`
+);
+const storyWebAuthnAuthenticationOptions = {
+    allowCredentials: [{ id: "AAAAAAAA", type: "public-key" }],
+    challenge: "A".repeat(32),
+    rpId: "dashboard.test",
+    timeout: 60_000,
+    userVerification: "required",
+} as const;
 const auditEvent = {
     action: "auth.login",
     actor: {
@@ -85,6 +123,16 @@ const auditEvent = {
         type: "user",
     },
 } as const satisfies SecurityAuditEventSummary;
+const paginatedAuditEvents = Array.from({ length: 51 }, (_, index) => ({
+    ...auditEvent,
+    action: index % 2 === 0 ? "auth.login" : "auth.session.revoke",
+    id: `019fd977-c837-747d-9693-${index.toString(16).padStart(12, "0")}`,
+    metadata:
+        index % 3 === 0
+            ? ({ reason: "invalid_current_password" } as const)
+            : auditEvent.metadata,
+    occurredAtMs: nowMs - index * 1000,
+})) satisfies SecurityAuditEventSummary[];
 const notifications = { notifications: [], readCount: 0, unreadCount: 0 } as const;
 
 function accountSecurityFixtures(
@@ -143,6 +191,76 @@ export const Ready: Story = {
     },
 };
 
+export const PaginatedAudit: Story = {
+    args: {
+        fixtures: accountSecurityFixtures(readySummary, {
+            queries: {
+                "securityAudit.listEvents": dashboardStoryResolver((input, callIndex) => {
+                    const cursor = (input as { cursor?: unknown }).cursor;
+                    if (cursor === undefined) {
+                        const page = paginatedAuditEvents.slice(0, 20);
+                        const last = page.at(-1);
+                        return {
+                            events: page,
+                            nextCursor:
+                                last === undefined
+                                    ? undefined
+                                    : { id: last.id, occurredAtMs: last.occurredAtMs },
+                        };
+                    }
+                    if (callIndex === 1) {
+                        const page = paginatedAuditEvents.slice(20, 50);
+                        const last = page.at(-1);
+                        return {
+                            events: page,
+                            nextCursor:
+                                last === undefined
+                                    ? undefined
+                                    : { id: last.id, occurredAtMs: last.occurredAtMs },
+                        };
+                    }
+                    if (callIndex === 2) {
+                        throw new TypeError("Safe older-audit failure");
+                    }
+                    return { events: paginatedAuditEvents.slice(50) };
+                }),
+            },
+        }),
+        route: "/account-security",
+    },
+    play: async ({ canvasElement }) => {
+        const canvas = within(canvasElement);
+        await userEvent.click(
+            await canvas.findByRole("button", { name: "Load older events" })
+        );
+        await waitFor(async () => {
+            await expect(
+                canvas.getByRole("region", { name: "Security audit events" })
+            ).toHaveAttribute("data-virtualized", "true");
+        });
+        const auditRegion = canvas.getByRole("region", {
+            name: "Security audit events",
+        });
+        await waitFor(async () => {
+            await expect(auditRegion.scrollHeight).toBeGreaterThan(
+                auditRegion.clientHeight
+            );
+        });
+        auditRegion.scrollTop = auditRegion.scrollHeight;
+        await fireEvent.scroll(auditRegion);
+        await fireEvent.scroll(auditRegion);
+        await expect(
+            await canvas.findByText("The request could not be completed. Try again.")
+        ).toBeVisible();
+        await userEvent.click(canvas.getByRole("button", { name: "Try again" }));
+        await waitFor(async () => {
+            await expect(
+                canvas.queryByText("The request could not be completed. Try again.")
+            ).not.toBeInTheDocument();
+        });
+    },
+};
+
 export const InitialError: Story = {
     args: {
         fixtures: accountSecurityFixtures(readySummary, {
@@ -153,6 +271,229 @@ export const InitialError: Story = {
             },
         }),
         route: "/account-security",
+    },
+};
+
+export const StalePasswordEnrollment: Story = {
+    args: {
+        fixtures: accountSecurityFixtures(staleEnrollmentSummary, {
+            mutations: {
+                "accountSecurity.reauthenticatePassword": dashboardStoryResolver(
+                    (_input, callIndex) => {
+                        if (callIndex === 0) {
+                            throw Object.assign(
+                                new Error("Safe password proof failure"),
+                                { data: { code: "UNAUTHORIZED" } }
+                            );
+                        }
+                        return { session: currentSession, verifiedAtMs: nowMs };
+                    }
+                ),
+            },
+            queries: {
+                "auth.status": dashboardStoryResolver((_input, callIndex) => {
+                    if (callIndex === 1) {
+                        throw new TypeError("Safe session refresh failure");
+                    }
+                    return authenticatedDashboardStoryStatus;
+                }),
+            },
+        }),
+        route: "/account-security",
+    },
+    play: async ({ canvasElement }) => {
+        const canvas = within(canvasElement);
+        const page = within(canvasElement.ownerDocument.body);
+        await userEvent.click(
+            await canvas.findByRole("button", { name: "Add authenticator app" })
+        );
+        const verification = await page.findByRole("dialog", {
+            name: "Verify current password",
+        });
+        const password = within(verification).getByLabelText("Current password");
+        await fireEvent.change(password, { target: { value: "current password" } });
+        await userEvent.click(
+            within(verification).getByRole("button", { name: "Verify password" })
+        );
+        const verificationError = await within(verification).findByText(
+            "The credentials or session are no longer valid."
+        );
+        await waitFor(async () => {
+            await expect(verificationError).toBeVisible();
+        });
+        await fireEvent.change(password, { target: { value: "current password" } });
+        await userEvent.click(
+            within(verification).getByRole("button", { name: "Verify password" })
+        );
+        const enrollment = await page.findByRole("dialog", {
+            name: "Add authenticator app",
+        });
+        await expect(within(enrollment).getByLabelText("Name")).toBeVisible();
+        await userEvent.click(within(enrollment).getByRole("button", { name: "Cancel" }));
+        const retry = await page.findByRole("button", {
+            name: "Retry secure session refresh",
+        });
+        const reconciliation = page.getByRole("dialog", {
+            name: "Verify current password",
+        });
+        await expect(within(reconciliation).getByRole("alert")).toHaveTextContent(
+            "The request could not be completed. Try again."
+        );
+        await userEvent.click(retry);
+        await waitFor(async () => {
+            await expect(
+                page.queryByRole("button", {
+                    name: "Retry secure session refresh",
+                })
+            ).not.toBeInTheDocument();
+        });
+    },
+};
+
+export const StaleMfaEnrollment: Story = {
+    args: {
+        fixtures: accountSecurityFixtures(allMfaStaleSummary, {
+            mutations: {
+                "accountSecurity.stepUpRecovery": dashboardStoryFailure(
+                    Object.assign(new Error("Safe recovery proof failure"), {
+                        data: { code: "UNAUTHORIZED" },
+                    })
+                ),
+                "accountSecurity.stepUpTotp": dashboardStoryValue({
+                    method: "totp",
+                    session: { ...currentSession, authMethod: "totp" },
+                    verifiedAtMs: nowMs,
+                }),
+            },
+        }),
+        route: "/account-security",
+    },
+    play: async ({ canvasElement }) => {
+        const canvas = within(canvasElement);
+        const page = within(canvasElement.ownerDocument.body);
+        await userEvent.click(
+            await canvas.findByRole("button", { name: "Add authenticator app" })
+        );
+        const verification = await page.findByRole("dialog", {
+            name: "Verify your session",
+        });
+        await userEvent.click(
+            within(verification).getByRole("button", { name: "Use recovery code" })
+        );
+        await fireEvent.change(within(verification).getByLabelText("Recovery code"), {
+            target: { value: storyRecoveryCodes[0]! },
+        });
+        await userEvent.click(
+            within(verification).getByRole("button", { name: "Use recovery code" })
+        );
+        await expect(
+            await within(verification).findByText(
+                "The credentials or session are no longer valid."
+            )
+        ).toBeVisible();
+        await userEvent.click(
+            within(verification).getByRole("button", {
+                name: "Choose another method",
+            })
+        );
+        await userEvent.click(
+            within(verification).getByRole("button", {
+                name: "Use authenticator app",
+            })
+        );
+        await fireEvent.change(
+            within(verification).getByLabelText("Authenticator code"),
+            { target: { value: "123456" } }
+        );
+        await userEvent.click(
+            within(verification).getByRole("button", {
+                name: "Verify authenticator",
+            })
+        );
+        const enrollment = await page.findByRole("dialog", {
+            name: "Add authenticator app",
+        });
+        await expect(within(enrollment).getByLabelText("Name")).toBeVisible();
+    },
+};
+
+export const StaleWebAuthnEnrollment: Story = {
+    args: {
+        fixtures: accountSecurityFixtures(allMfaStaleSummary, {
+            mutations: {
+                "accountSecurity.beginWebAuthnStepUp": dashboardStoryValue({
+                    expiresAtMs: nowMs + 60_000,
+                    options: storyWebAuthnAuthenticationOptions,
+                }),
+            },
+        }),
+        route: "/account-security",
+    },
+    play: async ({ canvasElement }) => {
+        const canvas = within(canvasElement);
+        const page = within(canvasElement.ownerDocument.body);
+        await userEvent.click(
+            await canvas.findByRole("button", { name: "Add security key" })
+        );
+        const verification = await page.findByRole("dialog", {
+            name: "Verify your session",
+        });
+        await userEvent.click(
+            within(verification).getByRole("button", { name: "Use security key" })
+        );
+        await waitFor(async () => {
+            await expect(
+                within(verification).getByText(
+                    "The request could not be completed. Try again."
+                )
+            ).toBeVisible();
+        });
+    },
+};
+
+export const EnrollmentRequired: Story = {
+    args: {
+        fixtures: accountSecurityFixtures(readySummary, {
+            mutations: {
+                "accountSecurity.rotateRecoveryCodes": dashboardStoryFailure(
+                    Object.assign(new Error("Safe enrollment-required failure"), {
+                        data: {
+                            code: "FORBIDDEN",
+                            reason: "mfa_enrollment_required",
+                        },
+                    })
+                ),
+            },
+        }),
+        route: "/account-security",
+    },
+    play: async ({ canvasElement }) => {
+        const canvas = within(canvasElement);
+        const page = within(canvasElement.ownerDocument.body);
+        await userEvent.click(
+            await canvas.findByRole("button", { name: "Create new codes" })
+        );
+        const confirmation = await page.findByRole("dialog", {
+            name: "Create new recovery codes?",
+        });
+        await userEvent.click(
+            within(confirmation).getByRole("button", {
+                name: "Create new recovery codes",
+            })
+        );
+        const verification = await page.findByRole("dialog", {
+            name: "Protect privileged actions",
+        });
+        await userEvent.click(
+            within(verification).getByRole("button", {
+                name: "Open Dashboard security settings",
+            })
+        );
+        await waitFor(async () => {
+            await expect(
+                page.queryByRole("dialog", { name: "Protect privileged actions" })
+            ).not.toBeInTheDocument();
+        });
     },
 };
 
@@ -184,6 +525,167 @@ export const DestructiveConfirmation: Story = {
     },
 };
 
+export const DisableMfaRecovery: Story = {
+    args: {
+        fixtures: accountSecurityFixtures(readySummary, {
+            mutations: {
+                "accountSecurity.disableMfa": dashboardStoryResolver(
+                    (_input, callIndex) => {
+                        if (callIndex === 0) {
+                            throw Object.assign(new Error("Safe MFA disable failure"), {
+                                data: { code: "UNAUTHORIZED" },
+                            });
+                        }
+                        return {
+                            disabled: true,
+                            revokedSessions: 1,
+                            session: currentSession,
+                        };
+                    }
+                ),
+            },
+        }),
+        route: "/account-security",
+    },
+    play: async ({ canvasElement }) => {
+        const canvas = within(canvasElement);
+        const page = within(canvasElement.ownerDocument.body);
+        const openDisable = async () => {
+            await userEvent.click(await canvas.findByRole("button", { name: "Disable" }));
+            return page.findByRole("dialog", { name: "Disable two-step login" });
+        };
+
+        let dialog = await openDisable();
+        await fireEvent.change(within(dialog).getByLabelText("Current password"), {
+            target: { value: "discarded password" },
+        });
+        await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+        await waitFor(async () => {
+            await expect(
+                page.queryByRole("dialog", { name: "Disable two-step login" })
+            ).not.toBeInTheDocument();
+        });
+
+        dialog = await openDisable();
+        await fireEvent.change(within(dialog).getByLabelText("Current password"), {
+            target: { value: "current password" },
+        });
+        await userEvent.click(
+            within(dialog).getByRole("button", { name: "Turn off MFA" })
+        );
+        await waitFor(async () => {
+            await expect(
+                within(dialog).getByText(
+                    "The credentials or session are no longer valid."
+                )
+            ).toBeVisible();
+        });
+        await userEvent.click(
+            within(dialog).getByRole("button", { name: "Turn off MFA" })
+        );
+        await waitFor(async () => {
+            await expect(
+                page.queryByRole("dialog", { name: "Disable two-step login" })
+            ).not.toBeInTheDocument();
+        });
+    },
+};
+
+export const VerificationMethodSwitch: Story = {
+    args: {
+        fixtures: accountSecurityFixtures(readySummary, {
+            mutations: {
+                "accountSecurity.stepUpRecovery": dashboardStoryValue({
+                    method: "recovery",
+                    recoveryCodesRemaining: 7,
+                    session: { ...currentSession, authMethod: "recovery" },
+                    verifiedAtMs: nowMs,
+                }),
+                "accountSecurity.stepUpTotp": dashboardStoryFailure(
+                    Object.assign(new Error("Safe authenticator proof failure"), {
+                        data: { code: "UNAUTHORIZED" },
+                    })
+                ),
+            },
+        }),
+        route: "/account-security",
+    },
+    play: async ({ canvasElement }) => {
+        const canvas = within(canvasElement);
+        const page = within(canvasElement.ownerDocument.body);
+        await userEvent.click(await canvas.findByRole("button", { name: "Verify now" }));
+        const verification = await page.findByRole("dialog", {
+            name: "Verify second factor",
+        });
+        await userEvent.click(
+            within(verification).getByRole("button", {
+                name: "Use authenticator app",
+            })
+        );
+        await fireEvent.change(
+            within(verification).getByLabelText("Authenticator code"),
+            { target: { value: "123456" } }
+        );
+        await userEvent.click(
+            within(verification).getByRole("button", {
+                name: "Verify authenticator",
+            })
+        );
+        await expect(
+            await within(verification).findByText(
+                "The credentials or session are no longer valid."
+            )
+        ).toBeVisible();
+        await userEvent.click(
+            within(verification).getByRole("button", {
+                name: "Choose another method",
+            })
+        );
+        await userEvent.click(
+            within(verification).getByRole("button", { name: "Use recovery code" })
+        );
+        await fireEvent.change(within(verification).getByLabelText("Recovery code"), {
+            target: { value: storyRecoveryCodes[0]! },
+        });
+        await userEvent.click(
+            within(verification).getByRole("button", { name: "Use recovery code" })
+        );
+        await expect(await canvas.findByText("Recovery code accepted.")).toBeVisible();
+    },
+};
+
+export const LocalPasswordVerification: Story = {
+    args: {
+        fixtures: accountSecurityFixtures(staleEnrollmentSummary, {
+            mutations: {
+                "accountSecurity.reauthenticatePassword": dashboardStoryValue({
+                    session: currentSession,
+                    verifiedAtMs: nowMs,
+                }),
+            },
+        }),
+        route: "/account-security",
+    },
+    play: async ({ canvasElement }) => {
+        const canvas = within(canvasElement);
+        const page = within(canvasElement.ownerDocument.body);
+        await userEvent.click(
+            await canvas.findByRole("button", { name: "Verify password" })
+        );
+        const verification = await page.findByRole("dialog", {
+            name: "Verify current password",
+        });
+        await fireEvent.change(
+            within(verification).getByLabelText("Password to confirm your identity"),
+            { target: { value: "current password" } }
+        );
+        await userEvent.click(
+            within(verification).getByRole("button", { name: "Verify password" })
+        );
+        await expect(await canvas.findByText("Password confirmed.")).toBeVisible();
+    },
+};
+
 export const EnrollmentSecret: Story = {
     args: {
         fixtures: accountSecurityFixtures(enrollmentSummary, {
@@ -211,10 +713,9 @@ export const EnrollmentSecret: Story = {
         const labelDialog = await page.findByRole("dialog", {
             name: "Add authenticator app",
         });
-        await userEvent.type(
-            within(labelDialog).getByLabelText("Name"),
-            "Storybook phone"
-        );
+        await fireEvent.change(within(labelDialog).getByLabelText("Name"), {
+            target: { value: "Storybook phone" },
+        });
         await userEvent.click(
             within(labelDialog).getByRole("button", { name: "Continue" })
         );

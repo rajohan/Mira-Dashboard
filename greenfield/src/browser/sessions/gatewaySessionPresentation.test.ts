@@ -4,7 +4,7 @@ import type { GatewaySession } from "../../contracts/gatewaySessions.ts";
 import { gatewayPrimarySessionKey } from "../../contracts/gatewaySessions.ts";
 import {
     gatewaySessionMatchesFilter,
-    gatewaySessionTokenLabel,
+    gatewaySessionTokenPresentation,
     sortGatewaySessions,
 } from "./gatewaySessionPresentation.ts";
 
@@ -53,21 +53,35 @@ describe("Gateway session presentation", () => {
     });
 
     test("labels unknown, stale, and fresh token counts explicitly", () => {
-        expect(gatewaySessionTokenLabel(session("cron:a", "cron", "Cron"))).toBe(
-            "Unknown"
-        );
         expect(
-            gatewaySessionTokenLabel(
+            gatewaySessionTokenPresentation(session("cron:a", "cron", "Cron"))
+        ).toEqual({
+            accessibleLabel: "Session token use: Unknown",
+            compactLabel: "Unknown",
+        });
+        expect(
+            gatewaySessionTokenPresentation(
                 session("cron:a", "cron", "Cron", { totalTokens: 1200 })
             )
-        ).toBe("~1,200 (last known)");
+        ).toEqual({
+            accessibleLabel: "Session token use: 1,200, out of date",
+            compactLabel: "~1.2k (last known)",
+            maximum: undefined,
+            value: undefined,
+        });
         expect(
-            gatewaySessionTokenLabel(
+            gatewaySessionTokenPresentation(
                 session("cron:a", "cron", "Cron", {
+                    contextTokens: 272_000,
                     totalTokens: 1200,
                     totalTokensFresh: true,
                 })
             )
-        ).toBe("1,200");
+        ).toEqual({
+            accessibleLabel: "Session token use: 1,200 of 272,000, current",
+            compactLabel: "1.2k / 272k",
+            maximum: 272_000,
+            value: 1200,
+        });
     });
 });

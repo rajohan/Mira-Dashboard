@@ -222,6 +222,7 @@ describe("chat runtime store", () => {
         store.installExternalRuns(sessionKey, [
             {
                 continuity: "complete",
+                lifecycle: "active" as const,
                 hasUnprojectedActivity: false,
                 message: {
                     attachments: [],
@@ -475,11 +476,12 @@ describe("chat runtime store", () => {
         expect(store.state.sessions[sessionKey]).toBeUndefined();
     });
 
-    test("preserves known provider detail through truncated catch-up and keeps authoritative removal", () => {
+    test("preserves known provider detail through compact and poorer reconnect snapshots", () => {
         const store = createChatRuntimeStore();
         store.installExternalRuns(sessionKey, [
             {
                 continuity: "complete",
+                lifecycle: "active" as const,
                 hasUnprojectedActivity: false,
                 message: {
                     attachments: [],
@@ -530,6 +532,7 @@ describe("chat runtime store", () => {
         store.installExternalRuns(sessionKey, [
             {
                 continuity: "interrupted",
+                lifecycle: "active" as const,
                 hasUnprojectedActivity: true,
                 message: {
                     attachments: [],
@@ -576,6 +579,7 @@ describe("chat runtime store", () => {
         const preserved = store.state.sessions[sessionKey]?.externalRuns["provider-1"];
         expect(preserved).toMatchObject({
             continuity: "interrupted",
+            lifecycle: "active" as const,
             observationEpoch: 2,
             plan: {
                 description: "Explain the active work.",
@@ -646,14 +650,17 @@ describe("chat runtime store", () => {
         ).toBeUndefined();
         expect(
             store.state.sessions[sessionKey]?.externalRuns["provider-1"]?.message.parts
-        ).toEqual([]);
+        ).not.toEqual([]);
 
         store.installExternalRuns(sessionKey, []);
         expect(
             store.state.sessions[sessionKey]?.externalRuns["provider-1"]?.omissionCount
         ).toBe(1);
         store.installExternalRuns(sessionKey, []);
-        expect(chatRuntimeMessages(store.state, sessionKey)).toEqual([]);
+        expect(
+            store.state.sessions[sessionKey]?.externalRuns["provider-1"]?.omissionCount
+        ).toBe(2);
+        expect(chatRuntimeMessages(store.state, sessionKey)).not.toEqual([]);
         expect(chatRuntimePlans(store.state, sessionKey)).toEqual([]);
     });
 
@@ -721,6 +728,7 @@ describe("chat runtime store", () => {
         const store = createChatRuntimeStore();
         const projection = {
             continuity: "complete" as const,
+            lifecycle: "active" as const,
             hasUnprojectedActivity: false,
             message: {
                 attachments: [],
@@ -826,6 +834,7 @@ describe("chat runtime store", () => {
     test("uses rich assistant segments instead of duplicate compact aggregates in both prefix directions", () => {
         const base = {
             continuity: "complete" as const,
+            lifecycle: "active" as const,
             hasUnprojectedActivity: false,
             observationEpoch: 1,
             observedAtMs: occurredAtMs,
@@ -909,6 +918,7 @@ describe("chat runtime store", () => {
         const authoritativeCompact = createChatRuntimeStore();
         const staleRun = {
             continuity: "complete" as const,
+            lifecycle: "active" as const,
             hasUnprojectedActivity: true,
             observationEpoch: 1,
             observedAtMs: occurredAtMs,
@@ -1069,6 +1079,7 @@ describe("chat runtime store", () => {
         ): ChatExternalRunProjection => ({
             continuity: "complete",
             hasUnprojectedActivity: true,
+            lifecycle: "active",
             message: {
                 attachments: [],
                 id: `external:${sessionKey}:${providerRunId}`,
@@ -1158,6 +1169,7 @@ describe("chat runtime store", () => {
         const run = (text: string, resetId?: string) =>
             projectChatExternalRun({
                 continuity: "complete",
+                lifecycle: "active" as const,
                 hasUnprojectedActivity: true,
                 observationEpoch: resetId === undefined ? 1 : 2,
                 observedAtMs: occurredAtMs,
@@ -1199,6 +1211,7 @@ describe("chat runtime store", () => {
         ): ChatExternalRunProjection => ({
             continuity: "complete",
             hasUnprojectedActivity: true,
+            lifecycle: "active",
             message: {
                 attachments: [],
                 id: `external:${sessionKey}:${providerRunId}`,
@@ -1275,6 +1288,7 @@ describe("chat runtime store", () => {
             }[]
         ) => ({
             continuity: "complete" as const,
+            lifecycle: "active" as const,
             hasUnprojectedActivity: false,
             message: {
                 attachments: [],
@@ -1398,6 +1412,7 @@ describe("chat runtime store", () => {
         store.installExternalRuns(sessionKey, [
             {
                 continuity: "complete",
+                lifecycle: "active" as const,
                 hasUnprojectedActivity: false,
                 message: {
                     attachments: [],
@@ -1416,6 +1431,7 @@ describe("chat runtime store", () => {
             },
             {
                 continuity: "complete",
+                lifecycle: "active" as const,
                 hasUnprojectedActivity: false,
                 message: {
                     attachments: [],
@@ -1445,6 +1461,7 @@ describe("chat runtime store", () => {
         const providerRunId = "provider-steer";
         const initial = projectChatExternalRun({
             continuity: "complete",
+            lifecycle: "active" as const,
             hasUnprojectedActivity: false,
             observationEpoch: 1,
             observedAtMs: occurredAtMs,
@@ -1486,6 +1503,7 @@ describe("chat runtime store", () => {
         store.installExternalRuns(sessionKey, [
             projectChatExternalRun({
                 continuity: "complete",
+                lifecycle: "active" as const,
                 hasUnprojectedActivity: false,
                 observationEpoch: 2,
                 observedAtMs: occurredAtMs,
@@ -1553,10 +1571,11 @@ describe("chat runtime store", () => {
         ]);
     });
 
-    test("retires an omitted external run only after one authoritative grace poll", () => {
+    test("retains an omitted external diagnostic tail across authoritative polls", () => {
         const store = createChatRuntimeStore();
         const projection = projectChatExternalRun({
             continuity: "complete",
+            lifecycle: "active" as const,
             hasUnprojectedActivity: false,
             observationEpoch: 1,
             observedAtMs: occurredAtMs,
@@ -1586,8 +1605,10 @@ describe("chat runtime store", () => {
         store.installExternalRuns(sessionKey, []);
         expect(
             store.state.sessions[sessionKey]?.externalRuns["provider-terminal-lag"]
-        ).toBeUndefined();
-        expect(chatRuntimeMessages(store.state, sessionKey)).toEqual([]);
+                ?.omissionCount
+        ).toBe(2);
+        expect(chatRuntimeMessages(store.state, sessionKey)).not.toEqual([]);
+        expect(chatRuntimePlans(store.state, sessionKey)).toEqual([]);
     });
 
     test("does not retire external activity from a canonical user echo", () => {
@@ -1595,6 +1616,7 @@ describe("chat runtime store", () => {
         store.installExternalRuns(sessionKey, [
             projectChatExternalRun({
                 continuity: "complete",
+                lifecycle: "active" as const,
                 hasUnprojectedActivity: false,
                 observationEpoch: 1,
                 observedAtMs: occurredAtMs,
@@ -1627,6 +1649,6 @@ describe("chat runtime store", () => {
         });
         expect(
             store.state.sessions[sessionKey]?.externalRuns["provider-user-echo"]
-        ).toBeUndefined();
+        ).toBeDefined();
     });
 });

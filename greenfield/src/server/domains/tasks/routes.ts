@@ -16,6 +16,8 @@ import {
     deleteTaskInputSchema,
     deleteTaskProgressInputSchema,
     getTaskInputSchema,
+    listTaskLabelsInputSchema,
+    listTaskLabelsResultSchema,
     listTaskProgressInputSchema,
     listTaskProgressResultSchema,
     listTasksInputSchema,
@@ -113,6 +115,13 @@ export const taskRoutes = {
                 ...result,
                 tasks: result.tasks.map((task) => mutableTaskSummary(task)),
             };
+        }),
+    listLabels: taskReadProcedure
+        .input(listTaskLabelsInputSchema)
+        .output(listTaskLabelsResultSchema)
+        .query(async ({ ctx }) => {
+            const result = await runTaskEffect(ctx.taskService.listTaskLabels());
+            return { ...result, labels: [...result.labels] };
         }),
     listUpdates: taskReadProcedure
         .input(listTaskProgressInputSchema)

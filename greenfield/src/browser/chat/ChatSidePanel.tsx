@@ -1,10 +1,11 @@
 import {
     Bot,
     CircleAlert,
+    Circle,
     CircleCheck,
+    CircleDot,
     ListChecks,
     Square,
-    Timer,
     X,
 } from "lucide-react";
 import { type KeyboardEvent, type Ref, useId, useRef, useState } from "react";
@@ -14,7 +15,9 @@ import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
 import { ExpandableCard } from "../ui/ExpandableCard.tsx";
+import { Fieldset } from "../ui/Fieldset.tsx";
 import { Form } from "../ui/Form.tsx";
+import { FormField } from "../ui/FormField.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { Input } from "../ui/Input.tsx";
@@ -29,8 +32,22 @@ import type {
 
 function planStatusIcon(status: ChatActivePlanView["items"][number]["status"]) {
     if (status === "completed") return CircleCheck;
-    if (status === "in-progress") return Timer;
-    return ListChecks;
+    if (status === "in-progress") return CircleDot;
+    return Circle;
+}
+
+function planStatusLabel(status: ChatActivePlanView["items"][number]["status"]): string {
+    if (status === "completed") return "completed";
+    if (status === "in-progress") return "in progress";
+    return "pending";
+}
+
+function planStatusTone(
+    status: ChatActivePlanView["items"][number]["status"]
+): "accent" | "default" | "success" {
+    if (status === "completed") return "success";
+    if (status === "in-progress") return "accent";
+    return "default";
 }
 
 function taskBadgeVariant(
@@ -109,7 +126,11 @@ function Plan({ plan }: Readonly<{ plan: ChatActivePlanView }>) {
             )}
             <ol className="space-y-1.5">
                 {plan.items.map((item) => (
-                    <li className="flex items-start gap-2 text-sm" key={item.id}>
+                    <li
+                        aria-label={`${item.label}, ${planStatusLabel(item.status)}`}
+                        className="flex items-start gap-2 text-sm"
+                        key={item.id}
+                    >
                         <Icon
                             className={cn(
                                 "mt-0.5 shrink-0",
@@ -118,7 +139,7 @@ function Plan({ plan }: Readonly<{ plan: ChatActivePlanView }>) {
                             )}
                             icon={planStatusIcon(item.status)}
                             size="sm"
-                            tone={item.status === "completed" ? "success" : "inherit"}
+                            tone={planStatusTone(item.status)}
                         />
                         <span
                             className={
@@ -398,38 +419,38 @@ export function ChatSidePanel({
                         </div>
                     )}
                     <Form className="min-w-0 space-y-2" onSubmit={ask}>
-                        <div className="flex min-w-0 items-center justify-between gap-2">
-                            <label
-                                className="text-primary-300 min-w-0 text-xs font-medium"
-                                htmlFor="chat-companion-question"
-                            >
-                                Ask about this chat
-                            </label>
-                            <span
-                                className="text-primary-400 shrink-0 text-xs"
-                                id="chat-companion-limit"
-                            >
-                                {question.length}/400
-                            </span>
-                        </div>
-                        <Input
-                            aria-describedby="chat-companion-limit"
-                            aria-label="Ask chat helper"
-                            disabled={
-                                providerWritesDisabled ||
-                                !canAskCompanion ||
-                                companionAskBusy ||
-                                companionResetBusy
+                        <FormField
+                            label="Ask about this chat"
+                            labelAdornment={
+                                <span
+                                    className="text-primary-400 shrink-0 text-xs"
+                                    id="chat-companion-limit"
+                                >
+                                    {question.length}/400
+                                </span>
                             }
-                            id="chat-companion-question"
-                            maxLength={400}
-                            onChange={(event) => setQuestion(event.currentTarget.value)}
-                            placeholder="Example: What is still running?"
-                            value={question}
-                        />
-                        <fieldset
-                            aria-label="Chat helper actions"
+                        >
+                            <Input
+                                aria-describedby="chat-companion-limit"
+                                aria-label="Ask chat helper"
+                                className="mt-1"
+                                disabled={
+                                    providerWritesDisabled ||
+                                    !canAskCompanion ||
+                                    companionAskBusy ||
+                                    companionResetBusy
+                                }
+                                maxLength={400}
+                                onChange={(event) =>
+                                    setQuestion(event.currentTarget.value)
+                                }
+                                placeholder="What is still running?"
+                                value={question}
+                            />
+                        </FormField>
+                        <Fieldset
                             className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]"
+                            legend={<span className="sr-only">Chat helper actions</span>}
                         >
                             <Button
                                 busy={companion.status === "answering"}
@@ -458,7 +479,7 @@ export function ChatSidePanel({
                             >
                                 Reset
                             </Button>
-                        </fieldset>
+                        </Fieldset>
                     </Form>
                 </div>
             </ExpandableCard>

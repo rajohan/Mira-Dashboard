@@ -10,14 +10,13 @@ import {
     deriveGatewaySessionStats,
     gatewayPrimarySessionKey,
 } from "../../contracts/gatewaySessions.ts";
-import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { GatewaySessionsView } from "./GatewaySessionsView.tsx";
 
 const { render, screen, waitFor, within } = await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
 const userEvent = userEventModule.default;
 
-const timestampMs = 1_800_000_000_000;
+const timestampMs = Date.now();
 
 function session(
     key: string,
@@ -43,7 +42,9 @@ function session(
 
 const sessions = [
     session(gatewayPrimarySessionKey, "main", "Primary main", timestampMs - 20_000, {
+        contextTokens: 272_000,
         hasActiveRun: true,
+        totalTokens: 40_000,
     }),
     session("agent:coder:main", "subagent", "Beta main", timestampMs - 10_000),
     session(
@@ -87,7 +88,7 @@ function actionResult(
 }
 
 describe("Gateway sessions view", () => {
-    test("renders same-snapshot stats, exact timestamps, and labelled mobile cells", () => {
+    test("renders metrics, relative activity, and labelled mobile cells without status chrome", () => {
         render(
             <GatewaySessionsView
                 onAction={(action, row) => Promise.resolve(actionResult(action, row.key))}
@@ -95,25 +96,23 @@ describe("Gateway sessions view", () => {
             />
         );
 
-        expect(screen.getByText("Connected")).toBeTruthy();
-        expect(
-            screen.getByText(
-                "Updates automatically every 10 seconds and when OpenClaw reports a change."
-            )
-        ).toBeTruthy();
+        expect(screen.queryByRole("heading", { name: "Current status" })).toBeNull();
+        expect(screen.queryByText("Connected")).toBeNull();
         expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
         expect(screen.getAllByText("5", { selector: "dd" })).toHaveLength(2);
         expect(screen.getByText("2", { selector: "dd" })).toBeTruthy();
-        const observation = screen.getByText(formatDashboardDateTime(timestampMs));
-        expect(observation).toHaveAttribute(
-            "dateTime",
-            new Date(timestampMs).toISOString()
-        );
         const table = screen.getByRole("table", { name: "Current OpenClaw sessions" });
-        expect(table).toHaveClass("border-separate", "border-spacing-0");
+        expect(table).toHaveClass(
+            "bg-primary-950/40",
+            "border-separate",
+            "border-spacing-0"
+        );
         expect(table.parentElement).toHaveClass(
+            "dashboard-data-table-container",
             "overflow-x-auto",
-            "overscroll-x-contain"
+            "@max-[66rem]:overflow-x-hidden",
+            "hidden",
+            "@min-[66rem]:block"
         );
         expect(within(table).getByRole("columnheader", { name: "Type" })).toHaveClass(
             "bg-primary-950"
@@ -123,6 +122,36 @@ describe("Gateway sessions view", () => {
         );
         const rows = within(table).getAllByRole("row");
         expect(rows[1]).toHaveTextContent("Primary main");
+        expect(within(rows[1]!).getByText("40k / 272k")).toBeTruthy();
+        expect(
+            within(rows[1]!).getByRole("progressbar", {
+                name: "Token context used for Primary main",
+            })
+        ).toHaveAttribute("aria-valuenow", "40000");
+        const mobileSessions = screen.getByRole("list", {
+            name: "Current OpenClaw sessions",
+        });
+        const mobilePrimary = within(mobileSessions).getByRole("listitem", {
+            name: "Primary main session",
+        });
+        const tokenTerm = within(mobilePrimary).getByText("Tokens", {
+            selector: "dt",
+        });
+        const tokenGroup = tokenTerm.parentElement;
+        expect(tokenGroup).not.toBeNull();
+        if (tokenGroup === null) throw new Error("Missing mobile token group");
+        expect([...tokenGroup.children].map((element) => element.tagName)).toEqual([
+            "DT",
+            "DD",
+            "DD",
+        ]);
+        expect(
+            within(tokenGroup).getByRole("progressbar", {
+                name: "Token context used for Primary main",
+            }).parentElement
+        ).toHaveProperty("tagName", "DD");
+        const activity = within(rows[1]!).getByText("less than a minute ago");
+        expect(activity).toHaveAttribute("title");
     });
 
     test("uses sortable buttons and aria-sort while keeping primary main first", async () => {
@@ -169,13 +198,16 @@ describe("Gateway sessions view", () => {
         expect(
             within(filter)
                 .getAllByRole("button")
-                .map(({ textContent }) => textContent)
+                .map((button) => button.getAttribute("aria-label"))
         ).toEqual(["ALL", "MAIN", "SUBAGENT", "HOOK", "CRON"]);
 
         await user.click(within(filter).getByRole("button", { name: "CRON" }));
         expect(within(filter).getByRole("button", { name: "CRON" })).toHaveAttribute(
             "aria-pressed",
             "true"
+        );
+        expect(within(filter).getByRole("button", { name: "CRON" })).toHaveClass(
+            "bg-accent-500"
         );
         const table = screen.getByRole("table", { name: "Current OpenClaw sessions" });
         expect(within(table).getByText("Daily cron")).toBeTruthy();
@@ -190,17 +222,23 @@ describe("Gateway sessions view", () => {
                 snapshot={snapshot()}
             />
         );
-        expect(
-            screen.getByRole("button", {
-                name: `Delete Primary main transcript unavailable for the primary main session; key ${gatewayPrimarySessionKey}`,
-            })
-        ).toBeDisabled();
-        const trigger = screen.getByRole("button", {
-            name: "Delete Daily cron transcript; key cron:daily",
+        const mobileSessions = screen.getByRole("list", {
+            name: "Current OpenClaw sessions",
+        });
+        const primaryMenuTrigger = within(mobileSessions).getByRole("button", {
+            name: `Actions for Primary main; key ${gatewayPrimarySessionKey}`,
+        });
+        await user.click(primaryMenuTrigger);
+        expect(screen.getByRole("menuitem", { name: /Delete session/u })).toBeDisabled();
+        await user.keyboard("{Escape}");
+
+        const trigger = within(mobileSessions).getByRole("button", {
+            name: "Actions for Daily cron; key cron:daily",
         });
         await user.click(trigger);
+        await user.click(screen.getByRole("menuitem", { name: /Delete session/u }));
         const dialog = screen.getByRole("dialog", {
-            name: "Delete session transcript?",
+            name: "Delete session?",
         });
         expect(dialog).toHaveTextContent("and its OpenClaw transcript");
         expect(dialog).toHaveTextContent("cannot be undone");
@@ -255,11 +293,17 @@ describe("Gateway sessions view", () => {
             />
         );
 
+        const mobileSessions = screen.getByRole("list", {
+            name: "Current OpenClaw sessions",
+        });
         expect(
-            screen.getByText(
-                `~${new Intl.NumberFormat().format(1200)} / ${new Intl.NumberFormat().format(200_000)} (last known)`
-            )
+            within(mobileSessions).getByText("~1.2k / 200k (last known)")
         ).toBeTruthy();
+        expect(
+            screen.queryByRole("progressbar", {
+                name: "Token context used for Stale token session",
+            })
+        ).toBeNull();
     });
 
     test("runs the confirmed exact action and reports success without raw errors", async () => {
@@ -268,24 +312,24 @@ describe("Gateway sessions view", () => {
             Promise.resolve(actionResult(action, row.key))
         );
         render(<GatewaySessionsView onAction={onAction} snapshot={snapshot()} />);
-        const trigger = screen.getByRole("button", {
-            name: `Summarize Primary main; key ${gatewayPrimarySessionKey}`,
+        const mobileSessions = screen.getByRole("list", {
+            name: "Current OpenClaw sessions",
+        });
+        const trigger = within(mobileSessions).getByRole("button", {
+            name: `Actions for Primary main; key ${gatewayPrimarySessionKey}`,
         });
         await user.click(trigger);
+        await user.click(screen.getByRole("menuitem", { name: /Compact session/u }));
         const dialog = screen.getByRole("dialog", {
-            name: "Summarize older context?",
+            name: "Compact session?",
         });
-        await user.click(
-            within(dialog).getByRole("button", { name: "Summarize session" })
-        );
+        await user.click(within(dialog).getByRole("button", { name: "Compact session" }));
 
         await waitFor(() =>
             expect(onAction).toHaveBeenCalledWith("compact", sessions[0])
         );
-        expect(await screen.findByText("Older session context summarized.")).toBeTruthy();
-        expect(
-            screen.queryByRole("dialog", { name: "Summarize older context?" })
-        ).toBeNull();
+        expect(await screen.findByText("Session compacted.")).toBeTruthy();
+        expect(screen.queryByRole("dialog", { name: "Compact session?" })).toBeNull();
         expect(onAction).toHaveBeenCalledTimes(1);
         await waitFor(() => expect(document.activeElement === trigger).toBeTrue());
     });
@@ -305,7 +349,7 @@ describe("Gateway sessions view", () => {
             />
         );
 
-        expect(screen.getByText("Last known")).toBeTruthy();
+        expect(screen.queryByText("Last known")).toBeNull();
         expect(screen.getByRole("alert")).toHaveTextContent("Showing session data from");
         expect(
             screen.getByRole("table", { name: "Current OpenClaw sessions" })

@@ -4,11 +4,14 @@ import * as v from "valibot";
 
 import {
     createTaskInputSchema,
+    listTaskLabelsInputSchema,
+    listTaskLabelsResultSchema,
     listTaskProgressInputSchema,
     listTaskProgressResultSchema,
     listTasksInputSchema,
     listTasksResultSchema,
     taskProcedureContracts,
+    taskLabelSuggestionMaximum,
     updateTaskInputSchema,
 } from "./tasks.ts";
 
@@ -23,6 +26,7 @@ function task(id: string, updatedAtMs: number) {
         createdAtMs: 1000,
         id,
         labels: ["P1"],
+        number: 1,
         priority: "high" as const,
         status: "in-progress" as const,
         title: "Implement task board",
@@ -33,7 +37,7 @@ function task(id: string, updatedAtMs: number) {
 
 function update(id: string, createdAtMs: number) {
     return {
-        author: { id: userId, kind: "user" as const },
+        author: { id: userId, kind: "user" as const, username: "raymond" },
         createdAtMs,
         id,
         messageMarkdown: "Implemented one bounded slice.",
@@ -94,6 +98,37 @@ describe("task procedure contracts", () => {
         ).toBeFalse();
     });
 
+    test("bounds the distinct task-label catalog in canonical order", () => {
+        expect(v.parse(listTaskLabelsInputSchema, {})).toEqual({});
+        const result = v.parse(listTaskLabelsResultSchema, {
+            labels: ["alpha", "ops"],
+            truncated: false,
+        });
+        expect(result.labels).toEqual(["alpha", "ops"]);
+        expect(Object.isFrozen(result.labels)).toBeTrue();
+        expect(
+            v.safeParse(listTaskLabelsResultSchema, {
+                labels: ["ops", "alpha"],
+                truncated: false,
+            }).success
+        ).toBeFalse();
+        expect(
+            v.safeParse(listTaskLabelsResultSchema, {
+                labels: ["ops", "ops"],
+                truncated: false,
+            }).success
+        ).toBeFalse();
+        expect(
+            v.safeParse(listTaskLabelsResultSchema, {
+                labels: Array.from(
+                    { length: taskLabelSuggestionMaximum + 1 },
+                    (_, index) => `label-${String(index).padStart(3, "0")}`
+                ),
+                truncated: true,
+            }).success
+        ).toBeFalse();
+    });
+
     test("requires newest-first progress order and an exact continuation cursor", () => {
         const first = update(firstUpdateId, 4000);
         const second = update(secondUpdateId, 4000);
@@ -137,6 +172,7 @@ describe("task procedure contracts", () => {
     test("registers the complete task parity surface with explicit capabilities", () => {
         expect(taskProcedureContracts.map(({ name }) => name)).toEqual([
             "tasks.list",
+            "tasks.listLabels",
             "tasks.get",
             "tasks.listUpdates",
             "tasks.create",

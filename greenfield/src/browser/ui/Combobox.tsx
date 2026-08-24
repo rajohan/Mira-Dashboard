@@ -11,6 +11,7 @@ import { useState, type FocusEventHandler } from "react";
 import { cn } from "../lib/classNames.ts";
 import { useFormFieldInvalid } from "./formFieldContext.ts";
 import { Icon } from "./Icon.tsx";
+import { interactiveTapClassName } from "./interactionStyles.ts";
 
 export interface ComboboxOption<TValue extends string> {
     readonly description?: string;
@@ -184,7 +185,10 @@ export function Combobox<TValue extends string>({
                 />
                 <ComboboxButton
                     aria-label={`Open ${ariaLabel}`}
-                    className="text-primary-400 data-hover:bg-primary-800 data-hover:text-primary-50 data-active:bg-primary-700 absolute inset-y-px right-px flex w-9 cursor-pointer items-center justify-center rounded-r-lg transition-colors outline-none data-disabled:cursor-not-allowed data-disabled:opacity-60"
+                    className={cn(
+                        interactiveTapClassName,
+                        "text-primary-400 data-hover:bg-primary-800 data-hover:text-primary-50 data-active:bg-primary-700 absolute inset-y-px right-px flex w-9 items-center justify-center rounded-r-lg transition-colors outline-none data-disabled:cursor-not-allowed data-disabled:opacity-60"
+                    )}
                 >
                     <Icon icon={ChevronsUpDown} size="sm" tone="inherit" />
                 </ComboboxButton>

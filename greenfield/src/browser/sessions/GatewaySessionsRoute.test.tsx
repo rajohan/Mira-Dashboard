@@ -17,9 +17,9 @@ import { Route as sessionsLazyRoute } from "../routes/sessions.lazy.tsx";
 import { gatewaySessionQueryKey } from "./gatewaySessionQueries.ts";
 import { GatewaySessionsRoute } from "./GatewaySessionsRoute.tsx";
 
-const { render, screen, waitFor } = await import("@testing-library/react");
+const { render, screen, waitFor, within } = await import("@testing-library/react");
 
-const observedAtMs = 1_800_000_000_000;
+const observedAtMs = Date.now();
 const primarySession: GatewaySession = {
     displayName: "Primary main",
     hasActiveRun: true,
@@ -77,9 +77,12 @@ test("sessions route composes its bounded browser and lazy route registration", 
                 /Sensitive actions require a recent multi-factor authentication check/u
             )
         ).toBeVisible();
-        expect(screen.getByText(/Updates automatically every 10 seconds/u)).toBeVisible();
+        expect(screen.queryByText(/Updates automatically every 10 seconds/u)).toBeNull();
         expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
-        expect(screen.getByText("Primary main")).toBeVisible();
+        const table = screen.getByRole("table", {
+            name: "Current OpenClaw sessions",
+        });
+        expect(within(table).getByText("Primary main")).toBeVisible();
         await waitFor(() => expect(queryClient.isFetching()).toBe(0));
     } finally {
         rendered.unmount();

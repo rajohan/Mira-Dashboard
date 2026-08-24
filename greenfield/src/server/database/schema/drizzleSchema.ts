@@ -12,6 +12,7 @@ export { automationCredentials } from "./automationCredentials.ts";
 export { automationPrincipalCapabilities } from "./automationPrincipalCapabilities.ts";
 export { automationPrincipals } from "./automationPrincipals.ts";
 export { cacheEntries } from "./cacheEntries.ts";
+export { chatExternalRuntimeSnapshots } from "./chatExternalRuntimeSnapshots.ts";
 export { chatRunEvents } from "./chatRunEvents.ts";
 export { chatRuns } from "./chatRuns.ts";
 export { chatRuntimeSnapshots } from "./chatRuntimeSnapshots.ts";

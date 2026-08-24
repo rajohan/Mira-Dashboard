@@ -77,6 +77,11 @@ export interface SecurityUserPasswordUpdateInput {
     readonly userId: string;
 }
 
+export interface SecurityUserPasswordResetInput extends SecurityUserPasswordUpdateInput {
+    readonly expectedMfaEnabledAt: Date | null;
+    readonly resetMfa: boolean;
+}
+
 export interface AuthenticationRateLimitReader {
     findRateLimitBucket(bucketKey: string): AuthRateLimitBucket | undefined;
 }

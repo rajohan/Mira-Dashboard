@@ -11,27 +11,37 @@ const userEvent = userEventModule.default;
 describe("DropdownMenu", () => {
     test("selects actions from the keyboard while skipping disabled items", async () => {
         const selectedActions: string[] = [];
+        const selectedTriggers: HTMLButtonElement[] = [];
         const actions = Object.freeze([
             {
                 description: "Moves the task out of the active queue.",
                 icon: Archive,
                 id: "archive",
                 label: "Archive task",
-                onSelect: () => selectedActions.push("archive"),
+                onSelect: (trigger: HTMLButtonElement) => {
+                    selectedActions.push("archive");
+                    selectedTriggers.push(trigger);
+                },
             },
             {
                 disabled: true,
                 icon: Copy,
                 id: "duplicate",
                 label: "Duplicate task",
-                onSelect: () => selectedActions.push("duplicate"),
+                onSelect: (trigger: HTMLButtonElement) => {
+                    selectedActions.push("duplicate");
+                    selectedTriggers.push(trigger);
+                },
             },
             {
                 description: "Permanently removes the task.",
                 icon: Trash2,
                 id: "delete",
                 label: "Delete task",
-                onSelect: () => selectedActions.push("delete"),
+                onSelect: (trigger: HTMLButtonElement) => {
+                    selectedActions.push("delete");
+                    selectedTriggers.push(trigger);
+                },
                 tone: "danger",
             },
         ] satisfies readonly DropdownMenuAction[]);
@@ -64,5 +74,6 @@ describe("DropdownMenu", () => {
         await user.keyboard("{Enter}");
 
         expect(selectedActions).toEqual(["delete"]);
+        expect(selectedTriggers).toEqual([trigger]);
     });
 });

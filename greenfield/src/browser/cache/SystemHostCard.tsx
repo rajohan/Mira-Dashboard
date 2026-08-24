@@ -4,6 +4,7 @@ import { type CacheEntry, systemHostCachePayloadSchema } from "../../contracts/c
 import { Badge } from "../ui/Badge.tsx";
 import { Card } from "../ui/Card.tsx";
 import { Heading } from "../ui/Heading.tsx";
+import { ProgressBar } from "../ui/ProgressBar.tsx";
 import { Text } from "../ui/Text.tsx";
 import {
     cacheAttemptVariant,
@@ -31,10 +32,10 @@ function CapacityMeter({ freeBytes, label, totalBytes }: CapacityMeterProps) {
                     {formatCacheBytes(usedBytes)} / {formatCacheBytes(totalBytes)}
                 </span>
             </div>
-            <progress
-                aria-label={`${label} used`}
-                className="mt-2 h-2 w-full accent-emerald-400"
-                max={Math.max(1, totalBytes)}
+            <ProgressBar
+                className="mt-2 w-full"
+                label={`${label} used`}
+                maximum={totalBytes}
                 value={usedBytes}
             />
             <Text className="mt-1" size="sm" tone="muted">

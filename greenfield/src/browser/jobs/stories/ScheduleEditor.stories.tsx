@@ -215,9 +215,6 @@ export const CronConfiguration: Story = {
         const canvas = within(canvasElement);
         const cronExpression = canvas.getByLabelText("Cron expression");
         const scheduleType = canvas.getByLabelText("Schedule type");
-        const spacer = canvasElement.querySelector<HTMLElement>(
-            "[data-cron-description-spacer]"
-        );
         const descriptionId = cronExpression.getAttribute("aria-describedby");
         const helper =
             descriptionId === null
@@ -225,11 +222,11 @@ export const CronConfiguration: Story = {
                 : canvasElement.ownerDocument.querySelector<HTMLElement>(
                       `[id="${descriptionId}"]`
                   );
-        if (spacer === null) throw new Error("The cron alignment spacer is missing.");
-
         await expect(cronExpression).toHaveValue("0 6 * * 1-5");
         await expect(canvas.getByLabelText("Time zone")).toHaveValue("UTC");
-        await expect(spacer).not.toBeVisible();
+        await expect(
+            canvasElement.querySelector("[data-cron-description-spacer]")
+        ).toBeNull();
         await expect(helper).toHaveTextContent(
             "Order: minute, hour, day, month, weekday."
         );

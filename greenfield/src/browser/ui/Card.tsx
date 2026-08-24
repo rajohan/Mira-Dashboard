@@ -15,7 +15,7 @@ export function Card({ children, className, ...properties }: CardProps) {
         <section
             {...properties}
             className={cn(
-                "border-primary-700 bg-primary-800/80 rounded-xl border p-5 shadow-sm shadow-black/10",
+                "border-primary-700 bg-primary-800/80 max-w-full min-w-0 rounded-xl border p-5 shadow-sm shadow-black/10",
                 className
             )}
         >

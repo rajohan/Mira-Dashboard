@@ -1,36 +1,42 @@
-import { Link } from "@tanstack/react-router";
-import type { ReactNode } from "react";
+import { createLink } from "@tanstack/react-router";
+import type { ComponentPropsWithRef } from "react";
 
-import type { DashboardRoutePath } from "../lib/dashboardRoutes.ts";
+import { cn } from "../lib/classNames.ts";
 import { buttonClassNames, type ButtonSize, type ButtonVariant } from "./buttonStyles.ts";
 
-interface ActionLinkProps {
-    readonly children: ReactNode;
-    readonly className?: string;
+/* oxlint-disable react/only-export-components -- TanStack createLink returns the exported typed component from this local anchor. */
+
+interface ActionAnchorProps extends ComponentPropsWithRef<"a"> {
     readonly fullWidth?: boolean;
     readonly size?: ButtonSize;
-    readonly to: DashboardRoutePath;
     readonly variant?: ButtonVariant;
 }
 
-/**
- * Renders a semantic router link with the shared Dashboard action styling.
- * @returns A client-side navigation action.
- */
-export function ActionLink({
+function ActionAnchor({
     children,
     className,
     fullWidth,
     size,
-    to,
-    variant,
-}: ActionLinkProps) {
+    variant = "unstyled",
+    ...properties
+}: ActionAnchorProps) {
     return (
-        <Link
-            className={buttonClassNames({ className, fullWidth, size, variant })}
-            to={to}
+        <a
+            {...properties}
+            className={buttonClassNames({
+                className: cn(variant === "unstyled" && "rounded-sm", className),
+                fullWidth,
+                size,
+                variant,
+            })}
         >
             {children}
-        </Link>
+        </a>
     );
 }
+
+/**
+ * Renders a typed same-origin router link with shared interaction styling.
+ * @returns A TanStack Router link supporting route params, search, hash, and action variants.
+ */
+export const ActionLink = createLink(ActionAnchor);

@@ -2,6 +2,7 @@ import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { useRef } from "react";
 
 import type { AuthStatus } from "../../contracts/auth.ts";
+import { registerAuthenticatedOperation } from "./authenticatedOperationRegistry.ts";
 import {
     authenticatedBrowserCacheGeneration,
     authStatusCacheIdentity,
@@ -51,6 +52,12 @@ export function useAuthenticatedMutationBoundary() {
             queryClient,
             controller
         );
+        const completeOperation = registerAuthenticatedOperation({
+            cacheGeneration: owner.cacheGeneration,
+            identity: owner.identity,
+            queryClient,
+            signal: controller.signal,
+        });
         try {
             try {
                 const result = await operation(controller.signal, isActive);
@@ -62,7 +69,11 @@ export function useAuthenticatedMutationBoundary() {
                 throw error;
             }
         } finally {
-            unregister();
+            try {
+                unregister();
+            } finally {
+                completeOperation();
+            }
         }
     }
 

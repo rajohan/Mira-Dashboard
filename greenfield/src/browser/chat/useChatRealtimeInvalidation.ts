@@ -16,7 +16,7 @@ import {
 } from "./chatQueries.ts";
 import type { ChatRuntimeStore } from "./chatRuntimeStore.ts";
 
-const fallbackRefreshIntervalMs = 30_000;
+const safetyRefreshIntervalMs = 30_000;
 const trailingRefreshBackoffMs = 1000;
 type ChatRefreshTarget = "history" | "runtime" | "sessions" | "task-details" | "tasks";
 
@@ -38,7 +38,6 @@ export function useChatRealtimeInvalidation(
     }, [sessionKey]);
 
     useEffect(() => {
-        let fallback: ReturnType<typeof setInterval> | undefined;
         let active = false;
         let backoff: ReturnType<typeof setTimeout> | undefined;
         let disposed = false;
@@ -58,26 +57,34 @@ export function useChatRealtimeInvalidation(
                 );
             }
             if (selected !== "") {
+                let historyRefresh: Promise<unknown> | undefined;
+                if (targets.has("history")) {
+                    historyRefresh = queryClient.invalidateQueries(
+                        {
+                            exact: true,
+                            queryKey: chatHistoryQueryKey(selected),
+                        },
+                        { cancelRefetch: false }
+                    );
+                    invalidations.push(historyRefresh);
+                }
                 if (targets.has("runtime")) {
                     invalidations.push(
-                        queryClient.invalidateQueries(
-                            {
-                                exact: true,
-                                queryKey: chatRuntimeQueryKey(selected),
-                            },
-                            { cancelRefetch: false }
-                        )
-                    );
-                }
-                if (targets.has("history")) {
-                    invalidations.push(
-                        queryClient.invalidateQueries(
-                            {
-                                exact: true,
-                                queryKey: chatHistoryQueryKey(selected),
-                            },
-                            { cancelRefetch: false }
-                        )
+                        (async () => {
+                            // `chat.history` performs the provider observation that
+                            // can retire a missed live activity. Read runtime only
+                            // after that reconciliation has had a chance to publish.
+                            if (historyRefresh !== undefined) {
+                                await Promise.allSettled([historyRefresh]);
+                            }
+                            return queryClient.invalidateQueries(
+                                {
+                                    exact: true,
+                                    queryKey: chatRuntimeQueryKey(selected),
+                                },
+                                { cancelRefetch: false }
+                            );
+                        })()
                     );
                 }
                 if (targets.has("tasks")) {
@@ -144,11 +151,16 @@ export function useChatRealtimeInvalidation(
         };
         const refreshAll = () =>
             refresh("sessions", "runtime", "history", "tasks", "task-details");
-        const startFallback = () => {
+        const handleRealtimeFailure = () => {
             runtimeStore.setConnection("disconnected");
             refreshAll();
-            fallback ??= setInterval(refreshAll, fallbackRefreshIntervalMs);
         };
+        // SSE remains the primary low-latency signal, but a connection can stay
+        // apparently healthy across a backend watch restart while the in-memory
+        // provider subscription has disappeared. Touch both provider-backed chat
+        // reads on a bounded cadence so that history can reconcile the run and the
+        // following runtime read can publish its terminal projection.
+        const safetyRefresh = setInterval(refreshAll, safetyRefreshIntervalMs);
         const subscription = hub.subscribe(
             [chatHistoryRealtimeTopic, chatRealtimeTopic, openClawTasksRealtimeTopic],
             {
@@ -178,7 +190,7 @@ export function useChatRealtimeInvalidation(
                         refresh("task-details");
                     }
                 },
-                onError: startFallback,
+                onError: handleRealtimeFailure,
             }
         );
         const offline = () => runtimeStore.setConnection("disconnected");
@@ -191,7 +203,7 @@ export function useChatRealtimeInvalidation(
         return () => {
             disposed = true;
             subscription.unsubscribe();
-            if (fallback !== undefined) clearInterval(fallback);
+            clearInterval(safetyRefresh);
             if (backoff !== undefined) clearTimeout(backoff);
             globalThis.removeEventListener?.("offline", offline);
             globalThis.removeEventListener?.("online", online);

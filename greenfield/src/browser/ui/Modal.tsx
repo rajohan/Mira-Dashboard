@@ -21,8 +21,10 @@ interface ModalProps {
     readonly children: ReactNode;
     readonly description?: ReactNode;
     readonly dismissible?: boolean;
+    readonly eyebrow?: ReactNode;
     readonly onClose: () => void;
     readonly open: boolean;
+    readonly scrollOwner?: "content" | "page";
     readonly size?: keyof typeof sizeClasses;
     readonly title: ReactNode;
 }
@@ -35,8 +37,10 @@ export function Modal({
     children,
     description,
     dismissible = true,
+    eyebrow,
     onClose,
     open,
+    scrollOwner = "page",
     size = "md",
     title,
 }: ModalProps) {
@@ -52,7 +56,10 @@ export function Modal({
             />
             <div
                 aria-label={dismissible ? undefined : "Dialog content"}
-                className="fixed inset-0 w-screen overflow-x-hidden overflow-y-auto p-4"
+                className={cn(
+                    "fixed inset-0 w-screen overflow-x-hidden p-4",
+                    scrollOwner === "page" ? "overflow-y-auto" : "overflow-y-hidden"
+                )}
                 role={dismissible ? undefined : "region"}
                 tabIndex={dismissible ? undefined : 0}
             >
@@ -61,13 +68,20 @@ export function Modal({
                         className={cn(
                             "border-primary-700 bg-primary-800 w-full min-w-0 rounded-xl border shadow-2xl shadow-black/50 transition duration-200",
                             "data-closed:translate-y-2 data-closed:scale-95 data-closed:opacity-0",
+                            scrollOwner === "content" &&
+                                "flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden",
                             sizeClasses[size]
                         )}
                         data-testid="modal-panel"
                         transition
                     >
-                        <div className="border-primary-700 flex min-w-0 items-start justify-between gap-4 border-b px-5 py-4">
+                        <div className="border-primary-700 bg-primary-900/40 flex min-w-0 shrink-0 items-start justify-between gap-4 border-b px-5 py-4">
                             <div className="min-w-0 flex-1">
+                                {eyebrow !== undefined && (
+                                    <div className="mb-2 flex flex-wrap items-center gap-2">
+                                        {eyebrow}
+                                    </div>
+                                )}
                                 <DialogTitle className="text-primary-50 line-clamp-3 text-lg font-semibold wrap-anywhere">
                                     {title}
                                 </DialogTitle>
@@ -88,7 +102,15 @@ export function Modal({
                                 />
                             )}
                         </div>
-                        <div className="min-w-0 p-5">{children}</div>
+                        <div
+                            className={cn(
+                                "min-w-0 p-5",
+                                scrollOwner === "content" &&
+                                    "min-h-0 flex-1 overflow-y-auto"
+                            )}
+                        >
+                            {children}
+                        </div>
                     </DialogPanel>
                 </div>
             </div>

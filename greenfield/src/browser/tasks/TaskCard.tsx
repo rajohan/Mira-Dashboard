@@ -1,11 +1,14 @@
 import { useDraggable } from "@dnd-kit/react";
-import { Bot, GripVertical, UserRound } from "lucide-react";
+import { GripVertical, UserRound } from "lucide-react";
 
+import type { OpenClawCronJob } from "../../contracts/openClawCron.ts";
 import type { TaskSummary } from "../../contracts/taskModel.ts";
 import { cn } from "../lib/classNames.ts";
+import { openClawCronOperationalStatus } from "../openClawCron/presentation.ts";
 import { Badge } from "../ui/Badge.tsx";
 import { Icon } from "../ui/Icon.tsx";
-import { IconOnlyButton } from "../ui/IconOnlyButton.tsx";
+import { StretchedAction } from "../ui/StretchedAction.tsx";
+import { TaskLabelBadge } from "./TaskLabelBadge.tsx";
 import {
     taskAssigneeLabel,
     taskPriorityBadgeVariant,
@@ -13,28 +16,51 @@ import {
 } from "./taskPresentation.ts";
 
 interface TaskCardContentProps {
+    readonly automationJob?: OpenClawCronJob;
     readonly overlay?: boolean;
     readonly task: TaskSummary;
 }
 
 /** @returns Presentational task-card content shared by the board and drag overlay. */
-export function TaskCardContent({ overlay = false, task }: TaskCardContentProps) {
+export function TaskCardContent({
+    automationJob,
+    overlay = false,
+    task,
+}: TaskCardContentProps) {
+    const automationStatus =
+        automationJob === undefined
+            ? undefined
+            : openClawCronOperationalStatus(automationJob);
     return (
         <div
             className={cn(
                 "border-primary-700 bg-primary-800 rounded-lg border p-3 shadow-sm transition-colors",
-                overlay && "border-accent-400 w-72 shadow-xl shadow-black/40"
+                overlay
+                    ? "border-accent-400 w-72 shadow-xl shadow-black/40"
+                    : "group-hover:border-primary-500 group-focus-within:border-accent-400"
             )}
         >
             <div className="flex flex-wrap items-center gap-1.5">
-                <Badge variant={taskPriorityBadgeVariant(task.priority)}>
+                <span className="text-primary-400 mr-0.5 text-xs font-medium tabular-nums">
+                    #{task.number}
+                </span>
+                <Badge
+                    className="capitalize"
+                    variant={taskPriorityBadgeVariant(task.priority)}
+                >
                     {task.priority}
                 </Badge>
                 {task.automation !== undefined && (
-                    <Badge variant="info">
-                        <Icon icon={Bot} size="sm" tone="inherit" />
-                        {task.automation.recurring ? "Recurring" : "Automated"}
-                    </Badge>
+                    <>
+                        <Badge variant="info">
+                            {task.automation.recurring ? "Recurring" : "Automated"}
+                        </Badge>
+                        {automationStatus !== undefined && (
+                            <Badge variant={automationStatus.variant}>
+                                {automationStatus.label}
+                            </Badge>
+                        )}
+                    </>
                 )}
             </div>
             <p className="text-primary-100 mt-2 line-clamp-3 text-sm font-medium wrap-break-word">
@@ -43,12 +69,7 @@ export function TaskCardContent({ overlay = false, task }: TaskCardContentProps)
             {task.labels.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-1">
                     {task.labels.slice(0, 3).map((label) => (
-                        <span
-                            className="bg-primary-700/70 text-primary-300 rounded px-1.5 py-0.5 text-xs"
-                            key={label}
-                        >
-                            {label}
-                        </span>
+                        <TaskLabelBadge key={label} label={label} />
                     ))}
                     {task.labels.length > 3 && (
                         <span className="text-primary-400 px-1 text-xs">
@@ -74,14 +95,15 @@ export function TaskCardContent({ overlay = false, task }: TaskCardContentProps)
 }
 
 interface TaskCardProps {
+    readonly automationJob?: OpenClawCronJob;
     readonly disabled: boolean;
     readonly onSelect: (taskId: string) => void;
     readonly task: TaskSummary;
 }
 
 /** @returns One draggable, keyboard-selectable task card. */
-export function TaskCard({ disabled, onSelect, task }: TaskCardProps) {
-    const { handleRef, isDragging, ref } = useDraggable({
+export function TaskCard({ automationJob, disabled, onSelect, task }: TaskCardProps) {
+    const { isDragging, ref } = useDraggable({
         disabled,
         id: `task:${task.id}`,
         type: "task-card",
@@ -94,24 +116,21 @@ export function TaskCard({ disabled, onSelect, task }: TaskCardProps) {
                 isDragging && "opacity-35",
                 disabled && "opacity-70"
             )}
-            ref={ref}
         >
-            <TaskCardContent task={task} />
-            <button
-                aria-label={`Open task: ${task.title}`}
-                className="focus-visible:ring-accent-400 absolute inset-0 rounded-lg outline-none focus-visible:ring-2"
-                onClick={() => onSelect(task.id)}
-                type="button"
-            />
-            <IconOnlyButton
-                className="absolute top-2 right-2 z-10 cursor-grab opacity-100 active:cursor-grabbing md:opacity-0 md:group-focus-within:opacity-100 md:group-hover:opacity-100"
+            <TaskCardContent automationJob={automationJob} task={task} />
+            <StretchedAction
+                className="cursor-grab active:cursor-grabbing"
                 disabled={disabled}
-                icon={GripVertical}
-                label={`Move task: ${task.title}`}
-                ref={handleRef}
-                size="sm"
-                variant="ghost"
+                label={`Open task #${task.number}: ${task.title}`}
+                onClick={() => onSelect(task.id)}
+                ref={ref}
             />
+            <span
+                aria-hidden="true"
+                className="text-primary-500 group-hover:text-primary-300 pointer-events-none absolute top-3 right-3 opacity-100 transition-colors md:opacity-0 md:group-focus-within:opacity-100 md:group-hover:opacity-100"
+            >
+                <Icon icon={GripVertical} size="sm" />
+            </span>
         </article>
     );
 }

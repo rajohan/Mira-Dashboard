@@ -58,12 +58,18 @@ export function terminalPathIsCanonical(value: string): boolean {
 
 /** Canonical root-relative initial path; host absolute paths never cross transport. */
 export const terminalPathSchema = v.pipe(
-    v.string("Terminal path is invalid"),
-    v.minLength(1, "Terminal path is invalid"),
-    v.maxLength(terminalPathMaximumLength, "Terminal path is outside its budget"),
-    noNulStringAction("Terminal path is invalid"),
-    v.regex(/^\/(?:[^/\r\n]+(?:\/[^/\r\n]+)*)?$/u, "Terminal path is invalid"),
-    v.check(terminalPathIsCanonical, "Terminal path is not canonical")
+    v.string("Enter a folder path that starts with /."),
+    v.minLength(1, "Enter a folder path that starts with /."),
+    v.maxLength(
+        terminalPathMaximumLength,
+        `Use a folder path of no more than ${terminalPathMaximumLength} characters.`
+    ),
+    noNulStringAction("Folder paths cannot contain null characters."),
+    v.regex(
+        /^\/(?:[^/\r\n]+(?:\/[^/\r\n]+)*)?$/u,
+        "Use a folder path that starts with / and contains no empty segments or line breaks."
+    ),
+    v.check(terminalPathIsCanonical, "Folder paths cannot contain . or .. segments.")
 );
 
 export const terminalLocationSchema = v.strictObject({

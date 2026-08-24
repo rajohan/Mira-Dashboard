@@ -42,7 +42,11 @@ function activityTouchIsDue(
  * high-frequency DOM events.
  * @returns No visual output.
  */
-export function AuthenticatedSessionActivity() {
+export function AuthenticatedSessionActivity({
+    suspended = false,
+}: {
+    readonly suspended?: boolean;
+}) {
     const client = useDashboardTrpcClient();
     const queryClient = useQueryClient();
     const status = useQuery(authStatusQueryOptions(client));
@@ -50,6 +54,7 @@ export function AuthenticatedSessionActivity() {
         status.data?.state === "authenticated" ? status.data.session.id : undefined;
 
     useEffect(() => {
+        if (suspended) return;
         let active = true;
         let inFlight = false;
         let statusRefreshInFlight = false;
@@ -167,7 +172,7 @@ export function AuthenticatedSessionActivity() {
             );
             window.removeEventListener("focus", reconcileAuthenticationOnFocus);
         };
-    }, [authenticatedSessionId, client, queryClient]);
+    }, [authenticatedSessionId, client, queryClient, suspended]);
 
     return null;
 }

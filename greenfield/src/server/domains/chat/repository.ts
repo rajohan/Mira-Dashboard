@@ -29,6 +29,7 @@ import {
     chatActiveRunsPerProcessMaximum,
     chatActiveRunsPerSessionMaximum,
     chatActiveRunStates,
+    chatExternalRunsPerProcessMaximum,
     chatRunEventBytesMaximum,
     chatRunEventMaximum,
     chatRunEventPayloadMaximumBytes,
@@ -52,11 +53,19 @@ import { realtimeEventRetentionMilliseconds } from "../../../contracts/realtime.
 import { utf8ByteLength } from "../../../shared/encoding.ts";
 import { compareStrings } from "../../../shared/validation.ts";
 import type { ImmediateDatabaseWriteAdmission } from "../../database/immediateWriteAdmission.ts";
+import { chatExternalRuntimeSnapshots } from "../../database/schema/chatExternalRuntimeSnapshots.ts";
 import { chatRunEvents } from "../../database/schema/chatRunEvents.ts";
 import { chatRuns } from "../../database/schema/chatRuns.ts";
 import { chatRuntimeSnapshots } from "../../database/schema/chatRuntimeSnapshots.ts";
 import { chatTranscriptGenerations } from "../../database/schema/chatTranscriptGenerations.ts";
 import { realtimeEvents } from "../../database/schema/realtime.ts";
+import {
+    chatExternalRuntimeSnapshotInsertSchema,
+    chatExternalRuntimeSnapshotPayloadSchema,
+    chatExternalRuntimeSnapshotSelectSchema,
+    type ChatExternalRuntimeSnapshotPayload,
+    type ChatExternalRuntimeSnapshotRow,
+} from "../../database/validation/chatExternalRuntimeSnapshots.ts";
 import {
     chatRunEventInsertSchema,
     chatRunEventSelectSchema,
@@ -88,6 +97,8 @@ import {
     ChatTranscriptUnavailableError,
 } from "./errors.ts";
 import {
+    type ChatExternalRuntimeSnapshotRecord,
+    toChatExternalRuntimeSnapshot,
     toChatRunSummary,
     toChatRuntimeEvent,
     toChatRuntimeSnapshot,
@@ -149,6 +160,17 @@ export interface ChatProviderRunWatermark {
     readonly providerRunId: string;
 }
 
+export interface ChatExternalRuntimeSnapshotWrite {
+    readonly observationEpoch: number;
+    readonly payload: ChatExternalRuntimeSnapshotPayload;
+    readonly sessionKey: string;
+    readonly transcriptGeneration: number;
+    readonly updatedAtMs: number;
+}
+
+export type ChatExternalRuntimeSnapshotEntry =
+    ChatExternalRuntimeSnapshotPayload["entries"][number];
+
 export interface ChatHistoryAlias {
     readonly historyMessageId: string;
     readonly idempotencyKey?: string;
@@ -194,6 +216,10 @@ export interface ChatRepository extends ChatTranscriptLifecycleStore {
     findRun(runId: string): ChatRunSummary | undefined;
     isRetiredProviderCorrelation(sessionKey: string, providerRunId: string): boolean;
     listRecoveryCandidates(): readonly ChatRecoveryCandidate[];
+    listExternalRuntimeSnapshots(
+        limit?: number
+    ): readonly ChatExternalRuntimeSnapshotRecord[];
+    listKnownSessionKeys(limit?: number): readonly string[];
     listTranscriptRecoveryCandidates(
         sessionKey: string
     ): readonly ChatRecoveryCandidate[];
@@ -201,6 +227,11 @@ export interface ChatRepository extends ChatTranscriptLifecycleStore {
     listProviderRunWatermarks(sessionKey: string): readonly ChatProviderRunWatermark[];
     markOutcomeUnknown(runId: string, at?: Date): Promise<ChatRunSummary>;
     pruneExpired(at?: Date, limit?: number): Promise<number>;
+    readExternalRuntimeObservationEpoch(): number;
+    rememberSession(sessionKey: string, at?: Date): Promise<void>;
+    replaceExternalRuntimeSnapshot(
+        input: ChatExternalRuntimeSnapshotWrite
+    ): Promise<boolean>;
     readMetrics(): ChatRepositoryMetrics;
     readRuntime(input: ChatRuntimeInput): ChatRuntimeOutput;
     readIntent(runId: string): ChatRecoveryCandidate | undefined;
@@ -244,6 +275,10 @@ function existingRun(
 
 function parseTranscriptGeneration(row: unknown): ChatTranscriptGenerationRow {
     return v.parse(chatTranscriptGenerationSelectSchema, row);
+}
+
+function parseExternalRuntimeSnapshot(row: unknown): ChatExternalRuntimeSnapshotRow {
+    return v.parse(chatExternalRuntimeSnapshotSelectSchema, row);
 }
 
 function existingTranscriptGeneration(
@@ -784,6 +819,15 @@ function advanceTranscriptGeneration(
             );
         }
     }
+    transaction
+        .delete(chatExternalRuntimeSnapshots)
+        .where(
+            and(
+                eq(chatExternalRuntimeSnapshots.gatewayScope, row.gatewayScope),
+                eq(chatExternalRuntimeSnapshots.sessionKey, row.sessionKey)
+            )
+        )
+        .run();
     let lastBoundaryProviderUpdatedAt: Date | null;
     if (input.action === "transport") {
         lastBoundaryProviderUpdatedAt = row.lastBoundaryProviderUpdatedAt;
@@ -1546,9 +1590,86 @@ export function createChatRepository(
                     .map(({ run }) => toChatRunSummary(parseRun(run)))
             );
         },
-        listProviderRunWatermarks(sessionKey) {
+        listExternalRuntimeSnapshots(limit = chatExternalRunsPerProcessMaximum) {
+            if (
+                !Number.isSafeInteger(limit) ||
+                limit < 1 ||
+                limit > chatExternalRunsPerProcessMaximum
+            ) {
+                throw new RangeError("External chat snapshot read limit is invalid");
+            }
+            return read((transaction) => {
+                const rows = transaction
+                    .select({ snapshot: chatExternalRuntimeSnapshots })
+                    .from(chatExternalRuntimeSnapshots)
+                    .innerJoin(
+                        chatTranscriptGenerations,
+                        and(
+                            eq(
+                                chatTranscriptGenerations.gatewayScope,
+                                chatExternalRuntimeSnapshots.gatewayScope
+                            ),
+                            eq(
+                                chatTranscriptGenerations.sessionKey,
+                                chatExternalRuntimeSnapshots.sessionKey
+                            ),
+                            eq(
+                                chatTranscriptGenerations.currentGeneration,
+                                chatExternalRuntimeSnapshots.transcriptGeneration
+                            )
+                        )
+                    )
+                    .where(
+                        and(
+                            eq(chatExternalRuntimeSnapshots.gatewayScope, gatewayScope),
+                            eq(chatTranscriptGenerations.status, "ready"),
+                            sql`json_array_length(${chatExternalRuntimeSnapshots.snapshotJson}, '$.entries') > 0`
+                        )
+                    )
+                    .orderBy(
+                        desc(chatExternalRuntimeSnapshots.updatedAt),
+                        asc(chatExternalRuntimeSnapshots.sessionKey)
+                    )
+                    .limit(limit)
+                    .all();
+                return Object.freeze(
+                    rows.map(({ snapshot }) =>
+                        toChatExternalRuntimeSnapshot(
+                            parseExternalRuntimeSnapshot(snapshot)
+                        )
+                    )
+                );
+            });
+        },
+        listKnownSessionKeys(limit = 64) {
+            if (!Number.isSafeInteger(limit) || limit < 1 || limit > 64) {
+                throw new RangeError("Chat watch-session limit is invalid");
+            }
             return read((transaction) =>
-                transaction
+                Object.freeze(
+                    transaction
+                        .select({ sessionKey: chatTranscriptGenerations.sessionKey })
+                        .from(chatTranscriptGenerations)
+                        .where(
+                            and(
+                                eq(chatTranscriptGenerations.gatewayScope, gatewayScope),
+                                eq(chatTranscriptGenerations.status, "ready")
+                            )
+                        )
+                        .orderBy(
+                            desc(chatTranscriptGenerations.updatedAt),
+                            asc(chatTranscriptGenerations.sessionKey)
+                        )
+                        .limit(limit)
+                        .all()
+                        .map(({ sessionKey: key }) => key)
+                )
+            );
+        },
+        listProviderRunWatermarks(sessionKey) {
+            return read((transaction) => {
+                const watermarks = new Map<string, number>();
+                const local = transaction
                     .select({ run: chatRuns })
                     .from(chatRuns)
                     .innerJoin(
@@ -1600,8 +1721,68 @@ export function createChatRepository(
                             lastProviderSequence,
                             providerRunId: run.providerRunId ?? request.idempotencyKey,
                         });
-                    })
-            );
+                    });
+                for (const watermark of local) {
+                    watermarks.set(
+                        watermark.providerRunId,
+                        Math.max(
+                            watermarks.get(watermark.providerRunId) ?? 0,
+                            watermark.lastProviderSequence
+                        )
+                    );
+                }
+                const rawSnapshot = transaction
+                    .select({ snapshot: chatExternalRuntimeSnapshots })
+                    .from(chatExternalRuntimeSnapshots)
+                    .innerJoin(
+                        chatTranscriptGenerations,
+                        and(
+                            eq(
+                                chatTranscriptGenerations.gatewayScope,
+                                chatExternalRuntimeSnapshots.gatewayScope
+                            ),
+                            eq(
+                                chatTranscriptGenerations.sessionKey,
+                                chatExternalRuntimeSnapshots.sessionKey
+                            ),
+                            eq(
+                                chatTranscriptGenerations.currentGeneration,
+                                chatExternalRuntimeSnapshots.transcriptGeneration
+                            )
+                        )
+                    )
+                    .where(
+                        and(
+                            eq(chatExternalRuntimeSnapshots.gatewayScope, gatewayScope),
+                            eq(chatExternalRuntimeSnapshots.sessionKey, sessionKey),
+                            eq(chatTranscriptGenerations.status, "ready")
+                        )
+                    )
+                    .get();
+                if (rawSnapshot !== undefined) {
+                    const snapshot = toChatExternalRuntimeSnapshot(
+                        parseExternalRuntimeSnapshot(rawSnapshot.snapshot)
+                    );
+                    for (const entry of snapshot.payload.entries) {
+                        watermarks.set(
+                            entry.run.providerRunId,
+                            Math.max(
+                                watermarks.get(entry.run.providerRunId) ?? 0,
+                                entry.lastProviderSequence
+                            )
+                        );
+                    }
+                }
+                return Object.freeze(
+                    [...watermarks]
+                        .map(([providerRunId, lastProviderSequence]) =>
+                            Object.freeze({ lastProviderSequence, providerRunId })
+                        )
+                        .toSorted((left, right) =>
+                            compareStrings(left.providerRunId, right.providerRunId)
+                        )
+                );
+            });
         },
         beginTranscriptControl({ action, controlId, key, occurredAtMs }) {
             const at = toDate(occurredAtMs);
@@ -2224,6 +2405,149 @@ export function createChatRepository(
                     ),
                     run: toChatRunSummary(run),
                 });
+            });
+        },
+        readExternalRuntimeObservationEpoch() {
+            return read((transaction) =>
+                requiredCursor(
+                    transaction
+                        .select({
+                            value: max(chatExternalRuntimeSnapshots.observationEpoch),
+                        })
+                        .from(chatExternalRuntimeSnapshots)
+                        .innerJoin(
+                            chatTranscriptGenerations,
+                            and(
+                                eq(
+                                    chatTranscriptGenerations.gatewayScope,
+                                    chatExternalRuntimeSnapshots.gatewayScope
+                                ),
+                                eq(
+                                    chatTranscriptGenerations.sessionKey,
+                                    chatExternalRuntimeSnapshots.sessionKey
+                                ),
+                                eq(
+                                    chatTranscriptGenerations.currentGeneration,
+                                    chatExternalRuntimeSnapshots.transcriptGeneration
+                                )
+                            )
+                        )
+                        .where(
+                            and(
+                                eq(
+                                    chatExternalRuntimeSnapshots.gatewayScope,
+                                    gatewayScope
+                                ),
+                                eq(chatTranscriptGenerations.status, "ready")
+                            )
+                        )
+                        .get()
+                )
+            );
+        },
+        rememberSession(sessionKey, at = toDate(nowMs())) {
+            if (
+                read(
+                    (transaction) =>
+                        existingTranscriptGeneration(
+                            transaction,
+                            gatewayScope,
+                            sessionKey
+                        ) !== undefined
+                )
+            ) {
+                return Promise.resolve();
+            }
+            return write((transaction) => {
+                ensureTranscriptGeneration(transaction, gatewayScope, sessionKey, at);
+            });
+        },
+        replaceExternalRuntimeSnapshot(input) {
+            const payload = v.parse(
+                chatExternalRuntimeSnapshotPayloadSchema,
+                input.payload
+            );
+            const snapshotJson = JSON.stringify(payload);
+            const at = toDate(input.updatedAtMs);
+            return write((transaction) => {
+                const transcript = ensureTranscriptGeneration(
+                    transaction,
+                    gatewayScope,
+                    input.sessionKey,
+                    at
+                );
+                if (
+                    transcript.status !== "ready" ||
+                    transcript.currentGeneration !== input.transcriptGeneration
+                ) {
+                    return false;
+                }
+                const rawCurrent = transaction
+                    .select()
+                    .from(chatExternalRuntimeSnapshots)
+                    .where(
+                        and(
+                            eq(chatExternalRuntimeSnapshots.gatewayScope, gatewayScope),
+                            eq(chatExternalRuntimeSnapshots.sessionKey, input.sessionKey)
+                        )
+                    )
+                    .get();
+                const current =
+                    rawCurrent === undefined
+                        ? undefined
+                        : parseExternalRuntimeSnapshot(rawCurrent);
+                if (
+                    current !== undefined &&
+                    (input.observationEpoch < current.observationEpoch ||
+                        (input.observationEpoch === current.observationEpoch &&
+                            input.updatedAtMs < getTime(current.updatedAt)))
+                ) {
+                    return false;
+                }
+                if (
+                    current !== undefined &&
+                    current.observationEpoch === input.observationEpoch &&
+                    getTime(current.updatedAt) === input.updatedAtMs
+                ) {
+                    return false;
+                }
+                const stored = v.parse(chatExternalRuntimeSnapshotInsertSchema, {
+                    gatewayScope,
+                    observationEpoch: input.observationEpoch,
+                    schemaVersion: 1,
+                    sessionKey: input.sessionKey,
+                    snapshotBytes: utf8ByteLength(snapshotJson),
+                    snapshotJson,
+                    transcriptGeneration: input.transcriptGeneration,
+                    updatedAt: at,
+                });
+                if (current === undefined) {
+                    transaction.insert(chatExternalRuntimeSnapshots).values(stored).run();
+                } else {
+                    transaction
+                        .update(chatExternalRuntimeSnapshots)
+                        .set({
+                            observationEpoch: stored.observationEpoch,
+                            snapshotBytes: stored.snapshotBytes,
+                            snapshotJson: stored.snapshotJson,
+                            updatedAt: stored.updatedAt,
+                        })
+                        .where(
+                            and(
+                                eq(
+                                    chatExternalRuntimeSnapshots.gatewayScope,
+                                    gatewayScope
+                                ),
+                                eq(
+                                    chatExternalRuntimeSnapshots.sessionKey,
+                                    input.sessionKey
+                                )
+                            )
+                        )
+                        .run();
+                }
+                appendRealtimeMarker(transaction, at);
+                return true;
             });
         },
         signalRuntimeChanged(at = toDate(nowMs())) {

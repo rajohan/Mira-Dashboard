@@ -1,4 +1,4 @@
-import { formatDistanceToNowStrict } from "date-fns";
+import { formatDistanceStrict } from "date-fns";
 
 import {
     taskAssignees,
@@ -67,10 +67,41 @@ export function taskPriorityBadgeVariant(
     }
 }
 
+/** @returns Shared task-status badge treatment. */
+export function taskStatusBadgeVariant(
+    status: TaskStatus
+): "default" | "info" | "success" | "warning" {
+    switch (status) {
+        case "todo": {
+            return "default";
+        }
+        case "in-progress": {
+            return "info";
+        }
+        case "blocked": {
+            return "warning";
+        }
+        case "done": {
+            return "success";
+        }
+    }
+}
+
+/** @returns Human-readable task-status label shared with the board. */
+export function taskStatusLabel(status: TaskStatus): string {
+    return (
+        taskStatusDefinitions.find((definition) => definition.status === status)?.title ??
+        status
+    );
+}
+
 /**
  * @param timestampMs Valid task timestamp.
+ * @param nowMs Current presentation clock.
  * @returns Compact relative age for one task timestamp.
  */
-export function taskRelativeTime(timestampMs: number): string {
-    return formatDistanceToNowStrict(new Date(timestampMs), { addSuffix: true });
+export function taskRelativeTime(timestampMs: number, nowMs = Date.now()): string {
+    return formatDistanceStrict(new Date(Math.min(timestampMs, nowMs)), new Date(nowMs), {
+        addSuffix: true,
+    });
 }

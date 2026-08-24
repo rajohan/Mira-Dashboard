@@ -259,7 +259,7 @@ export function ScheduleDisableIntentModal({
                                 setComment(event.currentTarget.value);
                                 setCommentError(undefined);
                             }}
-                            placeholder="Example: Waiting for the maintenance window to finish"
+                            placeholder="Waiting for the maintenance window to finish"
                             required
                             value={comment}
                         />

@@ -1,34 +1,6 @@
-import * as v from "valibot";
-
-import {
-    contractAuthenticationErrorReasons,
-    contractErrorCodes,
-    contractOperationErrorReasons,
-} from "../../contracts/registry.ts";
+import { SecurityVerificationCancelledError } from "../security/securityVerificationCoordinator.ts";
 import { DashboardProtocolError } from "./trpcClient.ts";
-
-const clientErrorCodeSchema = v.picklist([
-    ...contractErrorCodes,
-    "CLIENT_CLOSED_REQUEST",
-    "INTERNAL_SERVER_ERROR",
-    "METHOD_NOT_SUPPORTED",
-    "PARSE_ERROR",
-    "TIMEOUT",
-]);
-
-const clientErrorSchema = v.object({
-    data: v.nullish(
-        v.object({
-            code: v.optional(clientErrorCodeSchema),
-            reason: v.optional(
-                v.picklist([
-                    ...contractAuthenticationErrorReasons,
-                    ...contractOperationErrorReasons,
-                ])
-            ),
-        })
-    ),
-});
+import { dashboardTrpcFailureData } from "./trpcFailureData.ts";
 
 /** Fixed browser-facing failure categories; no server message is rendered. */
 export type DashboardBrowserFailure =
@@ -60,15 +32,16 @@ function isCancelledBrowserCeremony(error: unknown): boolean {
  */
 export function classifyDashboardBrowserFailure(error: unknown): DashboardBrowserFailure {
     if (error instanceof DashboardProtocolError) return "protocol";
+    if (error instanceof SecurityVerificationCancelledError) return "cancelled";
     if (isCancelledBrowserCeremony(error)) return "cancelled";
 
-    const parsed = v.safeParse(clientErrorSchema, error);
-    if (!parsed.success) return "unknown";
-    const reason = parsed.output.data?.reason;
+    const failure = dashboardTrpcFailureData(error);
+    if (failure === undefined) return "unknown";
+    const { reason } = failure;
     if (reason === "mfa_enrollment_required") return "mfa-enrollment-required";
     if (reason === "step_up_required") return "step-up-required";
 
-    switch (parsed.output.data?.code) {
+    switch (failure.code) {
         case "BAD_REQUEST":
         case "PARSE_ERROR": {
             return "invalid-request";
@@ -127,10 +100,7 @@ const browserFailureMessages: Readonly<Record<DashboardBrowserFailure, string>> 
  * @returns Whether the server explicitly reported an indeterminate operation outcome.
  */
 export function isDashboardOperationOutcomeUnknown(error: unknown): boolean {
-    const parsed = v.safeParse(clientErrorSchema, error);
-    return parsed.success
-        ? parsed.output.data?.reason === "operation_outcome_unknown"
-        : false;
+    return dashboardTrpcFailureData(error)?.reason === "operation_outcome_unknown";
 }
 
 /** Maximum transient read failures tolerated while the shared Gateway reconnects. */

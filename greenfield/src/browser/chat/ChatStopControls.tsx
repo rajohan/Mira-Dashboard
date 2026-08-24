@@ -2,7 +2,6 @@ import { Popover, PopoverButton, PopoverPanel } from "@headlessui/react";
 import { Square } from "lucide-react";
 
 import { Button } from "../ui/Button.tsx";
-import { buttonClassNames } from "../ui/buttonStyles.ts";
 import { Icon } from "../ui/Icon.tsx";
 import { IconOnlyButton } from "../ui/IconOnlyButton.tsx";
 
@@ -34,16 +33,13 @@ export function ChatStopControls({ onAbort, runIds }: ChatStopControlsProps) {
             {({ close }) => (
                 <>
                     <PopoverButton
-                        aria-label={`Stop responses, ${runIds.length} active`}
-                        className={buttonClassNames({
-                            className: "min-h-10 min-w-10 px-0 sm:min-h-9 sm:min-w-9",
-                            size: "sm",
-                            variant: "secondary",
-                        })}
-                        title={`Stop responses, ${runIds.length} active`}
-                    >
-                        <Icon icon={Square} size="sm" tone="inherit" />
-                    </PopoverButton>
+                        as={IconOnlyButton}
+                        className="min-h-10 min-w-10 px-0 sm:min-h-9 sm:min-w-9"
+                        icon={Square}
+                        label={`Stop responses, ${runIds.length} active`}
+                        size="sm"
+                        variant="secondary"
+                    />
                     <PopoverPanel
                         anchor={{ gap: 8, padding: 8, to: "top end" }}
                         aria-label="Active responses"

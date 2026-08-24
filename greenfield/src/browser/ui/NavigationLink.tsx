@@ -1,8 +1,8 @@
-import { Link } from "@tanstack/react-router";
 import type { MouseEventHandler, ReactNode } from "react";
 
 import { cn } from "../lib/classNames.ts";
 import type { DashboardNavigationPath } from "../lib/dashboardRoutes.ts";
+import { ActionLink } from "./ActionLink.tsx";
 
 interface NavigationLinkProps {
     readonly active: boolean;
@@ -26,7 +26,7 @@ export function NavigationLink({
     to,
 }: NavigationLinkProps) {
     return (
-        <Link
+        <ActionLink
             aria-current={current ? "page" : undefined}
             className={cn(
                 "mb-1 flex min-h-11 items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
@@ -38,8 +38,9 @@ export function NavigationLink({
             )}
             onClick={onClick}
             to={to}
+            variant="unstyled"
         >
             {children}
-        </Link>
+        </ActionLink>
     );
 }

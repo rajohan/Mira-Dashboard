@@ -10,9 +10,9 @@ import type {
     DeliveryPullRequestsResult,
     DeliveryReleasesResult,
 } from "../../contracts/delivery.ts";
+import { ActionLink } from "../ui/ActionLink.tsx";
 import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
-import { buttonClassNames } from "../ui/buttonStyles.ts";
 import { Card } from "../ui/Card.tsx";
 import { ConfirmModal } from "../ui/ConfirmModal.tsx";
 import { Heading } from "../ui/Heading.tsx";
@@ -266,16 +266,15 @@ export function DeliveryRoute({ client }: DeliveryRouteProps) {
                                 </code>
                             </div>
                             <div className="flex gap-2">
-                                <a
-                                    className={buttonClassNames({ size: "sm" })}
-                                    href={
-                                        "/jobs?runId=" +
-                                        encodeURIComponent(operations.result.jobRunId)
-                                    }
+                                <ActionLink
+                                    search={{ runId: operations.result.jobRunId }}
+                                    size="sm"
+                                    to="/jobs"
+                                    variant="primary"
                                 >
                                     <Icon icon={ExternalLinkIcon} size="sm" />
                                     View job
-                                </a>
+                                </ActionLink>
                                 <Button
                                     onClick={operations.dismissResult}
                                     size="sm"

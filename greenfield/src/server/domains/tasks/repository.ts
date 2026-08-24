@@ -42,6 +42,7 @@ export function createTaskRepository(
         findTask: (id: string) => withReadTransaction((reader) => reader.findTask(id)),
         findTaskProgress: (taskId: string, updateId: string) =>
             withReadTransaction((reader) => reader.findTaskProgress(taskId, updateId)),
+        listTaskLabels: () => withReadTransaction((reader) => reader.listTaskLabels()),
         listTaskProgress: (input: ListTaskProgressInput) =>
             withReadTransaction((reader) => reader.listTaskProgress(input)),
         listOpenTasksByCronJobIds: (cronJobIds: readonly string[]) =>

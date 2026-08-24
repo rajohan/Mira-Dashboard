@@ -9,6 +9,7 @@ describe("security audit boundary", () => {
         const metadata = parseUnknownJson(
             serializeRedactedAuditMetadata({
                 password: "do-not-store",
+                mfaReset: false,
                 reason: "invalid_credentials",
                 requestBody: { username: "operator" },
                 safe: { nested: { deeper: { value: "hidden" } } },
@@ -16,7 +17,7 @@ describe("security audit boundary", () => {
             })
         );
 
-        expect(metadata).toEqual({ reason: "invalid_credentials" });
+        expect(metadata).toEqual({ mfaReset: false, reason: "invalid_credentials" });
     });
 
     test("builds a validated audit row without optional secret leakage", () => {

@@ -5,6 +5,7 @@ import type { JobRunSummary } from "../../contracts/jobModel.ts";
 import { cn } from "../lib/classNames.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { Badge } from "../ui/Badge.tsx";
+import { Button } from "../ui/Button.tsx";
 import { DataTable } from "../ui/DataTable.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { Text } from "../ui/Text.tsx";
@@ -28,7 +29,7 @@ const jobRunColumnHelper = createColumnHelper<
 const jobRunColumns = jobRunColumnHelper.columns([
     jobRunColumnHelper.accessor((row) => row.run.displayName, {
         cell: ({ getValue, row }) => (
-            <button
+            <Button
                 aria-current={row.original.selected ? "true" : undefined}
                 aria-label={`Open run ${getValue()}; action ${row.original.run.actionKey}; id ${row.original.run.id}`}
                 className={cn(
@@ -36,13 +37,14 @@ const jobRunColumns = jobRunColumnHelper.columns([
                     row.original.selected && "text-accent-300"
                 )}
                 onClick={() => row.original.onSelect(row.original.run.id)}
+                variant="unstyled"
                 type="button"
             >
                 <span className="block">{getValue()}</span>
                 <span className="text-primary-400 mt-0.5 block font-mono text-xs wrap-anywhere">
                     {row.original.run.actionKey}
                 </span>
-            </button>
+            </Button>
         ),
         header: "Job run",
         id: "displayName",

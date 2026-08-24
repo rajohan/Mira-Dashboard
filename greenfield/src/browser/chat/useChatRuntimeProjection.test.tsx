@@ -169,6 +169,7 @@ describe("chat runtime projection", () => {
             externalRuns: [
                 {
                     continuity: "complete" as const,
+                    lifecycle: "active" as const,
                     hasUnprojectedActivity: false,
                     projectionTruncated: false,
                     providerRunId: "provider-after-reset",
@@ -277,7 +278,7 @@ describe("chat runtime projection", () => {
         }
     });
 
-    test("retains one empty runtime read before authoritative removal", async () => {
+    test("retains richer activity through repeated empty reconnect inventories", async () => {
         const sessionKey = "agent:main:main";
         const store = createChatRuntimeStore();
         let invocation = 0;
@@ -291,6 +292,7 @@ describe("chat runtime projection", () => {
                         ? [
                               {
                                   continuity: "complete" as const,
+                                  lifecycle: "active" as const,
                                   hasUnprojectedActivity: false,
                                   projectionTruncated: false,
                                   providerRunId: "provider-run-1",
@@ -337,9 +339,12 @@ describe("chat runtime projection", () => {
                 exact: true,
                 queryKey: chatRuntimeQueryKey(sessionKey),
             });
-            await waitFor(() =>
-                expect(chatRuntimeMessages(store.state, sessionKey)).toEqual([])
-            );
+            await waitFor(() => expect(query).toHaveBeenCalledTimes(3));
+            expect(chatRuntimeMessages(store.state, sessionKey)).toHaveLength(1);
+            expect(
+                store.state.sessions[sessionKey]?.externalRuns["provider-run-1"]
+                    ?.omissionCount
+            ).toBe(2);
             expect(query).toHaveBeenCalledTimes(3);
         } finally {
             rendered.unmount();

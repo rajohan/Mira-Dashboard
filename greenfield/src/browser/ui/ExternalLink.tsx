@@ -3,6 +3,7 @@ import type { ComponentPropsWithRef, ReactNode } from "react";
 
 import { cn } from "../lib/classNames.ts";
 import { Icon } from "./Icon.tsx";
+import { interactiveTapClassName } from "./interactionStyles.ts";
 
 export interface ExternalLinkProps extends Omit<
     ComponentPropsWithRef<"a">,
@@ -28,6 +29,7 @@ export function ExternalLink({
         <a
             {...properties}
             className={cn(
+                interactiveTapClassName,
                 "text-accent-300 inline-flex items-center gap-1 underline-offset-4 transition-colors",
                 "hover:text-accent-200 hover:underline",
                 "focus-visible:ring-accent-300 focus-visible:ring-offset-primary-900 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-offset-2",

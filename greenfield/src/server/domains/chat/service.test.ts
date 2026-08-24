@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import type { ChatSendInput } from "../../../contracts/chat.ts";
 import {
     chatDeltaCoalescingMilliseconds,
+    chatExternalRunsPerProcessMaximum,
     chatRunEventMaximum,
     chatRuntimeProjectionPartsMaximum,
     chatRuntimeResponseMaximumBytes,
@@ -23,6 +24,7 @@ import {
     ChatAttachmentTicketError,
     type ChatEventSubscriptionRequest,
     type ChatProvider,
+    type ChatProviderHistoryRequest,
     ChatProviderCapacityError,
     ChatProviderConflictError,
     ChatProviderUnknownOutcomeError,
@@ -64,6 +66,25 @@ function runtimeInput(sessionKey = "agent:main:main") {
         afterTranscriptGeneration: 0,
         limit: 128,
         sessionKey,
+    };
+}
+
+function unscopedHistoryUser(
+    id: string,
+    text: string,
+    createdAtMs: number,
+    sequence: number
+) {
+    return {
+        content: {
+            kind: "complete" as const,
+            parts: [{ id: `${id}-part`, kind: "text" as const, text }],
+        },
+        createdAtMs,
+        id,
+        role: "user" as const,
+        sequence,
+        source: "gateway-history" as const,
     };
 }
 
@@ -544,6 +565,7 @@ describe("ChatService", () => {
             "main",
             () => 1000
         );
+        const coalescerScheduler = schedulerHarness();
         const provider = providerHarness();
         const service = createChatService({
             attachmentConsumer: {
@@ -552,6 +574,7 @@ describe("ChatService", () => {
                 },
             },
             attachmentPreparer: inertAttachmentPreparer(),
+            coalescerScheduler: coalescerScheduler.scheduler,
             nowMs: () => 1000,
             provider: provider.provider,
             repository,
@@ -559,25 +582,30 @@ describe("ChatService", () => {
         try {
             await service.runtime(runtimeInput());
             const subscription = provider.requests[0]!;
+            const oversizedMultibyteProjection = "界".repeat(
+                Math.ceil(chatRuntimeSnapshotMaximumBytes / 3)
+            );
             for (let runIndex = 0; runIndex < 9; runIndex += 1) {
                 const usesLargeProjection = runIndex >= 7;
-                const eventCount = usesLargeProjection ? 5 : 1;
-                for (let sequence = 1; sequence <= eventCount; sequence += 1) {
-                    await subscription.onEvent({
-                        kind: "delta",
-                        mode: sequence === 1 ? "replace" : "append",
-                        providerRunId: `external-${runIndex}`,
-                        providerSequence: sequence,
-                        receivedAtMs: 1000 + runIndex * 10 + sequence,
-                        sessionKey: "agent:main:main",
-                        stream: "assistant",
-                        streamId: "assistant",
-                        text: usesLargeProjection
-                            ? "😀".repeat(32 * 1024)
-                            : `External run ${runIndex}`,
-                    });
-                }
+                await subscription.onEvent({
+                    kind: "delta",
+                    mode: "replace",
+                    providerRunId: `external-${runIndex}`,
+                    providerSequence: 1,
+                    receivedAtMs: 1001 + runIndex * 10,
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                    streamId: "assistant",
+                    text: usesLargeProjection
+                        ? oversizedMultibyteProjection
+                        : `External run ${runIndex}`,
+                });
             }
+            await service.abort({
+                abortAttemptId: "bounded-projection-abort",
+                providerRunId: "external-8",
+                sessionKey: "agent:main:main",
+            });
             const runtime = await service.runtime(runtimeInput());
             expect(runtime.externalRuns).toHaveLength(8);
             expect(
@@ -600,14 +628,34 @@ describe("ChatService", () => {
             expect(utf8ByteLength(JSON.stringify(runtime))).toBeLessThanOrEqual(
                 chatRuntimeResponseMaximumBytes
             );
+            expect(
+                runtime.externalRuns.find(
+                    ({ providerRunId }) => providerRunId === "external-8"
+                )
+            ).toMatchObject({
+                abortBoundary: {
+                    attemptId: "bounded-projection-abort",
+                    baselineUpdatedAtMs: 1081,
+                    settlement: "not-aborted",
+                },
+                projectionTruncated: true,
+            });
             const olderBoundedExternal = runtime.externalRuns.find(
                 ({ providerRunId }) => providerRunId === "external-7"
             );
             const newerBoundedExternal = runtime.externalRuns.find(
                 ({ providerRunId }) => providerRunId === "external-8"
             );
-            expect(olderBoundedExternal?.text.endsWith("😀")).toBeTrue();
-            expect(newerBoundedExternal?.text.endsWith("😀")).toBeTrue();
+            expect(newerBoundedExternal).toMatchObject({
+                hasUnprojectedActivity: true,
+                parts: [],
+                projectionTruncated: true,
+            });
+            expect(
+                utf8ByteLength(JSON.stringify(newerBoundedExternal))
+            ).toBeLessThanOrEqual(chatRuntimeSnapshotMaximumBytes);
+            expect(olderBoundedExternal?.text.endsWith("界")).toBeTrue();
+            expect(newerBoundedExternal?.text.endsWith("界")).toBeTrue();
             expect(newerBoundedExternal!.text.length).toBeGreaterThan(
                 olderBoundedExternal!.text.length
             );
@@ -657,11 +705,7 @@ describe("ChatService", () => {
             const projectedRuntime = await service.runtime(runtimeInput());
             for (const external of projectedRuntime.externalRuns) {
                 const terminalSequence =
-                    external.providerRunId === "external-7" ||
-                    external.providerRunId === "external-8" ||
-                    external.providerRunId === "external-late-baseline"
-                        ? 6
-                        : 2;
+                    external.providerRunId === "external-late-baseline" ? 6 : 2;
                 await subscription.onEvent({
                     kind: "terminal",
                     outcome: "completed",
@@ -677,62 +721,13 @@ describe("ChatService", () => {
                 sessionKey: "agent:main:main",
             });
             const cleaned = await service.runtime(runtimeInput());
-            expect(cleaned.externalRuns).toEqual([]);
-            expect(cleaned.externalRunsTruncated).toBeFalse();
-
-            for (let sequence = 1; sequence <= 5; sequence += 1) {
-                await subscription.onEvent({
-                    kind: "delta",
-                    mode: sequence === 1 ? "replace" : "append",
-                    providerRunId: "external-multibyte",
-                    providerSequence: sequence,
-                    receivedAtMs: 2200 + sequence,
-                    sessionKey: "agent:main:main",
-                    stream: "assistant",
-                    streamId: "assistant",
-                    text: "界".repeat(64 * 1024),
-                });
-            }
-            const multibyteRuntime = await service.runtime(runtimeInput());
-            const multibyte = multibyteRuntime.externalRuns.find(
-                ({ providerRunId }) => providerRunId === "external-multibyte"
-            );
-            expect(multibyte).toMatchObject({
-                hasUnprojectedActivity: true,
-                parts: [],
-                projectionTruncated: true,
-                streamResets: [
-                    {
-                        resetId: "external-multibyte:1",
-                        streamId: "assistant",
-                    },
-                ],
-            });
-            expect(multibyte?.text.length).toBeGreaterThan(0);
-            expect(utf8ByteLength(JSON.stringify(multibyte))).toBeLessThanOrEqual(
-                chatRuntimeSnapshotMaximumBytes
-            );
-            await service.abort({
-                abortAttemptId: "bounded-projection-abort",
-                providerRunId: "external-multibyte",
-                sessionKey: "agent:main:main",
-            });
-            const boundedAbortRuntime = await service.runtime(runtimeInput());
+            expect(cleaned.externalRuns).toHaveLength(8);
             expect(
-                boundedAbortRuntime.externalRuns.find(
-                    ({ providerRunId }) => providerRunId === "external-multibyte"
+                cleaned.externalRuns.every(
+                    ({ lifecycle }) => lifecycle === "terminal-pending-history"
                 )
-            ).toMatchObject({
-                abortBoundary: {
-                    attemptId: "bounded-projection-abort",
-                    baselineUpdatedAtMs: 2205,
-                    settlement: "not-aborted",
-                },
-                projectionTruncated: true,
-            });
-            expect(
-                utf8ByteLength(JSON.stringify(boundedAbortRuntime))
-            ).toBeLessThanOrEqual(chatRuntimeResponseMaximumBytes);
+            ).toBeTrue();
+            expect(cleaned.externalRunsTruncated).toBeTrue();
 
             const projectedSegments = 3;
             for (let sequence = 1; sequence <= projectedSegments; sequence += 1) {
@@ -811,6 +806,7 @@ describe("ChatService", () => {
                 },
             },
             attachmentPreparer: inertAttachmentPreparer(),
+            nowMs: () => 1000,
             provider: provider.provider,
             repository,
         });
@@ -855,6 +851,7 @@ describe("ChatService", () => {
                     "external-exact-stop"
                 )
             ).toBeUndefined();
+            expect(repository.listExternalRuntimeSnapshots()).toEqual([]);
 
             await provider.requests[0]!.onEvent({
                 kind: "delta",
@@ -881,6 +878,28 @@ describe("ChatService", () => {
             expect(
                 notAbortedRuntime.externalRuns.map(({ providerRunId }) => providerRunId)
             ).toContain("external-not-aborted");
+            const notAbortedRun = notAbortedRuntime.externalRuns.find(
+                ({ providerRunId }) => providerRunId === "external-not-aborted"
+            );
+            const notAbortedSnapshot = repository.listExternalRuntimeSnapshots()[0];
+            expect(notAbortedSnapshot?.payload.entries[0]?.run).toMatchObject({
+                abortBoundary: {
+                    attemptId: "abort-external-not-aborted",
+                    settlement: "not-aborted",
+                },
+                providerRunId: "external-not-aborted",
+                updatedAtMs: notAbortedRun?.updatedAtMs,
+            });
+            expect(notAbortedSnapshot?.updatedAtMs).toBe(notAbortedRun?.updatedAtMs);
+
+            expect(
+                await service.abort({
+                    abortAttemptId: "abort-external-not-aborted",
+                    providerRunId: "external-not-aborted",
+                    sessionKey: "agent:main:main",
+                })
+            ).toMatchObject({ aborted: false });
+            expect(abortRequests).toHaveLength(2);
         } finally {
             await service.dispose();
             database.sqlite.close(true);
@@ -906,9 +925,9 @@ describe("ChatService", () => {
             abort: async () => {
                 abortCalls += 1;
                 if (abortCalls === 1) firstAbortDispatched.resolve();
-                return abortCalls === 1
-                    ? firstAbort.promise
-                    : { aborted: false, ok: true, runIds: [] };
+                if (abortCalls === 1) return firstAbort.promise;
+                if (abortCalls === 3) throw new ChatProviderUnavailableError();
+                return { aborted: false, ok: true, runIds: [] };
             },
         });
         const service = createChatService({
@@ -956,6 +975,7 @@ describe("ChatService", () => {
             await firstAbortDispatched.promise;
             expect(abortCalls).toBe(1);
             const pendingAbortRuntime = await service.runtime(runtimeInput());
+            const pendingAbortRun = pendingAbortRuntime.externalRuns[0];
             expect(pendingAbortRuntime.externalRuns[0]).toMatchObject({
                 abortBoundary: {
                     attemptId: "abort-attempt-one",
@@ -963,8 +983,12 @@ describe("ChatService", () => {
                     baselineUpdatedAtMs: 1002,
                     settlement: "pending",
                 },
-                updatedAtMs: 1002,
             });
+            expect(pendingAbortRun?.updatedAtMs).toBeGreaterThan(1002);
+            const pendingSnapshot = repository.listExternalRuntimeSnapshots()[0];
+            expect(pendingSnapshot?.payload.entries[0]?.run).toEqual(pendingAbortRun);
+            expect(pendingSnapshot?.updatedAtMs).toBe(pendingAbortRun?.updatedAtMs);
+            const abortObservationEpoch = pendingSnapshot?.observationEpoch;
             expect(
                 service.abort({
                     abortAttemptId: "abort-attempt-one",
@@ -987,6 +1011,7 @@ describe("ChatService", () => {
             )) as ChatServiceError;
             expect(firstFailure.reason).toBe("unknown-outcome");
             const unknownAbortRuntime = await service.runtime(runtimeInput());
+            const unknownAbortRun = unknownAbortRuntime.externalRuns[0];
             expect(unknownAbortRuntime.externalRuns[0]).toMatchObject({
                 abortBoundary: {
                     attemptId: "abort-attempt-one",
@@ -994,8 +1019,14 @@ describe("ChatService", () => {
                     baselineUpdatedAtMs: 1002,
                     settlement: "unknown",
                 },
-                updatedAtMs: 1002,
             });
+            expect(unknownAbortRun?.updatedAtMs).toBeGreaterThan(
+                pendingAbortRun?.updatedAtMs ?? 0
+            );
+            const unknownSnapshot = repository.listExternalRuntimeSnapshots()[0];
+            expect(unknownSnapshot?.payload.entries[0]?.run).toEqual(unknownAbortRun);
+            expect(unknownSnapshot?.updatedAtMs).toBe(unknownAbortRun?.updatedAtMs);
+            expect(unknownSnapshot?.observationEpoch).toBe(abortObservationEpoch);
             const replayFailure = (await captureFailure(() =>
                 service.abort({
                     abortAttemptId: "abort-attempt-one",
@@ -1025,6 +1056,7 @@ describe("ChatService", () => {
                 text: " after abort",
             });
             const advancedAbortRuntime = await service.runtime(runtimeInput());
+            const advancedAbortRun = advancedAbortRuntime.externalRuns[0];
             expect(advancedAbortRuntime.externalRuns[0]).toMatchObject({
                 abortBoundary: {
                     attemptId: "abort-attempt-one",
@@ -1032,8 +1064,13 @@ describe("ChatService", () => {
                     baselineUpdatedAtMs: 1002,
                     settlement: "unknown",
                 },
-                updatedAtMs: 1003,
             });
+            expect(advancedAbortRun?.updatedAtMs).toBeGreaterThanOrEqual(
+                unknownAbortRun?.updatedAtMs ?? 0
+            );
+            expect(advancedAbortRun?.observationEpoch).toBeGreaterThan(
+                unknownAbortRun?.observationEpoch ?? 0
+            );
             expect(
                 await service.abort({
                     abortAttemptId: "abort-attempt-two",
@@ -1051,10 +1088,51 @@ describe("ChatService", () => {
                 abortBoundary: {
                     attemptId: "abort-attempt-two",
                     baselineObservationEpoch: 3,
-                    baselineUpdatedAtMs: 1003,
+                    baselineUpdatedAtMs: advancedAbortRun?.updatedAtMs,
                     settlement: "not-aborted",
                 },
             });
+            const rejectedAbortRun = rejectedAbortRuntime.externalRuns[0];
+            const rejectedSnapshot = repository.listExternalRuntimeSnapshots()[0];
+            expect(rejectedSnapshot?.payload.entries[0]?.run).toEqual(rejectedAbortRun);
+            expect(rejectedSnapshot?.updatedAtMs).toBe(rejectedAbortRun?.updatedAtMs);
+
+            await subscription.onEvent({
+                kind: "delta",
+                mode: "append",
+                providerRunId: "external-abort-fence",
+                providerSequence: 4,
+                receivedAtMs: 1004,
+                sessionKey: "agent:main:main",
+                stream: "assistant",
+                text: " before definitive failure",
+            });
+            const beforeDefinitiveFailureRuntime = await service.runtime(runtimeInput());
+            const beforeDefinitiveFailure =
+                beforeDefinitiveFailureRuntime.externalRuns[0];
+            const definitiveFailure = await captureFailure(() =>
+                service.abort({
+                    abortAttemptId: "abort-attempt-three",
+                    providerRunId: "external-abort-fence",
+                    sessionKey: "agent:main:main",
+                })
+            );
+            expect(definitiveFailure).toBeInstanceOf(ChatServiceError);
+            expect(abortCalls).toBe(3);
+            const afterDefinitiveFailureRuntime = await service.runtime(runtimeInput());
+            const afterDefinitiveFailure = afterDefinitiveFailureRuntime.externalRuns[0];
+            expect(afterDefinitiveFailure?.abortBoundary).toBeUndefined();
+            expect(afterDefinitiveFailure?.updatedAtMs).toBeGreaterThan(
+                beforeDefinitiveFailure?.updatedAtMs ?? 0
+            );
+            const definitiveFailureSnapshot =
+                repository.listExternalRuntimeSnapshots()[0];
+            expect(definitiveFailureSnapshot?.payload.entries[0]?.run).toEqual(
+                afterDefinitiveFailure
+            );
+            expect(definitiveFailureSnapshot?.updatedAtMs).toBe(
+                afterDefinitiveFailure?.updatedAtMs
+            );
         } finally {
             await service.dispose();
             database.sqlite.close(true);
@@ -1198,7 +1276,12 @@ describe("ChatService", () => {
                 updatedAtMs: 2000,
             });
             expect(refreshed.parts).toEqual([
-                { kind: "thinking", sequence: 1, text: "Private reasoning" },
+                {
+                    kind: "thinking",
+                    occurredAtMs: 1001,
+                    sequence: 1,
+                    text: "Private reasoning",
+                },
                 {
                     callId: "synthetic-call",
                     callIdSource: "synthetic",
@@ -1207,6 +1290,7 @@ describe("ChatService", () => {
                     kind: "tool",
                     name: "search",
                     nameSource: "synthetic",
+                    occurredAtMs: 1002,
                     output: "Found",
                     phase: "succeeded",
                     sequence: 2,
@@ -1218,7 +1302,12 @@ describe("ChatService", () => {
                     text: "Checked history",
                     type: "progress",
                 },
-                { kind: "assistant", sequence: 4, text: "Snapshot answer" },
+                {
+                    kind: "assistant",
+                    occurredAtMs: 1005,
+                    sequence: 4,
+                    text: "Snapshot answer",
+                },
             ]);
 
             await subscription.onEvent({
@@ -1247,6 +1336,7 @@ describe("ChatService", () => {
             expect(continued.parts?.slice(-2)).toEqual([
                 {
                     kind: "assistant",
+                    occurredAtMs: 1005,
                     sequence: 4,
                     text: "Snapshot answer continued",
                 },
@@ -1913,6 +2003,51 @@ describe("ChatService", () => {
         }
     });
 
+    test("releases the backend watch when a deleted transcript becomes absent", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createChatRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission,
+            "main",
+            () => 1000
+        );
+        const lifecycle = createChatTranscriptLifecycleCoordinator(repository);
+        const provider = providerHarness();
+        const service = createChatService({
+            attachmentConsumer: {
+                reserve: async () => {
+                    throw new Error("Attachment reservation is not used by this test");
+                },
+            },
+            attachmentPreparer: inertAttachmentPreparer(),
+            provider: provider.provider,
+            repository,
+            subscriptionMaximum: 1,
+            transcriptLifecycle: lifecycle,
+        });
+        try {
+            await service.runtime(runtimeInput());
+            expect(provider.requests).toHaveLength(1);
+
+            await lifecycle.observeLifecycleEvent({
+                occurredAtMs: 1100,
+                reason: "delete",
+                sessionKey: "agent:main:main",
+                updatedAtMs: 1100,
+            });
+
+            expect(repository.readTranscriptState("agent:main:main")).toMatchObject({
+                currentGeneration: 2,
+                status: "absent",
+            });
+            expect(provider.closeCount()).toBe(1);
+            expect(provider.requests).toHaveLength(1);
+        } finally {
+            await service.dispose();
+            database.sqlite.close(true);
+        }
+    });
+
     test("retires exact external finals and expires only unmatched interrupted projections", async () => {
         const database = await openFreshMigratedDatabase();
         let clock = 1000;
@@ -2142,14 +2277,25 @@ describe("ChatService", () => {
                 projectionTruncated: false,
             });
             expect(toolRuntime.externalRuns[0]?.parts).toEqual([
-                { kind: "assistant", sequence: 1, text: "one-two-three" },
-                { kind: "thinking", sequence: 2, text: "private reasoning" },
+                {
+                    kind: "assistant",
+                    occurredAtMs: 1000,
+                    sequence: 1,
+                    text: "one-two-three",
+                },
+                {
+                    kind: "thinking",
+                    occurredAtMs: 1004,
+                    sequence: 2,
+                    text: "private reasoning",
+                },
                 {
                     callId: "call-1",
                     input: '{"query":"runtime"}',
                     isError: false,
                     kind: "tool",
                     name: "search",
+                    occurredAtMs: 1005,
                     output: "found",
                     phase: "succeeded",
                     sequence: 3,
@@ -2185,9 +2331,788 @@ describe("ChatService", () => {
                 "chat.runtime",
             ]);
             const terminalRuntime = await service.runtime(runtimeInput());
-            expect(terminalRuntime.externalRuns).toEqual([]);
+            expect(terminalRuntime.externalRuns).toMatchObject([
+                {
+                    lifecycle: "terminal-pending-history",
+                    providerRunId: "external-burst",
+                },
+            ]);
         } finally {
             await service.dispose();
+            database.sqlite.close(true);
+        }
+    });
+
+    test("keeps an observed external run subscribed across idle sweeps", async () => {
+        const database = await openFreshMigratedDatabase();
+        let clock = 1000;
+        const repository = createChatRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission,
+            "main",
+            () => clock
+        );
+        let terminalInHistory = false;
+        const provider = providerHarness({
+            history: async () => ({
+                hasMore: false,
+                messages: terminalInHistory
+                    ? [
+                          {
+                              content: {
+                                  kind: "complete" as const,
+                                  parts: [
+                                      {
+                                          id: "external-live-final-part",
+                                          kind: "text" as const,
+                                          text: "done",
+                                      },
+                                  ],
+                              },
+                              id: "external-live-final",
+                              role: "assistant" as const,
+                              runId: "external-live-run",
+                              source: "gateway-history" as const,
+                          },
+                      ]
+                    : [],
+            }),
+        });
+        const service = createChatService({
+            attachmentConsumer: {
+                reserve: async () => {
+                    throw new Error("Attachment reservation is not used by this test");
+                },
+            },
+            attachmentPreparer: inertAttachmentPreparer(),
+            nowMs: () => clock,
+            provider: provider.provider,
+            repository,
+            subscriptionIdleMilliseconds: 100,
+        });
+        try {
+            await service.runtime(runtimeInput());
+            const subscription = provider.requests[0]!;
+            await subscription.onEvent({
+                kind: "status",
+                phase: "starting-model",
+                providerRunId: "external-live-run",
+                providerSequence: 1,
+                receivedAtMs: 1001,
+                sessionKey: "agent:main:main",
+            });
+
+            clock = 1200;
+            expect(await service.sweepSubscriptions()).toBe(0);
+            expect(provider.closeCount()).toBe(0);
+
+            await subscription.onReconciliationRequired("transport");
+            expect(provider.requests).toHaveLength(2);
+            expect(provider.closeCount()).toBe(1);
+
+            await provider.requests[1]!.onEvent({
+                kind: "terminal",
+                outcome: "completed",
+                providerRunId: "external-live-run",
+                providerSequence: 2,
+                receivedAtMs: clock,
+                sessionKey: "agent:main:main",
+            });
+            clock = 1400;
+            expect(await service.sweepSubscriptions()).toBe(0);
+            terminalInHistory = true;
+            await service.history({
+                cursor: "0",
+                limit: 50,
+                sessionKey: "agent:main:main",
+            });
+            clock = 1600;
+            expect(await service.sweepSubscriptions()).toBe(0);
+            expect(provider.closeCount()).toBe(1);
+        } finally {
+            await service.dispose();
+            database.sqlite.close(true);
+        }
+    });
+
+    test("pins a history-discovered in-flight run after a process restart", async () => {
+        const database = await openFreshMigratedDatabase();
+        let clock = 1000;
+        let active = true;
+        const repository = createChatRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission,
+            "main",
+            () => clock
+        );
+        const provider = providerHarness({
+            history: async () => ({
+                hasMore: false,
+                ...(active
+                    ? {
+                          inFlightRun: {
+                              runId: "external-before-restart",
+                              text: "",
+                          },
+                      }
+                    : {}),
+                messages: [],
+            }),
+        });
+        const service = createChatService({
+            attachmentConsumer: {
+                reserve: async () => {
+                    throw new Error("Attachment reservation is not used by this test");
+                },
+            },
+            attachmentPreparer: inertAttachmentPreparer(),
+            nowMs: () => clock,
+            provider: provider.provider,
+            repository,
+            subscriptionIdleMilliseconds: 100,
+        });
+        try {
+            await service.history({
+                cursor: "0",
+                limit: 50,
+                sessionKey: "agent:main:main",
+            });
+            clock = 1200;
+            expect(await service.sweepSubscriptions()).toBe(0);
+
+            await provider.requests[0]!.onReconciliationRequired("transport");
+            expect(provider.requests).toHaveLength(2);
+
+            active = false;
+            await service.history({
+                cursor: "0",
+                limit: 50,
+                sessionKey: "agent:main:main",
+            });
+            clock = 1400;
+            expect(await service.sweepSubscriptions()).toBe(0);
+            expect(provider.closeCount()).toBe(1);
+        } finally {
+            await service.dispose();
+            database.sqlite.close(true);
+        }
+    });
+
+    test("keeps provider-origin activity across restart when an active history echo matches the in-flight run", async () => {
+        const database = await openFreshMigratedDatabase();
+        let clock = 1000;
+        let historyPhase: "active" | "final" = "active";
+        const historyUser = {
+            content: {
+                kind: "complete" as const,
+                parts: [
+                    {
+                        id: "external-restart-user-text",
+                        kind: "text" as const,
+                        text: "Continue with the checks",
+                    },
+                ],
+            },
+            createdAtMs: 1002,
+            id: "external-restart-user",
+            role: "user" as const,
+            runId: "external-restart-run",
+            sequence: 1,
+            source: "gateway-history" as const,
+        };
+        const activeAssistantEcho = {
+            content: {
+                kind: "complete" as const,
+                parts: [
+                    {
+                        id: "external-restart-active-echo-text",
+                        kind: "text" as const,
+                        text: "Still working",
+                    },
+                ],
+            },
+            createdAtMs: 1003,
+            id: "external-restart-active-echo",
+            role: "assistant" as const,
+            runId: "external-restart-run",
+            sequence: 2,
+            source: "gateway-history" as const,
+        };
+        const historyPage = async (request: ChatProviderHistoryRequest) => {
+            if (historyPhase === "active") {
+                return request.offset === 0
+                    ? {
+                          hasMore: true,
+                          inFlightRun: {
+                              runId: "external-restart-run",
+                              text: "",
+                          },
+                          messages: [historyUser],
+                          nextOffset: 1,
+                      }
+                    : {
+                          hasMore: false,
+                          messages: [activeAssistantEcho],
+                      };
+            }
+            return {
+                hasMore: false,
+                messages: [
+                    historyUser,
+                    {
+                        content: {
+                            kind: "complete" as const,
+                            parts: [
+                                {
+                                    id: "external-restart-final-text",
+                                    kind: "text" as const,
+                                    text: "Finished",
+                                },
+                            ],
+                        },
+                        createdAtMs: 1006,
+                        id: "external-restart-final",
+                        role: "assistant" as const,
+                        runId: "external-restart-run",
+                        sequence: 2,
+                        source: "gateway-history" as const,
+                    },
+                ],
+            };
+        };
+        const firstRepository = createChatRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission,
+            "main",
+            () => clock
+        );
+        const firstProvider = providerHarness({ history: historyPage });
+        const firstService = createChatService({
+            attachmentConsumer: {
+                reserve: async () => {
+                    throw new Error("Attachment reservation is not used by this test");
+                },
+            },
+            attachmentPreparer: inertAttachmentPreparer(),
+            nowMs: () => clock,
+            provider: firstProvider.provider,
+            repository: firstRepository,
+        });
+        try {
+            await firstService.runtime(runtimeInput());
+            const firstSubscription = firstProvider.requests[0]!;
+            await firstSubscription.onEvent({
+                kind: "delta",
+                mode: "append",
+                providerRunId: "external-restart-run",
+                providerSequence: 1,
+                receivedAtMs: 1001,
+                sessionKey: "agent:main:main",
+                stream: "thinking",
+                text: "Inspecting state",
+            });
+            await firstSubscription.onEvent({
+                callId: "external-restart-tool",
+                input: '{"cmd":"status"}',
+                isError: false,
+                kind: "tool",
+                name: "bash",
+                phase: "started",
+                providerRunId: "external-restart-run",
+                providerSequence: 2,
+                receivedAtMs: 1003,
+                sessionKey: "agent:main:main",
+            });
+            clock = 1004;
+            await firstService.history({
+                cursor: "0",
+                limit: 50,
+                sessionKey: "agent:main:main",
+            });
+            const beforeRestart = await firstService.runtime(runtimeInput());
+            expect(beforeRestart.externalRuns[0]?.parts).toMatchObject([
+                { kind: "thinking", occurredAtMs: 1001 },
+                {
+                    kind: "user",
+                    messageId: "external-restart-user",
+                    occurredAtMs: 1002,
+                },
+                { kind: "tool", occurredAtMs: 1003 },
+            ]);
+            expect(
+                firstRepository.listExternalRuntimeSnapshots()[0]?.payload.entries[0]?.run
+                    .parts
+            ).toMatchObject([
+                { kind: "thinking", occurredAtMs: 1001 },
+                {
+                    kind: "user",
+                    messageId: "external-restart-user",
+                    occurredAtMs: 1002,
+                },
+                { kind: "tool", occurredAtMs: 1003 },
+            ]);
+
+            await firstService.dispose();
+            expect(firstRepository.listExternalRuntimeSnapshots()).toHaveLength(1);
+
+            const restartedRepository = createChatRepository(
+                database.orm,
+                testImmediateDatabaseWriteAdmission,
+                "main",
+                () => clock
+            );
+            const restartedProvider = providerHarness({ history: historyPage });
+            const restartedService = createChatService({
+                attachmentConsumer: {
+                    reserve: async () => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    },
+                },
+                attachmentPreparer: inertAttachmentPreparer(),
+                nowMs: () => clock,
+                provider: restartedProvider.provider,
+                repository: restartedRepository,
+            });
+            try {
+                await restartedService.recover();
+                expect(restartedProvider.requests).toHaveLength(1);
+                expect(restartedProvider.requests[0]?.runWatermarks).toEqual([
+                    {
+                        lastProviderSequence: 2,
+                        providerRunId: "external-restart-run",
+                    },
+                ]);
+                const hydrated = await restartedService.runtime(runtimeInput());
+                expect(hydrated.externalRuns[0]).toMatchObject({
+                    lifecycle: "active",
+                    providerRunId: "external-restart-run",
+                });
+                expect(hydrated.externalRuns[0]?.parts).toMatchObject([
+                    { kind: "thinking", occurredAtMs: 1001 },
+                    {
+                        kind: "user",
+                        messageId: "external-restart-user",
+                        occurredAtMs: 1002,
+                    },
+                    { kind: "tool", occurredAtMs: 1003 },
+                ]);
+
+                clock = 1005;
+                await restartedProvider.requests[0]!.onEvent({
+                    kind: "terminal",
+                    outcome: "completed",
+                    providerRunId: "external-restart-run",
+                    providerSequence: 3,
+                    receivedAtMs: clock,
+                    sessionKey: "agent:main:main",
+                });
+                const terminalRuntime = await restartedService.runtime(runtimeInput());
+                expect(terminalRuntime.externalRuns[0]).toMatchObject({
+                    lifecycle: "terminal-pending-history",
+                });
+                expect(restartedRepository.listExternalRuntimeSnapshots()).toHaveLength(
+                    1
+                );
+
+                historyPhase = "final";
+                clock = 1006;
+                await restartedService.history({
+                    cursor: "0",
+                    limit: 50,
+                    sessionKey: "agent:main:main",
+                });
+                const retiredRuntime = await restartedService.runtime(runtimeInput());
+                expect(retiredRuntime.externalRuns).toEqual([]);
+                expect(restartedRepository.listExternalRuntimeSnapshots()).toEqual([]);
+            } finally {
+                await restartedService.dispose();
+            }
+        } finally {
+            await firstService.dispose();
+            database.sqlite.close(true);
+        }
+    });
+
+    test("keeps a restarted terminal snapshot pending when history still reports it in flight", async () => {
+        const database = await openFreshMigratedDatabase();
+        let clock = 1000;
+        const repository = createChatRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission,
+            "main",
+            () => clock
+        );
+        const firstProvider = providerHarness();
+        const firstService = createChatService({
+            attachmentConsumer: {
+                reserve: async () => {
+                    throw new Error("Attachment reservation is not used by this test");
+                },
+            },
+            attachmentPreparer: inertAttachmentPreparer(),
+            nowMs: () => clock,
+            provider: firstProvider.provider,
+            repository,
+        });
+        try {
+            await firstService.runtime(runtimeInput());
+            await firstProvider.requests[0]!.onEvent({
+                kind: "delta",
+                mode: "append",
+                providerRunId: "external-terminal-restart",
+                providerSequence: 1,
+                receivedAtMs: 1001,
+                sessionKey: "agent:main:main",
+                stream: "thinking",
+                text: "Finishing",
+            });
+            clock = 1002;
+            await firstProvider.requests[0]!.onEvent({
+                kind: "terminal",
+                outcome: "completed",
+                providerRunId: "external-terminal-restart",
+                providerSequence: 2,
+                receivedAtMs: clock,
+                sessionKey: "agent:main:main",
+            });
+            await firstService.dispose();
+
+            clock = 1003;
+            const restartedProvider = providerHarness({
+                history: async () => ({
+                    hasMore: false,
+                    inFlightRun: {
+                        runId: "external-terminal-restart",
+                        text: "",
+                    },
+                    messages: [],
+                }),
+            });
+            const restartedService = createChatService({
+                attachmentConsumer: {
+                    reserve: async () => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    },
+                },
+                attachmentPreparer: inertAttachmentPreparer(),
+                nowMs: () => clock,
+                provider: restartedProvider.provider,
+                repository,
+            });
+            try {
+                await restartedService.recover();
+                const restartedRuntime = await restartedService.runtime(runtimeInput());
+                expect(restartedRuntime.externalRuns).toMatchObject([
+                    {
+                        lifecycle: "terminal-pending-history",
+                        providerRunId: "external-terminal-restart",
+                    },
+                ]);
+                expect(
+                    repository.listExternalRuntimeSnapshots()[0]?.payload.entries[0]?.run
+                        .lifecycle
+                ).toBe("terminal-pending-history");
+            } finally {
+                await restartedService.dispose();
+            }
+        } finally {
+            await firstService.dispose();
+            database.sqlite.close(true);
+        }
+    });
+
+    test("correlates only causally adjacent unscoped history users to one external run", async () => {
+        const database = await openFreshMigratedDatabase();
+        let clock = 1_000_000;
+        const provider = providerHarness({
+            history: async () => ({
+                hasMore: false,
+                inFlightRun: { runId: "external-unscoped-users", text: "" },
+                messages: [
+                    unscopedHistoryUser("unrelated-old", "Old turn", 600_000, 1),
+                    unscopedHistoryUser("current-prompt", "Start this run", 999_999, 2),
+                    unscopedHistoryUser("current-steer", "Adjust it", 1_000_002, 3),
+                    unscopedHistoryUser("unrelated-future", "Later turn", 1_005_000, 4),
+                ],
+            }),
+        });
+        const repository = createChatRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission,
+            "main",
+            () => clock
+        );
+        const service = createChatService({
+            attachmentConsumer: {
+                reserve: async () => {
+                    throw new Error("Attachment reservation is not used by this test");
+                },
+            },
+            attachmentPreparer: inertAttachmentPreparer(),
+            nowMs: () => clock,
+            provider: provider.provider,
+            repository,
+        });
+        try {
+            await service.runtime(runtimeInput());
+            await provider.requests[0]!.onEvent({
+                kind: "delta",
+                mode: "append",
+                providerRunId: "external-unscoped-users",
+                providerSequence: 1,
+                receivedAtMs: 1_000_001,
+                sessionKey: "agent:main:main",
+                stream: "thinking",
+                text: "Inspecting",
+            });
+            await provider.requests[0]!.onEvent({
+                callId: "external-unscoped-tool",
+                isError: false,
+                kind: "tool",
+                name: "bash",
+                phase: "started",
+                providerRunId: "external-unscoped-users",
+                providerSequence: 2,
+                receivedAtMs: 1_000_003,
+                sessionKey: "agent:main:main",
+            });
+            clock = 1_000_004;
+            await service.history({
+                cursor: "0",
+                limit: 50,
+                sessionKey: "agent:main:main",
+            });
+            const runtime = await service.runtime(runtimeInput());
+            expect(
+                runtime.externalRuns[0]?.parts?.flatMap((part) =>
+                    part.kind === "user" ? [part.messageId] : []
+                )
+            ).toEqual(["current-prompt", "current-steer"]);
+        } finally {
+            await service.dispose();
+            database.sqlite.close(true);
+        }
+    });
+
+    test("retries a rejected empty-snapshot retirement during disposal", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createChatRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission,
+            "main",
+            () => 2000
+        );
+        let failFirstTombstone = true;
+        let tombstoneAttempts = 0;
+        const faultedRepository: ChatRepository = {
+            ...repository,
+            replaceExternalRuntimeSnapshot: async (input) => {
+                if (input.payload.entries.length === 0) {
+                    tombstoneAttempts += 1;
+                    if (failFirstTombstone) {
+                        failFirstTombstone = false;
+                        return false;
+                    }
+                }
+                return repository.replaceExternalRuntimeSnapshot(input);
+            },
+        };
+        const provider = providerHarness({
+            history: async () => ({
+                hasMore: false,
+                messages: [
+                    {
+                        content: {
+                            kind: "complete" as const,
+                            parts: [
+                                {
+                                    id: "dispose-retry-final-part",
+                                    kind: "text" as const,
+                                    text: "Done",
+                                },
+                            ],
+                        },
+                        id: "dispose-retry-final",
+                        role: "assistant" as const,
+                        runId: "dispose-retry-run",
+                        source: "gateway-history" as const,
+                    },
+                ],
+            }),
+        });
+        const service = createChatService({
+            attachmentConsumer: {
+                reserve: async () => {
+                    throw new Error("Attachment reservation is not used by this test");
+                },
+            },
+            attachmentPreparer: inertAttachmentPreparer(),
+            onAsyncFailure: () => {},
+            provider: provider.provider,
+            repository: faultedRepository,
+        });
+        try {
+            await service.runtime(runtimeInput());
+            await provider.requests[0]!.onEvent({
+                kind: "status",
+                phase: "starting-model",
+                providerRunId: "dispose-retry-run",
+                providerSequence: 1,
+                receivedAtMs: 1001,
+                sessionKey: "agent:main:main",
+            });
+            expect(repository.listExternalRuntimeSnapshots()).toHaveLength(1);
+
+            await service.history({
+                cursor: "0",
+                limit: 50,
+                sessionKey: "agent:main:main",
+            });
+            expect(tombstoneAttempts).toBe(1);
+            expect(repository.listExternalRuntimeSnapshots()).toHaveLength(1);
+
+            await service.dispose();
+            expect(tombstoneAttempts).toBe(2);
+            expect(repository.listExternalRuntimeSnapshots()).toEqual([]);
+        } finally {
+            await service.dispose();
+            database.sqlite.close(true);
+        }
+    });
+
+    test("retires capacity evictions durably before persisting a new external run", async () => {
+        const database = await openFreshMigratedDatabase();
+        let clock = 1000;
+        const failures: unknown[] = [];
+        const repository = createChatRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission,
+            "main",
+            () => clock
+        );
+        const provider = providerHarness();
+        const service = createChatService({
+            attachmentConsumer: {
+                reserve: async () => {
+                    throw new Error("Attachment reservation is not used by this test");
+                },
+            },
+            attachmentPreparer: inertAttachmentPreparer(),
+            nowMs: () => clock,
+            onAsyncFailure: (error) => failures.push(error),
+            provider: provider.provider,
+            repository,
+        });
+        try {
+            for (
+                let index = 0;
+                index < chatExternalRunsPerProcessMaximum + 1;
+                index += 1
+            ) {
+                const sessionKey = `agent:main:external-capacity-${index}`;
+                clock = 1000 + index;
+                await service.runtime(runtimeInput(sessionKey));
+                await provider.requests[index]!.onEvent({
+                    kind: "status",
+                    phase: "starting-model",
+                    providerRunId: `external-capacity-run-${index}`,
+                    providerSequence: 1,
+                    receivedAtMs: clock,
+                    sessionKey,
+                });
+            }
+
+            const durableEntries = repository
+                .listExternalRuntimeSnapshots()
+                .flatMap(({ payload }) => payload.entries);
+            expect(failures).toEqual([]);
+            expect(durableEntries).toHaveLength(chatExternalRunsPerProcessMaximum);
+            expect(
+                durableEntries.some(
+                    ({ run }) => run.providerRunId === "external-capacity-run-0"
+                )
+            ).toBeFalse();
+            expect(
+                durableEntries.some(
+                    ({ run }) =>
+                        run.providerRunId ===
+                        `external-capacity-run-${chatExternalRunsPerProcessMaximum}`
+                )
+            ).toBeTrue();
+        } finally {
+            await service.dispose();
+            database.sqlite.close(true);
+        }
+    });
+
+    test("reacquires a remembered empty chat session during backend recovery", async () => {
+        const database = await openFreshMigratedDatabase();
+        let clock = 1000;
+        const repository = createChatRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission,
+            "main",
+            () => clock
+        );
+        const firstProvider = providerHarness();
+        const firstService = createChatService({
+            attachmentConsumer: {
+                reserve: async () => {
+                    throw new Error("Attachment reservation is not used by this test");
+                },
+            },
+            attachmentPreparer: inertAttachmentPreparer(),
+            nowMs: () => clock,
+            provider: firstProvider.provider,
+            repository,
+            subscriptionIdleMilliseconds: 100,
+        });
+        try {
+            await firstService.runtime(runtimeInput());
+            await firstService.dispose();
+            expect(repository.listKnownSessionKeys()).toEqual(["agent:main:main"]);
+
+            let historyCalls = 0;
+            const restartedProvider = providerHarness({
+                history: async () => {
+                    historyCalls += 1;
+                    return { hasMore: false, messages: [] };
+                },
+            });
+            const restartedService = createChatService({
+                attachmentConsumer: {
+                    reserve: async () => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    },
+                },
+                attachmentPreparer: inertAttachmentPreparer(),
+                nowMs: () => clock,
+                provider: restartedProvider.provider,
+                repository,
+                subscriptionIdleMilliseconds: 100,
+            });
+            try {
+                await restartedService.recover();
+                expect(restartedProvider.requests).toHaveLength(1);
+                expect(restartedProvider.requests[0]).toMatchObject({
+                    runWatermarks: [],
+                    sessionKey: "agent:main:main",
+                });
+                expect(historyCalls).toBe(0);
+                clock = 1200;
+                expect(await restartedService.sweepSubscriptions()).toBe(0);
+                expect(restartedProvider.closeCount()).toBe(0);
+            } finally {
+                await restartedService.dispose();
+            }
+        } finally {
+            await firstService.dispose();
             database.sqlite.close(true);
         }
     });
@@ -2329,6 +3254,7 @@ describe("ChatService", () => {
             expect(runtime.externalRuns[0]?.parts).toEqual([
                 {
                     kind: "thinking",
+                    occurredAtMs: 1001,
                     segmentId: "codex-ordered-run:1",
                     sequence: 1,
                     streamId: "agent:reasoning",
@@ -2336,6 +3262,7 @@ describe("ChatService", () => {
                 },
                 {
                     kind: "thinking",
+                    occurredAtMs: 1002,
                     segmentId: "agent:preamble:preamble-1",
                     sequence: 2,
                     streamId: "agent:preamble",
@@ -2347,12 +3274,14 @@ describe("ChatService", () => {
                     isError: false,
                     kind: "tool",
                     name: "bash",
+                    occurredAtMs: 1004,
                     output: "/workspace",
                     phase: "succeeded",
                     sequence: 3,
                 },
                 {
                     kind: "thinking",
+                    occurredAtMs: 1006,
                     segmentId: "codex-ordered-run:6",
                     sequence: 4,
                     streamId: "agent:reasoning",
@@ -2360,6 +3289,7 @@ describe("ChatService", () => {
                 },
                 {
                     kind: "assistant",
+                    occurredAtMs: 1007,
                     segmentId: "codex-ordered-run:7",
                     sequence: 5,
                     streamId: "assistant",
@@ -2371,12 +3301,14 @@ describe("ChatService", () => {
                     isError: false,
                     kind: "tool",
                     name: "bash",
+                    occurredAtMs: 1008,
                     output: "1 pass",
                     phase: "succeeded",
                     sequence: 6,
                 },
                 {
                     kind: "assistant",
+                    occurredAtMs: 1010,
                     segmentId: "codex-ordered-run:10",
                     sequence: 7,
                     streamId: "assistant",
@@ -2427,6 +3359,7 @@ describe("ChatService", () => {
             ).toEqual([
                 {
                     kind: "thinking",
+                    occurredAtMs: 1002,
                     segmentId: "agent:preamble:preamble-1",
                     sequence: 2,
                     streamId: "agent:preamble",
@@ -2434,6 +3367,7 @@ describe("ChatService", () => {
                 },
                 {
                     kind: "thinking",
+                    occurredAtMs: 1012,
                     segmentId: "agent:preamble:preamble-2",
                     sequence: 8,
                     streamId: "agent:preamble",
@@ -2443,6 +3377,7 @@ describe("ChatService", () => {
             expect(replaced.parts?.filter((part) => part.kind === "assistant")).toEqual([
                 {
                     kind: "assistant",
+                    occurredAtMs: 1013,
                     segmentId: "codex-ordered-run:13",
                     sequence: 9,
                     streamId: "assistant",
@@ -2479,6 +3414,7 @@ describe("ChatService", () => {
             ).toEqual([
                 {
                     kind: "thinking",
+                    occurredAtMs: 1014,
                     segmentId: "codex-ordered-run:14",
                     sequence: 10,
                     streamId: "agent:reasoning",
@@ -2528,7 +3464,7 @@ describe("ChatService", () => {
                 (part) => part.kind === "item" && part.type === "compaction"
             );
             expect(compaction).toMatchObject({
-                occurredAtMs: 1016,
+                occurredAtMs: 1015,
                 sequence: 11,
                 text: "Compacting context",
             });
@@ -2545,7 +3481,7 @@ describe("ChatService", () => {
                 (part) => part.kind === "item" && part.type === "compaction"
             );
             expect(compaction).toMatchObject({
-                occurredAtMs: 1017,
+                occurredAtMs: 1015,
                 sequence: 11,
                 text: "Context compacted",
             });
@@ -2657,6 +3593,10 @@ describe("ChatService", () => {
                 providerSequenceStart: 1,
             });
             expect(repository.listProviderRunWatermarks("agent:main:main")).toEqual([
+                {
+                    lastProviderSequence: 101,
+                    providerRunId: "external-noop-run",
+                },
                 {
                     lastProviderSequence: 101,
                     providerRunId: "provider-run",
@@ -2788,7 +3728,7 @@ describe("ChatService", () => {
             await service.recover();
             expect(repository.findRun(runId)?.state).toBe("unresolved");
             expect(historyCalls).toBe(0);
-            expect(provider.closeCount()).toBe(1);
+            expect(provider.closeCount()).toBe(0);
         } finally {
             await service.dispose();
             database.sqlite.close(true);
@@ -3271,6 +4211,14 @@ describe("ChatService", () => {
             expect(provider.requests).toHaveLength(0);
 
             await service.runtime(runtimeInput("agent:main:first"));
+            await provider.requests[0]!.onEvent({
+                kind: "status",
+                phase: "starting-model",
+                providerRunId: "capacity-pinned-run",
+                providerSequence: 1,
+                receivedAtMs: 1000,
+                sessionKey: "agent:main:first",
+            });
             const capacity = (await captureFailure(() =>
                 service.runtime(runtimeInput("agent:main:second"))
             )) as ChatServiceError;
@@ -3381,6 +4329,14 @@ describe("ChatService", () => {
         });
         try {
             await service.runtime(runtimeInput("agent:main:lease-one"));
+            await provider.requests[0]!.onEvent({
+                kind: "status",
+                phase: "starting-model",
+                providerRunId: "conflict-boundary-pinned-run",
+                providerSequence: 1,
+                receivedAtMs: 1000,
+                sessionKey: "agent:main:lease-one",
+            });
             const capacity = (await captureFailure(() =>
                 service.runtime(runtimeInput("agent:main:lease-two"))
             )) as ChatServiceError;

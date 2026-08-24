@@ -3,6 +3,7 @@ import { ChevronDown, type LucideIcon } from "lucide-react";
 import { type ReactNode, useLayoutEffect, useRef } from "react";
 
 import { cn } from "../lib/classNames.ts";
+import { Button } from "./Button.tsx";
 import { Card } from "./Card.tsx";
 import { Icon } from "./Icon.tsx";
 
@@ -82,8 +83,9 @@ export function ExpandableCard({
                     return (
                         <>
                             <DisclosureButton
+                                as={Button}
                                 className={cn(
-                                    "group focus-visible:ring-accent-400 flex w-full text-left outline-none focus-visible:ring-2 focus-visible:ring-inset",
+                                    "group focus-visible:ring-accent-400 flex w-full text-left focus-visible:ring-inset",
                                     compact
                                         ? "hover:bg-primary-800 data-open:bg-primary-800 min-h-8 items-center gap-2 p-2 text-sm"
                                         : "items-start justify-between gap-4 p-5"
@@ -105,6 +107,7 @@ export function ExpandableCard({
                                     onOpenChange(!open);
                                 }}
                                 ref={trigger}
+                                variant="unstyled"
                             >
                                 <span
                                     className={cn(

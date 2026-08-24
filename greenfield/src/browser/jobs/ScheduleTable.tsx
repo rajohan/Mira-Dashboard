@@ -4,6 +4,7 @@ import type { JobRunState, ScheduleSummary } from "../../contracts/jobModel.ts";
 import { cn } from "../lib/classNames.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { Badge } from "../ui/Badge.tsx";
+import { Button } from "../ui/Button.tsx";
 import { DataTable } from "../ui/DataTable.tsx";
 import { Text } from "../ui/Text.tsx";
 import { Virtualizer, type VirtualizerRenderState } from "../ui/Virtualizer.tsx";
@@ -33,7 +34,7 @@ const scheduleColumnHelper = createColumnHelper<
 const scheduleColumns = scheduleColumnHelper.columns([
     scheduleColumnHelper.accessor((row) => row.schedule.name, {
         cell: ({ getValue, row }) => (
-            <button
+            <Button
                 aria-current={row.original.selected ? "true" : undefined}
                 aria-label={`${getValue()}; ${row.original.schedule.id}`}
                 className={cn(
@@ -41,10 +42,11 @@ const scheduleColumns = scheduleColumnHelper.columns([
                     row.original.selected && "text-accent-300"
                 )}
                 onClick={() => row.original.onSelect(row.original.schedule.id)}
+                variant="unstyled"
                 type="button"
             >
                 {getValue()}
-            </button>
+            </Button>
         ),
         header: "Schedule",
         id: "name",

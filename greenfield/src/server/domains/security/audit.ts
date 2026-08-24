@@ -19,6 +19,7 @@ const securityAuditSettlements: ReadonlySet<string> = new Set(
 
 export interface SecurityAuditMetadata {
     readonly addedCapabilities?: readonly ApplicationCapability[];
+    readonly mfaReset?: boolean;
     readonly reason?: SecurityAuditReason;
     readonly method?: "password" | "recovery" | "totp" | "webauthn";
     readonly pendingMfa?: boolean;
@@ -73,6 +74,9 @@ export function serializeRedactedAuditMetadata(
     );
     if (addedCapabilities.success) {
         sanitized.addedCapabilities = addedCapabilities.output;
+    }
+    if (typeof metadata.mfaReset === "boolean") {
+        sanitized.mfaReset = metadata.mfaReset;
     }
     if (
         typeof metadata.reason === "string" &&

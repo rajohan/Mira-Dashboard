@@ -315,6 +315,33 @@ describe("chat contract adapter", () => {
         });
     });
 
+    test("does not restore a definitively rejected pre-ack send as transcript history", () => {
+        const snapshot: ChatRuntimeSnapshot = {
+            firstSequence: 1,
+            parts: [{ kind: "user", sequence: 1, text: "Rejected development send" }],
+            projectionTruncated: false,
+            run: {
+                admittedAtMs: timestampMs,
+                failureCode: "dispatch_failed",
+                failureMessage: "Chat provider dispatch failed before acknowledgement",
+                id: runId,
+                reconciliation: "pending",
+                sessionKey,
+                state: "failed",
+                stateVersion: 2,
+                terminalAtMs: timestampMs + 1,
+                updatedAtMs: timestampMs + 1,
+            },
+            throughSequence: 1,
+        };
+
+        expect(projectChatRuntimeSnapshot(snapshot)).toMatchObject({
+            message: { parts: [] },
+            phase: "failed",
+        });
+        expect(projectChatRuntimeSnapshot(snapshot)).not.toHaveProperty("userMessage");
+    });
+
     test("projects provider-origin runs without fabricating local admission identity", () => {
         const externalRun: ChatExternalRun = {
             abortBoundary: {
@@ -326,6 +353,7 @@ describe("chat contract adapter", () => {
             },
             continuity: "interrupted",
             hasUnprojectedActivity: false,
+            lifecycle: "active",
             observationEpoch: 7,
             observedAtMs: timestampMs,
             parts: [
@@ -371,7 +399,7 @@ describe("chat contract adapter", () => {
                 },
                 {
                     kind: "control",
-                    text: expect.stringContaining("Activity updates were interrupted"),
+                    text: expect.stringContaining("updates were interrupted"),
                 },
             ],
             role: "assistant",
@@ -394,6 +422,7 @@ describe("chat contract adapter", () => {
     test("retains provider thinking while suppressing mirrored items and user echoes", () => {
         const projection = projectChatExternalRun({
             continuity: "complete",
+            lifecycle: "active" as const,
             hasUnprojectedActivity: false,
             observationEpoch: 1,
             observedAtMs: timestampMs,
@@ -443,9 +472,118 @@ describe("chat contract adapter", () => {
         expect(JSON.stringify(projection.message)).not.toMatch(/progress|checkpoint/u);
     });
 
+    test("settles terminal-pending activity and preserves exact canonical user anchors", () => {
+        const projection = projectChatExternalRun({
+            continuity: "complete",
+            hasUnprojectedActivity: false,
+            lifecycle: "terminal-pending-history",
+            observationEpoch: 4,
+            observedAtMs: timestampMs,
+            parts: [
+                {
+                    kind: "thinking",
+                    occurredAtMs: timestampMs + 1,
+                    sequence: 1,
+                    text: "Checking",
+                },
+                {
+                    kind: "user",
+                    messageId: "canonical-user-between-activity",
+                    occurredAtMs: timestampMs + 2,
+                    sequence: 2,
+                    text: "Continue",
+                },
+                {
+                    callId: "pending-tool",
+                    isError: false,
+                    kind: "tool",
+                    name: "bash",
+                    occurredAtMs: timestampMs + 3,
+                    phase: "started",
+                    sequence: 3,
+                },
+                {
+                    id: "compaction-active",
+                    kind: "item",
+                    occurredAtMs: timestampMs + 4,
+                    sequence: 4,
+                    text: "Compacting context",
+                    type: "compaction",
+                },
+            ],
+            projectionTruncated: false,
+            providerRunId: "provider-terminal-pending",
+            sessionKey,
+            source: "provider-runtime",
+            text: "",
+            updatedAtMs: timestampMs + 5,
+        });
+
+        expect(projection.lifecycle).toBe("terminal-pending-history");
+        expect(projection.segments).toMatchObject([
+            {
+                message: {
+                    parts: [{ kind: "thinking", status: "complete" }],
+                    timestampMs: timestampMs + 1,
+                },
+            },
+            {
+                message: { parts: [], timestampMs: timestampMs + 2 },
+                precedingUserMessageId: "canonical-user-between-activity",
+                precedingUserText: "Continue",
+            },
+            {
+                message: {
+                    parts: [{ kind: "tool", status: "completed" }],
+                    timestampMs: timestampMs + 3,
+                },
+            },
+            {
+                message: {
+                    parts: [{ activity: "complete", kind: "control" }],
+                },
+            },
+        ]);
+    });
+
+    test("uses exact message identity as the stable user-anchor dedupe key", () => {
+        const projectAnchor = (sequence: number, messageId?: string) => {
+            const projection = projectChatExternalRun({
+                continuity: "complete",
+                hasUnprojectedActivity: false,
+                lifecycle: "active",
+                observationEpoch: sequence,
+                observedAtMs: timestampMs,
+                parts: [
+                    {
+                        kind: "user",
+                        ...(messageId === undefined ? {} : { messageId }),
+                        sequence,
+                        text: "Continue",
+                    },
+                ],
+                projectionTruncated: false,
+                providerRunId: "provider-reindexed-anchor",
+                sessionKey,
+                source: "provider-runtime",
+                text: "",
+                updatedAtMs: timestampMs + sequence,
+            });
+            return projection.segments?.[0];
+        };
+
+        const beforeReindex = projectAnchor(2, "canonical-steer-message");
+        const afterReindex = projectAnchor(7, "canonical-steer-message");
+        expect(beforeReindex?.segmentId).toBe("user:canonical-steer-message");
+        expect(afterReindex?.segmentId).toBe(beforeReindex?.segmentId);
+        expect(afterReindex?.message.id).toBe(beforeReindex?.message.id);
+        expect(projectAnchor(7)?.segmentId).toBe("user:7");
+    });
+
     test("projects a complete provider plan even when unrelated activity is truncated", () => {
         const projection = projectChatExternalRun({
             continuity: "complete",
+            lifecycle: "active" as const,
             hasUnprojectedActivity: true,
             observationEpoch: 2,
             observedAtMs: timestampMs,
@@ -471,6 +609,7 @@ describe("chat contract adapter", () => {
     test("keeps truncated assistant text authoritative and folds synthetic tool lifecycle", () => {
         const projection = projectChatExternalRun({
             continuity: "complete",
+            lifecycle: "active" as const,
             hasUnprojectedActivity: true,
             observationEpoch: 1,
             observedAtMs: timestampMs,
@@ -523,12 +662,7 @@ describe("chat contract adapter", () => {
             },
             {
                 kind: "control",
-                text: "Some OpenClaw activity details were not returned.",
-                tone: "warning",
-            },
-            {
-                kind: "control",
-                text: "Some additional OpenClaw activity could not be shown.",
+                text: "Some OpenClaw activity details could not be shown.",
                 tone: "warning",
             },
         ]);

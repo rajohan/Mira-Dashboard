@@ -5,6 +5,7 @@ import { cn } from "../lib/classNames.ts";
 import { Card } from "./Card.tsx";
 import { Heading } from "./Heading.tsx";
 import { Icon } from "./Icon.tsx";
+import { ProgressBar } from "./ProgressBar.tsx";
 import { Text } from "./Text.tsx";
 
 interface MetricCardMeter {
@@ -32,9 +33,6 @@ export function MetricCard({
     value,
 }: MetricCardProps) {
     const headingId = useId();
-    const maximum = Math.max(1, meter?.maximum ?? 1);
-    const meterValue = Math.min(maximum, Math.max(0, meter?.value ?? 0));
-
     return (
         <Card aria-labelledby={headingId} className={cn("min-w-0", className)}>
             <div className="flex items-start justify-between gap-4">
@@ -54,11 +52,11 @@ export function MetricCard({
                 {description}
             </Text>
             {meter !== undefined && (
-                <progress
-                    aria-label={meter.label}
-                    className="mt-4 h-2 w-full accent-emerald-400"
-                    max={maximum}
-                    value={meterValue}
+                <ProgressBar
+                    className="mt-4 w-full"
+                    label={meter.label}
+                    maximum={meter.maximum}
+                    value={meter.value}
                 />
             )}
         </Card>

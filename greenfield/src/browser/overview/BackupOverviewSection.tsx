@@ -11,10 +11,10 @@ import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { dashboardBrowserFailureMessage } from "../api/trpcError.ts";
 import { useAuthenticatedMutationBoundary } from "../auth/useAuthenticatedMutationBoundary.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
+import { ActionLink } from "../ui/ActionLink.tsx";
 import { Alert } from "../ui/Alert.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
-import { buttonClassNames } from "../ui/buttonStyles.ts";
 import { Card } from "../ui/Card.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
@@ -170,13 +170,15 @@ function ProviderCard({
                     </Button>
                 )}
                 {status.activity.state !== "idle" && (
-                    <a
-                        className={buttonClassNames({ size: "sm", variant: "ghost" })}
-                        href={status.activity.jobsUrl}
+                    <ActionLink
+                        search={{ runId: status.activity.jobRunId }}
+                        size="sm"
+                        to="/jobs"
+                        variant="ghost"
                     >
                         <Icon icon={ExternalLink} size="sm" />
                         View job
-                    </a>
+                    </ActionLink>
                 )}
             </div>
             {controlsDisabled && (
@@ -274,13 +276,10 @@ export function BackupOverviewSectionView({
                         Durable Kopia and WAL-G operations with independent saved status.
                     </Text>
                 </div>
-                <a
-                    className={buttonClassNames({ size: "sm", variant: "ghost" })}
-                    href="/jobs"
-                >
+                <ActionLink size="sm" to="/jobs" variant="ghost">
                     <Icon icon={ExternalLink} size="sm" />
                     All backup jobs
-                </a>
+                </ActionLink>
             </div>
             {error !== undefined && (
                 <Alert className="mt-4" message={error} variant="error" />

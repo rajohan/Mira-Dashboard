@@ -95,6 +95,10 @@ async function materializeCommandOutput(
                 path.join(repositoryRoot, "dist/processes/openClawHeartbeat.js"),
                 "openclaw-heartbeat"
             ),
+            writeFile(
+                path.join(repositoryRoot, "dist/processes/resetDashboardPassword.js"),
+                "password-recovery"
+            ),
             writeFile(path.join(repositoryRoot, "dist/processes/web.js"), "web"),
             writeFile(path.join(repositoryRoot, "dist/processes/worker.js"), "worker"),
         ]);

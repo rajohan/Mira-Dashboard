@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "a6580004-bbff-47d3-bb10-48f6d2939349",
+  "id": "a39b0947-942c-4fbc-bc33-7f2cf6d2bdeb",
   "prevIds": [
-    "3788ae36-f3ed-4727-ab4c-bc8e5c978003"
+    "7c6ad5b1-68a7-45c2-afc1-88c8b4ee4b09"
   ],
   "ddl": [
     {
@@ -44,6 +44,10 @@
     },
     {
       "name": "cache_entries",
+      "entityType": "tables"
+    },
+    {
+      "name": "chat_external_runtime_snapshots",
       "entityType": "tables"
     },
     {
@@ -1161,6 +1165,86 @@
       "name": "updated_at",
       "entityType": "columns",
       "table": "cache_entries"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "gateway_scope",
+      "entityType": "columns",
+      "table": "chat_external_runtime_snapshots"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "observation_epoch",
+      "entityType": "columns",
+      "table": "chat_external_runtime_snapshots"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "1",
+      "generated": null,
+      "name": "schema_version",
+      "entityType": "columns",
+      "table": "chat_external_runtime_snapshots"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "session_key",
+      "entityType": "columns",
+      "table": "chat_external_runtime_snapshots"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "snapshot_bytes",
+      "entityType": "columns",
+      "table": "chat_external_runtime_snapshots"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "snapshot_json",
+      "entityType": "columns",
+      "table": "chat_external_runtime_snapshots"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "transcript_generation",
+      "entityType": "columns",
+      "table": "chat_external_runtime_snapshots"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "table": "chat_external_runtime_snapshots"
     },
     {
       "type": "text",
@@ -3804,11 +3888,21 @@
     },
     {
       "type": "text",
-      "notNull": false,
+      "notNull": true,
       "autoincrement": false,
       "default": null,
       "generated": null,
       "name": "id",
+      "entityType": "columns",
+      "table": "tasks"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": true,
+      "default": null,
+      "generated": null,
+      "name": "number",
       "entityType": "columns",
       "table": "tasks"
     },
@@ -4459,6 +4553,23 @@
     },
     {
       "columns": [
+        "gateway_scope",
+        "session_key"
+      ],
+      "tableTo": "chat_transcript_generations",
+      "columnsTo": [
+        "gateway_scope",
+        "session_key"
+      ],
+      "onUpdate": "RESTRICT",
+      "onDelete": "CASCADE",
+      "nameExplicit": true,
+      "name": "chat_external_runtime_snapshots_transcript_fk",
+      "entityType": "fks",
+      "table": "chat_external_runtime_snapshots"
+    },
+    {
+      "columns": [
         "chat_run_id"
       ],
       "tableTo": "chat_runs",
@@ -4818,6 +4929,16 @@
         "session_key"
       ],
       "nameExplicit": true,
+      "name": "chat_external_runtime_snapshots_pk",
+      "entityType": "pks",
+      "table": "chat_external_runtime_snapshots"
+    },
+    {
+      "columns": [
+        "gateway_scope",
+        "session_key"
+      ],
+      "nameExplicit": true,
       "name": "chat_transcript_generations_pk",
       "entityType": "pks",
       "table": "chat_transcript_generations"
@@ -5105,7 +5226,7 @@
     },
     {
       "columns": [
-        "id"
+        "number"
       ],
       "nameExplicit": false,
       "name": "tasks_pk",
@@ -6826,6 +6947,20 @@
     {
       "columns": [
         {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "tasks_id_unique",
+      "entityType": "indexes",
+      "table": "tasks"
+    },
+    {
+      "columns": [
+        {
           "value": "user_id",
           "isExpression": false
         },
@@ -7446,6 +7581,48 @@
       "name": "cache_entries_time_check",
       "entityType": "checks",
       "table": "cache_entries"
+    },
+    {
+      "value": "length(\"gateway_scope\") BETWEEN 1 AND 64 AND instr(\"gateway_scope\", char(0)) = 0 AND length(trim(\"gateway_scope\", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND \"gateway_scope\" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8232) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*')",
+      "name": "chat_external_runtime_snapshots_gateway_scope_check",
+      "entityType": "checks",
+      "table": "chat_external_runtime_snapshots"
+    },
+    {
+      "value": "length(\"session_key\") BETWEEN 1 AND 512 AND instr(\"session_key\", char(0)) = 0 AND length(trim(\"session_key\", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND \"session_key\" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8232) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*')",
+      "name": "chat_external_runtime_snapshots_session_key_check",
+      "entityType": "checks",
+      "table": "chat_external_runtime_snapshots"
+    },
+    {
+      "value": "\"transcript_generation\" BETWEEN 1 AND 9007199254740991",
+      "name": "chat_external_runtime_snapshots_transcript_generation_check",
+      "entityType": "checks",
+      "table": "chat_external_runtime_snapshots"
+    },
+    {
+      "value": "\"observation_epoch\" BETWEEN 0 AND 9007199254740991",
+      "name": "chat_external_runtime_snapshots_observation_epoch_check",
+      "entityType": "checks",
+      "table": "chat_external_runtime_snapshots"
+    },
+    {
+      "value": "\"schema_version\" = 1",
+      "name": "chat_external_runtime_snapshots_schema_version_check",
+      "entityType": "checks",
+      "table": "chat_external_runtime_snapshots"
+    },
+    {
+      "value": "length(CAST(\"snapshot_json\" AS BLOB)) <= 5242880 AND CASE WHEN json_valid(\"snapshot_json\") THEN json_type(\"snapshot_json\") = 'object' ELSE 0 END AND \"snapshot_bytes\" = length(CAST(\"snapshot_json\" AS BLOB))",
+      "name": "chat_external_runtime_snapshots_payload_check",
+      "entityType": "checks",
+      "table": "chat_external_runtime_snapshots"
+    },
+    {
+      "value": "\"updated_at\" BETWEEN 0 AND 8640000000000000",
+      "name": "chat_external_runtime_snapshots_updated_at_check",
+      "entityType": "checks",
+      "table": "chat_external_runtime_snapshots"
     },
     {
       "value": "\"kind\" IN ('assistant', 'cancel', 'interrupted', 'item', 'plan', 'provider-noop', 'reconciled', 'status', 'terminal', 'thinking', 'tool', 'user')",
@@ -8476,6 +8653,12 @@
     {
       "value": "length(\"id\") = 36 AND instr(\"id\", char(0)) = 0 AND length(replace(\"id\", '-', '')) = 32 AND replace(\"id\", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr(\"id\", 9, 1) = '-' AND substr(\"id\", 14, 1) = '-' AND substr(\"id\", 15, 1) = '7' AND substr(\"id\", 19, 1) = '-' AND substr(\"id\", 20, 1) GLOB '[89ab]' AND substr(\"id\", 24, 1) = '-'",
       "name": "tasks_id_check",
+      "entityType": "checks",
+      "table": "tasks"
+    },
+    {
+      "value": "\"number\" BETWEEN 1 AND 9007199254740991",
+      "name": "tasks_number_check",
       "entityType": "checks",
       "table": "tasks"
     },

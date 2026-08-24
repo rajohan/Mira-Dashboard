@@ -283,6 +283,10 @@ export const PopulatedStreaming: Story = {
 
 export const Empty: Story = {
     args: { fixtures: chatFixtures({ history: [] }), route: "/chat" },
+    play: async ({ canvasElement }) => {
+        const canvas = await waitForConnectedComposer(canvasElement);
+        await expect(await canvas.findByText("No messages yet")).toBeVisible();
+    },
 };
 
 export const LastKnownGood: Story = {

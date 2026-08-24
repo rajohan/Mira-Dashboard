@@ -76,7 +76,7 @@ describe("interactive terminal workspace", () => {
 
         fireEvent.change(
             screen.getByRole("textbox", {
-                name: "Terminal starting folder or subfolder",
+                name: "Folder or subfolder",
             }),
             { target: { value: "/../private" } }
         );

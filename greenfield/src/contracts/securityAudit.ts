@@ -74,6 +74,7 @@ export const securityAuditCursorSchema = v.strictObject({
 /** Explicitly redacted metadata fields permitted on public audit summaries. */
 export const securityAuditMetadataSchema = v.strictObject({
     addedCapabilities: v.optional(applicationCapabilityListSchema),
+    mfaReset: v.optional(v.boolean()),
     method: v.optional(v.picklist(["password", "recovery", "totp", "webauthn"])),
     pendingMfa: v.optional(v.boolean()),
     predecessorCredentialId: v.optional(securityRecordIdSchema),

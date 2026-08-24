@@ -471,6 +471,11 @@ export function projectChatRuntimeSnapshot(
             tone: "warning",
         });
     }
+    // Definitive pre-ack failures remain durable audit rows, but never became
+    // provider transcript messages and must not reappear as sent after refresh.
+    const userMessageWasAccepted = !(
+        snapshot.run.state === "failed" && snapshot.run.providerRunId === undefined
+    );
     return {
         lastSequence: snapshot.throughSequence,
         message: {
@@ -508,7 +513,7 @@ export function projectChatRuntimeSnapshot(
               }),
         runId: snapshot.run.id,
         updatedAtMs: snapshot.run.updatedAtMs,
-        ...(userParts.length === 0
+        ...(!userMessageWasAccepted || userParts.length === 0
             ? {}
             : {
                   userMessage: {
@@ -538,18 +543,22 @@ export function projectChatExternalRun(run: ChatExternalRun): ChatExternalRunPro
         segmentId: string,
         providerSequence: number,
         parts: readonly ChatMessagePart[],
-        precedingUserText?: string
+        precedingUserText?: string,
+        role: ChatDisplayMessage["role"] = "assistant",
+        timestampMs = run.updatedAtMs,
+        precedingUserMessageId?: string
     ): ChatExternalRunSegmentProjection => ({
         message: {
             attachments: [],
             id: `external:${run.sessionKey}:${run.providerRunId}:segment:${segmentId}`,
             parts,
             providerRunId: run.providerRunId,
-            role: "assistant",
+            role,
             sequence: providerSequence,
             sessionKey: run.sessionKey,
-            timestampMs: run.updatedAtMs,
+            timestampMs,
         },
+        ...(precedingUserMessageId === undefined ? {} : { precedingUserMessageId }),
         ...(precedingUserText === undefined ? {} : { precedingUserText }),
         providerSequence,
         segmentId,
@@ -568,13 +577,23 @@ export function projectChatExternalRun(run: ChatExternalRun): ChatExternalRunPro
     const upsertSinglePart = (
         segmentId: string,
         providerSequence: number,
-        part: ChatMessagePart
+        part: ChatMessagePart,
+        timestampMs?: number
     ): void => {
         const existingIndex = segments.findIndex(
             (segment) => segment.segmentId === segmentId
         );
         if (existingIndex === -1) {
-            segments.push(createSegment(segmentId, providerSequence, [part]));
+            segments.push(
+                createSegment(
+                    segmentId,
+                    providerSequence,
+                    [part],
+                    undefined,
+                    "assistant",
+                    timestampMs
+                )
+            );
             return;
         }
         replaceSegmentParts(existingIndex, [part]);
@@ -599,7 +618,8 @@ export function projectChatExternalRun(run: ChatExternalRun): ChatExternalRunPro
                                       sourceStreamKey: `${run.providerRunId}:${part.streamId}`,
                                   }),
                             text: part.text,
-                        }
+                        },
+                        part.occurredAtMs
                     );
                     break;
                 }
@@ -619,9 +639,13 @@ export function projectChatExternalRun(run: ChatExternalRun): ChatExternalRunPro
                                 : {
                                       sourceStreamKey: `${run.providerRunId}:${part.streamId}`,
                                   }),
-                            status: "running",
+                            status:
+                                run.lifecycle === "terminal-pending-history"
+                                    ? "complete"
+                                    : "running",
                             text: part.text,
-                        }
+                        },
+                        part.occurredAtMs
                     );
                     break;
                 }
@@ -639,7 +663,11 @@ export function projectChatExternalRun(run: ChatExternalRun): ChatExternalRunPro
                             ? {}
                             : { nameSource: part.nameSource }),
                         ...(part.output === undefined ? {} : { output: part.output }),
-                        status: toolPartStatus(part.phase),
+                        status:
+                            run.lifecycle === "terminal-pending-history" &&
+                            toolPartStatus(part.phase) === "running"
+                                ? "completed"
+                                : toolPartStatus(part.phase),
                     };
                     const matchingSyntheticIndex = segments.findIndex((segment) =>
                         segment.message.parts.some(
@@ -664,7 +692,16 @@ export function projectChatExternalRun(run: ChatExternalRun): ChatExternalRunPro
                             : [...(segments[existingIndex]?.message.parts ?? [])];
                     appendChatMessagePart(toolParts, projectedTool);
                     if (existingIndex === -1) {
-                        segments.push(createSegment(segmentId, part.sequence, toolParts));
+                        segments.push(
+                            createSegment(
+                                segmentId,
+                                part.sequence,
+                                toolParts,
+                                undefined,
+                                "assistant",
+                                part.occurredAtMs
+                            )
+                        );
                     } else {
                         replaceSegmentParts(existingIndex, toolParts);
                     }
@@ -676,11 +713,13 @@ export function projectChatExternalRun(run: ChatExternalRun): ChatExternalRunPro
                         (part.text === "Compacting context" ||
                             part.text === "Context compacted")
                     ) {
+                        const activity =
+                            run.lifecycle === "active" &&
+                            part.text === "Compacting context"
+                                ? "running"
+                                : "complete";
                         upsertSinglePart(`compaction:${part.id}`, part.sequence, {
-                            activity:
-                                part.text === "Compacting context"
-                                    ? "running"
-                                    : "complete",
+                            activity,
                             kind: "control",
                             text: part.text,
                             tone: "muted",
@@ -702,12 +741,19 @@ export function projectChatExternalRun(run: ChatExternalRun): ChatExternalRunPro
                     break;
                 }
                 case "user": {
+                    const segmentId =
+                        part.messageId === undefined
+                            ? `user:${part.sequence}`
+                            : `user:${part.messageId}`;
                     segments.push(
                         createSegment(
-                            `user:${part.sequence}`,
+                            segmentId,
                             part.sequence,
                             [],
-                            part.text
+                            part.text,
+                            "assistant",
+                            part.occurredAtMs,
+                            part.messageId
                         )
                     );
                     break;
@@ -788,44 +834,51 @@ export function projectChatExternalRun(run: ChatExternalRun): ChatExternalRunPro
             segments.splice(0, segments.length, ...retained);
         }
     }
-    if (run.projectionTruncated) {
-        segments.push(
-            createSegment("notice:truncated", Number.MAX_SAFE_INTEGER - 3, [
-                {
-                    kind: "control",
-                    text: "Some OpenClaw activity details were not returned.",
-                    tone: "warning",
-                },
-            ])
+    if (
+        run.continuity === "interrupted" ||
+        run.projectionTruncated ||
+        run.hasUnprojectedActivity
+    ) {
+        const gapPart: ChatMessagePart = {
+            kind: "control",
+            text:
+                run.continuity === "interrupted"
+                    ? "Some OpenClaw activity may be missing because updates were interrupted."
+                    : "Some OpenClaw activity details could not be shown.",
+            tone: "warning",
+        };
+        const lastContentIndex = segments.findLastIndex(
+            (segment) => segment.message.parts.length > 0
         );
-    }
-    if (run.continuity === "interrupted") {
-        segments.push(
-            createSegment("notice:interrupted", Number.MAX_SAFE_INTEGER - 2, [
-                {
-                    kind: "control",
-                    text: "Activity updates were interrupted, so some details may be missing.",
-                    tone: "warning",
-                },
-            ])
-        );
-    }
-    if (run.hasUnprojectedActivity) {
-        segments.push(
-            createSegment("notice:unprojected", Number.MAX_SAFE_INTEGER - 1, [
-                {
-                    kind: "control",
-                    text: "Some additional OpenClaw activity could not be shown.",
-                    tone: "warning",
-                },
-            ])
-        );
+        if (lastContentIndex === -1) {
+            segments.push(
+                createSegment(
+                    "notice:activity-gap",
+                    Number.MAX_SAFE_INTEGER - 1,
+                    [gapPart],
+                    undefined,
+                    "control"
+                )
+            );
+        } else {
+            const previous = segments[lastContentIndex];
+            if (previous !== undefined) {
+                segments[lastContentIndex] = {
+                    ...previous,
+                    message: {
+                        ...previous.message,
+                        parts: [...previous.message.parts, gapPart],
+                    },
+                };
+            }
+        }
     }
     const parts = segments.flatMap((segment) => segment.message.parts);
     return {
         ...(run.abortBoundary === undefined ? {} : { abortBoundary: run.abortBoundary }),
         continuity: run.continuity,
         hasUnprojectedActivity: run.hasUnprojectedActivity,
+        lifecycle: run.lifecycle,
         message: {
             attachments: [],
             id: `external:${run.sessionKey}:${run.providerRunId}`,

@@ -34,11 +34,11 @@ function optionalCanonicalAutomationTextSchema(maximumLength: number, message: s
 
 const optionalAutomationTextSchema = optionalCanonicalAutomationTextSchema(
     taskAutomationTextMaximumLength,
-    "Automation value is invalid"
+    "Use no more than 200 visible characters with no leading or trailing spaces, or leave it blank."
 );
 const optionalScheduleSummarySchema = optionalCanonicalAutomationTextSchema(
     taskAutomationScheduleSummaryMaximumLength,
-    "Schedule summary is invalid"
+    "Use no more than 500 visible characters with no leading or trailing spaces, or leave it blank."
 );
 
 function automationTextIsValid(enabled: boolean, value: string): boolean {
@@ -57,7 +57,7 @@ function rawTaskLabelsFromText(value: string): string[] {
 }
 
 /**
- * Converts a one-label-per-line field to canonical contract labels.
+ * Converts the editor's serialized label value to canonical contract labels.
  * @param value Browser label field.
  * @returns Validated, sorted task labels.
  */
@@ -66,27 +66,27 @@ export function taskLabelsFromText(value: string): readonly string[] {
 }
 
 const taskLabelsTextSchema = v.pipe(
-    v.string("Task labels are invalid"),
+    v.string("Add labels, or leave them blank."),
     v.maxLength(
         taskMaximumLabels * (taskLabelMaximumLength * 2 + 2),
-        "Task labels are outside their budget"
+        "Use at most 20 unique labels; each label may contain up to 64 visible characters."
     ),
     v.check(
         (value) =>
             v.safeParse(taskLabelInputSchema, rawTaskLabelsFromText(value)).success,
-        "Use at most 20 unique labels, one per line"
+        "Use at most 20 unique labels; each label may contain up to 64 visible characters."
     )
 );
 
 const taskEditorObjectSchema = v.strictObject({
     assignee: v.picklist([...taskAssigneeIds, unassignedTaskOwner]),
-    automationCronJobId: v.string("Automation value is invalid"),
+    automationCronJobId: v.string("Enter a cron job ID, or leave it blank."),
     automationEnabled: v.boolean(),
-    automationModel: v.string("Automation value is invalid"),
+    automationModel: v.string("Enter a model, or leave it blank."),
     automationRecurring: v.boolean(),
-    automationScheduleSummary: v.string("Schedule summary is invalid"),
-    automationSessionTarget: v.string("Automation value is invalid"),
-    automationThinking: v.string("Automation value is invalid"),
+    automationScheduleSummary: v.string("Enter a schedule summary, or leave it blank."),
+    automationSessionTarget: v.string("Enter a session target, or leave it blank."),
+    automationThinking: v.string("Enter a thinking level, or leave it blank."),
     bodyMarkdown: optionalBodySchema,
     labelsText: taskLabelsTextSchema,
     priority: v.picklist(taskPriorities),
@@ -108,7 +108,7 @@ export const taskEditorFormSchema = v.pipe(
         v.check(
             (value) =>
                 automationTextIsValid(value.automationEnabled, value.automationCronJobId),
-            "Automation value is invalid"
+            "Use no more than 200 visible characters with no leading or trailing spaces, or leave it blank."
         ),
         ["automationCronJobId"]
     ),
@@ -116,7 +116,7 @@ export const taskEditorFormSchema = v.pipe(
         v.check(
             (value) =>
                 automationTextIsValid(value.automationEnabled, value.automationModel),
-            "Automation value is invalid"
+            "Use no more than 200 visible characters with no leading or trailing spaces, or leave it blank."
         ),
         ["automationModel"]
     ),
@@ -127,7 +127,7 @@ export const taskEditorFormSchema = v.pipe(
                     value.automationEnabled,
                     value.automationScheduleSummary
                 ),
-            "Schedule summary is invalid"
+            "Use no more than 500 visible characters with no leading or trailing spaces, or leave it blank."
         ),
         ["automationScheduleSummary"]
     ),
@@ -138,7 +138,7 @@ export const taskEditorFormSchema = v.pipe(
                     value.automationEnabled,
                     value.automationSessionTarget
                 ),
-            "Automation value is invalid"
+            "Use no more than 200 visible characters with no leading or trailing spaces, or leave it blank."
         ),
         ["automationSessionTarget"]
     ),
@@ -146,7 +146,7 @@ export const taskEditorFormSchema = v.pipe(
         v.check(
             (value) =>
                 automationTextIsValid(value.automationEnabled, value.automationThinking),
-            "Automation value is invalid"
+            "Use no more than 200 visible characters with no leading or trailing spaces, or leave it blank."
         ),
         ["automationThinking"]
     )

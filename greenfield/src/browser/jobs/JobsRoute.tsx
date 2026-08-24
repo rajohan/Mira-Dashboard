@@ -4,6 +4,7 @@ import { useState } from "react";
 import { OpenClawCronBrowser } from "../openClawCron/OpenClawCronBrowser.tsx";
 import { OverviewServiceActionsSection } from "../overview/OverviewServiceActionsSection.tsx";
 import { Button } from "../ui/Button.tsx";
+import { Fieldset } from "../ui/Fieldset.tsx";
 import { PageHeader } from "../ui/PageHeader.tsx";
 import { parseJobsRouteSearch } from "./jobRouteSearch.ts";
 import { JobRunBrowser } from "./JobRunBrowser.tsx";
@@ -47,8 +48,10 @@ export function JobsRoute() {
                 eyebrow="Operations"
                 title="Jobs"
             />
-            <fieldset className="border-primary-700 mt-6 inline-flex rounded-lg border p-1">
-                <legend className="sr-only">Job source</legend>
+            <Fieldset
+                className="border-primary-700 mt-6 inline-flex rounded-lg border p-1"
+                legend={<span className="sr-only">Job source</span>}
+            >
                 <Button
                     aria-pressed={source === "dashboard"}
                     onClick={() => selectSource("dashboard")}
@@ -63,7 +66,7 @@ export function JobsRoute() {
                 >
                     OpenClaw schedules
                 </Button>
-            </fieldset>
+            </Fieldset>
             <div className="mt-8">
                 {source === "dashboard" ? (
                     <DashboardJobsContent />

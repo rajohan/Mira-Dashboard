@@ -1,9 +1,12 @@
 import { cn } from "../lib/classNames.ts";
+import { interactiveTapClassName } from "./interactionStyles.ts";
 
-export type ButtonVariant = "danger" | "ghost" | "primary" | "secondary";
+export type ButtonVariant = "danger" | "ghost" | "primary" | "secondary" | "unstyled";
 export type ButtonSize = "lg" | "md" | "sm";
 
-const variantClasses: Readonly<Record<ButtonVariant, string>> = Object.freeze({
+type VisualButtonVariant = Exclude<ButtonVariant, "unstyled">;
+
+const variantClasses: Readonly<Record<VisualButtonVariant, string>> = Object.freeze({
     danger: "bg-red-700 text-white data-hover:bg-red-600 data-active:bg-red-800 hover:bg-red-600 active:bg-red-800",
     ghost: "bg-transparent text-primary-300 data-hover:bg-primary-700 data-hover:text-primary-50 data-active:bg-primary-600 hover:bg-primary-700 hover:text-primary-50 active:bg-primary-600",
     primary:
@@ -37,11 +40,13 @@ export function buttonClassNames({
     variant = "primary",
 }: ButtonStyleOptions = {}): string {
     return cn(
-        "inline-flex items-center justify-center gap-2 rounded-lg font-semibold transition-colors",
-        "focus-visible:ring-accent-300 focus-visible:ring-offset-primary-900 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
-        "disabled:cursor-not-allowed disabled:opacity-55 data-disabled:cursor-not-allowed data-disabled:opacity-55",
-        variantClasses[variant],
-        sizeClasses[size],
+        interactiveTapClassName,
+        "focus-visible:ring-accent-300 outline-none focus-visible:ring-2",
+        "disabled:cursor-not-allowed disabled:opacity-55 aria-disabled:cursor-not-allowed data-disabled:cursor-not-allowed data-disabled:opacity-55",
+        variant !== "unstyled" &&
+            "focus-visible:ring-offset-primary-900 inline-flex items-center justify-center gap-2 rounded-lg font-semibold transition-colors focus-visible:ring-offset-2",
+        variant !== "unstyled" && variantClasses[variant],
+        variant !== "unstyled" && sizeClasses[size],
         fullWidth && "w-full",
         className
     );

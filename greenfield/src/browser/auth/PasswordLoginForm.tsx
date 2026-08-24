@@ -31,8 +31,10 @@ export function PasswordLoginForm() {
 
     return (
         <LoginPanel
-            description="Use your Mira Dashboard account."
+            description="Log in with your dashboard username and password"
+            footer="Forgotten passwords are reset with the host-local recovery command."
             icon={KeyRound}
+            showStepHeading={false}
             title="Sign in"
         >
             <Alert className="mb-5" message={error} />
@@ -54,7 +56,7 @@ export function PasswordLoginForm() {
                                     onChange={(event) =>
                                         field.handleChange(event.currentTarget.value)
                                     }
-                                    placeholder="Example: operator"
+                                    placeholder="operator"
                                     required
                                     spellCheck={false}
                                     value={field.state.value}

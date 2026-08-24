@@ -27,6 +27,39 @@ export function openClawCronRunStatusLabel(status: OpenClawCronRun["status"]): s
     return "Unknown";
 }
 
+/**
+ * @param status Contract-validated OpenClaw run outcome.
+ * @returns Shared badge treatment for one completed OpenClaw cron run.
+ */
+export function openClawCronRunStatusBadgeVariant(
+    status: OpenClawCronRun["status"]
+): "danger" | "default" | "success" {
+    if (status === "ok") return "success";
+    if (status === "error") return "danger";
+    return "default";
+}
+
+/**
+ * @param job Current contract-validated OpenClaw cron job.
+ * @returns Compact operational state with running and disabled state taking precedence.
+ */
+export function openClawCronOperationalStatus(job: OpenClawCronJob): {
+    readonly label: string;
+    readonly variant: "danger" | "default" | "success" | "warning";
+} {
+    if (job.state.runningAtMs !== undefined) {
+        return { label: "Running", variant: "warning" };
+    }
+    if (!job.enabled) return { label: "Disabled", variant: "default" };
+    if (job.state.lastRunStatus === undefined) {
+        return { label: "Scheduled", variant: "default" };
+    }
+    return {
+        label: openClawCronRunStatusLabel(job.state.lastRunStatus),
+        variant: openClawCronRunStatusBadgeVariant(job.state.lastRunStatus),
+    };
+}
+
 export function openClawCronDeliveryStatusLabel(
     status: OpenClawCronRun["deliveryStatus"]
 ): string {

@@ -1,7 +1,16 @@
 import type { ReactTable, Row, RowData, TableFeatures } from "@tanstack/react-table";
-import { useEffect, useRef, type RefObject } from "react";
+import {
+    useEffect,
+    useLayoutEffect,
+    useRef,
+    type ReactNode,
+    type RefObject,
+    type CSSProperties,
+    type UIEventHandler,
+} from "react";
 
 import { cn } from "../lib/classNames.ts";
+import { dashboardDataTableClassNames } from "./dataTableStyles.ts";
 
 export interface DataTableRowWindow {
     readonly getVirtualItemForOffset: (
@@ -22,7 +31,10 @@ export interface DataTableRowWindow {
 }
 
 interface DataTableBaseProps<TFeatures extends TableFeatures, TData extends RowData> {
+    readonly columnWidths?: Readonly<Record<string, CSSProperties["width"]>>;
+    readonly footer?: ReactNode;
     readonly label: string;
+    readonly onScroll?: UIEventHandler<HTMLElement>;
     readonly scrollClassName?: string;
     readonly scrollContainerRef?: RefObject<HTMLDivElement | null>;
     readonly table: ReactTable<TFeatures, TData>;
@@ -40,7 +52,10 @@ type DataTableProps<
  * @returns A styled table that is independent of sorting and virtualization policy.
  */
 export function DataTable<TFeatures extends TableFeatures, TData extends RowData>({
+    columnWidths,
+    footer,
     label,
+    onScroll,
     rowWindow,
     scrollClassName,
     scrollContainerRef,
@@ -62,10 +77,47 @@ export function DataTable<TFeatures extends TableFeatures, TData extends RowData
             ? 0
             : Math.max(0, rowWindow.totalSize - (lastVirtualItem?.end ?? 0));
     const queryContainerRef = useRef<HTMLDivElement>(null);
+    const footerElementRef = useRef<HTMLTableSectionElement>(null);
+    const footerPresentRef = useRef(footer !== undefined);
+    const scrollWasAtEndRef = useRef(false);
+    const stableAnchorIndexRef = useRef<number | undefined>(undefined);
+    const suppressForwardedScrollRef = useRef(false);
     const tableElementRef = useRef<HTMLTableElement>(null);
+    const tableUsesCardLayoutRef = useRef<boolean | undefined>(undefined);
     const getVirtualItemForOffset = rowWindow?.getVirtualItemForOffset;
     const measureRows = rowWindow?.measure;
     const scrollToIndex = rowWindow?.scrollToIndex;
+
+    function handleScroll(event: React.UIEvent<HTMLElement>): void {
+        const container = event.currentTarget;
+        scrollWasAtEndRef.current =
+            container.scrollHeight - container.scrollTop - container.clientHeight <= 1;
+        if (suppressForwardedScrollRef.current) return;
+        const tableElement = tableElementRef.current;
+        if (
+            tableElement !== null &&
+            getVirtualItemForOffset !== undefined &&
+            (getComputedStyle(tableElement).display === "block") !==
+                tableUsesCardLayoutRef.current
+        ) {
+            suppressForwardedScrollRef.current = true;
+            return;
+        }
+        stableAnchorIndexRef.current = getVirtualItemForOffset?.(
+            container.scrollTop
+        )?.index;
+        onScroll?.(event);
+    }
+
+    useLayoutEffect(() => {
+        const footerPresent = footer !== undefined;
+        const footerBecamePresent = footerPresent && !footerPresentRef.current;
+        footerPresentRef.current = footerPresent;
+        if (!footerBecamePresent || !scrollWasAtEndRef.current) return;
+        const scrollContainer = scrollContainerRef?.current;
+        if (scrollContainer == null || footerElementRef.current === null) return;
+        scrollContainer.scrollTo({ top: scrollContainer.scrollHeight });
+    }, [footer, scrollContainerRef]);
 
     useEffect(() => {
         const queryContainer = queryContainerRef.current;
@@ -85,21 +137,39 @@ export function DataTable<TFeatures extends TableFeatures, TData extends RowData
 
         let measureFrame: number | undefined;
         let restoreFrame: number | undefined;
+        let releaseFrame: number | undefined;
         let usesCardLayout = getComputedStyle(tableElement).display === "block";
+        tableUsesCardLayoutRef.current = usesCardLayout;
+        stableAnchorIndexRef.current = getVirtualItemForOffset(
+            scrollContainer.scrollTop
+        )?.index;
         const observer = new ResizeObserver(() => {
             const nextUsesCardLayout = getComputedStyle(tableElement).display === "block";
             if (nextUsesCardLayout === usesCardLayout) return;
+            suppressForwardedScrollRef.current = true;
             usesCardLayout = nextUsesCardLayout;
+            tableUsesCardLayoutRef.current = nextUsesCardLayout;
             if (measureFrame !== undefined) cancelAnimationFrame(measureFrame);
             if (restoreFrame !== undefined) cancelAnimationFrame(restoreFrame);
-            const anchorIndex = getVirtualItemForOffset(scrollContainer.scrollTop)?.index;
+            if (releaseFrame !== undefined) cancelAnimationFrame(releaseFrame);
+            const anchorIndex =
+                stableAnchorIndexRef.current ??
+                getVirtualItemForOffset(scrollContainer.scrollTop)?.index;
             measureFrame = requestAnimationFrame(() => {
                 measureRows();
-                if (anchorIndex !== undefined) {
-                    restoreFrame = requestAnimationFrame(() =>
-                        scrollToIndex(anchorIndex, { align: "start" })
-                    );
+                if (anchorIndex === undefined) {
+                    suppressForwardedScrollRef.current = false;
+                    return;
                 }
+                restoreFrame = requestAnimationFrame(() => {
+                    scrollToIndex(anchorIndex, { align: "start" });
+                    releaseFrame = requestAnimationFrame(() => {
+                        stableAnchorIndexRef.current =
+                            getVirtualItemForOffset(scrollContainer.scrollTop)?.index ??
+                            anchorIndex;
+                        suppressForwardedScrollRef.current = false;
+                    });
+                });
             });
         });
         observer.observe(queryContainer);
@@ -108,6 +178,9 @@ export function DataTable<TFeatures extends TableFeatures, TData extends RowData
             observer.disconnect();
             if (measureFrame !== undefined) cancelAnimationFrame(measureFrame);
             if (restoreFrame !== undefined) cancelAnimationFrame(restoreFrame);
+            if (releaseFrame !== undefined) cancelAnimationFrame(releaseFrame);
+            suppressForwardedScrollRef.current = false;
+            tableUsesCardLayoutRef.current = undefined;
         };
     }, [getVirtualItemForOffset, measureRows, scrollContainerRef, scrollToIndex]);
 
@@ -122,18 +195,16 @@ export function DataTable<TFeatures extends TableFeatures, TData extends RowData
                         ? undefined
                         : headerGroups.length + virtualItem.index + 1
                 }
-                className={cn(
-                    "dashboard-data-table-row border-primary-700 border-b text-sm"
-                )}
+                className={dashboardDataTableClassNames.row}
                 data-index={virtualItem?.index}
                 key={row.id}
                 ref={virtualItem === undefined ? undefined : rowWindow?.measureElement}
             >
                 {row.getAllCells().map((cell) => (
-                    <td className="dashboard-data-table-cell min-w-0 p-3" key={cell.id}>
+                    <td className={dashboardDataTableClassNames.cell} key={cell.id}>
                         <div
                             aria-hidden="true"
-                            className="dashboard-data-table-label text-primary-400"
+                            className={dashboardDataTableClassNames.label}
                         >
                             {(() => {
                                 const header = headerByColumnId.get(cell.column.id);
@@ -144,7 +215,7 @@ export function DataTable<TFeatures extends TableFeatures, TData extends RowData
                                 );
                             })()}
                         </div>
-                        <div className="dashboard-data-table-value">
+                        <div className={dashboardDataTableClassNames.value}>
                             <table.FlexRender cell={cell} />
                         </div>
                     </td>
@@ -155,13 +226,13 @@ export function DataTable<TFeatures extends TableFeatures, TData extends RowData
 
     return (
         <div
-            className="dashboard-data-table-query-container w-full max-w-full min-w-0"
+            className={dashboardDataTableClassNames.queryContainer}
             ref={queryContainerRef}
         >
             <section
                 aria-label={label}
                 className={cn(
-                    "dashboard-data-table-container border-primary-700 w-full max-w-full min-w-0 overflow-x-auto overscroll-x-contain rounded-lg border",
+                    dashboardDataTableClassNames.scrollContainer,
                     rowWindow === undefined
                         ? undefined
                         : [
@@ -171,19 +242,29 @@ export function DataTable<TFeatures extends TableFeatures, TData extends RowData
                     scrollClassName
                 )}
                 data-virtualized={rowWindow === undefined ? undefined : "true"}
+                onScroll={handleScroll}
                 ref={scrollContainerRef}
                 tabIndex={rowWindow === undefined ? undefined : 0}
             >
                 <table
                     aria-label={label}
-                    aria-rowcount={headerGroups.length + rows.length}
-                    className={cn(
-                        "dashboard-data-table w-full min-w-full border-separate border-spacing-0",
-                        tableClassName
-                    )}
+                    aria-rowcount={
+                        headerGroups.length + rows.length + (footer === undefined ? 0 : 1)
+                    }
+                    className={cn(dashboardDataTableClassNames.table, tableClassName)}
                     ref={tableElementRef}
                 >
-                    <thead className="dashboard-data-table-head bg-primary-950 sticky top-0 z-20 shadow-sm">
+                    {columnWidths !== undefined && (
+                        <colgroup>
+                            {leafHeaders.map((header) => (
+                                <col
+                                    key={header.id}
+                                    style={{ width: columnWidths[header.column.id] }}
+                                />
+                            ))}
+                        </colgroup>
+                    )}
+                    <thead className={dashboardDataTableClassNames.head}>
                         {headerGroups.map((headerGroup) => (
                             <tr key={headerGroup.id}>
                                 {headerGroup.headers.map((header) => (
@@ -200,14 +281,14 @@ export function DataTable<TFeatures extends TableFeatures, TData extends RowData
                             </tr>
                         ))}
                     </thead>
-                    <tbody className="dashboard-data-table-body">
+                    <tbody className={dashboardDataTableClassNames.body}>
                         {topSpacerHeight > 0 && (
                             <tr
                                 aria-hidden="true"
-                                className="dashboard-data-table-spacer-row"
+                                className={dashboardDataTableClassNames.spacerRow}
                             >
                                 <td
-                                    className="dashboard-data-table-spacer-cell border-0 p-0"
+                                    className={dashboardDataTableClassNames.spacerCell}
                                     colSpan={visibleColumnCount}
                                     height={topSpacerHeight}
                                 />
@@ -224,16 +305,34 @@ export function DataTable<TFeatures extends TableFeatures, TData extends RowData
                         {bottomSpacerHeight > 0 && (
                             <tr
                                 aria-hidden="true"
-                                className="dashboard-data-table-spacer-row"
+                                className={dashboardDataTableClassNames.spacerRow}
                             >
                                 <td
-                                    className="dashboard-data-table-spacer-cell border-0 p-0"
+                                    className={dashboardDataTableClassNames.spacerCell}
                                     colSpan={visibleColumnCount}
                                     height={bottomSpacerHeight}
                                 />
                             </tr>
                         )}
                     </tbody>
+                    {footer !== undefined && (
+                        <tfoot
+                            className="@max-[66rem]:block @max-[66rem]:w-full"
+                            ref={footerElementRef}
+                        >
+                            <tr
+                                aria-rowindex={headerGroups.length + rows.length + 1}
+                                className="@max-[66rem]:block @max-[66rem]:w-full"
+                            >
+                                <td
+                                    className="border-primary-700/60 bg-primary-950/40 border-t p-0 @max-[66rem]:block @max-[66rem]:w-full"
+                                    colSpan={visibleColumnCount}
+                                >
+                                    {footer}
+                                </td>
+                            </tr>
+                        </tfoot>
+                    )}
                 </table>
             </section>
         </div>

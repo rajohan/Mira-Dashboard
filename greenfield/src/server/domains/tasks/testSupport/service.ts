@@ -21,6 +21,7 @@ export function createTestTaskService(
         deleteTask: unexpectedTaskServiceCall,
         deleteTaskProgress: unexpectedTaskServiceCall,
         getTask: unexpectedTaskServiceCall,
+        listTaskLabels: unexpectedTaskServiceCall,
         listTaskProgress: unexpectedTaskServiceCall,
         listTasks: unexpectedTaskServiceCall,
         moveTask: unexpectedTaskServiceCall,

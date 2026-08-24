@@ -2,9 +2,11 @@ import {
     infiniteQueryOptions,
     type InfiniteData,
     type QueryClient,
+    queryOptions,
 } from "@tanstack/react-query";
 
 import type {
+    GetOpenClawCronResult,
     ListOpenClawCronResult,
     ListOpenClawCronRunsResult,
     OpenClawCronFreshness,
@@ -39,6 +41,14 @@ export const openClawCronListQueryKey = [
     ...openClawCronListQueryRoot,
     openClawCronInventoryInput,
 ] as const;
+
+/**
+ * @param id Stable OpenClaw cron job identity.
+ * @returns Stable cache identity for one exact OpenClaw cron job.
+ */
+export function openClawCronDetailQueryKey(id: string) {
+    return [...openClawCronDetailQueryRoot, id] as const;
+}
 
 export interface OpenClawCronInventoryView {
     readonly freshness: OpenClawCronFreshness;
@@ -205,9 +215,17 @@ export function accumulateOpenClawCronRunPages(
     };
 }
 
-/** @returns Bounded offset-paginated OpenClaw cron inventory query options. */
-export function openClawCronListQueryOptions(client: DashboardTrpcClient) {
+/**
+ * @param client Validated Dashboard tRPC client.
+ * @param enabled Whether the caller currently needs the shared cron inventory.
+ * @returns Bounded offset-paginated OpenClaw cron inventory query options.
+ */
+export function openClawCronListQueryOptions(
+    client: DashboardTrpcClient,
+    enabled = true
+) {
     return infiniteQueryOptions({
+        enabled,
         initialPageParam: 0,
         queryFn: ({ pageParam, signal }): Promise<ListOpenClawCronResult> =>
             client.query(
@@ -220,6 +238,22 @@ export function openClawCronListQueryOptions(client: DashboardTrpcClient) {
                 ? undefined
                 : lastPage.nextOffset,
         queryKey: openClawCronListQueryKey,
+        refetchInterval: openClawCronRefreshIntervalMs,
+        retry: false,
+        staleTime: openClawCronRefreshIntervalMs,
+    });
+}
+
+/**
+ * @param client Validated Dashboard tRPC client.
+ * @param id Stable OpenClaw cron job identity.
+ * @returns Exact live OpenClaw cron detail for one linked job identity.
+ */
+export function openClawCronDetailQueryOptions(client: DashboardTrpcClient, id: string) {
+    return queryOptions({
+        queryFn: ({ signal }): Promise<GetOpenClawCronResult> =>
+            client.query("openClawCron.get", { id }, { signal }),
+        queryKey: openClawCronDetailQueryKey(id),
         refetchInterval: openClawCronRefreshIntervalMs,
         retry: false,
         staleTime: openClawCronRefreshIntervalMs,

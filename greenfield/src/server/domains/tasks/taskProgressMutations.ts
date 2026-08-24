@@ -112,7 +112,9 @@ function addTaskProgress(
         },
         updateId,
     });
-    return changedProgressResult(progress);
+    return changedProgressResult(
+        requireTaskProgress(context.unit, input.taskId, progress.id)
+    );
 }
 
 function updateTaskProgress(
@@ -153,7 +155,9 @@ function updateTaskProgress(
         },
         updateId: input.updateId,
     });
-    return changedProgressResult(progress);
+    return changedProgressResult(
+        requireTaskProgress(context.unit, input.taskId, progress.id)
+    );
 }
 
 function deleteTaskProgress(

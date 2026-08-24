@@ -7,6 +7,7 @@ import { Alert } from "../ui/Alert.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import { Card } from "../ui/Card.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
+import { FormField } from "../ui/FormField.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { Select, type SelectOption } from "../ui/Select.tsx";
 import { Text } from "../ui/Text.tsx";
@@ -163,12 +164,13 @@ export function OpenClawAgentAccessSection({
                 />
             ) : (
                 <div className="mt-5 grid gap-5">
-                    <div className="max-w-md">
-                        <Text className="mb-2" tone="muted">
-                            Selected agent
-                        </Text>
+                    <FormField
+                        className="max-w-md"
+                        disabled={disabled || busy}
+                        label="Selected OpenClaw agent"
+                    >
                         <Select
-                            ariaLabel="Selected OpenClaw agent"
+                            className="mt-2"
                             disabled={disabled || busy}
                             onChange={onSelectAgent}
                             options={agents.map((agent) => ({
@@ -177,7 +179,7 @@ export function OpenClawAgentAccessSection({
                             }))}
                             value={activeAgent.id}
                         />
-                    </div>
+                    </FormField>
 
                     <ul className="divide-primary-700 divide-y">
                         {activeAgent.tools.map((tool) => {

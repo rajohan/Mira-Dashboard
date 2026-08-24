@@ -1,5 +1,6 @@
 import type { TRPCRequestOptions } from "@trpc/client";
 
+import type { AccountSecuritySummary } from "../../contracts/accountSecurity.ts";
 import type { AuthStatus } from "../../contracts/auth.ts";
 import type { DashboardTrpcTransport } from "../api/trpcClient.ts";
 
@@ -65,6 +66,28 @@ export const authenticatedDashboardStoryStatus = Object.freeze({
     },
 } as const satisfies AuthStatus);
 
+/** Safe default used by authenticated stories that do not exercise security UI. */
+export const dashboardStoryAccountSecuritySummary = Object.freeze({
+    checkedAtMs: storyTimestampMs,
+    mfa: {
+        enabled: false,
+        methods: [],
+        recoveryCodesRemaining: 0,
+        totpFactors: [],
+        webAuthnCredentials: [],
+    },
+    recentAuth: {
+        mfa: { recent: false },
+        password: {
+            expiresAtMs: storyTimestampMs + 300_000,
+            recent: true,
+            remainingMs: 300_000,
+            verifiedAtMs: storyTimestampMs,
+        },
+    },
+    webAuthn: { available: false },
+} as const satisfies AccountSecuritySummary);
+
 function valueForCall(
     value: DashboardStoryFixtureValue,
     input: unknown,
@@ -123,6 +146,8 @@ export class DashboardStoryTransport implements DashboardTrpcTransport {
         if (fixture !== undefined) return valueForCall(fixture, input, callIndex);
         if (path === "auth.status")
             return Promise.resolve(authenticatedDashboardStoryStatus);
+        if (path === "accountSecurity.summary")
+            return Promise.resolve(dashboardStoryAccountSecuritySummary);
         return Promise.reject(new TypeError(`Unexpected story query: ${path}`));
     }
 }

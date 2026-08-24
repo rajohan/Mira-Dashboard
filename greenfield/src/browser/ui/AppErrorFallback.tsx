@@ -8,7 +8,7 @@ import { PageState } from "./PageState.tsx";
  */
 export function AppErrorFallback({ resetErrorBoundary }: FallbackProps) {
     return (
-        <main className="bg-primary-950 text-primary-100 flex min-h-screen items-center justify-center px-4">
+        <main className="bg-primary-900 text-primary-100 flex min-h-screen items-center justify-center px-4">
             <PageState
                 message="The browser application could not finish rendering. No private error details were displayed."
                 onRetry={resetErrorBoundary}

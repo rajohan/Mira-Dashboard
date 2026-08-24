@@ -6,13 +6,25 @@ import tailwindcss from "@tailwindcss/vite";
 import { loadEnv } from "vite";
 
 const storybookAllowedHostEnvironmentName = "MIRA_DASHBOARD_STORYBOOK_ALLOWED_HOST";
-const storybookBrowserPort = 6006;
+const storybookPortEnvironmentName = "MIRA_DASHBOARD_STORYBOOK_PORT";
 const dnsLabelPattern = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const storybookEnvironment = loadEnv(
     "storybook",
     fileURLToPath(new URL(".", import.meta.url)),
     "MIRA_DASHBOARD_STORYBOOK_"
 );
+
+function storybookBrowserPort(): number {
+    const configured = storybookEnvironment[storybookPortEnvironmentName] ?? "6006";
+    if (!/^[1-9][0-9]{0,4}$/u.test(configured)) {
+        throw new Error(`${storybookPortEnvironmentName} must be a valid TCP port`);
+    }
+    const port = Number(configured);
+    if (port > 65_535) {
+        throw new Error(`${storybookPortEnvironmentName} must be a valid TCP port`);
+    }
+    return port;
+}
 
 function optionalStorybookAllowedHost(): string | undefined {
     const configured = storybookEnvironment[storybookAllowedHostEnvironmentName];
@@ -33,6 +45,7 @@ function optionalStorybookAllowedHost(): string | undefined {
 }
 
 const storybookAllowedHost = optionalStorybookAllowedHost();
+const storybookPort = storybookBrowserPort();
 
 const config: StorybookConfig = {
     addons: ["@storybook/addon-a11y", "@storybook/addon-docs", "@storybook/addon-vitest"],
@@ -73,7 +86,7 @@ const config: StorybookConfig = {
                                   ? false
                                   : {
                                         ...viteConfiguration.server?.ws,
-                                        clientPort: storybookBrowserPort,
+                                        clientPort: storybookPort,
                                     },
                       },
                   }),

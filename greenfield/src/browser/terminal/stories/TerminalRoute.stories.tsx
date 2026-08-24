@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/tanstack-react";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, userEvent, waitFor, within } from "storybook/test";
 
 import type {
     TerminalConnectionTicket,
@@ -66,10 +66,12 @@ const notifications = { notifications: [], readCount: 0, unreadCount: 0 } as con
 function terminalFixtures({
     active = dashboardStoryValue({ status: "none" }),
     mutations = {},
+    queries = {},
     runtimeFixture = dashboardStoryValue(runtime),
 }: {
     readonly active?: ReturnType<typeof dashboardStoryValue>;
     readonly mutations?: DashboardStoryFixtures["mutations"];
+    readonly queries?: DashboardStoryFixtures["queries"];
     readonly runtimeFixture?: DashboardStoryFixtureValue;
 } = {}): DashboardStoryFixtures {
     return {
@@ -78,6 +80,7 @@ function terminalFixtures({
             "notifications.list": dashboardStoryValue(notifications),
             "terminal.getActiveSession": active,
             "terminal.getRuntime": runtimeFixture,
+            ...queries,
         },
     };
 }
@@ -270,6 +273,67 @@ export const MfaError: Story = {
         }),
         route: "/terminal",
         terminalBrowserDependencies: storyTerminalBrowserDependencies,
+    },
+};
+
+export const EnrollmentRequired: Story = {
+    args: {
+        fixtures: terminalFixtures({
+            mutations: {
+                "terminal.prepareSession": dashboardStoryFailure(
+                    Object.assign(new Error("Safe enrollment-required failure"), {
+                        data: {
+                            code: "FORBIDDEN",
+                            reason: "mfa_enrollment_required",
+                        },
+                    })
+                ),
+            },
+            queries: {
+                "auth.sessions": dashboardStoryValue({ sessions: [] }),
+                "automationSecurity.listPrincipals": dashboardStoryValue({
+                    activePrincipalCount: 0,
+                    principals: [],
+                    totalPrincipalCount: 0,
+                }),
+                "securityAudit.listEvents": dashboardStoryValue({ events: [] }),
+            },
+        }),
+        route: "/terminal",
+        terminalBrowserDependencies: storyTerminalBrowserDependencies,
+    },
+    play: async ({ canvasElement }) => {
+        const canvas = within(canvasElement);
+        const page = within(canvasElement.ownerDocument.body);
+        await userEvent.click(
+            await canvas.findByRole("button", { name: "Start terminal" })
+        );
+        const enrollment = await page.findByRole("dialog", {
+            name: "Protect privileged actions",
+        });
+        const enrollmentRequirement = within(enrollment).getByText(
+            "Multi-factor authentication is required before this action can continue."
+        );
+        await waitFor(async () => {
+            await expect(enrollmentRequirement).toBeVisible();
+        });
+        await expect(enrollment).toBeVisible();
+        await expect(
+            within(enrollment).getByText(/Register a security key or authenticator app/iu)
+        ).toBeVisible();
+        await userEvent.click(
+            within(enrollment).getByRole("button", {
+                name: "Open Dashboard security settings",
+            })
+        );
+        const securityHeading = await canvas.findByRole("heading", {
+            level: 1,
+            name: "Account security",
+        });
+        await expect(securityHeading).toBeVisible();
+        await expect(
+            canvas.getByRole("tab", { name: "Dashboard settings" })
+        ).toHaveAttribute("aria-selected", "true");
     },
 };
 

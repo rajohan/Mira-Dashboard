@@ -10,6 +10,7 @@ import {
 
 import { cn } from "../lib/classNames.ts";
 import { Button } from "../ui/Button.tsx";
+import { Fieldset } from "../ui/Fieldset.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { IconOnlyButton } from "../ui/IconOnlyButton.tsx";
 import { Textarea } from "../ui/Textarea.tsx";
@@ -303,15 +304,15 @@ export function ChatComposer({
                     className="border-primary-700 flex min-w-0 flex-row items-center justify-between gap-1 border-t p-2"
                     data-testid="chat-composer-toolbar"
                 >
-                    <fieldset
-                        aria-label="Composer tools"
+                    <Fieldset
                         className="m-0 flex shrink-0 items-center border-0 p-0"
+                        legend={<span className="sr-only">Composer tools</span>}
                     >
                         {settingsControl}
-                    </fieldset>
-                    <fieldset
-                        aria-label="Composer actions"
+                    </Fieldset>
+                    <Fieldset
                         className="m-0 ml-auto flex min-w-0 flex-nowrap items-center justify-end gap-1 border-0 p-0"
+                        legend={<span className="sr-only">Composer actions</span>}
                     >
                         {voiceInput?.phase !== "recording" &&
                             voiceInput?.phase !== "transcribing" && (
@@ -431,7 +432,7 @@ export function ChatComposer({
                                     size="sm"
                                 />
                             )}
-                    </fieldset>
+                    </Fieldset>
                 </div>
             </Combobox>
             <ChatAttachmentPicker
