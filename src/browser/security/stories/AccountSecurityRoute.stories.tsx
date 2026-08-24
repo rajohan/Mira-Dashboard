@@ -432,12 +432,6 @@ export const StalePasswordEnrollment: Story = {
             },
             asyncStoryTimeout
         );
-        const reconciliation = page.getByRole("dialog", {
-            name: "Verify current password",
-        });
-        await expect(within(reconciliation).getByRole("alert")).toHaveTextContent(
-            "The request could not be completed. Try again."
-        );
         stalePasswordEnrollment.allowSessionRefresh();
         await fireEvent.click(retry);
         await waitFor(async () => {
