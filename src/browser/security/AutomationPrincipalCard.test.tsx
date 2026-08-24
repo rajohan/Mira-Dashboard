@@ -8,7 +8,7 @@ import { createDashboardTrpcClient } from "../api/trpcClient.ts";
 import { DashboardTrpcProvider } from "../api/trpcContext.tsx";
 import { AutomationPrincipalCard } from "./AutomationPrincipalCard.tsx";
 
-const { render, screen } = await import("@testing-library/react");
+const { fireEvent, render, screen } = await import("@testing-library/react");
 
 const timestampMs = Date.now();
 const principal = Object.freeze({
@@ -65,6 +65,7 @@ describe("automation principal card", () => {
         const rendered = render(principalCard(queryClient, principal));
 
         try {
+            fireEvent.click(screen.getByRole("button", { name: /OpenClaw heartbeat/ }));
             expect(
                 screen.getByRole("checkbox", { name: "notifications:read" })
             ).toBeChecked();
