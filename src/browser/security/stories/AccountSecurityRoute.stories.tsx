@@ -78,14 +78,45 @@ const staleEnrollmentSummary = {
 
 function stalePasswordEnrollmentScenario(): {
     readonly allowSessionRefresh: () => void;
+    readonly failSessionRefresh: () => Promise<void>;
     readonly fixtures: DashboardStoryFixtures;
     readonly reset: () => void;
 } {
     let reauthenticationCompleted = false;
     let sessionRefreshAllowed = false;
+    let pendingSessionRefresh: Promise<never> | undefined;
+    let rejectSessionRefresh: ((error: TypeError) => void) | undefined;
+    let signalSessionRefreshStarted: (() => void) | undefined;
+    let sessionRefreshStarted: Promise<void>;
+
+    const reset = () => {
+        reauthenticationCompleted = false;
+        sessionRefreshAllowed = false;
+        pendingSessionRefresh = undefined;
+        rejectSessionRefresh = undefined;
+        sessionRefreshStarted = new Promise<void>((resolve) => {
+            signalSessionRefreshStarted = resolve;
+        });
+    };
+    reset();
+
     return {
         allowSessionRefresh: () => {
             sessionRefreshAllowed = true;
+            pendingSessionRefresh = undefined;
+            rejectSessionRefresh = undefined;
+        },
+        failSessionRefresh: async () => {
+            await sessionRefreshStarted;
+            const reject = rejectSessionRefresh;
+            const pending = pendingSessionRefresh;
+            if (reject === undefined || pending === undefined) {
+                throw new TypeError("Session refresh was not pending");
+            }
+            await waitFor(async () => {
+                reject(new TypeError("Safe session refresh failure"));
+                await pending.catch(() => {});
+            });
         },
         fixtures: accountSecurityFixtures(staleEnrollmentSummary, {
             mutations: {
@@ -100,16 +131,19 @@ function stalePasswordEnrollmentScenario(): {
             queries: {
                 "auth.status": dashboardStoryResolver(() => {
                     if (reauthenticationCompleted && !sessionRefreshAllowed) {
-                        throw new TypeError("Safe session refresh failure");
+                        pendingSessionRefresh ??= new Promise<never>(
+                            (_resolve, reject) => {
+                                rejectSessionRefresh = reject;
+                                signalSessionRefreshStarted?.();
+                            }
+                        );
+                        return pendingSessionRefresh;
                     }
                     return authenticatedDashboardStoryStatus;
                 }),
             },
         }),
-        reset: () => {
-            reauthenticationCompleted = false;
-            sessionRefreshAllowed = false;
-        },
+        reset,
     };
 }
 const allMfaStaleSummary = {
@@ -385,6 +419,12 @@ export const StalePasswordEnrollment: Story = {
         );
         await expect(within(enrollment).getByLabelText("Name")).toBeVisible();
         await fireEvent.click(within(enrollment).getByRole("button", { name: "Cancel" }));
+        await page.findByRole(
+            "status",
+            { name: "Refreshing secure session…" },
+            asyncStoryTimeout
+        );
+        await stalePasswordEnrollment.failSessionRefresh();
         const retry = await page.findByRole(
             "button",
             {
