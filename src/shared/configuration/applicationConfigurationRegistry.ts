@@ -75,7 +75,7 @@ export const applicationConfigurationEnvironmentNames = [
     "MIRA_DASHBOARD_PROJECT_ROOT",
     "MIRA_DASHBOARD_OPENCLAW_ROOT",
     "MIRA_DASHBOARD_WORKSPACE_ROOT",
-    "PORT",
+    "MIRA_DASHBOARD_PORT",
     "MIRA_DASHBOARD_PUBLIC_ORIGIN",
     "MIRA_DASHBOARD_TRUSTED_PROXY_IPS",
     "ELEVENLABS_API_KEY",
@@ -231,7 +231,7 @@ export const applicationConfigurationRegistry: readonly ApplicationConfiguration
             browserExposure: "none",
             defaultValue: "3100",
             description: "Loopback HTTP listener port for the greenfield web process.",
-            environmentName: "PORT",
+            environmentName: "MIRA_DASHBOARD_PORT",
             field: "port",
             operationalEffect:
                 "Changes the local listener endpoint used by the reverse proxy.",

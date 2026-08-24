@@ -109,9 +109,9 @@ export function requiredConfigurationString(
  * @returns Validated TCP port.
  */
 export function configurationWebPort(input: PickedApplicationEnvironment): number {
-    const value = requiredConfigurationString(input, "PORT", 16);
+    const value = requiredConfigurationString(input, "MIRA_DASHBOARD_PORT", 16);
     if (!canonicalUnsignedIntegerPattern.test(value)) {
-        configurationError("PORT", "invalid");
+        configurationError("MIRA_DASHBOARD_PORT", "invalid");
     }
     const parsed = Number(value);
     if (
@@ -119,7 +119,7 @@ export function configurationWebPort(input: PickedApplicationEnvironment): numbe
         parsed < applicationConfigurationLimits.port.minimum ||
         parsed > applicationConfigurationLimits.port.maximum
     ) {
-        configurationError("PORT", "invalid");
+        configurationError("MIRA_DASHBOARD_PORT", "invalid");
     }
     return parsed;
 }

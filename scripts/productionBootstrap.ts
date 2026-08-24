@@ -20,7 +20,7 @@ const dopplerConfigurationNames = applicationConfigurationRegistry
     .filter(
         (entry) =>
             entry.required ||
-            entry.environmentName === "PORT" ||
+            entry.environmentName === "MIRA_DASHBOARD_PORT" ||
             entry.environmentName === "MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD"
     )
     .map((entry) => entry.environmentName)

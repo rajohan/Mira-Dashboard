@@ -187,14 +187,19 @@ async function installerTestHooks(
 }
 
 async function destinationFixture(
-    options: Readonly<{ readonly includeLibexec?: boolean }> = {}
+    options: Readonly<{
+        readonly includeLibexec?: boolean;
+        readonly includeSysusers?: boolean;
+    }> = {}
 ): Promise<string> {
     const destinationRoot = await mkdtemp(
         path.join(tmpdir(), "mira-host-operations-destination-")
     );
     temporaryRoots.push(destinationRoot);
     await chmod(destinationRoot, 0o700);
-    const directories = ["etc/polkit-1/rules.d", "etc/systemd/system", "etc/sysusers.d"];
+    const directories = ["etc/polkit-1/rules.d", "etc/systemd/system"];
+    if (options.includeSysusers === false) directories.push("etc");
+    else directories.push("etc/sysusers.d");
     if (options.includeLibexec === false) directories.push("usr/local");
     else directories.push("usr/local/libexec");
     for (const directory of directories) {
@@ -304,10 +309,14 @@ describe("root host-operations provisioning installer", () => {
         ).toEqual({ releaseId, status: "INSTALLED" });
     });
 
-    test("creates and validates the reviewed libexec target on a fresh host", async () => {
+    test("creates and validates reviewed target directories on a fresh host", async () => {
         const releaseRoot = await releaseFixture();
-        const destinationRoot = await destinationFixture({ includeLibexec: false });
+        const destinationRoot = await destinationFixture({
+            includeLibexec: false,
+            includeSysusers: false,
+        });
         const libexec = path.join(destinationRoot, "usr/local/libexec");
+        const sysusers = path.join(destinationRoot, "etc/sysusers.d");
         const hooks = await installerTestHooks(releaseRoot, destinationRoot);
 
         expect(
@@ -317,10 +326,12 @@ describe("root host-operations provisioning installer", () => {
             )
         ).toEqual({ releaseId, status: "INSTALLED" });
 
-        const status = await lstat(libexec);
-        expect(status.isDirectory()).toBeTrue();
-        expect(status.isSymbolicLink()).toBeFalse();
-        expect(status.mode & 0o7777).toBe(0o755);
+        for (const directory of [libexec, sysusers]) {
+            const status = await lstat(directory);
+            expect(status.isDirectory()).toBeTrue();
+            expect(status.isSymbolicLink()).toBeFalse();
+            expect(status.mode & 0o7777).toBe(0o755);
+        }
         expect(
             await readFile(path.join(libexec, "mira-dashboard-host-operation"))
         ).toEqual(
