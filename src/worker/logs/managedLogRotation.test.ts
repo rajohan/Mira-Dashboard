@@ -245,6 +245,28 @@ describe("managed log rotation engine", () => {
         });
     });
 
+    test("admits group-writable logs owned by one runtime group", async () => {
+        const base = await fixture();
+        const source = path.join(base.logDirectory, "container.log");
+        await writeFile(source, "container payload\n", { mode: 0o660 });
+        await chmod(source, 0o660);
+        const engine = createManagedLogRotationEngine({
+            manifest: {
+                ...base.manifest,
+                fileTargets: [fileTarget(source)],
+            },
+        });
+
+        const summary = await engine.run();
+
+        expect(summary).toMatchObject({ checkedTargets: 1, ok: true });
+        expect(summary.results).toContainEqual({
+            action: "rotated",
+            reason: "size",
+            targetId: "dashboard.test",
+        });
+    });
+
     test("fails closed during the pre-truncate phase and commits a new exact-prefix generation", async () => {
         const base = await fixture();
         const sourceId = "dashboard.web.stdout";

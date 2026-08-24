@@ -46,6 +46,14 @@ const rootAndRuntimeOwnerIds = Object.freeze(
     runtimeOwnerId === 0 ? [0] : [0, runtimeOwnerId]
 );
 
+function trustedContainerOwnerIds(containerOwnerId: number): readonly number[] {
+    return Object.freeze(
+        [...new Set([...rootAndRuntimeOwnerIds, containerOwnerId])].toSorted(
+            (left, right) => left - right
+        )
+    );
+}
+
 function validateManifestPath(value: string): void {
     if (
         value.includes("\0") ||
@@ -120,21 +128,21 @@ export const managedLogManifest: ManagedLogManifest = Object.freeze({
         managedFile(
             "docker.prowlarr.debug",
             "/opt/docker/data/prowlarr/logs/prowlarr.debug.txt",
-            { trustedOwnerIds: Object.freeze([0, 1001]) }
+            { trustedOwnerIds: trustedContainerOwnerIds(1001) }
         ),
         managedFile(
             "docker.prowlarr.trace",
             "/opt/docker/data/prowlarr/logs/prowlarr.trace.txt",
-            { trustedOwnerIds: Object.freeze([0, 1001]) }
+            { trustedOwnerIds: trustedContainerOwnerIds(1001) }
         ),
         managedFile("docker.prowlarr", "/opt/docker/data/prowlarr/logs/prowlarr.txt", {
-            trustedOwnerIds: Object.freeze([0, 1001]),
+            trustedOwnerIds: trustedContainerOwnerIds(1001),
         }),
         managedFile("docker.submaker", "/opt/docker/data/submaker/logs/app.log", {
-            trustedOwnerIds: Object.freeze([0, 1000]),
+            trustedOwnerIds: trustedContainerOwnerIds(1000),
         }),
         managedFile("docker.traefik", "/opt/docker/data/traefik/access.log", {
-            trustedOwnerIds: Object.freeze([0, 1001]),
+            trustedOwnerIds: trustedContainerOwnerIds(1001),
         }),
     ]),
     lockPath:

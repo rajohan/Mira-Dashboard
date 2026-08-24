@@ -370,6 +370,7 @@ describe("production bootstrap admission", () => {
             "c".repeat(64),
             "d".repeat(64),
             "e".repeat(64),
+            1000,
             dependencies
         );
 
@@ -387,8 +388,17 @@ describe("production bootstrap admission", () => {
             commands.some(
                 (command) =>
                     command.some((argument) =>
-                        argument.endsWith("provisionManagedContainerLogs.ts")
-                    ) && command.includes("--group-id=986")
+                        argument.endsWith("migrateManagedApplicationLogs.ts")
+                    ) && command.includes("--user-id=1000")
+            )
+        ).toBe(true);
+        expect(
+            commands.some(
+                (command) =>
+                    command.includes("/usr/bin/systemd-tmpfiles") &&
+                    command.includes(
+                        "/usr/lib/tmpfiles.d/mira-dashboard-managed-container-logs.conf"
+                    )
             )
         ).toBe(true);
         expect(
@@ -410,6 +420,7 @@ describe("production bootstrap admission", () => {
                 "c".repeat(64),
                 "d".repeat(64),
                 "e".repeat(64),
+                1000,
                 {
                     run: (command) => {
                         commands.push([...command]);
@@ -442,6 +453,7 @@ describe("production bootstrap admission", () => {
                 "c".repeat(64),
                 "d".repeat(64),
                 "e".repeat(64),
+                1000,
                 {
                     run: (command) => {
                         commands.push([...command]);

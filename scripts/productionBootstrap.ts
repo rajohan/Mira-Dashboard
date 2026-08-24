@@ -341,6 +341,7 @@ export async function admitProductionBootstrapRelease(
  * @param manifestSha256 Independently verified release-manifest digest.
  * @param archiveSha256 Digest verified before and after the root-owned archive handoff.
  * @param runtimeSha256 Digest of the root-owned runtime source and staged interpreter.
+ * @param userId Canonical non-root production service identity.
  * @param dependencies Fixed process boundary.
  */
 export async function stageProductionBootstrapRootAuthority(
@@ -349,6 +350,7 @@ export async function stageProductionBootstrapRootAuthority(
     manifestSha256: string,
     archiveSha256: string,
     runtimeSha256: string,
+    userId: number,
     dependencies: ProductionBootstrapDependencies
 ): Promise<void> {
     const sudo = "/usr/bin/sudo";
@@ -460,15 +462,20 @@ export async function stageProductionBootstrapRootAuthority(
                   group.stdout
               )
             : null;
-    const groupId = Number(groupMatch?.[1]);
-    if (!groupMatch || !Number.isSafeInteger(groupId)) {
+    if (!groupMatch) {
         throw new Error(failureMessage);
     }
     await requireSuccess(dependencies, [
         sudo,
         stagedRuntime,
-        `${stagedRelease}/scripts/delivery/provisioning/log-maintenance/provisionManagedContainerLogs.ts`,
-        `--group-id=${groupId}`,
+        `${stagedRelease}/scripts/delivery/provisioning/log-maintenance/migrateManagedApplicationLogs.ts`,
+        `--user-id=${userId}`,
+    ]);
+    await requireSuccess(dependencies, [
+        sudo,
+        "/usr/bin/systemd-tmpfiles",
+        "--create",
+        "/usr/lib/tmpfiles.d/mira-dashboard-managed-container-logs.conf",
     ]);
     await requireSuccess(dependencies, [
         sudo,
@@ -681,6 +688,7 @@ export async function bootstrapProduction(
             admitted.manifestSha256,
             admitted.archiveSha256,
             prerequisites.runtimeSha256,
+            userId,
             dependencies
         );
         await requireSuccess(dependencies, [

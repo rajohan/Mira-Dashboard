@@ -127,12 +127,23 @@ function ownerIsTrusted(ownerId: number, trustedOwnerIds: readonly number[]): bo
     return trustedOwnerIds.includes(ownerId);
 }
 
+function runtimeGroupIds(): readonly number[] {
+    const groupIds =
+        typeof process.getgroups === "function"
+            ? process.getgroups()
+            : [typeof process.getgid === "function" ? process.getgid() : 0];
+    return groupIds;
+}
+
 function fileStatusIsTrusted(status: Stats, trustedOwnerIds: readonly number[]): boolean {
+    const groupWriteIsTrusted =
+        (status.mode & 0o020) === 0 || runtimeGroupIds().includes(status.gid);
     return (
         status.isFile() &&
         status.nlink === 1 &&
         ownerIsTrusted(status.uid, trustedOwnerIds) &&
-        (status.mode & 0o022) === 0 &&
+        groupWriteIsTrusted &&
+        (status.mode & 0o002) === 0 &&
         Number.isSafeInteger(status.size) &&
         status.size >= 0
     );
