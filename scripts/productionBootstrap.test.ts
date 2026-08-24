@@ -12,6 +12,7 @@ import {
     parseProductionBootstrapRelease,
     resolveProductionBootstrapSourceIdentity,
     stageProductionBootstrapRootAuthority,
+    verifyProductionBootstrapPrerequisites,
     type ProductionBootstrapDependencies,
 } from "./productionBootstrap.ts";
 import {
@@ -39,6 +40,15 @@ const realProcessDependencies: ProductionBootstrapDependencies = {
         return { exitCode, stdout };
     },
 };
+
+async function captureFailure(operation: Promise<unknown>): Promise<unknown> {
+    try {
+        await operation;
+        return undefined;
+    } catch (error) {
+        return error;
+    }
+}
 
 describe("production bootstrap admission", () => {
     test("accepts only a GitHub release for the exact clean checkout", () => {
@@ -131,6 +141,39 @@ describe("production bootstrap admission", () => {
         expect(commands.at(-1)).toContain("release download v0.2.0");
     });
 
+    test("binds clean-host prerequisites to root-owned runtime bytes", async () => {
+        const runtimeBytes = new TextEncoder().encode("qualified-runtime");
+        const dependencies: ProductionBootstrapDependencies = {
+            run: () => Promise.resolve({ exitCode: 0, stdout: "ready\n" }),
+        };
+        const result = await verifyProductionBootstrapPrerequisites(
+            dependencies,
+            "/srv/dashboard",
+            1000,
+            {
+                canonical: (target) =>
+                    Promise.resolve(
+                        target === "/home/ubuntu/.openclaw"
+                            ? target
+                            : "/usr/local/bin/bun"
+                    ),
+                read: () => Promise.resolve(runtimeBytes),
+                status: (target) =>
+                    Promise.resolve({
+                        gid: target === "/usr/local/bin/bun" ? 0 : 1000,
+                        isDirectory: () => target === "/home/ubuntu/.openclaw",
+                        isFile: () => target === "/usr/local/bin/bun",
+                        mode: target === "/usr/local/bin/bun" ? 0o755 : 0o700,
+                        uid: target === "/usr/local/bin/bun" ? 0 : 1000,
+                    }),
+            }
+        );
+
+        expect(result.runtimeSha256).toBe(
+            new Bun.CryptoHasher("sha256").update(runtimeBytes).digest("hex")
+        );
+    });
+
     test("admits a real packaged release and extracts it immutably", async () => {
         const runtime = { revision: "b".repeat(40), version: Bun.version };
         const releaseRoot = await createLocalReleaseFixture(
@@ -182,12 +225,18 @@ describe("production bootstrap admission", () => {
         const dependencies: ProductionBootstrapDependencies = {
             run: (command) => {
                 commands.push([...command]);
+                let stdout = "";
+                if (command.includes("/usr/bin/sha256sum")) {
+                    stdout = command.at(-1)?.endsWith("/runtime/bun")
+                        ? `${"e".repeat(64)}  bun\n`
+                        : `${"d".repeat(64)}  release.tar\n`;
+                }
                 return Promise.resolve({
                     exitCode:
                         command[0] === "/usr/bin/getent" && command[1] === "group"
                             ? 2
                             : 0,
-                    stdout: "",
+                    stdout,
                 });
             },
         };
@@ -196,6 +245,8 @@ describe("production bootstrap admission", () => {
             "/tmp/artifact",
             releaseId,
             "c".repeat(64),
+            "d".repeat(64),
+            "e".repeat(64),
             dependencies
         );
 
@@ -219,6 +270,71 @@ describe("production bootstrap admission", () => {
         expect(commands.at(-1)).toContain("--mode=apply");
     });
 
+    test("stops before root execution when staged bytes do not match", async () => {
+        const commands: string[][] = [];
+        const failure = await captureFailure(
+            stageProductionBootstrapRootAuthority(
+                "/tmp/artifact",
+                releaseId,
+                "c".repeat(64),
+                "d".repeat(64),
+                "e".repeat(64),
+                {
+                    run: (command) => {
+                        commands.push([...command]);
+                        return Promise.resolve({
+                            exitCode: 0,
+                            stdout: command.includes("/usr/bin/sha256sum")
+                                ? `${"f".repeat(64)}  staged\n`
+                                : "",
+                        });
+                    },
+                }
+            )
+        );
+        expect(failure).toEqual(new Error("Production bootstrap failed"));
+        expect(
+            commands.some((command) =>
+                command.some((argument) =>
+                    argument.endsWith("installHostOperationsProvisioning.ts")
+                )
+            )
+        ).toBe(false);
+    });
+
+    test("rejects a changed archive after the runtime handoff succeeds", async () => {
+        const commands: string[][] = [];
+        const failure = await captureFailure(
+            stageProductionBootstrapRootAuthority(
+                "/tmp/artifact",
+                releaseId,
+                "c".repeat(64),
+                "d".repeat(64),
+                "e".repeat(64),
+                {
+                    run: (command) => {
+                        commands.push([...command]);
+                        const stagedRuntime = command.at(-1)?.endsWith("/runtime/bun");
+                        return Promise.resolve({
+                            exitCode: 0,
+                            stdout: command.includes("/usr/bin/sha256sum")
+                                ? `${(stagedRuntime ? "e" : "f").repeat(64)}  staged\n`
+                                : "",
+                        });
+                    },
+                }
+            )
+        );
+        expect(failure).toEqual(new Error("Production bootstrap failed"));
+        expect(
+            commands.some((command) =>
+                command.some((argument) =>
+                    argument.endsWith("installHostOperationsProvisioning.ts")
+                )
+            )
+        ).toBe(false);
+    });
+
     test("runs the complete clean-host bootstrap sequence", async () => {
         const runtime = { revision: "d".repeat(40), version: Bun.version };
         const sourceReleaseRoot = await createLocalReleaseFixture(
@@ -228,7 +344,7 @@ describe("production bootstrap admission", () => {
             temporaryDirectories
         );
         const sourceRepositoryRoot = path.resolve(sourceReleaseRoot, "../../..");
-        await packageProductionReleaseArtifact({
+        const receipt = await packageProductionReleaseArtifact({
             projectRoot: sourceRepositoryRoot,
             releaseId,
         });
@@ -249,7 +365,12 @@ describe("production bootstrap admission", () => {
             ),
         ]);
         const commands: string[] = [];
+        let prerequisitesInspected = false;
         const dependencies: ProductionBootstrapDependencies = {
+            inspectPrerequisites: () => {
+                prerequisitesInspected = true;
+                return Promise.resolve({ runtimeSha256: "e".repeat(64) });
+            },
             run: async (command, cwd) => {
                 const invocation = command.join(" ");
                 commands.push(invocation);
@@ -271,6 +392,14 @@ describe("production bootstrap admission", () => {
                 if (invocation.includes(" rev-list ")) {
                     return { exitCode: 0, stdout: `${releaseId}\n` };
                 }
+                if (invocation.includes("sha256sum")) {
+                    return {
+                        exitCode: 0,
+                        stdout: command.at(-1)?.endsWith("/runtime/bun")
+                            ? `${"e".repeat(64)}  bun\n`
+                            : `${receipt.archive.sha256}  release.tar\n`,
+                    };
+                }
                 if (
                     command[0] === "/usr/bin/getent" &&
                     command.at(-1) === "mira-dashboard-log-maintenance"
@@ -288,10 +417,7 @@ describe("production bootstrap admission", () => {
             userId: 1000,
         });
 
-        expect(commands.some((command) => command.includes("getent group docker"))).toBe(
-            true
-        );
-        expect(commands.some((command) => command.includes("docker version"))).toBe(true);
+        expect(prerequisitesInspected).toBe(true);
         expect(
             commands.some((command) => command.includes("delivery prepare-state"))
         ).toBe(true);

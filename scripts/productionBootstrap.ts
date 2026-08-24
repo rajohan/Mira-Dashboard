@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -27,6 +27,7 @@ const githubReleaseSchema = v.strictObject({
 });
 
 export interface ProductionBootstrapDependencies {
+    readonly inspectPrerequisites?: () => Promise<Readonly<{ runtimeSha256: string }>>;
     readonly run: (command: readonly string[], cwd?: string) => Promise<CommandResult>;
 }
 
@@ -35,6 +36,20 @@ export interface ProductionBootstrapOptions {
     readonly expectedCheckout?: string;
     readonly repositoryRoot?: string;
     readonly userId?: number;
+}
+
+interface ProductionBootstrapPathStatus {
+    readonly gid: number;
+    readonly mode: number;
+    readonly uid: number;
+    isDirectory(): boolean;
+    isFile(): boolean;
+}
+
+export interface ProductionBootstrapPrerequisiteFilesystem {
+    readonly canonical: (target: string) => Promise<string>;
+    readonly read: (target: string) => Promise<Uint8Array>;
+    readonly status: (target: string) => Promise<ProductionBootstrapPathStatus>;
 }
 
 async function readBounded(stream: ReadableStream<Uint8Array>): Promise<string> {
@@ -230,7 +245,9 @@ export async function admitProductionBootstrapRelease(
     releaseId: string,
     dependencies: ProductionBootstrapDependencies,
     repositoryRoot = projectRoot
-): Promise<Readonly<{ manifestSha256: string; releaseRoot: string }>> {
+): Promise<
+    Readonly<{ archiveSha256: string; manifestSha256: string; releaseRoot: string }>
+> {
     const [receiptBytes, archiveBytes, selectedVersion] = await Promise.all([
         readFile(path.join(artifactRoot, "receipt.json")),
         readFile(path.join(artifactRoot, "release.tar")),
@@ -276,6 +293,7 @@ export async function admitProductionBootstrapRelease(
         throw new Error(failureMessage);
     }
     return Object.freeze({
+        archiveSha256: receipt.archive.sha256,
         manifestSha256: receipt.releaseManifestSha256,
         releaseRoot,
     });
@@ -286,17 +304,22 @@ export async function admitProductionBootstrapRelease(
  * @param artifactRoot Directory containing the admitted release archive.
  * @param releaseId Exact release commit.
  * @param manifestSha256 Independently verified release-manifest digest.
+ * @param archiveSha256 Digest verified before and after the root-owned archive handoff.
+ * @param runtimeSha256 Digest of the root-owned runtime source and staged interpreter.
  * @param dependencies Fixed process boundary.
  */
 export async function stageProductionBootstrapRootAuthority(
     artifactRoot: string,
     releaseId: string,
     manifestSha256: string,
+    archiveSha256: string,
+    runtimeSha256: string,
     dependencies: ProductionBootstrapDependencies
 ): Promise<void> {
     const sudo = "/usr/bin/sudo";
     const stagedRelease = `${provisioningRoot}/releases/${releaseId}`;
     const stagedRuntime = `${provisioningRoot}/runtime/bun`;
+    const stagedArchive = `${provisioningRoot}/release.tar`;
     for (const directory of [
         provisioningRoot,
         `${provisioningRoot}/releases`,
@@ -327,11 +350,39 @@ export async function stageProductionBootstrapRootAuthority(
         process.execPath,
         stagedRuntime,
     ]);
+    const installedRuntimeSha256 = await requireSuccess(dependencies, [
+        sudo,
+        "/usr/bin/sha256sum",
+        stagedRuntime,
+    ]);
+    if (installedRuntimeSha256.split(/\s+/u)[0] !== runtimeSha256) {
+        throw new Error(failureMessage);
+    }
+    await requireSuccess(dependencies, [
+        sudo,
+        "/usr/bin/install",
+        "-o",
+        "root",
+        "-g",
+        "root",
+        "-m",
+        "0400",
+        path.join(artifactRoot, "release.tar"),
+        stagedArchive,
+    ]);
+    const installedArchiveSha256 = await requireSuccess(dependencies, [
+        sudo,
+        "/usr/bin/sha256sum",
+        stagedArchive,
+    ]);
+    if (installedArchiveSha256.split(/\s+/u)[0] !== archiveSha256) {
+        throw new Error(failureMessage);
+    }
     await requireSuccess(dependencies, [
         sudo,
         "/usr/bin/tar",
         "-xf",
-        path.join(artifactRoot, "release.tar"),
+        stagedArchive,
         "-C",
         `${provisioningRoot}/releases`,
     ]);
@@ -381,11 +432,18 @@ export async function stageProductionBootstrapRootAuthority(
 }
 
 const productionBootstrapDependencies = Object.freeze({ run: defaultRun });
+const productionBootstrapPrerequisiteFilesystem = Object.freeze({
+    canonical: realpath,
+    read: (target: string) => readFile(target),
+    status: lstat,
+} satisfies ProductionBootstrapPrerequisiteFilesystem);
 
-async function verifyProductionBootstrapPrerequisites(
+export async function verifyProductionBootstrapPrerequisites(
     dependencies: ProductionBootstrapDependencies,
-    repositoryRoot: string
-): Promise<void> {
+    repositoryRoot: string,
+    userId: number,
+    filesystem: ProductionBootstrapPrerequisiteFilesystem = productionBootstrapPrerequisiteFilesystem
+): Promise<Readonly<{ runtimeSha256: string }>> {
     await requireSuccess(
         dependencies,
         ["/usr/bin/getent", "group", "docker"],
@@ -396,6 +454,29 @@ async function verifyProductionBootstrapPrerequisites(
         ["/usr/bin/docker", "version", "--format={{.Server.Version}}"],
         repositoryRoot
     );
+    const [runtimePath, openClawPath] = await Promise.all([
+        filesystem.canonical(process.execPath),
+        filesystem.canonical("/home/ubuntu/.openclaw"),
+    ]);
+    const [runtimeStatus, openClawStatus, runtimeBytes] = await Promise.all([
+        filesystem.status(runtimePath),
+        filesystem.status(openClawPath),
+        filesystem.read(runtimePath),
+    ]);
+    if (
+        !runtimeStatus.isFile() ||
+        runtimeStatus.uid !== 0 ||
+        runtimeStatus.gid !== 0 ||
+        (runtimeStatus.mode & 0o022) !== 0 ||
+        (runtimeStatus.mode & 0o111) === 0 ||
+        openClawPath !== "/home/ubuntu/.openclaw" ||
+        !openClawStatus.isDirectory() ||
+        openClawStatus.uid !== userId ||
+        (openClawStatus.mode & 0o7777) !== 0o700
+    ) {
+        throw new Error(failureMessage);
+    }
+    return Object.freeze({ runtimeSha256: sha256(runtimeBytes) });
 }
 
 /**
@@ -407,11 +488,13 @@ export async function bootstrapProduction(
     options: ProductionBootstrapOptions = {}
 ): Promise<void> {
     const repositoryRoot = options.repositoryRoot ?? projectRoot;
+    const userId =
+        options.userId ?? (typeof process.getuid === "function" ? process.getuid() : 0);
     const releaseId = await resolveProductionBootstrapSourceIdentity(
         dependencies,
         repositoryRoot,
         options.expectedCheckout ?? `${projectHome}/production/checkout`,
-        options.userId ?? (typeof process.getuid === "function" ? process.getuid() : 0)
+        userId
     );
     const selectedVersionFile = await readFile(
         path.join(repositoryRoot, ".bun-version"),
@@ -421,7 +504,13 @@ export async function bootstrapProduction(
     if (Bun.version !== selectedVersion) {
         throw new Error(`Production bootstrap requires Bun ${selectedVersion}`);
     }
-    await verifyProductionBootstrapPrerequisites(dependencies, repositoryRoot);
+    const prerequisites = dependencies.inspectPrerequisites
+        ? await dependencies.inspectPrerequisites()
+        : await verifyProductionBootstrapPrerequisites(
+              dependencies,
+              repositoryRoot,
+              userId
+          );
     const temporaryRoot = options.createTemporaryRoot
         ? await options.createTemporaryRoot()
         : await mkdtemp(path.join(os.tmpdir(), "mira-dashboard-bootstrap-"));
@@ -441,6 +530,8 @@ export async function bootstrapProduction(
             artifactRoot,
             releaseId,
             admitted.manifestSha256,
+            admitted.archiveSha256,
+            prerequisites.runtimeSha256,
             dependencies
         );
         await requireSuccess(dependencies, [
