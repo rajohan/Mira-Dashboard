@@ -1,0 +1,166 @@
+{
+    "gatewayEvents": [
+        "session.approval",
+        "session.message",
+        "session.observer",
+        "session.operation",
+        "session.sharing",
+        "session.suggestion",
+        "session.tool",
+        "session.typing",
+        "sessions.changed"
+    ],
+    "methods": [
+        "session.discussion.info",
+        "session.discussion.open",
+        "session.members.add",
+        "session.members.list",
+        "session.members.remove",
+        "session.suggestions.add",
+        "session.suggestions.list",
+        "session.suggestions.resolve",
+        "session.typing",
+        "session.visibility.set",
+        "sessions.abort",
+        "sessions.branches.list",
+        "sessions.branches.switch",
+        "sessions.catalog.archive",
+        "sessions.catalog.continue",
+        "sessions.catalog.list",
+        "sessions.catalog.read",
+        "sessions.cleanup",
+        "sessions.compact",
+        "sessions.compaction.branch",
+        "sessions.compaction.get",
+        "sessions.compaction.list",
+        "sessions.compaction.restore",
+        "sessions.companion.ask",
+        "sessions.companion.reset",
+        "sessions.companion.state",
+        "sessions.create",
+        "sessions.delete",
+        "sessions.describe",
+        "sessions.diff",
+        "sessions.dispatch",
+        "sessions.files.get",
+        "sessions.files.list",
+        "sessions.files.reveal",
+        "sessions.files.set",
+        "sessions.fork",
+        "sessions.get",
+        "sessions.groups.delete",
+        "sessions.groups.list",
+        "sessions.groups.put",
+        "sessions.groups.rename",
+        "sessions.list",
+        "sessions.messages.subscribe",
+        "sessions.messages.unsubscribe",
+        "sessions.observer.visibility",
+        "sessions.patch",
+        "sessions.pluginPatch",
+        "sessions.preview",
+        "sessions.reclaim",
+        "sessions.reset",
+        "sessions.resolve",
+        "sessions.rewind",
+        "sessions.search",
+        "sessions.send",
+        "sessions.steer",
+        "sessions.subscribe",
+        "sessions.unsubscribe",
+        "sessions.usage",
+        "sessions.usage.logs",
+        "sessions.usage.timeseries",
+        "sessions.viewers.set"
+    ],
+    "schemaVersion": 1,
+    "companion": {
+        "authority": {
+            "askResultDelivery": "requester-only",
+            "dedicatedGatewayEvent": false,
+            "stateStorage": "process-memory"
+        },
+        "lifecycle": {
+            "firstFailedAskRemovesEmptyThread": true,
+            "resetAbortsActiveAsk": true,
+            "sessionResetClearsThread": true,
+            "serviceDisposeAbortsAll": true
+        },
+        "limits": {
+            "answerChars": 1200,
+            "connectionAsksPerMinute": 4,
+            "exchangeBytes": 49152,
+            "exchanges": 24,
+            "globalAsksPerMinute": 12,
+            "globalConcurrentAsks": 6,
+            "idleTtlMs": 7200000,
+            "perSeedMessageChars": 4000,
+            "perSessionConcurrentAsks": 1,
+            "questionChars": 400,
+            "seedBytes": 24576,
+            "seedTranscriptMessages": 40,
+            "sweepIntervalMs": 600000,
+            "timeoutMs": 60000
+        },
+        "methodPermissions": [
+            {
+                "controlPlaneWrite": false,
+                "name": "sessions.companion.ask",
+                "scope": "operator.read"
+            },
+            {
+                "controlPlaneWrite": true,
+                "name": "sessions.companion.reset",
+                "scope": "operator.write"
+            },
+            {
+                "controlPlaneWrite": false,
+                "name": "sessions.companion.state",
+                "scope": "operator.read"
+            }
+        ],
+        "runtimePolicy": {
+            "askStartsUtilityModelInference": true,
+            "messageToolDisabled": true,
+            "sessionsVisibility": "self",
+            "toolSearchDisabled": true,
+            "tools": ["read", "sessions_history", "sessions_search"],
+            "workspaceOnly": true
+        },
+        "uiProjection": {
+            "busyCode": "SESSION_COMPANION_BUSY",
+            "hydrationIsRevisionGuarded": true,
+            "localPendingPerSession": true,
+            "retainedExchanges": 24
+        }
+    },
+    "domain": "sessions",
+    "plan": {
+        "authority": {
+            "dedicatedGatewayEvent": false,
+            "dedicatedRpcMethod": false,
+            "gatewayEvent": "agent",
+            "phase": "update",
+            "producerTool": "update_plan",
+            "stream": "plan"
+        },
+        "contract": {
+            "legacyStringStepsBecomePending": true,
+            "maximumInProgressSteps": 1,
+            "minimumSteps": 1,
+            "statuses": ["pending", "in_progress", "completed"]
+        },
+        "lifecycle": {
+            "clearedOnOwningRunTerminal": true,
+            "durableAfterTerminal": false,
+            "historyRecovery": "in-flight-run-only",
+            "runOwned": true
+        },
+        "uiProjection": {
+            "activeOnly": true,
+            "composerChecklist": true,
+            "messageStreamCard": true,
+            "sessionRailStepLimit": 3
+        }
+    }
+}

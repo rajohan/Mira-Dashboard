@@ -70,8 +70,8 @@ export async function buildFrontend({
         outdir: resolvedOutdir,
         plugins: [
             ...(isProduction ? [productionDevtoolsPlugin] : []),
-            tailwindPlugin,
             reactCompilerPlugin,
+            tailwindPlugin,
         ],
         publicPath: "/",
         sourcemap: isProduction ? "none" : "linked",

@@ -1,4 +1,4 @@
-import { Effect, Layer, ManagedRuntime, Stream } from "effect";
+import { Data, Effect, Exit, Fiber, Layer, ManagedRuntime, Stream } from "effect";
 
 import {
     type AuthenticationWorkLayerOptions,
@@ -30,12 +30,46 @@ export interface ApplicationRuntimeServices {
     readonly realtimeEvents: RealtimeEventRuntimeService;
 }
 
+export type ApplicationListenerStopOperation = "force" | "graceful";
+export type ApplicationListenerStopWait = "force" | "graceful-settlement";
+
+/** Expected operational rejection from Bun listener shutdown. */
+export class ApplicationListenerStopError extends Data.TaggedError(
+    "ApplicationListenerStopError"
+)<{
+    readonly cause: unknown;
+    readonly operation: ApplicationListenerStopOperation;
+}> {}
+
+/** Expected failure when listener shutdown does not settle inside its budget. */
+export class ApplicationListenerStopTimeoutError extends Data.TaggedError(
+    "ApplicationListenerStopTimeoutError"
+)<{
+    readonly operation: ApplicationListenerStopWait;
+    readonly timeoutMs: number;
+}> {}
+
+export type ApplicationListenerShutdownError =
+    | ApplicationListenerStopError
+    | ApplicationListenerStopTimeoutError;
+
+/** One process-listener shutdown coordinated by the process Effect runtime. */
+export interface ApplicationListenerShutdownOptions {
+    /** Synchronous escalation bridge used by repeated `ApplicationServer.stop(true)`. */
+    readonly forceSignal: AbortSignal;
+    /** Independent budget applied to each graceful, forced, and settlement phase. */
+    readonly gracefulShutdownTimeoutMs: number;
+    readonly stop: (force: boolean) => Promise<void>;
+}
+
 /** Effect-backed lifecycle and request services owned by one long-lived Bun process. */
 export interface ApplicationRuntime {
     readonly services: ApplicationRuntimeServices;
     dispose(): Promise<void>;
     /** Eagerly builds and caches every process-owned layer before readiness. */
     initialize(): Promise<void>;
+    /** Drains or force-stops the one process listener before runtime disposal. */
+    shutdownListener(options: ApplicationListenerShutdownOptions): Promise<void>;
 }
 
 /** Scoped layers owned by one composition root for the full process lifetime. */
@@ -60,6 +94,104 @@ function abortSignalEffect(signal: AbortSignal): Effect.Effect<void> {
         signal.addEventListener("abort", onAbort, { once: true });
         return Effect.sync(() => signal.removeEventListener("abort", onAbort));
     });
+}
+
+function listenerStopEffect(
+    options: ApplicationListenerShutdownOptions,
+    force: boolean
+): Effect.Effect<void, ApplicationListenerStopError> {
+    return Effect.tryPromise({
+        catch: (cause) =>
+            new ApplicationListenerStopError({
+                cause,
+                operation: force ? "force" : "graceful",
+            }),
+        try: () => options.stop(force),
+    });
+}
+
+function boundedForceListenerStop(
+    options: ApplicationListenerShutdownOptions
+): Effect.Effect<void, ApplicationListenerShutdownError> {
+    return listenerStopEffect(options, true).pipe(
+        Effect.timeoutOrElse({
+            duration: options.gracefulShutdownTimeoutMs,
+            orElse: () =>
+                Effect.fail(
+                    new ApplicationListenerStopTimeoutError({
+                        operation: "force",
+                        timeoutMs: options.gracefulShutdownTimeoutMs,
+                    })
+                ),
+        })
+    );
+}
+
+function awaitGracefulListenerSettlement(
+    options: ApplicationListenerShutdownOptions,
+    gracefulFiber: Fiber.Fiber<void, ApplicationListenerStopError>
+): Effect.Effect<void, ApplicationListenerStopTimeoutError> {
+    return Fiber.await(gracefulFiber).pipe(
+        Effect.asVoid,
+        Effect.timeoutOrElse({
+            duration: options.gracefulShutdownTimeoutMs,
+            orElse: () =>
+                Effect.fail(
+                    new ApplicationListenerStopTimeoutError({
+                        operation: "graceful-settlement",
+                        timeoutMs: options.gracefulShutdownTimeoutMs,
+                    })
+                ),
+        })
+    );
+}
+
+function forceAndSettleGracefulListener(
+    options: ApplicationListenerShutdownOptions,
+    gracefulFiber: Fiber.Fiber<void, ApplicationListenerStopError>
+): Effect.Effect<void, ApplicationListenerShutdownError> {
+    return boundedForceListenerStop(options).pipe(
+        Effect.andThen(awaitGracefulListenerSettlement(options, gracefulFiber))
+    );
+}
+
+function coordinatedListenerShutdown(
+    options: ApplicationListenerShutdownOptions
+): Effect.Effect<void, ApplicationListenerShutdownError> {
+    return Effect.scoped(
+        Effect.gen(function* () {
+            if (options.forceSignal.aborted) {
+                return yield* boundedForceListenerStop(options);
+            }
+
+            const gracefulFiber = yield* listenerStopEffect(options, false).pipe(
+                Effect.forkScoped
+            );
+            const gracefulOutcome = Fiber.await(gracefulFiber).pipe(
+                Effect.map((exit) => ({ exit, kind: "graceful" as const }))
+            );
+            const forceRequested = abortSignalEffect(options.forceSignal).pipe(
+                Effect.as({ kind: "force-requested" as const })
+            );
+            const gracefulDeadline = Effect.sleep(options.gracefulShutdownTimeoutMs).pipe(
+                Effect.as({ kind: "deadline" as const })
+            );
+            const outcome = yield* Effect.raceFirst(
+                gracefulOutcome,
+                Effect.raceFirst(forceRequested, gracefulDeadline)
+            );
+
+            if (outcome.kind !== "graceful") {
+                return yield* forceAndSettleGracefulListener(options, gracefulFiber);
+            }
+            if (Exit.isSuccess(outcome.exit)) return;
+
+            // A failed graceful stop still receives one bounded force attempt. Its
+            // initiating failure remains the externally observable root cause.
+            yield* boundedForceListenerStop(options).pipe(Effect.ignore);
+            return yield* Effect.failCause(outcome.exit.cause);
+        })
+    );
 }
 
 /**
@@ -206,5 +338,8 @@ export function createApplicationRuntime(
             await runtime.context();
         },
         services,
+        shutdownListener(options: ApplicationListenerShutdownOptions) {
+            return runtime.runPromise(coordinatedListenerShutdown(options));
+        },
     });
 }

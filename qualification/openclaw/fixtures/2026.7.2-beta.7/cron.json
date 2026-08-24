@@ -1,0 +1,18 @@
+{
+    "gatewayEvents": ["cron"],
+    "methods": [
+        "cron.add",
+        "cron.get",
+        "cron.list",
+        "cron.remove",
+        "cron.run",
+        "cron.runs",
+        "cron.scratch.get",
+        "cron.scratch.set",
+        "cron.status",
+        "cron.update",
+        "wake"
+    ],
+    "schemaVersion": 1,
+    "domain": "cron"
+}

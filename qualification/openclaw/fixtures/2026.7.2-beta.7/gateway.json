@@ -1,0 +1,23 @@
+{
+    "challengeEvent": "connect.challenge",
+    "frameTypes": ["event", "req", "res"],
+    "gatewayEvents": [
+        "connect.challenge",
+        "health",
+        "heartbeat",
+        "presence",
+        "shutdown",
+        "tick"
+    ],
+    "helloType": "hello-ok",
+    "limits": {
+        "authenticatedFrameBytes": 26214400,
+        "preauthenticationFrameBytes": 65536
+    },
+    "method": "connect",
+    "minimumClientProtocolVersion": 4,
+    "minimumNodeProtocolVersion": 3,
+    "minimumProbeProtocolVersion": 3,
+    "protocolVersion": 4,
+    "schemaVersion": 1
+}
