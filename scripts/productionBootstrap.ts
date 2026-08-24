@@ -4,7 +4,9 @@ import path from "node:path";
 
 import * as v from "valibot";
 
+import { applicationConfigurationRegistry } from "../src/shared/configuration/applicationConfigurationRegistry.ts";
 import { productionReleaseArtifactReceiptSchema } from "./delivery/packageProductionReleaseArtifact.ts";
+import { discardOwnedProductionReleaseCandidate } from "./delivery/productionReleasePublication.ts";
 import { verifyReleaseArtifactIdentity } from "./delivery/releaseIdentity.ts";
 
 const failureMessage = "Production bootstrap failed";
@@ -12,6 +14,16 @@ const projectRoot = path.resolve(import.meta.dir, "..");
 const projectHome = "/home/ubuntu/projects/mira-dashboard";
 const provisioningRoot = "/var/lib/mira-dashboard-host-provisioning";
 const maximumOutputBytes = 1024 * 1024;
+const dopplerConfigurationNames = applicationConfigurationRegistry
+    .filter(
+        (entry) =>
+            entry.secret &&
+            (entry.required ||
+                entry.environmentName ===
+                    "MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD")
+    )
+    .map((entry) => entry.environmentName)
+    .join(",");
 
 interface CommandResult {
     readonly exitCode: number;
@@ -24,6 +36,11 @@ const githubReleaseSchema = v.strictObject({
         v.maxLength(128),
         v.regex(/^v\d+\.\d+\.\d+(?:[.-][0-9A-Za-z.-]+)?$/u)
     ),
+});
+
+const tailscaleStatusSchema = v.object({
+    BackendState: v.literal("Running"),
+    Self: v.object({ Online: v.literal(true) }),
 });
 
 export interface ProductionBootstrapDependencies {
@@ -274,8 +291,8 @@ export async function admitProductionBootstrapRelease(
     assertProductionReleaseArchiveListing(listing, releaseId);
     const releasesRoot = path.join(repositoryRoot, "dist/releases");
     const releaseRoot = path.join(releasesRoot, releaseId);
-    await rm(releaseRoot, { force: true, recursive: true });
     await mkdir(releasesRoot, { mode: 0o700, recursive: true });
+    await discardOwnedProductionReleaseCandidate(releasesRoot, releaseRoot, releaseId);
     await requireSuccess(dependencies, [
         "/usr/bin/tar",
         "-xf",
@@ -461,6 +478,12 @@ export async function verifyProductionBootstrapPrerequisites(
         ["/usr/local/bin/doppler", "--version"],
         repositoryRoot
     );
+    const tailscaleStatus = await requireSuccess(
+        dependencies,
+        ["/usr/bin/tailscale", "status", "--json"],
+        repositoryRoot
+    );
+    v.parse(tailscaleStatusSchema, JSON.parse(tailscaleStatus) as unknown);
     const dopplerRoot = "/home/ubuntu/.doppler";
     const dopplerConfig = `${dopplerRoot}/.doppler.yaml`;
     const [runtimePath, openClawPath, dopplerPath, dopplerConfigPath] = await Promise.all(
@@ -509,6 +532,33 @@ export async function verifyProductionBootstrapPrerequisites(
     ) {
         throw new Error(failureMessage);
     }
+    await requireSuccess(
+        dependencies,
+        [
+            "/usr/bin/env",
+            "-i",
+            "HOME=/home/ubuntu",
+            "PATH=/usr/local/bin:/usr/bin:/bin",
+            "NODE_ENV=production",
+            `MIRA_DASHBOARD_PROJECT_ROOT=${projectHome}`,
+            "MIRA_DASHBOARD_OPENCLAW_ROOT=/home/ubuntu/.openclaw",
+            "MIRA_DASHBOARD_WORKSPACE_ROOT=/home/ubuntu/.openclaw/workspace",
+            "PORT=3100",
+            "/usr/local/bin/doppler",
+            "run",
+            "--config=prd",
+            "--project=rajohan",
+            "--config-dir=/home/ubuntu/.doppler",
+            "--no-read-env",
+            `--only-secrets=${dopplerConfigurationNames}`,
+            "--no-exit-on-missing-only-secrets",
+            "--preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT,MIRA_DASHBOARD_OPENCLAW_ROOT,MIRA_DASHBOARD_WORKSPACE_ROOT,PORT",
+            "--",
+            process.execPath,
+            path.join(repositoryRoot, "scripts/productionBootstrapDopplerCheck.ts"),
+        ],
+        repositoryRoot
+    );
     return Object.freeze({ runtimeSha256: sha256(runtimeBytes) });
 }
 

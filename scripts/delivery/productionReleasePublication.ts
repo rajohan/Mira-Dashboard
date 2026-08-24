@@ -446,7 +446,13 @@ async function freezeReleaseTree(
     await assertReleaseTreeMode(releaseRoot, after, true);
 }
 
-async function restoreOwnedCandidate(
+/**
+ * Restores and removes one same-user, same-filesystem immutable release candidate.
+ * @param releasesDirectory Canonical private parent directory.
+ * @param candidateRoot Exact direct child selected for removal.
+ * @param expectedName Exact basename admitted by the caller.
+ */
+export async function discardOwnedProductionReleaseCandidate(
     releasesDirectory: string,
     candidateRoot: string,
     expectedName: string
@@ -580,7 +586,7 @@ export async function publishProductionRelease(
     } catch {
         if (ownedRoot && ownedName) {
             try {
-                await restoreOwnedCandidate(
+                await discardOwnedProductionReleaseCandidate(
                     paths.releasesDirectory,
                     ownedRoot,
                     ownedName

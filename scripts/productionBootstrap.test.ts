@@ -15,6 +15,7 @@ import {
     verifyProductionBootstrapPrerequisites,
     type ProductionBootstrapDependencies,
 } from "./productionBootstrap.ts";
+import { assertProductionBootstrapDopplerEnvironment } from "./productionBootstrapDopplerCheck.ts";
 import {
     createLocalReleaseFixture,
     removeProductionDeliveryFixtures,
@@ -51,6 +52,25 @@ async function captureFailure(operation: Promise<unknown>): Promise<unknown> {
 }
 
 describe("production bootstrap admission", () => {
+    test("requires every production credential without exposing values", () => {
+        const environment = Object.fromEntries(
+            [
+                "MOLTBOOK_API_KEY",
+                "OPENCLAW_GATEWAY_TOKEN",
+                "MIRA_DASHBOARD_TOTP_KEYRING",
+                "RESEND_API_KEY",
+                "MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD",
+            ].map((name) => [name, "present"])
+        );
+        expect(() =>
+            assertProductionBootstrapDopplerEnvironment(environment)
+        ).not.toThrow();
+        delete environment.MIRA_DASHBOARD_TOTP_KEYRING;
+        expect(() => assertProductionBootstrapDopplerEnvironment(environment)).toThrow(
+            "Production Doppler configuration is incomplete"
+        );
+    });
+
     test("accepts only a GitHub release for the exact clean checkout", () => {
         expect(
             parseProductionBootstrapRelease({ tagName: "v0.2.0" }, releaseId, releaseId)
@@ -144,7 +164,13 @@ describe("production bootstrap admission", () => {
     test("binds clean-host prerequisites to root-owned runtime bytes", async () => {
         const runtimeBytes = new TextEncoder().encode("qualified-runtime");
         const dependencies: ProductionBootstrapDependencies = {
-            run: () => Promise.resolve({ exitCode: 0, stdout: "ready\n" }),
+            run: (command) =>
+                Promise.resolve({
+                    exitCode: 0,
+                    stdout: command.includes("/usr/bin/tailscale")
+                        ? '{"BackendState":"Running","Self":{"Online":true}}\n'
+                        : "ready\n",
+                }),
         };
         const result = await verifyProductionBootstrapPrerequisites(
             dependencies,
@@ -194,7 +220,12 @@ describe("production bootstrap admission", () => {
                 {
                     run: (command) => {
                         commands.push([...command]);
-                        return Promise.resolve({ exitCode: 0, stdout: "ready\n" });
+                        return Promise.resolve({
+                            exitCode: 0,
+                            stdout: command.includes("/usr/bin/tailscale")
+                                ? '{"BackendState":"Running","Self":{"Online":true}}\n'
+                                : "ready\n",
+                        });
                     },
                 },
                 "/srv/dashboard",
@@ -228,6 +259,30 @@ describe("production bootstrap admission", () => {
         );
 
         expect(failure).toEqual(new Error("Production bootstrap failed"));
+        expect(commands.some((command) => command[0] === "/usr/bin/sudo")).toBe(false);
+    });
+
+    test("rejects an offline Tailscale host before filesystem admission", async () => {
+        const commands: string[][] = [];
+        const failure = await captureFailure(
+            verifyProductionBootstrapPrerequisites(
+                {
+                    run: (command) => {
+                        commands.push([...command]);
+                        return Promise.resolve({
+                            exitCode: 0,
+                            stdout: command.includes("/usr/bin/tailscale")
+                                ? '{"BackendState":"NeedsLogin","Self":{"Online":false}}\n'
+                                : "ready\n",
+                        });
+                    },
+                },
+                "/srv/dashboard",
+                1000
+            )
+        );
+
+        expect(failure).toBeInstanceOf(Error);
         expect(commands.some((command) => command[0] === "/usr/bin/sudo")).toBe(false);
     });
 
@@ -275,6 +330,14 @@ describe("production bootstrap admission", () => {
             path.join(targetRepositoryRoot, "dist/releases", releaseId)
         );
         expect(admitted.manifestSha256).toBe(receipt.releaseManifestSha256);
+
+        const readmitted = await admitProductionBootstrapRelease(
+            targetArtifactRoot,
+            releaseId,
+            realProcessDependencies,
+            targetRepositoryRoot
+        );
+        expect(readmitted.manifestSha256).toBe(receipt.releaseManifestSha256);
     });
 
     test("stages every fixed root authority command without shell interpretation", async () => {

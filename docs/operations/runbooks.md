@@ -8,7 +8,8 @@ Docker must be running, its `docker` group must exist, and `ubuntu` must already
 the daemon in its current login session. OpenClaw must be installed and initialized first so
 `/home/ubuntu/.openclaw` exists as canonical `ubuntu`-owned mode `0700` state.
 Doppler must be initialized for `ubuntu` with canonical `ubuntu`-owned mode `0700`
-`/home/ubuntu/.doppler` state and a single-link mode `0600` `.doppler.yaml` config file.
+`/home/ubuntu/.doppler` state, a single-link mode `0600` `.doppler.yaml` config file, and access to
+the required `rajohan`/`prd` production secrets. Tailscale must be running, joined, and online.
 Authenticate those host-owned tools outside chat. Clone GitHub `main` into
 `/home/ubuntu/projects/mira-dashboard/production/checkout`, ensure `origin/main` is current, then run
 as `ubuntu`:
