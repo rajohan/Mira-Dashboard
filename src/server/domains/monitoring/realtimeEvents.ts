@@ -1,6 +1,10 @@
 import * as v from "valibot";
 
-import { monitoringChangePayloadSchema } from "../../../contracts/monitoring.ts";
+import {
+    findMonitoringRealtimeTopicDefinition,
+    monitoringRealtimeRoutingSchema,
+    monitoringRealtimeTopics,
+} from "../../../contracts/monitoringRealtime.ts";
 import type { NormalizedMonitoringProblem } from "./normalization.ts";
 import type {
     IncidentRecord,
@@ -11,11 +15,7 @@ import { serializeMonitoringJsonObject } from "./serialization.ts";
 
 const monitoringNotificationKind = "monitoring.incident";
 
-export const monitoringRealtimeTopics = Object.freeze({
-    incidents: "monitoring.incidents",
-    notifications: "monitoring.notifications",
-    reports: "monitoring.reports",
-});
+export { monitoringRealtimeTopics } from "../../../contracts/monitoringRealtime.ts";
 
 export interface MutableSubmissionCounts {
     createdIncidents: number;
@@ -37,7 +37,16 @@ function createRealtimeEvent(input: {
     operation: RealtimeEventInsert["operation"];
     topic: string;
 }): RealtimeEventInsert {
-    const payload = v.parse(monitoringChangePayloadSchema, { id: input.entityId });
+    v.parse(monitoringRealtimeRoutingSchema, {
+        entityType: input.entityType,
+        operation: input.operation,
+        topic: input.topic,
+    });
+    const definition = findMonitoringRealtimeTopicDefinition(input.topic);
+    if (definition === undefined) {
+        throw new Error("Monitoring realtime event violates its topic contract");
+    }
+    const payload = v.parse(definition.payload, { id: input.entityId });
     const payloadJson = serializeMonitoringJsonObject(payload);
 
     return {

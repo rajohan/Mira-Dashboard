@@ -3,7 +3,10 @@ import * as v from "valibot";
 
 import { timestampMillisecondsSchema } from "../shared/dateTime.ts";
 import { utf8ByteLength } from "../shared/encoding.ts";
-import { lowercaseUuidV7Schema } from "../shared/validation.ts";
+import {
+    boundedNonBlankStringSchema,
+    lowercaseUuidV7Schema,
+} from "../shared/validation.ts";
 
 export type JsonObject = { readonly [key: string]: JsonValue };
 export type JsonValue =
@@ -67,14 +70,6 @@ function encodedJsonBytes(value: JsonObject): number {
     return utf8ByteLength(JSON.stringify(value));
 }
 
-function boundedNonBlankString(maximumLength: number) {
-    return v.pipe(
-        v.string(),
-        v.maxLength(maximumLength),
-        v.check((value) => value.trim().length > 0, "Expected a non-blank string.")
-    );
-}
-
 /** JSON object accepted by monitoring report metadata and incident details. */
 export const monitoringJsonObjectSchema = v.pipe(
     v.custom<JsonObject>(isJsonObject, "Expected a JSON object."),
@@ -91,35 +86,34 @@ const monitoringRunIdSchema = lowercaseUuidV7Schema(
 );
 
 /** Shared persisted monitoring kind policy. */
-export const monitoringKindSchema = boundedNonBlankString(100);
+export const monitoringKindSchema = boundedNonBlankStringSchema(100);
 
 /** Shared persisted monitor key policy. */
-export const monitoringMonitorKeySchema = boundedNonBlankString(200);
+export const monitoringMonitorKeySchema = boundedNonBlankStringSchema(200);
 
 /** Shared persisted monitoring problem title policy. */
-export const monitoringProblemTitleSchema = boundedNonBlankString(1000);
+export const monitoringProblemTitleSchema = boundedNonBlankStringSchema(1000);
 
 /** Shared persisted report body policy. */
-export const monitoringReportBodyMarkdownSchema = v.pipe(
-    v.string(),
-    v.maxLength(maximumReportBodyCharacters),
-    v.check((value) => value.trim().length > 0, "Expected a non-blank report body.")
+export const monitoringReportBodyMarkdownSchema = boundedNonBlankStringSchema(
+    maximumReportBodyCharacters,
+    "Expected a non-blank report body."
 );
 
 /** Shared persisted report source policy. */
-export const monitoringReportSourceSchema = boundedNonBlankString(200);
+export const monitoringReportSourceSchema = boundedNonBlankStringSchema(200);
 
 /** Shared persisted report source-job policy. */
-export const monitoringReportSourceJobIdSchema = boundedNonBlankString(200);
+export const monitoringReportSourceJobIdSchema = boundedNonBlankStringSchema(200);
 
 /** Shared persisted report title policy. */
-export const monitoringReportTitleSchema = boundedNonBlankString(500);
+export const monitoringReportTitleSchema = boundedNonBlankStringSchema(500);
 
 /** One observed problem in a complete monitor snapshot. */
 export const monitoringProblemInputSchema = v.strictObject({
-    condition: boundedNonBlankString(200),
+    condition: boundedNonBlankStringSchema(200),
     details: v.optional(monitoringJsonObjectSchema, {}),
-    entityKey: boundedNonBlankString(200),
+    entityKey: boundedNonBlankStringSchema(200),
     kind: monitoringKindSchema,
     severity: v.picklist(["critical", "error", "info", "warning"]),
     title: monitoringProblemTitleSchema,
@@ -158,7 +152,7 @@ export const completeMonitoringSnapshotInputSchema = v.pipe(
 
 /** Compact durable outbox payload used to invalidate one changed entity. */
 export const monitoringChangePayloadSchema = v.strictObject({
-    id: boundedNonBlankString(200),
+    id: boundedNonBlankStringSchema(200),
 });
 
 export type CompleteMonitoringSnapshotInput = v.InferOutput<

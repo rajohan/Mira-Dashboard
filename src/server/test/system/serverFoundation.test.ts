@@ -3,7 +3,11 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { createTRPCClient, httpBatchLink } from "@trpc/client";
 import superjson from "superjson";
 
-import { createServer, serverRequestBodyMaximumBytes } from "../../../app/server.ts";
+import {
+    type ApplicationServer,
+    createServer,
+    serverRequestBodyMaximumBytes,
+} from "../../../app/server.ts";
 import { bunRuntimePolicy } from "../../../shared/bunRuntimePolicy.ts";
 import {
     createReadinessController,
@@ -11,15 +15,18 @@ import {
 } from "../../platform/readiness/readinessState.ts";
 import * as runtimeIdentityModule from "../../platform/runtime/readRuntimeIdentity.ts";
 import type { AppRouter } from "../../trpc/appRouter.ts";
+import { createTestApplicationRuntime } from "../support/requestContext.ts";
 
-const servers: Array<ReturnType<typeof createServer>> = [];
+const servers: ApplicationServer[] = [];
 
-function startServer(): {
+async function startServer(): Promise<{
     readiness: ReadinessController;
-    server: ReturnType<typeof createServer>;
-} {
+    server: ApplicationServer;
+}> {
     const readiness = createReadinessController();
-    const server = createServer({
+    const server = await createServer({
+        applicationRuntime: createTestApplicationRuntime(),
+        authenticateRequest: () => ({ kind: "anonymous" }),
         hostname: "127.0.0.1",
         port: 0,
         readiness,
@@ -36,7 +43,7 @@ afterEach(async () => {
 
 describe("system foundation", () => {
     test("serves typed runtime identity through tRPC", async () => {
-        const { server } = startServer();
+        const { server } = await startServer();
         const client = createTRPCClient<AppRouter>({
             links: [
                 httpBatchLink({
@@ -61,7 +68,7 @@ describe("system foundation", () => {
     });
 
     test("keeps health checks as explicit raw HTTP protocol routes", async () => {
-        const { readiness: readinessController, server } = startServer();
+        const { readiness: readinessController, server } = await startServer();
 
         const liveness = await fetch(new URL("/api/health/live", server.url));
         const readiness = await fetch(new URL("/api/health/ready", server.url));
@@ -97,7 +104,7 @@ describe("system foundation", () => {
     });
 
     test("rejects request bodies above the bounded application transport budget", async () => {
-        const { server } = startServer();
+        const { server } = await startServer();
         const response = await fetch(
             new URL("/trpc/system.runtimeIdentity", server.url),
             {
@@ -108,6 +115,74 @@ describe("system foundation", () => {
         );
 
         expect(response.status).toBe(413);
+    });
+
+    test("prewarms and disposes the process runtime exactly once", async () => {
+        let disposals = 0;
+        let initializations = 0;
+        const server = await createServer({
+            applicationRuntime: createTestApplicationRuntime({
+                dispose: () => {
+                    disposals += 1;
+                    return Promise.resolve();
+                },
+                initialize: () => {
+                    initializations += 1;
+                    return Promise.resolve();
+                },
+            }),
+            authenticateRequest: () => ({ kind: "anonymous" }),
+            hostname: "127.0.0.1",
+            port: 0,
+            readiness: createReadinessController(),
+        });
+        servers.push(server);
+
+        expect(initializations).toBe(1);
+        await server.stop(true);
+        await server.stop(true);
+        expect(disposals).toBe(1);
+    });
+
+    test("stops a listener that reports an invalid bound port", async () => {
+        let disposals = 0;
+        let forcedStops = 0;
+        const serveSpy = spyOn(Bun, "serve").mockImplementation(
+            () =>
+                ({
+                    port: 0,
+                    stop(force?: boolean) {
+                        if (force) forcedStops += 1;
+                        return Promise.resolve();
+                    },
+                    url: new URL("http://127.0.0.1"),
+                }) as unknown as ReturnType<typeof Bun.serve>
+        );
+
+        try {
+            let startupFailure: unknown;
+            try {
+                await createServer({
+                    applicationRuntime: createTestApplicationRuntime({
+                        dispose: () => {
+                            disposals += 1;
+                            return Promise.resolve();
+                        },
+                    }),
+                    authenticateRequest: () => ({ kind: "anonymous" }),
+                    port: 0,
+                    readiness: createReadinessController(),
+                });
+            } catch (error) {
+                startupFailure = error;
+            }
+
+            expect(startupFailure).toBeInstanceOf(Error);
+            expect(forcedStops).toBe(1);
+            expect(disposals).toBe(1);
+        } finally {
+            serveSpy.mockRestore();
+        }
     });
 
     test("accepts new canary revisions on Bun 1.4", () => {
@@ -132,7 +207,7 @@ describe("system foundation", () => {
         ).toThrow(`Serving Bun runtime must be ${bunRuntimePolicy.version}`);
     });
 
-    test("runs the runtime guard before invoking Bun.serve", () => {
+    test("runs the runtime guard before invoking Bun.serve", async () => {
         const runtimeError = new Error("simulated unqualified runtime");
         const runtimeSpy = spyOn(
             runtimeIdentityModule,
@@ -146,7 +221,31 @@ describe("system foundation", () => {
 
         try {
             const readiness = createReadinessController();
-            expect(() => createServer({ port: 0, readiness })).toThrow(runtimeError);
+            let disposals = 0;
+            let initializations = 0;
+            let startupFailure: unknown;
+            try {
+                await createServer({
+                    applicationRuntime: createTestApplicationRuntime({
+                        dispose: () => {
+                            disposals += 1;
+                            return Promise.resolve();
+                        },
+                        initialize: () => {
+                            initializations += 1;
+                            return Promise.resolve();
+                        },
+                    }),
+                    authenticateRequest: () => ({ kind: "anonymous" }),
+                    port: 0,
+                    readiness,
+                });
+            } catch (error) {
+                startupFailure = error;
+            }
+            expect(startupFailure).toBe(runtimeError);
+            expect(disposals).toBe(1);
+            expect(initializations).toBe(0);
             expect(serveSpy).not.toHaveBeenCalled();
         } finally {
             serveSpy.mockRestore();
