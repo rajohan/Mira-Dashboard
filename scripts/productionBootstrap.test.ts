@@ -355,6 +355,8 @@ describe("production bootstrap admission", () => {
                     groupLookupCount += 1;
                     if (groupLookupCount === 2) {
                         stdout = "mira-dashboard-log-maintenance:x:986:\n";
+                    } else if (groupLookupCount === 3) {
+                        stdout = "mira-dashboard-log-maintenance:x:986:ubuntu\n";
                     }
                 }
                 return Promise.resolve({
@@ -409,6 +411,52 @@ describe("production bootstrap admission", () => {
             )
         ).toBe(true);
         expect(commands.at(-1)).toContain("--mode=apply");
+    });
+
+    test("rejects unexpected maintenance-group members", async () => {
+        const commands: string[][] = [];
+        const failure = await captureFailure(
+            stageProductionBootstrapRootAuthority(
+                "/tmp/artifact",
+                releaseId,
+                "c".repeat(64),
+                "d".repeat(64),
+                "e".repeat(64),
+                1000,
+                {
+                    run: (command) => {
+                        commands.push([...command]);
+                        if (command.includes("/usr/bin/sha256sum")) {
+                            return Promise.resolve({
+                                exitCode: 0,
+                                stdout: command.at(-1)?.endsWith("/runtime/bun")
+                                    ? `${"e".repeat(64)}  bun\n`
+                                    : `${"d".repeat(64)}  release.tar\n`,
+                            });
+                        }
+                        if (command[0] === "/usr/bin/getent") {
+                            return Promise.resolve({
+                                exitCode: 0,
+                                stdout: "mira-dashboard-log-maintenance:x:986:mira-dashboard-web\n",
+                            });
+                        }
+                        return Promise.resolve({ exitCode: 0, stdout: "" });
+                    },
+                }
+            )
+        );
+
+        expect(failure).toEqual(new Error("Production bootstrap failed"));
+        expect(
+            commands.some((command) =>
+                command.includes(
+                    "/usr/lib/tmpfiles.d/mira-dashboard-managed-container-logs.conf"
+                )
+            )
+        ).toBe(false);
+        expect(commands.some((command) => command.includes("/usr/sbin/usermod"))).toBe(
+            false
+        );
     });
 
     test("stops before root execution when staged bytes do not match", async () => {
@@ -555,12 +603,19 @@ describe("production bootstrap admission", () => {
                     command.at(-1) === "mira-dashboard-log-maintenance"
                 ) {
                     groupLookupCount += 1;
-                    return groupLookupCount === 1
-                        ? { exitCode: 2, stdout: "" }
-                        : {
-                              exitCode: 0,
-                              stdout: "mira-dashboard-log-maintenance:x:986:\n",
-                          };
+                    if (groupLookupCount === 1) {
+                        return { exitCode: 2, stdout: "" };
+                    }
+                    if (groupLookupCount === 2) {
+                        return {
+                            exitCode: 0,
+                            stdout: "mira-dashboard-log-maintenance:x:986:\n",
+                        };
+                    }
+                    return {
+                        exitCode: 0,
+                        stdout: "mira-dashboard-log-maintenance:x:986:ubuntu\n",
+                    };
                 }
                 return { exitCode: 0, stdout: "" };
             },

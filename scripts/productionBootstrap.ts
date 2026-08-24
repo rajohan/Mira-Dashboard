@@ -456,9 +456,31 @@ export async function stageProductionBootstrapRootAuthority(
             "mira-dashboard-log-maintenance",
         ]);
     }
-    const groupMatch =
+    let groupMatch =
         group.exitCode === 0
-            ? /^mira-dashboard-log-maintenance:[^:\n]*:(\d{1,10}):[^\n]*\n?$/u.exec(
+            ? /^mira-dashboard-log-maintenance:[^:\n]*:(\d{1,10}):([^\n]*)\n?$/u.exec(
+                  group.stdout
+              )
+            : null;
+    if (!groupMatch || (groupMatch[2] !== "" && groupMatch[2] !== "ubuntu")) {
+        throw new Error(failureMessage);
+    }
+    await requireSuccess(dependencies, [
+        sudo,
+        "/usr/sbin/usermod",
+        "--append",
+        "--groups",
+        "mira-dashboard-log-maintenance",
+        "ubuntu",
+    ]);
+    group = await dependencies.run([
+        "/usr/bin/getent",
+        "group",
+        "mira-dashboard-log-maintenance",
+    ]);
+    groupMatch =
+        group.exitCode === 0
+            ? /^mira-dashboard-log-maintenance:[^:\n]*:(\d{1,10}):(ubuntu)\n?$/u.exec(
                   group.stdout
               )
             : null;
@@ -476,14 +498,6 @@ export async function stageProductionBootstrapRootAuthority(
         "/usr/bin/systemd-tmpfiles",
         "--create",
         "/usr/lib/tmpfiles.d/mira-dashboard-managed-container-logs.conf",
-    ]);
-    await requireSuccess(dependencies, [
-        sudo,
-        "/usr/sbin/usermod",
-        "--append",
-        "--groups",
-        "mira-dashboard-log-maintenance",
-        "ubuntu",
     ]);
     await requireSuccess(dependencies, [sudo, "/usr/bin/systemctl", "daemon-reload"]);
     await requireSuccess(dependencies, [
