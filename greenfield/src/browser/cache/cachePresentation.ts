@@ -3,8 +3,10 @@ import {
     classifyDashboardBrowserFailure,
     type DashboardBrowserFailure,
 } from "../api/trpcError.ts";
-
-const byteUnits = ["B", "KiB", "MiB", "GiB", "TiB"] as const;
+export {
+    formatByteCount as formatCacheBytes,
+    formatUptime as formatCacheUptime,
+} from "../lib/formatMeasurements.ts";
 
 /**
  * @param freshness Independently derived cache freshness.
@@ -29,22 +31,6 @@ export function cacheAttemptVariant(
 }
 
 /**
- * Formats a nonnegative byte count without exposing locale- or host-specific state.
- * @param bytes Validated cache byte count.
- * @returns Compact binary-capacity label.
- */
-export function formatCacheBytes(bytes: number): string {
-    let value = bytes;
-    let unitIndex = 0;
-    while (value >= 1024 && unitIndex < byteUnits.length - 1) {
-        value /= 1024;
-        unitIndex += 1;
-    }
-    const digits = value >= 10 || unitIndex === 0 ? 0 : 1;
-    return `${value.toFixed(digits)} ${byteUnits[unitIndex]}`;
-}
-
-/**
  * Formats a nonnegative duration for concise operator metadata.
  * @param milliseconds Validated duration in milliseconds.
  * @returns Compact duration label.
@@ -53,20 +39,6 @@ export function formatCacheDuration(milliseconds: number): string {
     if (milliseconds < 1000) return `${milliseconds} ms`;
     const seconds = milliseconds / 1000;
     return `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)} s`;
-}
-
-/**
- * Formats validated host uptime without relying on wall-clock state.
- * @param seconds Whole uptime seconds.
- * @returns Human-readable bounded uptime.
- */
-export function formatCacheUptime(seconds: number): string {
-    const days = Math.floor(seconds / 86_400);
-    const hours = Math.floor((seconds % 86_400) / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    if (days > 0) return `${days}d ${hours}h`;
-    if (hours > 0) return `${hours}h ${minutes}m`;
-    return `${minutes}m`;
 }
 
 const cacheFailureMessages: Readonly<Record<DashboardBrowserFailure, string>> = {

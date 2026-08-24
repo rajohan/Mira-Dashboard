@@ -1,8 +1,29 @@
-import { runtimeIdentityContract } from "../../../contracts/system.ts";
+import { TRPCError } from "@trpc/server";
+
+import {
+    runtimeIdentityContract,
+    systemMetricsContract,
+} from "../../../contracts/system.ts";
 import { readRuntimeIdentity } from "../../platform/runtime/readRuntimeIdentity.ts";
-import { publicProcedure, router } from "../../trpc/trpc.ts";
+import { publicProcedure, router, sessionProcedure } from "../../trpc/trpc.ts";
+import { SystemMetricsUnavailableError } from "./systemMetricsService.ts";
 
 const systemRoutes = {
+    metrics: sessionProcedure
+        .input(systemMetricsContract.input)
+        .output(systemMetricsContract.output)
+        .query(async ({ ctx }) => {
+            try {
+                return await ctx.services.systemMetrics.read();
+            } catch (error) {
+                if (!(error instanceof SystemMetricsUnavailableError)) throw error;
+                throw new TRPCError({
+                    cause: error,
+                    code: "SERVICE_UNAVAILABLE",
+                    message: "System metrics are temporarily unavailable",
+                });
+            }
+        }),
     runtimeIdentity: publicProcedure
         .input(runtimeIdentityContract.input)
         .output(runtimeIdentityContract.output)
@@ -12,5 +33,5 @@ const systemRoutes = {
 /** Leaf procedure names owned by the system-router composition. */
 export const systemProcedureNames = Object.freeze(Object.keys(systemRoutes));
 
-/** Public system procedures implemented by the foundation slice. */
+/** Public identity and session-only system metric procedures. */
 export const systemRouter = router(systemRoutes);

@@ -28,6 +28,10 @@ import {
     authenticationWorkLayer,
     type AuthenticationVerificationWorkOptions,
 } from "../../domains/security/authenticationWorkGate.ts";
+import {
+    createSystemMetricsRuntimeService,
+    type SystemMetricsRuntimeService,
+} from "../../domains/system/systemMetricsService.ts";
 import { createEffectLoggerLayer } from "../observability/effectLogger.ts";
 import type { StructuredLogger } from "../observability/structuredLogger.ts";
 import { RealtimeEventPump, type RealtimeEventDelivery } from "../realtime/eventPump.ts";
@@ -56,6 +60,7 @@ export interface RealtimeEventRuntimeService {
 export interface ApplicationRuntimeServices {
     readonly authentication: AuthenticationWorkRuntimeService;
     readonly realtimeEvents: RealtimeEventRuntimeService;
+    readonly systemMetrics: SystemMetricsRuntimeService;
 }
 
 export type ApplicationListenerStopOperation = "force" | "graceful";
@@ -270,6 +275,7 @@ function createApplicationRuntimeFromManagedRuntime<RuntimeError>(
             throw error;
         }
     };
+    const systemMetrics = createSystemMetricsRuntimeService();
     const services: ApplicationRuntimeServices = Object.freeze({
         authentication: Object.freeze({
             passwordWorkGate: Object.freeze({
@@ -382,6 +388,7 @@ function createApplicationRuntimeFromManagedRuntime<RuntimeError>(
                 );
             },
         }),
+        systemMetrics,
     });
 
     return Object.freeze({
