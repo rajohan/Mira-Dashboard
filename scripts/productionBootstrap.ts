@@ -71,8 +71,9 @@ function parseMaintenanceGroup(
     expectedMembers: string
 ): Readonly<{ groupId: number; line: string }> | undefined {
     const line = stdout.endsWith("\n") ? stdout.slice(0, -1) : stdout;
-    const match =
-        /^mira-dashboard-log-maintenance:[^:\n]*:(\d{1,10}):([^\n]*)$/u.exec(line);
+    const match = /^mira-dashboard-log-maintenance:[^:\n]*:(\d{1,10}):([^\n]*)$/u.exec(
+        line
+    );
     if (!match || match[2] !== expectedMembers) return undefined;
     const groupId = Number(match[1]);
     return Number.isSafeInteger(groupId) && groupId >= minimumUnprivilegedGroupId
@@ -489,7 +490,10 @@ export async function stageProductionBootstrapRootAuthority(
     }
     let admittedGroup =
         group.exitCode === 0 ? parseMaintenanceGroup(group.stdout, "") : undefined;
-    if (!admittedGroup || !(await maintenanceGroupIsUnique(dependencies, admittedGroup))) {
+    if (
+        !admittedGroup ||
+        !(await maintenanceGroupIsUnique(dependencies, admittedGroup))
+    ) {
         throw new Error(failureMessage);
     }
     await requireSuccess(dependencies, [
@@ -506,10 +510,11 @@ export async function stageProductionBootstrapRootAuthority(
         "mira-dashboard-log-maintenance",
     ]);
     admittedGroup =
-        group.exitCode === 0
-            ? parseMaintenanceGroup(group.stdout, "ubuntu")
-            : undefined;
-    if (!admittedGroup || !(await maintenanceGroupIsUnique(dependencies, admittedGroup))) {
+        group.exitCode === 0 ? parseMaintenanceGroup(group.stdout, "ubuntu") : undefined;
+    if (
+        !admittedGroup ||
+        !(await maintenanceGroupIsUnique(dependencies, admittedGroup))
+    ) {
         throw new Error(failureMessage);
     }
     await requireSuccess(dependencies, [

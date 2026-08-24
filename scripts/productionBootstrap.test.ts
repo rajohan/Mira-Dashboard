@@ -361,8 +361,7 @@ describe("production bootstrap admission", () => {
                 if (isNamedGroupLookup) {
                     groupLookupCount += 1;
                     if (groupLookupCount === 2) {
-                        maintenanceGroupLine =
-                            "mira-dashboard-log-maintenance:x:986:\n";
+                        maintenanceGroupLine = "mira-dashboard-log-maintenance:x:986:\n";
                     } else if (groupLookupCount === 3) {
                         maintenanceGroupLine =
                             "mira-dashboard-log-maintenance:x:986:ubuntu\n";
@@ -372,8 +371,7 @@ describe("production bootstrap admission", () => {
                     stdout = maintenanceGroupLine;
                 }
                 return Promise.resolve({
-                    exitCode:
-                        isNamedGroupLookup && groupLookupCount === 1 ? 2 : 0,
+                    exitCode: isNamedGroupLookup && groupLookupCount === 1 ? 2 : 0,
                     stdout,
                 });
             },
@@ -532,10 +530,7 @@ describe("production bootstrap admission", () => {
                                     : `${"d".repeat(64)}  release.tar\n`,
                             });
                         }
-                        if (
-                            command[0] === "/usr/bin/getent" &&
-                            command.length === 3
-                        ) {
+                        if (command[0] === "/usr/bin/getent" && command.length === 3) {
                             return Promise.resolve({
                                 exitCode: 0,
                                 stdout: "mira-dashboard-log-maintenance:x:986:\n",
@@ -544,8 +539,7 @@ describe("production bootstrap admission", () => {
                         if (command[0] === "/usr/bin/getent") {
                             return Promise.resolve({
                                 exitCode: 0,
-                                stdout:
-                                    "mira-dashboard-log-maintenance:x:986:\nprivileged-alias:x:986:\n",
+                                stdout: "mira-dashboard-log-maintenance:x:986:\nprivileged-alias:x:986:\n",
                             });
                         }
                         return Promise.resolve({ exitCode: 0, stdout: "" });
