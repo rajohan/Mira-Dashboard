@@ -92,7 +92,6 @@
                   "operation": {
                     "enum": [
                       "deploy",
-                      "merge-and-deploy",
                       "rollback-release"
                     ],
                     "type": "string"
@@ -194,7 +193,6 @@
                   "operation": {
                     "enum": [
                       "deploy",
-                      "merge-and-deploy",
                       "rollback-release"
                     ],
                     "type": "string"
@@ -232,14 +230,13 @@
                         "branch-retained",
                         "comment-failed",
                         "deployment-failed",
-                        "deployment-not-started",
                         "deployment-outcome-unknown",
                         "main-sync-failed",
                         "preview-cleanup-failed"
                       ],
                       "type": "string"
                     },
-                    "maxItems": 8,
+                    "maxItems": 7,
                     "$comment": "Live Valibot validation additionally requires Delivery warning lists to be nonempty, unique, and canonically ordered."
                   }
                 },
@@ -315,7 +312,6 @@
                   "operation": {
                     "enum": [
                       "deploy",
-                      "merge-and-deploy",
                       "rollback-release"
                     ],
                     "type": "string"
@@ -417,7 +413,6 @@
                   "operation": {
                     "enum": [
                       "deploy",
-                      "merge-and-deploy",
                       "rollback-release"
                     ],
                     "type": "string"
@@ -519,7 +514,6 @@
                   "operation": {
                     "enum": [
                       "deploy",
-                      "merge-and-deploy",
                       "rollback-release"
                     ],
                     "type": "string"

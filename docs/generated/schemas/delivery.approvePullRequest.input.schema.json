@@ -54,9 +54,6 @@
       "type": "integer",
       "minimum": 1,
       "maximum": 9007199254740991
-    },
-    "deploy": {
-      "const": false
     }
   },
   "required": [
@@ -67,8 +64,7 @@
     "operation",
     "idempotencyKey",
     "sourceRevision",
-    "number",
-    "deploy"
+    "number"
   ],
   "additionalProperties": false,
   "$comment": "Live Valibot validation additionally requires the selected pull request and exact head to be the final member of its submitted scope.",

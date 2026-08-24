@@ -43,7 +43,7 @@ describe("Delivery worker contract", () => {
         expect(deliveryProductionActionKey).toBe("delivery.production.v1");
     });
 
-    test("routes merge-and-deploy to production while merge-only stays GitHub", () => {
+    test("routes pull request merges only to GitHub authority", () => {
         const base = {
             checkoutRevision: revision,
             expectedHeads: [{ headSha: sha, number: 42 }],
@@ -53,19 +53,11 @@ describe("Delivery worker contract", () => {
             sourceRevision: revision,
         };
         expect(
-            deliveryJobActionKeyForPayload(
-                parseDeliveryOperationJobPayload({ ...base, deploy: false })
-            )
+            deliveryJobActionKeyForPayload(parseDeliveryOperationJobPayload(base))
         ).toBe(deliveryGitHubActionKey);
-        expect(
-            deliveryJobActionKeyForPayload(
-                parseDeliveryOperationJobPayload({
-                    ...base,
-                    activationRevision: revision,
-                    deploy: true,
-                })
-            )
-        ).toBe(deliveryProductionActionKey);
+        expect(() =>
+            parseDeliveryOperationJobPayload({ ...base, deploy: true })
+        ).toThrow();
     });
 
     test("rejects confirmations, idempotency keys, secrets, and arbitrary commands", () => {
@@ -93,7 +85,6 @@ describe("Delivery worker contract", () => {
         expect(() =>
             parseDeliveryOperationJobPayload({
                 checkoutRevision: revision,
-                deploy: false,
                 expectedHeads: [{ headSha: sha, number: 42 }],
                 mergeStack: false,
                 number: 41,

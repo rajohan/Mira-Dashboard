@@ -119,6 +119,5 @@ export const deliveryDeploymentOperationLabels: Readonly<
     Record<DeliveryDeploymentOperation, string>
 > = {
     deploy: "Deploy main",
-    "merge-and-deploy": "Merge and deploy",
     "rollback-release": "Rollback release",
 };

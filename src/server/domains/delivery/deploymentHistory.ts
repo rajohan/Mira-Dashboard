@@ -119,18 +119,13 @@ export function createDeliveryDeploymentHistoryReader({
                                   parseJsonText(record.resultJson)
                               );
                     let commitSha: string | undefined = result?.operationResult.releaseId;
-                    let operation: "deploy" | "merge-and-deploy" | "rollback-release";
+                    let operation: "deploy" | "rollback-release";
                     if (payload.operation === "deploy") {
                         commitSha ??= payload.expectedMainHeadSha;
                         operation = "deploy";
                     } else if (payload.operation === "rollback-release") {
                         commitSha ??= payload.target.releaseId;
                         operation = "rollback-release";
-                    } else if (
-                        payload.operation === "merge-pull-request" &&
-                        payload.deploy === true
-                    ) {
-                        operation = "merge-and-deploy";
                     } else {
                         throw new TypeError(
                             "Delivery history contains a non-production payload"

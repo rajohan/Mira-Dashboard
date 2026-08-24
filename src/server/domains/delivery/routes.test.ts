@@ -38,7 +38,6 @@ const snapshotTransitionId = "018f6f50-6a9e-7b88-8000-000000000021";
 const approvePullRequestInput = Object.freeze({
     checkoutRevision: resourceRevision,
     confirmation: "merge-delivery-pull-request" as const,
-    deploy: false as const,
     expectedHeads: [{ headSha, number: 42 }],
     idempotencyKey,
     mergeStack: false,

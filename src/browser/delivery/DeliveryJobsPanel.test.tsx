@@ -15,14 +15,14 @@ import { DeliveryJobsPanel } from "./DeliveryJobsPanel.tsx";
 const { render, screen } = await import("@testing-library/react");
 
 const base = {
-    operation: "merge-and-deploy",
+    operation: "deploy",
     queuedAtMs: 1000,
     state: "succeeded",
     updatedAtMs: 2000,
 } as const;
 
 describe("DeliveryJobsPanel", () => {
-    test("distinguishes completed, partial, and merge-queued production truth", async () => {
+    test("distinguishes completed and partial production truth", async () => {
         const deployments = [
             {
                 ...base,
@@ -39,7 +39,7 @@ describe("DeliveryJobsPanel", () => {
                 ...base,
                 jobRunId: "019fdf70-0000-7000-8000-000000000043",
                 outcome: "completed-with-warnings",
-                warnings: ["deployment-not-started"],
+                warnings: ["main-sync-failed"],
             },
         ] as const satisfies readonly DeliveryDeployment[];
 
@@ -63,8 +63,10 @@ describe("DeliveryJobsPanel", () => {
         render(<RouterProvider router={router} />);
 
         expect(await screen.findByText("Completed")).toBeTruthy();
-        expect(screen.getByText("Merge queued. Deploy not started")).toBeTruthy();
+        expect(screen.getByText("Deployment queued")).toBeTruthy();
         expect(screen.getByText("Completed with warnings")).toBeTruthy();
-        expect(screen.getByText("Deployment did not start.")).toBeTruthy();
+        expect(
+            screen.getByText("The production main checkout did not synchronize.")
+        ).toBeTruthy();
     });
 });

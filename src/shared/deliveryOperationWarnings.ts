@@ -6,7 +6,6 @@ export const deliveryOperationWarningCodes = Object.freeze([
     "branch-retained",
     "comment-failed",
     "deployment-failed",
-    "deployment-not-started",
     "deployment-outcome-unknown",
     "main-sync-failed",
     "preview-cleanup-failed",

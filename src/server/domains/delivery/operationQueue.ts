@@ -154,7 +154,6 @@ function payloadMatchesInput(
             return (
                 payload.operation === input.operation &&
                 payload.number === input.number &&
-                payload.deploy === input.deploy &&
                 payload.mergeStack === input.mergeStack &&
                 payload.checkoutRevision === input.checkoutRevision &&
                 headsMatch(payload.expectedHeads, input.expectedHeads)
@@ -241,11 +240,7 @@ function actionKeyForInput(
     if (input.operation === "start-preview" || input.operation === "stop-preview") {
         return deliveryPreviewActionKey;
     }
-    if (
-        input.operation === "deploy" ||
-        input.operation === "rollback-release" ||
-        (input.operation === "merge-pull-request" && input.deploy)
-    ) {
+    if (input.operation === "deploy" || input.operation === "rollback-release") {
         return deliveryProductionActionKey;
     }
     return deliveryGitHubActionKey;

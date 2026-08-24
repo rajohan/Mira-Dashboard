@@ -16,7 +16,7 @@ const transitionId = "019fd974-54a2-74dd-a64b-d4186f8d8828";
 const previousTransitionId = "019fd974-54a2-74dd-a64b-d4186f8d8827";
 
 function operationPayload(
-    operation: "deploy" | "merge-pull-request" | "rollback-release",
+    operation: "deploy" | "rollback-release",
     targetReleaseId: string
 ): DeliveryProductionOperationCapsule["enqueue"]["payload"] {
     switch (operation) {
@@ -30,18 +30,6 @@ function operationPayload(
                     releaseId: targetReleaseId,
                     runtimeRevision: "d".repeat(40),
                 },
-            };
-        }
-        case "merge-pull-request": {
-            return {
-                activationRevision: "1".repeat(64),
-                checkoutRevision: "2".repeat(64),
-                deploy: true,
-                expectedHeads: [{ headSha: "9".repeat(40), number: 7 }],
-                mergeStack: false,
-                number: 7,
-                operation,
-                sourceRevision: "f".repeat(64),
             };
         }
         case "deploy": {
@@ -62,7 +50,7 @@ function operationPayload(
 }
 
 function capsule(
-    operation: "deploy" | "merge-pull-request" | "rollback-release" = "deploy"
+    operation: "deploy" | "rollback-release" = "deploy"
 ): DeliveryProductionOperationCapsule {
     const targetReleaseId = "c".repeat(40);
     const payload = operationPayload(operation, targetReleaseId);

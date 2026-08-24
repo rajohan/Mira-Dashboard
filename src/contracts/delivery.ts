@@ -731,11 +731,7 @@ export const deliveryReleasesResultSchema = v.pipe(
     v.check(readFreshnessIsCausal, "Delivery read freshness is inconsistent")
 );
 
-export const deliveryDeploymentOperations = [
-    "deploy",
-    "merge-and-deploy",
-    "rollback-release",
-] as const;
+export const deliveryDeploymentOperations = ["deploy", "rollback-release"] as const;
 export const deliveryDeploymentOperationSchema = v.picklist(
     deliveryDeploymentOperations,
     "Delivery deployment operation is invalid"
@@ -864,7 +860,7 @@ const mergeBase = {
     ...deliveryOperationBase,
     number: pullRequestNumberSchema,
 } as const;
-const mergeInputSchema = v.strictObject({ ...mergeBase, deploy: v.literal(false) });
+const mergeInputSchema = v.strictObject(mergeBase);
 
 export function selectedPullRequestEndsScope<
     T extends {

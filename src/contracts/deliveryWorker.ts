@@ -40,9 +40,8 @@ const exactPullRequest = {
     ),
 } as const;
 
-const mergeWithoutDeployPayloadSchema = v.strictObject({
+const mergePayloadSchema = v.strictObject({
     checkoutRevision: deliveryResourceRevisionSchema,
-    deploy: v.literal(false),
     expectedHeads: deliveryExpectedHeadsSchema,
     mergeStack: v.boolean("Delivery stack merge state is invalid"),
     number: exactPullRequest.number,
@@ -81,7 +80,7 @@ const nonProductionJobPayloadSchema = v.variant("operation", [
         operation: v.literal("create-pull-request-stack"),
         ...workerOperationBase,
     }),
-    mergeWithoutDeployPayloadSchema,
+    mergePayloadSchema,
     v.strictObject({
         ...exactPullRequest,
         operation: v.literal("reject-pull-request"),
@@ -137,13 +136,7 @@ export function deliveryJobActionKeyForPayload(
     if (payload.operation === "start-preview" || payload.operation === "stop-preview") {
         return deliveryPreviewActionKey;
     }
-    if (
-        payload.operation === "deploy" ||
-        payload.operation === "rollback-release" ||
-        (payload.operation === "merge-pull-request" &&
-            "deploy" in payload &&
-            payload.deploy === true)
-    ) {
+    if (payload.operation === "deploy" || payload.operation === "rollback-release") {
         return deliveryProductionActionKey;
     }
     return deliveryGitHubActionKey;

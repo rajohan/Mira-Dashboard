@@ -748,6 +748,9 @@ describe("production Delivery executor", () => {
                     capacityAdmission: () => Promise.resolve(),
                     installRuntime: (_lease, _paths, identity, dependencies) => {
                         expect(identity).toEqual(target.runtime.identity);
+                        if (dependencies === undefined) {
+                            throw new Error("Expected published runtime dependency");
+                        }
                         expect(dependencies.sourceExecutable).toBe(
                             `${options.projectRoot}/production/checkout/dist/releases/${targetReleaseId}/runtime/bun`
                         );

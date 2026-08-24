@@ -959,7 +959,7 @@ export const deliveryProductionJobActionDefinition =
         attemptLimit: 3,
         cancellationPolicy: "never",
         description:
-            "Runs one exact-main deployment, merge-and-deploy, or paired rollback through the versioned activation protocol.",
+            "Runs one exact-main deployment or paired rollback through the versioned activation protocol.",
         displayName: "Delivery production operation",
         manualExposure: "none",
         priority: 50,

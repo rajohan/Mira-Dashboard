@@ -447,23 +447,9 @@ export function createWorkerDeliveryProcessComposition({
                     tailscale: createPreviewTailscaleServe(),
                 }
             ),
-        createProduction: ({ authority, github, mainGit, preview }) =>
+        createProduction: ({ authority, github, mainGit }) =>
             createDeliveryProductionExecutionPort({
                 authority,
-                cleanupConfirmed: async (expectedHeads, signal) => {
-                    for (const expectedHead of expectedHeads) {
-                        const cleaned = await preview.cleanupConfirmed?.(
-                            {
-                                expectedHeadSha: expectedHead.headSha,
-                                number: expectedHead.number,
-                                operationId: Bun.randomUUIDv7(),
-                            },
-                            signal
-                        );
-                        if (cleaned !== true) return false;
-                    }
-                    return true;
-                },
                 control: productionControl(),
                 executorReleaseId,
                 executorRuntimeRevision,

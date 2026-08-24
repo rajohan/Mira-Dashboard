@@ -243,7 +243,6 @@ describe("Delivery service", () => {
             {
                 checkoutRevision: sourceRevision,
                 confirmation: "merge-delivery-pull-request",
-                deploy: false,
                 expectedHeads: [{ headSha, number: 42 }],
                 idempotencyKey: "A".repeat(43),
                 mergeStack: false,
@@ -267,7 +266,6 @@ describe("Delivery service", () => {
         expect(next.queued).toEqual([
             {
                 checkoutRevision: sourceRevision,
-                deploy: false,
                 expectedHeads: [{ headSha, number: 42 }],
                 mergeStack: false,
                 number: 42,
@@ -390,7 +388,6 @@ describe("Delivery service", () => {
         const input = {
             checkoutRevision: sourceRevision,
             confirmation: "merge-delivery-pull-request" as const,
-            deploy: false as const,
             expectedHeads: [{ headSha, number: 42 }],
             idempotencyKey: "A".repeat(43),
             mergeStack: true,

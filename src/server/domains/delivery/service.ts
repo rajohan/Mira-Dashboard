@@ -336,7 +336,6 @@ function payloadFor(input: DeliveryRequestOperationInput): DeliveryOperationJobP
         case "merge-pull-request": {
             return {
                 checkoutRevision: input.checkoutRevision,
-                deploy: false,
                 expectedHeads: input.expectedHeads,
                 mergeStack: input.mergeStack,
                 number: input.number,

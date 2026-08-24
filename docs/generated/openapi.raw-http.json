@@ -19673,7 +19673,6 @@
                         "operation": {
                           "enum": [
                             "deploy",
-                            "merge-and-deploy",
                             "rollback-release"
                           ],
                           "type": "string"
@@ -19775,7 +19774,6 @@
                         "operation": {
                           "enum": [
                             "deploy",
-                            "merge-and-deploy",
                             "rollback-release"
                           ],
                           "type": "string"
@@ -19813,14 +19811,13 @@
                               "branch-retained",
                               "comment-failed",
                               "deployment-failed",
-                              "deployment-not-started",
                               "deployment-outcome-unknown",
                               "main-sync-failed",
                               "preview-cleanup-failed"
                             ],
                             "type": "string"
                           },
-                          "maxItems": 8,
+                          "maxItems": 7,
                           "$comment": "Live Valibot validation additionally requires Delivery warning lists to be nonempty, unique, and canonically ordered."
                         }
                       },
@@ -19896,7 +19893,6 @@
                         "operation": {
                           "enum": [
                             "deploy",
-                            "merge-and-deploy",
                             "rollback-release"
                           ],
                           "type": "string"
@@ -19998,7 +19994,6 @@
                         "operation": {
                           "enum": [
                             "deploy",
-                            "merge-and-deploy",
                             "rollback-release"
                           ],
                           "type": "string"
@@ -20100,7 +20095,6 @@
                         "operation": {
                           "enum": [
                             "deploy",
-                            "merge-and-deploy",
                             "rollback-release"
                           ],
                           "type": "string"
@@ -21586,9 +21580,6 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 9007199254740991
-          },
-          "deploy": {
-            "const": false
           }
         },
         "required": [
@@ -21599,8 +21590,7 @@
           "operation",
           "idempotencyKey",
           "sourceRevision",
-          "number",
-          "deploy"
+          "number"
         ],
         "additionalProperties": false,
         "$comment": "Live Valibot validation additionally requires the selected pull request and exact head to be the final member of its submitted scope.",

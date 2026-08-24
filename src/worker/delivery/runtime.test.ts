@@ -239,7 +239,6 @@ describe("Delivery worker runtime", () => {
         expect(
             runtime.execute({
                 checkoutRevision: current.checkout.revision,
-                deploy: false,
                 expectedHeads: [{ headSha: pr.headSha, number: pr.number }],
                 mergeStack: false,
                 number: pr.number,
@@ -287,7 +286,6 @@ describe("Delivery worker runtime", () => {
         const conflict = await runtime
             .execute({
                 checkoutRevision: current.checkout.revision,
-                deploy: false,
                 expectedHeads: [{ headSha: top.headSha, number: top.number }],
                 mergeStack: false,
                 number: top.number,
@@ -305,7 +303,6 @@ describe("Delivery worker runtime", () => {
         expect(
             runtime.execute({
                 checkoutRevision: current.checkout.revision,
-                deploy: false,
                 expectedHeads: [
                     { headSha: bottom.headSha, number: bottom.number },
                     { headSha: top.headSha, number: top.number },
@@ -343,7 +340,6 @@ describe("Delivery worker runtime", () => {
         });
         const input = {
             checkoutRevision: current.checkout.revision,
-            deploy: false as const,
             expectedHeads: [{ headSha: remaining.headSha, number: remaining.number }],
             mergeStack: true,
             number: remaining.number,
@@ -462,52 +458,5 @@ describe("Delivery worker runtime", () => {
             )
         ).resolves.toEqual({ operation: "deploy", outcome: "completed" });
         expect(executions).toBe(1);
-    });
-
-    test("settles an exact mixed native merge scope as unknown without retrying merge or deploy", () => {
-        const first = pullRequest(1, { state: "MERGED" });
-        const second = pullRequest(2, { state: "OPEN" });
-        const current = overview([first, second]);
-        let productionExecutions = 0;
-        const runtime = createDeliveryRuntime({
-            collector: collector(current),
-            github: github({
-                getPullRequest: (number) =>
-                    Promise.resolve(number === first.number ? first : second),
-            }),
-            mainGit: mainGit(),
-            preview: preview(),
-            production: {
-                execute: () => {
-                    productionExecutions += 1;
-                    return Promise.reject(new Error("must not execute"));
-                },
-            },
-            readPrevious: () => current,
-        });
-
-        expect(
-            runtime.execute(
-                {
-                    activationRevision: current.releases.activationRevision,
-                    checkoutRevision: current.checkout.revision,
-                    deploy: true,
-                    expectedHeads: [
-                        { headSha: first.headSha, number: first.number },
-                        { headSha: second.headSha, number: second.number },
-                    ],
-                    mergeStack: true,
-                    number: second.number,
-                    operation: "merge-pull-request",
-                    sourceRevision: "f".repeat(64),
-                },
-                undefined,
-                productionRunIdentity
-            )
-        ).resolves.toEqual({
-            operation: "merge-pull-request",
-            outcome: "unknown-outcome",
-        });
-        expect(productionExecutions).toBe(0);
     });
 });

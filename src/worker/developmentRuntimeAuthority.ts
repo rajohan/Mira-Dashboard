@@ -790,10 +790,7 @@ function createDeliveryPort(
                 let releaseId: string | undefined;
                 if (payload.operation === "rollback-release") {
                     releaseId = payload.target.releaseId;
-                } else if (
-                    payload.operation === "deploy" ||
-                    (payload.operation === "merge-pull-request" && payload.deploy)
-                ) {
+                } else if (payload.operation === "deploy") {
                     releaseId = currentReleaseId;
                 }
                 return {

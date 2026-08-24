@@ -125,7 +125,6 @@ export function pullRequestOperationPrompt(input: {
                 input: {
                     checkoutRevision: input.checkout.revision,
                     confirmation: "merge-delivery-pull-request",
-                    deploy: false,
                     expectedHeads,
                     idempotencyKey,
                     mergeStack,

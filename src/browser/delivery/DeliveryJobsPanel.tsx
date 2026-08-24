@@ -22,7 +22,6 @@ const warningLabels: Readonly<Record<DeliveryOperationWarningCode, string>> = {
     "branch-retained": "The merged branch was retained.",
     "comment-failed": "The GitHub follow-up comment was not published.",
     "deployment-failed": "Deployment failed after the GitHub operation completed.",
-    "deployment-not-started": "Deployment did not start.",
     "deployment-outcome-unknown": "The deployment outcome could not be confirmed.",
     "main-sync-failed": "The production main checkout did not synchronize.",
     "preview-cleanup-failed": "Retained preview cleanup did not complete.",
@@ -57,7 +56,7 @@ function deploymentBadgeVariant(
 function deploymentStatusLabel(deployment: DeliveryDeployment): string {
     if (deployment.state !== "succeeded") return deployment.state;
     if (deployment.outcome === "enqueued") {
-        return "Merge queued. Deploy not started";
+        return "Deployment queued";
     }
     if (deployment.outcome === "completed-with-warnings") {
         return "Completed with warnings";

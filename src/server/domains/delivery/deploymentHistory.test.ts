@@ -89,11 +89,9 @@ describe("Delivery deployment history", () => {
         const payload = JSON.stringify({
             activationRevision: revision,
             checkoutRevision: revision,
-            deploy: true,
-            expectedHeads: [{ headSha: sha, number: 42 }],
-            mergeStack: false,
-            number: 42,
-            operation: "merge-pull-request",
+            expectedMainHeadSha: sha,
+            operation: "deploy",
+            release: publishedReleaseAuthority(sha),
             sourceRevision: revision,
         });
         const reader = createDeliveryDeploymentHistoryReader({
@@ -106,7 +104,7 @@ describe("Delivery deployment history", () => {
                         payloadJson: payload,
                         queuedAt: new Date(1000),
                         resultJson: JSON.stringify({
-                            operation: "merge-pull-request",
+                            operation: "deploy",
                             outcome: "enqueued",
                         }),
                         state: "succeeded",
@@ -119,9 +117,9 @@ describe("Delivery deployment history", () => {
                         payloadJson: payload,
                         queuedAt: new Date(1000),
                         resultJson: JSON.stringify({
-                            operation: "merge-pull-request",
+                            operation: "deploy",
                             outcome: "completed-with-warnings",
-                            warnings: ["deployment-not-started"],
+                            warnings: ["main-sync-failed"],
                         }),
                         state: "succeeded",
                         terminalMessage: null,
@@ -143,7 +141,7 @@ describe("Delivery deployment history", () => {
             { outcome: "enqueued", warnings: undefined },
             {
                 outcome: "completed-with-warnings",
-                warnings: ["deployment-not-started"],
+                warnings: ["main-sync-failed"],
             },
         ]);
     });

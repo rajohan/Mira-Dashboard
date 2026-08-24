@@ -42,9 +42,7 @@ export interface DeliveryProductionExecutionPort {
     readonly execute: (
         payload: Extract<
             DeliveryOperationJobPayload,
-            | { operation: "deploy" }
-            | { operation: "rollback-release" }
-            | { deploy: true; operation: "merge-pull-request" }
+            { operation: "deploy" } | { operation: "rollback-release" }
         >,
         current: DeliveryOperationAuthoritySnapshot,
         runIdentity: JobExecutionRunIdentity,
@@ -96,7 +94,6 @@ function pullRequestActionId(
     | "approve-review"
     | "create-stack"
     | "merge"
-    | "merge-and-deploy"
     | "preview-start"
     | "reject"
     | "update-branch"
@@ -109,7 +106,7 @@ function pullRequestActionId(
             return "create-stack";
         }
         case "merge-pull-request": {
-            return payload.deploy ? "merge-and-deploy" : "merge";
+            return "merge";
         }
         case "reject-pull-request": {
             return "reject";
@@ -236,13 +233,6 @@ function authorizePullRequestOperation(
     ) {
         fail("conflict");
     }
-    if (
-        payload.operation === "merge-pull-request" &&
-        payload.deploy &&
-        current.releases.activationRevision !== payload.activationRevision
-    ) {
-        fail("conflict");
-    }
 }
 
 function authorizeProductionOperation(
@@ -302,47 +292,6 @@ async function currentOverview(
         return fail("source-unavailable");
     }
     return refreshed;
-}
-
-type ExactProductionMergeScopeState =
-    | "all-merged"
-    | "all-open"
-    | "mixed-or-nonopen"
-    | "unavailable-or-mismatch";
-
-async function classifyExactProductionMergeScope(
-    options: DeliveryRuntimeOptions,
-    payload: Extract<
-        DeliveryOperationJobPayload,
-        { deploy: true; operation: "merge-pull-request" }
-    >,
-    signal?: AbortSignal
-): Promise<ExactProductionMergeScopeState> {
-    try {
-        const pullRequests = await Promise.all(
-            payload.expectedHeads.map(({ number }) =>
-                options.github.getPullRequest(number, signal)
-            )
-        );
-        if (
-            pullRequests.some(
-                (pullRequest, index) =>
-                    pullRequest.number !== payload.expectedHeads[index]?.number ||
-                    pullRequest.headSha !== payload.expectedHeads[index]?.headSha
-            )
-        ) {
-            return "unavailable-or-mismatch";
-        }
-        if (pullRequests.every(({ state }) => state === "MERGED")) {
-            return pullRequests.at(-1)?.mergeCommitSha === undefined
-                ? "unavailable-or-mismatch"
-                : "all-merged";
-        }
-        if (pullRequests.every(({ state }) => state === "OPEN")) return "all-open";
-        return "mixed-or-nonopen";
-    } catch {
-        return "unavailable-or-mismatch";
-    }
 }
 
 function result(
@@ -451,7 +400,6 @@ async function executeGithub(
                 return result(payload.operation, "completed");
             }
             case "merge-pull-request": {
-                if (payload.deploy) return fail("production-unavailable");
                 const outcome = payload.mergeStack
                     ? await options.github.mergeNativeStack(payload.expectedHeads, signal)
                     : await options.github.mergePullRequest(
@@ -599,8 +547,7 @@ export function createDeliveryRuntime(
         ): Promise<DeliveryJobOperationResult> {
             const productionOperation =
                 payload.operation === "deploy" ||
-                payload.operation === "rollback-release" ||
-                (payload.operation === "merge-pull-request" && payload.deploy);
+                payload.operation === "rollback-release";
             if (productionOperation && runIdentity === undefined) {
                 return fail("production-unavailable");
             }
@@ -610,39 +557,16 @@ export function createDeliveryRuntime(
                 signal,
                 runIdentity?.runId
             );
-            const productionMergeScope =
-                payload.operation === "merge-pull-request" && payload.deploy
-                    ? await classifyExactProductionMergeScope(options, payload, signal)
-                    : undefined;
-            if (
-                productionMergeScope === "mixed-or-nonopen" ||
-                productionMergeScope === "unavailable-or-mismatch"
-            ) {
-                return result(payload.operation, "unknown-outcome");
+            if (current.sourceRevision !== payload.sourceRevision) {
+                return fail("conflict");
             }
-            const completedProductionMerge = productionMergeScope === "all-merged";
-            if (completedProductionMerge) {
-                if (
-                    payload.operation !== "merge-pull-request" ||
-                    !payload.deploy ||
-                    current.releases.activationRevision !== payload.activationRevision ||
-                    !current.checkout.safeForDeploy
-                ) {
-                    return fail("conflict");
-                }
-            } else {
-                if (current.sourceRevision !== payload.sourceRevision) {
-                    return fail("conflict");
-                }
-                authorizePullRequestOperation(current, payload);
-            }
+            authorizePullRequestOperation(current, payload);
             authorizeProductionOperation(current, payload);
             authorizePreviewStop(current, payload);
 
             if (
                 payload.operation === "deploy" ||
-                payload.operation === "rollback-release" ||
-                (payload.operation === "merge-pull-request" && payload.deploy)
+                payload.operation === "rollback-release"
             ) {
                 if (options.production === undefined) {
                     return fail("production-unavailable");
