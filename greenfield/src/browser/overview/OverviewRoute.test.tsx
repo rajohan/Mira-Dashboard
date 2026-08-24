@@ -10,6 +10,8 @@ import type {
     RefreshCacheEntryInput,
 } from "../../contracts/cache.ts";
 import type { JobRunSummary } from "../../contracts/jobModel.ts";
+import type { ReportSummary } from "../../contracts/monitoring.ts";
+import type { ListReportsResult } from "../../contracts/reports.ts";
 import type { SystemMetrics } from "../../contracts/system.ts";
 import { createDashboardQueryClient } from "../api/queryClient.ts";
 import {
@@ -179,6 +181,20 @@ const failedRefresh = Object.freeze({
     updatedAtMs: timestampMs + 1000,
 } as const satisfies JobRunSummary);
 
+const overviewReport = Object.freeze({
+    id: "019fd974-54a2-74dd-a64b-d4186f8d8828",
+    kind: "heartbeat",
+    occurredAtMs: timestampMs,
+    source: "monitor",
+    status: "warning",
+    summary: "One bounded overview summary.",
+    title: "Overview heartbeat",
+} as const satisfies ReportSummary);
+
+const reportPage = Object.freeze({
+    reports: [overviewReport],
+} as const satisfies ListReportsResult);
+
 const unexpectedWebAuthnClient: DashboardWebAuthnClient = Object.freeze({
     authenticate: () => Promise.reject(new TypeError("Unexpected authentication")),
     register: () => Promise.reject(new TypeError("Unexpected registration")),
@@ -193,6 +209,7 @@ interface OverviewTransportOptions {
     readonly cacheEntryOutputs?: readonly (CacheEntry | Error)[];
     readonly cacheStatusOutputs?: readonly (CacheStatusResult | Error)[];
     readonly refreshOutputs?: readonly (JobRunSummary | Error)[];
+    readonly reportOutputs?: readonly (ListReportsResult | Error)[];
     readonly systemMetricsOutputs?: readonly (SystemMetrics | Error)[];
 }
 
@@ -212,6 +229,7 @@ class OverviewTransport implements DashboardTrpcTransport {
     readonly #cacheEntryOutputs: readonly (CacheEntry | Error)[];
     readonly #cacheStatusOutputs: readonly (CacheStatusResult | Error)[];
     readonly #refreshOutputs: readonly (JobRunSummary | Error)[];
+    readonly #reportOutputs: readonly (ListReportsResult | Error)[];
     readonly #systemMetricsOutputs: readonly (SystemMetrics | Error)[];
     readonly mutationCalls: TransportCall[] = [];
     readonly queryCalls: TransportCall[] = [];
@@ -220,6 +238,7 @@ class OverviewTransport implements DashboardTrpcTransport {
         this.#cacheEntryOutputs = options.cacheEntryOutputs ?? [hostEntry];
         this.#cacheStatusOutputs = options.cacheStatusOutputs ?? [cacheStatus];
         this.#refreshOutputs = options.refreshOutputs ?? [queuedRefresh];
+        this.#reportOutputs = options.reportOutputs ?? [reportPage];
         this.#systemMetricsOutputs = options.systemMetricsOutputs ?? [systemMetrics];
     }
 
@@ -250,6 +269,9 @@ class OverviewTransport implements DashboardTrpcTransport {
             }
             case "notifications.list": {
                 return Promise.resolve(emptyNotificationListResult);
+            }
+            case "reports.list": {
+                return transportOutput(this.#reportOutputs, callIndex, path);
             }
             case "system.metrics": {
                 return transportOutput(this.#systemMetricsOutputs, callIndex, path);
@@ -313,6 +335,17 @@ describe("Dashboard operational overview foundation", () => {
         expect(within(cpuCard as HTMLElement).getByText("50%")).toBeTruthy();
         expect(screen.getByText("12.3 Mbit/s")).toBeTruthy();
         expect(screen.queryByText("mira-vps")).toBeNull();
+        expect(
+            await screen.findByRole("heading", {
+                level: 2,
+                name: "Reports overview",
+            })
+        ).toBeTruthy();
+        expect(screen.getByText("Overview heartbeat")).toBeTruthy();
+        expect(screen.getByRole("link", { name: "View reports" })).toHaveAttribute(
+            "href",
+            "/reports"
+        );
         expect(await screen.findByText("Showing 2 of 129")).toBeTruthy();
         expect(
             transport.queryCalls.filter(({ path }) => path === "cache.getEntry")
