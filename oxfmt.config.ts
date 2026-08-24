@@ -3,6 +3,7 @@ import { defineConfig } from "oxfmt";
 export default defineConfig({
     endOfLine: "lf",
     ignorePatterns: [
+        "CHANGELOG.md",
         "**/coverage/**",
         "data/**",
         "**/dist/**",
