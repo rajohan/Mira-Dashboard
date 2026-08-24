@@ -22,10 +22,14 @@ describe("request authentication contract", () => {
             "cache:write",
             "chat:read",
             "chat:write",
+            "files:read",
+            "files:write",
             "gateway-sessions:read",
             "gateway-sessions:write",
             "jobs:read",
             "jobs:write",
+            "logs:read",
+            "logs:write",
             "monitoring:write",
             "notifications:read",
             "notifications:write",
@@ -35,6 +39,8 @@ describe("request authentication contract", () => {
             "reports:write",
             "tasks:read",
             "tasks:write",
+            "terminal:read",
+            "terminal:write",
         ]);
         expect(
             v.parse(applicationCapabilityListSchema, ["jobs:write", "jobs:read"])

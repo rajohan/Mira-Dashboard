@@ -25,23 +25,23 @@ function mfaConfirmationCopy(confirmation: MfaConfirmation) {
         case "remove-totp": {
             return {
                 confirmLabel: "Remove authenticator",
-                description: `Remove “${confirmation.label}” from the accepted MFA factors.`,
+                description: `You will no longer be able to use “${confirmation.label}” to confirm your identity.`,
                 title: "Remove authenticator?",
             };
         }
         case "remove-webauthn": {
             return {
                 confirmLabel: "Remove security key",
-                description: `Remove “${confirmation.label}” from the accepted MFA factors.`,
+                description: `You will no longer be able to use “${confirmation.label}” to confirm your identity.`,
                 title: "Remove security key?",
             };
         }
         case "rotate-recovery-codes": {
             return {
-                confirmLabel: "Rotate recovery codes",
+                confirmLabel: "Create new recovery codes",
                 description:
                     "Every current recovery code will stop working and a new one-time set will be shown.",
-                title: "Rotate recovery codes?",
+                title: "Create new recovery codes?",
             };
         }
     }
@@ -137,14 +137,14 @@ export function MfaManagementSection({ summary }: MfaManagementSectionProps) {
 
     return (
         <SecuritySection
-            description="Enroll and remove possession factors. Enrollment secrets and recovery codes are never query-cached."
+            description="Add or remove authenticator apps and security keys. Save recovery codes when they are shown because they cannot be viewed again."
             id="mfa-management-heading"
             title="Multi-factor authentication"
         >
             <Alert className="mb-4" message={action.error} />
             <p className="text-primary-300 text-sm">
                 Status: {summary.mfa.enabled ? "Enabled" : "Disabled"} · {factorCount} of
-                4 possession factors
+                4 sign-in methods set up
             </p>
             {recoveryCodes !== undefined && (
                 <OneTimeSecretPanel

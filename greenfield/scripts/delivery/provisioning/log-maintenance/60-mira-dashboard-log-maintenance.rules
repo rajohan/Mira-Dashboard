@@ -1,0 +1,20 @@
+polkit.addRule(function (action, subject) {
+    if (
+        action.id !== "org.freedesktop.systemd1.manage-units" ||
+        action.lookup("verb") !== "start" ||
+        !subject.isInGroup("mira-dashboard-log-maintenance")
+    ) {
+        return polkit.Result.NOT_HANDLED;
+    }
+
+    var unit = action.lookup("unit");
+    var allowed = [
+        "mira-dashboard-log-maintenance@host-alternatives.service",
+        "mira-dashboard-log-maintenance@host-apport.service",
+        "mira-dashboard-log-maintenance@host-dpkg.service",
+        "mira-dashboard-log-maintenance@host-rsyslog.service"
+    ];
+    return allowed.indexOf(unit) === -1
+        ? polkit.Result.NOT_HANDLED
+        : polkit.Result.YES;
+});

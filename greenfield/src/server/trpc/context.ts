@@ -2,9 +2,11 @@ import type { RequestAuthentication } from "../../contracts/security.ts";
 import type { AgentService } from "../domains/agents/service.ts";
 import type { CacheService } from "../domains/cache/service.ts";
 import type { ChatService } from "../domains/chat/service.ts";
+import type { WorkspaceFilesService } from "../domains/files/service.ts";
 import type { GatewayConnectionService } from "../domains/gatewayConnection/service.ts";
 import type { GatewaySessionsService } from "../domains/gatewaySessions/service.ts";
 import type { JobService } from "../domains/jobs/service.ts";
+import type { LogsService } from "../domains/logs/service.ts";
 import type { MonitoringCatalogService } from "../domains/monitoring/catalogService.ts";
 import type { MonitoringService } from "../domains/monitoring/service.ts";
 import type { OpenClawCronService } from "../domains/openClawCron/service.ts";
@@ -19,6 +21,7 @@ import type { MfaAccountLifecycleService } from "../domains/security/mfa/account
 import type { MfaLoginLifecycleService } from "../domains/security/mfa/loginLifecycle.ts";
 import type { SecurityAuditLifecycleService } from "../domains/security/securityAuditLifecycle.ts";
 import type { TaskService } from "../domains/tasks/service.ts";
+import type { TerminalService } from "../domains/terminal/service.ts";
 import type {
     ApplicationRuntime,
     ApplicationRuntimeServices,
@@ -42,11 +45,13 @@ export interface RequestContextOptions {
     readonly authenticateCredential: AuthenticateCredential;
     readonly cacheService: CacheService["Service"];
     readonly chatService?: ChatService;
+    readonly workspaceFilesService?: WorkspaceFilesService;
     readonly gatewayConnectionService: GatewayConnectionService;
     readonly gatewaySessionsService: GatewaySessionsService;
     readonly mfaAccountLifecycle: MfaAccountLifecycleService;
     readonly mfaLoginLifecycle: MfaLoginLifecycleService;
     readonly jobService: JobService["Service"];
+    readonly logsService?: LogsService;
     readonly monitoringCatalogService: MonitoringCatalogService["Service"];
     readonly monitoringService: MonitoringService["Service"];
     readonly openClawCronService: OpenClawCronService;
@@ -57,6 +62,7 @@ export interface RequestContextOptions {
     readonly responseHeaders: Headers;
     readonly securityAuditLifecycle: SecurityAuditLifecycleService;
     readonly taskService: TaskService["Service"];
+    readonly terminalService?: TerminalService;
 }
 
 /** Dependencies supplied to every application tRPC procedure. */
@@ -69,11 +75,13 @@ export interface RequestContext {
     readonly authenticationLease?: AuthenticationLease;
     readonly cacheService: CacheService["Service"];
     readonly chatService?: ChatService;
+    readonly workspaceFilesService?: WorkspaceFilesService;
     readonly gatewayConnectionService: GatewayConnectionService;
     readonly gatewaySessionsService: GatewaySessionsService;
     readonly mfaAccountLifecycle: MfaAccountLifecycleService;
     readonly mfaLoginLifecycle: MfaLoginLifecycleService;
     readonly jobService: JobService["Service"];
+    readonly logsService?: LogsService;
     readonly monitoringCatalogService: MonitoringCatalogService["Service"];
     readonly monitoringService: MonitoringService["Service"];
     readonly openClawCronService: OpenClawCronService;
@@ -83,6 +91,7 @@ export interface RequestContext {
     readonly responseHeaders: Headers;
     readonly securityAuditLifecycle: SecurityAuditLifecycleService;
     readonly taskService: TaskService["Service"];
+    readonly terminalService?: TerminalService;
     readonly services: ApplicationRuntimeServices;
     readonly userAgent?: string;
 }
@@ -109,11 +118,17 @@ export async function createRequestContext(
         ...(options.chatService === undefined
             ? {}
             : { chatService: options.chatService }),
+        ...(options.workspaceFilesService === undefined
+            ? {}
+            : { workspaceFilesService: options.workspaceFilesService }),
         gatewayConnectionService: options.gatewayConnectionService,
         gatewaySessionsService: options.gatewaySessionsService,
         mfaAccountLifecycle: options.mfaAccountLifecycle,
         mfaLoginLifecycle: options.mfaLoginLifecycle,
         jobService: options.jobService,
+        ...(options.logsService === undefined
+            ? {}
+            : { logsService: options.logsService }),
         monitoringCatalogService: options.monitoringCatalogService,
         monitoringService: options.monitoringService,
         openClawCronService: options.openClawCronService,
@@ -126,6 +141,9 @@ export async function createRequestContext(
         responseHeaders: options.responseHeaders,
         securityAuditLifecycle: options.securityAuditLifecycle,
         taskService: options.taskService,
+        ...(options.terminalService === undefined
+            ? {}
+            : { terminalService: options.terminalService }),
         services: options.applicationRuntime.services,
         ...(userAgent !== null && { userAgent }),
     });

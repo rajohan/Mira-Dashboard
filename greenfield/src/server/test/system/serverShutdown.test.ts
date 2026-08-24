@@ -17,6 +17,7 @@ import {
     createApplicationRuntime,
     createDashboardApplicationRuntime,
 } from "../../platform/runtime/applicationRuntime.ts";
+import type { TerminalSocketBoundary } from "../../rawHttp/terminalSocket.ts";
 import { migrationsDirectory } from "../support/freshDatabase.ts";
 import { captureFailure } from "../support/promise.ts";
 import {
@@ -67,6 +68,62 @@ function createShutdownTestRuntime(onDispose: () => void) {
 }
 
 describe("application server shutdown", () => {
+    test("closes terminal upgrades before draining the listener and runtime", async () => {
+        const fake = createPendingBunServer();
+        const order: string[] = [];
+        const originalStop = fake.server.stop.bind(fake.server);
+        const serveSpy = spyOn(Bun, "serve").mockReturnValue({
+            ...fake.server,
+            stop(force = false) {
+                order.push("listener-stop");
+                return originalStop(force);
+            },
+        });
+        const terminalSocketBoundary = Object.freeze({
+            handle: () => Promise.resolve({ kind: "not-matched" as const }),
+            shutdown() {
+                order.push("terminal-shutdown");
+            },
+            websocket: Object.freeze({
+                backpressureLimit: 1,
+                close() {},
+                closeOnBackpressureLimit: true,
+                drain() {},
+                idleTimeout: 1,
+                maxPayloadLength: 1,
+                message() {},
+                open() {},
+                perMessageDeflate: false as const,
+                sendPings: true as const,
+            }),
+        }) satisfies TerminalSocketBoundary;
+
+        try {
+            const server = await createServer({
+                ...createTestServerSecurityServices(),
+                applicationRuntime: createTestApplicationRuntime({
+                    dispose() {
+                        order.push("runtime-dispose");
+                        return Promise.resolve();
+                    },
+                }),
+                port: 3100,
+                readiness: createReadinessController(),
+                terminalSocketBoundary,
+            });
+
+            await server.stop(true);
+
+            expect(order).toEqual([
+                "terminal-shutdown",
+                "listener-stop",
+                "runtime-dispose",
+            ]);
+        } finally {
+            serveSpy.mockRestore();
+        }
+    });
+
     test("withdraws readiness before listener drain begins", async () => {
         const fake = createPendingBunServer();
         const readiness = createReadinessController();

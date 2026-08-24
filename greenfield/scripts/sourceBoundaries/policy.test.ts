@@ -95,6 +95,8 @@ describe("source-boundary policy", () => {
         expect(validateSourceFile(".storybook/manager.ts")).toBeUndefined();
         expect(validateSourceFile(".storybook/preview.tsx")).toBeUndefined();
         expect(validateSourceFile(".storybook/vitest.config.ts")).toBeUndefined();
+        expect(validateSourceFile("src/app/dashboardLogs.ts")).toBeUndefined();
+        expect(validateSourceFile("src/app/dashboardTerminal.ts")).toBeUndefined();
         expect(
             validateSourceImport(
                 "tailwind.config.ts",
@@ -435,7 +437,7 @@ describe("source-boundary policy", () => {
         expect(
             validateSourceImport("src/server/runtimeImport.ts", staticImport("bun:ffi"))
                 ?.message
-        ).toContain("Bun FFI APIs");
+        ).toContain("exact reviewed worker adapter");
         for (const specifier of ["node:wasi", "wasi"] as const) {
             expect(
                 validateSourceImport(
@@ -479,6 +481,47 @@ describe("source-boundary policy", () => {
                     sourceImport
                 )?.message
             ).toContain("exact reviewed importer and named binding allowlist");
+        }
+    });
+
+    test("allows Bun FFI only through the exact reviewed Linux rename adapter", () => {
+        const reviewedImport = {
+            kind: "import" as const,
+            importedBindings: [
+                { imported: "dlopen", typeOnly: false },
+                { imported: "FFIType", typeOnly: false },
+                { imported: "read", typeOnly: false },
+            ],
+            line: 1,
+            specifier: "bun:ffi",
+        };
+        expect(
+            validateSourceImport(
+                "src/worker/files/linuxRenameExchange.ts",
+                reviewedImport
+            )
+        ).toBeUndefined();
+
+        for (const [importer, sourceImport] of [
+            ["src/worker/files/otherAdapter.ts", reviewedImport],
+            [
+                "src/worker/files/linuxRenameExchange.ts",
+                {
+                    ...reviewedImport,
+                    importedBindings: [
+                        ...reviewedImport.importedBindings,
+                        { imported: "JSCallback", typeOnly: false },
+                    ],
+                },
+            ],
+            [
+                "src/worker/files/linuxRenameExchange.ts",
+                { ...reviewedImport, specifier: "bun:ffi/internal" },
+            ],
+        ] as const) {
+            expect(validateSourceImport(importer, sourceImport)?.message).toContain(
+                "exact reviewed worker adapter"
+            );
         }
     });
 

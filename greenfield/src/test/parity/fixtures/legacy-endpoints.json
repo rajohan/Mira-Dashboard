@@ -521,7 +521,7 @@
             "purpose": "Lists workspace files.",
             "section": "Files, Config Files, Logs, Media",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["files.list"],
                 "phase": "phase-5"
@@ -534,10 +534,10 @@
             "purpose": "Reads workspace file/media metadata/content.",
             "section": "Files, Config Files, Logs, Media",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "raw-http",
                 "method": "GET",
-                "path": "/api/files/content/*",
+                "path": "/api/files/content/:ticketId",
                 "phase": "phase-5"
             }
         },
@@ -654,10 +654,9 @@
             "purpose": "Reads the bounded Dashboard service log tail.",
             "section": "Files, Config Files, Logs, Media",
             "target": {
-                "delivery": "planned",
-                "kind": "raw-http",
-                "method": "GET",
-                "path": "/api/logs/dashboard",
+                "delivery": "implemented",
+                "kind": "procedure",
+                "names": ["logs.tail"],
                 "phase": "phase-5"
             }
         },
@@ -668,10 +667,9 @@
             "purpose": "Reads a bounded tail from one allowlisted OpenClaw log file.",
             "section": "Files, Config Files, Logs, Media",
             "target": {
-                "delivery": "planned",
-                "kind": "raw-http",
-                "method": "GET",
-                "path": "/api/logs/openclaw/content/*",
+                "delivery": "implemented",
+                "kind": "procedure",
+                "names": ["logs.tail"],
                 "phase": "phase-5"
             }
         },
@@ -682,9 +680,9 @@
             "purpose": "Lists readable OpenClaw log files and metadata.",
             "section": "Files, Config Files, Logs, Media",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
-                "names": ["logs.listOpenClawFiles"],
+                "names": ["logs.listSources"],
                 "phase": "phase-5"
             }
         },
@@ -789,7 +787,7 @@
             "target": {
                 "delivery": "planned",
                 "kind": "procedure",
-                "names": ["logMaintenance.status"],
+                "names": ["logs.maintenanceStatus"],
                 "phase": "phase-5"
             }
         },
@@ -1699,9 +1697,9 @@
             "purpose": "Queues and observes log rotation.",
             "section": "Backups, Cache, Metrics, Ops",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
-                "names": ["logMaintenance.run"],
+                "names": ["jobs.getRun", "logs.requestMaintenance"],
                 "phase": "phase-5"
             }
         },
@@ -2026,10 +2024,10 @@
             "purpose": "Writes workspace file content.",
             "section": "Files, Config Files, Logs, Media",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "raw-http",
                 "method": "PUT",
-                "path": "/api/files/content/*",
+                "path": "/api/files/uploads/:ticketId",
                 "phase": "phase-5"
             }
         },

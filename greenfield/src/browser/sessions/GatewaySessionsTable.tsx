@@ -44,7 +44,7 @@ function SortHeader({ field, label, onSort, sort }: SortHeaderProps) {
     return (
         <th
             aria-sort={active ? sort.direction : "none"}
-            className="text-primary-300 border-primary-700 border-b px-3 py-2 text-left text-xs font-semibold tracking-wide uppercase"
+            className="text-primary-300 border-primary-700 bg-primary-950 border-b px-3 py-2 text-left text-xs font-semibold tracking-wide uppercase"
             scope="col"
         >
             <button
@@ -84,7 +84,7 @@ function deleteTranscriptLabel(session: GatewaySession): string {
         return `Delete ${session.displayName} transcript unavailable for the primary main session; key ${session.key}`;
     }
     if (session.sessionId === undefined) {
-        return `Delete ${session.displayName} transcript unavailable because its generation is unknown; key ${session.key}`;
+        return `Delete ${session.displayName} transcript unavailable because its current version could not be confirmed; key ${session.key}`;
     }
     return `Delete ${session.displayName} transcript; key ${session.key}`;
 }
@@ -112,13 +112,13 @@ export function GatewaySessionsTable({
         <div className="dashboard-data-table-query-container w-full max-w-full min-w-0">
             <section
                 aria-label="Current OpenClaw sessions"
-                className="dashboard-data-table-container border-primary-700 w-full max-w-full min-w-0 rounded-lg border"
+                className="dashboard-data-table-container border-primary-700 w-full max-w-full min-w-0 overflow-x-auto overscroll-x-contain rounded-lg border"
             >
                 <table
                     aria-label="Current OpenClaw sessions"
-                    className="dashboard-data-table w-full min-w-224"
+                    className="dashboard-data-table w-full min-w-224 border-separate border-spacing-0"
                 >
-                    <thead className="dashboard-data-table-head bg-primary-900 sticky top-0 z-10 shadow-sm">
+                    <thead className="dashboard-data-table-head bg-primary-950 sticky top-0 z-20 shadow-sm">
                         <tr>
                             <SortHeader
                                 field="kind"
@@ -151,7 +151,7 @@ export function GatewaySessionsTable({
                                 sort={sort}
                             />
                             <th
-                                className="text-primary-300 border-primary-700 border-b px-3 py-2 text-left text-xs font-semibold tracking-wide uppercase"
+                                className="text-primary-300 border-primary-700 bg-primary-950 border-b px-3 py-2 text-left text-xs font-semibold tracking-wide uppercase"
                                 scope="col"
                             >
                                 Actions
@@ -223,7 +223,7 @@ export function GatewaySessionsTable({
                                                 size="sm"
                                                 tone="warning"
                                             >
-                                                Metadata omitted:{" "}
+                                                Some details were not shown:{" "}
                                                 {session.omittedMetadataFields.join(", ")}
                                             </Text>
                                         )}
@@ -315,7 +315,7 @@ export function GatewaySessionsTable({
                                     </span>
                                     <span className="dashboard-data-table-value flex flex-wrap gap-1">
                                         <Button
-                                            aria-label={`Compact ${session.displayName}; key ${session.key}`}
+                                            aria-label={`Summarize ${session.displayName}; key ${session.key}`}
                                             disabled={busy}
                                             onClick={actionRequest(
                                                 "compact",
@@ -330,7 +330,7 @@ export function GatewaySessionsTable({
                                                 size="sm"
                                                 tone="inherit"
                                             />
-                                            Compact
+                                            Summarize
                                         </Button>
                                         <Button
                                             aria-label={`Reset ${session.displayName}; key ${session.key}`}

@@ -81,20 +81,18 @@ describe("OverviewIncidentsCard", () => {
         expect(
             await screen.findByRole("heading", { level: 2, name: "Active incidents" })
         ).toBeTruthy();
-        expect(within(metric("Newest 12")).getByText("2")).toBeTruthy();
+        expect(within(metric("Shown")).getByText("2")).toBeTruthy();
         expect(within(metric("Critical")).getByText("1")).toBeTruthy();
         expect(within(metric("Error")).getByText("0")).toBeTruthy();
         expect(screen.getByText("Disk capacity remains critical")).toBeTruthy();
-        expect(screen.getByText("generation 2")).toBeTruthy();
-        expect(screen.getByText("ops-check · 3 occurrences")).toBeTruthy();
+        expect(screen.getByText("Incident group 2")).toBeTruthy();
+        expect(screen.getByText("Check: ops-check · Seen 3 times")).toBeTruthy();
         expect(
             screen.getByText(`Last seen ${formatDashboardDateTime(timestampMs)}`)
         ).toHaveAttribute("dateTime", new Date(timestampMs).toISOString());
-        expect(screen.getByText(/not a current monitor-health verdict/u)).toBeTruthy();
+        expect(screen.getByText(/Some checks may still be unavailable/u)).toBeTruthy();
         expect(
-            screen.getByText(
-                "Older active generations are available on the incidents route."
-            )
+            screen.getByText("Open Incidents to see older active incidents.")
         ).toBeTruthy();
         expect(screen.getByRole("link", { name: "View incidents" })).toHaveAttribute(
             "href",
@@ -105,8 +103,10 @@ describe("OverviewIncidentsCard", () => {
     test("renders an explicit empty active-generation result", async () => {
         renderCard({ hasMore: false, incidents: [] });
 
-        expect(await screen.findByText("No persisted active incidents.")).toBeTruthy();
-        expect(within(metric("Newest 12")).getByText("0")).toBeTruthy();
-        expect(screen.queryByText(/Older active generations/u)).toBeNull();
+        expect(await screen.findByText("No active incidents.")).toBeTruthy();
+        expect(within(metric("Shown")).getByText("0")).toBeTruthy();
+        expect(
+            screen.queryByText(/Open Incidents to see older active incidents/u)
+        ).toBeNull();
     });
 });

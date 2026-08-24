@@ -33,26 +33,25 @@ function sessionConfirmationCopy(confirmation: SessionConfirmation) {
     switch (confirmation.kind) {
         case "revoke-session": {
             return {
-                confirmLabel: "Revoke session",
-                description:
-                    "This browser session will be signed out and must authenticate again.",
-                title: "Revoke browser session?",
+                confirmLabel: "Sign out browser",
+                description: "This browser will be signed out and must sign in again.",
+                title: "Sign out this browser?",
             };
         }
         case "revoke-others": {
             return {
-                confirmLabel: "Revoke other sessions",
+                confirmLabel: "Sign out other browsers",
                 description:
-                    "Every browser except this one will be signed out and must authenticate again.",
-                title: "Revoke every other session?",
+                    "Every browser except this one will be signed out and must sign in again.",
+                title: "Sign out every other browser?",
             };
         }
         case "revoke-all": {
             return {
-                confirmLabel: "Revoke every session",
+                confirmLabel: "Sign out every browser",
                 description:
-                    "Every browser session, including this one, will be signed out immediately.",
-                title: "Revoke every browser session?",
+                    "Every browser, including this one, will be signed out immediately.",
+                title: "Sign out every browser?",
             };
         }
     }
@@ -121,7 +120,7 @@ export function SessionManagementSection() {
 
     return (
         <SecuritySection
-            description="Review browser sessions, revoke individual devices, or end every session."
+            description="See where you are signed in and sign out one browser or all of them."
             id="session-management-heading"
             title="Browser sessions"
         >
@@ -145,7 +144,7 @@ export function SessionManagementSection() {
             )}
             {sessions.isSuccess && sessions.data.sessions.length === 0 && (
                 <EmptyState
-                    description="No active browser session records are available."
+                    description="There are no signed-in browsers to show."
                     icon={MonitorX}
                     title="No browser sessions"
                 />
@@ -181,9 +180,9 @@ export function SessionManagementSection() {
                                 </div>
                                 {!session.isCurrent && (
                                     <Button
-                                        aria-label={`Revoke session ${session.userAgent ?? "unnamed browser"}`}
+                                        aria-label={`Sign out browser ${session.userAgent ?? "unnamed browser"}`}
                                         busy={action.busy}
-                                        busyLabel="Revoking…"
+                                        busyLabel="Signing out…"
                                         onClick={() =>
                                             setConfirmation({
                                                 kind: "revoke-session",
@@ -194,7 +193,7 @@ export function SessionManagementSection() {
                                         variant="danger"
                                     >
                                         <Icon icon={Trash2} size="sm" tone="inherit" />
-                                        Revoke
+                                        Sign out
                                     </Button>
                                 )}
                             </div>
@@ -205,21 +204,21 @@ export function SessionManagementSection() {
             <div className="border-primary-700 mt-5 flex flex-wrap gap-3 border-t pt-5">
                 <Button
                     busy={action.busy}
-                    busyLabel="Revoking…"
+                    busyLabel="Signing out…"
                     onClick={() => setConfirmation({ kind: "revoke-others" })}
                     variant="secondary"
                 >
                     <Icon icon={MonitorX} size="sm" tone="inherit" />
-                    Revoke other sessions
+                    Sign out other browsers
                 </Button>
                 <Button
                     busy={action.busy}
-                    busyLabel="Revoking…"
+                    busyLabel="Signing out…"
                     onClick={() => setConfirmation({ kind: "revoke-all" })}
                     variant="danger"
                 >
                     <Icon icon={ShieldX} size="sm" tone="inherit" />
-                    Revoke every session
+                    Sign out every browser
                 </Button>
                 <Button
                     busy={action.busy}

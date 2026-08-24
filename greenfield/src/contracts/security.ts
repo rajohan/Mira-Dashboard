@@ -98,10 +98,14 @@ export const applicationCapabilities = [
     "cache:write",
     "chat:read",
     "chat:write",
+    "files:read",
+    "files:write",
     "gateway-sessions:read",
     "gateway-sessions:write",
     "jobs:read",
     "jobs:write",
+    "logs:read",
+    "logs:write",
     "monitoring:write",
     "notifications:read",
     "notifications:write",
@@ -111,6 +115,8 @@ export const applicationCapabilities = [
     "reports:write",
     "tasks:read",
     "tasks:write",
+    "terminal:read",
+    "terminal:write",
 ] as const;
 
 /** One capability granted to an authenticated application principal. */

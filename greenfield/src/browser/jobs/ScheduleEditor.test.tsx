@@ -62,7 +62,12 @@ describe("schedule editor", () => {
         expect(form).toHaveClass("sm:items-start");
         expect(spacer).toHaveClass("invisible", "select-none");
         expect(spacer).toHaveAttribute("aria-hidden", "true");
-        expect(helper).toHaveTextContent("Minute, hour, day, month, weekday.");
+        expect(helper).toHaveTextContent("Order: minute, hour, day, month, weekday.");
+        expect(cronExpression).toHaveAttribute("placeholder", "Example: 0 6 * * 1-5");
+        expect(screen.getByLabelText("Time zone")).toHaveAttribute(
+            "placeholder",
+            "Example: Europe/Oslo"
+        );
     });
 
     test("disables every cron control while a save is busy", () => {
@@ -85,6 +90,7 @@ describe("schedule editor", () => {
             name: "Edit Worker smoke schedule",
         });
         const interval = screen.getByLabelText("Interval (seconds)");
+        expect(interval).toHaveAttribute("placeholder", "Example: 300");
         const save = screen.getByRole("button", { name: "Save schedule" });
         expect(form).toHaveAttribute("novalidate");
         expect(save).toBeDisabled();

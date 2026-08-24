@@ -657,8 +657,10 @@ async function executeClaim(options: ExecuteClaimOptions): Promise<void> {
         return result.kind;
     };
 
-    const action = Effect.suspend(() =>
-        registration.execute(
+    let parsedActionPayload: JsonObject | undefined;
+    const action = Effect.suspend(() => {
+        parsedActionPayload = v.parse(jobPayloadSchema, parseJsonText(run.payloadJson));
+        return registration.execute(
             Object.freeze({
                 commitCacheAttempt: async (outcome: JobCacheAttemptCommit) => {
                     if (
@@ -686,9 +688,9 @@ async function executeClaim(options: ExecuteClaimOptions): Promise<void> {
                 writeOutput: (kind: "stderr" | "stdout", message: string) =>
                     Effect.tryPromise(() => appendEvent(kind, message)),
             }),
-            v.parse(jobPayloadSchema, parseJsonText(run.payloadJson))
-        )
-    );
+            parsedActionPayload
+        );
+    });
     const monitorPromise = monitor().catch((error: unknown) => {
         if (!actionController.signal.aborted) {
             monitorFailure = error;
@@ -724,7 +726,7 @@ async function executeClaim(options: ExecuteClaimOptions): Promise<void> {
     if (abortReason instanceof JobClaimLostError) return;
     const at = new Date(options.nowMs());
     const outcome = executionOutcome(run, at, result, abortReason, actionFailure);
-    await options.repository.settleClaim({
+    const settlement = await options.repository.settleClaim({
         at,
         leaseToken,
         outcome,
@@ -737,6 +739,16 @@ async function executeClaim(options: ExecuteClaimOptions): Promise<void> {
             ),
         workerId: options.workerInstanceId,
     });
+    if (
+        settlement.kind === "settled" &&
+        settlement.run.state === "succeeded" &&
+        registration.afterSuccessfulSettlement !== undefined
+    ) {
+        if (parsedActionPayload === undefined) {
+            throw new Error("Successful job action payload was not retained");
+        }
+        await registration.afterSuccessfulSettlement(parsedActionPayload);
+    }
 }
 
 /**

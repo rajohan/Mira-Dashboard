@@ -42,7 +42,7 @@ function targetLabel(target: SecurityAuditEventSummary["target"]): string {
 
 function metadataLabel(metadata: SecurityAuditEventSummary["metadata"]): string {
     const entries = Object.entries(metadata);
-    if (entries.length === 0) return "No public metadata";
+    if (entries.length === 0) return "No details";
     return entries
         .map(
             ([name, value]) =>
@@ -91,14 +91,14 @@ const auditColumns = auditColumnHelper.columns([
         cell: ({ getValue }) => (
             <span className="text-primary-300 break-all">{getValue()}</span>
         ),
-        header: "Actor",
+        header: "Who",
         id: "actor",
     }),
     auditColumnHelper.accessor((event) => targetLabel(event.target), {
         cell: ({ getValue }) => (
             <span className="text-primary-300 break-all">{getValue()}</span>
         ),
-        header: "Target",
+        header: "Affected item",
         id: "target",
     }),
     auditColumnHelper.accessor("occurredAtMs", {
@@ -116,7 +116,7 @@ const auditColumns = auditColumnHelper.columns([
         cell: ({ getValue }) => (
             <span className="text-primary-400 break-all">{getValue()}</span>
         ),
-        header: "Public metadata",
+        header: "Details",
         id: "metadata",
     }),
 ]);
@@ -191,7 +191,7 @@ export function SecurityAuditSection() {
 
     return (
         <SecuritySection
-            description="Newest-first immutable events with a fixed, redacted metadata allowlist."
+            description="A read-only history of security changes. Sensitive details are hidden."
             id="security-audit-heading"
             title="Security audit"
         >
@@ -214,7 +214,7 @@ export function SecurityAuditSection() {
             )}
             {events.isSuccess && auditEvents.length === 0 && (
                 <EmptyState
-                    description="Security events will appear here after protected actions occur."
+                    description="Security events will appear here after account or access settings change."
                     icon={ScrollText}
                     title="No security events"
                 />

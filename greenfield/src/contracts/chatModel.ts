@@ -35,6 +35,7 @@ export const chatRuntimeExternalProjectionReserveBytes = 64 * 1024;
 export const chatRuntimeDurableResponseMaximumBytes =
     chatRuntimeResponseMaximumBytes - chatRuntimeExternalProjectionReserveBytes;
 export const chatRuntimeSnapshotMaximumBytes = 512 * 1024;
+export const chatRuntimeProjectionPartsMaximum = 512;
 export const chatRunEventMaximum = 4096;
 export const chatRunEventBytesMaximum = 1024 * 1024;
 /** One immutable journal row must leave most of the per-run journal available. */
@@ -53,21 +54,6 @@ export const chatExternalRunsPerSessionMaximum = 8;
 export const chatExternalRunsPerProcessMaximum = 32;
 export const chatDeltaCoalescingMilliseconds = 150;
 export const chatMessageTextMaximumCodeUnits = 256 * 1024;
-
-/**
- * Converges mirrored cumulative and incremental provider text without repeating
- * an already-rendered suffix. The rule is intentionally shared by server and
- * browser reducers so restart snapshots and live projection stay identical.
- * @param previous Previously projected text.
- * @param next Newly observed cumulative or incremental text.
- * @returns The converged projection text.
- */
-export function mergeChatStreamText(previous: string, next: string): string {
-    if (next.length === 0) return previous;
-    if (previous.length === 0 || next.startsWith(previous)) return next;
-    if (previous.endsWith(next)) return previous;
-    return previous + next;
-}
 
 export const chatRunStates = [
     "active",
@@ -110,6 +96,14 @@ export const chatRuntimeEventSequenceSchema = v.pipe(
 );
 const chatProviderSequenceSchema = positiveSafeIntegerSchema(
     "Chat provider sequence is invalid"
+);
+const chatProjectionStreamIdSchema = boundedControlSafeTextSchema(
+    512,
+    "Chat projection stream id is invalid"
+);
+const chatProjectionSegmentIdSchema = boundedControlSafeTextSchema(
+    512,
+    "Chat projection segment id is invalid"
 );
 
 function boundedChatTextSchema(maximumCodeUnits: number, message: string) {
@@ -164,11 +158,13 @@ const chatMessagePartVariantSchema = v.variant("kind", [
     }),
     v.strictObject({
         callId: chatToolCallIdSchema,
+        callIdSource: v.optional(v.literal("synthetic")),
         id: chatPartIdSchema,
         input: v.optional(chatDiagnosticTextSchema),
         isError: v.boolean("Chat tool failure state is invalid"),
         kind: v.literal("tool"),
         name: chatToolNameSchema,
+        nameSource: v.optional(v.literal("synthetic")),
         output: v.optional(chatDiagnosticTextSchema),
         phase: v.picklist(
             ["started", "running", "succeeded", "failed"],
@@ -386,6 +382,11 @@ const chatRuntimeEventBase = {
 };
 
 export const chatPlanStepStatuses = ["completed", "in_progress", "pending"] as const;
+export const chatPlanExplanationMaximumCodeUnits = 4000;
+export const chatPlanExplanationSchema = boundedNonBlankTextSchema(
+    chatPlanExplanationMaximumCodeUnits,
+    "Chat plan explanation is invalid"
+);
 export const chatPlanStepSchema = v.strictObject({
     status: v.picklist(chatPlanStepStatuses, "Chat plan step status is invalid"),
     text: boundedNonBlankTextSchema(1000, "Chat plan step text is invalid"),
@@ -442,10 +443,12 @@ const chatRuntimeEventVariantSchema = v.variant("kind", [
     v.strictObject({
         ...chatRuntimeEventBase,
         callId: chatToolCallIdSchema,
+        callIdSource: v.optional(v.literal("synthetic")),
         input: v.optional(chatDiagnosticTextSchema),
         isError: v.boolean("Chat tool failure state is invalid"),
         kind: v.literal("tool"),
         name: chatToolNameSchema,
+        nameSource: v.optional(v.literal("synthetic")),
         output: v.optional(chatDiagnosticTextSchema),
         phase: v.picklist(["started", "running", "succeeded", "failed"]),
         providerSequence: v.optional(chatProviderSequenceSchema),
@@ -471,6 +474,7 @@ const chatRuntimeEventVariantSchema = v.variant("kind", [
     }),
     v.strictObject({
         ...chatRuntimeEventBase,
+        explanation: v.optional(chatPlanExplanationSchema),
         kind: v.literal("plan"),
         phase: v.literal("update"),
         providerSequence: v.optional(chatProviderSequenceSchema),
@@ -479,7 +483,8 @@ const chatRuntimeEventVariantSchema = v.variant("kind", [
     v.strictObject({
         ...chatRuntimeEventBase,
         kind: v.literal("provider-noop"),
-        providerSequence: chatProviderSequenceSchema,
+        providerSequenceEnd: chatProviderSequenceSchema,
+        providerSequenceStart: chatProviderSequenceSchema,
         reason: v.literal("ignored"),
     }),
     v.strictObject({
@@ -528,7 +533,13 @@ export function chatRuntimeEventToolStateIsConsistent(
 export function chatRuntimeEventProviderRangeIsConsistent(
     event: v.InferOutput<typeof chatRuntimeEventVariantSchema>
 ): boolean {
-    if (event.kind !== "assistant" && event.kind !== "thinking") return true;
+    if (
+        event.kind !== "assistant" &&
+        event.kind !== "thinking" &&
+        event.kind !== "provider-noop"
+    ) {
+        return true;
+    }
     return (
         (event.providerSequenceStart === undefined &&
             event.providerSequenceEnd === undefined) ||
@@ -555,20 +566,26 @@ export type ChatRuntimeEvent = v.InferOutput<typeof chatRuntimeEventSchema>;
 const chatRuntimeProjectionPartVariantSchema = v.variant("kind", [
     v.strictObject({
         kind: v.literal("assistant"),
+        segmentId: v.optional(chatProjectionSegmentIdSchema),
         sequence: chatRuntimeEventSequenceSchema,
+        streamId: v.optional(chatProjectionStreamIdSchema),
         text: chatMessageTextSchema,
     }),
     v.strictObject({
         kind: v.literal("thinking"),
+        segmentId: v.optional(chatProjectionSegmentIdSchema),
         sequence: chatRuntimeEventSequenceSchema,
+        streamId: v.optional(chatProjectionStreamIdSchema),
         text: chatMessageTextSchema,
     }),
     v.strictObject({
         callId: chatToolCallIdSchema,
+        callIdSource: v.optional(v.literal("synthetic")),
         input: v.optional(chatDiagnosticTextSchema),
         isError: v.boolean(),
         kind: v.literal("tool"),
         name: chatToolNameSchema,
+        nameSource: v.optional(v.literal("synthetic")),
         output: v.optional(chatDiagnosticTextSchema),
         phase: v.picklist(["started", "running", "succeeded", "failed"]),
         sequence: chatRuntimeEventSequenceSchema,
@@ -620,7 +637,10 @@ export function chatRuntimeProjectionPartsAreOrdered(
 
 const chatRuntimeProjectionPartsSchema = v.pipe(
     v.array(chatRuntimeProjectionPartSchema, "Chat runtime projection parts are invalid"),
-    v.maxLength(512, "Chat runtime projection part count is outside its budget"),
+    v.maxLength(
+        chatRuntimeProjectionPartsMaximum,
+        "Chat runtime projection part count is outside its budget"
+    ),
     v.check(
         chatRuntimeProjectionPartsAreOrdered,
         "Chat runtime projection parts are not in strict sequence order"
@@ -632,6 +652,7 @@ const chatRuntimeSnapshotObjectSchema = v.strictObject({
     parts: chatRuntimeProjectionPartsSchema,
     plan: v.optional(
         v.strictObject({
+            explanation: v.optional(chatPlanExplanationSchema),
             phase: v.literal("update"),
             steps: chatPlanStepsSchema,
         })
@@ -663,22 +684,86 @@ export const chatRuntimeSnapshotSchema = v.pipe(
 export type ChatRuntimeSnapshot = v.InferOutput<typeof chatRuntimeSnapshotSchema>;
 
 const chatExternalPlanSchema = v.strictObject({
+    explanation: v.optional(chatPlanExplanationSchema),
     phase: v.literal("update"),
     steps: chatPlanStepsSchema,
 });
 
+export const chatAbortAttemptIdSchema = boundedControlSafeTextSchema(
+    64,
+    "Chat abort attempt id is invalid"
+);
+
+const chatExternalAbortBoundarySchema = v.strictObject({
+    attemptId: chatAbortAttemptIdSchema,
+    attemptedAtMs: timestampMillisecondsSchema(
+        "External chat abort attempt timestamp is invalid"
+    ),
+    baselineObservationEpoch: nonnegativeSafeIntegerSchema(
+        "External chat abort observation epoch is invalid"
+    ),
+    baselineUpdatedAtMs: timestampMillisecondsSchema(
+        "External chat abort baseline is invalid"
+    ),
+    settlement: v.picklist(["not-aborted", "pending", "unknown"]),
+});
+
+export const chatExternalStreamResetMaximum = 8;
+const chatExternalStreamResetSchema = v.strictObject({
+    resetId: chatProjectionSegmentIdSchema,
+    streamId: chatProjectionStreamIdSchema,
+});
+const chatExternalStreamResetsSchema = v.pipe(
+    v.array(chatExternalStreamResetSchema),
+    v.maxLength(
+        chatExternalStreamResetMaximum,
+        "External chat stream reset count is outside its budget"
+    )
+);
+
 /** Honest provider-origin projection with no fabricated local actor or UUID admission. */
-export const chatExternalRunSchema = v.strictObject({
+const chatExternalRunObjectSchema = v.strictObject({
+    /** Server-owned observation fence for one exact provider abort attempt. */
+    abortBoundary: v.optional(chatExternalAbortBoundarySchema),
     continuity: v.picklist(["complete", "interrupted"]),
     hasUnprojectedActivity: v.boolean(),
+    /** Process-local receipt/start epoch; processing completion never advances it. */
+    observationEpoch: v.optional(
+        nonnegativeSafeIntegerSchema("External chat observation epoch is invalid"),
+        0
+    ),
+    /** Trusted provider receipt or history-request start time, never completion time. */
+    observedAtMs: v.optional(
+        timestampMillisecondsSchema("External chat observation timestamp is invalid"),
+        0
+    ),
+    /** Ordered provider activity retained even when no local admission exists. */
+    parts: v.optional(chatRuntimeProjectionPartsSchema),
     plan: v.optional(chatExternalPlanSchema),
     /** True when response budgeting deliberately omits provider projection detail. */
     projectionTruncated: v.optional(v.boolean(), false),
     providerRunId: chatProviderRunIdSchema,
     sessionKey: gatewaySessionKeySchema,
     source: v.picklist(["provider-in-flight", "provider-runtime"]),
+    /** Latest authoritative replacement watermark for each provider stream. */
+    streamResets: v.optional(chatExternalStreamResetsSchema),
+    /** Assistant-only compatibility projection used by bounded response fallback. */
     text: chatMessageTextSchema,
     updatedAtMs: timestampMillisecondsSchema("External chat run timestamp is invalid"),
 });
+
+export function chatExternalRunFitsBudget(
+    run: v.InferOutput<typeof chatExternalRunObjectSchema>
+): boolean {
+    return utf8ByteLength(JSON.stringify(run)) <= chatRuntimeSnapshotMaximumBytes;
+}
+
+export const chatExternalRunSchema = v.pipe(
+    chatExternalRunObjectSchema,
+    v.check(
+        chatExternalRunFitsBudget,
+        "External chat run projection is outside its budget"
+    )
+);
 
 export type ChatExternalRun = v.InferOutput<typeof chatExternalRunSchema>;

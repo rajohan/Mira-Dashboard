@@ -51,6 +51,14 @@ function queuedRun() {
 describe("durable job models", () => {
     test("accepts lifecycle-consistent run projections without internal execution data", () => {
         expect(v.parse(jobRunSummarySchema, queuedRun()).state).toBe("queued");
+        expect(
+            v.parse(jobRunSummarySchema, {
+                ...queuedRun(),
+                actionKey: "workspace-files.apply-write",
+                scheduledJobId: undefined,
+                scheduledJobVersion: undefined,
+            }).scheduledJobId
+        ).toBeUndefined();
 
         const succeeded = {
             ...queuedRun(),
@@ -92,11 +100,7 @@ describe("durable job models", () => {
     test("rejects inconsistent schedule provenance, attempts, terminal state, and time", () => {
         const invalidRuns = [
             { ...queuedRun(), scheduledJobVersion: undefined },
-            {
-                ...queuedRun(),
-                scheduledJobId: undefined,
-                scheduledJobVersion: undefined,
-            },
+            { ...queuedRun(), scheduledJobId: undefined },
             { ...queuedRun(), triggerType: "startup" },
             { ...queuedRun(), scheduledForAtMs: 500, triggerType: "manual" },
             {

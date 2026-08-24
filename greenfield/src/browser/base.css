@@ -198,3 +198,137 @@ input[type="search"]::-webkit-search-cancel-button {
 ::-webkit-scrollbar-thumb:hover {
     background: #8a929e;
 }
+
+/* CSP-safe, AA-adjusted Monokai Sublime palette based on the legacy Files viewer. */
+.source-viewer-source {
+    color: #f8f8f2;
+    background: transparent;
+}
+
+.source-viewer-source-wrapped {
+    width: 100%;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+
+.source-viewer-source-unwrapped {
+    width: max-content;
+    min-width: 100%;
+    white-space: pre;
+}
+
+.source-viewer-lines {
+    display: block;
+    min-width: 100%;
+    color: #f8f8f2;
+    counter-reset: source-viewer-line-number;
+}
+
+.source-viewer-line {
+    position: relative;
+    display: block;
+    min-height: 1lh;
+    counter-increment: source-viewer-line-number;
+}
+
+.source-viewer-lines-numbered .source-viewer-line {
+    padding-right: 1rem;
+    padding-left: 5rem;
+}
+
+.source-viewer-lines-numbered .source-viewer-line::before {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    display: inline-block;
+    box-sizing: border-box;
+    width: 4rem;
+    margin-left: -5rem;
+    margin-right: 1rem;
+    padding-right: 1rem;
+    color: #858c99; /* Legacy #6b7280 lifted to AA contrast at 14px. */
+    text-align: right;
+    vertical-align: top;
+    background: #0b0b0c;
+    content: counter(source-viewer-line-number);
+    user-select: none;
+}
+
+.source-viewer-source-wrapped .source-viewer-line {
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+
+.source-viewer-source-unwrapped .source-viewer-line {
+    width: max-content;
+    min-width: 100%;
+    white-space: pre;
+}
+
+.syntax-highlighted-source {
+    color: #f8f8f2;
+}
+
+.syntax-highlighted-source .hljs-tag,
+.syntax-highlighted-source .hljs-subst,
+.syntax-highlighted-source .hljs-params,
+.syntax-highlighted-source .hljs-class .hljs-title {
+    color: #f8f8f2;
+}
+
+.syntax-highlighted-source .hljs-strong {
+    color: #a8a8a2;
+    font-weight: 700;
+}
+
+.syntax-highlighted-source .hljs-emphasis {
+    color: #a8a8a2;
+    font-style: italic;
+}
+
+.syntax-highlighted-source .hljs-bullet,
+.syntax-highlighted-source .hljs-quote,
+.syntax-highlighted-source .hljs-literal,
+.syntax-highlighted-source .hljs-number,
+.syntax-highlighted-source .hljs-regexp,
+.syntax-highlighted-source .hljs-link {
+    color: #ae81ff;
+}
+
+.syntax-highlighted-source .hljs-code,
+.syntax-highlighted-source .hljs-section,
+.syntax-highlighted-source .hljs-title,
+.syntax-highlighted-source .hljs-selector-class {
+    color: #a6e22e;
+}
+
+.syntax-highlighted-source .hljs-keyword,
+.syntax-highlighted-source .hljs-selector-tag,
+.syntax-highlighted-source .hljs-name,
+.syntax-highlighted-source .hljs-attr {
+    color: #ff367d; /* Monokai #f92672 lifted to AA contrast at 14px. */
+}
+
+.syntax-highlighted-source .hljs-symbol,
+.syntax-highlighted-source .hljs-attribute {
+    color: #66d9ef;
+}
+
+.syntax-highlighted-source .hljs-string,
+.syntax-highlighted-source .hljs-type,
+.syntax-highlighted-source .hljs-built_in,
+.syntax-highlighted-source .hljs-builtin-name,
+.syntax-highlighted-source .hljs-selector-id,
+.syntax-highlighted-source .hljs-selector-attr,
+.syntax-highlighted-source .hljs-selector-pseudo,
+.syntax-highlighted-source .hljs-addition,
+.syntax-highlighted-source .hljs-variable,
+.syntax-highlighted-source .hljs-template-variable {
+    color: #e6db74;
+}
+
+.syntax-highlighted-source .hljs-comment,
+.syntax-highlighted-source .hljs-deletion,
+.syntax-highlighted-source .hljs-meta {
+    color: #918d78; /* Monokai #75715e lifted to AA contrast at 14px. */
+}

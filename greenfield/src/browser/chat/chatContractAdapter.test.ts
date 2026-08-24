@@ -7,6 +7,7 @@ import type {
 } from "../../contracts/chatModel.ts";
 import {
     adaptChatRuntimeEvent,
+    chatToolResultMatchesCall,
     projectChatContractMessage,
     projectChatExternalRun,
     projectChatRuntimeSnapshot,
@@ -77,6 +78,145 @@ describe("chat contract adapter", () => {
         });
     });
 
+    test("coalesces split call and result parts with one stable tool lifecycle", () => {
+        const message: ChatMessage = {
+            content: {
+                kind: "complete",
+                parts: [
+                    {
+                        callId: "call-1",
+                        id: "call-part",
+                        input: '{"cmd":"bun test","workdir":"/workspace/app"}',
+                        isError: false,
+                        kind: "tool",
+                        name: "functions.exec_command",
+                        phase: "started",
+                    },
+                    {
+                        callId: "call-1",
+                        id: "result-part",
+                        isError: false,
+                        kind: "tool",
+                        name: "tool",
+                        output: "8 pass",
+                        phase: "succeeded",
+                    },
+                ],
+            },
+            id: "message-tool-pair",
+            role: "assistant",
+            source: "gateway-history",
+        };
+
+        expect(projectChatContractMessage(message, sessionKey, 0).parts).toEqual([
+            {
+                callId: "call-1",
+                input: '{"cmd":"bun test","workdir":"/workspace/app"}',
+                kind: "tool",
+                name: "functions.exec_command",
+                output: "8 pass",
+                status: "completed",
+            },
+        ]);
+    });
+
+    test("pairs synthetic same-name results with the first unresolved call", () => {
+        const message: ChatMessage = {
+            content: {
+                kind: "complete",
+                parts: [
+                    {
+                        callId: "1",
+                        callIdSource: "synthetic",
+                        id: "call-1",
+                        input: "first",
+                        isError: false,
+                        kind: "tool",
+                        name: "search",
+                        phase: "started",
+                    },
+                    {
+                        callId: "2",
+                        callIdSource: "synthetic",
+                        id: "call-2",
+                        input: "second",
+                        isError: false,
+                        kind: "tool",
+                        name: "search",
+                        phase: "started",
+                    },
+                    {
+                        callId: "3",
+                        callIdSource: "synthetic",
+                        id: "result-1",
+                        isError: false,
+                        kind: "tool",
+                        name: "search",
+                        output: "first result",
+                        phase: "succeeded",
+                    },
+                ],
+            },
+            id: "synthetic-tool-pair",
+            role: "assistant",
+            source: "gateway-history",
+        };
+
+        expect(projectChatContractMessage(message, sessionKey, 0).parts).toEqual([
+            {
+                callId: "1",
+                callIdSource: "synthetic",
+                input: "first",
+                kind: "tool",
+                name: "search",
+                output: "first result",
+                status: "completed",
+            },
+            {
+                callId: "2",
+                callIdSource: "synthetic",
+                input: "second",
+                kind: "tool",
+                name: "search",
+                status: "running",
+            },
+        ]);
+    });
+
+    test("consumes a terminal tool result only once", () => {
+        const result = {
+            callId: "call-1",
+            kind: "tool" as const,
+            name: "search",
+            output: "found",
+            status: "completed" as const,
+        };
+        expect(
+            chatToolResultMatchesCall(
+                {
+                    callId: "call-1",
+                    input: '{"query":"runtime"}',
+                    kind: "tool",
+                    name: "search",
+                    status: "running",
+                },
+                result
+            )
+        ).toBeTrue();
+        expect(
+            chatToolResultMatchesCall(
+                {
+                    callId: "call-1",
+                    kind: "tool",
+                    name: "search",
+                    output: "first result",
+                    status: "completed",
+                },
+                result
+            )
+        ).toBeFalse();
+    });
+
     test("maps every runtime lifecycle family explicitly", () => {
         const base = { occurredAtMs: timestampMs, runId, sequence: 1 };
         expect(
@@ -117,7 +257,8 @@ describe("chat contract adapter", () => {
             adaptChatRuntimeEvent(sessionKey, "5", {
                 ...base,
                 kind: "provider-noop",
-                providerSequence: 9,
+                providerSequenceEnd: 9,
+                providerSequenceStart: 9,
                 reason: "ignored",
             })
         ).toMatchObject({ cursor: 5, kind: "noop" });
@@ -166,7 +307,6 @@ describe("chat contract adapter", () => {
                 parts: [
                     { kind: "thinking", status: "complete" },
                     { kind: "tool", status: "completed" },
-                    { kind: "control", text: "plan: One" },
                     { kind: "text", text: "Final" },
                 ],
             },
@@ -177,8 +317,34 @@ describe("chat contract adapter", () => {
 
     test("projects provider-origin runs without fabricating local admission identity", () => {
         const externalRun: ChatExternalRun = {
+            abortBoundary: {
+                attemptId: "abort-attempt",
+                attemptedAtMs: timestampMs - 1,
+                baselineObservationEpoch: 6,
+                baselineUpdatedAtMs: timestampMs - 1,
+                settlement: "unknown",
+            },
             continuity: "interrupted",
-            hasUnprojectedActivity: true,
+            hasUnprojectedActivity: false,
+            observationEpoch: 7,
+            observedAtMs: timestampMs,
+            parts: [
+                {
+                    kind: "assistant",
+                    sequence: 1,
+                    text: "Provider response",
+                },
+                {
+                    callId: "provider-tool-1",
+                    input: '{"query":"runtime"}',
+                    isError: false,
+                    kind: "tool",
+                    name: "search",
+                    output: "Found runtime activity",
+                    phase: "succeeded",
+                    sequence: 2,
+                },
+            ],
             plan: {
                 phase: "update",
                 steps: [{ status: "in_progress", text: "Inspect provider state" }],
@@ -192,31 +358,181 @@ describe("chat contract adapter", () => {
         };
 
         const projection = projectChatExternalRun(externalRun);
+        expect(projection.abortBoundary).toEqual(externalRun.abortBoundary);
         expect(projection.message).toMatchObject({
             id: `external:${sessionKey}:provider-run-1`,
             parts: [
                 { kind: "text", text: "Provider response" },
                 {
-                    kind: "control",
-                    text: expect.stringContaining("without a local Dashboard admission"),
+                    input: '{"query":"runtime"}',
+                    kind: "tool",
+                    output: "Found runtime activity",
+                    status: "completed",
                 },
                 {
                     kind: "control",
-                    text: expect.stringContaining("continuity was interrupted"),
-                },
-                {
-                    kind: "control",
-                    text: expect.stringContaining("could not be projected"),
+                    text: expect.stringContaining("Activity updates were interrupted"),
                 },
             ],
             role: "assistant",
         });
+        expect(projection.message.parts).not.toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    text: expect.stringContaining("started outside the Dashboard"),
+                }),
+            ])
+        );
         expect(projection.message).not.toHaveProperty("clientRunId");
         expect(projection.message).not.toHaveProperty("runId");
         expect(projection.plan).toMatchObject({
             runId: "provider:provider-run-1",
-            title: "Provider-origin plan",
+            title: "OpenClaw plan",
         });
+    });
+
+    test("retains provider thinking while suppressing mirrored items and user echoes", () => {
+        const projection = projectChatExternalRun({
+            continuity: "complete",
+            hasUnprojectedActivity: false,
+            observationEpoch: 1,
+            observedAtMs: timestampMs,
+            parts: [
+                {
+                    kind: "thinking",
+                    sequence: 1,
+                    text: "Inspecting the workspace",
+                },
+                {
+                    id: "item-with-text",
+                    kind: "item",
+                    sequence: 2,
+                    text: "Read the current configuration",
+                    type: "progress",
+                },
+                {
+                    id: "item-without-text",
+                    kind: "item",
+                    sequence: 3,
+                    type: "checkpoint",
+                },
+                {
+                    kind: "user",
+                    sequence: 4,
+                    text: "Provider-side copy of the prompt",
+                },
+            ],
+            projectionTruncated: false,
+            providerRunId: "provider-activity",
+            sessionKey,
+            source: "provider-runtime",
+            text: "",
+            updatedAtMs: timestampMs,
+        });
+
+        expect(projection.message.parts).toEqual([
+            {
+                kind: "thinking",
+                status: "running",
+                text: "Inspecting the workspace",
+            },
+        ]);
+        expect(JSON.stringify(projection.message)).not.toContain(
+            "Provider-side copy of the prompt"
+        );
+        expect(JSON.stringify(projection.message)).not.toMatch(/progress|checkpoint/u);
+    });
+
+    test("projects a complete provider plan even when unrelated activity is truncated", () => {
+        const projection = projectChatExternalRun({
+            continuity: "complete",
+            hasUnprojectedActivity: true,
+            observationEpoch: 2,
+            observedAtMs: timestampMs,
+            plan: {
+                explanation: "Why the provider is doing this work.",
+                phase: "update",
+                steps: [{ status: "in_progress", text: "Inspect runtime" }],
+            },
+            projectionTruncated: true,
+            providerRunId: "provider-truncated-with-plan",
+            sessionKey,
+            source: "provider-runtime",
+            text: "Partial response",
+            updatedAtMs: timestampMs,
+        });
+
+        expect(projection.plan).toMatchObject({
+            description: "Why the provider is doing this work.",
+            items: [{ label: "Inspect runtime", status: "in-progress" }],
+        });
+    });
+
+    test("keeps truncated assistant text authoritative and folds synthetic tool lifecycle", () => {
+        const projection = projectChatExternalRun({
+            continuity: "complete",
+            hasUnprojectedActivity: true,
+            observationEpoch: 1,
+            observedAtMs: timestampMs,
+            parts: [
+                { kind: "assistant", sequence: 1, text: "stale tail" },
+                {
+                    callId: "synthetic-start",
+                    callIdSource: "synthetic",
+                    input: '{"query":"runtime"}',
+                    isError: false,
+                    kind: "tool",
+                    name: "search",
+                    phase: "started",
+                    sequence: 2,
+                },
+                {
+                    callId: "synthetic-result",
+                    callIdSource: "synthetic",
+                    isError: false,
+                    kind: "tool",
+                    name: "search",
+                    output: "found",
+                    phase: "succeeded",
+                    sequence: 3,
+                },
+            ],
+            projectionTruncated: true,
+            providerRunId: "provider-truncated",
+            sessionKey,
+            source: "provider-runtime",
+            text: "The complete accumulated assistant response.",
+            updatedAtMs: timestampMs,
+        });
+
+        expect(projection.message.parts).toEqual([
+            {
+                kind: "text",
+                sourceKey: "provider-truncated:aggregate:assistant",
+                sourceStreamKey: "provider-truncated:assistant",
+                text: "The complete accumulated assistant response.",
+            },
+            {
+                callId: "synthetic-start",
+                callIdSource: "synthetic",
+                input: '{"query":"runtime"}',
+                kind: "tool",
+                name: "search",
+                output: "found",
+                status: "completed",
+            },
+            {
+                kind: "control",
+                text: "Some OpenClaw activity details were not returned.",
+                tone: "warning",
+            },
+            {
+                kind: "control",
+                text: "Some additional OpenClaw activity could not be shown.",
+                tone: "warning",
+            },
+        ]);
+        expect(JSON.stringify(projection)).not.toContain("stale tail");
     });
 
     test("treats truncated projections as explicit placeholders, not empty transcripts", () => {
@@ -243,7 +559,9 @@ describe("chat contract adapter", () => {
                 parts: [
                     {
                         kind: "control",
-                        text: expect.stringContaining("projection detail was omitted"),
+                        text: expect.stringContaining(
+                            "live response details were not returned"
+                        ),
                         tone: "warning",
                     },
                 ],
@@ -276,7 +594,7 @@ describe("chat contract adapter", () => {
                     {
                         kind: "control",
                         text: expect.stringContaining(
-                            "remains unresolved after the reconciliation deadline"
+                            "still has not confirmed the result"
                         ),
                         tone: "warning",
                     },

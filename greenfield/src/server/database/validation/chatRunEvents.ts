@@ -65,6 +65,9 @@ export function chatRunEventRowIsConsistent(row: ChatRunEventRowLike): boolean {
     if (event.kind === "assistant" || event.kind === "thinking") {
         providerStart = event.providerSequenceStart;
         providerEnd = event.providerSequenceEnd;
+    } else if (event.kind === "provider-noop") {
+        providerStart = event.providerSequenceStart;
+        providerEnd = event.providerSequenceEnd;
     } else if ("providerSequence" in event) {
         providerStart = event.providerSequence;
         providerEnd = event.providerSequence;

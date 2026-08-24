@@ -27,12 +27,14 @@ function validEnvironment(): Record<string, unknown> {
     return {
         ELEVENLABS_API_KEY: "elevenlabs-api-key-test-value",
         MIRA_DASHBOARD_LOG_LEVEL: "info",
+        MIRA_DASHBOARD_OPENCLAW_ROOT: "/srv/openclaw",
         MIRA_DASHBOARD_PROJECT_ROOT: "/srv/mira-dashboard",
         MIRA_DASHBOARD_PUBLIC_ORIGIN: "https://dashboard.example.com",
         MIRA_DASHBOARD_RECENT_AUTH_MINUTES: "10",
         MIRA_DASHBOARD_SESSION_IDLE_MINUTES: "30",
         MIRA_DASHBOARD_TOTP_KEYRING: serializedKeyring(),
         MIRA_DASHBOARD_TRUSTED_PROXY_IPS: "127.0.0.1,::1",
+        MIRA_DASHBOARD_WORKSPACE_ROOT: "/srv/mira-workspace",
         MIRA_DASHBOARD_WEBAUTHN_ORIGINS:
             "https://dashboard.example.com,https://admin.example.com",
         MIRA_DASHBOARD_WEBAUTHN_RP_ID: "example.com",
@@ -73,12 +75,14 @@ describe("web application configuration", () => {
             gatewayUrl: "ws://127.0.0.1:18789/",
             logLevel: "info",
             nodeEnvironment: "production",
+            openClawRoot: "/srv/openclaw",
             port: 3100,
             projectRoot: "/srv/mira-dashboard",
             publicOrigin: "https://dashboard.example.com",
             recentAuthenticationWindowMs: 600_000,
             sessionIdleDurationMs: 1_800_000,
             trustedProxyAddresses: ["127.0.0.1", "::1"],
+            workspaceRoot: "/srv/mira-workspace",
             webAuthnRelyingParty: {
                 allowedOrigins: [
                     "https://admin.example.com",
@@ -232,7 +236,9 @@ describe("web application configuration", () => {
     test("classifies missing required fields without retaining values", () => {
         for (const field of [
             "MIRA_DASHBOARD_PROJECT_ROOT",
+            "MIRA_DASHBOARD_OPENCLAW_ROOT",
             "MIRA_DASHBOARD_PUBLIC_ORIGIN",
+            "MIRA_DASHBOARD_WORKSPACE_ROOT",
             "MIRA_DASHBOARD_WEBAUTHN_RP_ID",
             "MIRA_DASHBOARD_WEBAUTHN_ORIGINS",
             "MIRA_DASHBOARD_TOTP_KEYRING",
@@ -270,6 +276,36 @@ describe("web application configuration", () => {
                 "MIRA_DASHBOARD_PROJECT_ROOT",
                 "/srv/../srv/mira-dashboard",
                 "MIRA_DASHBOARD_PROJECT_ROOT",
+                "invalid",
+            ],
+            [
+                "MIRA_DASHBOARD_OPENCLAW_ROOT",
+                "relative/path",
+                "MIRA_DASHBOARD_OPENCLAW_ROOT",
+                "invalid",
+            ],
+            [
+                "MIRA_DASHBOARD_OPENCLAW_ROOT",
+                "/",
+                "MIRA_DASHBOARD_OPENCLAW_ROOT",
+                "invalid",
+            ],
+            [
+                "MIRA_DASHBOARD_WORKSPACE_ROOT",
+                "relative/path",
+                "MIRA_DASHBOARD_WORKSPACE_ROOT",
+                "invalid",
+            ],
+            [
+                "MIRA_DASHBOARD_WORKSPACE_ROOT",
+                "/",
+                "MIRA_DASHBOARD_WORKSPACE_ROOT",
+                "invalid",
+            ],
+            [
+                "MIRA_DASHBOARD_WORKSPACE_ROOT",
+                "/srv/../srv/mira-workspace",
+                "MIRA_DASHBOARD_WORKSPACE_ROOT",
                 "invalid",
             ],
             [

@@ -1,10 +1,9 @@
-import {
-    chatDeltaCoalescingMilliseconds,
-    mergeChatStreamText,
-} from "../../../contracts/chatModel.ts";
+import { chatDeltaCoalescingMilliseconds } from "../../../contracts/chatModel.ts";
+import { mergeChatStreamText } from "../../../shared/chatStreamText.ts";
 import type { ChatRuntimeEventDraft } from "./repository.ts";
 
 type DeltaDraft = Extract<ChatRuntimeEventDraft, { kind: "assistant" | "thinking" }>;
+type ProviderNoopDraft = Extract<ChatRuntimeEventDraft, { kind: "provider-noop" }>;
 
 export interface ChatCoalescerScheduler {
     readonly clear: (handle: unknown) => void;
@@ -22,6 +21,10 @@ const defaultScheduler: ChatCoalescerScheduler = Object.freeze({
 
 function isDelta(event: ChatRuntimeEventDraft): event is DeltaDraft {
     return event.kind === "assistant" || event.kind === "thinking";
+}
+
+function isProviderNoop(event: ChatRuntimeEventDraft): event is ProviderNoopDraft {
+    return event.kind === "provider-noop";
 }
 
 function canMerge(previous: DeltaDraft, next: DeltaDraft): boolean {
@@ -49,7 +52,7 @@ function canMerge(previous: DeltaDraft, next: DeltaDraft): boolean {
     );
 }
 
-function assertCompleteRange(event: DeltaDraft): void {
+function assertCompleteRange(event: DeltaDraft | ProviderNoopDraft): void {
     const hasStart = event.providerSequenceStart !== undefined;
     const hasEnd = event.providerSequenceEnd !== undefined;
     if (hasStart !== hasEnd) {
@@ -58,6 +61,22 @@ function assertCompleteRange(event: DeltaDraft): void {
     if (hasStart && event.providerSequenceStart! > event.providerSequenceEnd!) {
         throw new RangeError("Chat delta provider sequence range is reversed");
     }
+}
+
+function mergeProviderNoop(
+    previous: ProviderNoopDraft,
+    next: ProviderNoopDraft
+): ProviderNoopDraft | undefined {
+    if (next.providerSequenceStart !== previous.providerSequenceEnd + 1) {
+        return undefined;
+    }
+    return {
+        kind: "provider-noop",
+        occurredAtMs: next.occurredAtMs,
+        providerSequenceEnd: next.providerSequenceEnd,
+        providerSequenceStart: previous.providerSequenceStart,
+        reason: "ignored",
+    };
 }
 
 function mergeDelta(previous: DeltaDraft, next: DeltaDraft): DeltaDraft | undefined {
@@ -82,7 +101,7 @@ function mergeDelta(previous: DeltaDraft, next: DeltaDraft): DeltaDraft | undefi
 }
 
 /**
- * Serializes one run's provider lane and batches only contiguous assistant/thinking deltas.
+ * Serializes one run's provider lane and batches contiguous stream/noop ranges.
  * Tool, item, plan, status, cancellation, and terminal boundaries flush immediately.
  */
 export class ChatRuntimeEventCoalescer {
@@ -171,6 +190,22 @@ export class ChatRuntimeEventCoalescer {
     public push(event: ChatRuntimeEventDraft): Promise<void> {
         if (this.#closed) throw new Error("Chat runtime coalescer is closed");
         return this.#enqueue(async () => {
+            if (isProviderNoop(event)) {
+                assertCompleteRange(event);
+                const previous = this.#pending.at(-1);
+                if (previous !== undefined && isProviderNoop(previous)) {
+                    const merged = mergeProviderNoop(previous, event);
+                    if (merged !== undefined) {
+                        this.#pending[this.#pending.length - 1] = merged;
+                        this.#schedule();
+                        return;
+                    }
+                    await this.#flushNow();
+                }
+                this.#pending.push(event);
+                this.#schedule();
+                return;
+            }
             if (!isDelta(event)) {
                 this.#pending.push(event);
                 await this.#flushNow();

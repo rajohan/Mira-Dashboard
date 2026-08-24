@@ -1,19 +1,42 @@
 import { Effect } from "effect";
 import * as v from "valibot";
 
+import {
+    type LogMaintenancePolicyId,
+    logMaintenancePolicyIdSchema,
+} from "../../../contracts/logs.ts";
 import type { JsonObject } from "../../../shared/json.ts";
 import { collectSystemHostPayload } from "../cache/systemHostProvider.ts";
+import { parseWorkspaceFileJobPayload } from "../files/jobPayload.ts";
 import {
-    type JobActionDefinition,
     type JobActionExecutor,
+    type JobExecutableActionDefinition,
     type JobActionRegistration,
+    type JobActionSuccessfulSettlementHandler,
     JobActionRetryableError,
     jobActionDefinitions,
+    logMaintenanceJobActionKey,
     validateJobActionRegistration,
+    workspaceFileReplaceJobActionDefinition,
+    workspaceFileReplaceJobActionKey,
+    workspaceFileWriteJobActionDefinition,
+    workspaceFileWriteJobActionKey,
 } from "./actionRegistry.ts";
 
 const emptyPayloadSchema = v.strictObject({});
 const systemHostActionPayloadSchema = v.strictObject({ key: v.literal("system.host") });
+const logMaintenanceActionPayloadSchema = v.strictObject({
+    policyId: logMaintenancePolicyIdSchema,
+});
+const logMaintenanceResultSchema = v.strictObject({
+    completedAtMs: v.pipe(
+        v.number("Log maintenance completion timestamp is invalid"),
+        v.safeInteger("Log maintenance completion timestamp is invalid"),
+        v.minValue(0, "Log maintenance completion timestamp is invalid")
+    ),
+    policyId: logMaintenancePolicyIdSchema,
+    status: v.literal("completed"),
+});
 const smokeResultSchema = v.strictObject({
     checkedAtMs: v.pipe(
         v.number("Worker smoke timestamp is invalid"),
@@ -31,11 +54,46 @@ const smokeResultSchema = v.strictObject({
         v.uuid("Worker smoke identity is invalid")
     ),
 });
+const workspaceFileWriteResultSchema = v.strictObject({
+    modifiedAtMs: v.pipe(v.number(), v.safeInteger(), v.minValue(0)),
+    revision: v.pipe(v.string(), v.regex(/^[0-9a-f]{64}$/u)),
+    sizeBytes: v.pipe(v.number(), v.safeInteger(), v.minValue(0)),
+    status: v.literal("completed"),
+    ticketId: v.pipe(v.string(), v.uuid()),
+});
 
 interface JobActionExecutorEntry {
     readonly actionKey: string;
+    readonly afterSuccessfulSettlement?: JobActionSuccessfulSettlementHandler;
     readonly execute: JobActionExecutor;
 }
+
+/** Narrow worker-owned authority consumed by the durable action adapter. */
+export interface LogMaintenanceExecutionPort {
+    readonly run: (
+        policyId: LogMaintenancePolicyId,
+        signal?: AbortSignal
+    ) => Promise<void>;
+}
+
+/** Worker-only structural authority; web composition receives only its durable queue. */
+export interface WorkspaceFileWriteExecutionPort {
+    readonly apply: (
+        command: ReturnType<typeof parseWorkspaceFileJobPayload>["command"],
+        signal?: AbortSignal
+    ) => Promise<{
+        readonly modifiedAtMs: number;
+        readonly revision: string;
+        readonly sizeBytes: number;
+    }>;
+    readonly removeSettledReplacementIntent: (
+        command: ReturnType<typeof parseWorkspaceFileJobPayload>["command"]
+    ) => Promise<void>;
+}
+
+export type JobWorkerActionResolver = (
+    actionKey: string
+) => JobActionRegistration | undefined;
 
 const workerSmokeExecutor: JobActionExecutor = (context, payload: JsonObject) =>
     Effect.sync(() => {
@@ -120,18 +178,72 @@ export function createSystemHostExecutor(
         });
 }
 
-const systemHostExecutor = createSystemHostExecutor();
+/**
+ * Adapts the fixed worker log-maintenance port to one schema-validated durable action.
+ * The payload can select only a reviewed policy identity and never carries host paths.
+ * @returns A cancellable durable job executor for one fixed policy id.
+ */
+export function createLogMaintenanceJobExecutor(
+    maintenance: LogMaintenanceExecutionPort
+): JobActionExecutor {
+    return (context, payload) =>
+        Effect.tryPromise({
+            catch: () => new Error("Log maintenance action failed"),
+            try: async (signal) => {
+                const { policyId } = v.parse(logMaintenanceActionPayloadSchema, payload);
+                await maintenance.run(policyId, signal);
+                return v.parse(logMaintenanceResultSchema, {
+                    completedAtMs: context.nowMs(),
+                    policyId,
+                    status: "completed",
+                });
+            },
+        });
+}
 
-const executorEntries = Object.freeze([
-    Object.freeze({
-        actionKey: "cache.refresh.system-host",
-        execute: systemHostExecutor,
-    }),
-    Object.freeze({
-        actionKey: "system.worker-smoke",
-        execute: workerSmokeExecutor,
-    }),
-] as const satisfies readonly JobActionExecutorEntry[]);
+/**
+ * Adapts one schema-validated spooled command to the worker-only structural writer.
+ * @param writer Worker-owned descriptor writer.
+ * @returns Durable action executor without web-process filesystem authority.
+ */
+export function createWorkspaceFileWriteJobExecutor(
+    writer: WorkspaceFileWriteExecutionPort
+): JobActionExecutor {
+    return (_context, payload) =>
+        Effect.suspend(() => {
+            const parsed = parseWorkspaceFileJobPayload(payload);
+            return Effect.tryPromise({
+                catch: (error) =>
+                    parsed.command.operation === "replace"
+                        ? new JobActionRetryableError(error)
+                        : new Error("Workspace file write action failed", {
+                              cause: error,
+                          }),
+                try: async (signal) => {
+                    const result = await writer.apply(parsed.command, signal);
+                    return v.parse(workspaceFileWriteResultSchema, {
+                        ...result,
+                        status: "completed",
+                        ticketId: parsed.command.ticketId,
+                    });
+                },
+            });
+        });
+}
+
+function createWorkspaceFileReplacementSettlementHandler(
+    writer: WorkspaceFileWriteExecutionPort
+): JobActionSuccessfulSettlementHandler {
+    return async (payload) => {
+        const parsed = parseWorkspaceFileJobPayload(payload);
+        if (parsed.command.operation !== "replace") {
+            throw new TypeError("Workspace replacement settlement payload is invalid");
+        }
+        await writer.removeSettledReplacementIntent(parsed.command);
+    };
+}
+
+const systemHostExecutor = createSystemHostExecutor();
 
 /**
  * Builds a fail-closed worker registry whose executors exactly match release definitions.
@@ -140,7 +252,7 @@ const executorEntries = Object.freeze([
  * @returns A validated worker registry indexed by action key.
  */
 export function createJobWorkerActionRegistry(
-    definitions: readonly JobActionDefinition[],
+    definitions: readonly JobExecutableActionDefinition[],
     executors: readonly JobActionExecutorEntry[]
 ): ReadonlyMap<string, JobActionRegistration> {
     const definitionByKey = new Map(
@@ -167,6 +279,12 @@ export function createJobWorkerActionRegistry(
                 definition.actionKey,
                 validateJobActionRegistration({
                     ...definition,
+                    ...(executor.afterSuccessfulSettlement === undefined
+                        ? {}
+                        : {
+                              afterSuccessfulSettlement:
+                                  executor.afterSuccessfulSettlement,
+                          }),
                     execute: executor.execute,
                 }),
             ];
@@ -174,18 +292,51 @@ export function createJobWorkerActionRegistry(
     );
 }
 
-const workerActionRegistry = createJobWorkerActionRegistry(
-    jobActionDefinitions,
-    executorEntries
-);
-
 /**
- * Resolves one exact worker-owned executor registration.
- * @param actionKey Canonical job action key.
- * @returns The matching worker registration when implemented.
+ * Creates the worker-only resolver after privileged adapters are composed.
+ * Web code can import pure definitions without gaining log-maintenance authority.
+ * @returns A fail-closed resolver containing every reviewed worker action.
  */
-export function findJobWorkerAction(
-    actionKey: string
-): JobActionRegistration | undefined {
-    return workerActionRegistry.get(actionKey);
+export function createJobWorkerActionResolver(
+    logMaintenance: LogMaintenanceExecutionPort,
+    workspaceFiles?: WorkspaceFileWriteExecutionPort
+): JobWorkerActionResolver {
+    const definitions =
+        workspaceFiles === undefined
+            ? jobActionDefinitions
+            : Object.freeze([
+                  ...jobActionDefinitions,
+                  workspaceFileWriteJobActionDefinition,
+                  workspaceFileReplaceJobActionDefinition,
+              ]);
+    const executors = [
+        Object.freeze({
+            actionKey: "cache.refresh.system-host",
+            execute: systemHostExecutor,
+        }),
+        Object.freeze({
+            actionKey: logMaintenanceJobActionKey,
+            execute: createLogMaintenanceJobExecutor(logMaintenance),
+        }),
+        Object.freeze({
+            actionKey: "system.worker-smoke",
+            execute: workerSmokeExecutor,
+        }),
+        ...(workspaceFiles === undefined
+            ? []
+            : [
+                  Object.freeze({
+                      actionKey: workspaceFileWriteJobActionKey,
+                      execute: createWorkspaceFileWriteJobExecutor(workspaceFiles),
+                  }),
+                  Object.freeze({
+                      actionKey: workspaceFileReplaceJobActionKey,
+                      afterSuccessfulSettlement:
+                          createWorkspaceFileReplacementSettlementHandler(workspaceFiles),
+                      execute: createWorkspaceFileWriteJobExecutor(workspaceFiles),
+                  }),
+              ]),
+    ];
+    const registry = createJobWorkerActionRegistry(definitions, Object.freeze(executors));
+    return (actionKey) => registry.get(actionKey);
 }

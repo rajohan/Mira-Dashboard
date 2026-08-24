@@ -1,0 +1,38 @@
+#!/bin/sh
+set -eu
+
+fail() {
+    printf '%s\n' 'Log maintenance policy rejected' >&2
+    exit 64
+}
+
+policy_id=${1-}
+case "$policy_id" in
+    host-alternatives)
+        policy=/etc/logrotate.d/alternatives
+        ;;
+    host-apport)
+        policy=/etc/logrotate.d/apport
+        ;;
+    host-dpkg)
+        policy=/etc/logrotate.d/dpkg
+        ;;
+    host-rsyslog)
+        policy=/etc/logrotate.d/rsyslog
+        ;;
+    *)
+        fail
+        ;;
+esac
+
+[ "$#" -eq 1 ] || fail
+[ -f "$policy" ] || fail
+[ ! -L "$policy" ] || fail
+[ "$(/usr/bin/stat -c '%h' "$policy")" = 1 ] || fail
+[ "$(/usr/bin/stat -c '%u' "$policy")" = 0 ] || fail
+mode=$(/usr/bin/stat -c '%a' "$policy")
+case "$mode" in
+    *[2367][0-7]|*[0-7][2367]) fail ;;
+esac
+
+exec /usr/sbin/logrotate --state /var/lib/logrotate/status "$policy"

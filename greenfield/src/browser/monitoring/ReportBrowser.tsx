@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { FileText, Filter, RotateCcw, Trash2 } from "lucide-react";
-import { type FormEvent, type ReactNode, useState } from "react";
+import { type ReactNode, useState } from "react";
 
 import type { ReportDetail, ReportSummary } from "../../contracts/monitoring.ts";
 import type { ListReportsInput } from "../../contracts/reports.ts";
@@ -17,6 +17,7 @@ import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Card } from "../ui/Card.tsx";
 import { ConfirmModal } from "../ui/ConfirmModal.tsx";
+import { Form } from "../ui/Form.tsx";
 import { FormField } from "../ui/FormField.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
@@ -189,7 +190,7 @@ function ReportDetailPanel({ id, onDeleted }: ReportDetailPanelProps) {
                 busy={deletion.isPending}
                 confirmLabel="Delete report"
                 danger
-                description={`Delete “${detail.title}”? Linked notifications are removed within the bounded server policy.`}
+                description={`Delete “${detail.title}”? Linked notifications for this report will also be deleted.`}
                 onCancel={() => setConfirmingDelete(false)}
                 onConfirm={() =>
                     deletion.mutate(
@@ -234,8 +235,7 @@ export function ReportBrowser() {
             search: reportId === undefined ? {} : { reportId },
         });
     };
-    const applyFilters = (event: FormEvent<HTMLFormElement>) => {
-        event.preventDefault();
+    const applyFilters = () => {
         setKind(kindDraft.trim());
         setSource(sourceDraft.trim());
         setStatus(statusDraft);
@@ -297,35 +297,38 @@ export function ReportBrowser() {
 
     return (
         <div>
-            <form
+            <Form
                 aria-label="Report filters"
                 className="border-primary-700 bg-primary-900/35 grid gap-3 rounded-xl border p-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_12rem_auto] md:items-end"
                 onSubmit={applyFilters}
             >
-                <FormField label="Kind">
+                <FormField label="Report type">
                     <Input
+                        className="mt-2"
                         maxLength={100}
                         onChange={(event) => setKindDraft(event.currentTarget.value)}
-                        placeholder="e.g. heartbeat"
+                        placeholder="Example: heartbeat"
                         value={kindDraft}
                     />
                 </FormField>
                 <FormField label="Source">
                     <Input
+                        className="mt-2"
                         maxLength={200}
                         onChange={(event) => setSourceDraft(event.currentTarget.value)}
-                        placeholder="e.g. openclaw"
+                        placeholder="Example: openclaw"
                         value={sourceDraft}
                     />
                 </FormField>
                 <FormField label="Status">
                     <Select
+                        className="mt-2"
                         onChange={setStatusDraft}
                         options={reportStatusOptions}
                         value={statusDraft}
                     />
                 </FormField>
-                <div className="flex gap-2">
+                <div className="flex min-h-10 items-center gap-2">
                     <Button size="sm" type="submit">
                         <Icon icon={Filter} size="sm" tone="inherit" />
                         Apply
@@ -335,7 +338,7 @@ export function ReportBrowser() {
                         Reset
                     </Button>
                 </div>
-            </form>
+            </Form>
             {query.error !== null && query.data !== undefined && (
                 <Alert
                     className="mt-4"
@@ -367,7 +370,7 @@ export function ReportBrowser() {
                 </Card>
                 {selectedId === undefined ? (
                     <PageState
-                        description="Choose a report after monitoring has produced one."
+                        description="Choose a report from the list to read it."
                         icon={FileText}
                         status="empty"
                         title="No report selected"

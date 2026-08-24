@@ -205,9 +205,10 @@ to parse SQL with regular expressions.
 
 ### Generated outputs
 
-The following is the **target** artifact set. The checked-in
-`docs/generated/README.md` identifies the smaller subset the current generator actually emits and
-lists the references still required before cutover.
+The following is the **target** artifact set. The current generator emits the procedure, raw HTTP,
+realtime, configuration, browser route/feature, package/runtime, and transport-schema references.
+The checked-in `docs/generated/README.md` lists the database and OpenAPI references still required
+before cutover.
 
 ```text
 docs/generated/
@@ -400,11 +401,23 @@ Keep the host-native deployment. Dashboard needs controlled access to systemd, l
 Docker, OpenClaw, Git worktrees, and host databases; putting the application itself in a
 container would add mounts and privilege plumbing without isolating the important child jobs.
 
+The Docker stack remains a separate project and source of truth beneath `/opt/docker`. Dashboard
+does not absorb its compose files, application data, or deployment lifecycle into the Dashboard
+repository or state tree. Dashboard is the control plane: browser requests select reviewed
+operations, durable jobs and audit records preserve intent/outcome, and worker-only adapters touch
+the Docker project within explicit policy and resource bounds.
+
 The future repository root ships new `systemd/` web and worker units as part of the immutable
 release. The legacy units were deliberately not copied: they change into a `backend` working
 directory, execute retired `dist/*Start.js` entrypoints, and retain pre-measurement multi-gigabyte
 limits. The replacement units invoke the exact project-local Bun runtime and release pointers,
-bind logs beneath project state, and enforce the measured web/worker resource ceilings.
+bind logs beneath project state, and enforce the measured web/worker resource ceilings. Both units
+preserve the explicit `MIRA_DASHBOARD_OPENCLAW_ROOT`; web treats it as a fixed descriptor-read
+manifest, while worker uses a separate exact replacement manifest for `openclaw.json` and
+`hooks/transforms/agentmail.ts`. The worker's atomic replacement needs target-directory write access
+for its private stage file and `renameat2` exchange, so the unit does not advertise an exact-file
+`ReadWritePaths` sandbox that would fail at runtime. Descriptor validation, per-file bounds, CAS,
+and the fixed worker manifest are the write boundary.
 
 Persistent state remains inside the existing Dashboard project layout at
 `<project-root>/production/state`, but outside every immutable release directory. Production
@@ -448,7 +461,10 @@ Recommended layout:
       mira-dashboard.db
       backups/
       job-output/
+      log-maintenance/
       logs/
+      terminal-broker/
+      workspace-file-uploads/
   development/
     state/
       local/

@@ -161,11 +161,11 @@ export function DataTable<TFeatures extends TableFeatures, TData extends RowData
             <section
                 aria-label={label}
                 className={cn(
-                    "dashboard-data-table-container border-primary-700 w-full max-w-full min-w-0 rounded-lg border",
+                    "dashboard-data-table-container border-primary-700 w-full max-w-full min-w-0 overflow-x-auto overscroll-x-contain rounded-lg border",
                     rowWindow === undefined
                         ? undefined
                         : [
-                              "max-h-128 overflow-auto overscroll-x-contain outline-none [-webkit-overflow-scrolling:touch]",
+                              "max-h-128 overflow-y-auto outline-none [-webkit-overflow-scrolling:touch]",
                               "focus-visible:border-accent-400 focus-visible:ring-accent-400/30 focus-visible:ring-2",
                           ],
                     scrollClassName
@@ -178,17 +178,17 @@ export function DataTable<TFeatures extends TableFeatures, TData extends RowData
                     aria-label={label}
                     aria-rowcount={headerGroups.length + rows.length}
                     className={cn(
-                        "dashboard-data-table w-full min-w-full",
+                        "dashboard-data-table w-full min-w-full border-separate border-spacing-0",
                         tableClassName
                     )}
                     ref={tableElementRef}
                 >
-                    <thead className="dashboard-data-table-head bg-primary-900 sticky top-0 z-10 shadow-sm">
+                    <thead className="dashboard-data-table-head bg-primary-950 sticky top-0 z-20 shadow-sm">
                         {headerGroups.map((headerGroup) => (
                             <tr key={headerGroup.id}>
                                 {headerGroup.headers.map((header) => (
                                     <th
-                                        className="text-primary-300 border-primary-700 border-b px-3 py-2 text-left text-xs font-semibold tracking-wide uppercase"
+                                        className="text-primary-300 border-primary-700 bg-primary-950 border-b px-3 py-2 text-left text-xs font-semibold tracking-wide uppercase"
                                         key={header.id}
                                         scope="col"
                                     >

@@ -22,6 +22,22 @@ function isHappyDomTimerOwner(value: unknown): value is HappyDomTimerOwner {
 
 GlobalRegistrator.register({ url: "https://dashboard.test/" });
 
+const browserFetch = globalThis.fetch;
+const dashboardTestFetch: typeof globalThis.fetch = (input, init) => {
+    const url = new URL(
+        input instanceof Request ? input.url : input.toString(),
+        globalThis.location.href
+    );
+    if (
+        url.origin === globalThis.location.origin &&
+        url.pathname === "/api/health/ready"
+    ) {
+        return Promise.resolve(Response.json({ status: "ready" }));
+    }
+    return browserFetch(input, init);
+};
+Reflect.set(globalThis, "fetch", dashboardTestFetch);
+
 const happyDomTimerOwner: unknown = Reflect.get(document, PropertySymbol.window);
 if (!isHappyDomTimerOwner(happyDomTimerOwner)) {
     throw new TypeError("HappyDOM did not expose its owning window timer");

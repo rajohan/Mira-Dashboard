@@ -31,14 +31,22 @@ export interface ChatHistoryAliasResolver {
     ) => string | undefined;
 }
 
+export interface ChatProviderObservationBoundary {
+    readonly epoch: number;
+    readonly observedAtMs: number;
+}
+
 export interface ChatHistoryObservationPort {
+    readonly beginObservation: (sessionKey: string) => ChatProviderObservationBoundary;
     readonly observeHistoryMessages: (
         sessionKey: string,
-        messages: readonly ChatMessage[]
+        messages: readonly ChatMessage[],
+        observation: ChatProviderObservationBoundary
     ) => void | Promise<void>;
     readonly observeInFlightRun: (
         sessionKey: string,
-        inFlightRun: ChatProviderInFlightRun | undefined
+        inFlightRun: ChatProviderInFlightRun | undefined,
+        observation: ChatProviderObservationBoundary
     ) => void | Promise<void>;
 }
 
@@ -164,6 +172,7 @@ export class ChatHistoryService {
         signal?: AbortSignal
     ): Promise<ChatHistoryOutput> {
         const input = v.parse(chatHistoryInputSchema, rawInput);
+        const observation = this.#observations?.beginObservation(input.sessionKey);
         const pages: ChatMessage[][] = [];
         let offset = Number(input.cursor);
         let providerPagesRead = 0;
@@ -186,16 +195,20 @@ export class ChatHistoryService {
                 },
                 signal
             );
-            if (providerPagesRead === 0) {
+            if (providerPagesRead === 0 && observation !== undefined) {
                 await this.#observations?.observeInFlightRun(
                     input.sessionKey,
-                    page.inFlightRun
+                    page.inFlightRun,
+                    observation
                 );
             }
-            await this.#observations?.observeHistoryMessages(
-                input.sessionKey,
-                page.messages
-            );
+            if (observation !== undefined) {
+                await this.#observations?.observeHistoryMessages(
+                    input.sessionKey,
+                    page.messages,
+                    observation
+                );
+            }
             providerPagesRead += 1;
             if (
                 sessionId !== undefined &&

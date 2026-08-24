@@ -1,7 +1,5 @@
-import { Disclosure, DisclosureButton, DisclosurePanel } from "@headlessui/react";
 import {
     Bot,
-    ChevronDown,
     CircleAlert,
     CircleCheck,
     ListChecks,
@@ -9,11 +7,14 @@ import {
     Timer,
     X,
 } from "lucide-react";
-import { type FormEvent, type KeyboardEvent, type Ref, useRef, useState } from "react";
+import { type KeyboardEvent, type Ref, useId, useRef, useState } from "react";
 
 import { cn } from "../lib/classNames.ts";
+import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
+import { ExpandableCard } from "../ui/ExpandableCard.tsx";
+import { Form } from "../ui/Form.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { Input } from "../ui/Input.tsx";
@@ -40,6 +41,15 @@ function taskBadgeVariant(
     return "default";
 }
 
+function taskStatusLabel(status: ChatBackgroundTaskView["status"]): string {
+    if (status === "queued") return "Waiting";
+    if (status === "running") return "Running";
+    if (status === "completed") return "Completed";
+    if (status === "failed") return "Failed";
+    if (status === "cancelled") return "Cancelled";
+    return "Timed out";
+}
+
 interface ChatSidePanelProps {
     readonly canAskCompanion: boolean;
     readonly className?: string;
@@ -54,7 +64,7 @@ interface ChatSidePanelProps {
     readonly onReturnTasksToLatest?: () => void;
     readonly onRetryCompanion?: () => void;
     readonly onRetryTasks?: () => void;
-    readonly onSelectTask: (taskId: string) => void;
+    readonly onSelectTask: (taskId?: string) => void;
     readonly plans: readonly ChatActivePlanView[];
     readonly providerWritesDisabled?: boolean;
     readonly selectedTaskId?: string;
@@ -92,6 +102,11 @@ function Plan({ plan }: Readonly<{ plan: ChatActivePlanView }>) {
     return (
         <section aria-label={`Active plan: ${plan.title}`} className="shrink-0 space-y-2">
             <Heading level={3}>{plan.title}</Heading>
+            {plan.description === undefined ? null : (
+                <Text size="sm" tone="muted">
+                    {plan.description}
+                </Text>
+            )}
             <ol className="space-y-1.5">
                 {plan.items.map((item) => (
                     <li className="flex items-start gap-2 text-sm" key={item.id}>
@@ -117,6 +132,67 @@ function Plan({ plan }: Readonly<{ plan: ChatActivePlanView }>) {
                     </li>
                 ))}
             </ol>
+        </section>
+    );
+}
+
+interface TaskDetailProps {
+    readonly cancelBusy: boolean;
+    readonly cancelDisabled: boolean;
+    readonly error?: string;
+    readonly id: string;
+    readonly onCancel: () => void;
+    readonly task: ChatBackgroundTaskView;
+}
+
+function TaskDetail({
+    cancelBusy,
+    cancelDisabled,
+    error,
+    id,
+    onCancel,
+    task,
+}: TaskDetailProps) {
+    return (
+        <section aria-label={`Task detail: ${task.label}`} className="min-w-0" id={id}>
+            <p className="text-primary-100 min-w-0 font-medium wrap-break-word">
+                {task.label}
+            </p>
+            <Text className="mt-1" size="sm" tone="muted">
+                {task.summary ?? "No more details are available yet."}
+            </Text>
+            {task.detail !== undefined && (
+                <pre className="border-primary-700 text-primary-300 mt-2 min-w-0 border-t pt-2 text-xs wrap-break-word whitespace-pre-wrap">
+                    {task.detail}
+                </pre>
+            )}
+            {error !== undefined && (
+                <p className="mt-2 text-sm text-amber-200" role="alert">
+                    {error}
+                </p>
+            )}
+            {task.updatedAtMs !== undefined && (
+                <time
+                    className="text-primary-400 mt-1 block text-xs"
+                    dateTime={new Date(task.updatedAtMs).toISOString()}
+                >
+                    Updated {formatDashboardDateTime(task.updatedAtMs)}
+                </time>
+            )}
+            {(task.status === "running" || task.status === "queued") && (
+                <Button
+                    busy={cancelBusy}
+                    busyLabel="Stopping task…"
+                    className="mt-3 w-full min-w-0 justify-center"
+                    disabled={cancelDisabled}
+                    onClick={onCancel}
+                    size="sm"
+                    variant="danger"
+                >
+                    <Icon icon={Square} size="sm" tone="inherit" />
+                    Cancel task
+                </Button>
+            )}
         </section>
     );
 }
@@ -156,15 +232,15 @@ export function ChatSidePanel({
 }: ChatSidePanelProps) {
     const [questions, setQuestions] = useState<Readonly<Record<string, string>>>({});
     const panel = useRef<HTMLElement>(null);
+    const taskDetailIdPrefix = useId();
     const question = questions[sessionKey] ?? "";
     const setQuestion = (value: string) =>
         setQuestions((current) => ({ ...current, [sessionKey]: value }));
-    const selectedTask = tasks.find((task) => task.id === selectedTaskId) ?? tasks[0];
+    const selectedTask = tasks.find((task) => task.id === selectedTaskId);
     const companionAskBusy = companion.status === "answering";
     const companionResetBusy = companion.status === "resetting";
 
-    function ask(event: FormEvent<HTMLFormElement>): void {
-        event.preventDefault();
+    function ask(): void {
         const nextQuestion = question.trim();
         if (
             nextQuestion === "" ||
@@ -242,36 +318,29 @@ export function ChatSidePanel({
             ))}
             {plans.length === 0 && (
                 <Text className="shrink-0" size="sm" tone="muted">
-                    Active-run plans appear here and disappear when their run settles.
+                    Plans for active responses appear here and disappear when the response
+                    finishes.
                 </Text>
             )}
 
-            <Disclosure
-                as="section"
-                className="border-primary-600 bg-primary-950 min-w-0 shrink-0 overflow-hidden rounded-xl border"
+            <ExpandableCard
+                className="min-w-0 shrink-0"
+                compact
                 defaultOpen={
                     companion.status !== "idle" ||
                     companion.answer !== undefined ||
                     companion.error !== undefined ||
                     companionError !== undefined
                 }
-            >
-                <DisclosureButton className="hover:bg-primary-800 focus-visible:ring-accent-400 group flex w-full min-w-0 items-center gap-2 p-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset">
-                    <Icon icon={Bot} size="sm" tone="accent" />
-                    <span className="text-primary-100 min-w-0 flex-1 font-medium">
-                        Companion
-                    </span>
+                icon={Bot}
+                title="Chat helper"
+                trailing={
                     <Badge variant={companionBadgeVariant(companion.status)}>
                         {companionStatusLabel(companion.status)}
                     </Badge>
-                    <Icon
-                        className="shrink-0 transition-transform group-data-open:rotate-180 motion-reduce:transition-none"
-                        icon={ChevronDown}
-                        size="sm"
-                        tone="default"
-                    />
-                </DisclosureButton>
-                <DisclosurePanel className="border-primary-700 min-w-0 space-y-3 border-t p-3">
+                }
+            >
+                <div className="min-w-0 space-y-3">
                     {(companion.question !== undefined ||
                         companion.answer !== undefined) && (
                         <div className="space-y-2">
@@ -287,7 +356,7 @@ export function ChatSidePanel({
                             )}
                             {companion.answer !== undefined && (
                                 <output
-                                    aria-label="Companion answer"
+                                    aria-label="Chat helper answer"
                                     className="border-primary-600 bg-primary-800 text-primary-100 block min-w-0 rounded-lg border p-2.5 text-sm wrap-break-word whitespace-pre-wrap"
                                 >
                                     {companion.answer}
@@ -323,18 +392,18 @@ export function ChatSidePanel({
                                     size="sm"
                                     variant="secondary"
                                 >
-                                    Retry companion
+                                    Try chat helper again
                                 </Button>
                             )}
                         </div>
                     )}
-                    <form className="min-w-0 space-y-2" onSubmit={ask}>
+                    <Form className="min-w-0 space-y-2" onSubmit={ask}>
                         <div className="flex min-w-0 items-center justify-between gap-2">
                             <label
                                 className="text-primary-300 min-w-0 text-xs font-medium"
                                 htmlFor="chat-companion-question"
                             >
-                                Ask about this session
+                                Ask about this chat
                             </label>
                             <span
                                 className="text-primary-400 shrink-0 text-xs"
@@ -345,7 +414,7 @@ export function ChatSidePanel({
                         </div>
                         <Input
                             aria-describedby="chat-companion-limit"
-                            aria-label="Ask companion"
+                            aria-label="Ask chat helper"
                             disabled={
                                 providerWritesDisabled ||
                                 !canAskCompanion ||
@@ -355,11 +424,11 @@ export function ChatSidePanel({
                             id="chat-companion-question"
                             maxLength={400}
                             onChange={(event) => setQuestion(event.currentTarget.value)}
-                            placeholder="Ask a short question"
+                            placeholder="Example: What is still running?"
                             value={question}
                         />
                         <fieldset
-                            aria-label="Companion actions"
+                            aria-label="Chat helper actions"
                             className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]"
                         >
                             <Button
@@ -376,7 +445,7 @@ export function ChatSidePanel({
                                 size="sm"
                                 type="submit"
                             >
-                                Ask companion
+                                Ask chat helper
                             </Button>
                             <Button
                                 busy={companion.status === "resetting"}
@@ -390,9 +459,9 @@ export function ChatSidePanel({
                                 Reset
                             </Button>
                         </fieldset>
-                    </form>
-                </DisclosurePanel>
-            </Disclosure>
+                    </Form>
+                </div>
+            </ExpandableCard>
 
             <section className="border-primary-700 min-w-0 shrink-0 border-t pt-4">
                 <Heading level={2} size="subsection">
@@ -426,89 +495,49 @@ export function ChatSidePanel({
                 {tasks.length > 0 && (
                     <>
                         <ul aria-label="Background tasks" className="mt-2 space-y-1">
-                            {tasks.map((task) => (
-                                <li key={task.id}>
-                                    <button
-                                        aria-pressed={task.id === selectedTask?.id}
-                                        className={cn(
-                                            "hover:bg-primary-800 focus-visible:ring-accent-400 flex w-full min-w-0 items-center gap-2 rounded-lg p-2 text-left text-sm outline-none focus-visible:ring-2",
-                                            task.id === selectedTask?.id &&
-                                                "bg-primary-800"
-                                        )}
-                                        onClick={() => onSelectTask(task.id)}
-                                        type="button"
-                                    >
-                                        <span className="min-w-0 flex-1 truncate">
-                                            {task.label}
-                                        </span>
-                                        <Badge
-                                            className="shrink-0"
-                                            variant={taskBadgeVariant(task.status)}
+                            {tasks.map((task, index) => {
+                                const selected = task.id === selectedTask?.id;
+                                const taskDetailId = `${taskDetailIdPrefix}-${index}`;
+                                return (
+                                    <li key={task.id}>
+                                        <ExpandableCard
+                                            compact
+                                            onOpenChange={(open) =>
+                                                onSelectTask(open ? task.id : undefined)
+                                            }
+                                            open={selected}
+                                            title={task.label}
+                                            trailing={
+                                                <Badge
+                                                    variant={taskBadgeVariant(
+                                                        task.status
+                                                    )}
+                                                >
+                                                    {taskStatusLabel(task.status)}
+                                                </Badge>
+                                            }
                                         >
-                                            {task.status}
-                                        </Badge>
-                                    </button>
-                                </li>
-                            ))}
+                                            {() => (
+                                                <TaskDetail
+                                                    cancelBusy={taskCancelGatedIds.includes(
+                                                        task.id
+                                                    )}
+                                                    cancelDisabled={
+                                                        providerWritesDisabled
+                                                    }
+                                                    {...(taskDetailError === undefined
+                                                        ? {}
+                                                        : { error: taskDetailError })}
+                                                    id={taskDetailId}
+                                                    onCancel={() => onCancelTask(task.id)}
+                                                    task={task}
+                                                />
+                                            )}
+                                        </ExpandableCard>
+                                    </li>
+                                );
+                            })}
                         </ul>
-                        {selectedTask !== undefined && (
-                            <section
-                                aria-label={`Task detail: ${selectedTask.label}`}
-                                className="border-primary-700 bg-primary-950/50 mt-2 rounded-lg border p-3"
-                            >
-                                <p className="text-primary-100 font-medium">
-                                    {selectedTask.label}
-                                </p>
-                                <Text className="mt-1" size="sm" tone="muted">
-                                    {selectedTask.summary ??
-                                        "No task detail is available yet."}
-                                </Text>
-                                {selectedTask.detail !== undefined && (
-                                    <pre className="border-primary-700 text-primary-300 mt-2 min-w-0 border-t pt-2 text-xs wrap-break-word whitespace-pre-wrap">
-                                        {selectedTask.detail}
-                                    </pre>
-                                )}
-                                {taskDetailError !== undefined && (
-                                    <p
-                                        className="mt-2 text-sm text-amber-200"
-                                        role="alert"
-                                    >
-                                        {taskDetailError}
-                                    </p>
-                                )}
-                                {selectedTask.updatedAtMs !== undefined && (
-                                    <time
-                                        className="text-primary-400 mt-1 block text-xs"
-                                        dateTime={new Date(
-                                            selectedTask.updatedAtMs
-                                        ).toISOString()}
-                                    >
-                                        Updated{" "}
-                                        {new Intl.DateTimeFormat("en-GB", {
-                                            dateStyle: "medium",
-                                            timeStyle: "short",
-                                        }).format(selectedTask.updatedAtMs)}
-                                    </time>
-                                )}
-                                {(selectedTask.status === "running" ||
-                                    selectedTask.status === "queued") && (
-                                    <Button
-                                        busy={taskCancelGatedIds.includes(
-                                            selectedTask.id
-                                        )}
-                                        busyLabel="Reconciling task…"
-                                        className="mt-3 w-full min-w-0 justify-center"
-                                        disabled={providerWritesDisabled}
-                                        onClick={() => onCancelTask(selectedTask.id)}
-                                        size="sm"
-                                        variant="danger"
-                                    >
-                                        <Icon icon={Square} size="sm" tone="inherit" />
-                                        Cancel task
-                                    </Button>
-                                )}
-                            </section>
-                        )}
                         {tasksHasNextPage && (
                             <Button
                                 busy={tasksLoadingMore}
@@ -523,7 +552,7 @@ export function ChatSidePanel({
                         )}
                         {tasksWindowLimited && (
                             <div className="text-primary-300 mt-3 text-center text-xs">
-                                <p>Older tasks are capped to this browser window.</p>
+                                <p>Only the most recent tasks are shown here.</p>
                                 {onReturnTasksToLatest !== undefined && (
                                     <Button
                                         className="mt-2 w-full"

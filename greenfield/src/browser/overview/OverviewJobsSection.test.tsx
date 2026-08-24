@@ -171,9 +171,11 @@ describe("OverviewJobsSection", () => {
         const firstPage = Promise.withResolvers<ListJobRunsResult>();
         const harness = renderSection([firstPage.promise, jobPage(pausedSummary)]);
 
-        expect(await screen.findByLabelText("Loading Dashboard job queue…")).toBeTruthy();
+        expect(
+            await screen.findByLabelText("Loading Dashboard background jobs…")
+        ).toBeTruthy();
         firstPage.resolve(jobPage(activeSummary));
-        expect(await screen.findByText("Claiming active")).toBeTruthy();
+        expect(await screen.findByText("Accepting new jobs")).toBeTruthy();
         expect(harness.transport.calls[0]).toEqual({
             input: { limit: 1 },
             path: "jobs.listRuns",
@@ -185,7 +187,7 @@ describe("OverviewJobsSection", () => {
 
         const callCountBeforeRealtimeChange = harness.transport.calls.length;
         await emitQueueChange(harness.realtimeClient);
-        expect(await screen.findByText("Claiming paused")).toBeTruthy();
+        expect(await screen.findByText("New jobs paused")).toBeTruthy();
         expect(harness.transport.calls.length).toBeGreaterThan(
             callCountBeforeRealtimeChange
         );
@@ -198,13 +200,13 @@ describe("OverviewJobsSection", () => {
     test("retains validated queue state when a background refresh fails", async () => {
         const rawFailure = new TypeError("private jobs transport detail");
         const harness = renderSection([jobPage(activeSummary), rawFailure]);
-        expect(await screen.findByText("Claiming active")).toBeTruthy();
+        expect(await screen.findByText("Accepting new jobs")).toBeTruthy();
 
         await emitQueueChange(harness.realtimeClient);
         expect(
             await screen.findByText("The request could not be completed. Try again.")
         ).toBeTruthy();
-        expect(screen.getByText("Claiming active")).toBeTruthy();
+        expect(screen.getByText("Accepting new jobs")).toBeTruthy();
         expect(screen.queryByText(rawFailure.message)).toBeNull();
     });
 
@@ -215,12 +217,12 @@ describe("OverviewJobsSection", () => {
         expect(
             await screen.findByRole("heading", {
                 level: 2,
-                name: "Dashboard job queue unavailable",
+                name: "Dashboard background jobs unavailable",
             })
         ).toBeTruthy();
         expect(screen.queryByText(rawFailure.message)).toBeNull();
 
         await userEvent.setup().click(screen.getByRole("button", { name: "Try again" }));
-        await waitFor(() => expect(screen.getByText("Claiming active")).toBeTruthy());
+        await waitFor(() => expect(screen.getByText("Accepting new jobs")).toBeTruthy());
     });
 });

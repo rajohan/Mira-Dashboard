@@ -158,12 +158,12 @@ export function OpenClawCronBrowser({
 
     const paginationWarning =
         inventoryAccumulation?.stable === false
-            ? "The Gateway inventory changed while another page was loading. Showing only the stable bounded prefix; refresh before continuing."
+            ? "The OpenClaw job list changed while more jobs were loading. Refresh before continuing."
             : undefined;
     let runsError: string | undefined;
     if (runsAccumulation?.stable === false) {
         runsError =
-            "OpenClaw run history changed while another page was loading. Showing only the stable bounded prefix; refresh before continuing.";
+            "OpenClaw run history changed while older runs were loading. Refresh before continuing.";
     } else if (runs.error !== null) {
         runsError = dashboardBrowserFailureMessage(runs.error);
     }

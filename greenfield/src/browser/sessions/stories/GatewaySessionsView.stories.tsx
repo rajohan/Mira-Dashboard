@@ -100,13 +100,13 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
-export const FreshCurrentProjection: Story = {
+export const FreshCurrentSessions: Story = {
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement);
         await expect(canvas.getByText("Connected")).toBeVisible();
         await expect(
             canvas.getByText(
-                "Updates automatically every 10 seconds and after Gateway session events."
+                "Updates automatically every 10 seconds and when OpenClaw reports a change."
             )
         ).toBeVisible();
         await expect(
@@ -137,12 +137,12 @@ export const LastKnownGood: Story = {
         const canvas = within(canvasElement);
         await expect(canvas.getByText("Last known")).toBeVisible();
         await expect(canvas.getByRole("alert")).toHaveTextContent(
-            "last-known-good projection"
+            "Showing session data from"
         );
     },
 };
 
-export const EmptyProjection: Story = {
+export const EmptySessions: Story = {
     args: {
         snapshot: {
             ...freshSnapshot,
@@ -173,9 +173,9 @@ export const BoundedMobileCards: Story = {
         const canvas = within(canvasElement);
         await expect(canvas.getByText("5+")).toBeVisible();
         await expect(
-            canvas.getByText("OpenClaw returned at least 5 current sessions", {
-                exact: false,
-            })
+            canvas.getByText(
+                "OpenClaw returned more sessions than this page can show. Showing the first 5."
+            )
         ).toBeVisible();
     },
 };

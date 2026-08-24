@@ -89,8 +89,12 @@ export function ScheduleDetail({
                         <Badge variant={schedule.enabled ? "success" : "default"}>
                             {schedule.enabled ? "enabled" : "disabled"}
                         </Badge>
-                        <Badge>{schedule.resourceClass}</Badge>
-                        <Badge>{schedule.cancellationPolicy}</Badge>
+                        <Badge>Work size: {schedule.resourceClass}</Badge>
+                        <Badge>
+                            {schedule.cancellationPolicy === "cooperative"
+                                ? "Can be cancelled"
+                                : "Cannot be cancelled"}
+                        </Badge>
                     </div>
                     <Heading
                         className="mt-3 wrap-anywhere"
@@ -109,7 +113,7 @@ export function ScheduleDetail({
                     {schedule.manualRunAvailable ? (
                         <Button
                             busy={runBusy}
-                            busyLabel="Enqueuing…"
+                            busyLabel="Starting…"
                             disabled={
                                 updateBusy ||
                                 (schedule.activeRun !== undefined && !runReplayAvailable)
@@ -118,7 +122,7 @@ export function ScheduleDetail({
                             size="sm"
                         >
                             <Icon icon={Play} size="sm" tone="inherit" />
-                            {runReplayAvailable ? "Retry run request" : "Run now"}
+                            {runReplayAvailable ? "Try starting again" : "Run now"}
                         </Button>
                     ) : null}
                     {schedule.enabled ? (
@@ -163,7 +167,7 @@ export function ScheduleDetail({
             />
             <dl className="border-primary-700 mt-5 grid gap-4 border-y py-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
                 <div>
-                    <dt className="text-primary-400">Cadence</dt>
+                    <dt className="text-primary-400">Schedule</dt>
                     <dd className="text-primary-100 mt-1 font-mono wrap-break-word">
                         {scheduleConfigurationLabel(schedule.schedule)}
                     </dd>
@@ -183,7 +187,7 @@ export function ScheduleDetail({
                     </dd>
                 </div>
                 <div>
-                    <dt className="text-primary-400">Version</dt>
+                    <dt className="text-primary-400">Saved version</dt>
                     <dd className="text-primary-100 mt-1">{schedule.version}</dd>
                 </div>
             </dl>
@@ -203,7 +207,7 @@ export function ScheduleDetail({
                 </div>
             )}
             <div className="mt-6">
-                <Heading level={3}>Cadence</Heading>
+                <Heading level={3}>Schedule</Heading>
                 <div className="mt-4">
                     <ScheduleEditor
                         busy={actionsBusy}

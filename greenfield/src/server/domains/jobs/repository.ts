@@ -20,6 +20,7 @@ import type { SQLiteBunDatabase } from "drizzle-orm/bun-sqlite";
 import * as v from "valibot";
 
 import {
+    jobActionKeySchema,
     jobRunEventMaximum,
     jobRunEventMessageMaximumBytes,
     jobRunPayloadEventMaximum,
@@ -150,6 +151,17 @@ export interface ListDueSchedulesInput {
         readonly nextRunAt: Date;
     };
     readonly limit?: number;
+}
+
+export interface ListActiveActionPayloadsInput {
+    readonly actionKey: string;
+    readonly limit: number;
+}
+
+/** Bounded active payload page used by durable resource reconciliation. */
+export interface ActiveActionPayloadPage {
+    readonly payloads: readonly string[];
+    readonly truncated: boolean;
 }
 
 export interface ReadQueueStateInput {
@@ -430,6 +442,9 @@ export interface JobRepositoryReader {
     findRunDetail(input: ListJobRunEventsInput): JobRunDetailRecord | undefined;
     findSchedule(id: string): ScheduleRecordWithRelations | undefined;
     listDueSchedules(input: ListDueSchedulesInput): ScheduledJobRecord[];
+    listActiveActionPayloads(
+        input: ListActiveActionPayloadsInput
+    ): ActiveActionPayloadPage;
     listRunEvents(input: ListJobRunEventsInput): JobRunEventRecord[];
     listRuns(input: ListJobRunsInput): JobRunRecord[];
     listRunsWithQueueState(input: ListJobRunsWithQueueStateInput): JobRunPageSnapshot;
@@ -479,6 +494,7 @@ export interface JobRepository extends JobRepositoryReader {
 
 const claimCandidateMaximum = 32;
 const recoveryBatchMaximum = 32;
+const activeActionPayloadMaximum = 256;
 const terminalRunStates = new Set<JobRunState>([
     "cancelled",
     "failed",
@@ -726,6 +742,29 @@ class DrizzleJobReader implements JobRepositoryReader {
             )
             .get();
         return row === undefined ? undefined : parseRun(row);
+    }
+
+    public listActiveActionPayloads(
+        input: ListActiveActionPayloadsInput
+    ): ActiveActionPayloadPage {
+        const actionKey = v.parse(jobActionKeySchema, input.actionKey);
+        assertLimit(input.limit, activeActionPayloadMaximum, "active action payload");
+        const rows = this.database
+            .select({ payloadJson: jobRuns.payloadJson })
+            .from(jobRuns)
+            .where(
+                and(
+                    eq(jobRuns.actionKey, actionKey),
+                    inArray(jobRuns.state, ["queued", "running"])
+                )
+            )
+            .orderBy(asc(jobRuns.queuedAt), asc(jobRuns.id))
+            .limit(input.limit + 1)
+            .all();
+        return {
+            payloads: rows.slice(0, input.limit).map(({ payloadJson }) => payloadJson),
+            truncated: rows.length > input.limit,
+        };
     }
 
     public findRunDetail(input: ListJobRunEventsInput): JobRunDetailRecord | undefined {
@@ -2519,6 +2558,8 @@ export function createJobRepository(
             write((writer) => writer.heartbeatWorker(input)),
         listDueSchedules: (input: ListDueSchedulesInput) =>
             read((reader) => reader.listDueSchedules(input)),
+        listActiveActionPayloads: (input: ListActiveActionPayloadsInput) =>
+            read((reader) => reader.listActiveActionPayloads(input)),
         listRunEvents: (input: ListJobRunEventsInput) =>
             read((reader) => reader.listRunEvents(input)),
         listRuns: (input: ListJobRunsInput) => read((reader) => reader.listRuns(input)),

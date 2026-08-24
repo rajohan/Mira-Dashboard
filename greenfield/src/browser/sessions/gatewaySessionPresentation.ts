@@ -127,7 +127,7 @@ export function gatewaySessionTokenLabel(
         session.contextTokens === undefined
             ? count
             : `${count} / ${formatter.format(session.contextTokens)}`;
-    return session.totalTokensFresh ? usage : `~${usage} (stale)`;
+    return session.totalTokensFresh ? usage : `~${usage} (last known)`;
 }
 
 /** @returns Visual kind treatment without implying online health. */
@@ -168,10 +168,10 @@ export function gatewaySessionConfirmationCopy(
     switch (action) {
         case "compact": {
             return {
-                confirmLabel: "Compact session",
+                confirmLabel: "Summarize session",
                 danger: false,
-                description: `Compact “${displayName}”? OpenClaw will summarize older context for this session.`,
-                title: "Compact session?",
+                description: `Summarize older context for “${displayName}”? This keeps the session but reduces how much previous conversation it carries forward.`,
+                title: "Summarize older context?",
             };
         }
         case "reset": {

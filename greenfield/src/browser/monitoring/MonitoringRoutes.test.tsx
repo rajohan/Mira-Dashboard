@@ -22,7 +22,7 @@ import type { DashboardWebAuthnClient } from "../security/webauthn/webauthnClien
 import { emptyNotificationListResult } from "../test/notifications.ts";
 import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
 
-const { render, screen, waitFor, within } = await import("@testing-library/react");
+const { act, render, screen, waitFor, within } = await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
 const userEvent = userEventModule.default;
 
@@ -251,7 +251,15 @@ const queryClients: ReturnType<typeof createDashboardQueryClient>[] = [];
 const collectionRegistries: DashboardBrowserCollections[] = [];
 const mountedViews: ReturnType<typeof render>[] = [];
 
-function renderMonitoringRoute(path: string, transport: MonitoringRouteTransport) {
+async function renderMonitoringRoute(path: string, transport: MonitoringRouteTransport) {
+    const harness = await renderMonitoringRouteHarness(path, transport);
+    return harness.queryClient;
+}
+
+async function renderMonitoringRouteHarness(
+    path: string,
+    transport: MonitoringRouteTransport
+) {
     const queryClient = createDashboardQueryClient();
     queryClient.setDefaultOptions({
         ...queryClient.getDefaultOptions(),
@@ -264,21 +272,24 @@ function renderMonitoringRoute(path: string, transport: MonitoringRouteTransport
     const trpcClient = createDashboardTrpcClient(transport);
     const collections = createDashboardBrowserCollections(queryClient, trpcClient);
     collectionRegistries.push(collections);
-    mountedViews.push(
-        render(
-            <DashboardBrowserApplication
-                collections={collections}
-                queryClient={queryClient}
-                realtimeClient={noOpDashboardRealtimeClient}
-                router={createDashboardRouter(
-                    createMemoryHistory({ initialEntries: [path] })
-                )}
-                trpcClient={trpcClient}
-                webAuthnClient={unexpectedWebAuthnClient}
-            />
-        )
-    );
-    return queryClient;
+    const router = createDashboardRouter(createMemoryHistory({ initialEntries: [path] }));
+    await act(async () => {
+        await router.load();
+        mountedViews.push(
+            render(
+                <DashboardBrowserApplication
+                    collections={collections}
+                    queryClient={queryClient}
+                    realtimeClient={noOpDashboardRealtimeClient}
+                    router={router}
+                    trpcClient={trpcClient}
+                    webAuthnClient={unexpectedWebAuthnClient}
+                />
+            )
+        );
+        await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    });
+    return { queryClient, router };
 }
 
 afterEach(async () => {
@@ -290,19 +301,90 @@ afterEach(async () => {
 });
 
 describe("monitoring browser routes", () => {
+    test("navigates with monitoring tabs and keeps Reports active in the main navigation", async () => {
+        const transport = new MonitoringRouteTransport();
+        const { router } = await renderMonitoringRouteHarness("/reports", transport);
+
+        await screen.findByRole("heading", { level: 1, name: "Reports" });
+        let navigation = screen.getByRole("navigation", { name: "Main navigation" });
+        expect(within(navigation).getByRole("link", { name: "Reports" })).toHaveAttribute(
+            "aria-current",
+            "page"
+        );
+
+        const initialReportsTab = screen.getByRole("tab", { name: "Reports" });
+        act(() => initialReportsTab.focus());
+        await act(async () => {
+            initialReportsTab.dispatchEvent(
+                new KeyboardEvent("keydown", { bubbles: true, key: "ArrowRight" })
+            );
+            await router.load();
+        });
+        await screen.findByRole("heading", { level: 1, name: "Incidents" });
+        const incidentsTab = screen.getByRole("tab", { name: "Incidents" });
+        expect(incidentsTab).toHaveAttribute("aria-selected", "true");
+        expect(document.activeElement).toBe(incidentsTab);
+        navigation = screen.getByRole("navigation", { name: "Main navigation" });
+        const reportsNavigation = within(navigation).getByRole("link", {
+            name: "Reports",
+        });
+        expect(reportsNavigation).not.toHaveAttribute("aria-current");
+        expect(reportsNavigation).toHaveClass("bg-accent-500/90");
+
+        await act(async () => {
+            incidentsTab.dispatchEvent(
+                new KeyboardEvent("keydown", { bubbles: true, key: "ArrowLeft" })
+            );
+            await router.load();
+        });
+        await screen.findByRole("heading", { level: 1, name: "Reports" });
+        const reportsTab = screen.getByRole("tab", { name: "Reports" });
+        expect(reportsTab).toHaveAttribute("aria-selected", "true");
+        expect(document.activeElement).toBe(reportsTab);
+
+        await act(async () => {
+            router.history.back();
+            await router.load();
+        });
+        await screen.findByRole("heading", { level: 1, name: "Incidents" });
+        expect(screen.getByRole("tab", { name: "Incidents" })).toHaveAttribute(
+            "aria-selected",
+            "true"
+        );
+
+        await act(async () => {
+            router.history.back();
+            await router.load();
+        });
+        await screen.findByRole("heading", { level: 1, name: "Reports" });
+        expect(screen.getByRole("tab", { name: "Reports" })).toHaveAttribute(
+            "aria-selected",
+            "true"
+        );
+    });
+
     test("auto-updates reports without routine refresh and retains initial retry", async () => {
         const transport = new MonitoringRouteTransport();
         transport.reportListFailuresRemaining = 1;
-        renderMonitoringRoute("/reports", transport);
+        await renderMonitoringRoute("/reports", transport);
         const user = userEvent.setup();
 
         expect(
             await screen.findByRole("heading", { level: 1, name: "Reports" })
         ).toBeTruthy();
-        expect(
-            screen.getByText(/Updates automatically from report events/u)
-        ).toBeTruthy();
-        expect(screen.getByRole("link", { name: "Browse incidents" })).toBeTruthy();
+        expect(screen.getByText(/This page updates automatically/u)).toBeTruthy();
+        expect(screen.getByRole("tab", { name: "Reports" })).toHaveAttribute(
+            "aria-selected",
+            "true"
+        );
+        expect(screen.getByRole("tab", { name: "Incidents" })).toBeTruthy();
+        expect(screen.getByLabelText("Report type")).toHaveClass("mt-2");
+        expect(screen.getByLabelText("Source")).toHaveClass("mt-2");
+        expect(screen.getByLabelText("Status")).toHaveClass("mt-2");
+        expect(screen.getByRole("button", { name: "Apply" }).parentElement).toHaveClass(
+            "min-h-10",
+            "items-center"
+        );
         expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
         expect(await screen.findByText("Reports unavailable")).toBeTruthy();
 
@@ -314,21 +396,39 @@ describe("monitoring browser routes", () => {
     test("auto-updates incidents without routine refresh and retains initial retry", async () => {
         const transport = new MonitoringRouteTransport();
         transport.incidentListFailuresRemaining = 1;
-        renderMonitoringRoute("/incidents", transport);
+        await renderMonitoringRoute("/incidents", transport);
         const user = userEvent.setup();
 
         expect(
             await screen.findByRole("heading", { level: 1, name: "Incidents" })
         ).toBeTruthy();
-        expect(
-            screen.getByText(/Updates automatically from incident events/u)
-        ).toBeTruthy();
-        expect(screen.getByRole("link", { name: "Browse reports" })).toBeTruthy();
+        expect(screen.getByText(/This page updates automatically/u)).toBeTruthy();
+        expect(screen.getByRole("tab", { name: "Incidents" })).toHaveAttribute(
+            "aria-selected",
+            "true"
+        );
+        expect(screen.getByRole("tab", { name: "Reports" })).toBeTruthy();
+        expect(screen.getByLabelText("Problem type")).toHaveClass("mt-2");
+        expect(screen.getByLabelText("Check")).toHaveClass("mt-2");
+        expect(screen.getByLabelText("Status")).toHaveClass("mt-2");
+        expect(screen.getByLabelText("Severity")).toHaveClass("mt-2");
+        expect(screen.getByRole("button", { name: "Apply" }).parentElement).toHaveClass(
+            "min-h-10",
+            "items-center"
+        );
         expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
         expect(await screen.findByText("Incidents unavailable")).toBeTruthy();
 
         await user.click(screen.getByRole("button", { name: "Try again" }));
         expect(await screen.findByText("Primary disk warning")).toBeTruthy();
+        expect(screen.getByLabelText("Problem type")).toHaveAttribute(
+            "placeholder",
+            "Example: filesystem"
+        );
+        expect(screen.getByLabelText("Check")).toHaveAttribute(
+            "placeholder",
+            "Example: ops-check"
+        );
         expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
     });
 
@@ -342,7 +442,7 @@ describe("monitoring browser routes", () => {
             timestampMs - 1000,
             "# Direct report\n\n<script>window.rawHtmlExecuted = true</script>"
         );
-        renderMonitoringRoute(`/reports?reportId=${secondReportId}`, transport);
+        await renderMonitoringRoute(`/reports?reportId=${secondReportId}`, transport);
 
         expect(
             await screen.findByRole("heading", { level: 2, name: "Direct report" })
@@ -356,7 +456,7 @@ describe("monitoring browser routes", () => {
 
     test("drops an invalid report search value without issuing a detail query", async () => {
         const transport = new MonitoringRouteTransport();
-        renderMonitoringRoute("/reports?reportId=not-a-uuid", transport);
+        await renderMonitoringRoute("/reports?reportId=not-a-uuid", transport);
 
         expect(await screen.findByText("No report selected")).toBeTruthy();
         expect(await screen.findByText("Primary heartbeat")).toBeTruthy();
@@ -365,12 +465,16 @@ describe("monitoring browser routes", () => {
 
     test("applies report text filters as one query transition", async () => {
         const transport = new MonitoringRouteTransport();
-        renderMonitoringRoute("/reports", transport);
+        await renderMonitoringRoute("/reports", transport);
         const user = userEvent.setup();
 
         await screen.findByText("Primary heartbeat");
-        await user.type(screen.getByLabelText("Kind"), "heartbeat");
-        await user.type(screen.getByLabelText("Source"), "openclaw");
+        const kind = screen.getByLabelText("Report type");
+        const source = screen.getByLabelText("Source");
+        expect(kind).toHaveAttribute("placeholder", "Example: heartbeat");
+        expect(source).toHaveAttribute("placeholder", "Example: openclaw");
+        await user.type(kind, "heartbeat");
+        await user.type(source, "openclaw");
         expect(
             transport.calls.filter(({ path }) => path === "reports.list")
         ).toHaveLength(1);
@@ -397,7 +501,7 @@ describe("monitoring browser routes", () => {
         const first = reportSummary(transport.reports[0]!);
         const second = reportSummary(transport.reports[1]!);
         transport.reportPages = [[first], [first, second]];
-        renderMonitoringRoute("/reports", transport);
+        await renderMonitoringRoute("/reports", transport);
         const user = userEvent.setup();
 
         await screen.findByText("Primary heartbeat");
@@ -412,7 +516,7 @@ describe("monitoring browser routes", () => {
     test("removes a deleted report from cached lists when the refresh fails", async () => {
         const transport = new MonitoringRouteTransport();
         transport.failReportListAfterDelete = true;
-        const queryClient = renderMonitoringRoute(
+        const queryClient = await renderMonitoringRoute(
             `/reports?reportId=${reportId}`,
             transport
         );
@@ -435,7 +539,7 @@ describe("monitoring browser routes", () => {
     test("presents a bounded-delete precondition and clears it for the next report", async () => {
         const transport = new MonitoringRouteTransport();
         transport.deleteFailureCode = "PRECONDITION_FAILED";
-        renderMonitoringRoute(`/reports?reportId=${reportId}`, transport);
+        await renderMonitoringRoute(`/reports?reportId=${reportId}`, transport);
         const user = userEvent.setup();
 
         await screen.findByRole("heading", { level: 2, name: "Primary heartbeat" });
@@ -460,7 +564,7 @@ describe("monitoring browser routes", () => {
     test("presents a missing report without leaking a server message", async () => {
         const transport = new MonitoringRouteTransport();
         transport.deleteFailureCode = "NOT_FOUND";
-        renderMonitoringRoute(`/reports?reportId=${reportId}`, transport);
+        await renderMonitoringRoute(`/reports?reportId=${reportId}`, transport);
         const user = userEvent.setup();
 
         await screen.findByRole("heading", { level: 2, name: "Primary heartbeat" });
@@ -472,7 +576,10 @@ describe("monitoring browser routes", () => {
     test("renders the hidden incident table and an exact detail outside its first page", async () => {
         const transport = new MonitoringRouteTransport();
         transport.incidentListIds = [incidentId];
-        renderMonitoringRoute(`/incidents?incidentId=${secondIncidentId}`, transport);
+        await renderMonitoringRoute(
+            `/incidents?incidentId=${secondIncidentId}`,
+            transport
+        );
 
         expect(
             await screen.findByRole("heading", {
@@ -485,6 +592,11 @@ describe("monitoring browser routes", () => {
             name: "Main navigation",
         });
         expect(within(navigation).queryByRole("link", { name: "Incidents" })).toBeNull();
+        const reportsNavigation = within(navigation).getByRole("link", {
+            name: "Reports",
+        });
+        expect(reportsNavigation).not.toHaveAttribute("aria-current");
+        expect(reportsNavigation).toHaveClass("bg-accent-500/90");
         expect(screen.getByText("Incidents", { selector: "header p" })).toBeTruthy();
         expect(
             transport.calls.find(({ path }) => path === "incidents.get")?.input
@@ -493,7 +605,7 @@ describe("monitoring browser routes", () => {
         const user = userEvent.setup();
         await user.click(
             screen.getByRole("button", {
-                name: "Primary disk warning; ops-check; generation 1",
+                name: "Primary disk warning; ops-check; occurrence group 1",
             })
         );
         expect(
@@ -507,7 +619,10 @@ describe("monitoring browser routes", () => {
     test("loads an exact incident deep link independently of list availability", async () => {
         const transport = new MonitoringRouteTransport();
         transport.incidentListFailuresRemaining = 1;
-        renderMonitoringRoute(`/incidents?incidentId=${secondIncidentId}`, transport);
+        await renderMonitoringRoute(
+            `/incidents?incidentId=${secondIncidentId}`,
+            transport
+        );
 
         expect(
             await screen.findByRole("heading", {
@@ -523,7 +638,7 @@ describe("monitoring browser routes", () => {
 
     test("drops an invalid incident search value without issuing a detail query", async () => {
         const transport = new MonitoringRouteTransport();
-        renderMonitoringRoute("/incidents?incidentId=not-a-uuid", transport);
+        await renderMonitoringRoute("/incidents?incidentId=not-a-uuid", transport);
 
         expect(await screen.findByText("No incident selected")).toBeTruthy();
         expect(await screen.findByText("Primary disk warning")).toBeTruthy();
@@ -533,7 +648,7 @@ describe("monitoring browser routes", () => {
     test("keeps monitoring procedures behind the authenticated route boundary", async () => {
         const transport = new MonitoringRouteTransport();
         transport.authStatus = { state: "anonymous" };
-        renderMonitoringRoute("/reports", transport);
+        await renderMonitoringRoute("/reports", transport);
 
         expect(
             await screen.findByRole("heading", { level: 1, name: "Sign in" })

@@ -21,6 +21,10 @@ import type {
     OpenClawTaskSummary,
 } from "../../contracts/openClawTasks.ts";
 import type { DashboardTrpcClient } from "../api/trpcClient.ts";
+import {
+    dashboardUnavailableReadRetryDelay,
+    retryDashboardUnavailableRead,
+} from "../api/trpcError.ts";
 import type { ChatBackgroundTaskView, ChatCompanionView } from "./chatTypes.ts";
 
 export const chatQueryRoot = ["chat"] as const;
@@ -207,7 +211,8 @@ export function chatHistoryQueryOptions(client: DashboardTrpcClient, sessionKey:
         },
         getNextPageParam: (lastPage) => lastPage.nextCursor,
         queryKey: chatHistoryQueryKey(sessionKey),
-        retry: false,
+        retry: retryDashboardUnavailableRead,
+        retryDelay: dashboardUnavailableReadRetryDelay,
         staleTime: 0,
     });
 }
@@ -233,7 +238,8 @@ export function chatMessageQueryOptions(
             return client.query("chat.getMessage", { messageId, sessionKey }, { signal });
         },
         queryKey: chatMessageQueryKey(sessionKey, messageId ?? ""),
-        retry: false,
+        retry: retryDashboardUnavailableRead,
+        retryDelay: dashboardUnavailableReadRetryDelay,
         staleTime: 5 * 60_000,
     });
 }
@@ -306,7 +312,8 @@ export function chatRuntimeQueryOptions(
             );
         },
         queryKey: chatRuntimeQueryKey(sessionKey),
-        retry: false,
+        retry: retryDashboardUnavailableRead,
+        retryDelay: dashboardUnavailableReadRetryDelay,
         staleTime: 0,
     });
 }
@@ -339,7 +346,8 @@ export function chatCompanionQueryOptions(
             return client.query("chat.companionState", { sessionKey }, { signal });
         },
         queryKey: chatCompanionQueryKey(sessionKey),
-        retry: false,
+        retry: retryDashboardUnavailableRead,
+        retryDelay: dashboardUnavailableReadRetryDelay,
         staleTime: 0,
     });
 }
@@ -371,9 +379,13 @@ export function openClawTaskListQueryOptions(
                 { signal }
             );
         },
-        getNextPageParam: (page) => page.nextCursor,
+        getNextPageParam: (page, _pages, pageParam) =>
+            page.tasks.length === 0 || page.nextCursor === pageParam
+                ? undefined
+                : page.nextCursor,
         queryKey: openClawTaskListQueryKey(sessionKey, projection),
-        retry: false,
+        retry: retryDashboardUnavailableRead,
+        retryDelay: dashboardUnavailableReadRetryDelay,
         staleTime: 5000,
     });
 }

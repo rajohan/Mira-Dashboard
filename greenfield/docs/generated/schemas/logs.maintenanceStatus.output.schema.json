@@ -1,0 +1,73 @@
+{
+  "$id": "urn:mira-dashboard:logs.maintenanceStatus.output",
+  "type": "object",
+  "properties": {
+    "observedAtMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 8640000000000000
+    },
+    "policies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "enum": [
+              "docker-managed",
+              "host-alternatives",
+              "host-apport",
+              "host-dpkg",
+              "host-rsyslog"
+            ],
+            "type": "string"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "\\S",
+            "allOf": [
+              {
+                "pattern": "^[^\\u0000]*$"
+              },
+              {
+                "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+              }
+            ]
+          },
+          "scope": {
+            "enum": [
+              "docker",
+              "host"
+            ],
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "queueable",
+              "unavailable"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "scope",
+          "state"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 5,
+      "maxItems": 5,
+      "$comment": "Live Valibot validation additionally requires every fixed log-maintenance policy ID to be unique."
+    }
+  },
+  "required": [
+    "observedAtMs",
+    "policies"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

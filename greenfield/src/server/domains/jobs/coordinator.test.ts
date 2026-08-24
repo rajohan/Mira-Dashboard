@@ -4,7 +4,7 @@ import { Effect } from "effect";
 
 import { testImmediateDatabaseWriteAdmission } from "../../test/support/databaseWriteAdmission.ts";
 import { openFreshMigratedDatabase } from "../../test/support/freshDatabase.ts";
-import { findJobWorkerAction } from "./actionExecutors.ts";
+import { createJobWorkerActionResolver } from "./actionExecutors.ts";
 import {
     type JobActionRegistration,
     type JobActionExecutionContext,
@@ -38,6 +38,10 @@ import {
     type ListDueSchedulesInput,
 } from "./repository.ts";
 import { createJobRealtimeSideEffects } from "./sideEffects.ts";
+
+const findJobWorkerAction = createJobWorkerActionResolver({
+    run: () => Promise.resolve(),
+});
 
 const releaseId = "a".repeat(40);
 const at = new Date("2026-08-08T00:00:00.000Z");
@@ -855,6 +859,50 @@ describe("durable job worker coordinator", () => {
         expect(fixture.settlements[0]?.outcome.kind).toBe("succeeded");
         expect(fixture.events).not.toContain("read-cancellation");
         expect(fixture.events).not.toContain("renew");
+    });
+
+    test("runs action cleanup only after successful durable settlement", async () => {
+        const workerId = Bun.randomUUIDv7();
+        const run = {
+            ...claimedRun(workerId, "test.success-cleanup"),
+            payloadJson: '{"spoolId":"019fdf50-0000-4000-8000-000000000001"}',
+        };
+        const fixture = repositoryFixture({
+            claim: { kind: "claimed", run },
+            settlementRun: {
+                ...run,
+                state: "succeeded",
+            },
+        });
+        const baseRegistration = jobActionDefinitions.at(0);
+        if (baseRegistration === undefined) throw new Error("Missing smoke action");
+        const observedPayloads: unknown[] = [];
+        const registration: JobActionRegistration = {
+            ...baseRegistration,
+            actionKey: run.actionKey,
+            afterSuccessfulSettlement: (payload) => {
+                observedPayloads.push(payload);
+                fixture.events.push("cleanup");
+                return Promise.resolve();
+            },
+            execute: () => Effect.succeed({}),
+        };
+        const coordinator = createJobWorkerCoordinator({
+            ...coordinatorOptions(fixture.repository, workerId),
+            findAction: (actionKey) =>
+                actionKey === registration.actionKey ? registration : undefined,
+        });
+
+        await coordinator.initialize();
+        await waitUntil(() => fixture.events.includes("cleanup"));
+        await coordinator.dispose();
+
+        expect(observedPayloads).toEqual([
+            { spoolId: "019fdf50-0000-4000-8000-000000000001" },
+        ]);
+        expect(fixture.events.indexOf("cleanup")).toBeGreaterThan(
+            fixture.events.indexOf("settle:succeeded")
+        );
     });
 
     test("anchors claim renewal to the durable clamped heartbeat", async () => {

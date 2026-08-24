@@ -282,6 +282,36 @@ describe("Dashboard task route", () => {
         await screen.findByRole("heading", { level: 1, name: "Tasks" });
         await user.click(screen.getByRole("button", { name: "New task" }));
         expect(await screen.findByRole("dialog", { name: "New task" })).toBeTruthy();
+        expect(screen.getByLabelText("Title")).toHaveAttribute(
+            "placeholder",
+            "Example: Review database backups"
+        );
+        expect(screen.getByLabelText("Description")).toHaveAttribute(
+            "placeholder",
+            "Example: Check the latest backup report and resolve any warnings."
+        );
+        await user.click(screen.getByRole("button", { name: /Automation/u }));
+        await user.click(screen.getByRole("checkbox", { name: "Attach automation" }));
+        expect(screen.getByLabelText("Cron job id")).toHaveAttribute(
+            "placeholder",
+            "Example: morning-report"
+        );
+        expect(screen.getByLabelText("Schedule summary")).toHaveAttribute(
+            "placeholder",
+            "Example: Every weekday at 08:00"
+        );
+        expect(screen.getByLabelText("Model")).toHaveAttribute(
+            "placeholder",
+            "Example: openai/gpt-5.6"
+        );
+        expect(screen.getByLabelText("Thinking")).toHaveAttribute(
+            "placeholder",
+            "Example: high"
+        );
+        expect(screen.getByLabelText("Session target")).toHaveAttribute(
+            "placeholder",
+            "Example: agent:main:main"
+        );
         await user.type(screen.getByLabelText("Title"), "Draft task");
         expect(screen.getByLabelText<HTMLInputElement>("Title").value).toBe("Draft task");
     });

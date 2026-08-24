@@ -2,13 +2,13 @@ import * as v from "valibot";
 
 import {
     chatRuntimeSnapshotSchema,
-    mergeChatStreamText,
     type ChatRunState,
     type ChatRunSummary,
     type ChatRuntimeEvent,
     type ChatRuntimeProjectionPart,
     type ChatRuntimeSnapshot,
 } from "../../../contracts/chatModel.ts";
+import { mergeChatStreamText } from "../../../shared/chatStreamText.ts";
 import { ChatRunTransitionError } from "./errors.ts";
 
 const terminalStates: ReadonlySet<ChatRunState> = new Set([
@@ -86,13 +86,23 @@ function updateToolPart(
     const index = parts.findIndex(
         (part) => part.kind === "tool" && part.callId === event.callId
     );
+    const previous = index === -1 ? undefined : parts[index];
+    const previousTool = previous?.kind === "tool" ? previous : undefined;
+    const input = previousTool?.input ?? event.input;
+    const output = event.output ?? previousTool?.output;
     const projection = {
         callId: event.callId,
-        ...(event.input === undefined ? {} : { input: event.input }),
+        ...((previousTool?.callIdSource ?? event.callIdSource) === undefined
+            ? {}
+            : { callIdSource: "synthetic" as const }),
+        ...(input === undefined ? {} : { input }),
         isError: event.isError,
         kind: "tool" as const,
-        name: event.name,
-        ...(event.output === undefined ? {} : { output: event.output }),
+        name: previousTool?.name ?? event.name,
+        ...((previousTool?.nameSource ?? event.nameSource) === undefined
+            ? {}
+            : { nameSource: "synthetic" as const }),
+        ...(output === undefined ? {} : { output }),
         phase: event.phase,
         sequence: index === -1 ? event.sequence : parts[index]!.sequence,
     };
@@ -185,7 +195,15 @@ export function reduceChatRuntimeSnapshot(
     }
     let plan = previous?.plan;
     if (event.kind === "terminal") plan = undefined;
-    if (event.kind === "plan") plan = { phase: event.phase, steps: event.steps };
+    if (event.kind === "plan") {
+        plan = {
+            ...((event.explanation ?? plan?.explanation) === undefined
+                ? {}
+                : { explanation: event.explanation ?? plan?.explanation }),
+            phase: event.phase,
+            steps: event.steps,
+        };
+    }
     const firstSequence = previous?.firstSequence ?? event.sequence;
     const projectionTruncated = previous?.projectionTruncated ?? false;
 

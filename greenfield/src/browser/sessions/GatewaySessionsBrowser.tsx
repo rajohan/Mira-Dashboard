@@ -18,14 +18,14 @@ import { GatewaySessionsView } from "./GatewaySessionsView.tsx";
 
 function gatewaySessionActionFailureMessage(error: unknown): string {
     if (isDashboardOperationOutcomeUnknown(error)) {
-        return "Outcome could not be confirmed; reconciliation is required before retry.";
+        return "We could not confirm whether that action finished. Refresh the session list before trying again.";
     }
     switch (classifyDashboardBrowserFailure(error)) {
         case "not-found": {
-            return "That OpenClaw session no longer exists. Review the current projection and choose another row.";
+            return "That OpenClaw session no longer exists. Review the current list and choose another session.";
         }
         case "conflict": {
-            return "The OpenClaw session changed while the action was being confirmed. Review the current projection and try again.";
+            return "The OpenClaw session changed before the action finished. Review the current list and try again.";
         }
         default: {
             return dashboardBrowserFailureMessage(error);

@@ -3,13 +3,16 @@ import { Outlet, useLocation } from "@tanstack/react-router";
 import {
     Bot,
     CalendarClock,
+    FolderOpen,
     Home,
     ListTodo,
+    Logs,
     Menu,
     MessageCircle,
     MessagesSquare,
     Newspaper,
     ShieldCheck,
+    SquareTerminal,
     X,
     type LucideIcon,
 } from "lucide-react";
@@ -20,10 +23,15 @@ import type {
     DashboardAuthenticatedPath,
     DashboardNavigationPath,
 } from "../lib/dashboardRoutes.ts";
-import { AuthenticatedNotificationCenter } from "../notifications/AuthenticatedNotificationCenter.tsx";
+import { MonitoringRouteLayout } from "../monitoring/MonitoringRouteLayout.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { IconOnlyButton } from "../ui/IconOnlyButton.tsx";
 import { NavigationLink } from "../ui/NavigationLink.tsx";
+import { DashboardHeaderControls } from "./DashboardHeaderControls.tsx";
+import {
+    dashboardContentContainerClassName,
+    dashboardMainClassName,
+} from "./dashboardShellLayout.ts";
 
 interface NavigationItem {
     readonly icon: LucideIcon;
@@ -36,8 +44,11 @@ const navigationItems: readonly NavigationItem[] = Object.freeze([
     { icon: Bot, label: "Agents", to: "/agents" },
     { icon: MessagesSquare, label: "Sessions", to: "/sessions" },
     { icon: MessageCircle, label: "Chat", to: "/chat" },
+    { icon: FolderOpen, label: "Files", to: "/files" },
     { icon: ListTodo, label: "Tasks", to: "/tasks" },
     { icon: CalendarClock, label: "Jobs", to: "/jobs" },
+    { icon: Logs, label: "Logs", to: "/logs" },
+    { icon: SquareTerminal, label: "Terminal", to: "/terminal" },
     { icon: Newspaper, label: "Reports", to: "/reports" },
     { icon: ShieldCheck, label: "Account security", to: "/account-security" },
 ]);
@@ -48,6 +59,7 @@ const authenticatedRouteTitles: readonly {
     readonly label: string;
     readonly to: DashboardAuthenticatedPath;
 }[] = Object.freeze([...routeTitles, { label: "Incidents", to: "/incidents" }]);
+const dashboardTopBarClassName = "border-primary-700 h-16 shrink-0 border-b";
 
 interface NavigationProps {
     readonly currentPath: string;
@@ -58,10 +70,13 @@ function Navigation({ currentPath, onNavigate }: NavigationProps) {
     return (
         <nav aria-label="Main navigation" className="flex-1 p-2">
             {navigationItems.map((item) => {
-                const active = currentPath === item.to;
+                const active =
+                    currentPath === item.to ||
+                    (item.to === "/reports" && currentPath === "/incidents");
                 return (
                     <NavigationLink
                         active={active}
+                        current={currentPath === item.to}
                         key={item.to}
                         onClick={onNavigate}
                         to={item.to}
@@ -82,7 +97,12 @@ interface SidebarContentProps extends NavigationProps {
 function SidebarContent({ currentPath, onClose, onNavigate }: SidebarContentProps) {
     return (
         <>
-            <div className="border-primary-700 flex items-center justify-between gap-3 border-b p-4">
+            <div
+                className={cn(
+                    dashboardTopBarClassName,
+                    "flex items-center justify-between gap-3 px-4"
+                )}
+            >
                 <div className="flex items-center gap-2">
                     <span aria-hidden="true" className="text-2xl">
                         👩‍💻
@@ -129,7 +149,6 @@ export function DashboardShell() {
     const currentTitle =
         authenticatedRouteTitles.find((item) => item.to === location.pathname)?.label ??
         "Mira Dashboard";
-    const chatCanvas = location.pathname === "/chat";
     return (
         <div className="bg-primary-900 text-primary-50 flex h-full overflow-hidden">
             <a
@@ -170,7 +189,12 @@ export function DashboardShell() {
             </Dialog>
 
             <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-                <header className="border-primary-700 bg-primary-900/95 flex min-h-16 shrink-0 items-center gap-3 border-b px-4 sm:px-6">
+                <header
+                    className={cn(
+                        dashboardTopBarClassName,
+                        "bg-primary-950 flex items-center gap-3 px-4 sm:px-6"
+                    )}
+                >
                     <IconOnlyButton
                         className="md:hidden"
                         icon={Menu}
@@ -179,27 +203,29 @@ export function DashboardShell() {
                         size="sm"
                         variant="ghost"
                     />
-                    <p className="text-primary-100 font-semibold">{currentTitle}</p>
-                    <div className="ml-auto">
-                        <AuthenticatedNotificationCenter />
+                    <p className="text-primary-50 truncate text-lg font-bold sm:text-xl">
+                        {currentTitle}
+                    </p>
+                    <div className="ml-auto min-w-0">
+                        <DashboardHeaderControls />
                     </div>
                 </header>
                 <main
-                    className={cn(
-                        "min-h-0 flex-1",
-                        chatCanvas
-                            ? "overflow-hidden p-2 sm:p-3"
-                            : "overflow-y-auto px-4 py-8 sm:px-6 lg:px-8"
-                    )}
+                    className={dashboardMainClassName(location.pathname)}
+                    data-scroll-restoration-id="dashboard-content"
                     id="dashboard-content"
                 >
                     <div
-                        className={cn(
-                            "w-full",
-                            chatCanvas ? "h-full min-h-0" : "mx-auto max-w-7xl"
-                        )}
+                        className={dashboardContentContainerClassName(location.pathname)}
                     >
-                        <Outlet />
+                        {location.pathname === "/reports" ||
+                        location.pathname === "/incidents" ? (
+                            <MonitoringRouteLayout pathname={location.pathname}>
+                                <Outlet />
+                            </MonitoringRouteLayout>
+                        ) : (
+                            <Outlet />
+                        )}
                     </div>
                 </main>
             </div>

@@ -55,7 +55,7 @@ const scheduleColumns = scheduleColumnHelper.columns([
                 {getValue() ? "enabled" : "disabled"}
             </Badge>
         ),
-        header: "State",
+        header: "Status",
         id: "enabled",
     }),
     scheduleColumnHelper.accessor((row) => row.schedule.schedule, {
@@ -64,7 +64,7 @@ const scheduleColumns = scheduleColumnHelper.columns([
                 {scheduleConfigurationLabel(getValue())}
             </Text>
         ),
-        header: "Cadence",
+        header: "Schedule",
         id: "cadence",
     }),
     scheduleColumnHelper.accessor((row) => row.schedule.nextRunAtMs, {

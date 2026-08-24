@@ -15,6 +15,8 @@ export const persistentGatewayChallengeFrameMaximumBytes = 4 * 1024;
 export const persistentGatewayOutboundFrameMaximumBytes = 1024 * 1024;
 /** Audited ceiling for a chat.send JSON frame containing base64 attachment content. */
 export const persistentGatewayChatOutboundFrameMaximumBytes = 24 * 1024 * 1024;
+/** Installed Gateway ceiling for the `chat.history` `maxChars` request parameter. */
+export const persistentGatewayChatHistoryMaximumChars = 500_000;
 
 export const persistentGatewayWebReadScopes = Object.freeze(["operator.read"] as const);
 export const persistentGatewayTaskNotificationScopes = Object.freeze([
@@ -381,7 +383,9 @@ const gatewayAgentEventDataSchema = v.pipe(
         args: v.optional(v.unknown()),
         callId: v.optional(v.unknown()),
         delta: v.optional(v.unknown()),
+        explanation: v.optional(v.unknown()),
         input: v.optional(v.unknown()),
+        isReasoningSnapshot: v.optional(v.unknown()),
         isError: v.optional(v.unknown()),
         item: v.optional(v.unknown()),
         itemId: v.optional(v.unknown()),
@@ -391,6 +395,7 @@ const gatewayAgentEventDataSchema = v.pipe(
         partialResult: v.optional(v.unknown()),
         payload: v.optional(v.unknown()),
         phase: v.optional(v.unknown()),
+        progressText: v.optional(v.unknown()),
         replace: v.optional(v.unknown()),
         result: v.optional(v.unknown()),
         steps: v.optional(v.unknown()),
@@ -407,13 +412,40 @@ const gatewayAgentEventDataSchema = v.pipe(
         "Gateway agent event data is outside its budget"
     )
 );
+const gatewaySupportedAgentStreams = Object.freeze([
+    "assistant",
+    "thinking",
+    "tool",
+    "item",
+    "plan",
+    "run_status",
+] as const);
 const gatewayAgentEventSchema = v.object({
     agentId: v.optional(chatAgentIdSchema),
     data: gatewayAgentEventDataSchema,
     runId: chatRunIdSchema,
     seq: positiveSafeIntegerSchema,
     sessionKey: chatSessionKeySchema,
-    stream: v.picklist(["assistant", "thinking", "tool", "item", "plan", "run_status"]),
+    stream: v.picklist(gatewaySupportedAgentStreams),
+    ts: nonnegativeSafeIntegerSchema,
+});
+const gatewayUnsupportedAgentEventSchema = v.object({
+    agentId: v.optional(chatAgentIdSchema),
+    data: v.pipe(
+        v.unknown(),
+        v.check(
+            (data) =>
+                jsonValueFitsByteBudget(
+                    data,
+                    persistentGatewayAgentEventDataMaximumBytes
+                ),
+            "Gateway unsupported agent event data is outside its budget"
+        )
+    ),
+    runId: chatRunIdSchema,
+    seq: positiveSafeIntegerSchema,
+    sessionKey: chatSessionKeySchema,
+    stream: boundedProtocolNameSchema,
     ts: nonnegativeSafeIntegerSchema,
 });
 const gatewaySessionMessagesSubscriptionAcknowledgementSchema = v.strictObject({
@@ -425,7 +457,12 @@ const gatewayChatHistoryParamsSchema = v.pipe(
     v.strictObject({
         agentId: v.optional(chatAgentIdSchema),
         limit: v.optional(v.pipe(positiveSafeIntegerSchema, v.maxValue(1000))),
-        maxChars: v.optional(v.pipe(positiveSafeIntegerSchema, v.maxValue(1024 * 1024))),
+        maxChars: v.optional(
+            v.pipe(
+                positiveSafeIntegerSchema,
+                v.maxValue(persistentGatewayChatHistoryMaximumChars)
+            )
+        ),
         messageId: v.optional(chatMessageIdSchema),
         offset: v.optional(nonnegativeSafeIntegerSchema),
         sessionId: v.optional(chatRunIdSchema),
@@ -712,7 +749,14 @@ export interface PersistentGatewayAgentEvent {
     readonly runId: string;
     readonly seq: number;
     readonly sessionKey: string;
-    readonly stream: "assistant" | "thinking" | "tool" | "item" | "plan" | "run_status";
+    readonly stream:
+        | "assistant"
+        | "thinking"
+        | "tool"
+        | "item"
+        | "plan"
+        | "run_status"
+        | "unsupported";
     readonly ts: number;
 }
 
@@ -1214,11 +1258,44 @@ export function parsePersistentGatewayPrivateChatEvent(
             ? Object.freeze({ event: "chat", payload: Object.freeze(payload.output) })
             : undefined;
     }
-    if (frame.output.event === "agent") {
+    // Control-UI-visible runs are broadcast as `agent`, except tool activity:
+    // the Gateway sends that to broad session subscribers as `session.tool`.
+    // Both envelopes carry the same bounded agent payload contract, so normalize
+    // the latter before it crosses the private chat boundary.
+    if (frame.output.event === "agent" || frame.output.event === "session.tool") {
         const payload = v.safeParse(gatewayAgentEventSchema, frame.output.payload);
-        return payload.success
-            ? Object.freeze({ event: "agent", payload: Object.freeze(payload.output) })
-            : undefined;
+        if (payload.success) {
+            return Object.freeze({
+                event: "agent",
+                payload: Object.freeze(payload.output),
+            });
+        }
+        const unsupported = v.safeParse(
+            gatewayUnsupportedAgentEventSchema,
+            frame.output.payload
+        );
+        if (
+            !unsupported.success ||
+            gatewaySupportedAgentStreams.some(
+                (stream) => stream === unsupported.output.stream
+            )
+        ) {
+            return undefined;
+        }
+        return Object.freeze({
+            event: "agent",
+            payload: Object.freeze({
+                ...(unsupported.output.agentId === undefined
+                    ? {}
+                    : { agentId: unsupported.output.agentId }),
+                data: Object.freeze({}),
+                runId: unsupported.output.runId,
+                seq: unsupported.output.seq,
+                sessionKey: unsupported.output.sessionKey,
+                stream: "unsupported" as const,
+                ts: unsupported.output.ts,
+            }),
+        });
     }
     return undefined;
 }

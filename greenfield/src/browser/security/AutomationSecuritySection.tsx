@@ -89,16 +89,16 @@ export function AutomationSecuritySection() {
 
     return (
         <SecuritySection
-            description="Create least-privilege automation principals and rotate exact one-time credentials."
+            description="Create automation accounts and give each one only the permissions it needs. New access tokens are shown once."
             id="automation-security-heading"
-            title="Automation credentials"
+            title="Automation access"
         >
             <Alert className="mb-4" message={action.error} />
             {issuedToken !== undefined && (
                 <OneTimeSecretPanel
                     id="new-principal-token"
                     onDismiss={() => setIssuedToken(undefined)}
-                    title="Initial automation token"
+                    title="New access token"
                 >
                     {issuedToken}
                 </OneTimeSecretPanel>
@@ -107,14 +107,15 @@ export function AutomationSecuritySection() {
                 className="border-primary-700 rounded-xl border p-4"
                 onSubmit={() => void principalForm.handleSubmit()}
             >
-                <Heading level={3}>Create principal</Heading>
+                <Heading level={3}>Create automation account</Heading>
                 <div className="mt-4 grid gap-4 sm:grid-cols-2">
                     <principalForm.Field name="id">
                         {(field) => (
                             <FormField
                                 disabled={action.busy}
                                 error={firstFormFieldError(field.state.meta.errors)}
-                                label="Principal ID"
+                                description="A stable ID used by scripts and configuration."
+                                label="Account ID"
                             >
                                 <Input
                                     autoCapitalize="none"
@@ -124,6 +125,7 @@ export function AutomationSecuritySection() {
                                     onChange={(event) =>
                                         field.handleChange(event.currentTarget.value)
                                     }
+                                    placeholder="Example: openclaw-heartbeat"
                                     required
                                     spellCheck={false}
                                     value={field.state.value}
@@ -136,7 +138,7 @@ export function AutomationSecuritySection() {
                             <FormField
                                 disabled={action.busy}
                                 error={firstFormFieldError(field.state.meta.errors)}
-                                label="Principal label"
+                                label="Account name"
                             >
                                 <Input
                                     className="mt-2"
@@ -145,6 +147,7 @@ export function AutomationSecuritySection() {
                                     onChange={(event) =>
                                         field.handleChange(event.currentTarget.value)
                                     }
+                                    placeholder="Example: OpenClaw heartbeat"
                                     required
                                     value={field.state.value}
                                 />
@@ -156,7 +159,7 @@ export function AutomationSecuritySection() {
                             <FormField
                                 disabled={action.busy}
                                 error={firstFormFieldError(field.state.meta.errors)}
-                                label="Initial credential label"
+                                label="First token name"
                             >
                                 <Input
                                     className="mt-2"
@@ -165,6 +168,7 @@ export function AutomationSecuritySection() {
                                     onChange={(event) =>
                                         field.handleChange(event.currentTarget.value)
                                     }
+                                    placeholder="Example: Daily heartbeat"
                                     required
                                     value={field.state.value}
                                 />
@@ -193,7 +197,7 @@ export function AutomationSecuritySection() {
                             type="submit"
                         >
                             <Icon icon={Plus} size="sm" tone="inherit" />
-                            Create principal and credential
+                            Create account and token
                         </Button>
                     )}
                 </principalForm.Subscribe>
@@ -201,7 +205,7 @@ export function AutomationSecuritySection() {
             {principals.isPending && (
                 <LoadingState
                     className="mt-5"
-                    label="Loading automation principals…"
+                    label="Loading automation accounts…"
                     size="sm"
                 />
             )}
@@ -223,9 +227,9 @@ export function AutomationSecuritySection() {
                 principals.data.pages.every((page) => page.principals.length === 0) && (
                     <EmptyState
                         className="mt-5"
-                        description="Create the first least-privilege automation identity above."
+                        description="Create an automation account above when a script or service needs Dashboard access."
                         icon={Bot}
-                        title="No automation principals"
+                        title="No automation accounts"
                     />
                 )}
             {principals.isSuccess && (
@@ -248,7 +252,7 @@ export function AutomationSecuritySection() {
                     onClick={() => void principals.fetchNextPage()}
                     variant="secondary"
                 >
-                    Load older principals
+                    Load older accounts
                 </Button>
             )}
         </SecuritySection>

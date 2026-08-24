@@ -274,6 +274,66 @@ describe("durable jobs repository", () => {
         }
     });
 
+    test("persists an honest unscheduled manual domain action without fake schedule provenance", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createJobRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        try {
+            const run = queuedRun(14, {
+                actionKey: "workspace-files.apply-write",
+                displayName: "Workspace file write",
+                payloadJson: JSON.stringify({ command: "opaque-domain-payload" }),
+                resourceClass: "host-heavy",
+                resourceKeysJson: '["workspace.files"]',
+                scheduledJobId: null,
+                scheduledJobVersion: null,
+            });
+
+            expect(
+                await repository.enqueueManualRun({
+                    ...noSideEffects,
+                    queuedEvent: queuedEvent(run),
+                    run,
+                })
+            ).toMatchObject({
+                kind: "inserted",
+                run: {
+                    actionKey: "workspace-files.apply-write",
+                    scheduledForAt: null,
+                    scheduledJobId: null,
+                    scheduledJobVersion: null,
+                    triggerType: "manual",
+                },
+            });
+
+            expect(
+                repository.listActiveActionPayloads({
+                    actionKey: "workspace-files.apply-write",
+                    limit: 1,
+                })
+            ).toEqual({
+                payloads: [run.payloadJson],
+                truncated: false,
+            });
+
+            const invalid = queuedRun(15, {
+                scheduledJobId: null,
+                scheduledJobVersion: 1,
+            });
+            expect(
+                repository.enqueueManualRun({
+                    ...noSideEffects,
+                    queuedEvent: queuedEvent(invalid),
+                    run: invalid,
+                })
+            ).rejects.toThrow();
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
     test("pages due schedules by next occurrence and ID", async () => {
         const database = await openFreshMigratedDatabase();
         const repository = createJobRepository(

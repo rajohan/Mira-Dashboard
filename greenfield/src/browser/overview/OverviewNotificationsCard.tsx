@@ -41,8 +41,8 @@ export function OverviewNotificationsCard({ result }: OverviewNotificationsCardP
                         Notifications
                     </Heading>
                     <Text className="mt-1" size="sm" tone="muted">
-                        Exact global read counts and the bounded newest window. Use the
-                        notification bell for history and actions.
+                        Unread and read totals with the newest notifications. Use the bell
+                        to see notification history and actions.
                     </Text>
                 </div>
             </div>
@@ -51,7 +51,7 @@ export function OverviewNotificationsCard({ result }: OverviewNotificationsCardP
                 {[
                     ["Unread", result.unreadCount],
                     ["Read", result.readCount],
-                    ["Newest 100", result.notifications.length],
+                    ["Shown", result.notifications.length],
                 ].map(([label, value]) => (
                     <div
                         className="border-primary-700 bg-primary-900/35 rounded-lg border p-3"
@@ -122,7 +122,7 @@ export function OverviewNotificationsCard({ result }: OverviewNotificationsCardP
 
             {result.nextCursor !== undefined && (
                 <Text className="mt-3" size="sm" tone="muted">
-                    Older notifications are available from the global notification bell.
+                    Use the notification bell to see older notifications.
                 </Text>
             )}
         </Card>

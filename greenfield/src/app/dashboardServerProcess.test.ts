@@ -20,6 +20,8 @@ import {
 import type { ApplicationServer } from "./server.ts";
 
 const projectRoot = "/srv/mira-dashboard";
+const openClawRoot = "/srv/openclaw";
+const workspaceRoot = "/srv/mira-workspace";
 const releaseId = "b".repeat(40);
 const revision = "a".repeat(40);
 const checksum = "c".repeat(64);
@@ -60,12 +62,14 @@ const processOptions = Object.freeze({
     configurationSource: {
         ELEVENLABS_API_KEY: "elevenlabs-api-key-test-value",
         MIRA_DASHBOARD_LOG_LEVEL: "debug",
+        MIRA_DASHBOARD_OPENCLAW_ROOT: openClawRoot,
         MIRA_DASHBOARD_PROJECT_ROOT: projectRoot,
         MIRA_DASHBOARD_PUBLIC_ORIGIN: "https://dashboard.example.com",
         MIRA_DASHBOARD_RECENT_AUTH_MINUTES: "10",
         MIRA_DASHBOARD_SESSION_IDLE_MINUTES: "30",
         MIRA_DASHBOARD_TOTP_KEYRING: serializedKeyring,
         MIRA_DASHBOARD_TRUSTED_PROXY_IPS: "127.0.0.1,::1",
+        MIRA_DASHBOARD_WORKSPACE_ROOT: workspaceRoot,
         MIRA_DASHBOARD_WEBAUTHN_ORIGINS: "https://dashboard.example.com",
         MIRA_DASHBOARD_WEBAUTHN_RP_ID: "example.com",
         MIRA_DASHBOARD_WEBAUTHN_RP_NAME: "Mira Dashboard",
@@ -128,11 +132,50 @@ function processFixture(totpFailure?: Error) {
             expect(options.applicationRuntime).toBe(observedRuntime);
             expect(options.readiness.isReady()).toBe(false);
             expect(options.browserOrigin).toBe("https://dashboard.example.com");
+            expect(options.dashboardLogsRoot).toBe(layout.production.state.logs);
+            expect(options.dashboardLogMaintenanceRoot).toBe(
+                layout.production.state.logMaintenance
+            );
             expect(Redacted.value(options.elevenLabsApiKey!)).toBe(
                 "elevenlabs-api-key-test-value"
             );
             expect(options.frontendAssets).toBeFunction();
             expect(options.port).toBe(3100);
+            expect(options.openClawFileRoot).toEqual({
+                id: "openclaw-config",
+                label: "OpenClaw Config",
+                manifest: [
+                    {
+                        contentPolicy: "redacted-config-json",
+                        maximumSizeBytes: 1_048_576,
+                        segments: ["openclaw.json"],
+                        writable: true,
+                    },
+                    {
+                        contentPolicy: "raw",
+                        maximumSizeBytes: 1_048_576,
+                        segments: ["hooks", "transforms", "agentmail.ts"],
+                        writable: true,
+                    },
+                ],
+                path: openClawRoot,
+                writable: false,
+            });
+            expect(options.workspaceFileRoot).toEqual({
+                id: "workspace",
+                label: "Workspace",
+                path: workspaceRoot,
+                writable: true,
+            });
+            expect(options.workspaceFileUploadSpoolRoot).toBe(
+                layout.production.state.workspaceFileUploads
+            );
+            expect(options.terminalBrokerDirectory).toBe(
+                layout.production.state.terminalBroker
+            );
+            expect(options.terminalBrokerSocket).toBe(
+                layout.production.state.terminalBrokerSocket
+            );
             events.push("server-create");
             const server = Object.freeze({
                 port: 3100,
@@ -165,6 +208,50 @@ function processFixture(totpFailure?: Error) {
             events.push(`layout:${observedProjectRoot}`);
             return Promise.resolve(layout);
         },
+        resolveOpenClawFileRoot(observedOpenClawRoot, observedProductionRoot) {
+            expect(observedOpenClawRoot).toBe(openClawRoot);
+            expect(observedProductionRoot).toBe(layout.production.root);
+            events.push(`openclaw:${observedOpenClawRoot}`);
+            return Promise.resolve(
+                Object.freeze({
+                    id: "openclaw-config",
+                    label: "OpenClaw Config",
+                    manifest: Object.freeze([
+                        Object.freeze({
+                            contentPolicy: "redacted-config-json" as const,
+                            maximumSizeBytes: 1_048_576,
+                            segments: Object.freeze(["openclaw.json"]),
+                            writable: true,
+                        }),
+                        Object.freeze({
+                            contentPolicy: "raw" as const,
+                            maximumSizeBytes: 1_048_576,
+                            segments: Object.freeze([
+                                "hooks",
+                                "transforms",
+                                "agentmail.ts",
+                            ]),
+                            writable: true,
+                        }),
+                    ]),
+                    path: openClawRoot,
+                    writable: false,
+                })
+            );
+        },
+        resolveWorkspaceFileRoot(observedWorkspaceRoot, observedLayout) {
+            expect(observedWorkspaceRoot).toBe(workspaceRoot);
+            expect(observedLayout).toBe(layout);
+            events.push(`workspace:${observedWorkspaceRoot}`);
+            return Promise.resolve(
+                Object.freeze({
+                    id: "workspace",
+                    label: "Workspace",
+                    path: workspaceRoot,
+                    writable: true,
+                })
+            );
+        },
     } satisfies DashboardWebProcessDependencies);
     return { dependencies, events, logLines };
 }
@@ -178,6 +265,8 @@ describe("Dashboard web process", () => {
         expect(fixture.events).toEqual([
             `layout:${projectRoot}`,
             `release:web:${layout.production.releases}:${release.releaseRoot}`,
+            `workspace:${workspaceRoot}`,
+            `openclaw:${openClawRoot}`,
             `logs:web:${layout.production.state.logs}`,
             "signals-create",
             "frontend-create",

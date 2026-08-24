@@ -17,8 +17,8 @@ export function OverviewJobsSection() {
 
     if (query.isPending && query.data === undefined) {
         return (
-            <Card aria-label="Dashboard job queue">
-                <PageState label="Loading Dashboard job queue…" status="loading" />
+            <Card aria-label="Dashboard background jobs">
+                <PageState label="Loading Dashboard background jobs…" status="loading" />
             </Card>
         );
     }
@@ -30,7 +30,7 @@ export function OverviewJobsSection() {
                 onRetry={() => void query.refetch()}
                 retryBusy={query.isFetching}
                 status="error"
-                title="Dashboard job queue unavailable"
+                title="Dashboard background jobs unavailable"
             />
         );
     }

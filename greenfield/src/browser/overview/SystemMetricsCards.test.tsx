@@ -45,7 +45,9 @@ describe("SystemMetricsCards", () => {
         render(<SystemMetricsCards metrics={metrics} />);
 
         expect(within(card("CPU")).getByText("248%")).toBeTruthy();
-        expect(within(card("CPU")).getByText(/1 minute load 9\.92/u)).toBeTruthy();
+        expect(
+            within(card("CPU")).getByText(/Average load over 1 minute: 9\.92/u)
+        ).toBeTruthy();
         expect(within(card("Memory")).getByText("75%")).toBeTruthy();
         expect(within(card("Disk")).getByText("60%")).toBeTruthy();
         expect(within(card("Uptime")).getByText("2d 3h")).toBeTruthy();
@@ -67,7 +69,7 @@ describe("SystemMetricsCards", () => {
             />
         );
 
-        expect(screen.getAllByText("Sampling…")).toHaveLength(2);
+        expect(screen.getAllByText("Measuring…")).toHaveLength(2);
         expect(screen.queryByText("0 bit/s")).toBeNull();
     });
 });

@@ -342,6 +342,12 @@ function providerRange(
             ? undefined
             : { end: event.providerSequenceEnd, start: event.providerSequenceStart };
     }
+    if (event.kind === "provider-noop") {
+        return {
+            end: event.providerSequenceEnd,
+            start: event.providerSequenceStart,
+        };
+    }
     if ("providerSequence" in event && event.providerSequence !== undefined) {
         return { end: event.providerSequence, start: event.providerSequence };
     }
@@ -711,6 +717,7 @@ function advanceTranscriptGeneration(
     input: Readonly<{
         action: ChatTranscriptGenerationChange["reason"];
         at: Date;
+        emitRealtimeMarkers?: boolean;
         providerSessionId?: string;
         providerUpdatedAtMs?: number;
         status: "absent" | "ready";
@@ -797,8 +804,10 @@ function advanceTranscriptGeneration(
         },
         boundaryAt
     );
-    appendRealtimeMarker(transaction, boundaryAt);
-    appendHistoryRealtimeMarker(transaction, boundaryAt);
+    if (input.emitRealtimeMarkers !== false) {
+        appendRealtimeMarker(transaction, boundaryAt);
+        appendHistoryRealtimeMarker(transaction, boundaryAt);
+    }
     return Object.freeze({
         currentGeneration: row.currentGeneration + 1,
         previousGeneration: row.currentGeneration,
@@ -1658,6 +1667,8 @@ export function createChatRepository(
             const at = toDate(occurredAtMs);
             return write((transaction) => {
                 const changes: ChatTranscriptGenerationChange[] = [];
+                let historyChanged = false;
+                let runtimeChanged = false;
                 const rows = transaction
                     .select()
                     .from(chatTranscriptGenerations)
@@ -1695,7 +1706,7 @@ export function createChatRepository(
                                 },
                                 at
                             );
-                            appendRealtimeMarker(transaction, at);
+                            runtimeChanged = true;
                         }
                         continue;
                     }
@@ -1703,6 +1714,7 @@ export function createChatRepository(
                         advanceTranscriptGeneration(transaction, row, {
                             action: "transport",
                             at,
+                            emitRealtimeMarkers: false,
                             ...(row.providerSessionId === null
                                 ? {}
                                 : { providerSessionId: row.providerSessionId }),
@@ -1714,7 +1726,11 @@ export function createChatRepository(
                             status: row.status === "absent" ? "absent" : "ready",
                         })
                     );
+                    historyChanged = true;
+                    runtimeChanged = true;
                 }
+                if (runtimeChanged) appendRealtimeMarker(transaction, at);
+                if (historyChanged) appendHistoryRealtimeMarker(transaction, at);
                 return Object.freeze(changes);
             });
         },

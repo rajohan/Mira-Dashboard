@@ -1,0 +1,47 @@
+{
+  "$id": "urn:mira-dashboard:terminal.prepareResume.output",
+  "type": "object",
+  "properties": {
+    "afterSequence": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "connectionToken": {
+      "type": "string",
+      "minLength": 97,
+      "maxLength": 97,
+      "pattern": "^[0-9a-f]{32}\\.[0-9a-f]{64}$"
+    },
+    "expiresAtMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 8640000000000000
+    },
+    "sessionId": {
+      "type": "string",
+      "minLength": 36,
+      "maxLength": 36,
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "webSocketProtocol": {
+      "const": "mira-terminal-v1"
+    },
+    "webSocketUrl": {
+      "type": "string",
+      "maxLength": 128,
+      "pattern": "^\\/api\\/terminal\\/sessions\\/[0-9a-f-]{36}\\/socket$"
+    }
+  },
+  "required": [
+    "afterSequence",
+    "connectionToken",
+    "expiresAtMs",
+    "sessionId",
+    "webSocketProtocol",
+    "webSocketUrl"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

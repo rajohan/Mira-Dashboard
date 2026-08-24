@@ -53,6 +53,7 @@ import {
     writeChatDisplaySettings,
 } from "./chatLocalPreferences.ts";
 import {
+    createChatIdempotencyKey,
     chatSendFailureDisposition,
     createChatSendIdentity,
     executeChatSend,
@@ -91,7 +92,11 @@ import {
 } from "./chatQueries.ts";
 import { resolveChatSessionKey } from "./chatRouteSearch.ts";
 import { useChatRuntimeStore } from "./chatRuntimeContextValue.ts";
-import { chatRuntimeMessages, chatRuntimePlans } from "./chatRuntimeStore.ts";
+import {
+    type ChatExternalRunProjection,
+    chatRuntimeMessages,
+    chatRuntimePlans,
+} from "./chatRuntimeStore.ts";
 import type {
     ChatDisplaySettings,
     ChatDraftAttachment,
@@ -142,6 +147,11 @@ interface ProviderControlGate extends ChatProviderObservationBoundary {
     readonly sessionKey: string;
 }
 
+interface ExternalAbortGate {
+    readonly attemptId: string;
+    readonly sessionKey: string;
+}
+
 interface ProviderObservedMutationResult<TResult> {
     readonly gate: ProviderControlGate;
     readonly observation?: ListGatewaySessionsResult;
@@ -154,6 +164,30 @@ interface ProviderObservedMutationResult<TResult> {
 interface TaskPostMutationObservation {
     readonly absent: boolean;
     readonly task?: OpenClawTaskSummary;
+}
+
+const externalRunControlPrefix = "provider-run:";
+
+function externalRunControlId(providerRunId: string): string {
+    return `${externalRunControlPrefix}${providerRunId}`;
+}
+
+function providerRunIdFromControlId(controlId: string): string | undefined {
+    return controlId.startsWith(externalRunControlPrefix)
+        ? controlId.slice(externalRunControlPrefix.length)
+        : undefined;
+}
+
+function externalAbortBoundaryIsGated(run: ChatExternalRunProjection): boolean {
+    const boundary = run.abortBoundary;
+    return (
+        boundary !== undefined &&
+        boundary.settlement !== "not-aborted" &&
+        (boundary.settlement === "pending" ||
+            run.observationEpoch <= boundary.baselineObservationEpoch ||
+            run.observedAtMs <= boundary.attemptedAtMs ||
+            run.updatedAtMs <= boundary.baselineUpdatedAtMs)
+    );
 }
 
 function emptyDraft(): SessionDraft {
@@ -213,10 +247,10 @@ function chatQueryError(
         return dashboardBrowserFailureMessage(input.sessionsError);
     }
     if (input.sessionsError !== null || input.historyFailed) {
-        return "Some chat data could not be refreshed. Last-known rows remain visible.";
+        return "Some chat data could not be updated. The latest available messages remain visible.";
     }
     if (input.runtimeFailed) {
-        return "Live runtime data is unavailable. Drafts remain local.";
+        return "Live updates are unavailable. Drafts remain saved in this browser.";
     }
     return input.actionError;
 }
@@ -292,7 +326,11 @@ export function ChatBrowser({
     const [abortGates, setAbortGates] = useState<Readonly<Record<string, ChatAbortGate>>>(
         {}
     );
+    const [externalAbortGates, setExternalAbortGates] = useState<
+        Readonly<Record<string, ExternalAbortGate>>
+    >({});
     const abortLocks = useRef(new Set<string>());
+    const externalAbortLocks = useRef(new Map<string, ExternalAbortGate>());
     const [taskCancelGates, setTaskCancelGates] = useState<
         Readonly<Record<string, ChatTaskCancelGate>>
     >({});
@@ -344,15 +382,69 @@ export function ChatBrowser({
         return retained === undefined ? [] : [retained];
     });
     const requestedTaskId = selectedTasks[selectedSessionKey];
-    const selectableTaskRows = [...taskRows, ...retainedTaskRows];
-    const selectedTaskId =
-        requestedTaskId !== undefined &&
-        selectableTaskRows.some((task) => task.id === requestedTaskId)
-            ? requestedTaskId
-            : selectableTaskRows[0]?.id;
     const taskDetailQuery = useQuery(
-        openClawTaskDetailQueryOptions(client, selectedTaskId)
+        openClawTaskDetailQueryOptions(client, requestedTaskId)
     );
+    useEffect(() => {
+        if (
+            requestedTaskId === undefined ||
+            taskDetailQuery.error === null ||
+            classifyDashboardBrowserFailure(taskDetailQuery.error) !== "not-found"
+        ) {
+            return;
+        }
+        let disposed = false;
+        queueMicrotask(() => {
+            if (disposed) return;
+            taskCancelLocks.current.delete(requestedTaskId);
+            setTaskCancelGates((current) => {
+                if (current[requestedTaskId] === undefined) return current;
+                const next = { ...current };
+                delete next[requestedTaskId];
+                return next;
+            });
+            setTaskOverrides((current) => {
+                if (current[requestedTaskId] === undefined) return current;
+                const next = { ...current };
+                delete next[requestedTaskId];
+                return next;
+            });
+            setAbsentTaskIds((current) =>
+                current.has(requestedTaskId)
+                    ? current
+                    : new Set([...current, requestedTaskId])
+            );
+            setSelectedTasks((current) => {
+                if (current[selectedSessionKey] !== requestedTaskId) return current;
+                const next = { ...current };
+                delete next[selectedSessionKey];
+                return next;
+            });
+            queryClient.removeQueries({
+                exact: true,
+                queryKey: openClawTaskDetailQueryKey(requestedTaskId),
+            });
+        });
+        return () => {
+            disposed = true;
+        };
+    }, [queryClient, requestedTaskId, selectedSessionKey, taskDetailQuery.error]);
+    const selectedDetail = taskDetailQuery.data?.task;
+    const retainedSelectedDetail =
+        selectedDetail === undefined ||
+        absentTaskIds.has(selectedDetail.id) ||
+        taskRows.some((task) => task.id === selectedDetail.id) ||
+        retainedTaskRows.some((task) => task.id === selectedDetail.id)
+            ? []
+            : [selectedDetail];
+    const selectableTaskRows = [
+        ...taskRows,
+        ...retainedTaskRows,
+        ...retainedSelectedDetail,
+    ];
+    const selectedTaskId = selectableTaskRows.some((task) => task.id === requestedTaskId)
+        ? requestedTaskId
+        : undefined;
     const hydratedMessageQuery = useQuery(
         chatMessageQueryOptions(
             client,
@@ -419,8 +511,7 @@ export function ChatBrowser({
         });
     }, [historyQuery.data, runtimeStore, selectedSessionKey]);
 
-    const selectedDetail = taskDetailQuery.data?.task;
-    const authoritativeTasks = [...taskRows, ...retainedTaskRows].map((task) =>
+    const authoritativeTasks = selectableTaskRows.map((task) =>
         reconcileChatTaskSummary(
             task,
             selectedDetail?.id === task.id ? selectedDetail : undefined
@@ -464,17 +555,36 @@ export function ChatBrowser({
             ? providerSendSettings
             : (sendSettings[selectedSessionKey] ?? providerSendSettings);
     const runtimeSession = runtimeState.sessions[selectedSessionKey];
-    const allActiveRunIds = Object.entries(runtimeSession?.runs ?? {})
+    const localActiveRunIds = Object.entries(runtimeSession?.runs ?? {})
         .filter(([, run]) => run.phase === "active")
         .map(([runId]) => runId);
-    const activeRunIds = allActiveRunIds.filter(
-        (runId) =>
-            !chatAbortIsGated(
-                abortGates[runId],
-                selectedSessionKey,
-                runtimeSession?.runs[runId]
-            )
-    );
+    const externalActiveRunIds = Object.entries(runtimeSession?.externalRuns ?? {})
+        .filter(([, run]) => run.continuity === "complete")
+        .map(([providerRunId]) => providerRunId);
+    const allActiveRunIds = [...localActiveRunIds, ...externalActiveRunIds];
+    const activeRunIds = [
+        ...localActiveRunIds.filter(
+            (runId) =>
+                !chatAbortIsGated(
+                    abortGates[runId],
+                    selectedSessionKey,
+                    runtimeSession?.runs[runId]
+                )
+        ),
+        ...externalActiveRunIds.flatMap((providerRunId) => {
+            const controlId = externalRunControlId(providerRunId);
+            const gate = externalAbortGates[controlId];
+            const externalRun = runtimeSession?.externalRuns[providerRunId];
+            const abortBoundary = externalRun?.abortBoundary;
+            return externalRun !== undefined &&
+                (externalAbortBoundaryIsGated(externalRun) ||
+                    (gate?.sessionKey === selectedSessionKey &&
+                        abortBoundary?.attemptId !== gate.attemptId))
+                ? []
+                : [controlId];
+        }),
+    ];
+
     const taskCancelGatedIds = authoritativeTasks.flatMap((task) =>
         chatTaskCancelIsGated(taskCancelGates[task.id]) ? [task.id] : []
     );
@@ -683,7 +793,7 @@ export function ChatBrowser({
         }
         if (command === "/reset") {
             setActionNotice(
-                "Open Chat settings and confirm Reset provider transcript to continue."
+                "Open Chat settings and choose Reset chat history to continue."
             );
             return;
         }
@@ -782,7 +892,7 @@ export function ChatBrowser({
                     error: "Outcome is unknown",
                 });
                 setActionError(
-                    "Send outcome could not be confirmed. It remains under runtime reconciliation; do not retry it."
+                    "Dashboard could not confirm whether the message was sent. It will check automatically; do not send it again."
                 );
                 return;
             }
@@ -813,7 +923,147 @@ export function ChatBrowser({
         }
     }
 
+    async function abortExternal(
+        controlId: string,
+        providerRunId: string
+    ): Promise<void> {
+        if (!providerWritesEnabled) return;
+        const sessionKey = selectedSessionKey;
+        const externalRun =
+            runtimeStore.state.sessions[sessionKey]?.externalRuns[providerRunId];
+        if (externalRun?.continuity !== "complete") return;
+        if (externalAbortBoundaryIsGated(externalRun)) return;
+        const priorGate = externalAbortLocks.current.get(controlId);
+        if (priorGate !== undefined) {
+            const abortBoundary = externalRun.abortBoundary;
+            if (
+                priorGate.sessionKey === sessionKey &&
+                (abortBoundary?.attemptId !== priorGate.attemptId ||
+                    (abortBoundary.settlement !== "not-aborted" &&
+                        (externalRun.observationEpoch <=
+                            abortBoundary.baselineObservationEpoch ||
+                            externalRun.observedAtMs <= abortBoundary.attemptedAtMs ||
+                            externalRun.updatedAtMs <=
+                                abortBoundary.baselineUpdatedAtMs)))
+            ) {
+                return;
+            }
+            externalAbortLocks.current.delete(controlId);
+        }
+        const gate: ExternalAbortGate = {
+            attemptId: createChatIdempotencyKey(),
+            sessionKey,
+        };
+        const releaseGate = () => {
+            if (externalAbortLocks.current.get(controlId) !== gate) return;
+            externalAbortLocks.current.delete(controlId);
+            setExternalAbortGates((current) => {
+                if (current[controlId] !== gate) return current;
+                const next = { ...current };
+                delete next[controlId];
+                return next;
+            });
+        };
+        const reconcileGate = (includeHistory = false) => {
+            const historyCatchUp = includeHistory
+                ? queryClient.invalidateQueries({
+                      exact: true,
+                      queryKey: chatHistoryQueryKey(sessionKey),
+                  })
+                : Promise.resolve();
+            void historyCatchUp
+                .then(() =>
+                    queryClient.invalidateQueries({
+                        exact: true,
+                        queryKey: chatRuntimeQueryKey(sessionKey),
+                    })
+                )
+                .then(() => {
+                    const observedRun =
+                        runtimeStore.state.sessions[sessionKey]?.externalRuns[
+                            providerRunId
+                        ];
+                    const abortBoundary = observedRun?.abortBoundary;
+                    if (
+                        observedRun === undefined ||
+                        (abortBoundary?.attemptId === gate.attemptId &&
+                            (abortBoundary.settlement === "not-aborted" ||
+                                (observedRun.observationEpoch >
+                                    abortBoundary.baselineObservationEpoch &&
+                                    observedRun.observedAtMs >
+                                        abortBoundary.attemptedAtMs &&
+                                    observedRun.updatedAtMs >
+                                        abortBoundary.baselineUpdatedAtMs)))
+                    ) {
+                        releaseGate();
+                    }
+                    return null;
+                });
+        };
+        externalAbortLocks.current.set(controlId, gate);
+        setExternalAbortGates((current) => ({
+            ...current,
+            [controlId]: gate,
+        }));
+        setActionError(undefined);
+        setActionNotice(undefined);
+        let operationIsActive = inactiveCompanionOperation;
+        try {
+            const output = await mutationBoundary.run(async (signal, isActive) => {
+                operationIsActive = isActive;
+                assertAuthenticatedMutationOwner(isActive);
+                const result = await client.mutation(
+                    "chat.abort",
+                    {
+                        abortAttemptId: gate.attemptId,
+                        providerRunId,
+                        sessionKey,
+                    },
+                    { signal }
+                );
+                assertAuthenticatedMutationOwner(isActive);
+                return result;
+            });
+            if (!operationIsActive()) return;
+            if (
+                !("abortAttemptId" in output) ||
+                output.abortAttemptId !== gate.attemptId
+            ) {
+                reconcileGate(true);
+                setActionError(
+                    "Dashboard could not confirm whether the response stopped. It will check automatically."
+                );
+                return;
+            }
+            if (!output.aborted) {
+                releaseGate();
+                setActionError(
+                    "OpenClaw did not stop this response. Its live status has been refreshed; try again if it is still running."
+                );
+            }
+            reconcileGate();
+        } catch (error) {
+            if (!operationIsActive()) return;
+            const unknown = isDashboardOperationOutcomeUnknown(error);
+            if (unknown) {
+                reconcileGate(true);
+            } else {
+                releaseGate();
+            }
+            setActionError(
+                unknown
+                    ? "Dashboard could not confirm whether the response stopped. It will check automatically."
+                    : dashboardBrowserFailureMessage(error)
+            );
+        }
+    }
+
     async function abort(runId: string): Promise<void> {
+        const providerRunId = providerRunIdFromControlId(runId);
+        if (providerRunId !== undefined) {
+            await abortExternal(runId, providerRunId);
+            return;
+        }
         if (!providerWritesEnabled) return;
         const sessionKey = selectedSessionKey;
         if (abortLocks.current.has(runId)) return;
@@ -914,12 +1164,12 @@ export function ChatBrowser({
             if (result.outcomeError !== undefined) {
                 setActionError(
                     isDashboardOperationOutcomeUnknown(result.outcomeError)
-                        ? "Stop outcome could not be confirmed. Runtime reconciliation will resolve it."
+                        ? "Dashboard could not confirm whether the response stopped. It will check automatically."
                         : dashboardBrowserFailureMessage(result.outcomeError)
                 );
             } else if (!advanced) {
                 setActionError(
-                    "Stop was accepted, but controls remain blocked until an explicit newer runtime observation arrives."
+                    "The stop request was accepted. Controls remain paused until OpenClaw reports a newer status."
                 );
             }
             if (
@@ -1070,8 +1320,8 @@ export function ChatBrowser({
             if (!reconciled) {
                 setActionError(
                     outcomeUnknown
-                        ? "Settings outcome could not be confirmed. Controls remain blocked until an explicit newer fresh session read arrives."
-                        : "Settings were accepted, but controls remain blocked until an explicit newer fresh session read arrives."
+                        ? "Dashboard could not confirm the settings change. It will check automatically before the controls become available again."
+                        : "Settings were saved. Dashboard is checking OpenClaw before the controls become available again."
                 );
             }
         } catch (error) {
@@ -1142,8 +1392,8 @@ export function ChatBrowser({
             if (!reconciled) {
                 setActionError(
                     outcomeUnknown
-                        ? "Compact outcome could not be confirmed. Controls remain blocked until an explicit newer fresh session read arrives."
-                        : "Compact completed, but controls remain blocked until an explicit newer fresh session read arrives."
+                        ? "Dashboard could not confirm whether the chat history was shortened. It will check automatically before the controls become available again."
+                        : "Chat history was shortened. Dashboard is checking OpenClaw before the controls become available again."
                 );
             }
         } catch (error) {
@@ -1211,8 +1461,8 @@ export function ChatBrowser({
             if (!reconciled) {
                 setActionError(
                     outcomeUnknown
-                        ? "Reset outcome could not be confirmed. Controls remain blocked until an explicit newer fresh session read arrives."
-                        : "Reset completed, but controls remain blocked until an explicit newer fresh session read arrives."
+                        ? "Dashboard could not confirm whether the chat history was reset. It will check automatically before the controls become available again."
+                        : "Chat history was reset. Dashboard is checking OpenClaw before the controls become available again."
                 );
             }
         } catch (error) {
@@ -1424,7 +1674,7 @@ export function ChatBrowser({
                 setCompanionOverride((current) => ({
                     ...current,
                     [sessionKey]: {
-                        error: "Companion outcome could not be confirmed. Waiting for a newer companion-state observation; do not submit the question again.",
+                        error: "Dashboard could not confirm whether the chat helper received the question. It will check automatically; do not submit it again.",
                         question,
                         status: "answering",
                     },
@@ -1573,7 +1823,7 @@ export function ChatBrowser({
                     [sessionKey]: companionOperationView(
                         companionBeforeReset,
                         "resetting",
-                        "Companion reset outcome could not be confirmed. Waiting for a newer companion-state observation; do not reset again."
+                        "Dashboard could not confirm whether the chat helper was reset. It will check automatically; do not reset it again."
                     ),
                 }));
                 try {
@@ -1915,7 +2165,7 @@ export function ChatBrowser({
         ...(taskQueryFailed
             ? {
                   backgroundTasksError: taskQueryHasData
-                      ? "Background tasks could not be refreshed. Last-known tasks remain visible."
+                      ? "Background tasks could not be updated. The latest available tasks remain visible."
                       : "Background tasks are unavailable. Retry to load them.",
               }
             : {}),
@@ -1936,8 +2186,8 @@ export function ChatBrowser({
             : {
                   companionError:
                       companionQuery.data === undefined
-                          ? "Companion state is unavailable. Retry to load it."
-                          : "Companion state could not be refreshed. The last-known exchange remains visible.",
+                          ? "The chat helper is unavailable. Try loading it again."
+                          : "The chat helper could not be updated. The latest available answer remains visible.",
               }),
         connection,
         historyHasNextPage:
@@ -1953,7 +2203,7 @@ export function ChatBrowser({
             ? {}
             : {
                   modelInventoryError:
-                      "Configured models could not be refreshed. Current session controls remain available.",
+                      "Available models could not be updated. Current chat controls remain available.",
               }),
         selectedSessionKey,
         sessionsLoading: sessionsQuery.isPending && sessionsQuery.data === undefined,
@@ -2129,10 +2379,15 @@ export function ChatBrowser({
             }}
             onSelectSession={onSelectedSessionChange}
             onSelectTask={(taskId) =>
-                setSelectedTasks((current) => ({
-                    ...current,
-                    [selectedSessionKey]: taskId,
-                }))
+                setSelectedTasks((current) => {
+                    const next = { ...current };
+                    if (taskId === undefined) {
+                        delete next[selectedSessionKey];
+                    } else {
+                        next[selectedSessionKey] = taskId;
+                    }
+                    return next;
+                })
             }
             onSend={() => void send()}
             onSendSettingsChange={(settings) => void updateProviderSettings(settings)}

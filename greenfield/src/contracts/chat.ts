@@ -16,6 +16,7 @@ import {
 } from "./chatMedia.ts";
 import {
     type ChatMessage,
+    chatAbortAttemptIdSchema,
     chatHistoryPageDefault,
     chatHistoryPageMaximum,
     chatHistoryProviderPageMaximum,
@@ -201,15 +202,35 @@ export const chatSendOutputSchema = v.strictObject({
     run: chatRunSummarySchema,
 });
 
-/** Exact run-scoped cancellation; repeat requests reuse durable cancellation state. */
-export const chatAbortInputSchema = v.strictObject({
-    runId: chatRunIdSchema,
-    sessionKey: gatewaySessionKeySchema,
-});
-export const chatAbortOutputSchema = v.strictObject({
-    aborted: v.boolean("Chat abort result is invalid"),
-    run: chatRunSummarySchema,
-});
+/** Exact run-scoped cancellation for a durable local run or observed provider run. */
+export const chatAbortInputSchema = v.union([
+    v.strictObject({
+        runId: chatRunIdSchema,
+        sessionKey: gatewaySessionKeySchema,
+    }),
+    v.strictObject({
+        abortAttemptId: chatAbortAttemptIdSchema,
+        providerRunId: boundedControlSafeTextSchema(
+            256,
+            "Chat provider run id is invalid"
+        ),
+        sessionKey: gatewaySessionKeySchema,
+    }),
+]);
+export const chatAbortOutputSchema = v.union([
+    v.strictObject({
+        aborted: v.boolean("Chat abort result is invalid"),
+        run: chatRunSummarySchema,
+    }),
+    v.strictObject({
+        aborted: v.boolean("Chat abort result is invalid"),
+        abortAttemptId: chatAbortAttemptIdSchema,
+        providerRunId: boundedControlSafeTextSchema(
+            256,
+            "Chat provider run id is invalid"
+        ),
+    }),
+]);
 
 export const chatModelsListInputSchema = v.strictObject({});
 
@@ -549,7 +570,7 @@ export const chatProcedureContracts = [
         output: chatAbortOutputSchema,
         outputSchemaId: "chat.abort.output",
         summary:
-            "Cancels one exact durable chat run without ambiguous session-wide aborts.",
+            "Cancels one exact durable or observed provider chat run without ambiguous session-wide aborts.",
         transport: chatMutationTransport,
     },
     {

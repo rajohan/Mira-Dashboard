@@ -6,9 +6,12 @@ import { eq } from "drizzle-orm";
 import type { ChatSendInput } from "../../../contracts/chat.ts";
 import {
     chatDeltaCoalescingMilliseconds,
+    chatRuntimeProjectionPartsMaximum,
     chatRuntimeResponseMaximumBytes,
+    chatRuntimeSnapshotMaximumBytes,
 } from "../../../contracts/chatModel.ts";
 import { utf8ByteLength } from "../../../shared/encoding.ts";
+import { chatRunEvents } from "../../database/schema/chatRunEvents.ts";
 import { realtimeEvents } from "../../database/schema/realtime.ts";
 import { testImmediateDatabaseWriteAdmission } from "../../test/support/databaseWriteAdmission.ts";
 import { openFreshMigratedDatabase } from "../../test/support/freshDatabase.ts";
@@ -481,6 +484,7 @@ describe("ChatService", () => {
                 },
             },
             attachmentPreparer: inertAttachmentPreparer(),
+            nowMs: () => 1000,
             provider: provider.provider,
             repository,
         });
@@ -488,16 +492,17 @@ describe("ChatService", () => {
             await service.runtime(runtimeInput());
             const subscription = provider.requests[0]!;
             for (let runIndex = 0; runIndex < 9; runIndex += 1) {
-                for (let sequence = 1; sequence <= 4; sequence += 1) {
+                for (let sequence = 1; sequence <= 5; sequence += 1) {
                     await subscription.onEvent({
                         kind: "delta",
-                        mode: "append",
+                        mode: sequence === 1 ? "replace" : "append",
                         providerRunId: `external-${runIndex}`,
                         providerSequence: sequence,
                         receivedAtMs: 1000 + runIndex * 10 + sequence,
                         sessionKey: "agent:main:main",
                         stream: "assistant",
-                        text: "x".repeat(64 * 1024),
+                        streamId: "assistant",
+                        text: "😀".repeat(32 * 1024),
                     });
                 }
             }
@@ -512,9 +517,21 @@ describe("ChatService", () => {
                     ({ projectionTruncated }) => projectionTruncated
                 )
             ).toBeTrue();
+            for (const external of runtime.externalRuns) {
+                expect(external.streamResets).toEqual([
+                    {
+                        resetId: `${external.providerRunId}:1`,
+                        streamId: "assistant",
+                    },
+                ]);
+            }
             expect(utf8ByteLength(JSON.stringify(runtime))).toBeLessThanOrEqual(
                 chatRuntimeResponseMaximumBytes
             );
+            for (const external of runtime.externalRuns) {
+                if (external.text.length === 0) continue;
+                expect(external.text.endsWith("😀")).toBeTrue();
+            }
             expect(
                 database.orm
                     .select()
@@ -564,8 +581,7 @@ describe("ChatService", () => {
                     kind: "terminal",
                     outcome: "completed",
                     providerRunId: external.providerRunId,
-                    providerSequence:
-                        external.providerRunId === "external-late-baseline" ? 6 : 5,
+                    providerSequence: 6,
                     receivedAtMs: 2100,
                     sessionKey: "agent:main:main",
                 });
@@ -578,6 +594,1188 @@ describe("ChatService", () => {
             const cleaned = await service.runtime(runtimeInput());
             expect(cleaned.externalRuns).toEqual([]);
             expect(cleaned.externalRunsTruncated).toBeFalse();
+
+            for (let sequence = 1; sequence <= 5; sequence += 1) {
+                await subscription.onEvent({
+                    kind: "delta",
+                    mode: sequence === 1 ? "replace" : "append",
+                    providerRunId: "external-multibyte",
+                    providerSequence: sequence,
+                    receivedAtMs: 2200 + sequence,
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                    streamId: "assistant",
+                    text: "界".repeat(64 * 1024),
+                });
+            }
+            const multibyteRuntime = await service.runtime(runtimeInput());
+            const multibyte = multibyteRuntime.externalRuns.find(
+                ({ providerRunId }) => providerRunId === "external-multibyte"
+            );
+            expect(multibyte).toMatchObject({
+                hasUnprojectedActivity: true,
+                parts: [],
+                projectionTruncated: true,
+                streamResets: [
+                    {
+                        resetId: "external-multibyte:1",
+                        streamId: "assistant",
+                    },
+                ],
+            });
+            expect(multibyte?.text.length).toBeGreaterThan(0);
+            expect(utf8ByteLength(JSON.stringify(multibyte))).toBeLessThanOrEqual(
+                chatRuntimeSnapshotMaximumBytes
+            );
+            await service.abort({
+                abortAttemptId: "bounded-projection-abort",
+                providerRunId: "external-multibyte",
+                sessionKey: "agent:main:main",
+            });
+            const boundedAbortRuntime = await service.runtime(runtimeInput());
+            expect(
+                boundedAbortRuntime.externalRuns.find(
+                    ({ providerRunId }) => providerRunId === "external-multibyte"
+                )
+            ).toMatchObject({
+                abortBoundary: {
+                    attemptId: "bounded-projection-abort",
+                    baselineUpdatedAtMs: 2205,
+                    settlement: "not-aborted",
+                },
+                projectionTruncated: true,
+            });
+            expect(
+                utf8ByteLength(JSON.stringify(boundedAbortRuntime))
+            ).toBeLessThanOrEqual(chatRuntimeResponseMaximumBytes);
+
+            const lifetimeProjectionSegments = 4097;
+            for (
+                let sequence = 1;
+                sequence <= lifetimeProjectionSegments;
+                sequence += 1
+            ) {
+                await subscription.onEvent(
+                    sequence <= 514
+                        ? {
+                              kind: "delta",
+                              mode: sequence === 1 ? "replace" : "merge",
+                              providerRunId: "external-many-parts",
+                              providerSequence: sequence,
+                              receivedAtMs: 2300 + sequence,
+                              segmentId: `agent:preamble:preamble-${sequence}`,
+                              sessionKey: "agent:main:main",
+                              stream: "thinking",
+                              streamId: "agent:preamble",
+                              text: `Preamble ${sequence}`,
+                          }
+                        : {
+                              itemId: `item-${sequence}`,
+                              itemType: "progress",
+                              kind: "item",
+                              providerRunId: "external-many-parts",
+                              providerSequence: sequence,
+                              receivedAtMs: 2300 + sequence,
+                              sessionKey: "agent:main:main",
+                          }
+                );
+                if (sequence === 513 || sequence === 514) {
+                    const rolloverRuntime = await service.runtime(runtimeInput());
+                    const rollover = rolloverRuntime.externalRuns.find(
+                        ({ providerRunId }) => providerRunId === "external-many-parts"
+                    );
+                    expect(rollover?.parts).toHaveLength(
+                        chatRuntimeProjectionPartsMaximum
+                    );
+                    expect(rollover?.parts?.at(0)).toMatchObject({
+                        segmentId: `agent:preamble:preamble-${sequence - 511}`,
+                        sequence: 1,
+                    });
+                    expect(rollover?.parts?.at(-1)).toMatchObject({
+                        segmentId: `agent:preamble:preamble-${sequence}`,
+                        sequence: chatRuntimeProjectionPartsMaximum,
+                    });
+                    expect(rollover?.streamResets).toEqual([
+                        {
+                            resetId: "external-many-parts:1",
+                            streamId: "agent:preamble",
+                        },
+                    ]);
+                }
+            }
+            await subscription.onEvent({
+                kind: "delta",
+                mode: "append",
+                providerRunId: "external-many-parts",
+                providerSequence: lifetimeProjectionSegments + 1,
+                receivedAtMs: 2300 + lifetimeProjectionSegments + 1,
+                sessionKey: "agent:main:main",
+                stream: "assistant",
+                streamId: "assistant",
+                text: "Final response",
+            });
+            const manyPartsRuntime = await service.runtime(runtimeInput());
+            const manyParts = manyPartsRuntime.externalRuns.find(
+                ({ providerRunId }) => providerRunId === "external-many-parts"
+            );
+            expect(manyParts?.parts).toHaveLength(chatRuntimeProjectionPartsMaximum);
+            expect(manyParts?.parts?.map(({ sequence }) => sequence)).toEqual(
+                Array.from(
+                    { length: chatRuntimeProjectionPartsMaximum },
+                    (_, index) => index + 1
+                )
+            );
+            expect(manyParts?.parts?.at(-1)).toMatchObject({
+                kind: "assistant",
+                segmentId: `external-many-parts:${lifetimeProjectionSegments + 1}`,
+                text: "Final response",
+            });
+        } finally {
+            await service.dispose();
+            database.sqlite.close(true);
+        }
+    });
+
+    test("aborts an exact observed provider run without fabricating a durable local run", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createChatRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission,
+            "main",
+            () => 1000
+        );
+        const abortRequests: unknown[] = [];
+        const provider = providerHarness({
+            abort: async (request) => {
+                abortRequests.push(request);
+                const aborted = request.providerRunId !== "external-not-aborted";
+                return {
+                    aborted,
+                    ok: true,
+                    runIds: aborted ? [request.providerRunId!] : [],
+                };
+            },
+        });
+        const service = createChatService({
+            attachmentConsumer: {
+                reserve: async () => {
+                    throw new Error("Attachment reservation is not used by this test");
+                },
+            },
+            attachmentPreparer: inertAttachmentPreparer(),
+            provider: provider.provider,
+            repository,
+        });
+        try {
+            await service.runtime(runtimeInput());
+            await provider.requests[0]!.onEvent({
+                kind: "delta",
+                mode: "merge",
+                providerRunId: "external-exact-stop",
+                providerSequence: 1,
+                receivedAtMs: 1001,
+                sessionKey: "agent:main:main",
+                stream: "assistant",
+                text: "Still running",
+            });
+            const beforeAbort = await service.runtime(runtimeInput());
+            expect(beforeAbort.externalRuns).toHaveLength(1);
+
+            expect(
+                await service.abort({
+                    abortAttemptId: "abort-external-exact-stop",
+                    providerRunId: "external-exact-stop",
+                    sessionKey: "agent:main:main",
+                })
+            ).toEqual({
+                aborted: true,
+                abortAttemptId: "abort-external-exact-stop",
+                providerRunId: "external-exact-stop",
+            });
+            expect(abortRequests).toEqual([
+                {
+                    preserveSideRuns: false,
+                    providerRunId: "external-exact-stop",
+                    sessionKey: "agent:main:main",
+                },
+            ]);
+            const afterAbort = await service.runtime(runtimeInput());
+            expect(afterAbort.externalRuns).toEqual([]);
+            expect(
+                repository.findByProviderCorrelation(
+                    "agent:main:main",
+                    "external-exact-stop"
+                )
+            ).toBeUndefined();
+
+            await provider.requests[0]!.onEvent({
+                kind: "delta",
+                mode: "merge",
+                providerRunId: "external-not-aborted",
+                providerSequence: 1,
+                receivedAtMs: 1002,
+                sessionKey: "agent:main:main",
+                stream: "assistant",
+                text: "Still running after false acknowledgement",
+            });
+            expect(
+                await service.abort({
+                    abortAttemptId: "abort-external-not-aborted",
+                    providerRunId: "external-not-aborted",
+                    sessionKey: "agent:main:main",
+                })
+            ).toEqual({
+                aborted: false,
+                abortAttemptId: "abort-external-not-aborted",
+                providerRunId: "external-not-aborted",
+            });
+            const notAbortedRuntime = await service.runtime(runtimeInput());
+            expect(
+                notAbortedRuntime.externalRuns.map(({ providerRunId }) => providerRunId)
+            ).toContain("external-not-aborted");
+        } finally {
+            await service.dispose();
+            database.sqlite.close(true);
+        }
+    });
+
+    test("fences external abort retries to the server-owned provider baseline and exact attempt", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createChatRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission,
+            "main",
+            () => 1000
+        );
+        const firstAbort = deferred<{
+            aborted: boolean;
+            ok: boolean;
+            runIds: readonly string[];
+        }>();
+        const firstAbortDispatched = deferred<void>();
+        let abortCalls = 0;
+        const provider = providerHarness({
+            abort: async () => {
+                abortCalls += 1;
+                if (abortCalls === 1) firstAbortDispatched.resolve();
+                return abortCalls === 1
+                    ? firstAbort.promise
+                    : { aborted: false, ok: true, runIds: [] };
+            },
+        });
+        const service = createChatService({
+            attachmentConsumer: {
+                reserve: async () => {
+                    throw new Error("Attachment reservation is not used by this test");
+                },
+            },
+            attachmentPreparer: inertAttachmentPreparer(),
+            nowMs: () => 1000,
+            provider: provider.provider,
+            repository,
+        });
+        try {
+            await service.runtime(runtimeInput());
+            const subscription = provider.requests[0]!;
+            await subscription.onEvent({
+                kind: "delta",
+                mode: "merge",
+                providerRunId: "external-abort-fence",
+                providerSequence: 1,
+                receivedAtMs: 1001,
+                sessionKey: "agent:main:main",
+                stream: "assistant",
+                text: "Browser-visible response",
+            });
+            // This event is already server-owned before the browser dispatches its
+            // abort from the older T=1001 projection.
+            await subscription.onEvent({
+                kind: "delta",
+                mode: "merge",
+                providerRunId: "external-abort-fence",
+                providerSequence: 2,
+                receivedAtMs: 1002,
+                sessionKey: "agent:main:main",
+                stream: "assistant",
+                text: "Server-ahead response",
+            });
+
+            const firstAttempt = service.abort({
+                abortAttemptId: "abort-attempt-one",
+                providerRunId: "external-abort-fence",
+                sessionKey: "agent:main:main",
+            });
+            await firstAbortDispatched.promise;
+            expect(abortCalls).toBe(1);
+            const pendingAbortRuntime = await service.runtime(runtimeInput());
+            expect(pendingAbortRuntime.externalRuns[0]).toMatchObject({
+                abortBoundary: {
+                    attemptId: "abort-attempt-one",
+                    baselineObservationEpoch: 2,
+                    baselineUpdatedAtMs: 1002,
+                    settlement: "pending",
+                },
+                updatedAtMs: 1002,
+            });
+            expect(
+                service.abort({
+                    abortAttemptId: "abort-attempt-one",
+                    providerRunId: "external-abort-fence",
+                    sessionKey: "agent:main:main",
+                })
+            ).toBe(firstAttempt);
+            const concurrentFailure = (await captureFailure(() =>
+                service.abort({
+                    abortAttemptId: "abort-attempt-two",
+                    providerRunId: "external-abort-fence",
+                    sessionKey: "agent:main:main",
+                })
+            )) as ChatServiceError;
+            expect(concurrentFailure.reason).toBe("conflict");
+
+            firstAbort.reject(new ChatProviderUnknownOutcomeError());
+            const firstFailure = (await captureFailure(
+                () => firstAttempt
+            )) as ChatServiceError;
+            expect(firstFailure.reason).toBe("unknown-outcome");
+            const unknownAbortRuntime = await service.runtime(runtimeInput());
+            expect(unknownAbortRuntime.externalRuns[0]).toMatchObject({
+                abortBoundary: {
+                    attemptId: "abort-attempt-one",
+                    baselineObservationEpoch: 2,
+                    baselineUpdatedAtMs: 1002,
+                    settlement: "unknown",
+                },
+                updatedAtMs: 1002,
+            });
+            const replayFailure = (await captureFailure(() =>
+                service.abort({
+                    abortAttemptId: "abort-attempt-one",
+                    providerRunId: "external-abort-fence",
+                    sessionKey: "agent:main:main",
+                })
+            )) as ChatServiceError;
+            expect(replayFailure.reason).toBe("unknown-outcome");
+            const earlyRetryFailure = (await captureFailure(() =>
+                service.abort({
+                    abortAttemptId: "abort-attempt-two",
+                    providerRunId: "external-abort-fence",
+                    sessionKey: "agent:main:main",
+                })
+            )) as ChatServiceError;
+            expect(earlyRetryFailure.reason).toBe("conflict");
+            expect(abortCalls).toBe(1);
+
+            await subscription.onEvent({
+                kind: "delta",
+                mode: "append",
+                providerRunId: "external-abort-fence",
+                providerSequence: 3,
+                receivedAtMs: 1003,
+                sessionKey: "agent:main:main",
+                stream: "assistant",
+                text: " after abort",
+            });
+            const advancedAbortRuntime = await service.runtime(runtimeInput());
+            expect(advancedAbortRuntime.externalRuns[0]).toMatchObject({
+                abortBoundary: {
+                    attemptId: "abort-attempt-one",
+                    baselineObservationEpoch: 2,
+                    baselineUpdatedAtMs: 1002,
+                    settlement: "unknown",
+                },
+                updatedAtMs: 1003,
+            });
+            expect(
+                await service.abort({
+                    abortAttemptId: "abort-attempt-two",
+                    providerRunId: "external-abort-fence",
+                    sessionKey: "agent:main:main",
+                })
+            ).toEqual({
+                aborted: false,
+                abortAttemptId: "abort-attempt-two",
+                providerRunId: "external-abort-fence",
+            });
+            expect(abortCalls).toBe(2);
+            const rejectedAbortRuntime = await service.runtime(runtimeInput());
+            expect(rejectedAbortRuntime.externalRuns[0]).toMatchObject({
+                abortBoundary: {
+                    attemptId: "abort-attempt-two",
+                    baselineObservationEpoch: 3,
+                    baselineUpdatedAtMs: 1003,
+                    settlement: "not-aborted",
+                },
+            });
+        } finally {
+            await service.dispose();
+            database.sqlite.close(true);
+        }
+    });
+
+    test("merges in-flight history snapshots without replacing live external detail", async () => {
+        const database = await openFreshMigratedDatabase();
+        let clock = 1000;
+        const repository = createChatRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission,
+            "main",
+            () => clock
+        );
+        let includeSnapshotPlan = true;
+        let snapshotText = "Snapshot answer";
+        const provider = providerHarness({
+            history: async () => ({
+                hasMore: false,
+                inFlightRun: {
+                    ...(includeSnapshotPlan
+                        ? {
+                              plan: {
+                                  explanation: "Snapshot rationale",
+                                  steps: [
+                                      {
+                                          status: "in_progress" as const,
+                                          text: "Snapshot plan",
+                                      },
+                                  ],
+                              },
+                          }
+                        : {}),
+                    runId: "external-refresh",
+                    text: snapshotText,
+                },
+                messages: [],
+            }),
+        });
+        const service = createChatService({
+            attachmentConsumer: {
+                reserve: async () => {
+                    throw new Error("Attachment reservation is not used by this test");
+                },
+            },
+            attachmentPreparer: inertAttachmentPreparer(),
+            nowMs: () => clock,
+            provider: provider.provider,
+            repository,
+        });
+        try {
+            await service.runtime(runtimeInput());
+            const subscription = provider.requests[0]!;
+            await subscription.onEvent({
+                kind: "delta",
+                mode: "append",
+                providerRunId: "external-refresh",
+                providerSequence: 1,
+                receivedAtMs: 1001,
+                sessionKey: "agent:main:main",
+                stream: "thinking",
+                text: "Private reasoning",
+            });
+            await subscription.onEvent({
+                callId: "synthetic-call",
+                callIdSource: "synthetic",
+                input: '{"query":"history"}',
+                isError: false,
+                kind: "tool",
+                name: "search",
+                nameSource: "synthetic",
+                phase: "started",
+                providerRunId: "external-refresh",
+                providerSequence: 2,
+                receivedAtMs: 1002,
+                sessionKey: "agent:main:main",
+            });
+            await subscription.onEvent({
+                callId: "synthetic-call",
+                callIdSource: "synthetic",
+                isError: false,
+                kind: "tool",
+                name: "search",
+                nameSource: "synthetic",
+                output: "Found",
+                phase: "succeeded",
+                providerRunId: "external-refresh",
+                providerSequence: 3,
+                receivedAtMs: 1003,
+                sessionKey: "agent:main:main",
+            });
+            await subscription.onEvent({
+                itemId: "item-1",
+                itemType: "progress",
+                kind: "item",
+                providerRunId: "external-refresh",
+                providerSequence: 4,
+                receivedAtMs: 1004,
+                sessionKey: "agent:main:main",
+                text: "Checked history",
+            });
+            await subscription.onEvent({
+                kind: "delta",
+                mode: "append",
+                providerRunId: "external-refresh",
+                providerSequence: 5,
+                receivedAtMs: 1005,
+                sessionKey: "agent:main:main",
+                stream: "assistant",
+                text: "Answer",
+            });
+            await subscription.onEvent({
+                kind: "plan",
+                phase: "update",
+                explanation: "Live rationale",
+                providerRunId: "external-refresh",
+                providerSequence: 6,
+                receivedAtMs: 1006,
+                sessionKey: "agent:main:main",
+                steps: [{ status: "pending", text: "Live plan" }],
+            });
+
+            clock = 2000;
+            await service.history({
+                cursor: "0",
+                limit: 50,
+                sessionKey: "agent:main:main",
+            });
+            const refreshedRuntime = await service.runtime(runtimeInput());
+            const refreshed = refreshedRuntime.externalRuns[0]!;
+            expect(refreshed).toMatchObject({
+                plan: {
+                    explanation: "Snapshot rationale",
+                    phase: "update",
+                    steps: [{ status: "in_progress", text: "Snapshot plan" }],
+                },
+                providerRunId: "external-refresh",
+                source: "provider-runtime",
+                text: "Snapshot answer",
+                updatedAtMs: 2000,
+            });
+            expect(refreshed.parts).toEqual([
+                { kind: "thinking", sequence: 1, text: "Private reasoning" },
+                {
+                    callId: "synthetic-call",
+                    callIdSource: "synthetic",
+                    input: '{"query":"history"}',
+                    isError: false,
+                    kind: "tool",
+                    name: "search",
+                    nameSource: "synthetic",
+                    output: "Found",
+                    phase: "succeeded",
+                    sequence: 2,
+                },
+                {
+                    id: "item-1",
+                    kind: "item",
+                    sequence: 3,
+                    text: "Checked history",
+                    type: "progress",
+                },
+                { kind: "assistant", sequence: 4, text: "Snapshot answer" },
+            ]);
+
+            await subscription.onEvent({
+                kind: "delta",
+                mode: "append",
+                providerRunId: "external-refresh",
+                providerSequence: 7,
+                receivedAtMs: 2001,
+                sessionKey: "agent:main:main",
+                stream: "assistant",
+                text: " continued",
+            });
+            await subscription.onEvent({
+                itemId: "item-2",
+                itemType: "progress",
+                kind: "item",
+                providerRunId: "external-refresh",
+                providerSequence: 8,
+                receivedAtMs: 2002,
+                sessionKey: "agent:main:main",
+                text: "Continued",
+            });
+            const continuedRuntime = await service.runtime(runtimeInput());
+            const continued = continuedRuntime.externalRuns[0]!;
+            expect(continued.text).toBe("Snapshot answer continued");
+            expect(continued.parts?.slice(-2)).toEqual([
+                {
+                    kind: "assistant",
+                    sequence: 4,
+                    text: "Snapshot answer continued",
+                },
+                {
+                    id: "item-2",
+                    kind: "item",
+                    sequence: 5,
+                    text: "Continued",
+                    type: "progress",
+                },
+            ]);
+
+            includeSnapshotPlan = false;
+            snapshotText = "Snapshot answer continued";
+            clock = 3000;
+            await service.history({
+                cursor: "0",
+                limit: 50,
+                sessionKey: "agent:main:main",
+            });
+            const withoutSnapshotPlanRuntime = await service.runtime(runtimeInput());
+            const withoutSnapshotPlan = withoutSnapshotPlanRuntime.externalRuns[0]!;
+            expect(withoutSnapshotPlan.plan).toEqual({
+                explanation: "Snapshot rationale",
+                phase: "update",
+                steps: [{ status: "in_progress", text: "Snapshot plan" }],
+            });
+            expect(withoutSnapshotPlan.parts).toEqual(continued.parts);
+
+            for (let index = 0; index < 5; index += 1) {
+                await subscription.onEvent({
+                    kind: "delta",
+                    mode: "append",
+                    providerRunId: "external-refresh",
+                    providerSequence: 9 + index,
+                    receivedAtMs: 3001 + index,
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                    text: "界".repeat(64 * 1024),
+                });
+            }
+            const truncatedRuntime = await service.runtime(runtimeInput());
+            expect(truncatedRuntime.externalRuns[0]).toMatchObject({
+                parts: [],
+                projectionTruncated: true,
+                providerRunId: "external-refresh",
+            });
+
+            snapshotText = "Recovered snapshot";
+            clock = 4000;
+            await service.history({
+                cursor: "0",
+                limit: 50,
+                sessionKey: "agent:main:main",
+            });
+            const recoveredRuntime = await service.runtime(runtimeInput());
+            expect(recoveredRuntime.externalRuns[0]).toMatchObject({
+                parts: [
+                    {
+                        kind: "assistant",
+                        sequence: 1,
+                        text: "Recovered snapshot",
+                    },
+                ],
+                plan: {
+                    explanation: "Snapshot rationale",
+                    phase: "update",
+                    steps: [{ status: "in_progress", text: "Snapshot plan" }],
+                },
+                projectionTruncated: true,
+                source: "provider-runtime",
+                text: "Recovered snapshot",
+            });
+        } finally {
+            await service.dispose();
+            database.sqlite.close(true);
+        }
+    });
+
+    test("adopts an in-flight assistant baseline before the first cumulative live delta", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createChatRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission,
+            "main",
+            () => 1000
+        );
+        const provider = providerHarness({
+            history: async () => ({
+                hasMore: false,
+                inFlightRun: {
+                    runId: "external-baseline",
+                    text: "Baseline answer.",
+                },
+                messages: [],
+            }),
+        });
+        const service = createChatService({
+            attachmentConsumer: {
+                reserve: async () => {
+                    throw new Error("Attachment reservation is not used by this test");
+                },
+            },
+            attachmentPreparer: inertAttachmentPreparer(),
+            nowMs: () => 1000,
+            provider: provider.provider,
+            repository,
+        });
+        try {
+            await service.runtime(runtimeInput());
+            await service.history({
+                cursor: "0",
+                limit: 50,
+                sessionKey: "agent:main:main",
+            });
+            const subscription = provider.requests[0]!;
+            const base = {
+                kind: "delta" as const,
+                mode: "merge" as const,
+                providerRunId: "external-baseline",
+                receivedAtMs: 1001,
+                sessionKey: "agent:main:main",
+                stream: "assistant" as const,
+                streamId: "assistant",
+            };
+            await subscription.onEvent({
+                ...base,
+                providerSequence: 1,
+                text: "Baseline answer.",
+            });
+            await subscription.onEvent({
+                ...base,
+                providerSequence: 2,
+                receivedAtMs: 1002,
+                text: "Baseline answer. Continued.",
+            });
+
+            const baselineRuntime = await service.runtime(runtimeInput());
+            const external = baselineRuntime.externalRuns[0]!;
+            expect(external.parts).toEqual([
+                {
+                    kind: "assistant",
+                    segmentId: "external-baseline:history-assistant",
+                    sequence: 1,
+                    streamId: "assistant",
+                    text: "Baseline answer. Continued.",
+                },
+            ]);
+            expect(external.text).toBe("Baseline answer. Continued.");
+        } finally {
+            await service.dispose();
+            database.sqlite.close(true);
+        }
+    });
+
+    test("does not let delayed history regress a newer live external observation", async () => {
+        const database = await openFreshMigratedDatabase();
+        let clock = 1000;
+        const repository = createChatRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission,
+            "main",
+            () => clock
+        );
+        const historyStarted = deferred<void>();
+        const staleHistory = deferred<{
+            hasMore: false;
+            inFlightRun: {
+                plan: {
+                    explanation: string;
+                    steps: readonly [{ status: "pending"; text: string }];
+                };
+                runId: string;
+                text: string;
+            };
+            messages: readonly [];
+        }>();
+        let historyCalls = 0;
+        const provider = providerHarness({
+            history: async () => {
+                historyCalls += 1;
+                if (historyCalls === 1) {
+                    historyStarted.resolve();
+                    return staleHistory.promise;
+                }
+                return {
+                    hasMore: false,
+                    inFlightRun: {
+                        plan: {
+                            explanation: "Later history explanation",
+                            steps: [{ status: "pending" as const, text: "Later" }],
+                        },
+                        runId: "external-history-race",
+                        text: "Later history",
+                    },
+                    messages: [],
+                };
+            },
+        });
+        const service = createChatService({
+            attachmentConsumer: {
+                reserve: async () => {
+                    throw new Error("Attachment reservation is not used by this test");
+                },
+            },
+            attachmentPreparer: inertAttachmentPreparer(),
+            nowMs: () => clock,
+            provider: provider.provider,
+            repository,
+        });
+        try {
+            await service.runtime(runtimeInput());
+            const pendingHistory = service.history({
+                cursor: "0",
+                limit: 50,
+                sessionKey: "agent:main:main",
+            });
+            await historyStarted.promise;
+            await provider.requests[0]!.onEvent({
+                explanation: "Live explanation",
+                kind: "plan",
+                phase: "update",
+                providerRunId: "external-history-race",
+                providerSequence: 1,
+                receivedAtMs: 1001,
+                sessionKey: "agent:main:main",
+                steps: [{ status: "in_progress", text: "Live" }],
+            });
+            await provider.requests[0]!.onEvent({
+                kind: "delta",
+                mode: "merge",
+                providerRunId: "external-history-race",
+                providerSequence: 2,
+                receivedAtMs: 1002,
+                sessionKey: "agent:main:main",
+                stream: "assistant",
+                text: "New live text",
+            });
+            staleHistory.resolve({
+                hasMore: false,
+                inFlightRun: {
+                    plan: {
+                        explanation: "Stale explanation",
+                        steps: [{ status: "pending", text: "Stale" }],
+                    },
+                    runId: "external-history-race",
+                    text: "Old history text",
+                },
+                messages: [],
+            });
+            await pendingHistory;
+            const liveRuntime = await service.runtime(runtimeInput());
+            expect(liveRuntime.externalRuns[0]).toMatchObject({
+                plan: {
+                    explanation: "Live explanation",
+                    steps: [{ status: "in_progress", text: "Live" }],
+                },
+                text: "New live text",
+            });
+
+            clock = 2000;
+            await service.history({
+                cursor: "0",
+                limit: 50,
+                sessionKey: "agent:main:main",
+            });
+            const laterHistoryRuntime = await service.runtime(runtimeInput());
+            expect(laterHistoryRuntime.externalRuns[0]).toMatchObject({
+                plan: {
+                    explanation: "Later history explanation",
+                    steps: [{ status: "pending", text: "Later" }],
+                },
+                text: "Later history",
+            });
+        } finally {
+            await service.dispose();
+            database.sqlite.close(true);
+        }
+    });
+
+    test("consumes a same-millisecond append burst already represented by history", async () => {
+        const database = await openFreshMigratedDatabase();
+        let clock = 1000;
+        const repository = createChatRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission,
+            "main",
+            () => clock
+        );
+        let historyRunId = "external-equal-time";
+        let historyText = "ABC";
+        const provider = providerHarness({
+            history: async () => ({
+                hasMore: false,
+                inFlightRun: {
+                    runId: historyRunId,
+                    text: historyText,
+                },
+                messages: [],
+            }),
+        });
+        const service = createChatService({
+            attachmentConsumer: {
+                reserve: async () => {
+                    throw new Error("Attachment reservation is not used by this test");
+                },
+            },
+            attachmentPreparer: inertAttachmentPreparer(),
+            nowMs: () => clock,
+            provider: provider.provider,
+            repository,
+        });
+        try {
+            await service.runtime(runtimeInput());
+            const subscription = provider.requests[0]!;
+            await subscription.onEvent({
+                kind: "delta",
+                mode: "append",
+                providerRunId: "external-equal-time",
+                providerSequence: 1,
+                receivedAtMs: 1000,
+                sessionKey: "agent:main:main",
+                stream: "assistant",
+                text: "A",
+            });
+            clock = 1001;
+            await service.history({
+                cursor: "0",
+                limit: 50,
+                sessionKey: "agent:main:main",
+            });
+            await subscription.onEvent({
+                kind: "delta",
+                mode: "append",
+                providerRunId: "external-equal-time",
+                providerSequence: 2,
+                receivedAtMs: 1001,
+                sessionKey: "agent:main:main",
+                stream: "assistant",
+                text: "B",
+            });
+            await subscription.onEvent({
+                kind: "delta",
+                mode: "append",
+                providerRunId: "external-equal-time",
+                providerSequence: 3,
+                receivedAtMs: 1001,
+                sessionKey: "agent:main:main",
+                stream: "assistant",
+                text: "C",
+            });
+
+            const equalTimeRuntime = await service.runtime(runtimeInput());
+            expect(equalTimeRuntime.externalRuns[0]).toMatchObject({ text: "ABC" });
+
+            clock = 1002;
+            await service.history({
+                cursor: "0",
+                limit: 50,
+                sessionKey: "agent:main:main",
+            });
+            await subscription.onEvent({
+                kind: "delta",
+                mode: "append",
+                providerRunId: "external-equal-time",
+                providerSequence: 4,
+                receivedAtMs: 1002,
+                sessionKey: "agent:main:main",
+                stream: "assistant",
+                text: "C",
+            });
+            const repeatedSuffixRuntime = await service.runtime(runtimeInput());
+            expect(repeatedSuffixRuntime.externalRuns[0]).toMatchObject({
+                text: "ABC",
+            });
+            await subscription.onEvent({
+                kind: "delta",
+                mode: "append",
+                providerRunId: "external-equal-time",
+                providerSequence: 5,
+                receivedAtMs: 1003,
+                sessionKey: "agent:main:main",
+                stream: "assistant",
+                text: "C",
+            });
+            const laterReceiptRuntime = await service.runtime(runtimeInput());
+            expect(laterReceiptRuntime.externalRuns[0]).toMatchObject({
+                text: "ABC",
+            });
+            historyText = "ABCC";
+            clock = 1004;
+            await service.history({
+                cursor: "0",
+                limit: 50,
+                sessionKey: "agent:main:main",
+            });
+            const repeatedSuffixCatchUp = await service.runtime(runtimeInput());
+            expect(repeatedSuffixCatchUp.externalRuns[0]).toMatchObject({
+                text: "ABCC",
+            });
+
+            historyRunId = "external-equal-time-authority";
+            historyText = "ABC";
+            clock = 2000;
+            await subscription.onEvent({
+                kind: "delta",
+                mode: "append",
+                providerRunId: historyRunId,
+                providerSequence: 1,
+                receivedAtMs: 2000,
+                sessionKey: "agent:main:main",
+                stream: "assistant",
+                text: "A",
+            });
+            clock = 2001;
+            await service.history({
+                cursor: "0",
+                limit: 50,
+                sessionKey: "agent:main:main",
+            });
+            await subscription.onEvent({
+                kind: "delta",
+                mode: "merge",
+                providerRunId: historyRunId,
+                providerSequence: 2,
+                receivedAtMs: 2001,
+                sessionKey: "agent:main:main",
+                stream: "assistant",
+                text: "ABCD",
+            });
+            await subscription.onEvent({
+                kind: "delta",
+                mode: "append",
+                providerRunId: historyRunId,
+                providerSequence: 3,
+                receivedAtMs: 2001,
+                sessionKey: "agent:main:main",
+                stream: "assistant",
+                text: "E",
+            });
+            const authorityRuntime = await service.runtime(runtimeInput());
+            expect(
+                authorityRuntime.externalRuns.find(
+                    ({ providerRunId }) => providerRunId === historyRunId
+                )
+            ).toMatchObject({ text: "ABCDE" });
+
+            historyRunId = "external-equal-time-catch-up";
+            clock = 3000;
+            await subscription.onEvent({
+                kind: "delta",
+                mode: "merge",
+                providerRunId: historyRunId,
+                providerSequence: 1,
+                receivedAtMs: 3000,
+                sessionKey: "agent:main:main",
+                stream: "assistant",
+                text: "ABC",
+            });
+            clock = 3001;
+            await service.history({
+                cursor: "0",
+                limit: 50,
+                sessionKey: "agent:main:main",
+            });
+            const historyMarkersBeforeAmbiguity = database.orm
+                .select()
+                .from(realtimeEvents)
+                .where(eq(realtimeEvents.topic, "chat.history"))
+                .all().length;
+            await subscription.onEvent({
+                kind: "delta",
+                mode: "append",
+                providerRunId: historyRunId,
+                providerSequence: 2,
+                receivedAtMs: 3001,
+                sessionKey: "agent:main:main",
+                stream: "assistant",
+                text: "D",
+            });
+            expect(
+                database.orm
+                    .select()
+                    .from(realtimeEvents)
+                    .where(eq(realtimeEvents.topic, "chat.history"))
+                    .all()
+            ).toHaveLength(historyMarkersBeforeAmbiguity + 1);
+            await subscription.onEvent({
+                kind: "delta",
+                mode: "append",
+                providerRunId: historyRunId,
+                providerSequence: 3,
+                receivedAtMs: 3002,
+                sessionKey: "agent:main:main",
+                stream: "assistant",
+                text: "D",
+            });
+            expect(
+                database.orm
+                    .select()
+                    .from(realtimeEvents)
+                    .where(eq(realtimeEvents.topic, "chat.history"))
+                    .all()
+            ).toHaveLength(historyMarkersBeforeAmbiguity + 1);
+            historyText = "ABCD";
+            clock = 3002;
+            await service.history({
+                cursor: "0",
+                limit: 50,
+                sessionKey: "agent:main:main",
+            });
+            await subscription.onEvent({
+                kind: "delta",
+                mode: "append",
+                providerRunId: historyRunId,
+                providerSequence: 4,
+                receivedAtMs: 3003,
+                sessionKey: "agent:main:main",
+                stream: "assistant",
+                text: "E",
+            });
+            const caughtUpRuntime = await service.runtime(runtimeInput());
+            expect(
+                caughtUpRuntime.externalRuns.find(
+                    ({ providerRunId }) => providerRunId === historyRunId
+                )
+            ).toMatchObject({ text: "ABCDE" });
+        } finally {
+            await service.dispose();
+            database.sqlite.close(true);
+        }
+    });
+
+    test("bounds a multibyte provider in-flight projection before runtime validation", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createChatRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission,
+            "main",
+            () => 1000
+        );
+        const provider = providerHarness({
+            history: async () => ({
+                hasMore: false,
+                inFlightRun: {
+                    runId: "provider-multibyte-in-flight",
+                    text: "界".repeat(256 * 1024),
+                },
+                messages: [],
+            }),
+        });
+        const service = createChatService({
+            attachmentConsumer: {
+                reserve: async () => {
+                    throw new Error("Attachment reservation is not used by this test");
+                },
+            },
+            attachmentPreparer: inertAttachmentPreparer(),
+            provider: provider.provider,
+            repository,
+        });
+        try {
+            await service.history({
+                cursor: "0",
+                limit: 50,
+                sessionKey: "agent:main:main",
+            });
+            const runtime = await service.runtime(runtimeInput());
+            expect(runtime.externalRuns[0]).toMatchObject({
+                hasUnprojectedActivity: true,
+                parts: [],
+                projectionTruncated: true,
+                providerRunId: "provider-multibyte-in-flight",
+            });
+            expect(
+                utf8ByteLength(JSON.stringify(runtime.externalRuns[0]))
+            ).toBeLessThanOrEqual(chatRuntimeSnapshotMaximumBytes);
         } finally {
             await service.dispose();
             database.sqlite.close(true);
@@ -865,6 +2063,7 @@ describe("ChatService", () => {
             expect(scheduler.entries).toHaveLength(1);
             await subscription.onEvent({
                 callId: "call-1",
+                input: '{"query":"runtime"}',
                 isError: false,
                 kind: "tool",
                 name: "search",
@@ -878,11 +2077,43 @@ describe("ChatService", () => {
             expect(topics()).toEqual(["chat.runtime", "chat.runtime"]);
 
             await subscription.onEvent({
-                kind: "delta",
-                mode: "append",
+                callId: "call-1",
+                isError: false,
+                kind: "tool",
+                name: "search",
+                output: "found",
+                phase: "succeeded",
                 providerRunId: "external-burst",
                 providerSequence: 6,
                 receivedAtMs: 1006,
+                sessionKey: "agent:main:main",
+            });
+            const toolRuntime = await service.runtime(runtimeInput());
+            expect(toolRuntime.externalRuns[0]).toMatchObject({
+                hasUnprojectedActivity: false,
+                projectionTruncated: false,
+            });
+            expect(toolRuntime.externalRuns[0]?.parts).toEqual([
+                { kind: "assistant", sequence: 1, text: "one-two-three" },
+                { kind: "thinking", sequence: 2, text: "private reasoning" },
+                {
+                    callId: "call-1",
+                    input: '{"query":"runtime"}',
+                    isError: false,
+                    kind: "tool",
+                    name: "search",
+                    output: "found",
+                    phase: "succeeded",
+                    sequence: 3,
+                },
+            ]);
+
+            await subscription.onEvent({
+                kind: "delta",
+                mode: "append",
+                providerRunId: "external-burst",
+                providerSequence: 7,
+                receivedAtMs: 1007,
                 sessionKey: "agent:main:main",
                 stream: "assistant",
                 text: "!",
@@ -892,12 +2123,13 @@ describe("ChatService", () => {
                 kind: "terminal",
                 outcome: "completed",
                 providerRunId: "external-burst",
-                providerSequence: 7,
-                receivedAtMs: 1007,
+                providerSequence: 8,
+                receivedAtMs: 1008,
                 sessionKey: "agent:main:main",
             });
             expect(scheduler.entries).toEqual([]);
             expect(topics()).toEqual([
+                "chat.runtime",
                 "chat.runtime",
                 "chat.runtime",
                 "chat.runtime",
@@ -906,6 +2138,422 @@ describe("ChatService", () => {
             ]);
             const terminalRuntime = await service.runtime(runtimeInput());
             expect(terminalRuntime.externalRuns).toEqual([]);
+        } finally {
+            await service.dispose();
+            database.sqlite.close(true);
+        }
+    });
+
+    test("keeps cumulative Codex streams ordered across noops and tool boundaries", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createChatRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission,
+            "main",
+            () => 1000
+        );
+        const provider = providerHarness();
+        const service = createChatService({
+            attachmentConsumer: {
+                reserve: async () => {
+                    throw new Error("Attachment reservation is not used by this test");
+                },
+            },
+            attachmentPreparer: inertAttachmentPreparer(),
+            provider: provider.provider,
+            repository,
+        });
+        try {
+            await service.runtime(runtimeInput());
+            const subscription = provider.requests[0]!;
+            const base = {
+                providerRunId: "codex-ordered-run",
+                sessionKey: "agent:main:main",
+            } as const;
+            await subscription.onEvent({
+                ...base,
+                kind: "delta",
+                mode: "merge",
+                providerSequence: 1,
+                receivedAtMs: 1001,
+                stream: "thinking",
+                streamId: "agent:reasoning",
+                text: "Checking workspace.",
+            });
+            await subscription.onEvent({
+                ...base,
+                kind: "delta",
+                mode: "merge",
+                providerSequence: 2,
+                receivedAtMs: 1002,
+                segmentId: "agent:preamble:preamble-1",
+                stream: "thinking",
+                streamId: "agent:preamble",
+                text: "Preparing command.",
+            });
+            await subscription.onEvent({
+                ...base,
+                kind: "noop",
+                providerSequence: 3,
+                reason: "ignored",
+                receivedAtMs: 1003,
+            });
+            await subscription.onEvent({
+                ...base,
+                callId: "command-1",
+                input: '{"cmd":"pwd"}',
+                isError: false,
+                kind: "tool",
+                name: "bash",
+                phase: "started",
+                providerSequence: 4,
+                receivedAtMs: 1004,
+            });
+            await subscription.onEvent({
+                ...base,
+                callId: "command-1",
+                isError: false,
+                kind: "tool",
+                name: "bash",
+                output: "/workspace",
+                phase: "succeeded",
+                providerSequence: 5,
+                receivedAtMs: 1005,
+            });
+            await subscription.onEvent({
+                ...base,
+                kind: "delta",
+                mode: "merge",
+                providerSequence: 6,
+                receivedAtMs: 1006,
+                stream: "thinking",
+                streamId: "agent:reasoning",
+                text: "Checking workspace. Verifying output.",
+            });
+            await subscription.onEvent({
+                ...base,
+                kind: "delta",
+                mode: "merge",
+                providerSequence: 7,
+                receivedAtMs: 1007,
+                stream: "assistant",
+                streamId: "assistant",
+                text: "Before tool.",
+            });
+            await subscription.onEvent({
+                ...base,
+                callId: "command-2",
+                input: '{"cmd":"bun test"}',
+                isError: false,
+                kind: "tool",
+                name: "bash",
+                phase: "started",
+                providerSequence: 8,
+                receivedAtMs: 1008,
+            });
+            await subscription.onEvent({
+                ...base,
+                callId: "command-2",
+                isError: false,
+                kind: "tool",
+                name: "bash",
+                output: "1 pass",
+                phase: "succeeded",
+                providerSequence: 9,
+                receivedAtMs: 1009,
+            });
+            await subscription.onEvent({
+                ...base,
+                kind: "delta",
+                mode: "merge",
+                providerSequence: 10,
+                receivedAtMs: 1010,
+                stream: "assistant",
+                streamId: "assistant",
+                text: "Before tool. After tool.",
+            });
+
+            const runtime = await service.runtime(runtimeInput());
+            expect(runtime.externalRuns[0]).toMatchObject({
+                hasUnprojectedActivity: false,
+                projectionTruncated: false,
+            });
+            expect(runtime.externalRuns[0]?.parts).toEqual([
+                {
+                    kind: "thinking",
+                    segmentId: "codex-ordered-run:1",
+                    sequence: 1,
+                    streamId: "agent:reasoning",
+                    text: "Checking workspace.",
+                },
+                {
+                    kind: "thinking",
+                    segmentId: "agent:preamble:preamble-1",
+                    sequence: 2,
+                    streamId: "agent:preamble",
+                    text: "Preparing command.",
+                },
+                {
+                    callId: "command-1",
+                    input: '{"cmd":"pwd"}',
+                    isError: false,
+                    kind: "tool",
+                    name: "bash",
+                    output: "/workspace",
+                    phase: "succeeded",
+                    sequence: 3,
+                },
+                {
+                    kind: "thinking",
+                    segmentId: "codex-ordered-run:6",
+                    sequence: 4,
+                    streamId: "agent:reasoning",
+                    text: " Verifying output.",
+                },
+                {
+                    kind: "assistant",
+                    segmentId: "codex-ordered-run:7",
+                    sequence: 5,
+                    streamId: "assistant",
+                    text: "Before tool.",
+                },
+                {
+                    callId: "command-2",
+                    input: '{"cmd":"bun test"}',
+                    isError: false,
+                    kind: "tool",
+                    name: "bash",
+                    output: "1 pass",
+                    phase: "succeeded",
+                    sequence: 6,
+                },
+                {
+                    kind: "assistant",
+                    segmentId: "codex-ordered-run:10",
+                    sequence: 7,
+                    streamId: "assistant",
+                    text: " After tool.",
+                },
+            ]);
+
+            await subscription.onEvent({
+                ...base,
+                kind: "delta",
+                mode: "merge",
+                providerSequence: 11,
+                receivedAtMs: 1011,
+                segmentId: "agent:preamble:preamble-1",
+                stream: "thinking",
+                streamId: "agent:preamble",
+                text: "Preparing command. Ready.",
+            });
+            await subscription.onEvent({
+                ...base,
+                kind: "delta",
+                mode: "merge",
+                providerSequence: 12,
+                receivedAtMs: 1012,
+                segmentId: "agent:preamble:preamble-2",
+                stream: "thinking",
+                streamId: "agent:preamble",
+                text: "Preparing command. Ready.",
+            });
+            await subscription.onEvent({
+                ...base,
+                kind: "delta",
+                mode: "replace",
+                providerSequence: 13,
+                receivedAtMs: 1013,
+                stream: "assistant",
+                streamId: "assistant",
+                text: "Authoritative replacement.",
+            });
+
+            const replacedRuntime = await service.runtime(runtimeInput());
+            const replaced = replacedRuntime.externalRuns[0]!;
+            expect(
+                replaced.parts?.filter(
+                    (part) =>
+                        part.kind === "thinking" && part.streamId === "agent:preamble"
+                )
+            ).toEqual([
+                {
+                    kind: "thinking",
+                    segmentId: "agent:preamble:preamble-1",
+                    sequence: 2,
+                    streamId: "agent:preamble",
+                    text: "Preparing command. Ready.",
+                },
+                {
+                    kind: "thinking",
+                    segmentId: "agent:preamble:preamble-2",
+                    sequence: 8,
+                    streamId: "agent:preamble",
+                    text: "Preparing command. Ready.",
+                },
+            ]);
+            expect(replaced.parts?.filter((part) => part.kind === "assistant")).toEqual([
+                {
+                    kind: "assistant",
+                    segmentId: "codex-ordered-run:13",
+                    sequence: 9,
+                    streamId: "assistant",
+                    text: "Authoritative replacement.",
+                },
+            ]);
+            expect(replaced.streamResets).toEqual([
+                {
+                    resetId: "codex-ordered-run:13",
+                    streamId: "assistant",
+                },
+            ]);
+            expect(replaced.parts?.filter((part) => part.kind === "tool")).toHaveLength(
+                2
+            );
+
+            await subscription.onEvent({
+                ...base,
+                kind: "delta",
+                mode: "replace",
+                providerSequence: 14,
+                receivedAtMs: 1014,
+                stream: "thinking",
+                streamId: "agent:reasoning",
+                text: "Replacement reasoning.",
+            });
+            const reasoningReplacementRuntime = await service.runtime(runtimeInput());
+            const reasoningReplaced = reasoningReplacementRuntime.externalRuns[0]!;
+            expect(
+                reasoningReplaced.parts?.filter(
+                    (part) =>
+                        part.kind === "thinking" && part.streamId === "agent:reasoning"
+                )
+            ).toEqual([
+                {
+                    kind: "thinking",
+                    segmentId: "codex-ordered-run:14",
+                    sequence: 10,
+                    streamId: "agent:reasoning",
+                    text: "Replacement reasoning.",
+                },
+            ]);
+            expect(reasoningReplaced.streamResets).toEqual([
+                {
+                    resetId: "codex-ordered-run:13",
+                    streamId: "assistant",
+                },
+                {
+                    resetId: "codex-ordered-run:14",
+                    streamId: "agent:reasoning",
+                },
+            ]);
+        } finally {
+            await service.dispose();
+            database.sqlite.close(true);
+        }
+    });
+
+    test("coalesces a hundred local and external noops into bounded exact ranges", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createChatRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission,
+            "main",
+            () => 3000
+        );
+        const scheduler = schedulerHarness();
+        const provider = providerHarness();
+        const service = createChatService({
+            attachmentConsumer: {
+                reserve: async () => {
+                    throw new Error("Attachment reservation is not used by this test");
+                },
+            },
+            attachmentPreparer: inertAttachmentPreparer(),
+            coalescerScheduler: scheduler.scheduler,
+            nowMs: () => 3000,
+            provider: provider.provider,
+            repository,
+        });
+        const runtimeMarkerCount = (): number =>
+            database.orm
+                .select()
+                .from(realtimeEvents)
+                .where(eq(realtimeEvents.topic, "chat.runtime"))
+                .all().length;
+        try {
+            await service.send(sendInput(), actor);
+            const subscription = provider.requests[0]!;
+            const rowsBefore = database.orm
+                .select()
+                .from(chatRunEvents)
+                .where(eq(chatRunEvents.chatRunId, runId))
+                .all().length;
+            const markersBefore = runtimeMarkerCount();
+
+            for (
+                let providerSequence = 1;
+                providerSequence <= 100;
+                providerSequence += 1
+            ) {
+                await subscription.onEvent({
+                    kind: "noop",
+                    providerRunId: "provider-run",
+                    providerSequence,
+                    reason: "ignored",
+                    receivedAtMs: 1000 + providerSequence,
+                    sessionKey: "agent:main:main",
+                });
+                await subscription.onEvent({
+                    kind: "noop",
+                    providerRunId: "external-noop-run",
+                    providerSequence,
+                    reason: "ignored",
+                    receivedAtMs: 2000 + providerSequence,
+                    sessionKey: "agent:main:main",
+                });
+            }
+            await subscription.onEvent({
+                kind: "status",
+                phase: "starting-model",
+                providerRunId: "provider-run",
+                providerSequence: 101,
+                receivedAtMs: 1101,
+                sessionKey: "agent:main:main",
+            });
+            await subscription.onEvent({
+                kind: "status",
+                phase: "starting-model",
+                providerRunId: "external-noop-run",
+                providerSequence: 101,
+                receivedAtMs: 2101,
+                sessionKey: "agent:main:main",
+            });
+
+            const rows = database.orm
+                .select()
+                .from(chatRunEvents)
+                .where(eq(chatRunEvents.chatRunId, runId))
+                .all();
+            expect(rows).toHaveLength(rowsBefore + 2);
+            expect(rows.find(({ kind }) => kind === "provider-noop")).toMatchObject({
+                providerSequenceEnd: 100,
+                providerSequenceStart: 1,
+            });
+            expect(repository.listProviderRunWatermarks("agent:main:main")).toEqual([
+                {
+                    lastProviderSequence: 101,
+                    providerRunId: "provider-run",
+                },
+            ]);
+            expect(runtimeMarkerCount()).toBe(markersBefore + 2);
+            expect(scheduler.entries).toEqual([]);
+            const noopRuntime = await service.runtime(runtimeInput());
+            expect(
+                noopRuntime.externalRuns.find(
+                    ({ providerRunId }) => providerRunId === "external-noop-run"
+                )
+            ).toMatchObject({ providerRunId: "external-noop-run" });
         } finally {
             await service.dispose();
             database.sqlite.close(true);

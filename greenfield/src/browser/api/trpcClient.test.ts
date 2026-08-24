@@ -231,6 +231,63 @@ describe("Dashboard browser tRPC client", () => {
         ]);
     });
 
+    test("loads workspace operation contracts on demand", async () => {
+        const filesCalls: TransportCall[] = [];
+        const logsCalls: TransportCall[] = [];
+        const terminalCalls: TransportCall[] = [];
+        const filesOutput = {
+            roots: [
+                {
+                    id: "workspace",
+                    label: "Workspace",
+                    resourceId: "00000000-0000-4000-8000-000000000001",
+                    writable: true,
+                },
+            ],
+        } as const;
+        const logsOutput = { observedAtMs: 0, sources: [] } as const;
+        const terminalOutput = {
+            clientMessageMaximumBytes: 16 * 1024,
+            defaultLocation: { path: "/", rootId: "workspace" },
+            idleTimeoutMs: 10 * 60 * 1000,
+            mode: "pty",
+            outputReplayMaximumBytes: 256 * 1024,
+            reconnectGraceMs: 15 * 1000,
+            roots: [{ defaultPath: "/", id: "workspace", label: "Workspace" }],
+            serverMessageMaximumBytes: 32 * 1024,
+            sessionMaximumDurationMs: 30 * 60 * 1000,
+            supportsInput: true,
+            supportsPty: true,
+            supportsResize: true,
+            supportsSignals: ["SIGINT", "SIGTERM", "SIGHUP"],
+            webSocketProtocol: "mira-terminal-v1",
+        } as const;
+        const filesClient = createDashboardTrpcClient(
+            createRecordingTransport(filesOutput, filesCalls)
+        );
+        const logsClient = createDashboardTrpcClient(
+            createRecordingTransport(logsOutput, logsCalls)
+        );
+        const terminalClient = createDashboardTrpcClient(
+            createRecordingTransport(terminalOutput, terminalCalls)
+        );
+
+        expect(await filesClient.query("files.listRoots", {})).toEqual(filesOutput);
+        expect(await logsClient.query("logs.listSources", {})).toEqual(logsOutput);
+        expect(await terminalClient.query("terminal.getRuntime", {})).toEqual(
+            terminalOutput
+        );
+        expect(filesCalls).toEqual([
+            { input: {}, kind: "query", path: "files.listRoots" },
+        ]);
+        expect(logsCalls).toEqual([
+            { input: {}, kind: "query", path: "logs.listSources" },
+        ]);
+        expect(terminalCalls).toEqual([
+            { input: {}, kind: "query", path: "terminal.getRuntime" },
+        ]);
+    });
+
     test("rejects invalid input before transport access", async () => {
         const calls: TransportCall[] = [];
         const client = createDashboardTrpcClient(

@@ -287,6 +287,7 @@ describe("chat runtime reducer", () => {
             }),
             event({
                 callId: "fixture-tool-1",
+                input: '{"path":"/tmp/fixture.json"}',
                 isError: false,
                 kind: "tool",
                 name: "fixture.lookup",
@@ -353,6 +354,7 @@ describe("chat runtime reducer", () => {
             },
             {
                 callId: "fixture-tool-1",
+                input: '{"path":"/tmp/fixture.json"}',
                 isError: false,
                 kind: "tool",
                 name: "fixture.lookup",
@@ -363,6 +365,56 @@ describe("chat runtime reducer", () => {
             { kind: "assistant", sequence: 5, text: "Fixture complete." },
         ]);
         expect(snapshot?.run.state).toBe("completed");
+    });
+
+    test("preserves original tool input and synthetic identity through completion", () => {
+        let snapshot = reduceChatRuntimeSnapshot(
+            undefined,
+            event({
+                callId: "synthetic-call",
+                callIdSource: "synthetic",
+                input: '{"query":"original"}',
+                isError: false,
+                kind: "tool",
+                name: "search",
+                occurredAtMs: 1000,
+                phase: "started",
+                runId,
+                sequence: 1,
+            }),
+            run()
+        );
+        snapshot = reduceChatRuntimeSnapshot(
+            snapshot,
+            event({
+                callId: "synthetic-call",
+                callIdSource: "synthetic",
+                input: '{"query":"replacement"}',
+                isError: false,
+                kind: "tool",
+                name: "search",
+                occurredAtMs: 1001,
+                output: "done",
+                phase: "succeeded",
+                runId,
+                sequence: 2,
+            }),
+            run({ updatedAtMs: 1001 })
+        );
+
+        expect(snapshot.parts).toEqual([
+            {
+                callId: "synthetic-call",
+                callIdSource: "synthetic",
+                input: '{"query":"original"}',
+                isError: false,
+                kind: "tool",
+                name: "search",
+                output: "done",
+                phase: "succeeded",
+                sequence: 1,
+            },
+        ]);
     });
 
     test("advances through an ignored provider sequence without adding projection content", () => {
@@ -383,7 +435,8 @@ describe("chat runtime reducer", () => {
             event({
                 kind: "provider-noop",
                 occurredAtMs: 1001,
-                providerSequence: 1,
+                providerSequenceEnd: 1,
+                providerSequenceStart: 1,
                 reason: "ignored",
                 runId,
                 sequence: 2,
@@ -495,6 +548,7 @@ describe("chat runtime reducer", () => {
         const planned = reduceChatRuntimeSnapshot(
             initial,
             event({
+                explanation: "Keep this explanation.",
                 kind: "plan",
                 occurredAtMs: 1001,
                 phase: "update",
@@ -504,23 +558,39 @@ describe("chat runtime reducer", () => {
             }),
             run({ updatedAtMs: 1001 })
         );
-        const terminal = reduceChatRuntimeSnapshot(
+        const stepOnlyUpdate = reduceChatRuntimeSnapshot(
             planned,
             event({
-                kind: "terminal",
+                kind: "plan",
                 occurredAtMs: 1002,
-                outcome: "completed",
+                phase: "update",
                 runId,
                 sequence: 3,
+                steps: [{ status: "completed", text: "Work" }],
+            }),
+            run({ updatedAtMs: 1002 })
+        );
+        const terminal = reduceChatRuntimeSnapshot(
+            stepOnlyUpdate,
+            event({
+                kind: "terminal",
+                occurredAtMs: 1003,
+                outcome: "completed",
+                runId,
+                sequence: 4,
             }),
             run({
                 state: "completed",
-                terminalAtMs: 1002,
-                updatedAtMs: 1002,
+                terminalAtMs: 1003,
+                updatedAtMs: 1003,
             })
         );
 
         expect(planned.plan?.steps).toHaveLength(1);
+        expect(stepOnlyUpdate.plan).toMatchObject({
+            explanation: "Keep this explanation.",
+            steps: [{ status: "completed", text: "Work" }],
+        });
         expect(terminal.plan).toBeUndefined();
     });
 

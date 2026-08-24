@@ -34,14 +34,24 @@ export function applyChatRuntimeBatch(
 ): ChatRuntimeBatchApplication {
     const sessionKey = batch.sessionKey;
     const previousCursor = runtimeStore.cursorFor(sessionKey);
+    const previousSession = runtimeStore.state.sessions[sessionKey];
     runtimeStore.setConnection("connected");
     const cursor = Number(batch.cursor);
     const snapshots = batch.runs.map(projectChatRuntimeSnapshot);
     const externalRuns = batch.externalRuns.map(projectChatExternalRun);
-    const projectionDetailOmitted =
-        batch.externalRunsTruncated ||
-        batch.externalRuns.some(({ projectionTruncated }) => projectionTruncated) ||
-        batch.runs.some(({ projectionTruncated }) => projectionTruncated);
+    const newlyOmittedProjectionDetail =
+        (batch.externalRunsTruncated &&
+            previousSession?.externalRunsTruncated !== true) ||
+        batch.externalRuns.some(
+            ({ projectionTruncated, providerRunId }) =>
+                projectionTruncated &&
+                previousSession?.externalRuns[providerRunId]?.projectionTruncated !== true
+        ) ||
+        batch.runs.some(
+            ({ projectionTruncated, run }) =>
+                projectionTruncated &&
+                previousSession?.runs[run.id]?.projectionTruncated !== true
+        );
     if (batch.resetRequired) {
         runtimeStore.installSnapshots(
             sessionKey,
@@ -57,7 +67,7 @@ export function applyChatRuntimeBatch(
         );
         return { cursor, historyMayHaveChanged: true, previousCursor };
     }
-    let historyMayHaveChanged = projectionDetailOmitted;
+    let historyMayHaveChanged = newlyOmittedProjectionDetail;
     for (const delivery of batch.events) {
         runtimeStore.apply(
             adaptChatRuntimeEvent(sessionKey, delivery.cursor, delivery.event)
@@ -101,7 +111,7 @@ export function useChatRuntimeProjection(
             () => runtimeStore.transcriptGenerationFor(sessionKey)
         )
     );
-    const { data, error, refetch } = query;
+    const { data, dataUpdatedAt, error, refetch } = query;
 
     useEffect(() => {
         const batch = data;
@@ -122,7 +132,7 @@ export function useChatRuntimeProjection(
         return () => {
             disposed = true;
         };
-    }, [data, queryClient, refetch, runtimeStore, sessionKey]);
+    }, [data, dataUpdatedAt, queryClient, refetch, runtimeStore, sessionKey]);
 
     useEffect(() => {
         if (error !== null) runtimeStore.setConnection("disconnected");

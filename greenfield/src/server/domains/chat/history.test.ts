@@ -143,9 +143,14 @@ describe("chat history service", () => {
                     providerRunId === "provider-1" ? localRunId : undefined,
             },
             {
+                beginObservation: () => ({ epoch: 7, observedAtMs: 1000 }),
                 observeHistoryMessages: () => {},
-                observeInFlightRun: (observedSessionKey, inFlightRun) => {
-                    observations.push({ inFlightRun, sessionKey: observedSessionKey });
+                observeInFlightRun: (observedSessionKey, inFlightRun, observation) => {
+                    observations.push({
+                        inFlightRun,
+                        observation,
+                        sessionKey: observedSessionKey,
+                    });
                 },
             }
         );
@@ -162,6 +167,7 @@ describe("chat history service", () => {
         expect(observations).toEqual([
             {
                 inFlightRun: { runId: "provider-1", text: "working" },
+                observation: { epoch: 7, observedAtMs: 1000 },
                 sessionKey,
             },
         ]);

@@ -13,7 +13,7 @@ const reports = Object.freeze([
         occurredAtMs: 1_800_000_000_000,
         source: "monitor",
         status: "warning",
-        summary: "A bounded operator summary without loading the report body.",
+        summary: "A short report summary without loading the full report.",
         title: "Daily operational brief",
     },
     {
@@ -60,7 +60,7 @@ export const LatestWindow: Story = {
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement);
         await expect(
-            canvas.getByRole("heading", { name: "Reports overview" })
+            canvas.getByRole("heading", { name: "Recent reports" })
         ).toBeVisible();
         await expect(canvas.getByText("Daily operational brief")).toBeVisible();
         await expect(canvas.getByText("warning")).toBeVisible();

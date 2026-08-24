@@ -3,6 +3,7 @@ import { chmod, mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
+import type { SQLiteBunDatabase } from "drizzle-orm/bun-sqlite";
 import * as v from "valibot";
 
 import { listAutomationPrincipalsResultSchema } from "../contracts/automationSecurity.ts";
@@ -26,8 +27,10 @@ import {
 import { listSchedulesResultSchema } from "../contracts/schedules.ts";
 import { automationPrincipalCapabilities } from "../server/database/schema/automationPrincipalCapabilities.ts";
 import { automationPrincipalCapabilityInsertSchema } from "../server/database/validation/automationPrincipalCapabilities.ts";
+import type { JobRepository } from "../server/domains/jobs/repository.ts";
 import type { OpenClawCronExpiryReconciler } from "../server/domains/openClawCron/expiryReconciler.ts";
 import { OpenClawCronProviderError } from "../server/domains/openClawCron/provider.ts";
+import type { AuthenticationLifecycleService } from "../server/domains/security/authenticationLifecycle.ts";
 import { createWebAuthnRelyingPartyConfiguration } from "../server/domains/security/mfa/webauthn/relyingPartyConfiguration.ts";
 import {
     authenticationTestNow,
@@ -39,12 +42,16 @@ import type { PersistentOpenClawCronTransport } from "../server/platform/gateway
 import { createReadinessController } from "../server/platform/readiness/readinessState.ts";
 import { createDashboardApplicationRuntime } from "../server/platform/runtime/applicationRuntime.ts";
 import { dashboardSessionCookieName } from "../server/rawHttp/authenticationCredentials.ts";
-import { runTestImmediateDatabaseWrite } from "../server/test/support/databaseWriteAdmission.ts";
+import {
+    runTestImmediateDatabaseWrite,
+    testImmediateDatabaseWriteAdmission,
+} from "../server/test/support/databaseWriteAdmission.ts";
 import { migrationsDirectory } from "../server/test/support/freshDatabase.ts";
 import {
     createTestApplicationRuntime,
     createTestStructuredLogger,
 } from "../server/test/support/requestContext.ts";
+import { createDashboardLogsService } from "./dashboardLogs.ts";
 import {
     createDashboardChatMediaReferenceRefresh,
     createDashboardOpenClawCronProvider,
@@ -53,6 +60,7 @@ import {
     startDashboardOpenClawCronExpiryReconciliation,
     validateDashboardWebAuthnBrowserOrigin,
 } from "./dashboardServer.ts";
+import { createDashboardTerminalComposition } from "./dashboardTerminal.ts";
 
 const mediaRefreshObservedAtMs = 1_800_000_000_000;
 
@@ -412,6 +420,140 @@ describe("Dashboard OpenClaw cron composition", () => {
     });
 });
 
+describe("Dashboard workspace operations composition", () => {
+    test("exposes the reviewed terminal runtime through the worker broker boundary", async () => {
+        const workspaceRoot = await mkdtemp(
+            path.join(os.tmpdir(), "dashboard-terminal-root-")
+        );
+        const brokerDirectory = await mkdtemp(
+            path.join(os.tmpdir(), "dashboard-terminal-broker-")
+        );
+        await Promise.all([chmod(workspaceRoot, 0o700), chmod(brokerDirectory, 0o700)]);
+
+        try {
+            const composition = await createDashboardTerminalComposition({
+                authenticateCredential: () => {},
+                authenticationLifecycle: {} as AuthenticationLifecycleService,
+                browserOrigin: "https://dashboard.example",
+                database: {} as SQLiteBunDatabase,
+                now: () => authenticationTestNow,
+                terminalBrokerDirectory: brokerDirectory,
+                terminalBrokerSocket: path.join(brokerDirectory, "terminal.sock"),
+                workspaceRoot: {
+                    id: "workspace",
+                    label: "Workspace",
+                    path: workspaceRoot,
+                },
+                writeAdmission: testImmediateDatabaseWriteAdmission,
+            });
+
+            expect(composition.service.getRuntime()).toMatchObject({
+                defaultLocation: { path: "/", rootId: "workspace" },
+                mode: "pty",
+                roots: [{ defaultPath: "/", id: "workspace", label: "Workspace" }],
+                supportsInput: true,
+                supportsPty: true,
+            });
+            const requestUrl = new URL("https://dashboard.example/api/not-terminal");
+            expect(
+                await composition.socketBoundary.handle(
+                    new Request(requestUrl.href),
+                    requestUrl,
+                    {
+                        upgrade: () => {
+                            throw new Error("Unmatched requests must not upgrade");
+                        },
+                    }
+                )
+            ).toEqual({ kind: "not-matched" });
+            composition.socketBoundary.shutdown();
+        } finally {
+            await Promise.all([
+                rm(workspaceRoot, { force: true, recursive: true }),
+                rm(brokerDirectory, { force: true, recursive: true }),
+            ]);
+        }
+    });
+
+    test("publishes missing log sources and fail-closed maintenance availability", async () => {
+        const dashboardLogsRoot = await mkdtemp(
+            path.join(os.tmpdir(), "dashboard-logs-root-")
+        );
+        const logMaintenanceRoot = await mkdtemp(
+            path.join(os.tmpdir(), "dashboard-log-maintenance-")
+        );
+        await Promise.all([
+            chmod(dashboardLogsRoot, 0o700),
+            chmod(logMaintenanceRoot, 0o700),
+        ]);
+        let repositoryCalls = 0;
+        let settlementFailures = 0;
+        const jobRepository: Pick<
+            JobRepository,
+            "enqueueManualRun" | "findRunByIdempotency"
+        > = {
+            enqueueManualRun: () => {
+                repositoryCalls += 1;
+                throw new Error("Read-only composition must not enqueue");
+            },
+            findRunByIdempotency: () => {
+                repositoryCalls += 1;
+                throw new Error("Read-only composition must not query jobs");
+            },
+        };
+
+        try {
+            const service = createDashboardLogsService({
+                dashboardLogsRoot,
+                database: {} as SQLiteBunDatabase,
+                jobRepository,
+                logMaintenanceRoot,
+                now: () => authenticationTestNow,
+                onAuditSettlementFailure: () => {
+                    settlementFailures += 1;
+                },
+                wakeEventPump: () => {
+                    throw new Error("Read-only composition must not wake the event pump");
+                },
+                writeAdmission: testImmediateDatabaseWriteAdmission,
+            });
+
+            const [sources, maintenance] = await Promise.all([
+                service.listSources(),
+                service.maintenanceStatus(),
+            ]);
+            expect(sources).toMatchObject({
+                observedAtMs: authenticationTestNow.getTime(),
+                sources: expect.arrayContaining([
+                    {
+                        availability: "missing",
+                        group: "dashboard",
+                        id: "dashboard.web.stdout",
+                        label: "Dashboard web output",
+                    },
+                ]),
+            });
+            expect(maintenance.observedAtMs).toBe(authenticationTestNow.getTime());
+            expect(
+                maintenance.policies.find(({ id }) => id === "docker-managed")
+            ).toMatchObject({ id: "docker-managed", state: "unavailable" });
+            expect(
+                maintenance.policies.find(({ id }) => id === "host-rsyslog")
+            ).toMatchObject({ id: "host-rsyslog", state: "unavailable" });
+            expect(
+                maintenance.policies.every(({ state }) => state === "unavailable")
+            ).toBe(true);
+            expect(repositoryCalls).toBe(0);
+            expect(settlementFailures).toBe(0);
+        } finally {
+            await Promise.all([
+                rm(dashboardLogsRoot, { force: true, recursive: true }),
+                rm(logMaintenanceRoot, { force: true, recursive: true }),
+            ]);
+        }
+    });
+});
+
 describe("Dashboard security composition", () => {
     test("isolates durable chat state by canonical Gateway origin", () => {
         const scope = resolveDashboardGatewayScope(
@@ -486,6 +628,49 @@ describe("Dashboard security composition", () => {
         ).rejects.toBeInstanceOf(TypeError);
 
         expect(initializeCalls).toBe(1);
+        expect(disposeCalls).toBe(1);
+    });
+
+    test("rejects partial log composition before runtime initialization", () => {
+        let disposeCalls = 0;
+        let initializeCalls = 0;
+        let ormCalls = 0;
+        const applicationRuntime = Object.freeze({
+            ...createTestApplicationRuntime({
+                dispose: () => {
+                    disposeCalls += 1;
+                    return Promise.resolve();
+                },
+                initialize: () => {
+                    initializeCalls += 1;
+                    return Promise.resolve();
+                },
+            }),
+            database: Object.freeze({
+                orm: () => {
+                    ormCalls += 1;
+                    return Promise.reject(new Error("Database must not be reached"));
+                },
+                run: runTestImmediateDatabaseWrite,
+            }),
+        });
+
+        expect(
+            createDashboardServer({
+                applicationRuntime,
+                browserOrigin: "https://dashboard.example",
+                dashboardLogsRoot: "/srv/mira-dashboard/logs",
+                gatewayUrl: "ws://127.0.0.1:1",
+                port: 0,
+                readiness: createReadinessController(),
+                totpSecretCipher: testTotpSecretCipher,
+            })
+        ).rejects.toThrow(
+            "Dashboard logs and log-maintenance roots must be configured together"
+        );
+
+        expect(initializeCalls).toBe(0);
+        expect(ormCalls).toBe(0);
         expect(disposeCalls).toBe(1);
     });
 
@@ -696,6 +881,7 @@ describe("Dashboard security composition", () => {
             );
             expect(schedules.schedules.map(({ id }) => id)).toEqual([
                 "cache.system-host",
+                "maintenance.rotate-managed-logs",
                 "system.worker-smoke",
             ]);
             expect(schedules.schedules[0]).toMatchObject({
@@ -704,6 +890,11 @@ describe("Dashboard security composition", () => {
                 id: "cache.system-host",
             });
             expect(schedules.schedules[1]).toMatchObject({
+                actionKey: "maintenance.rotate-logs",
+                enabled: true,
+                id: "maintenance.rotate-managed-logs",
+            });
+            expect(schedules.schedules[2]).toMatchObject({
                 actionKey: "system.worker-smoke",
                 enabled: false,
                 id: "system.worker-smoke",

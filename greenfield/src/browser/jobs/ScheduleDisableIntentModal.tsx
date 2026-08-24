@@ -41,13 +41,12 @@ interface ScheduleDisableIntentModalProps {
 
 const disableModeOptions = Object.freeze([
     {
-        description: "The worker enables the schedule again after this time.",
+        description: "The schedule starts automatically again after this time.",
         label: "Until a date",
         value: "until",
     },
     {
-        description:
-            "The schedule stays disabled until this annotation changes or it is enabled.",
+        description: "The schedule stays disabled until you enable it.",
         label: "Indefinitely",
         value: "indefinite",
     },
@@ -182,7 +181,7 @@ export function ScheduleDisableIntentModal({
         const parsedComment = v.safeParse(scheduleDisableReasonSchema, comment);
         const nextCommentError = parsedComment.success
             ? undefined
-            : "Use 1–1000 visible characters without control characters.";
+            : "Enter between 1 and 1,000 characters.";
         const nextExpiryError =
             mode === "until" && (draftExpiry === undefined || draftExpiry <= Date.now())
                 ? "Choose a future date and time."
@@ -220,8 +219,7 @@ export function ScheduleDisableIntentModal({
             <Form aria-label={title} id={formId} onSubmit={submit}>
                 <Alert className="mb-4" message={error} />
                 <p className="text-primary-300 mb-4 text-sm leading-6">
-                    The worker treats this schedule as intentionally disabled while this
-                    annotation is active.
+                    This schedule will not start automatically while it is paused.
                 </p>
                 <div className="grid gap-4">
                     <RadioGroup
@@ -261,6 +259,7 @@ export function ScheduleDisableIntentModal({
                                 setComment(event.currentTarget.value);
                                 setCommentError(undefined);
                             }}
+                            placeholder="Example: Waiting for the maintenance window to finish"
                             required
                             value={comment}
                         />

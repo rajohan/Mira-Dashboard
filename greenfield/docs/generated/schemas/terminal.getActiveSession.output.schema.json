@@ -1,0 +1,133 @@
+{
+  "$id": "urn:mira-dashboard:terminal.getActiveSession.output",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "status": {
+          "const": "none"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "session": {
+          "type": "object",
+          "properties": {
+            "dimensions": {
+              "type": "object",
+              "properties": {
+                "columns": {
+                  "type": "integer",
+                  "minimum": 2,
+                  "maximum": 400
+                },
+                "rows": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 200
+                }
+              },
+              "required": [
+                "columns",
+                "rows"
+              ],
+              "additionalProperties": false
+            },
+            "expiresAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            },
+            "idleExpiresAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            },
+            "location": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1024,
+                  "pattern": "^\\/(?:[^/\\r\\n]+(?:\\/[^/\\r\\n]+)*)?$",
+                  "$comment": "Live Valibot validation additionally rejects dot and parent segments in the root-relative initial terminal path."
+                },
+                "rootId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 48,
+                  "pattern": "^[a-z0-9][a-z0-9-]*$"
+                }
+              },
+              "required": [
+                "path",
+                "rootId"
+              ],
+              "additionalProperties": false
+            },
+            "nextSequence": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "replayAvailableFromSequence": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "sessionId": {
+              "type": "string",
+              "minLength": 36,
+              "maxLength": 36,
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            "startedAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            },
+            "state": {
+              "enum": [
+                "awaiting-connection",
+                "awaiting-reconnect",
+                "connected",
+                "starting"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "dimensions",
+            "expiresAtMs",
+            "idleExpiresAtMs",
+            "location",
+            "nextSequence",
+            "replayAvailableFromSequence",
+            "sessionId",
+            "startedAtMs",
+            "state"
+          ],
+          "additionalProperties": false,
+          "$comment": "Live Valibot validation additionally requires the oldest retained replay sequence not to exceed the next output sequence."
+        },
+        "status": {
+          "const": "active"
+        }
+      },
+      "required": [
+        "session",
+        "status"
+      ],
+      "additionalProperties": false
+    }
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

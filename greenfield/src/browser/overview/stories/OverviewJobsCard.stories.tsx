@@ -73,9 +73,9 @@ export const ActiveQueue: Story = {
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement);
         await expect(
-            canvas.getByRole("heading", { name: "Dashboard job queue" })
+            canvas.getByRole("heading", { name: "Dashboard background jobs" })
         ).toBeVisible();
-        await expect(canvas.getByText("Claiming active")).toBeVisible();
+        await expect(canvas.getByText("Accepting new jobs")).toBeVisible();
         await expect(
             canvas.getByText(formatDashboardDateTime(activeSummary.oldestQueuedAtMs))
         ).toHaveAttribute(
@@ -108,7 +108,7 @@ export const PausedEmpty: Story = {
     },
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement);
-        await expect(canvas.getByText("Claiming paused")).toBeVisible();
+        await expect(canvas.getByText("New jobs paused")).toBeVisible();
         await expect(canvas.getByText("None")).toBeVisible();
     },
 };

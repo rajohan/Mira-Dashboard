@@ -177,6 +177,47 @@ function activeRuntimePage(sessionKey = gatewayPrimarySessionKey, sequence = 1) 
     };
 }
 
+function externalRuntimePage(
+    sessionKey = gatewayPrimarySessionKey,
+    providerRunId = "external-provider-run",
+    updatedAtMs = observedAtMs,
+    abortBoundary?: Readonly<{
+        attemptId: string;
+        attemptedAtMs: number;
+        baselineObservationEpoch: number;
+        baselineUpdatedAtMs: number;
+        settlement: "not-aborted" | "pending" | "unknown";
+    }>,
+    observationEpoch = 1,
+    providerObservedAtMs = updatedAtMs
+) {
+    return {
+        cursor: "0",
+        events: [],
+        externalRuns: [
+            {
+                ...(abortBoundary === undefined ? {} : { abortBoundary }),
+                continuity: "complete" as const,
+                hasUnprojectedActivity: false,
+                observationEpoch,
+                observedAtMs: providerObservedAtMs,
+                projectionTruncated: false,
+                providerRunId,
+                sessionKey,
+                source: "provider-runtime" as const,
+                text: "Provider-origin response",
+                updatedAtMs,
+            },
+        ],
+        externalRunsTruncated: false,
+        hasMore: false,
+        resetRequired: false,
+        runs: [],
+        sessionKey,
+        transcriptGeneration: 1,
+    };
+}
+
 function harness(
     options: Readonly<{
         mirrorSelection?: boolean;
@@ -284,12 +325,12 @@ async function revealCompanionControls(): Promise<void> {
         name: "Open activity panel",
     });
     if (activityTrigger !== null) fireEvent.click(activityTrigger);
-    const companion = screen.getByRole("button", { name: /Companion/iu });
+    const companion = screen.getByRole("button", { name: /Chat helper/iu });
     if (companion.getAttribute("aria-expanded") === "false") {
         fireEvent.click(companion);
     }
     await waitFor(() =>
-        expect(screen.getByRole("textbox", { name: "Ask companion" })).toBeVisible()
+        expect(screen.getByRole("textbox", { name: "Ask chat helper" })).toBeVisible()
     );
 }
 
@@ -347,7 +388,7 @@ describe("chat browser", () => {
             sessionSnapshot: snapshot("stale"),
         });
         try {
-            expect(screen.getByText(/Showing last-known history/iu)).toBeVisible();
+            expect(screen.getByText(/Showing the latest saved history/iu)).toBeVisible();
             expect(view.onSelectedSessionChange).not.toHaveBeenCalled();
             expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
         } finally {
@@ -484,7 +525,9 @@ describe("chat browser", () => {
             await user.type(composer, "Send exactly once");
             await user.click(screen.getByRole("button", { name: "Send message" }));
             expect(
-                await screen.findByText(/remains under runtime reconciliation/iu)
+                await screen.findByText(
+                    /could not confirm whether the message was sent/iu
+                )
             ).toBeVisible();
             expect(composer).toHaveValue("");
             expect(
@@ -495,6 +538,403 @@ describe("chat browser", () => {
             ).not.toHaveProperty("queueMode");
             expect(screen.queryByText(/queued/iu)).toBeNull();
             expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+        } finally {
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            view.rendered.unmount();
+            view.queryClient.clear();
+        }
+    });
+
+    test("shows Stop for provider-origin activity and aborts its exact provider run without a local run", async () => {
+        let stopped = false;
+        const providerRunId = "external-provider-stop";
+        const view = harness({
+            mutation: (name, input) => {
+                if (name !== "chat.abort") {
+                    return Promise.reject(new Error("Unexpected mutation"));
+                }
+                stopped = true;
+                return Promise.resolve({
+                    aborted: true,
+                    abortAttemptId: (input as { abortAttemptId: string }).abortAttemptId,
+                    providerRunId,
+                });
+            },
+            query: (name) => {
+                if (name !== "chat.runtime") return;
+                return Promise.resolve(
+                    stopped
+                        ? {
+                              ...externalRuntimePage(
+                                  gatewayPrimarySessionKey,
+                                  providerRunId
+                              ),
+                              externalRuns: [],
+                          }
+                        : externalRuntimePage(gatewayPrimarySessionKey, providerRunId)
+                );
+            },
+            requestedSessionKey: gatewayPrimarySessionKey,
+            sessionSnapshot: snapshot(),
+        });
+        const user = userEvent.setup();
+        try {
+            await user.click(
+                await screen.findByRole("button", { name: "Stop response 1" })
+            );
+            await waitFor(() =>
+                expect(
+                    screen.queryByRole("button", { name: "Stop response 1" })
+                ).toBeNull()
+            );
+            expect(
+                view.mutation.mock.calls.find((call) => call[0] === "chat.abort")?.[1]
+            ).toEqual({
+                abortAttemptId: expect.stringMatching(/^[\da-f]{32}$/u),
+                providerRunId,
+                sessionKey: gatewayPrimarySessionKey,
+            });
+            expect(
+                view.runtimeStore.state.sessions[gatewayPrimarySessionKey]?.runs
+            ).toEqual({});
+        } finally {
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            view.rendered.unmount();
+            view.queryClient.clear();
+        }
+    });
+
+    test("keeps a pending server abort boundary gated after reload even when observations advance", async () => {
+        const providerRunId = "external-provider-reload-pending";
+        const baselineObservationEpoch = 4;
+        const baselineUpdatedAtMs = observedAtMs + 4;
+        const attemptedAtMs = observedAtMs + 5;
+        let settlement: "not-aborted" | "pending" = "pending";
+        const view = harness({
+            query: (name) =>
+                name === "chat.runtime"
+                    ? Promise.resolve(
+                          externalRuntimePage(
+                              gatewayPrimarySessionKey,
+                              providerRunId,
+                              baselineUpdatedAtMs + 1,
+                              {
+                                  attemptId: "server-attempt-pending",
+                                  attemptedAtMs,
+                                  baselineObservationEpoch,
+                                  baselineUpdatedAtMs,
+                                  settlement,
+                              },
+                              baselineObservationEpoch + 1,
+                              attemptedAtMs + 1
+                          )
+                      )
+                    : undefined,
+            requestedSessionKey: gatewayPrimarySessionKey,
+            sessionSnapshot: snapshot(),
+        });
+        try {
+            await waitFor(() =>
+                expect(
+                    view.runtimeStore.state.sessions[gatewayPrimarySessionKey]
+                        ?.externalRuns[providerRunId]?.abortBoundary?.settlement
+                ).toBe("pending")
+            );
+            expect(screen.queryByRole("button", { name: "Stop response 1" })).toBeNull();
+
+            settlement = "not-aborted";
+            await act(async () => {
+                await view.queryClient.invalidateQueries({
+                    exact: true,
+                    queryKey: chatRuntimeQueryKey(gatewayPrimarySessionKey),
+                });
+            });
+            expect(
+                await screen.findByRole("button", { name: "Stop response 1" })
+            ).toBeEnabled();
+            expect(
+                view.mutation.mock.calls.filter((call) => call[0] === "chat.abort")
+            ).toHaveLength(0);
+        } finally {
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            view.rendered.unmount();
+            view.queryClient.clear();
+        }
+    });
+
+    test("keeps an unknown server abort boundary gated after reload until every observation coordinate advances", async () => {
+        const providerRunId = "external-provider-reload-unknown";
+        const baselineObservationEpoch = 4;
+        const baselineUpdatedAtMs = observedAtMs + 4;
+        const attemptedAtMs = observedAtMs + 5;
+        let runtimeObservationEpoch = baselineObservationEpoch;
+        let runtimeObservedAtMs = attemptedAtMs;
+        let runtimeUpdatedAtMs = baselineUpdatedAtMs;
+        const abortBoundary = {
+            attemptId: "server-attempt-unknown",
+            attemptedAtMs,
+            baselineObservationEpoch,
+            baselineUpdatedAtMs,
+            settlement: "unknown" as const,
+        };
+        const view = harness({
+            query: (name) =>
+                name === "chat.runtime"
+                    ? Promise.resolve(
+                          externalRuntimePage(
+                              gatewayPrimarySessionKey,
+                              providerRunId,
+                              runtimeUpdatedAtMs,
+                              abortBoundary,
+                              runtimeObservationEpoch,
+                              runtimeObservedAtMs
+                          )
+                      )
+                    : undefined,
+            requestedSessionKey: gatewayPrimarySessionKey,
+            sessionSnapshot: snapshot(),
+        });
+        const refreshRuntime = async () => {
+            await act(async () => {
+                await view.queryClient.invalidateQueries({
+                    exact: true,
+                    queryKey: chatRuntimeQueryKey(gatewayPrimarySessionKey),
+                });
+            });
+        };
+        try {
+            await waitFor(() =>
+                expect(
+                    view.runtimeStore.state.sessions[gatewayPrimarySessionKey]
+                        ?.externalRuns[providerRunId]?.abortBoundary?.settlement
+                ).toBe("unknown")
+            );
+            expect(screen.queryByRole("button", { name: "Stop response 1" })).toBeNull();
+
+            runtimeObservationEpoch += 1;
+            await refreshRuntime();
+            expect(screen.queryByRole("button", { name: "Stop response 1" })).toBeNull();
+
+            runtimeObservedAtMs += 1;
+            await refreshRuntime();
+            expect(screen.queryByRole("button", { name: "Stop response 1" })).toBeNull();
+
+            runtimeUpdatedAtMs += 1;
+            await refreshRuntime();
+            expect(
+                await screen.findByRole("button", { name: "Stop response 1" })
+            ).toBeEnabled();
+            expect(
+                view.mutation.mock.calls.filter((call) => call[0] === "chat.abort")
+            ).toHaveLength(0);
+        } finally {
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            view.rendered.unmount();
+            view.queryClient.clear();
+        }
+    });
+
+    test("renders a retained provider plan explanation from a truncated runtime projection", async () => {
+        const page = externalRuntimePage(
+            gatewayPrimarySessionKey,
+            "external-provider-plan"
+        );
+        const externalRun = page.externalRuns[0]!;
+        const view = harness({
+            query: (name) =>
+                name === "chat.runtime"
+                    ? Promise.resolve({
+                          ...page,
+                          externalRuns: [
+                              {
+                                  ...externalRun,
+                                  hasUnprojectedActivity: true,
+                                  plan: {
+                                      explanation:
+                                          "This explanation remains visible during catch-up.",
+                                      phase: "update" as const,
+                                      steps: [
+                                          {
+                                              status: "in_progress" as const,
+                                              text: "Inspect live state",
+                                          },
+                                      ],
+                                  },
+                                  projectionTruncated: true,
+                              },
+                          ],
+                      })
+                    : undefined,
+            requestedSessionKey: gatewayPrimarySessionKey,
+            sessionSnapshot: snapshot(),
+        });
+        try {
+            expect(
+                await screen.findByText(
+                    "This explanation remains visible during catch-up."
+                )
+            ).toBeVisible();
+            expect(screen.getByText("Inspect live state")).toBeVisible();
+        } finally {
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            view.rendered.unmount();
+            view.queryClient.clear();
+        }
+    });
+
+    test("releases provider-origin Stop when OpenClaw reports that nothing was aborted", async () => {
+        const providerRunId = "external-provider-not-aborted";
+        const view = harness({
+            mutation: (name, input) =>
+                name === "chat.abort"
+                    ? Promise.resolve({
+                          aborted: false,
+                          abortAttemptId: (input as { abortAttemptId: string })
+                              .abortAttemptId,
+                          providerRunId,
+                      })
+                    : Promise.reject(new Error("Unexpected mutation")),
+            query: (name) =>
+                name === "chat.runtime"
+                    ? Promise.resolve(
+                          externalRuntimePage(gatewayPrimarySessionKey, providerRunId)
+                      )
+                    : undefined,
+            requestedSessionKey: gatewayPrimarySessionKey,
+            sessionSnapshot: snapshot(),
+        });
+        const user = userEvent.setup();
+        try {
+            await user.click(
+                await screen.findByRole("button", { name: "Stop response 1" })
+            );
+            expect(
+                await screen.findByRole("button", { name: "Stop response 1" })
+            ).toBeEnabled();
+            expect(await screen.findByText(/did not stop this response/iu)).toBeVisible();
+            expect(
+                view.mutation.mock.calls.filter((call) => call[0] === "chat.abort")
+            ).toHaveLength(1);
+        } finally {
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            view.rendered.unmount();
+            view.queryClient.clear();
+        }
+    });
+
+    test("keeps an uncertain provider Stop gated past a server-ahead event until its action boundary advances", async () => {
+        const providerRunId = "external-provider-unknown-abort";
+        const unknownOutcome = Object.assign(new Error("Unknown abort outcome"), {
+            data: { reason: "operation_outcome_unknown" },
+        });
+        let abortAttempts = 0;
+        let runtimeUpdatedAtMs = observedAtMs;
+        let runtimeObservationEpoch = 1;
+        let runtimeObservedAtMs = observedAtMs;
+        let serverAbortAttemptId: string | undefined;
+        let serverAbortAttemptedAtMs = observedAtMs + 2;
+        let serverAbortBaselineEpoch = 2;
+        let serverAbortBaselineMs = observedAtMs + 1;
+        const view = harness({
+            mutation: (name, input) => {
+                if (name !== "chat.abort") {
+                    return Promise.reject(new Error("Unexpected mutation"));
+                }
+                abortAttempts += 1;
+                const abortAttemptId = (input as { abortAttemptId: string })
+                    .abortAttemptId;
+                serverAbortAttemptId = abortAttemptId;
+                runtimeUpdatedAtMs = Math.max(runtimeUpdatedAtMs, serverAbortBaselineMs);
+                runtimeObservationEpoch = Math.max(
+                    runtimeObservationEpoch,
+                    serverAbortBaselineEpoch
+                );
+                runtimeObservedAtMs = Math.max(
+                    runtimeObservedAtMs,
+                    serverAbortBaselineMs
+                );
+                serverAbortAttemptedAtMs = Math.max(
+                    serverAbortAttemptedAtMs,
+                    runtimeObservedAtMs + 1
+                );
+                serverAbortBaselineEpoch = runtimeObservationEpoch;
+                serverAbortBaselineMs = runtimeUpdatedAtMs;
+                return abortAttempts === 1
+                    ? Promise.reject(unknownOutcome)
+                    : Promise.resolve({
+                          aborted: false,
+                          abortAttemptId,
+                          providerRunId,
+                      });
+            },
+            query: (name) =>
+                name === "chat.runtime"
+                    ? Promise.resolve(
+                          externalRuntimePage(
+                              gatewayPrimarySessionKey,
+                              providerRunId,
+                              runtimeUpdatedAtMs,
+                              serverAbortAttemptId === undefined
+                                  ? undefined
+                                  : {
+                                        attemptId: serverAbortAttemptId,
+                                        attemptedAtMs: serverAbortAttemptedAtMs,
+                                        baselineObservationEpoch:
+                                            serverAbortBaselineEpoch,
+                                        baselineUpdatedAtMs: serverAbortBaselineMs,
+                                        settlement:
+                                            abortAttempts === 1
+                                                ? "unknown"
+                                                : "not-aborted",
+                                    },
+                              runtimeObservationEpoch,
+                              runtimeObservedAtMs
+                          )
+                      )
+                    : undefined,
+            requestedSessionKey: gatewayPrimarySessionKey,
+            sessionSnapshot: snapshot(),
+        });
+        const user = userEvent.setup();
+        try {
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            const historyReadsBeforeStop = view.query.mock.calls.filter(
+                (call) => call[0] === "chat.history"
+            ).length;
+            await user.click(
+                await screen.findByRole("button", { name: "Stop response 1" })
+            );
+            expect(
+                await screen.findByText(
+                    /could not confirm whether the response stopped/iu
+                )
+            ).toBeVisible();
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            expect(screen.queryByRole("button", { name: "Stop response 1" })).toBeNull();
+            expect(
+                view.mutation.mock.calls.filter((call) => call[0] === "chat.abort")
+            ).toHaveLength(1);
+            expect(
+                view.query.mock.calls.filter((call) => call[0] === "chat.history")
+            ).toHaveLength(historyReadsBeforeStop + 1);
+
+            runtimeUpdatedAtMs = serverAbortAttemptedAtMs + 1;
+            runtimeObservationEpoch = serverAbortBaselineEpoch + 1;
+            runtimeObservedAtMs = serverAbortAttemptedAtMs + 1;
+            await act(async () => {
+                await view.queryClient.invalidateQueries({
+                    exact: true,
+                    queryKey: chatRuntimeQueryKey(gatewayPrimarySessionKey),
+                });
+            });
+
+            await user.click(
+                await screen.findByRole("button", { name: "Stop response 1" })
+            );
+            expect(await screen.findByText(/did not stop this response/iu)).toBeVisible();
+            expect(
+                view.mutation.mock.calls.filter((call) => call[0] === "chat.abort")
+            ).toHaveLength(2);
         } finally {
             await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
             view.rendered.unmount();
@@ -718,7 +1158,11 @@ describe("chat browser", () => {
 
             await user.type(composer, "/reset");
             await user.click(send);
-            expect(screen.getByText(/confirm Reset provider transcript/iu)).toBeVisible();
+            expect(
+                screen.getByText(
+                    "Open Chat settings and choose Reset chat history to continue."
+                )
+            ).toBeVisible();
 
             await user.clear(composer);
             await user.type(composer, "/model unavailable/model");
@@ -921,7 +1365,9 @@ describe("chat browser", () => {
         try {
             await waitForConnectedComposer();
             await user.click(screen.getByRole("button", { name: "Chat settings" }));
-            await user.click(screen.getByRole("button", { name: "Compact context" }));
+            await user.click(
+                screen.getByRole("button", { name: "Shorten chat history" })
+            );
             await waitFor(() =>
                 expect(
                     view.mutation.mock.calls.filter(
@@ -932,19 +1378,17 @@ describe("chat browser", () => {
             await user.click(screen.getByRole("button", { name: "Chat settings" }));
             await waitFor(() =>
                 expect(
-                    screen.getByRole("button", { name: "Compact context" })
+                    screen.getByRole("button", { name: "Shorten chat history" })
                 ).toBeEnabled()
             );
 
-            await user.click(
-                screen.getByRole("button", { name: "Reset provider transcript" })
-            );
+            await user.click(screen.getByRole("button", { name: "Reset chat history" }));
             const confirmation = await screen.findByRole("dialog", {
-                name: "Reset chat session?",
+                name: "Reset this chat?",
             });
             await user.click(
                 within(confirmation).getByRole("button", {
-                    name: "Reset provider transcript",
+                    name: "Reset chat history",
                 })
             );
             await waitFor(() =>
@@ -1173,7 +1617,7 @@ describe("chat browser", () => {
         }
     });
 
-    test("hydrates the first authoritative task with one exact detail read", async () => {
+    test("hydrates only an explicitly opened task and lets the selected row close it", async () => {
         const task: OpenClawTaskSummary = {
             id: "task-default-detail",
             progressSummary: "Summary",
@@ -1208,15 +1652,306 @@ describe("chat browser", () => {
             requestedSessionKey: gatewayPrimarySessionKey,
             sessionSnapshot: snapshot(),
         });
+        const user = userEvent.setup();
         try {
+            await screen.findByRole("button", {
+                name: "Default task detail Running",
+            });
+            const taskButton = () =>
+                screen.getByRole("button", {
+                    name: "Default task detail Running",
+                });
+            expect(taskButton()).toHaveAttribute("aria-expanded", "false");
+            expect(
+                view.query.mock.calls.filter((call) => call[0] === "openClawTasks.get")
+            ).toHaveLength(0);
+
+            await user.click(taskButton());
             const hydratedDetails = await screen.findAllByText("Hydrated exact detail");
             expect(hydratedDetails.length).toBeGreaterThanOrEqual(1);
+            expect(taskButton()).toHaveAttribute("aria-expanded", "true");
             expect(
                 view.query.mock.calls.filter((call) => call[0] === "openClawTasks.get")
             ).toHaveLength(1);
             expect(
                 view.query.mock.calls.find((call) => call[0] === "openClawTasks.get")?.[1]
             ).toEqual({ taskId: task.id });
+
+            await user.click(taskButton());
+            await waitFor(() =>
+                expect(
+                    screen.queryByRole("region", {
+                        name: "Task detail: Default task detail",
+                    })
+                ).toBeNull()
+            );
+            expect(taskButton()).toHaveFocus();
+            expect(
+                view.query.mock.calls.filter((call) => call[0] === "openClawTasks.get")
+            ).toHaveLength(1);
+
+            await user.click(taskButton());
+            await screen.findByRole("region", {
+                name: "Task detail: Default task detail",
+            });
+            await user.click(taskButton());
+            await waitFor(() =>
+                expect(
+                    screen.queryByRole("region", {
+                        name: "Task detail: Default task detail",
+                    })
+                ).toBeNull()
+            );
+            expect(taskButton()).toHaveAttribute("aria-expanded", "false");
+        } finally {
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            view.rendered.unmount();
+            view.queryClient.clear();
+        }
+    });
+
+    test("retains selected authoritative task detail through a transient list omission", async () => {
+        const task: OpenClawTaskSummary = {
+            id: "task-transient-list-gap",
+            progressSummary: "Review in progress",
+            status: "running",
+            title: "Stable active task",
+            updatedAtMs: observedAtMs,
+        };
+        let listed = true;
+        let detailUnavailable = false;
+        const view = harness({
+            query: (name, input) => {
+                if (name === "openClawTasks.list") {
+                    const statuses =
+                        typeof input === "object" &&
+                        input !== null &&
+                        "statuses" in input &&
+                        Array.isArray(input.statuses)
+                            ? input.statuses
+                            : [];
+                    return Promise.resolve({
+                        tasks: listed && statuses.includes("running") ? [task] : [],
+                    });
+                }
+                if (name === "openClawTasks.get") {
+                    if (detailUnavailable) {
+                        return Promise.reject(
+                            Object.assign(new Error("temporarily unavailable"), {
+                                data: { code: "SERVICE_UNAVAILABLE" },
+                            })
+                        );
+                    }
+                    return Promise.resolve({
+                        task: {
+                            ...task,
+                            progressSummary: "Authoritative live progress",
+                            prompt: "Keep this task explanation visible.",
+                        },
+                    });
+                }
+                return;
+            },
+            requestedSessionKey: gatewayPrimarySessionKey,
+            sessionSnapshot: snapshot(),
+        });
+        const user = userEvent.setup();
+        try {
+            await user.click(
+                await screen.findByRole("button", {
+                    name: "Stable active task Running",
+                })
+            );
+            expect(
+                await screen.findByText(/Keep this task explanation visible\./u)
+            ).toBeVisible();
+            listed = false;
+            detailUnavailable = true;
+
+            await act(async () => {
+                await Promise.all([
+                    view.queryClient.invalidateQueries({
+                        queryKey: openClawTaskListSessionQueryKey(
+                            gatewayPrimarySessionKey
+                        ),
+                    }),
+                    view.queryClient.invalidateQueries({
+                        exact: true,
+                        queryKey: openClawTaskDetailQueryKey(task.id),
+                    }),
+                ]);
+            });
+
+            expect(
+                screen.getByRole("button", { name: "Stable active task Running" })
+            ).toHaveAttribute("aria-expanded", "true");
+            expect(
+                screen.getAllByText(/Authoritative live progress/u).length
+            ).toBeGreaterThanOrEqual(1);
+            expect(
+                screen.getByText(/Keep this task explanation visible\./u)
+            ).toBeVisible();
+            expect(
+                view.query.mock.calls.filter((call) => call[0] === "openClawTasks.get")
+            ).toHaveLength(2);
+        } finally {
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            view.rendered.unmount();
+            view.queryClient.clear();
+        }
+    });
+
+    test("removes cached selected task detail after an authoritative not-found read", async () => {
+        const task: OpenClawTaskSummary = {
+            id: "task-authoritatively-deleted",
+            status: "running",
+            title: "Deleted active task",
+            updatedAtMs: observedAtMs,
+        };
+        let deleted = false;
+        const view = harness({
+            query: (name, input) => {
+                if (name === "openClawTasks.list") {
+                    const statuses =
+                        typeof input === "object" &&
+                        input !== null &&
+                        "statuses" in input &&
+                        Array.isArray(input.statuses)
+                            ? input.statuses
+                            : [];
+                    return Promise.resolve({
+                        tasks: !deleted && statuses.includes("running") ? [task] : [],
+                    });
+                }
+                if (name === "openClawTasks.get") {
+                    return deleted
+                        ? Promise.reject(
+                              Object.assign(new Error("task deleted"), {
+                                  data: { code: "NOT_FOUND" },
+                              })
+                          )
+                        : Promise.resolve({
+                              task: {
+                                  ...task,
+                                  prompt: "This prompt must not remain after deletion.",
+                              },
+                          });
+                }
+                return;
+            },
+            requestedSessionKey: gatewayPrimarySessionKey,
+            sessionSnapshot: snapshot(),
+        });
+        const user = userEvent.setup();
+        try {
+            await user.click(
+                await screen.findByRole("button", {
+                    name: "Deleted active task Running",
+                })
+            );
+            expect(
+                await screen.findByText(/must not remain after deletion/iu)
+            ).toBeVisible();
+            deleted = true;
+
+            await act(async () => {
+                await Promise.allSettled([
+                    view.queryClient.invalidateQueries({
+                        queryKey: openClawTaskListSessionQueryKey(
+                            gatewayPrimarySessionKey
+                        ),
+                    }),
+                    view.queryClient.invalidateQueries({
+                        exact: true,
+                        queryKey: openClawTaskDetailQueryKey(task.id),
+                    }),
+                ]);
+            });
+
+            await waitFor(() =>
+                expect(screen.queryByText("Deleted active task")).toBeNull()
+            );
+            expect(screen.queryByText(/must not remain after deletion/iu)).toBeNull();
+            expect(
+                view.queryClient.getQueryData(openClawTaskDetailQueryKey(task.id))
+            ).toBeUndefined();
+        } finally {
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            view.rendered.unmount();
+            view.queryClient.clear();
+        }
+    });
+
+    test("loads each unfinished task ledger once and hides the button at the end", async () => {
+        const view = harness({
+            query: (name, input) => {
+                if (name !== "openClawTasks.list") return;
+                const record =
+                    typeof input === "object" && input !== null
+                        ? (input as Readonly<Record<string, unknown>>)
+                        : {};
+                const statuses = Array.isArray(record.statuses) ? record.statuses : [];
+                const active = statuses.includes("running");
+                const cursor =
+                    typeof record.cursor === "string" ? record.cursor : undefined;
+                if (cursor === undefined) {
+                    return Promise.resolve({
+                        nextCursor: "1",
+                        tasks: [
+                            {
+                                id: active ? "task-active-1" : "task-finished-1",
+                                status: active ? "running" : "completed",
+                                title: active ? "Active task" : "Finished task",
+                            },
+                        ],
+                    });
+                }
+                return Promise.resolve(
+                    active
+                        ? { nextCursor: cursor, tasks: [] }
+                        : {
+                              tasks: [
+                                  {
+                                      id: "task-finished-2",
+                                      status: "failed",
+                                      title: "Older finished task",
+                                  },
+                              ],
+                          }
+                );
+            },
+            requestedSessionKey: gatewayPrimarySessionKey,
+            sessionSnapshot: snapshot(),
+        });
+        const user = userEvent.setup();
+        const taskListReads = () =>
+            view.query.mock.calls.filter((call) => call[0] === "openClawTasks.list");
+        try {
+            const loadMore = await screen.findByRole("button", {
+                name: "Load more tasks",
+            });
+            expect(taskListReads()).toHaveLength(2);
+
+            await user.click(loadMore);
+
+            await waitFor(() =>
+                expect(
+                    screen.queryByRole("button", { name: "Load more tasks" })
+                ).toBeNull()
+            );
+            expect(await screen.findByText("Older finished task")).toBeVisible();
+            expect(taskListReads()).toHaveLength(4);
+            expect(
+                taskListReads().filter((call) => {
+                    const input = call[1];
+                    return (
+                        typeof input === "object" && input !== null && "cursor" in input
+                    );
+                })
+            ).toHaveLength(2);
+
+            await Promise.resolve();
+            expect(taskListReads()).toHaveLength(4);
         } finally {
             await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
             view.rendered.unmount();
@@ -1249,6 +1984,9 @@ describe("chat browser", () => {
         const user = userEvent.setup();
         try {
             await screen.findAllByText("Background review");
+            await user.click(
+                screen.getByRole("button", { name: "Background review Running" })
+            );
             await user.dblClick(screen.getByRole("button", { name: "Cancel task" }));
             expect(
                 await screen.findByText(/newer task observation is required/iu)
@@ -1258,9 +1996,7 @@ describe("chat browser", () => {
                     (call) => call[0] === "openClawTasks.cancel"
                 )
             ).toHaveLength(1);
-            expect(
-                screen.getByRole("button", { name: "Reconciling task…" })
-            ).toBeDisabled();
+            expect(screen.getByRole("button", { name: "Stopping task…" })).toBeDisabled();
 
             task = {
                 ...task,
@@ -1273,7 +2009,7 @@ describe("chat browser", () => {
             await waitFor(() =>
                 expect(screen.queryByRole("button", { name: "Cancel task" })).toBeNull()
             );
-            expect(screen.getByText("completed")).toBeVisible();
+            expect(screen.getByText("Completed")).toBeVisible();
         } finally {
             await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
             view.rendered.unmount();
@@ -1337,6 +2073,11 @@ describe("chat browser", () => {
         const postTask = { ...task, updatedAtMs: observedAtMs + 2 };
         try {
             await screen.findAllByText("Delayed task reconciliation");
+            await user.click(
+                screen.getByRole("button", {
+                    name: "Delayed task reconciliation Running",
+                })
+            );
             await waitFor(() => expect(detailReads).toBe(1));
             void Promise.all([
                 view.queryClient.invalidateQueries({
@@ -1363,9 +2104,7 @@ describe("chat browser", () => {
                 await Promise.all([preActiveRead.promise, preDetailRead.promise]);
                 await Promise.resolve();
             });
-            expect(
-                screen.getByRole("button", { name: "Reconciling task…" })
-            ).toBeDisabled();
+            expect(screen.getByRole("button", { name: "Stopping task…" })).toBeDisabled();
 
             await act(async () => {
                 postActiveRead.resolve({ tasks: [postTask] });
@@ -1413,6 +2152,9 @@ describe("chat browser", () => {
         const user = userEvent.setup();
         try {
             await screen.findAllByText("Vanishing task");
+            await user.click(
+                screen.getByRole("button", { name: "Vanishing task Running" })
+            );
             await user.click(screen.getByRole("button", { name: "Cancel task" }));
             await waitFor(() => expect(screen.queryByText("Vanishing task")).toBeNull());
             expect(
@@ -1430,6 +2172,7 @@ describe("chat browser", () => {
 
     test("uses an exact task read when an unknown cancel removes the default list row", async () => {
         let listReads = 0;
+        let detailReads = 0;
         const task: OpenClawTaskSummary = {
             id: "task-exact",
             status: "running",
@@ -1450,6 +2193,8 @@ describe("chat browser", () => {
                     return Promise.resolve({ tasks: listReads === 1 ? [task] : [] });
                 }
                 if (name === "openClawTasks.get") {
+                    detailReads += 1;
+                    if (detailReads === 1) return Promise.resolve({ task });
                     return Promise.reject(
                         Object.assign(new Error("not found"), {
                             data: { code: "NOT_FOUND" },
@@ -1464,6 +2209,9 @@ describe("chat browser", () => {
         const user = userEvent.setup();
         try {
             await screen.findAllByText("Exact reconciliation");
+            await user.click(
+                screen.getByRole("button", { name: "Exact reconciliation Running" })
+            );
             await user.click(screen.getByRole("button", { name: "Cancel task" }));
             await waitFor(() =>
                 expect(screen.queryByText("Exact reconciliation")).toBeNull()
@@ -1511,10 +2259,10 @@ describe("chat browser", () => {
             await screen.findByRole("button", { name: "Stop response 1" });
             await revealCompanionControls();
             await user.type(
-                screen.getByRole("textbox", { name: "Ask companion" }),
+                screen.getByRole("textbox", { name: "Ask chat helper" }),
                 "What changed?"
             );
-            await user.click(screen.getByRole("button", { name: "Ask companion" }));
+            await user.click(screen.getByRole("button", { name: "Ask chat helper" }));
             await waitFor(() =>
                 expect(screen.getByRole("button", { name: "Asking…" })).toBeDisabled()
             );
@@ -1545,8 +2293,10 @@ describe("chat browser", () => {
                 await pendingAsk.promise;
             });
             expect(screen.queryByText("Stale answer")).toBeNull();
-            expect(screen.getByRole("textbox", { name: "Ask companion" })).toBeDisabled();
-            await user.click(screen.getByRole("button", { name: "Ask companion" }));
+            expect(
+                screen.getByRole("textbox", { name: "Ask chat helper" })
+            ).toBeDisabled();
+            await user.click(screen.getByRole("button", { name: "Ask chat helper" }));
             expect(
                 view.mutation.mock.calls.filter((call) => call[0] === "chat.companionAsk")
             ).toHaveLength(1);
@@ -1585,10 +2335,10 @@ describe("chat browser", () => {
             await waitForConnectedComposer();
             await revealCompanionControls();
             await user.type(
-                screen.getByRole("textbox", { name: "Ask companion" }),
+                screen.getByRole("textbox", { name: "Ask chat helper" }),
                 "What changed?"
             );
-            await user.click(screen.getByRole("button", { name: "Ask companion" }));
+            await user.click(screen.getByRole("button", { name: "Ask chat helper" }));
             await waitFor(() =>
                 expect(
                     view.mutation.mock.calls.filter(
@@ -1633,10 +2383,14 @@ describe("chat browser", () => {
             await revealCompanionControls();
             await user.dblClick(screen.getByRole("button", { name: "Reset" }));
             expect(
-                await screen.findByText(/reset outcome could not be confirmed/iu)
+                await screen.findByText(
+                    /could not confirm whether the chat helper was reset/iu
+                )
             ).toBeVisible();
             expect(screen.getByRole("button", { name: "Resetting…" })).toBeDisabled();
-            expect(screen.getByRole("textbox", { name: "Ask companion" })).toBeDisabled();
+            expect(
+                screen.getByRole("textbox", { name: "Ask chat helper" })
+            ).toBeDisabled();
             expect(
                 view.mutation.mock.calls.filter(
                     (call) => call[0] === "chat.companionReset"
@@ -1651,7 +2405,9 @@ describe("chat browser", () => {
                 expect(screen.getByRole("button", { name: "Reset" })).toBeEnabled()
             );
             expect(
-                screen.queryByText(/reset outcome could not be confirmed/iu)
+                screen.queryByText(
+                    /could not confirm whether the chat helper was reset/iu
+                )
             ).toBeNull();
         } finally {
             reconciliation.resolve({ exchanges: [] });
@@ -1837,11 +2593,13 @@ describe("chat browser", () => {
         try {
             await screen.findByRole("button", { name: "Stop response 1" });
             await revealCompanionControls();
-            const question = screen.getByRole("textbox", { name: "Ask companion" });
+            const question = screen.getByRole("textbox", { name: "Ask chat helper" });
             await user.type(question, "Do not duplicate");
-            await user.dblClick(screen.getByRole("button", { name: "Ask companion" }));
+            await user.dblClick(screen.getByRole("button", { name: "Ask chat helper" }));
             expect(
-                await screen.findByText(/outcome could not be confirmed/iu)
+                await screen.findByText(
+                    /could not confirm whether the chat helper received the question/iu
+                )
             ).toBeVisible();
             expect(question).toBeDisabled();
             expect(screen.getByRole("button", { name: "Reset" })).toBeEnabled();

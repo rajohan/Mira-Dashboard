@@ -113,7 +113,7 @@ function initialRemoteTextPreview(
         safeTextPreviewTypes.has(attachment.mediaType)
         ? { status: "loading" }
         : {
-              message: "This attachment does not expose a sanctioned text preview.",
+              message: "This attachment cannot be previewed as text.",
               status: "error",
           };
 }
@@ -182,7 +182,7 @@ export function ChatAttachmentPreview({
                 setRemoteTextPreview(
                     text === undefined
                         ? {
-                              message: "The bounded text preview could not be loaded.",
+                              message: "The text preview could not be loaded.",
                               status: "error",
                           }
                         : { status: "ready", text }
@@ -190,7 +190,7 @@ export function ChatAttachmentPreview({
             } catch {
                 if (controller.signal.aborted) return;
                 setRemoteTextPreview({
-                    message: "The bounded text preview could not be loaded.",
+                    message: "The text preview could not be loaded.",
                     status: "error",
                 });
             }
@@ -297,13 +297,13 @@ export function ChatAttachmentPreview({
                         <pre className="border-primary-600 bg-primary-950 text-primary-200 max-h-[min(55vh,32rem)] overflow-auto rounded-lg border p-3 text-xs wrap-break-word whitespace-pre-wrap">
                             {textPreview}
                             {attachment.sizeBytes > maximumTextPreviewBytes
-                                ? "\n\n[Preview truncated]"
+                                ? "\n\n[Preview shortened]"
                                 : ""}
                         </pre>
                     )}
                     {remoteTextPreview.status === "loading" && (
                         <output className="text-primary-300 block py-10 text-center text-sm">
-                            Loading bounded text preview…
+                            Loading text preview…
                         </output>
                     )}
                     {remoteTextPreview.status === "ready" && (
@@ -331,8 +331,8 @@ export function ChatAttachmentPreview({
                                     Preview unavailable
                                 </p>
                                 <p className="text-primary-400 mt-1 max-w-md text-sm">
-                                    This type is kept download-only to avoid rendering
-                                    active or unsupported content in the dashboard.
+                                    This file type can be downloaded but cannot be safely
+                                    shown in the Dashboard.
                                 </p>
                             </div>
                         )}

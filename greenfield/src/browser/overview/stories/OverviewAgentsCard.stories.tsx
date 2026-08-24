@@ -110,7 +110,7 @@ export const AllIdle: Story = {
     },
     play: async ({ canvasElement }) => {
         await expect(
-            within(canvasElement).getByText("All configured agents are idle.")
+            within(canvasElement).getByText("All agents are idle.")
         ).toBeVisible();
     },
 };
@@ -119,10 +119,10 @@ export const MissingProjection: Story = {
     args: { statuses: statuses.slice(1) },
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement);
-        await expect(canvas.getByText("Missing projection")).toBeVisible();
+        await expect(canvas.getByText("Status unavailable")).toBeVisible();
         await expect(
             canvas.getByText(
-                "No configured agent currently reports working; one or more status projections are missing."
+                "No agent currently reports working. Status is unavailable for one or more agents."
             )
         ).toBeVisible();
     },

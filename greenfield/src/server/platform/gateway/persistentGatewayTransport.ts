@@ -1119,8 +1119,12 @@ class GatewaySocketLane {
             this.#fail("protocol", false, policyCloseCode, "duplicate gateway challenge");
             return true;
         }
+        const privateChatEnvelope =
+            envelope.event === "chat" ||
+            envelope.event === "agent" ||
+            envelope.event === "session.tool";
         const chatEvent =
-            deliver && (envelope.event === "chat" || envelope.event === "agent")
+            deliver && privateChatEnvelope
                 ? parsePersistentGatewayPrivateChatEvent(value)
                 : undefined;
         if (

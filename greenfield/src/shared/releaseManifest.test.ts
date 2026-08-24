@@ -69,6 +69,23 @@ describe("release manifest", () => {
         ).toThrow("Release manifest is invalid");
     });
 
+    test("accepts the reviewed systemd template artifact segment", () => {
+        const candidate = manifest();
+        expect(
+            parseReleaseManifest({
+                ...candidate,
+                artifacts: [
+                    candidate.artifacts[0],
+                    {
+                        bytes: 84,
+                        path: "systemd/mira-dashboard-log-maintenance@.service",
+                        sha256: "2".repeat(64),
+                    },
+                ],
+            }).artifacts[1]?.path
+        ).toBe("systemd/mira-dashboard-log-maintenance@.service");
+    });
+
     test("rejects unordered identities and path traversal", () => {
         const candidate = manifest();
         expect(() =>

@@ -21,6 +21,16 @@ export function cacheFreshnessVariant(
 }
 
 /**
+ * @param freshness Stored freshness value.
+ * @returns A plain-language label without changing the stored freshness value.
+ */
+export function cacheFreshnessLabel(freshness: CacheEntryStatus["freshness"]): string {
+    if (freshness === "fresh") return "Up to date";
+    if (freshness === "stale") return "Out of date";
+    return "No saved data";
+}
+
+/**
  * @param status Latest refresh attempt outcome.
  * @returns The shared badge tone for the latest refresh attempt outcome.
  */
@@ -28,6 +38,14 @@ export function cacheAttemptVariant(
     status: CacheEntryStatus["lastAttemptStatus"]
 ): "danger" | "success" {
     return status === "succeeded" ? "success" : "danger";
+}
+
+/**
+ * @param status Stored attempt value.
+ * @returns A plain-language label without changing the stored attempt value.
+ */
+export function cacheAttemptLabel(status: CacheEntryStatus["lastAttemptStatus"]): string {
+    return status === "succeeded" ? "Succeeded" : "Failed";
 }
 
 /**
@@ -42,21 +60,20 @@ export function formatCacheDuration(milliseconds: number): string {
 }
 
 const cacheFailureMessages: Readonly<Record<DashboardBrowserFailure, string>> = {
-    cancelled: "The cache request was cancelled. You can try again.",
+    cancelled: "The request was cancelled. You can try again.",
     conflict:
-        "The cache refresh state changed. Review the current run and try again if needed.",
-    forbidden: "This session is not permitted to access that cache operation.",
-    "invalid-request": "The cache request was rejected. Refresh the page and try again.",
+        "The refresh changed while this page was updating. Check the background job and try again if needed.",
+    forbidden: "You do not have permission to refresh this data.",
+    "invalid-request": "The request was rejected. Refresh the page and try again.",
     "mfa-enrollment-required":
         "Multi-factor authentication must be enrolled before this action.",
-    "not-found": "The selected cache entry is no longer available.",
-    protocol:
-        "The server returned an invalid cache response. Reload before trying again.",
-    "rate-limited": "Too many cache requests were made. Wait before trying again.",
-    "step-up-required": "Verify your identity again before refreshing this cache entry.",
-    unauthorized: "The credentials or session are no longer valid.",
-    unavailable: "Cache data is temporarily unavailable. Try again shortly.",
-    unknown: "The cache request could not be completed. Try again.",
+    "not-found": "The selected data source is no longer available.",
+    protocol: "The server returned unexpected saved data. Reload before trying again.",
+    "rate-limited": "Too many refresh requests were made. Wait before trying again.",
+    "step-up-required": "Verify your identity again before refreshing this data.",
+    unauthorized: "Your session has ended. Sign in again.",
+    unavailable: "Saved data is temporarily unavailable. Try again shortly.",
+    unknown: "The request could not be completed. Try again.",
 };
 
 /**

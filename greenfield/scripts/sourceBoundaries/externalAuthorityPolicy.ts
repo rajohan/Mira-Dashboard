@@ -9,6 +9,12 @@ import {
 const reviewedBareBunImportSignatures: ReadonlyMap<string, string> = new Map([
     ["src/server/rawHttp/authenticationCredentials.ts", "value:CookieMap"],
 ]);
+const reviewedBunFfiImportSignatures: ReadonlyMap<string, string> = new Map([
+    [
+        "src/worker/files/linuxRenameExchange.ts",
+        "value:FFIType\0value:dlopen\0value:read",
+    ],
+]);
 const policyHandledNodeBuiltinNames: ReadonlySet<string> = new Set([
     "child_process",
     "cluster",
@@ -193,11 +199,19 @@ export function validateExternalImport(
         );
     }
     if (/^bun:ffi(?:\/|$)/u.test(specifier)) {
-        return violation(
-            importer,
-            sourceImport,
-            "Production source may not import Bun FFI APIs until an exact worker adapter is reviewed"
-        );
+        const expectedSignature = reviewedBunFfiImportSignatures.get(importer);
+        if (
+            specifier !== "bun:ffi" ||
+            expectedSignature === undefined ||
+            importBindingSignature(sourceImport) !== expectedSignature
+        ) {
+            return violation(
+                importer,
+                sourceImport,
+                "Bun FFI imports must match the exact reviewed worker adapter and named binding allowlist"
+            );
+        }
+        return undefined;
     }
     if (specifier === "bun") {
         const expectedSignature = reviewedBareBunImportSignatures.get(importer);

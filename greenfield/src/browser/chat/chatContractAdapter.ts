@@ -13,6 +13,7 @@ import type {
     ChatDisplayMessage,
     ChatMessageAttachment,
     ChatMessagePart,
+    ChatToolPart,
 } from "./chatTypes.ts";
 
 function contractLocalRunId(message: ChatMessage): string | undefined {
@@ -31,6 +32,84 @@ function messageRole(role: ChatMessage["role"]): ChatDisplayMessage["role"] {
     if (role === "user") return "user";
     if (role === "assistant") return "assistant";
     return "control";
+}
+
+/**
+ * Converges split provider tool lifecycle rows without losing the original input.
+ * Terminal observations are never downgraded by a later replayed running marker.
+ * @param previous Existing call projection.
+ * @param current Newer call or result projection for the same exact call id.
+ * @returns One complete tool part suitable for a single disclosure bubble.
+ */
+export function mergeChatToolPart(
+    previous: ChatToolPart,
+    current: ChatToolPart
+): ChatToolPart {
+    const previousIsTerminal = previous.status !== "running";
+    const currentIsTerminal = current.status !== "running";
+    const terminal = previousIsTerminal && !currentIsTerminal ? previous : current;
+    const named = previous.nameSource === "synthetic" ? current : previous;
+    return {
+        callId: previous.callId,
+        ...((previous.callIdSource ?? current.callIdSource) === undefined
+            ? {}
+            : { callIdSource: "synthetic" as const }),
+        ...((current.error ?? previous.error) === undefined
+            ? {}
+            : { error: current.error ?? previous.error }),
+        ...((previous.input ?? current.input) === undefined
+            ? {}
+            : { input: previous.input ?? current.input }),
+        kind: "tool",
+        name: named.name,
+        ...(named.nameSource === undefined ? {} : { nameSource: named.nameSource }),
+        ...((current.output ?? previous.output) === undefined
+            ? {}
+            : { output: current.output ?? previous.output }),
+        status: terminal.status,
+    };
+}
+
+/**
+ * Matches exact provider IDs, or the latest still-running same-name fallback call.
+ * @param call Previously rendered tool call.
+ * @param result Terminal tool result being reconciled.
+ * @returns Whether the result can safely complete this call.
+ */
+export function chatToolResultMatchesCall(
+    call: ChatToolPart,
+    result: ChatToolPart
+): boolean {
+    if (call.status !== "running" || result.status === "running") return false;
+    const usesSyntheticIdentity =
+        call.callIdSource === "synthetic" || result.callIdSource === "synthetic";
+    if (usesSyntheticIdentity) {
+        return (
+            call.callIdSource === "synthetic" &&
+            result.callIdSource === "synthetic" &&
+            call.nameSource !== "synthetic" &&
+            result.nameSource !== "synthetic" &&
+            call.name === result.name
+        );
+    }
+    return call.callId === result.callId;
+}
+
+function appendChatMessagePart(parts: ChatMessagePart[], part: ChatMessagePart): void {
+    if (part.kind !== "tool") {
+        parts.push(part);
+        return;
+    }
+    const index = parts.findIndex(
+        (candidate) =>
+            candidate.kind === "tool" && chatToolResultMatchesCall(candidate, part)
+    );
+    if (index === -1) {
+        parts.push(part);
+        return;
+    }
+    const previous = parts[index];
+    if (previous?.kind === "tool") parts[index] = mergeChatToolPart(previous, part);
 }
 
 /**
@@ -65,12 +144,18 @@ export function projectChatContractMessage(
                     break;
                 }
                 case "tool": {
-                    parts.push({
+                    appendChatMessagePart(parts, {
                         callId: part.callId,
+                        ...(part.callIdSource === undefined
+                            ? {}
+                            : { callIdSource: part.callIdSource }),
                         ...(part.input === undefined ? {} : { input: part.input }),
                         ...(part.isError ? { error: part.output ?? "Tool failed" } : {}),
                         kind: "tool",
                         name: part.name,
+                        ...(part.nameSource === undefined
+                            ? {}
+                            : { nameSource: part.nameSource }),
                         ...(part.output === undefined ? {} : { output: part.output }),
                         status: toolPartStatus(part.phase),
                     });
@@ -110,6 +195,7 @@ export function projectChatContractMessage(
             ? {}
             : { idempotencyKey: message.idempotencyKey }),
         parts,
+        ...(message.runId === undefined ? {} : { providerRunId: message.runId }),
         role: messageRole(message.role),
         ...(localRunId === undefined ? {} : { runId: localRunId }),
         sequence: message.sequence ?? fallbackSequence,
@@ -232,6 +318,9 @@ export function adaptChatRuntimeEvent(
         case "plan": {
             return {
                 ...base,
+                ...(event.explanation === undefined
+                    ? {}
+                    : { explanation: event.explanation }),
                 kind: "plan",
                 steps: event.steps,
             };
@@ -314,7 +403,7 @@ export function projectChatRuntimeSnapshot(
                 parts: [
                     {
                         kind: "control",
-                        text: "Runtime projection detail was omitted by the bounded response. Refreshing canonical history…",
+                        text: "Some live response details were not returned. Refreshing chat history…",
                         tone: "warning",
                     },
                 ],
@@ -348,26 +437,24 @@ export function projectChatRuntimeSnapshot(
                 break;
             }
             case "tool": {
-                parts.push({
+                appendChatMessagePart(parts, {
                     callId: part.callId,
+                    ...(part.callIdSource === undefined
+                        ? {}
+                        : { callIdSource: part.callIdSource }),
                     ...(part.input === undefined ? {} : { input: part.input }),
                     ...(part.isError ? { error: part.output ?? "Tool failed" } : {}),
                     kind: "tool",
                     name: part.name,
+                    ...(part.nameSource === undefined
+                        ? {}
+                        : { nameSource: part.nameSource }),
                     ...(part.output === undefined ? {} : { output: part.output }),
                     status: toolPartStatus(part.phase),
                 });
                 break;
             }
             case "item": {
-                parts.push({
-                    kind: "control",
-                    text:
-                        part.text === undefined
-                            ? part.type
-                            : `${part.type}: ${part.text}`,
-                    tone: "muted",
-                });
                 break;
             }
             case "user": {
@@ -379,7 +466,7 @@ export function projectChatRuntimeSnapshot(
     if (snapshot.run.state === "unresolved") {
         parts.push({
             kind: "control",
-            text: "Provider outcome remains unresolved after the reconciliation deadline. Refresh canonical history before retrying.",
+            text: "OpenClaw still has not confirmed the result. Refresh chat history before trying again.",
             tone: "warning",
         });
     }
@@ -403,6 +490,9 @@ export function projectChatRuntimeSnapshot(
             ? {}
             : {
                   plan: {
+                      ...(snapshot.plan.explanation === undefined
+                          ? {}
+                          : { description: snapshot.plan.explanation }),
                       items: snapshot.plan.steps.map((step, index) => ({
                           id: `${snapshot.run.id}:plan:${index}`,
                           label: step.text,
@@ -443,50 +533,160 @@ export function projectChatRuntimeSnapshot(
  */
 export function projectChatExternalRun(run: ChatExternalRun): ChatExternalRunProjection {
     const parts: ChatMessagePart[] = [];
-    if (!run.projectionTruncated && run.text !== "") {
-        parts.push({ kind: "text", text: run.text });
+    if (run.parts !== undefined && run.parts.length > 0) {
+        for (const part of run.parts) {
+            switch (part.kind) {
+                case "assistant": {
+                    parts.push({
+                        kind: "text",
+                        ...(part.segmentId === undefined
+                            ? {}
+                            : {
+                                  sourceKey: `${run.providerRunId}:${part.segmentId}`,
+                              }),
+                        ...(part.streamId === undefined
+                            ? {}
+                            : {
+                                  sourceStreamKey: `${run.providerRunId}:${part.streamId}`,
+                              }),
+                        text: part.text,
+                    });
+                    break;
+                }
+                case "thinking": {
+                    parts.push({
+                        kind: "thinking",
+                        ...(part.segmentId === undefined
+                            ? {}
+                            : {
+                                  sourceKey: `${run.providerRunId}:${part.segmentId}`,
+                              }),
+                        ...(part.streamId === undefined
+                            ? {}
+                            : {
+                                  sourceStreamKey: `${run.providerRunId}:${part.streamId}`,
+                              }),
+                        status: "running",
+                        text: part.text,
+                    });
+                    break;
+                }
+                case "tool": {
+                    appendChatMessagePart(parts, {
+                        callId: part.callId,
+                        ...(part.callIdSource === undefined
+                            ? {}
+                            : { callIdSource: part.callIdSource }),
+                        ...(part.input === undefined ? {} : { input: part.input }),
+                        ...(part.isError ? { error: part.output ?? "Tool failed" } : {}),
+                        kind: "tool",
+                        name: part.name,
+                        ...(part.nameSource === undefined
+                            ? {}
+                            : { nameSource: part.nameSource }),
+                        ...(part.output === undefined ? {} : { output: part.output }),
+                        status: toolPartStatus(part.phase),
+                    });
+                    break;
+                }
+                case "item": {
+                    break;
+                }
+                case "user": {
+                    break;
+                }
+            }
+        }
     }
-    parts.push({
-        kind: "control",
-        text: "Provider-origin activity is shown without a local Dashboard admission.",
-        tone: "muted",
-    });
+    const assistantIndexes = parts.flatMap((part, index) =>
+        part.kind === "text" ? [index] : []
+    );
+    const renderedAssistantText = assistantIndexes
+        .map((index) => {
+            const part = parts[index];
+            return part?.kind === "text" ? part.text : "";
+        })
+        .join("");
+    if (run.text !== "" && renderedAssistantText !== run.text) {
+        const lastAssistantIndex = assistantIndexes.at(-1);
+        if (
+            lastAssistantIndex !== undefined &&
+            run.text.startsWith(renderedAssistantText)
+        ) {
+            const previous = parts[lastAssistantIndex];
+            if (previous?.kind === "text") {
+                parts[lastAssistantIndex] = {
+                    ...previous,
+                    text: previous.text + run.text.slice(renderedAssistantText.length),
+                };
+            }
+        } else if (lastAssistantIndex === undefined) {
+            parts.push({
+                kind: "text",
+                sourceKey: `${run.providerRunId}:aggregate:assistant`,
+                sourceStreamKey: `${run.providerRunId}:assistant`,
+                text: run.text,
+            });
+        } else {
+            const insertionIndex = parts
+                .slice(0, lastAssistantIndex)
+                .filter((part) => part.kind !== "text").length;
+            const retained: ChatMessagePart[] = parts.filter(
+                (part) => part.kind !== "text"
+            );
+            retained.splice(insertionIndex, 0, {
+                kind: "text",
+                sourceKey: `${run.providerRunId}:aggregate:assistant`,
+                sourceStreamKey: `${run.providerRunId}:assistant`,
+                text: run.text,
+            });
+            parts.splice(0, parts.length, ...retained);
+        }
+    }
     if (run.projectionTruncated) {
         parts.push({
             kind: "control",
-            text: "Provider-origin projection detail was omitted by the bounded response.",
+            text: "Some OpenClaw activity details were not returned.",
             tone: "warning",
         });
     }
     if (run.continuity === "interrupted") {
         parts.push({
             kind: "control",
-            text: "Provider-origin continuity was interrupted; some activity may be missing.",
+            text: "Activity updates were interrupted, so some details may be missing.",
             tone: "warning",
         });
     }
     if (run.hasUnprojectedActivity) {
         parts.push({
             kind: "control",
-            text: "Additional provider-origin activity could not be projected.",
+            text: "Some additional OpenClaw activity could not be shown.",
             tone: "warning",
         });
     }
     return {
+        ...(run.abortBoundary === undefined ? {} : { abortBoundary: run.abortBoundary }),
         continuity: run.continuity,
         hasUnprojectedActivity: run.hasUnprojectedActivity,
         message: {
             attachments: [],
             id: `external:${run.sessionKey}:${run.providerRunId}`,
             parts,
+            providerRunId: run.providerRunId,
             role: "assistant",
             sequence: Number.MAX_SAFE_INTEGER - 2,
             sessionKey: run.sessionKey,
             timestampMs: run.updatedAtMs,
         },
-        ...(!run.projectionTruncated && run.plan !== undefined
-            ? {
+        observationEpoch: run.observationEpoch,
+        observedAtMs: run.observedAtMs,
+        ...(run.plan === undefined
+            ? {}
+            : {
                   plan: {
+                      ...(run.plan.explanation === undefined
+                          ? {}
+                          : { description: run.plan.explanation }),
                       items: run.plan.steps.map((step, index) => ({
                           id: `provider:${run.providerRunId}:plan:${index}`,
                           label: step.text,
@@ -496,12 +696,20 @@ export function projectChatExternalRun(run: ChatExternalRun): ChatExternalRunPro
                                   : step.status,
                       })),
                       runId: `provider:${run.providerRunId}`,
-                      title: "Provider-origin plan",
+                      title: "OpenClaw plan",
                   },
-              }
-            : {}),
+              }),
         projectionTruncated: run.projectionTruncated,
         providerRunId: run.providerRunId,
         source: run.source,
+        ...(run.streamResets === undefined
+            ? {}
+            : {
+                  streamResets: run.streamResets.map(({ resetId, streamId }) => ({
+                      resetKey: `${run.providerRunId}:${resetId}`,
+                      sourceStreamKey: `${run.providerRunId}:${streamId}`,
+                  })),
+              }),
+        updatedAtMs: run.updatedAtMs,
     };
 }

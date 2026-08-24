@@ -86,6 +86,7 @@ export function PendingMfaForm({ status }: PendingMfaFormProps) {
                                     onChange={(event) =>
                                         field.handleChange(event.currentTarget.value)
                                     }
+                                    placeholder="Example: 123456"
                                     required
                                     value={field.state.value}
                                 />
@@ -135,6 +136,7 @@ export function PendingMfaForm({ status }: PendingMfaFormProps) {
                                     onChange={(event) =>
                                         field.handleChange(event.currentTarget.value)
                                     }
+                                    placeholder="Example: ABCD-EFGH-IJKL"
                                     required
                                     spellCheck={false}
                                     type="password"

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import path from "node:path";
 
 import { Redacted } from "effect";
 
@@ -12,13 +13,17 @@ import {
     releaseBuildCommands,
     releaseProcessRoles,
 } from "../shared/releaseManifest.ts";
+import type { ManagedLogManifest } from "../worker/logs/managedLogManifest.ts";
 import type { DashboardWorkerRuntime } from "../worker/runtime.ts";
 import {
+    createWorkerLogMaintenanceExecutor,
     type DashboardWorkerProcessDependencies,
     runDashboardWorkerProcess,
 } from "./worker.ts";
 
 const projectRoot = "/srv/mira-dashboard";
+const openClawRoot = "/srv/openclaw";
+const workspaceRoot = "/srv/mira-workspace";
 const releaseId = "b".repeat(40);
 const revision = "a".repeat(40);
 const checksum = "c".repeat(64);
@@ -50,7 +55,9 @@ function processFixture(
     runtimeFailure?: Error,
     runtimeStopsUnexpectedly = false,
     waitForForceDuringDisposal = false,
-    runtimeCreationFailure?: Error
+    runtimeCreationFailure?: Error,
+    availabilityFailure?: Error,
+    availabilityStartFailure?: Error
 ) {
     const events: string[] = [];
     const logLines: string[] = [];
@@ -77,6 +84,9 @@ function processFixture(
             },
             write(line: string): undefined {
                 logLines.push(line);
+                events.push(
+                    `log:${String((JSON.parse(line) as { event?: unknown }).event)}`
+                );
                 return;
             },
         }),
@@ -101,9 +111,15 @@ function processFixture(
         },
         forceSignal: forceController.signal,
         termination:
-            runtimeFailure !== undefined || runtimeStopsUnexpectedly
+            runtimeFailure !== undefined ||
+            runtimeStopsUnexpectedly ||
+            availabilityFailure !== undefined
                 ? new Promise<"SIGTERM">(() => {})
                 : Promise.resolve("SIGTERM" as const),
+    });
+    const logMaintenance = Object.freeze({
+        availablePolicies: () => Promise.resolve(["docker-managed" as const]),
+        run: () => Promise.resolve(),
     });
     const runtime: DashboardWorkerRuntime = Object.freeze({
         completion,
@@ -142,6 +158,14 @@ function processFixture(
             return Promise.resolve();
         },
     });
+    let terminalBrokerStopped = false;
+    let availabilityStopped = false;
+    let resolveAvailabilityCompletion!: () => void;
+    let rejectAvailabilityCompletion!: (error: unknown) => void;
+    const availabilityCompletion = new Promise<void>((resolve, reject) => {
+        resolveAvailabilityCompletion = resolve;
+        rejectAvailabilityCompletion = reject;
+    });
     const dependencies = Object.freeze({
         createGatewayTransport(options) {
             events.push("gateway-create");
@@ -154,11 +178,45 @@ function processFixture(
             events.push(`logs:${processRole}:${logsDirectory}`);
             return destination;
         },
-        createRuntime(observedLayout, observedRelease, logger, observedGatewayTransport) {
+        createLogMaintenanceExecutor(observedLayout) {
+            expect(observedLayout).toBe(layout);
+            events.push("log-maintenance-create");
+            return logMaintenance;
+        },
+        createRuntime(
+            observedLayout,
+            observedRelease,
+            logger,
+            observedGatewayTransport,
+            observedWorkspaceRoot,
+            observedOpenClawRoot,
+            observedLogMaintenance
+        ) {
             expect(observedLayout).toBe(layout);
             expect(observedRelease).toBe(release);
             expect(logger).toBeDefined();
             expect(observedGatewayTransport).toBe(gatewayTransport);
+            expect(observedWorkspaceRoot).toEqual({
+                id: "workspace",
+                path: workspaceRoot,
+                writable: true,
+            });
+            expect(observedOpenClawRoot).toEqual({
+                id: "openclaw-config",
+                path: openClawRoot,
+                replacementManifest: [
+                    {
+                        maximumSizeBytes: 1_048_576,
+                        segments: ["openclaw.json"],
+                    },
+                    {
+                        maximumSizeBytes: 1_048_576,
+                        segments: ["hooks", "transforms", "agentmail.ts"],
+                    },
+                ],
+                writable: true,
+            });
+            expect(observedLogMaintenance).toBe(logMaintenance);
             expect(Object.keys(observedGatewayTransport).toSorted()).toEqual([
                 "start",
                 "stop",
@@ -182,6 +240,87 @@ function processFixture(
             events.push(`layout:${observedProjectRoot}`);
             return Promise.resolve(layout);
         },
+        resolveOpenClawFileRoot(observedOpenClawRoot, observedProductionRoot) {
+            expect(observedOpenClawRoot).toBe(openClawRoot);
+            expect(observedProductionRoot).toBe(layout.production.root);
+            events.push(`openclaw:${observedOpenClawRoot}`);
+            return Promise.resolve(
+                Object.freeze({
+                    id: "openclaw-config",
+                    path: openClawRoot,
+                    replacementManifest: Object.freeze([
+                        Object.freeze({
+                            maximumSizeBytes: 1_048_576,
+                            segments: Object.freeze(["openclaw.json"]),
+                        }),
+                        Object.freeze({
+                            maximumSizeBytes: 1_048_576,
+                            segments: Object.freeze([
+                                "hooks",
+                                "transforms",
+                                "agentmail.ts",
+                            ]),
+                        }),
+                    ]),
+                    writable: true,
+                })
+            );
+        },
+        resolveWorkspaceFileRoot(observedWorkspaceRoot, observedProductionRoot) {
+            expect(observedWorkspaceRoot).toBe(workspaceRoot);
+            expect(observedProductionRoot).toBe(layout.production.root);
+            events.push(`workspace:${observedWorkspaceRoot}`);
+            return Promise.resolve(
+                Object.freeze({
+                    id: "workspace",
+                    path: workspaceRoot,
+                    writable: true,
+                })
+            );
+        },
+        startLogMaintenanceAvailability(options) {
+            expect(options.availablePolicies).toBe(logMaintenance.availablePolicies);
+            expect(options.logMaintenanceRoot).toBe(
+                layout.production.state.logMaintenance
+            );
+            events.push("log-maintenance-availability-start");
+            if (availabilityStartFailure !== undefined) {
+                return Promise.reject(availabilityStartFailure);
+            }
+            if (availabilityFailure !== undefined) {
+                queueMicrotask(() => rejectAvailabilityCompletion(availabilityFailure));
+            }
+            return Promise.resolve(
+                Object.freeze({
+                    completion: availabilityCompletion,
+                    stop() {
+                        if (!availabilityStopped) {
+                            availabilityStopped = true;
+                            events.push("log-maintenance-availability-stop");
+                            resolveAvailabilityCompletion();
+                        }
+                        return Promise.resolve();
+                    },
+                })
+            );
+        },
+        startTerminalBroker(options) {
+            expect(options.projectRoot).toBe(layout.root);
+            events.push("terminal-broker-start");
+            return Promise.resolve(
+                Object.freeze({
+                    broker: {} as never,
+                    socketPath: layout.production.state.terminalBrokerSocket,
+                    stop() {
+                        if (!terminalBrokerStopped) {
+                            terminalBrokerStopped = true;
+                            events.push("terminal-broker-stop");
+                        }
+                        return Promise.resolve();
+                    },
+                })
+            );
+        },
     } satisfies DashboardWorkerProcessDependencies);
     return {
         dependencies,
@@ -197,6 +336,8 @@ const processOptions = Object.freeze({
     configurationSource: {
         MIRA_DASHBOARD_LOG_LEVEL: "debug",
         MIRA_DASHBOARD_PROJECT_ROOT: projectRoot,
+        MIRA_DASHBOARD_OPENCLAW_ROOT: openClawRoot,
+        MIRA_DASHBOARD_WORKSPACE_ROOT: workspaceRoot,
         NODE_ENV: "production",
         OPENCLAW_GATEWAY_TOKEN: "worker-gateway-token-test-value",
         OPENCLAW_GATEWAY_URL: "ws://127.0.0.1:18789",
@@ -205,6 +346,51 @@ const processOptions = Object.freeze({
 });
 
 describe("Dashboard worker process", () => {
+    test("binds managed rotation state to protected project-local paths", () => {
+        let observedManifest: ManagedLogManifest | undefined;
+        const executor = createWorkerLogMaintenanceExecutor(layout, {
+            createManaged(manifest) {
+                observedManifest = manifest;
+                return {
+                    run: () =>
+                        Promise.resolve({
+                            checkedTargets: 0,
+                            dryRun: false,
+                            finishedAtMs: 1,
+                            ok: true,
+                            results: [],
+                            startedAtMs: 0,
+                        }),
+                    status: () =>
+                        Promise.resolve({
+                            observedAtMs: 1,
+                            policyId: "docker-managed",
+                            targetCount: 0,
+                        }),
+                };
+            },
+            createSystem: () => ({
+                availablePolicies: () => Promise.resolve([]),
+                run: () => Promise.resolve(),
+            }),
+        });
+
+        expect(executor).toBeDefined();
+        expect(observedManifest?.lockPath).toBe(
+            path.join(layout.production.state.logMaintenance, "managed.lock")
+        );
+        expect(observedManifest?.statePath).toBe(
+            path.join(layout.production.state.logMaintenance, "managed-state.json")
+        );
+        expect(
+            observedManifest?.fileTargets
+                .filter(({ id }) => id.startsWith("dashboard."))
+                .every(({ filePath }) =>
+                    filePath.startsWith(`${layout.production.state.logs}/`)
+                )
+        ).toBe(true);
+    });
+
     test("validates its release and database before waiting for shutdown", async () => {
         const fixture = processFixture();
 
@@ -213,12 +399,21 @@ describe("Dashboard worker process", () => {
         expect(fixture.events).toEqual([
             `layout:${projectRoot}`,
             `release:worker:${layout.production.releases}:${release.releaseRoot}`,
+            `workspace:${workspaceRoot}`,
+            `openclaw:${openClawRoot}`,
             `logs:worker:${layout.production.state.logs}`,
             "signals-create",
+            "terminal-broker-start",
             "gateway-create",
+            "log-maintenance-create",
             "runtime-create",
             "runtime-initialize",
+            "log-maintenance-availability-start",
+            "log:runtime.started",
+            "log-maintenance-availability-stop",
+            "terminal-broker-stop",
             "runtime-dispose",
+            "log:runtime.stopped",
             "signals-dispose",
             "log-flush",
         ]);
@@ -271,6 +466,57 @@ describe("Dashboard worker process", () => {
         };
         expect(fatal.event).toBe("runtime.start_failed");
         expect(JSON.stringify(fatal)).not.toContain("private coordinator failure");
+    });
+
+    test("fails and clears availability before disposing after a publisher defect", async () => {
+        const failure = new Error("private availability publication failure");
+        const fixture = processFixture(
+            undefined,
+            undefined,
+            false,
+            false,
+            undefined,
+            failure
+        );
+
+        expect(
+            await runDashboardWorkerProcess(processOptions, fixture.dependencies).catch(
+                (error: unknown) => error
+            )
+        ).toBe(failure);
+        expect(fixture.events.indexOf("log-maintenance-availability-stop")).toBeLessThan(
+            fixture.events.indexOf("terminal-broker-stop")
+        );
+        expect(fixture.events.indexOf("terminal-broker-stop")).toBeLessThan(
+            fixture.events.indexOf("runtime-dispose")
+        );
+        expect(fixture.logLines.join("\n")).not.toContain(
+            "private availability publication failure"
+        );
+    });
+
+    test("disposes initialized ownership when the initial availability publish fails", async () => {
+        const failure = new Error("private initial publication failure");
+        const fixture = processFixture(
+            undefined,
+            undefined,
+            false,
+            false,
+            undefined,
+            undefined,
+            failure
+        );
+
+        expect(
+            await runDashboardWorkerProcess(processOptions, fixture.dependencies).catch(
+                (error: unknown) => error
+            )
+        ).toBe(failure);
+        expect(fixture.events).toContain("runtime-initialize");
+        expect(fixture.events).not.toContain("log-maintenance-availability-stop");
+        expect(fixture.events.indexOf("terminal-broker-stop")).toBeLessThan(
+            fixture.events.indexOf("runtime-dispose")
+        );
     });
 
     test("allows a second signal to force runtime-failure cleanup", async () => {

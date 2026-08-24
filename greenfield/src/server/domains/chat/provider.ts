@@ -34,7 +34,10 @@ export interface ChatProviderHistoryPage {
 
 /** Audited chat.history snapshot for the newest selected visible active run. */
 export interface ChatProviderInFlightRun {
-    readonly plan?: Readonly<{ readonly steps: readonly ChatPlanStep[] }>;
+    readonly plan?: Readonly<{
+        readonly explanation?: string;
+        readonly steps: readonly ChatPlanStep[];
+    }>;
     readonly runId: string;
     readonly text: string;
 }
@@ -108,16 +111,22 @@ export type ChatProviderEvent =
           providerRunId: string;
           providerSequence: number;
           receivedAtMs: number;
+          /** Stable identity for one provider-owned cumulative item segment. */
+          segmentId?: string;
           sessionKey: string;
           stream: "assistant" | "thinking";
+          /** Stable provider stream family used to reconcile cumulative snapshots. */
+          streamId?: string;
           text: string;
       }>
     | Readonly<{
           callId: string;
+          callIdSource?: "synthetic";
           input?: string;
           isError: boolean;
           kind: "tool";
           name: string;
+          nameSource?: "synthetic";
           output?: string;
           phase: "failed" | "running" | "started" | "succeeded";
           providerRunId: string;
@@ -148,6 +157,7 @@ export type ChatProviderEvent =
           sessionKey: string;
       }>
     | Readonly<{
+          explanation?: string;
           kind: "plan";
           phase: "update";
           providerRunId: string;

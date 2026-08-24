@@ -169,6 +169,29 @@ describe("chat queries", () => {
         );
     });
 
+    test("stops task pagination when an empty page repeats its cursor", () => {
+        const options = openClawTaskListQueryOptions(
+            { query: jest.fn() } as unknown as DashboardTrpcClient,
+            sessionKey,
+            "finished"
+        );
+        const firstPage = {
+            nextCursor: "1",
+            tasks: [taskSummary("task-1", "First")],
+        };
+        const emptyPage = { nextCursor: "1", tasks: [] };
+
+        expect(
+            options.getNextPageParam?.(firstPage, [firstPage], undefined, [undefined])
+        ).toBe("1");
+        expect(
+            options.getNextPageParam?.(emptyPage, [firstPage, emptyPage], "1", [
+                undefined,
+                "1",
+            ])
+        ).toBeUndefined();
+    });
+
     test("merges active and finished ledgers without rolling terminal overlap backward", () => {
         const tasks = mergeOpenClawTaskProjectionPages(
             {

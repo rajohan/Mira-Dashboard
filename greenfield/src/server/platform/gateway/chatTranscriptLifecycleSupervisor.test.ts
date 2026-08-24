@@ -90,7 +90,7 @@ describe("chat transcript lifecycle supervisor", () => {
         await flush();
 
         expect(lifecycleEvents).toEqual(["reset:agent:main:main"]);
-        expect(boundaries).toEqual([1800, 1950]);
+        expect(boundaries).toEqual([1800, 2000]);
 
         nowMs = 2100;
         listener!.onState?.({
@@ -99,7 +99,16 @@ describe("chat transcript lifecycle supervisor", () => {
             reconnectAttempt: 0,
         });
         await flush();
-        expect(boundaries).toEqual([1800, 1950, 2100]);
+        expect(boundaries).toEqual([1800, 2000]);
+
+        nowMs = 2200;
+        listener!.onState?.({
+            connectionGeneration: 3,
+            phase: "connected",
+            reconnectAttempt: 0,
+        });
+        await flush();
+        expect(boundaries).toEqual([1800, 2000, 2200]);
 
         await supervisor.stop();
         expect(unsubscribed).toBe(1);
@@ -109,7 +118,181 @@ describe("chat transcript lifecycle supervisor", () => {
             receivedSequence: 9,
         });
         await flush();
-        expect(boundaries).toEqual([1800, 1950, 2100]);
+        expect(boundaries).toEqual([1800, 2000, 2200]);
+    });
+
+    test("persists a newer loss episode queued while an earlier boundary write is active", async () => {
+        const boundaries: number[] = [];
+        const firstLossWrite = Promise.withResolvers<void>();
+        const lifecycle = createChatTranscriptLifecycleCoordinator({
+            beginTranscriptControl: async () => {},
+            failTranscriptControl: async () => {},
+            listReconcilingTranscripts: () => [],
+            markTranscriptTransportBoundary: async (occurredAtMs) => {
+                boundaries.push(occurredAtMs ?? -1);
+                if (occurredAtMs === 200) await firstLossWrite.promise;
+                return [];
+            },
+            observeTranscriptLifecycleEvent: async () => [],
+            observeTranscriptSnapshot: async () => [],
+            readTranscriptState: (sessionKey) => ({
+                currentGeneration: 1,
+                sessionKey,
+                status: "ready",
+            }),
+            reconcileTranscript: async () => [],
+            settleUnchangedTranscriptControl: async () => {},
+        });
+        let listener: PersistentGatewayListener | undefined;
+        let nowMs = 100;
+        const supervisor = createChatTranscriptLifecycleSupervisor({
+            lifecycle,
+            nowMs: () => nowMs,
+            transport: {
+                subscribe(next) {
+                    listener = next;
+                    return () => {};
+                },
+            },
+        });
+        await supervisor.ready;
+
+        listener!.onState?.({
+            connectionGeneration: 1,
+            lastActivityAtMs: 150,
+            phase: "connected",
+            reconnectAttempt: 0,
+        });
+        nowMs = 200;
+        listener!.onState?.({
+            connectionGeneration: 1,
+            lastActivityAtMs: 150,
+            phase: "degraded",
+            reconnectAttempt: 1,
+        });
+        await flush();
+        expect(boundaries).toEqual([100, 200]);
+
+        nowMs = 210;
+        listener!.onState?.({
+            connectionGeneration: 2,
+            lastActivityAtMs: 210,
+            phase: "connected",
+            reconnectAttempt: 0,
+        });
+        nowMs = 220;
+        listener!.onState?.({
+            connectionGeneration: 2,
+            lastActivityAtMs: 215,
+            phase: "degraded",
+            reconnectAttempt: 1,
+        });
+        nowMs = 230;
+        listener!.onState?.({
+            connectionGeneration: 3,
+            lastActivityAtMs: 230,
+            phase: "connected",
+            reconnectAttempt: 0,
+        });
+        await flush();
+        expect(boundaries).toEqual([100, 200]);
+
+        firstLossWrite.resolve();
+        await flush();
+        expect(boundaries).toEqual([100, 200, 220]);
+
+        await supervisor.stop();
+    });
+
+    test("retains the newest loss fence while its coalesced write waits behind lifecycle work", async () => {
+        const boundaries: number[] = [];
+        const lifecycleWrite = Promise.withResolvers<void>();
+        const lifecycle = createChatTranscriptLifecycleCoordinator({
+            beginTranscriptControl: async () => {},
+            failTranscriptControl: async () => {},
+            listReconcilingTranscripts: () => [],
+            markTranscriptTransportBoundary: async (occurredAtMs) => {
+                boundaries.push(occurredAtMs ?? -1);
+                return [];
+            },
+            observeTranscriptLifecycleEvent: async () => {
+                await lifecycleWrite.promise;
+                return [];
+            },
+            observeTranscriptSnapshot: async () => [],
+            readTranscriptState: (sessionKey) => ({
+                currentGeneration: 1,
+                sessionKey,
+                status: "ready",
+            }),
+            reconcileTranscript: async () => [],
+            settleUnchangedTranscriptControl: async () => {},
+        });
+        let listener: PersistentGatewayListener | undefined;
+        let nowMs = 100;
+        const supervisor = createChatTranscriptLifecycleSupervisor({
+            lifecycle,
+            nowMs: () => nowMs,
+            transport: {
+                subscribe(next) {
+                    listener = next;
+                    return () => {};
+                },
+            },
+        });
+        await supervisor.ready;
+        listener!.onState?.({
+            connectionGeneration: 1,
+            phase: "connected",
+            reconnectAttempt: 0,
+        });
+        listener!.onEvent?.({
+            connectionGeneration: 1,
+            frame: {
+                event: "sessions.changed",
+                sessionLifecycle: {
+                    occurredAtMs: 180,
+                    reason: "reset",
+                    sessionKey: "agent:main:main",
+                    updatedAtMs: 180,
+                },
+                type: "event",
+            },
+            receivedAtMs: 180,
+        });
+        nowMs = 200;
+        listener!.onState?.({
+            connectionGeneration: 1,
+            phase: "degraded",
+            reconnectAttempt: 1,
+        });
+        await flush();
+
+        nowMs = 210;
+        listener!.onState?.({
+            connectionGeneration: 2,
+            phase: "connected",
+            reconnectAttempt: 0,
+        });
+        nowMs = 220;
+        listener!.onState?.({
+            connectionGeneration: 2,
+            phase: "degraded",
+            reconnectAttempt: 1,
+        });
+        nowMs = 230;
+        listener!.onState?.({
+            connectionGeneration: 3,
+            phase: "connected",
+            reconnectAttempt: 0,
+        });
+        await flush();
+        expect(boundaries).toEqual([100]);
+
+        lifecycleWrite.resolve();
+        await flush();
+        expect(boundaries).toEqual([100, 220]);
+        await supervisor.stop();
     });
 
     test("reports startup bridge failures, schedules reconciliation, and clears it on stop", async () => {

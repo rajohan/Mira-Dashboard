@@ -28,6 +28,9 @@ const baseRuntimeOptions = {
         startupMode: "validate-only",
         stateDirectory: "/srv/mira-dashboard/state",
     },
+    logMaintenance: Object.freeze({
+        run: () => Promise.resolve(),
+    }),
     pid: 123,
     releaseId: "a".repeat(40),
     sideEffects: {
@@ -128,6 +131,7 @@ function runtimeFixture(initializationFailure?: Error) {
             events.push("coordinator-create");
             expect(options.repository).toBe(repository);
             expect(options.commitCacheAttempt).toBeFunction();
+            expect(options.findAction?.("maintenance.rotate-logs")).toBeDefined();
             return coordinator;
         },
         createDatabaseRuntime() {
@@ -265,6 +269,48 @@ describe("Dashboard worker runtime", () => {
         ]);
         expect(fixture.forceSignals).toEqual([force.signal]);
         expect(await runtime.completion).toBeUndefined();
+    });
+
+    test("registers and disposes the worker-only workspace writer", async () => {
+        const fixture = runtimeFixture();
+        const options: DashboardWorkerRuntimeOptions = {
+            ...fixture.options,
+            workspaceFiles: Object.freeze({
+                apply: () =>
+                    Promise.resolve({
+                        modifiedAtMs: 1,
+                        revision: "a".repeat(64),
+                        sizeBytes: 0,
+                    }),
+                removeSettledReplacementIntent: () => Promise.resolve(),
+                dispose() {
+                    fixture.events.push("workspace-files-dispose");
+                },
+            }),
+        };
+        const dependencies: DashboardWorkerRuntimeDependencies = {
+            ...fixture.dependencies,
+            createCoordinator(coordinatorOptions) {
+                expect(
+                    coordinatorOptions.findAction?.("workspace-files.apply-write")
+                ).toBeDefined();
+                expect(
+                    coordinatorOptions.findAction?.("workspace-files.apply-replacement")
+                ).toBeDefined();
+                return fixture.dependencies.createCoordinator(coordinatorOptions);
+            },
+        };
+        const runtime = createDashboardWorkerRuntime(options, dependencies);
+
+        await runtime.initialize();
+        await runtime.dispose();
+
+        expect(fixture.events.indexOf("coordinator-dispose")).toBeLessThan(
+            fixture.events.indexOf("workspace-files-dispose")
+        );
+        expect(fixture.events.indexOf("workspace-files-dispose")).toBeLessThan(
+            fixture.events.indexOf("gateway-stop")
+        );
     });
 
     test("forces teardown when durable notification release stalls", async () => {

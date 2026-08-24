@@ -34,6 +34,9 @@ describe("generated contract documentation", () => {
         expect(first.get("README.md")).toContain(
             "[Application configuration](configuration.md)"
         );
+        expect(first.get("README.md")).toContain(
+            "[Browser routes and features](routes-and-features.md)"
+        );
         expect(first.get("README.md")).not.toContain(
             "database, configuration, and browser"
         );
@@ -93,6 +96,15 @@ describe("generated contract documentation", () => {
             "| `openClawTasks.cancel` | mutation | openClawTasks | Authenticated: openclaw-tasks:write |"
         );
         expect(procedureDocumentation).toContain(
+            "| `files.list` | query | files | Authenticated browser session: files:read |"
+        );
+        expect(procedureDocumentation).toContain(
+            "| `logs.tail` | query | logs | Authenticated browser session: logs:read |"
+        );
+        expect(procedureDocumentation).toContain(
+            "| `terminal.prepareSession` | mutation | terminal | Authenticated browser session: terminal:write; MFA enrollment required; recent MFA when enabled |"
+        );
+        expect(procedureDocumentation).toContain(
             "| None | None | Returns bootstrap, pending MFA"
         );
         expect(procedureDocumentation).toContain("`events.stream`");
@@ -130,6 +142,40 @@ describe("generated contract documentation", () => {
         );
         expect(rawHttpDocumentation).toContain(
             "| POST | `/api/chat/speech/synthesize` | Authenticated: chat:write | 200, 400, 401, 403, 404, 405, 408, 413, 415, 429, 502, 503, 504 | [schema](./schemas/chat.speech.synthesize.input.schema.json) — `application/json` | Buffered binary, at most 8388608 bytes — `audio/mpeg` | None |"
+        );
+        expect(rawHttpDocumentation).toContain(
+            "| GET | `/api/files/content/:ticketId` | Authenticated browser session: files:read |"
+        );
+        expect(rawHttpDocumentation).toContain(
+            "| PUT | `/api/files/uploads/:ticketId` | Authenticated browser session: files:write; MFA enrollment required; recent MFA when enabled |"
+        );
+        expect(rawHttpDocumentation).toContain(
+            "| GET | `/api/terminal/sessions/:sessionId/socket` | Authenticated browser session: terminal:write; MFA enrollment required; recent MFA when enabled | 101, 400, 401, 403, 404, 405, 409, 410, 426, 429, 500, 503 |"
+        );
+        const routeDocumentation = first.get("routes-and-features.md");
+        expect(routeDocumentation).toContain(
+            "| `/files` | Browser session | Files | `files` |"
+        );
+        expect(routeDocumentation).toContain(
+            "| `/logs` | Browser session | Logs | `logs` |"
+        );
+        expect(routeDocumentation).toContain(
+            "| `/terminal` | Browser session | Terminal | `terminal` |"
+        );
+        expect(routeDocumentation?.match(/^\| `\//gmu)).toHaveLength(13);
+        expect(first.has("schemas/files.upload.accepted.schema.json")).toBe(true);
+        expect(first.has("schemas/logs.tail.output.schema.json")).toBe(true);
+        expect(first.has("schemas/terminal.prepareSession.output.schema.json")).toBe(
+            true
+        );
+        expect(first.get("schemas/files.list.output.schema.json")).toContain(
+            "rejects traversal names and path separators"
+        );
+        expect(first.get("schemas/logs.tail.output.schema.json")).toContain(
+            "every redacted log line ID to be unique"
+        );
+        expect(first.get("schemas/terminal.getRuntime.output.schema.json")).toContain(
+            "initial terminal path"
         );
         const realtimeDocumentation = first.get("realtime-events.md");
         for (const [topic, snapshot, idSchema] of [

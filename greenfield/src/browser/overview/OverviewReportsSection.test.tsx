@@ -179,7 +179,7 @@ describe("OverviewReportsSection", () => {
             reportPage([updatedReport, initialReport], true),
         ]);
 
-        expect(await screen.findByLabelText("Loading reports overview…")).toBeTruthy();
+        expect(await screen.findByLabelText("Loading recent reports…")).toBeTruthy();
         firstPage.resolve(reportPage([initialReport]));
         expect(
             await screen.findByRole("heading", { level: 3, name: "Initial report" })
@@ -224,7 +224,7 @@ describe("OverviewReportsSection", () => {
         expect(
             await screen.findByRole("heading", {
                 level: 2,
-                name: "Reports overview unavailable",
+                name: "Recent reports unavailable",
             })
         ).toBeTruthy();
         expect(screen.queryByText(rawFailure.message)).toBeNull();

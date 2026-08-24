@@ -2,6 +2,10 @@ import { agentProcedureNames, agentRouter } from "../domains/agents/procedures.t
 import { cacheProcedureNames, cacheRouter } from "../domains/cache/procedures.ts";
 import { chatProcedureNames, chatRouter } from "../domains/chat/procedures.ts";
 import {
+    workspaceFileProcedureNames,
+    workspaceFilesRouter,
+} from "../domains/files/procedures.ts";
+import {
     gatewayProcedureNames,
     gatewayRouter,
 } from "../domains/gatewayConnection/procedures.ts";
@@ -15,6 +19,7 @@ import {
     scheduleProcedureNames,
     scheduleRouter,
 } from "../domains/jobs/procedures.ts";
+import { logProcedureNames, logsRouter } from "../domains/logs/procedures.ts";
 import {
     incidentProcedureNames,
     incidentRouter,
@@ -49,6 +54,10 @@ import {
 } from "../domains/security/securityAuditProcedures.ts";
 import { systemProcedureNames, systemRouter } from "../domains/system/procedures.ts";
 import { taskProcedureNames, taskRouter } from "../domains/tasks/procedures.ts";
+import {
+    terminalProcedureNames,
+    terminalRouter,
+} from "../domains/terminal/procedures.ts";
 import { router } from "./trpc.ts";
 
 function namespacedProcedureNames(
@@ -67,10 +76,12 @@ export const appRouter = router({
     cache: cacheRouter,
     chat: chatRouter,
     events: eventsRouter,
+    files: workspaceFilesRouter,
     gateway: gatewayRouter,
     gatewaySessions: gatewaySessionsRouter,
     incidents: incidentRouter,
     jobs: jobRouter,
+    logs: logsRouter,
     monitoring: monitoringRouter,
     notifications: notificationRouter,
     openClawCron: openClawCronRouter,
@@ -80,6 +91,7 @@ export const appRouter = router({
     securityAudit: securityAuditRouter,
     system: systemRouter,
     tasks: taskRouter,
+    terminal: terminalRouter,
 });
 
 /** First-party procedure inventory produced by the same route records as the root router. */
@@ -91,10 +103,12 @@ export const appRouterProcedureNames = Object.freeze([
     ...namespacedProcedureNames("cache", cacheProcedureNames),
     ...namespacedProcedureNames("chat", chatProcedureNames),
     ...namespacedProcedureNames("events", eventsProcedureNames),
+    ...namespacedProcedureNames("files", workspaceFileProcedureNames),
     ...namespacedProcedureNames("gateway", gatewayProcedureNames),
     ...namespacedProcedureNames("gatewaySessions", gatewaySessionProcedureNames),
     ...namespacedProcedureNames("incidents", incidentProcedureNames),
     ...namespacedProcedureNames("jobs", jobProcedureNames),
+    ...namespacedProcedureNames("logs", logProcedureNames),
     ...namespacedProcedureNames("monitoring", monitoringProcedureNames),
     ...namespacedProcedureNames("notifications", notificationProcedureNames),
     ...namespacedProcedureNames("openClawCron", openClawCronProcedureNames),
@@ -104,6 +118,7 @@ export const appRouterProcedureNames = Object.freeze([
     ...namespacedProcedureNames("securityAudit", securityAuditProcedureNames),
     ...namespacedProcedureNames("system", systemProcedureNames),
     ...namespacedProcedureNames("tasks", taskProcedureNames),
+    ...namespacedProcedureNames("terminal", terminalProcedureNames),
 ]);
 
 /** Type-only root API contract consumed by TypeScript clients. */

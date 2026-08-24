@@ -6,10 +6,12 @@ import {
     parseJobActionOutputMessage,
     parseJobActionProgress,
     validateJobActionRegistration,
+    workspaceFileReplaceJobActionDefinition,
+    workspaceFileWriteJobActionDefinition,
 } from "./actionRegistry.ts";
 
 describe("durable job action registry", () => {
-    test("exposes pure smoke and cache definitions without worker authority", () => {
+    test("exposes pure smoke, cache, and fixed log definitions without worker authority", () => {
         const registration = findJobActionDefinition("system.worker-smoke");
 
         expect(registration).toMatchObject({
@@ -23,6 +25,17 @@ describe("durable job action registry", () => {
             initialDue: "immediate",
             manualExposure: "cache-write",
             scheduleId: "cache.system-host",
+        });
+        expect(findJobActionDefinition("maintenance.rotate-logs")).toMatchObject({
+            actionPayload: { policyId: "docker-managed" },
+            attemptLimit: 1,
+            defaultEnabled: true,
+            initialDue: "immediate",
+            manualExposure: "none",
+            resourceClass: "host-heavy",
+            resourceKeys: ["host.logs"],
+            retrySafe: false,
+            scheduleId: "maintenance.rotate-managed-logs",
         });
         expect(
             isRegisteredJobSchedule("system.worker-smoke", "system.worker-smoke")
@@ -81,6 +94,15 @@ describe("durable job action registry", () => {
                 execute: null as never,
             })
         ).toThrow("Job action executor is invalid");
+        expect(() =>
+            validateJobActionRegistration({
+                ...smoke,
+                afterSuccessfulSettlement: null as never,
+                execute: () => {
+                    throw new Error("not executed by this validation test");
+                },
+            })
+        ).toThrow("Job action settlement handler is invalid");
     });
 
     test("bounds progress and output before persistence", () => {
@@ -90,5 +112,18 @@ describe("durable job action registry", () => {
         expect(() => parseJobActionProgress({ value: "x".repeat(17 * 1024) })).toThrow();
         expect(() => parseJobActionOutputMessage("🙂".repeat(2000))).toThrow();
         expect(() => parseJobActionOutputMessage("line\nbreak")).toThrow();
+    });
+
+    test("publishes honest operation-specific workspace retry metadata", () => {
+        expect(workspaceFileWriteJobActionDefinition).toMatchObject({
+            actionKey: "workspace-files.apply-write",
+            attemptLimit: 1,
+            retrySafe: false,
+        });
+        expect(workspaceFileReplaceJobActionDefinition).toMatchObject({
+            actionKey: "workspace-files.apply-replacement",
+            attemptLimit: 3,
+            retrySafe: true,
+        });
     });
 });

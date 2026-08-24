@@ -72,6 +72,7 @@ export function Select<TValue extends string>({
                     "border-primary-600 bg-primary-900 z-60 mt-1 max-h-64 w-(--button-width) overflow-auto rounded-lg border p-1 shadow-xl shadow-black/35",
                     "transition duration-100 focus:outline-none data-closed:scale-95 data-closed:opacity-0 motion-reduce:transition-none"
                 )}
+                modal={false}
                 transition
             >
                 {options.map((option) => (

@@ -83,7 +83,7 @@ describe("job run table", () => {
         render(<JobRunTable onSelect={() => {}} runs={[]} />);
 
         expect(screen.getByRole("heading", { name: "No job runs" })).toBeTruthy();
-        expect(screen.queryByRole("table", { name: "Durable job runs" })).toBeNull();
+        expect(screen.queryByRole("table", { name: "Job runs" })).toBeNull();
     });
 
     test("selects a labelled run and virtualizes a maximum-sized page", async () => {
@@ -102,7 +102,7 @@ describe("job run table", () => {
         const firstRun = screen.getByRole("button", {
             name: `Open run Durable job 0; action maintenance.job-0; id ${runs[0]!.id}`,
         });
-        expect(screen.getByRole("table", { name: "Durable job runs" })).toBeTruthy();
+        expect(screen.getByRole("table", { name: "Job runs" })).toBeTruthy();
         expect(
             screen.getByRole("button", {
                 name: `Open run Durable job 0; action maintenance.job-0; id ${runs[1].id}`,
@@ -110,9 +110,7 @@ describe("job run table", () => {
         ).toHaveAttribute("aria-current", "true");
         expect(screen.queryByText("Durable job 49")).toBeNull();
         expect(
-            screen
-                .getByRole("table", { name: "Durable job runs" })
-                .querySelector("td[height]")
+            screen.getByRole("table", { name: "Job runs" }).querySelector("td[height]")
         ).toBeTruthy();
 
         await user.click(firstRun);

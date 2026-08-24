@@ -8,7 +8,9 @@ import {
 } from "./gatewayConfiguration.ts";
 import {
     configurationChoice,
+    configurationOpenClawRoot,
     configurationProjectRoot,
+    configurationWorkspaceRoot,
     pickApplicationEnvironment,
     type ApplicationLogLevel,
     type ApplicationNodeEnvironment,
@@ -20,7 +22,9 @@ export interface WorkerConfiguration {
     readonly gatewayUrl: string;
     readonly logLevel: ApplicationLogLevel;
     readonly nodeEnvironment: ApplicationNodeEnvironment;
+    readonly openClawRoot: string;
     readonly projectRoot: string;
+    readonly workspaceRoot: string;
 }
 
 const optionalEnvironmentValueSchema = v.optional(v.unknown());
@@ -28,7 +32,9 @@ const optionalEnvironmentValueSchema = v.optional(v.unknown());
 /** Valibot projection for the complete accepted worker-process environment surface. */
 export const workerConfigurationEnvironmentSchema = v.object({
     MIRA_DASHBOARD_LOG_LEVEL: optionalEnvironmentValueSchema,
+    MIRA_DASHBOARD_OPENCLAW_ROOT: optionalEnvironmentValueSchema,
     MIRA_DASHBOARD_PROJECT_ROOT: optionalEnvironmentValueSchema,
+    MIRA_DASHBOARD_WORKSPACE_ROOT: optionalEnvironmentValueSchema,
     NODE_ENV: optionalEnvironmentValueSchema,
     OPENCLAW_GATEWAY_TOKEN: optionalEnvironmentValueSchema,
     OPENCLAW_GATEWAY_URL: optionalEnvironmentValueSchema,
@@ -66,6 +72,8 @@ export function parseWorkerConfiguration(
             "production",
             "test",
         ] as const),
+        openClawRoot: configurationOpenClawRoot(input),
         projectRoot: configurationProjectRoot(input),
+        workspaceRoot: configurationWorkspaceRoot(input),
     });
 }

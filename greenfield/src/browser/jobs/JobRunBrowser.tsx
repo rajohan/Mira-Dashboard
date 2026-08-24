@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { Filter, RotateCcw } from "lucide-react";
-import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import * as v from "valibot";
 
 import {
@@ -19,6 +19,7 @@ import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
 import { ConfirmModal } from "../ui/ConfirmModal.tsx";
+import { Form } from "../ui/Form.tsx";
 import { FormField } from "../ui/FormField.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
@@ -291,7 +292,7 @@ function SelectedJobRun({ focusRequested, id, onFocusHandled }: SelectedJobRunPr
                 busy={cancellation.isPending}
                 confirmLabel="Cancel run"
                 danger
-                description={`Cancel “${detail.data.run.displayName}”? Running work receives a durable cooperative cancellation request when its policy allows it.`}
+                description={`Cancel “${detail.data.run.displayName}”? The job will stop if it supports cancellation.`}
                 onCancel={() => setConfirmingCancel(false)}
                 onConfirm={() =>
                     cancellation.mutate(
@@ -372,14 +373,15 @@ export function JobRunBrowser({
             },
         });
     };
-    const applyFilters = (event: FormEvent<HTMLFormElement>) => {
-        event.preventDefault();
+    const applyFilters = () => {
         const candidate = scheduleDraft.trim();
         let nextScheduleFilter: string | undefined;
         if (candidate.length > 0) {
             const parsed = v.safeParse(scheduleIdSchema, candidate);
             if (!parsed.success) {
-                setScheduleFilterError("Use a canonical Dashboard schedule id.");
+                setScheduleFilterError(
+                    "Enter a schedule ID such as system.worker-smoke."
+                );
                 setTimeout(() => scheduleFilterInputRef.current?.focus(), 0);
                 return;
             }
@@ -447,8 +449,8 @@ export function JobRunBrowser({
                     Queue and run history
                 </Heading>
                 <Text className="mt-1" tone="muted">
-                    Inspect durable execution, worker capacity, bounded output, and
-                    cancellation state.
+                    See what is waiting or running, available workers, saved output, and
+                    cancellation status.
                 </Text>
             </div>
             <Alert
@@ -471,12 +473,12 @@ export function JobRunBrowser({
                     summary={summary}
                 />
             )}
-            <form
+            <Form
                 aria-label="Job run filters"
                 className="border-primary-700 bg-primary-900/35 mt-6 grid gap-3 rounded-xl border p-4 md:grid-cols-2 xl:grid-cols-[repeat(3,minmax(0,1fr))_minmax(12rem,1fr)_auto] xl:items-end"
                 onSubmit={applyFilters}
             >
-                <FormField label="State">
+                <FormField label="Status">
                     <Select
                         className="mt-2 capitalize"
                         onChange={setStateDraft}
@@ -484,7 +486,7 @@ export function JobRunBrowser({
                         value={stateDraft}
                     />
                 </FormField>
-                <FormField label="Resource class">
+                <FormField label="Work size">
                     <Select
                         className="mt-2 capitalize"
                         onChange={setResourceClassDraft}
@@ -492,7 +494,7 @@ export function JobRunBrowser({
                         value={resourceClassDraft}
                     />
                 </FormField>
-                <FormField label="Trigger">
+                <FormField label="Started by">
                     <Select
                         className="mt-2 capitalize"
                         onChange={setTriggerTypeDraft}
@@ -500,7 +502,7 @@ export function JobRunBrowser({
                         value={triggerTypeDraft}
                     />
                 </FormField>
-                <FormField error={scheduleFilterError} label="Schedule id">
+                <FormField error={scheduleFilterError} label="Schedule ID">
                     <Input
                         className="mt-2 font-mono"
                         maxLength={scheduleIdMaximumLength}
@@ -508,7 +510,7 @@ export function JobRunBrowser({
                             setScheduleFilterError(undefined);
                             setScheduleDraft(event.currentTarget.value);
                         }}
-                        placeholder="system.worker-smoke"
+                        placeholder="Example: system.worker-smoke"
                         ref={scheduleFilterInputRef}
                         value={scheduleDraft}
                     />
@@ -523,7 +525,7 @@ export function JobRunBrowser({
                         Reset
                     </Button>
                 </div>
-            </form>
+            </Form>
             <Alert
                 className="mt-4"
                 focusOnError={false}
@@ -537,7 +539,7 @@ export function JobRunBrowser({
             <div className="mt-7">
                 {search.runId === undefined ? (
                     <PageState
-                        description="Select a run from any page, or open a validated runId deep link."
+                        description="Choose a run from the table to see its details."
                         status="empty"
                         title="Select a job run"
                     />

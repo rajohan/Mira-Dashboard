@@ -96,10 +96,10 @@ describe("OverviewAgentsCard", () => {
         expect(
             await screen.findByRole("heading", { level: 2, name: "Agent activity" })
         ).toBeTruthy();
-        expect(within(metric("Configured")).getByText("2")).toBeTruthy();
+        expect(within(metric("Added")).getByText("2")).toBeTruthy();
         expect(within(metric("Working")).getByText("1")).toBeTruthy();
         expect(within(metric("Idle")).getByText("1")).toBeTruthy();
-        expect(within(metric("Missing projection")).getByText("0")).toBeTruthy();
+        expect(within(metric("Status unavailable")).getByText("0")).toBeTruthy();
         expect(within(metric("Active")).getByText("1")).toBeTruthy();
         expect(within(metric("Idle sessions")).getByText("1")).toBeTruthy();
         expect(screen.getByText("Complete the Phase 3 overview")).toBeTruthy();
@@ -107,7 +107,7 @@ describe("OverviewAgentsCard", () => {
             screen.getByText(`Started ${formatDashboardDateTime(timestampMs - 60_000)}`)
         ).toHaveAttribute("dateTime", new Date(timestampMs - 60_000).toISOString());
         expect(
-            screen.getByText(/Availability is not online status or health/u)
+            screen.getByText(/does not prove that the agent is online or healthy/u)
         ).toBeTruthy();
         expect(screen.getByRole("link", { name: "View agents" })).toHaveAttribute(
             "href",
@@ -131,9 +131,11 @@ describe("OverviewAgentsCard", () => {
             })),
         });
 
-        expect(await screen.findByText("All configured agents are idle.")).toBeTruthy();
+        expect(await screen.findByText("All agents are idle.")).toBeTruthy();
         expect(within(metric("Idle")).getByText("2")).toBeTruthy();
-        expect(screen.getByText(/not online status or health/u)).toBeTruthy();
+        expect(
+            screen.getByText(/does not prove that the agent is online or healthy/u)
+        ).toBeTruthy();
     });
 
     test("discloses a cross-projection mismatch without inventing availability", async () => {
@@ -141,12 +143,13 @@ describe("OverviewAgentsCard", () => {
 
         expect(
             await screen.findByText(
-                "No configured agent currently reports working; one or more status projections are missing."
+                "No agent currently reports working. Status is unavailable for one or more agents."
             )
         ).toBeTruthy();
         expect(within(metric("Idle")).getByText("1")).toBeTruthy();
-        expect(within(metric("Missing projection")).getByText("1")).toBeTruthy();
-        expect(screen.queryByText(/unavailable/u)).toBeNull();
-        expect(screen.getByText(/not online status or health/u)).toBeTruthy();
+        expect(within(metric("Status unavailable")).getByText("1")).toBeTruthy();
+        expect(
+            screen.getByText(/does not prove that the agent is online or healthy/u)
+        ).toBeTruthy();
     });
 });

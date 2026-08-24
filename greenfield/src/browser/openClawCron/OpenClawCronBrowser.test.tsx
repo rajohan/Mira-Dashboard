@@ -148,7 +148,7 @@ function renderBrowser(
     return { queryClient, realtimeClient, view };
 }
 
-describe("OpenClaw cron browser", () => {
+describe("OpenClaw scheduled jobs browser", () => {
     test("validates the full delivery patch inline and disables Save until valid", async () => {
         const onClose = jest.fn();
         const onSubmit = jest.fn(() => Promise.resolve());
@@ -164,14 +164,12 @@ describe("OpenClaw cron browser", () => {
         try {
             const editor = screen.getByRole("dialog", { name: "Edit Beta" });
             const textarea = within(editor).getByRole("textbox", {
-                name: "Reviewed definition and delivery JSON",
+                name: "Job settings (JSON)",
             });
             const save = within(editor).getByRole("button", {
-                name: "Save reviewed fields",
+                name: "Save changes",
             });
-            expect(
-                within(editor).getByText("Change at least one reviewed field.")
-            ).toBeTruthy();
+            expect(within(editor).getByText("Change at least one field.")).toBeTruthy();
             expect(save.hasAttribute("disabled")).toBeTrue();
             expect((textarea as HTMLTextAreaElement).value).not.toContain('"delivery"');
 
@@ -187,7 +185,7 @@ describe("OpenClaw cron browser", () => {
                 },
             });
             expect(
-                within(editor).getByText(/Delivery must use the reviewed/u)
+                within(editor).getByText(/Delivery supports none, announce, or webhook/u)
             ).toBeTruthy();
             expect(save.hasAttribute("disabled")).toBeTrue();
 
@@ -250,7 +248,7 @@ describe("OpenClaw cron browser", () => {
         try {
             const dialog = screen.getByRole("dialog", { name: "Edit Beta" });
             const editor = within(dialog).getByRole<HTMLTextAreaElement>("textbox", {
-                name: "Reviewed definition and delivery JSON",
+                name: "Job settings (JSON)",
             });
             expect(JSON.parse(editor.value)).toEqual({ wakeMode: "now" });
 
@@ -264,7 +262,7 @@ describe("OpenClaw cron browser", () => {
             });
             await user.click(
                 within(dialog).getByRole("button", {
-                    name: "Save reviewed fields",
+                    name: "Save changes",
                 })
             );
             await waitFor(() =>
@@ -578,7 +576,7 @@ describe("OpenClaw cron browser", () => {
         try {
             expect(
                 await screen.findByRole("heading", {
-                    name: "OpenClaw cron unavailable",
+                    name: "OpenClaw scheduled jobs unavailable",
                 })
             ).toBeTruthy();
             expect(screen.getByRole("alert")).not.toHaveTextContent("private");
@@ -629,13 +627,11 @@ describe("OpenClaw cron browser", () => {
             ).toBeTruthy();
             await user.click(screen.getByRole("button", { name: "Run now" }));
             const dialog = screen.getByRole("dialog", {
-                name: "Run OpenClaw cron job",
+                name: "Run OpenClaw scheduled job",
             });
             await user.click(within(dialog).getByRole("button", { name: "Run now" }));
 
-            expect(
-                await within(dialog).findByText(/authoritative refresh failed/u)
-            ).toBeVisible();
+            expect(await within(dialog).findByText(/refresh also failed/u)).toBeVisible();
             expect(mutation).toHaveBeenCalledTimes(1);
             expect(inventoryCalls).toBeGreaterThanOrEqual(2);
             expect(
@@ -647,14 +643,14 @@ describe("OpenClaw cron browser", () => {
             inventoryState = "same";
             await user.click(
                 within(dialog).getByRole("button", {
-                    name: "Refresh authoritative state",
+                    name: "Refresh current status",
                 })
             );
             await waitFor(() =>
                 expect(inventoryCalls).toBeGreaterThan(callsBeforeSameObservation)
             );
             expect(
-                screen.getByRole("dialog", { name: "Run OpenClaw cron job" })
+                screen.getByRole("dialog", { name: "Run OpenClaw scheduled job" })
             ).toBeVisible();
             expect(
                 within(dialog).getByRole("button", { name: "Run now" })
@@ -664,13 +660,13 @@ describe("OpenClaw cron browser", () => {
             inventoryState = "newer";
             await user.click(
                 within(dialog).getByRole("button", {
-                    name: "Refresh authoritative state",
+                    name: "Refresh current status",
                 })
             );
             await waitFor(() =>
                 expect(
                     screen.queryByRole("dialog", {
-                        name: "Run OpenClaw cron job",
+                        name: "Run OpenClaw scheduled job",
                     })
                 ).not.toBeInTheDocument()
             );
@@ -708,7 +704,7 @@ describe("OpenClaw cron browser", () => {
             ).toBeTruthy();
             await user.click(screen.getByRole("button", { name: "Run now" }));
             const dialog = screen.getByRole("dialog", {
-                name: "Run OpenClaw cron job",
+                name: "Run OpenClaw scheduled job",
             });
             await user.click(within(dialog).getByRole("button", { name: "Run now" }));
             await waitFor(() =>
@@ -728,9 +724,7 @@ describe("OpenClaw cron browser", () => {
                 },
             });
 
-            expect(
-                await within(dialog).findByText(/authoritative refresh failed/u)
-            ).toBeVisible();
+            expect(await within(dialog).findByText(/refresh also failed/u)).toBeVisible();
             expect(
                 within(dialog).getByRole("button", { name: "Run now" })
             ).toBeDisabled();
@@ -778,7 +772,7 @@ describe("OpenClaw cron browser", () => {
             await user.click(
                 within(
                     screen.getByRole("dialog", {
-                        name: "Run OpenClaw cron job",
+                        name: "Run OpenClaw scheduled job",
                     })
                 ).getByRole("button", { name: "Run now" })
             );
@@ -802,24 +796,22 @@ describe("OpenClaw cron browser", () => {
             );
             await user.click(
                 within(disableDialog).getByRole("button", {
-                    name: "Save disabled state",
+                    name: "Disable job",
                 })
             );
             await waitFor(() => expect(mutation).toHaveBeenCalledTimes(2));
 
-            await user.click(
-                screen.getByRole("button", { name: "Edit reviewed fields" })
-            );
+            await user.click(screen.getByRole("button", { name: "Edit settings" }));
             const editor = screen.getByRole("dialog", { name: "Edit Beta" });
             fireEvent.change(
                 within(editor).getByRole("textbox", {
-                    name: "Reviewed definition and delivery JSON",
+                    name: "Job settings (JSON)",
                 }),
                 { target: { value: JSON.stringify({ name: "Beta renamed" }) } }
             );
             await user.click(
                 within(editor).getByRole("button", {
-                    name: "Save reviewed fields",
+                    name: "Save changes",
                 })
             );
             await waitFor(() => expect(mutation).toHaveBeenCalledTimes(3));
@@ -828,7 +820,7 @@ describe("OpenClaw cron browser", () => {
             await user.click(
                 within(
                     screen.getByRole("dialog", {
-                        name: "Delete OpenClaw cron job",
+                        name: "Delete OpenClaw scheduled job",
                     })
                 ).getByRole("button", { name: "Delete" })
             );
@@ -869,9 +861,7 @@ describe("OpenClaw cron browser", () => {
             ).toBeTrue();
             await waitFor(() => expect(failedRefreshAttempts).toBe(4));
             expect(
-                screen.queryByText(
-                    "The OpenClaw cron action failed. Refresh and try again."
-                )
+                screen.queryByText("The OpenClaw action failed. Refresh and try again.")
             ).toBeNull();
 
             const queryCountBeforeRecovery = query.mock.calls.length;

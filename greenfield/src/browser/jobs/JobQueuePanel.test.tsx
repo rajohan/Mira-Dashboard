@@ -49,15 +49,15 @@ describe("job queue panel", () => {
         );
         const user = userEvent.setup();
 
-        expect(screen.getByRole("status")).toHaveTextContent("Claiming active");
+        expect(screen.getByRole("status")).toHaveTextContent("Accepting new jobs");
         expect(screen.getByRole("table", { name: "Job workers" })).toBeTruthy();
         expect(screen.getByText(summary.workers[0]!.id)).toBeTruthy();
-        expect(screen.getByText("version 4", { exact: false })).toBeTruthy();
+        expect(screen.queryByText("version 4", { exact: false })).toBeNull();
         expect(screen.getByText("queued job runs")).toBeTruthy();
 
         await user.click(
             screen.getByRole("button", {
-                name: "Pause claiming for new job runs",
+                name: "Pause new jobs",
             })
         );
         expect(onSetClaimingPaused).toHaveBeenCalledWith(true);
@@ -77,12 +77,12 @@ describe("job queue panel", () => {
         );
         const user = userEvent.setup();
         const control = screen.getByRole("button", {
-            name: "Resume claiming for new job runs",
+            name: "Resume new jobs",
         });
 
         expect(control).toBeDisabled();
         expect(control).toHaveAttribute("aria-busy", "true");
-        expect(control).toHaveTextContent("Resuming claiming...");
+        expect(control).toHaveTextContent("Resuming new jobs...");
         await user.click(control);
         expect(onSetClaimingPaused).not.toHaveBeenCalled();
     });

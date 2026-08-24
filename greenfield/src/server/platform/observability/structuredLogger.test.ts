@@ -215,6 +215,40 @@ test("records only classified OpenClaw cron audit settlement fields", () => {
     expect(lines[0]).not.toContain(sensitiveId);
 });
 
+test("records only fixed log-maintenance audit settlement fields", () => {
+    const lines: string[] = [];
+    const logger = createStructuredLogger({
+        identity,
+        sink: {
+            write(line) {
+                lines.push(line);
+            },
+        },
+    });
+
+    logger.error({
+        component: "logs-maintenance-audit",
+        event: "logs.maintenance.audit_settlement_failed",
+        fields: {
+            kind: "logs-maintenance-audit-settlement",
+            policyId: "docker-managed",
+            settlement: "queued",
+        },
+        outcome: "server-error",
+    });
+
+    expect(JSON.parse(lines[0] ?? "null")).toMatchObject({
+        component: "logs-maintenance-audit",
+        event: "logs.maintenance.audit_settlement_failed",
+        fields: {
+            policyId: "docker-managed",
+            settlement: "queued",
+        },
+        level: "error",
+        outcome: "server-error",
+    });
+});
+
 test("normalizes unknown events and drops extra fields instead of relying on secret names", () => {
     const lines: string[] = [];
     const logger = createStructuredLogger({

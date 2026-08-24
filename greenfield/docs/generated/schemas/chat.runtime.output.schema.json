@@ -12,6 +12,56 @@
       "items": {
         "type": "object",
         "properties": {
+          "abortBoundary": {
+            "type": "object",
+            "properties": {
+              "attemptId": {
+                "type": "string",
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "\\S",
+                "allOf": [
+                  {
+                    "pattern": "^[^\\u0000]*$"
+                  },
+                  {
+                    "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                  }
+                ]
+              },
+              "attemptedAtMs": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8640000000000000
+              },
+              "baselineObservationEpoch": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "baselineUpdatedAtMs": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8640000000000000
+              },
+              "settlement": {
+                "enum": [
+                  "not-aborted",
+                  "pending",
+                  "unknown"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "attemptId",
+              "attemptedAtMs",
+              "baselineObservationEpoch",
+              "baselineUpdatedAtMs",
+              "settlement"
+            ],
+            "additionalProperties": false
+          },
           "continuity": {
             "enum": [
               "complete",
@@ -22,9 +72,301 @@
           "hasUnprojectedActivity": {
             "type": "boolean"
           },
+          "observationEpoch": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "default": 0
+          },
+          "observedAtMs": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 8640000000000000,
+            "default": 0
+          },
+          "parts": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "const": "assistant"
+                    },
+                    "segmentId": {
+                      "type": "string",
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "pattern": "\\S",
+                      "allOf": [
+                        {
+                          "pattern": "^[^\\u0000]*$"
+                        },
+                        {
+                          "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                        }
+                      ]
+                    },
+                    "sequence": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 4096
+                    },
+                    "streamId": {
+                      "type": "string",
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "pattern": "\\S",
+                      "allOf": [
+                        {
+                          "pattern": "^[^\\u0000]*$"
+                        },
+                        {
+                          "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                        }
+                      ]
+                    },
+                    "text": {
+                      "type": "string",
+                      "maxLength": 262144,
+                      "pattern": "^[^\\u0000]*$"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "sequence",
+                    "text"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "const": "thinking"
+                    },
+                    "segmentId": {
+                      "type": "string",
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "pattern": "\\S",
+                      "allOf": [
+                        {
+                          "pattern": "^[^\\u0000]*$"
+                        },
+                        {
+                          "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                        }
+                      ]
+                    },
+                    "sequence": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 4096
+                    },
+                    "streamId": {
+                      "type": "string",
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "pattern": "\\S",
+                      "allOf": [
+                        {
+                          "pattern": "^[^\\u0000]*$"
+                        },
+                        {
+                          "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                        }
+                      ]
+                    },
+                    "text": {
+                      "type": "string",
+                      "maxLength": 262144,
+                      "pattern": "^[^\\u0000]*$"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "sequence",
+                    "text"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "callId": {
+                      "type": "string",
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "pattern": "\\S",
+                      "allOf": [
+                        {
+                          "pattern": "^[^\\u0000]*$"
+                        },
+                        {
+                          "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                        }
+                      ]
+                    },
+                    "callIdSource": {
+                      "const": "synthetic"
+                    },
+                    "input": {
+                      "type": "string",
+                      "maxLength": 32768,
+                      "pattern": "^[^\\u0000]*$"
+                    },
+                    "isError": {
+                      "type": "boolean"
+                    },
+                    "kind": {
+                      "const": "tool"
+                    },
+                    "name": {
+                      "type": "string",
+                      "maxLength": 200,
+                      "minLength": 1,
+                      "pattern": "\\S",
+                      "allOf": [
+                        {
+                          "pattern": "^[^\\u0000]*$"
+                        },
+                        {
+                          "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                        }
+                      ]
+                    },
+                    "nameSource": {
+                      "const": "synthetic"
+                    },
+                    "output": {
+                      "type": "string",
+                      "maxLength": 32768,
+                      "pattern": "^[^\\u0000]*$"
+                    },
+                    "phase": {
+                      "enum": [
+                        "started",
+                        "running",
+                        "succeeded",
+                        "failed"
+                      ],
+                      "type": "string"
+                    },
+                    "sequence": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 4096
+                    }
+                  },
+                  "required": [
+                    "callId",
+                    "isError",
+                    "kind",
+                    "name",
+                    "phase",
+                    "sequence"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "pattern": "\\S",
+                      "allOf": [
+                        {
+                          "pattern": "^[^\\u0000]*$"
+                        },
+                        {
+                          "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                        }
+                      ]
+                    },
+                    "kind": {
+                      "const": "item"
+                    },
+                    "sequence": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 4096
+                    },
+                    "text": {
+                      "type": "string",
+                      "maxLength": 32768,
+                      "pattern": "^[^\\u0000]*$"
+                    },
+                    "type": {
+                      "type": "string",
+                      "maxLength": 128,
+                      "minLength": 1,
+                      "pattern": "\\S",
+                      "allOf": [
+                        {
+                          "pattern": "^[^\\u0000]*$"
+                        },
+                        {
+                          "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "kind",
+                    "sequence",
+                    "type"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "const": "user"
+                    },
+                    "sequence": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 4096
+                    },
+                    "text": {
+                      "type": "string",
+                      "maxLength": 262144,
+                      "pattern": "^[^\\u0000]*$"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "sequence",
+                    "text"
+                  ],
+                  "additionalProperties": false
+                }
+              ],
+              "$comment": "Live Valibot validation additionally requires projected tool phase, failure state, and failed output to agree."
+            },
+            "maxItems": 512,
+            "$comment": "Live Valibot validation additionally requires projected chat parts in strict ascending event-sequence order."
+          },
           "plan": {
             "type": "object",
             "properties": {
+              "explanation": {
+                "type": "string",
+                "maxLength": 4000,
+                "minLength": 1,
+                "pattern": "\\S",
+                "allOf": [
+                  {
+                    "pattern": "^[^\\u0000]*$"
+                  }
+                ]
+              },
               "phase": {
                 "const": "update"
               },
@@ -109,6 +451,48 @@
             ],
             "type": "string"
           },
+          "streamResets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "resetId": {
+                  "type": "string",
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "allOf": [
+                    {
+                      "pattern": "^[^\\u0000]*$"
+                    },
+                    {
+                      "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                    }
+                  ]
+                },
+                "streamId": {
+                  "type": "string",
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "allOf": [
+                    {
+                      "pattern": "^[^\\u0000]*$"
+                    },
+                    {
+                      "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "resetId",
+                "streamId"
+              ],
+              "additionalProperties": false
+            },
+            "maxItems": 8
+          },
           "text": {
             "type": "string",
             "maxLength": 262144,
@@ -129,7 +513,8 @@
           "text",
           "updatedAtMs"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "$comment": "Live Valibot validation additionally limits each external chat run projection to its reviewed UTF-8 byte budget."
       },
       "maxItems": 8,
       "$comment": "Live Valibot validation additionally requires every external chat projection to have a unique provider run ID.",
@@ -351,6 +736,9 @@
                       }
                     ]
                   },
+                  "callIdSource": {
+                    "const": "synthetic"
+                  },
                   "input": {
                     "type": "string",
                     "maxLength": 32768,
@@ -375,6 +763,9 @@
                         "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
                       }
                     ]
+                  },
+                  "nameSource": {
+                    "const": "synthetic"
                   },
                   "output": {
                     "type": "string",
@@ -547,6 +938,17 @@
                     "minimum": 1,
                     "maximum": 4096
                   },
+                  "explanation": {
+                    "type": "string",
+                    "maxLength": 4000,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "allOf": [
+                      {
+                        "pattern": "^[^\\u0000]*$"
+                      }
+                    ]
+                  },
                   "kind": {
                     "const": "plan"
                   },
@@ -627,7 +1029,12 @@
                   "kind": {
                     "const": "provider-noop"
                   },
-                  "providerSequence": {
+                  "providerSequenceEnd": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  },
+                  "providerSequenceStart": {
                     "type": "integer",
                     "minimum": 1,
                     "maximum": 9007199254740991
@@ -641,7 +1048,8 @@
                   "runId",
                   "sequence",
                   "kind",
-                  "providerSequence",
+                  "providerSequenceEnd",
+                  "providerSequenceStart",
                   "reason"
                 ],
                 "additionalProperties": false
@@ -906,10 +1314,38 @@
                     "kind": {
                       "const": "assistant"
                     },
+                    "segmentId": {
+                      "type": "string",
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "pattern": "\\S",
+                      "allOf": [
+                        {
+                          "pattern": "^[^\\u0000]*$"
+                        },
+                        {
+                          "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                        }
+                      ]
+                    },
                     "sequence": {
                       "type": "integer",
                       "minimum": 1,
                       "maximum": 4096
+                    },
+                    "streamId": {
+                      "type": "string",
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "pattern": "\\S",
+                      "allOf": [
+                        {
+                          "pattern": "^[^\\u0000]*$"
+                        },
+                        {
+                          "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                        }
+                      ]
                     },
                     "text": {
                       "type": "string",
@@ -930,10 +1366,38 @@
                     "kind": {
                       "const": "thinking"
                     },
+                    "segmentId": {
+                      "type": "string",
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "pattern": "\\S",
+                      "allOf": [
+                        {
+                          "pattern": "^[^\\u0000]*$"
+                        },
+                        {
+                          "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                        }
+                      ]
+                    },
                     "sequence": {
                       "type": "integer",
                       "minimum": 1,
                       "maximum": 4096
+                    },
+                    "streamId": {
+                      "type": "string",
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "pattern": "\\S",
+                      "allOf": [
+                        {
+                          "pattern": "^[^\\u0000]*$"
+                        },
+                        {
+                          "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                        }
+                      ]
                     },
                     "text": {
                       "type": "string",
@@ -965,6 +1429,9 @@
                         }
                       ]
                     },
+                    "callIdSource": {
+                      "const": "synthetic"
+                    },
                     "input": {
                       "type": "string",
                       "maxLength": 32768,
@@ -989,6 +1456,9 @@
                           "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
                         }
                       ]
+                    },
+                    "nameSource": {
+                      "const": "synthetic"
                     },
                     "output": {
                       "type": "string",
@@ -1106,6 +1576,17 @@
           "plan": {
             "type": "object",
             "properties": {
+              "explanation": {
+                "type": "string",
+                "maxLength": 4000,
+                "minLength": 1,
+                "pattern": "\\S",
+                "allOf": [
+                  {
+                    "pattern": "^[^\\u0000]*$"
+                  }
+                ]
+              },
               "phase": {
                 "const": "update"
               },

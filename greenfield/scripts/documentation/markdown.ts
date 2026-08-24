@@ -85,7 +85,47 @@ function errorReasonsLabel(contract: ProcedureContract): string {
  * @returns Generated Markdown index.
  */
 export function renderGeneratedIndex(): string {
-    return `${documentHeader("Generated Dashboard Reference", "bun run docs:generate")}## Current Generated Subset\n\n- [tRPC procedures](procedures.md)\n- [Raw HTTP routes](raw-http.md)\n- [Realtime events](realtime-events.md)\n- [Application configuration](configuration.md)\n- [Packages and runtime](packages-and-runtime.md)\n- [Transport schemas](schemas/)\n\n## Required Before Cutover\n\nThe target generator must also emit database and browser route/feature references plus OpenAPI 3.1 for true raw HTTP endpoints. The generated browser documentation route must render the complete checked-in set. These artifacts are future gates, not current generated outputs.\n`;
+    return `${documentHeader("Generated Dashboard Reference", "bun run docs:generate")}## Current Generated Subset\n\n- [tRPC procedures](procedures.md)\n- [Raw HTTP routes](raw-http.md)\n- [Realtime events](realtime-events.md)\n- [Browser routes and features](routes-and-features.md)\n- [Application configuration](configuration.md)\n- [Packages and runtime](packages-and-runtime.md)\n- [Transport schemas](schemas/)\n\n## Required Before Cutover\n\nThe target generator must also emit the database reference plus OpenAPI 3.1 for true raw HTTP endpoints. The generated browser documentation route must render the complete checked-in set. These artifacts are future gates, not current generated outputs.\n`;
+}
+
+/** Browser route metadata required by generated documentation. */
+export interface BrowserRouteDocumentationInput {
+    readonly access: "public" | "session";
+    readonly featureOwner: string;
+    readonly navigationLabel: string | null;
+    readonly path: string;
+    readonly summary: string;
+}
+
+/**
+ * Renders the source-backed browser route and feature registry as Markdown.
+ * @param routes Implemented browser routes and their feature metadata.
+ * @returns Generated Markdown document.
+ */
+export function renderBrowserRoutes(
+    routes: readonly BrowserRouteDocumentationInput[]
+): string {
+    if (routes.length === 0) throw new Error("Browser route registry is empty");
+    const routePaths = routes.map(({ path }) => path);
+    if (
+        new Set(routePaths).size !== routePaths.length ||
+        routes.some(
+            ({ featureOwner, path, summary }) =>
+                !path.startsWith("/") ||
+                featureOwner.trim().length === 0 ||
+                summary.trim().length === 0
+        )
+    ) {
+        throw new Error("Browser route documentation metadata is invalid");
+    }
+    const rows = routes
+        .toSorted((left, right) => left.path.localeCompare(right.path))
+        .map(
+            (route) =>
+                `| \`${markdownTableCell(route.path)}\` | ${route.access === "public" ? "Public" : "Browser session"} | ${route.navigationLabel === null ? "Hidden" : markdownTableCell(route.navigationLabel)} | \`${markdownTableCell(route.featureOwner)}\` | ${markdownTableCell(route.summary)} |`
+        );
+
+    return `${documentHeader("Browser Routes and Features", "bun run docs:generate")}| Path | Access | Navigation | Feature owner | Summary |\n| --- | --- | --- | --- | --- |\n${rows.join("\n")}\n`;
 }
 
 /** Registry metadata required to render one application configuration field. */
@@ -284,6 +324,9 @@ export function renderProcedures(contracts: readonly ProcedureContract[]): strin
 
 function rawHttpBodyLabel(body: RawHttpBodyContract): string {
     if (body.kind === "none") return "No body";
+    if (body.kind === "websocket") {
+        return `WebSocket \`${markdownTableCell(body.protocol)}\` — client ${body.clientMaximumMessageBytes} bytes, server ${body.serverMaximumMessageBytes} bytes per message`;
+    }
     const contentTypes = body.contentTypes
         .map((contentType) => `\`${markdownTableCell(contentType)}\``)
         .join(", ");

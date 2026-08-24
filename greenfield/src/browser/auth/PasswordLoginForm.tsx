@@ -31,7 +31,7 @@ export function PasswordLoginForm() {
 
     return (
         <LoginPanel
-            description="Use your Dashboard operator account."
+            description="Use your Mira Dashboard account."
             icon={KeyRound}
             title="Sign in"
         >
@@ -54,6 +54,7 @@ export function PasswordLoginForm() {
                                     onChange={(event) =>
                                         field.handleChange(event.currentTarget.value)
                                     }
+                                    placeholder="Example: operator"
                                     required
                                     spellCheck={false}
                                     value={field.state.value}
@@ -76,6 +77,7 @@ export function PasswordLoginForm() {
                                     onChange={(event) =>
                                         field.handleChange(event.currentTarget.value)
                                     }
+                                    placeholder="Enter your password"
                                     required
                                     type="password"
                                     value={field.state.value}
@@ -97,7 +99,7 @@ export function PasswordLoginForm() {
                             type="submit"
                         >
                             <Icon icon={KeyRound} size="sm" tone="inherit" />
-                            Continue
+                            Sign in
                         </Button>
                     )}
                 </form.Subscribe>

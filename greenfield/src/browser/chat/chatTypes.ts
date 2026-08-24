@@ -58,12 +58,20 @@ export interface ChatMessageAttachment {
 /** Ordered assistant prose inside one canonical message or active run. */
 export interface ChatTextPart {
     readonly kind: "text";
+    /** Stable provider segment identity used only for truncated snapshot replay. */
+    readonly sourceKey?: string;
+    /** Provider stream family used to retire replaced truncated segments. */
+    readonly sourceStreamKey?: string;
     readonly text: string;
 }
 
 /** Ordered, optionally streaming reasoning inside one active assistant run. */
 export interface ChatThinkingPart {
     readonly kind: "thinking";
+    /** Stable provider segment identity used only for truncated snapshot replay. */
+    readonly sourceKey?: string;
+    /** Provider stream family used to retire replaced truncated segments. */
+    readonly sourceStreamKey?: string;
     readonly status: "complete" | "running";
     readonly text: string;
 }
@@ -71,10 +79,12 @@ export interface ChatThinkingPart {
 /** Ordered tool activity with explicit accessible lifecycle state. */
 export interface ChatToolPart {
     readonly callId: string;
+    readonly callIdSource?: "synthetic";
     readonly error?: string;
     readonly input?: unknown;
     readonly kind: "tool";
     readonly name: string;
+    readonly nameSource?: "synthetic";
     readonly output?: unknown;
     readonly status: "completed" | "failed" | "running";
 }
@@ -107,6 +117,7 @@ export interface ChatDisplayMessage {
     readonly idempotencyKey?: string;
     readonly hydration?: "error" | "loading" | "required";
     readonly parts: readonly ChatMessagePart[];
+    readonly providerRunId?: string;
     readonly role: "assistant" | "control" | "user";
     readonly runId?: string;
     readonly sequence: number;
@@ -161,6 +172,7 @@ export interface ChatPlanItemView {
 }
 
 export interface ChatActivePlanView {
+    readonly description?: string;
     readonly items: readonly ChatPlanItemView[];
     readonly runId: string;
     readonly title: string;

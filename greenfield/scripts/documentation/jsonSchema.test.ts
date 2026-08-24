@@ -53,6 +53,7 @@ import {
     listTasksResultSchema,
     updateTaskInputSchema,
 } from "../../src/contracts/tasks.ts";
+import { terminalSessionSummarySchema } from "../../src/contracts/terminal.ts";
 import {
     webAuthnAuthenticationResponseSchema,
     webAuthnTransportListSchema,
@@ -171,6 +172,18 @@ describe("contract JSON Schema conversion", () => {
         );
     });
 
+    test("documents the runtime-only terminal replay window invariant", () => {
+        const document = JSON.stringify(
+            convertContractSchema(
+                terminalSessionSummarySchema,
+                "test.terminalSessionSummary",
+                "output"
+            )
+        );
+
+        expect(document).toContain("oldest retained replay sequence");
+    });
+
     test("documents chat budgets, projection invariants, and MIME normalization", () => {
         const sendDocument = JSON.stringify(
             convertContractSchema(chatSendInputSchema, "test.chatSend", "input")
@@ -229,10 +242,14 @@ describe("contract JSON Schema conversion", () => {
                     "cache:write",
                     "chat:read",
                     "chat:write",
+                    "files:read",
+                    "files:write",
                     "gateway-sessions:read",
                     "gateway-sessions:write",
                     "jobs:read",
                     "jobs:write",
+                    "logs:read",
+                    "logs:write",
                     "monitoring:write",
                     "notifications:read",
                     "notifications:write",
@@ -242,9 +259,11 @@ describe("contract JSON Schema conversion", () => {
                     "reports:write",
                     "tasks:read",
                     "tasks:write",
+                    "terminal:read",
+                    "terminal:write",
                 ],
             },
-            maxItems: 19,
+            maxItems: 25,
             type: "array",
             uniqueItems: true,
         });

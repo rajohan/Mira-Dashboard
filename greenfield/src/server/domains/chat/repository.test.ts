@@ -391,7 +391,8 @@ describe("durable chat repository", () => {
                 {
                     kind: "provider-noop",
                     occurredAtMs: 1001,
-                    providerSequence: 2,
+                    providerSequenceEnd: 2,
+                    providerSequenceStart: 2,
                     reason: "ignored",
                 },
             ]);
@@ -1095,6 +1096,44 @@ describe("durable chat repository", () => {
                 status: "ready",
             });
             expect(restarted.findRun(firstRunId)).toBeUndefined();
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("coalesces a transport boundary across every retained transcript into one realtime marker per topic", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createChatRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission,
+            "main",
+            () => 1000
+        );
+        const sessions = Array.from({ length: 22 }, (_, index) => ({
+            key: `agent:main:retained-${index}`,
+            sessionId: `provider-session-${index}`,
+            updatedAtMs: 1000,
+        }));
+        const markerCount = (topic: "chat.runtime" | "chat.history") =>
+            database.orm
+                .select()
+                .from(realtimeEvents)
+                .where(eq(realtimeEvents.topic, topic))
+                .all().length;
+        try {
+            await repository.observeTranscriptSnapshot({
+                observedAtMs: 1000,
+                projectionTruncated: false,
+                sessions,
+            });
+            const runtimeBefore = markerCount("chat.runtime");
+            const historyBefore = markerCount("chat.history");
+
+            expect(await repository.markTranscriptTransportBoundary(1100)).toHaveLength(
+                sessions.length
+            );
+            expect(markerCount("chat.runtime") - runtimeBefore).toBe(1);
+            expect(markerCount("chat.history") - historyBefore).toBe(1);
         } finally {
             database.sqlite.close(true);
         }

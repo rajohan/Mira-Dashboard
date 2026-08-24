@@ -68,9 +68,9 @@ export function OverviewAgentsCard({ agents, statuses }: OverviewAgentsCardProps
                             Agent activity
                         </Heading>
                         <Text className="mt-1" size="sm" tone="muted">
-                            Dashboard-owned current tasks paired with separate Gateway
-                            session availability. Availability is not online status or
-                            health.
+                            See the current Dashboard task for each agent and whether
+                            OpenClaw can see its session. A visible session does not prove
+                            that the agent is online or healthy.
                         </Text>
                     </div>
                 </div>
@@ -81,10 +81,10 @@ export function OverviewAgentsCard({ agents, statuses }: OverviewAgentsCardProps
 
             <dl className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-2">
                 {[
-                    ["Configured", agents.length],
+                    ["Added", agents.length],
                     ["Working", workingStatuses.length],
                     ["Idle", idleCount],
-                    ["Missing projection", missingProjectionCount],
+                    ["Status unavailable", missingProjectionCount],
                 ].map(([label, value]) => (
                     <div
                         className="border-primary-700 bg-primary-900/35 rounded-lg border p-3"
@@ -100,13 +100,13 @@ export function OverviewAgentsCard({ agents, statuses }: OverviewAgentsCardProps
 
             <section aria-labelledby={gatewayHeadingId} className="mt-5">
                 <Heading id={gatewayHeadingId} level={3}>
-                    Gateway session availability
+                    OpenClaw sessions
                 </Heading>
                 <dl className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-5 xl:grid-cols-2">
                     {[
                         ["Active", gatewayCounts.active],
                         ["Idle sessions", gatewayCounts.idle],
-                        ["Stale", gatewayCounts.stale],
+                        ["Out of date", gatewayCounts.stale],
                         ["Disconnected", gatewayCounts.disconnected],
                         ["Unknown", gatewayCounts.unknown],
                     ].map(([label, value]) => (
@@ -127,8 +127,8 @@ export function OverviewAgentsCard({ agents, statuses }: OverviewAgentsCardProps
                 <div className="border-primary-700 bg-primary-900/35 mt-4 rounded-lg border p-4">
                     <Text>
                         {idleCount === agents.length
-                            ? "All configured agents are idle."
-                            : "No configured agent currently reports working; one or more status projections are missing."}
+                            ? "All agents are idle."
+                            : "No agent currently reports working. Status is unavailable for one or more agents."}
                     </Text>
                 </div>
             ) : (

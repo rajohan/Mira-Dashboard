@@ -8,6 +8,7 @@ interface NavigationLinkProps {
     readonly active: boolean;
     readonly children: ReactNode;
     readonly className?: string;
+    readonly current: boolean;
     readonly onClick?: MouseEventHandler<HTMLAnchorElement>;
     readonly to: DashboardNavigationPath;
 }
@@ -20,12 +21,13 @@ export function NavigationLink({
     active,
     children,
     className,
+    current,
     onClick,
     to,
 }: NavigationLinkProps) {
     return (
         <Link
-            aria-current={active ? "page" : undefined}
+            aria-current={current ? "page" : undefined}
             className={cn(
                 "mb-1 flex min-h-11 items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
                 "focus-visible:ring-accent-300 focus-visible:ring-2 focus-visible:outline-none",

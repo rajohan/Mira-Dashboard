@@ -1,3 +1,7 @@
+import {
+    logMaintenancePolicyIds,
+    type LogMaintenancePolicyId,
+} from "../../../contracts/logs.ts";
 import type { SafeFailureDescriptor } from "../errors/safeFailure.ts";
 import { describeSafeFailure } from "../errors/safeFailure.ts";
 
@@ -52,6 +56,11 @@ export type StructuredLogFields =
           readonly auditOutcome: "failed" | "succeeded";
           readonly kind: "gateway-session-audit-settlement";
           readonly targetFingerprint: string;
+      }
+    | {
+          readonly kind: "logs-maintenance-audit-settlement";
+          readonly policyId: LogMaintenancePolicyId;
+          readonly settlement: "failed" | "queued";
       }
     | {
           readonly kind: "openclaw-cron-audit-settlement";
@@ -130,6 +139,7 @@ const structuredEventComponents = Object.freeze({
     "http.request.cancelled": "http",
     "http.request.failed": "http",
     "http.response.created": "http",
+    "logs.maintenance.audit_settlement_failed": "logs-maintenance-audit",
     "openclaw_cron.audit_settlement.failed": "openclaw-cron-audit",
     "openclaw_cron.expiry_reconciliation.failed": "openclaw-cron-expiry",
     "realtime.runner.failed": "realtime-event-pump",
@@ -144,6 +154,7 @@ const structuredEventComponents = Object.freeze({
 type StructuredEventName = keyof typeof structuredEventComponents;
 
 const structuredOutcomes = new Set(["cancelled", "rejected", "server-error", "success"]);
+const structuredLogMaintenancePolicyIds = new Set<string>(logMaintenancePolicyIds);
 const structuredLogLevels = new Set<StructuredLogLevel>([
     "debug",
     "error",
@@ -278,6 +289,19 @@ function safeEventFields(
             }
             const method = safeHttpMethod(fields.method);
             return method === undefined ? undefined : { method, status: fields.status };
+        }
+        case "logs-maintenance-audit-settlement": {
+            if (
+                eventName !== "logs.maintenance.audit_settlement_failed" ||
+                !structuredLogMaintenancePolicyIds.has(fields.policyId) ||
+                (fields.settlement !== "failed" && fields.settlement !== "queued")
+            ) {
+                return undefined;
+            }
+            return {
+                policyId: fields.policyId,
+                settlement: fields.settlement,
+            };
         }
         case "openclaw-cron-audit-settlement": {
             if (

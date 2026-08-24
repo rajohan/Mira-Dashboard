@@ -4,7 +4,6 @@ import { useId } from "react";
 import type { IncidentSummary } from "../../contracts/monitoring.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { incidentSeverityVariant } from "../monitoring/incidentPresentation.ts";
-import { incidentOverviewPageSize } from "../monitoring/monitoringQueries.ts";
 import { ActionLink } from "../ui/ActionLink.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import { Card } from "../ui/Card.tsx";
@@ -46,8 +45,8 @@ export function OverviewIncidentsCard({
                             Active incidents
                         </Heading>
                         <Text className="mt-1" size="sm" tone="muted">
-                            Persisted active generations, not a current monitor-health
-                            verdict.
+                            Open incidents saved by the Dashboard. Some checks may still
+                            be unavailable.
                         </Text>
                     </div>
                 </div>
@@ -58,7 +57,7 @@ export function OverviewIncidentsCard({
 
             <dl className="mt-5 grid grid-cols-3 gap-3">
                 {[
-                    [`Newest ${incidentOverviewPageSize}`, incidents.length],
+                    ["Shown", incidents.length],
                     ["Critical", criticalCount],
                     ["Error", errorCount],
                 ].map(([label, value]) => (
@@ -76,9 +75,9 @@ export function OverviewIncidentsCard({
 
             {latest === undefined ? (
                 <div className="border-primary-700 bg-primary-900/35 mt-4 rounded-lg border p-4">
-                    <Text>No persisted active incidents.</Text>
+                    <Text>No active incidents.</Text>
                     <Text className="mt-1" size="sm" tone="muted">
-                        Resolved generations remain available on the incidents route.
+                        Resolved incidents remain available on the Incidents page.
                     </Text>
                 </div>
             ) : (
@@ -90,7 +89,7 @@ export function OverviewIncidentsCard({
                         <Badge variant={incidentSeverityVariant(latest.severity)}>
                             {latest.severity}
                         </Badge>
-                        <Badge>generation {latest.generation}</Badge>
+                        <Badge>Incident group {latest.generation}</Badge>
                     </div>
                     <Heading
                         className="mt-3 line-clamp-2 wrap-break-word"
@@ -100,7 +99,7 @@ export function OverviewIncidentsCard({
                         {latest.title}
                     </Heading>
                     <Text className="mt-2 wrap-break-word" size="sm" tone="muted">
-                        {latest.monitorKey} · {latest.occurrenceCount} occurrence
+                        Check: {latest.monitorKey} · Seen {latest.occurrenceCount} time
                         {latest.occurrenceCount === 1 ? "" : "s"}
                     </Text>
                     <time
@@ -114,7 +113,7 @@ export function OverviewIncidentsCard({
 
             {hasMore && (
                 <Text className="mt-3" size="sm" tone="muted">
-                    Older active generations are available on the incidents route.
+                    Open Incidents to see older active incidents.
                 </Text>
             )}
         </Card>

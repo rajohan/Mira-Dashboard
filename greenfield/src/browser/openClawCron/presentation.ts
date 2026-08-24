@@ -2,6 +2,7 @@ import * as v from "valibot";
 
 import {
     type OpenClawCronJob,
+    type OpenClawCronRun,
     type UpdateOpenClawCronPatch,
     updateOpenClawCronPatchSchema,
 } from "../../contracts/openClawCron.ts";
@@ -9,7 +10,78 @@ import { compareStrings } from "../../shared/validation.ts";
 
 /** Fixed no-blind-retry guidance for an externally indeterminate mutation. */
 export const openClawCronUnknownOutcomeMessage =
-    "The OpenClaw cron outcome could not be confirmed. Refresh before retrying.";
+    "Dashboard could not confirm whether OpenClaw completed the action. Refresh the current status before trying again.";
+
+export function openClawCronSynchronizationLabel(
+    state: OpenClawCronJob["synchronization"]["state"]
+): string {
+    if (state === "confirmed") return "In sync";
+    if (state === "pending") return "Updating";
+    return "Needs attention";
+}
+
+export function openClawCronRunStatusLabel(status: OpenClawCronRun["status"]): string {
+    if (status === "ok") return "Succeeded";
+    if (status === "error") return "Failed";
+    if (status === "skipped") return "Skipped";
+    return "Unknown";
+}
+
+export function openClawCronDeliveryStatusLabel(
+    status: OpenClawCronRun["deliveryStatus"]
+): string {
+    if (status === "delivered") return "Delivered";
+    if (status === "not-delivered") return "Not delivered";
+    if (status === "not-requested") return "Not requested";
+    return "Unknown";
+}
+
+export function openClawCronPayloadLabel(
+    kind: OpenClawCronJob["payload"]["kind"]
+): string {
+    if (kind === "system-event") return "System event";
+    if (kind === "agent-turn") return "Agent request";
+    if (kind === "command") return "Command";
+    if (kind === "script") return "Script";
+    return "Heartbeat";
+}
+
+export function openClawCronDeliveryModeLabel(
+    mode: OpenClawCronJob["deliveryMode"]
+): string {
+    if (mode === "announce") return "Announcement";
+    if (mode === "none") return "None";
+    if (mode === "webhook") return "Webhook";
+    return "Not specified";
+}
+
+export function openClawCronSessionTargetLabel(
+    target: OpenClawCronJob["sessionTarget"]
+): string {
+    if (target === "current") return "Current session";
+    if (target === "isolated") return "Separate session";
+    if (target === "main") return "Main session";
+    return "Named session";
+}
+
+export function openClawCronWakeModeLabel(mode: OpenClawCronJob["wakeMode"]): string {
+    return mode === "now" ? "Immediately" : "At the next check-in";
+}
+
+function repeatingScheduleLabel(milliseconds: number): string {
+    const units = [
+        [86_400_000, "day"],
+        [3_600_000, "hour"],
+        [60_000, "minute"],
+        [1000, "second"],
+    ] as const;
+    for (const [unitMilliseconds, unit] of units) {
+        if (milliseconds % unitMilliseconds !== 0) continue;
+        const count = milliseconds / unitMilliseconds;
+        return `Every ${count} ${unit}${count === 1 ? "" : "s"}`;
+    }
+    return `Every ${milliseconds} milliseconds`;
+}
 
 /**
  * @param jobs Bounded current Gateway cron page.
@@ -32,16 +104,16 @@ export function openClawCronScheduleLabel(job: OpenClawCronJob): string {
             return `Once at ${schedule.at}`;
         }
         case "every": {
-            return `Every ${schedule.everyMs} ms`;
+            return repeatingScheduleLabel(schedule.everyMs);
         }
         case "cron": {
             return `${schedule.expr}${schedule.tz === undefined ? "" : ` (${schedule.tz})`}`;
         }
         case "on-exit": {
-            return "Process exit watcher (command redacted)";
+            return "Runs when a monitored process exits (command hidden)";
         }
         case "stream": {
-            return "Process stream watcher (command and match redacted)";
+            return "Runs when monitored process output matches (details hidden)";
         }
     }
 }
@@ -165,7 +237,7 @@ export function parseOpenClawCronPatchJson(
     if (!parsed.success) {
         return {
             message:
-                "Only name, description, delivery, at/every/cron schedule, system-event or agent-turn payload, and wakeMode may be edited. Delivery must use the reviewed none, announce, or webhook patch fields.",
+                "You can edit only name, description, delivery, schedule, payload, and wakeMode. Delivery supports none, announce, or webhook.",
             success: false,
         };
     }
@@ -175,7 +247,7 @@ export function parseOpenClawCronPatchJson(
         { abortEarly: true }
     );
     if (!changed.success) {
-        return { message: "Change at least one reviewed field.", success: false };
+        return { message: "Change at least one field.", success: false };
     }
     const delivery = changed.output.delivery;
     const effectiveDeliveryMode = delivery?.mode ?? job.delivery?.mode;
@@ -189,8 +261,7 @@ export function parseOpenClawCronPatchJson(
         !retainsConfiguredWebhookTarget
     ) {
         return {
-            message:
-                "Switching to webhook delivery requires a replacement write-only target.",
+            message: "Enter a new destination when switching to webhook delivery.",
             success: false,
         };
     }

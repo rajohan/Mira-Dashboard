@@ -78,7 +78,7 @@ interface ChatWorkspaceProps {
     readonly onRetryTasks?: () => void;
     readonly onRetry?: () => void;
     readonly onSelectSession: (sessionKey: string) => void;
-    readonly onSelectTask: (taskId: string) => void;
+    readonly onSelectTask: (taskId?: string) => void;
     readonly onSend: () => void;
     readonly onSendSettingsChange: (settings: ChatSendSettings) => void;
     readonly onStartVoiceInput?: () => void;
@@ -119,7 +119,7 @@ function chatConnectionStatusMessage(
     connection: ChatWorkspaceView["connection"]
 ): string | undefined {
     if (connection === "stale") {
-        return "Showing last-known history. Sending remains blocked until a fresh session observation arrives.";
+        return "Showing the latest saved history. Sending is paused until the connection catches up.";
     }
     if (connection === "disconnected") {
         return "Live chat is unavailable. Drafts and prepared attachments stay in this browser while the connection recovers.";
@@ -232,7 +232,7 @@ export function ChatWorkspace({
                     No chat sessions
                 </Heading>
                 <Text className="mt-2" tone="muted">
-                    OpenClaw has not exposed a valid session yet.
+                    OpenClaw has not created a chat session yet.
                 </Text>
             </Card>
         );
@@ -418,12 +418,12 @@ export function ChatWorkspace({
                     />
                 </div>
                 {!activityOpen && (
-                    <div className="border-primary-700 absolute top-2 right-1 z-30 flex shrink-0 items-start lg:static lg:border-l lg:p-1">
+                    <div className="border-primary-700 absolute top-1/2 right-1 z-30 flex shrink-0 -translate-y-1/2 items-center lg:static lg:translate-y-0 lg:self-stretch lg:border-l lg:p-1">
                         <Button
                             aria-controls="chat-activity-panel"
                             aria-expanded={false}
                             aria-label="Open activity panel"
-                            className="focus-visible:ring-accent-400 h-10 min-h-10 min-w-10 flex-none justify-center self-start px-0 focus-visible:ring-1 focus-visible:ring-offset-0"
+                            className="focus-visible:ring-accent-400 h-10 min-h-10 min-w-10 flex-none justify-center self-center px-0 focus-visible:ring-1 focus-visible:ring-offset-0"
                             onClick={() => {
                                 activityWasToggled.current = true;
                                 setActivityOpen(true);
@@ -485,16 +485,16 @@ export function ChatWorkspace({
             </div>
             <ConfirmModal
                 busy={providerControlsDisabled}
-                confirmLabel="Reset provider transcript"
+                confirmLabel="Reset chat history"
                 danger
-                description="Resetting clears the selected OpenClaw provider transcript. Hiding a message only affects this browser view; reset is the destructive provider operation."
+                description="This permanently clears the selected OpenClaw chat history. Hiding one message affects only this browser."
                 onCancel={() => setResetTarget(undefined)}
                 onConfirm={() => {
                     if (resetTarget !== undefined) onResetTranscript(resetTarget);
                     setResetTarget(undefined);
                 }}
                 open={resetTarget !== undefined}
-                title="Reset chat session?"
+                title="Reset this chat?"
             />
         </Card>
     );

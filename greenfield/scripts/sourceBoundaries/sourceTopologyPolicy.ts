@@ -20,7 +20,9 @@ export type SourceRole =
 
 const webApplicationFiles = new Set([
     "src/app/dashboardChatRuntimeMaintenance.ts",
+    "src/app/dashboardLogs.ts",
     "src/app/dashboardServer.ts",
+    "src/app/dashboardTerminal.ts",
     "src/app/server.ts",
     "src/app/trpcHttpHandler.ts",
     "src/app/trpcRequestPolicy.ts",

@@ -495,7 +495,10 @@ export type JobRunSummary = v.InferOutput<typeof jobRunSummaryObjectSchema>;
 export function jobRunSummaryIsConsistent(run: JobRunSummary): boolean {
     const hasScheduleIdentity = run.scheduledJobId !== undefined;
     if (hasScheduleIdentity !== (run.scheduledJobVersion !== undefined)) return false;
-    if (["manual", "schedule"].includes(run.triggerType) !== hasScheduleIdentity) {
+    if (
+        (run.triggerType === "schedule" && !hasScheduleIdentity) ||
+        (["startup", "system"].includes(run.triggerType) && hasScheduleIdentity)
+    ) {
         return false;
     }
     if (

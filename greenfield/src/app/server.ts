@@ -2,13 +2,17 @@ import { secondsToMilliseconds } from "date-fns";
 import * as v from "valibot";
 
 import { chatAttachmentLimits } from "../contracts/chatMedia.ts";
+import { workspaceFileLimits } from "../contracts/files.ts";
 import { healthLivenessPath, healthReadinessPath } from "../contracts/system.ts";
 import type { AgentService } from "../server/domains/agents/service.ts";
 import type { CacheService } from "../server/domains/cache/service.ts";
 import type { ChatService } from "../server/domains/chat/service.ts";
+import type { WorkspaceFileRawHttpHandler } from "../server/domains/files/rawHttp.ts";
+import type { WorkspaceFilesService } from "../server/domains/files/service.ts";
 import type { GatewayConnectionService } from "../server/domains/gatewayConnection/service.ts";
 import type { GatewaySessionsService } from "../server/domains/gatewaySessions/service.ts";
 import type { JobService } from "../server/domains/jobs/service.ts";
+import type { LogsService } from "../server/domains/logs/service.ts";
 import type { MonitoringCatalogService } from "../server/domains/monitoring/catalogService.ts";
 import type { MonitoringService } from "../server/domains/monitoring/service.ts";
 import type { OpenClawCronService } from "../server/domains/openClawCron/service.ts";
@@ -19,6 +23,7 @@ import type { MfaAccountLifecycleService } from "../server/domains/security/mfa/
 import type { MfaLoginLifecycleService } from "../server/domains/security/mfa/loginLifecycle.ts";
 import type { SecurityAuditLifecycleService } from "../server/domains/security/securityAuditLifecycle.ts";
 import type { TaskService } from "../server/domains/tasks/service.ts";
+import type { TerminalService } from "../server/domains/terminal/service.ts";
 import type { ReadinessController } from "../server/platform/readiness/readinessState.ts";
 import type { ApplicationRuntime } from "../server/platform/runtime/applicationRuntime.ts";
 import { readRuntimeIdentity } from "../server/platform/runtime/readRuntimeIdentity.ts";
@@ -30,18 +35,37 @@ import {
     readinessResponse,
 } from "../server/rawHttp/health.ts";
 import { parseBrowserOrigin } from "../server/rawHttp/requestSecurity.ts";
+import type {
+    TerminalSocketBoundary,
+    TerminalSocketConnection,
+} from "../server/rawHttp/terminalSocket.ts";
 import type { AuthenticateCredential } from "../server/trpc/context.ts";
 import { positiveSafeIntegerSchema } from "../shared/validation.ts";
 import { createTrpcHttpHandler } from "./trpcHttpHandler.ts";
 import { isTrpcRequestPath, serverRequestBodyMaximumBytes } from "./trpcRequestPolicy.ts";
 
-/** Listener ceiling needed for raw chat uploads; each route retains its own tighter policy. */
+/** Listener ceiling for raw uploads; each mounted route retains its own tighter policy. */
 export const serverListenerRequestBodyMaximumBytes = Math.max(
     serverRequestBodyMaximumBytes,
-    chatAttachmentLimits.maximumFileBytes
+    chatAttachmentLimits.maximumFileBytes,
+    workspaceFileLimits.maximumUploadBytes
 );
 
 const serverIdleTimeoutSeconds = 10;
+const disabledTerminalSocketWebSocketHandler = Object.freeze({
+    backpressureLimit: 1,
+    closeOnBackpressureLimit: true,
+    idleTimeout: 1,
+    maxPayloadLength: 1,
+    message(socket: Bun.ServerWebSocket<TerminalSocketConnection>) {
+        socket.close(1011, "Interactive terminal unavailable");
+    },
+    open(socket: Bun.ServerWebSocket<TerminalSocketConnection>) {
+        socket.close(1011, "Interactive terminal unavailable");
+    },
+    perMessageDeflate: false,
+    sendPings: true,
+} satisfies Bun.WebSocketHandler<TerminalSocketConnection>);
 const serverGracefulShutdownTimeoutDefaultMs = secondsToMilliseconds(5);
 const serverGracefulShutdownTimeoutMaximumMs = secondsToMilliseconds(60);
 const serverGracefulShutdownTimeoutMessage =
@@ -170,6 +194,9 @@ export interface ServerOptions {
     /** Raw attachment/media routes mounted before browser asset fallback. */
     readonly chatRawHttpHandler?: ChatRawHttpHandler;
     readonly chatService?: ChatService;
+    readonly workspaceFilesService?: WorkspaceFilesService;
+    /** Ticket-bound Files GET/HEAD/PUT routes mounted before browser asset fallback. */
+    readonly workspaceFileRawHttpHandler?: WorkspaceFileRawHttpHandler;
     /** Process-owned domain adapters disposed after listener drain, before runtime DB. */
     readonly disposeBeforeRuntime?: () => Promise<void> | void;
     readonly gatewayConnectionService: GatewayConnectionService;
@@ -182,6 +209,7 @@ export interface ServerOptions {
     readonly mfaAccountLifecycle: MfaAccountLifecycleService;
     readonly mfaLoginLifecycle: MfaLoginLifecycleService;
     readonly jobService: JobService["Service"];
+    readonly logsService?: LogsService;
     readonly monitoringCatalogService: MonitoringCatalogService["Service"];
     readonly monitoringService: MonitoringService["Service"];
     readonly openClawCronService: OpenClawCronService;
@@ -190,6 +218,9 @@ export interface ServerOptions {
     readonly readiness: ReadinessController;
     readonly securityAuditLifecycle: SecurityAuditLifecycleService;
     readonly taskService: TaskService["Service"];
+    readonly terminalService?: TerminalService;
+    /** Browser-session-only upgrade boundary for the worker-owned interactive PTY. */
+    readonly terminalSocketBoundary?: TerminalSocketBoundary;
     /** Exact proxy peers allowed to supply one overwritten client address. */
     readonly trustedProxyAddresses?: readonly string[];
 }
@@ -227,30 +258,46 @@ export async function createServer(options: ServerOptions): Promise<ApplicationS
             browserOrigin,
             cacheService: options.cacheService,
             chatService: options.chatService,
+            workspaceFilesService: options.workspaceFilesService,
             gatewayConnectionService: options.gatewayConnectionService,
             gatewaySessionsService: options.gatewaySessionsService,
             mfaAccountLifecycle: options.mfaAccountLifecycle,
             mfaLoginLifecycle: options.mfaLoginLifecycle,
             jobService: options.jobService,
+            ...(options.logsService === undefined
+                ? {}
+                : { logsService: options.logsService }),
             monitoringCatalogService: options.monitoringCatalogService,
             monitoringService: options.monitoringService,
             openClawCronService: options.openClawCronService,
             openClawTasksService: options.openClawTasksService,
             securityAuditLifecycle: options.securityAuditLifecycle,
             taskService: options.taskService,
+            ...(options.terminalService === undefined
+                ? {}
+                : { terminalService: options.terminalService }),
             trustedProxyAddresses: options.trustedProxyAddresses,
         });
         await options.applicationRuntime.initialize();
 
-        const server = Bun.serve({
+        const server = Bun.serve<TerminalSocketConnection>({
             async fetch(request, bunServer) {
                 const requestId = crypto.randomUUID();
                 const startedAtMs = performance.now();
                 try {
                     const requestUrl = new URL(request.url);
                     const pathname = requestUrl.pathname;
+                    const terminalSocketResult =
+                        await options.terminalSocketBoundary?.handle(
+                            request,
+                            requestUrl,
+                            bunServer
+                        );
+                    if (terminalSocketResult?.kind === "upgraded") return;
                     let response: Response;
-                    if (isTrpcRequestPath(pathname)) {
+                    if (terminalSocketResult?.kind === "response") {
+                        response = terminalSocketResult.response;
+                    } else if (isTrpcRequestPath(pathname)) {
                         response = await handleTrpcHttpRequest(
                             request,
                             requestUrl,
@@ -273,10 +320,14 @@ export async function createServer(options: ServerOptions): Promise<ApplicationS
                                 options.readiness
                             );
                         } else {
-                            const chatResponse = await options.chatRawHttpHandler?.(
-                                request,
-                                requestUrl
-                            );
+                            const workspaceFileResponse =
+                                await options.workspaceFileRawHttpHandler?.(
+                                    request,
+                                    requestUrl
+                                );
+                            const chatResponse =
+                                workspaceFileResponse ??
+                                (await options.chatRawHttpHandler?.(request, requestUrl));
                             if (chatResponse === undefined) {
                                 const frontendResponse = await options.frontendAssets?.(
                                     request,
@@ -343,6 +394,9 @@ export async function createServer(options: ServerOptions): Promise<ApplicationS
             idleTimeout: serverIdleTimeoutSeconds,
             maxRequestBodySize: serverListenerRequestBodyMaximumBytes,
             port: options.port,
+            websocket:
+                options.terminalSocketBoundary?.websocket ??
+                disabledTerminalSocketWebSocketHandler,
         });
         let serverPort: number;
         try {
@@ -365,6 +419,7 @@ export async function createServer(options: ServerOptions): Promise<ApplicationS
                 // Withdraw readiness before listener drain begins so the proxy stops
                 // admitting new work while active HTTP and SSE requests settle.
                 options.readiness.markUnavailable();
+                options.terminalSocketBoundary?.shutdown();
                 stopPromise = (async () => {
                     try {
                         await options.applicationRuntime.shutdownListener({
@@ -390,11 +445,12 @@ export async function createServer(options: ServerOptions): Promise<ApplicationS
             url: server.url,
         });
     } catch (error) {
-        throw await primaryErrorAfterCleanup(error, () =>
-            disposeRuntimeAndFlush(
+        throw await primaryErrorAfterCleanup(error, async () => {
+            options.terminalSocketBoundary?.shutdown();
+            await disposeRuntimeAndFlush(
                 options.applicationRuntime,
                 options.disposeBeforeRuntime
-            )
-        );
+            );
+        });
     }
 }

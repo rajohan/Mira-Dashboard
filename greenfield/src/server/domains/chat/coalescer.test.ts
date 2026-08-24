@@ -59,6 +59,48 @@ describe("chat runtime event coalescer", () => {
         ]);
     });
 
+    test("coalesces a hundred contiguous ignored provider frames into one exact range", async () => {
+        let scheduled: (() => void) | undefined;
+        const batches: Array<readonly ChatRuntimeEventDraft[]> = [];
+        const coalescer = new ChatRuntimeEventCoalescer(
+            async (events) => {
+                batches.push(events);
+            },
+            {
+                clear() {
+                    scheduled = undefined;
+                },
+                schedule(callback) {
+                    scheduled = callback;
+                    return callback;
+                },
+            }
+        );
+        for (let providerSequence = 1; providerSequence <= 100; providerSequence += 1) {
+            await coalescer.push({
+                kind: "provider-noop",
+                occurredAtMs: 1000 + providerSequence,
+                providerSequenceEnd: providerSequence,
+                providerSequenceStart: providerSequence,
+                reason: "ignored",
+            });
+        }
+        expect(batches).toEqual([]);
+        scheduled?.();
+        await coalescer.flush();
+        expect(batches).toEqual([
+            [
+                {
+                    kind: "provider-noop",
+                    occurredAtMs: 1100,
+                    providerSequenceEnd: 100,
+                    providerSequenceStart: 1,
+                    reason: "ignored",
+                },
+            ],
+        ]);
+    });
+
     test("flushes pending text and a tool boundary in one serialized commit", async () => {
         const batches: Array<readonly ChatRuntimeEventDraft[]> = [];
         const coalescer = new ChatRuntimeEventCoalescer(

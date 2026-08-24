@@ -230,7 +230,9 @@ export const CronConfiguration: Story = {
         await expect(cronExpression).toHaveValue("0 6 * * 1-5");
         await expect(canvas.getByLabelText("Time zone")).toHaveValue("UTC");
         await expect(spacer).not.toBeVisible();
-        await expect(helper).toHaveTextContent("Minute, hour, day, month, weekday.");
+        await expect(helper).toHaveTextContent(
+            "Order: minute, hour, day, month, weekday."
+        );
         await waitFor(async () => {
             await expect(
                 Math.abs(

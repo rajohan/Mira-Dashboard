@@ -1,5 +1,6 @@
 import { Store } from "@tanstack/react-store";
 
+import { mergeChatStreamText } from "../../shared/chatStreamText.ts";
 import type {
     ChatActivePlanView,
     ChatDisplayMessage,
@@ -84,6 +85,7 @@ export type ChatRuntimeEvent =
           readonly text: string;
       })
     | (ChatRuntimeEventBase & {
+          readonly explanation?: string;
           readonly kind: "plan";
           readonly steps: readonly Readonly<{
               status: "completed" | "in_progress" | "pending";
@@ -152,13 +154,27 @@ export interface ChatRuntimeSnapshotProjection {
 
 /** Provider-origin projection that intentionally has no local run or user identity. */
 export interface ChatExternalRunProjection {
+    readonly abortBoundary?: Readonly<{
+        readonly attemptId: string;
+        readonly attemptedAtMs: number;
+        readonly baselineObservationEpoch: number;
+        readonly baselineUpdatedAtMs: number;
+        readonly settlement: "not-aborted" | "pending" | "unknown";
+    }>;
     readonly continuity: "complete" | "interrupted";
     readonly hasUnprojectedActivity: boolean;
     readonly message: ChatDisplayMessage;
+    readonly observationEpoch: number;
+    readonly observedAtMs: number;
     readonly plan?: ChatActivePlanView;
     readonly projectionTruncated: boolean;
     readonly providerRunId: string;
     readonly source: "provider-in-flight" | "provider-runtime";
+    readonly streamResets?: readonly Readonly<{
+        readonly resetKey: string;
+        readonly sourceStreamKey: string;
+    }>[];
+    readonly updatedAtMs: number;
 }
 
 function emptySession(): ChatSessionRuntime {
@@ -267,6 +283,9 @@ function planAfterEvent(
 ): ChatActivePlanView | undefined {
     if (event.kind === "plan") {
         return {
+            ...((event.explanation ?? run.plan?.description) === undefined
+                ? {}
+                : { description: event.explanation ?? run.plan?.description }),
             items: event.steps.map((step, index) => ({
                 id: `${event.runId}:plan:${index}`,
                 label: step.text,
@@ -280,6 +299,303 @@ function planAfterEvent(
         return undefined;
     }
     return run.plan;
+}
+
+function truncatedExternalPartIdentity(part: ChatMessagePart): string | undefined {
+    if (part.kind === "tool") return `tool:${part.callId}`;
+    if (
+        (part.kind === "text" || part.kind === "thinking") &&
+        part.sourceKey !== undefined
+    ) {
+        return `stream:${part.sourceKey}`;
+    }
+    return undefined;
+}
+
+function mergeMatchingTruncatedExternalPart(
+    previous: ChatMessagePart,
+    current: ChatMessagePart
+): ChatMessagePart {
+    if (
+        (previous.kind === "text" || previous.kind === "thinking") &&
+        current.kind === previous.kind
+    ) {
+        let text = current.text;
+        if (current.text.startsWith(previous.text)) text = current.text;
+        else if (previous.text.startsWith(current.text)) text = previous.text;
+        return { ...previous, ...current, text };
+    }
+    if (previous.kind === "tool" && current.kind === "tool") {
+        const previousIsTerminal =
+            previous.status === "completed" || previous.status === "failed";
+        const currentIsTerminal =
+            current.status === "completed" || current.status === "failed";
+        const retainPreviousTerminal = previousIsTerminal && !currentIsTerminal;
+        return {
+            ...previous,
+            ...current,
+            ...((current.input ?? previous.input) === undefined
+                ? {}
+                : { input: current.input ?? previous.input }),
+            ...((current.output ?? previous.output) === undefined
+                ? {}
+                : { output: current.output ?? previous.output }),
+            ...(retainPreviousTerminal
+                ? {
+                      ...(previous.error === undefined ? {} : { error: previous.error }),
+                      status: previous.status,
+                  }
+                : {}),
+        };
+    }
+    return current;
+}
+
+function isAggregateAssistantPart(
+    part: ChatMessagePart
+): part is Extract<ChatMessagePart, { kind: "text" }> {
+    return (
+        part.kind === "text" && part.sourceKey?.endsWith(":aggregate:assistant") === true
+    );
+}
+
+function identifiedAssistantPartIndexes(parts: readonly ChatMessagePart[]): number[] {
+    return parts.flatMap((part, index) =>
+        part.kind === "text" &&
+        part.sourceKey !== undefined &&
+        !isAggregateAssistantPart(part)
+            ? [index]
+            : []
+    );
+}
+
+function identifiedAssistantText(
+    parts: readonly ChatMessagePart[],
+    indexes: readonly number[]
+): string {
+    return indexes
+        .map((index) => {
+            const part = parts[index];
+            return part?.kind === "text" ? part.text : "";
+        })
+        .join("");
+}
+
+function extendLastIdentifiedAssistantPart(
+    parts: ChatMessagePart[],
+    indexes: readonly number[],
+    aggregateText: string
+): boolean {
+    const rendered = identifiedAssistantText(parts, indexes);
+    if (rendered === "" || !aggregateText.startsWith(rendered)) return false;
+    const lastIndex = indexes.at(-1);
+    const last = lastIndex === undefined ? undefined : parts[lastIndex];
+    if (lastIndex !== undefined && last?.kind === "text") {
+        parts[lastIndex] = {
+            ...last,
+            text: last.text + aggregateText.slice(rendered.length),
+        };
+    }
+    return true;
+}
+
+function mergeTruncatedExternalParts(
+    known: readonly ChatMessagePart[],
+    incoming: readonly ChatMessagePart[],
+    replacedSourceStreams: ReadonlySet<string> = new Set()
+): readonly ChatMessagePart[] {
+    let candidateKnown = [...known];
+    let candidateIncoming = [...incoming];
+    if (replacedSourceStreams.size > 0) {
+        candidateKnown = candidateKnown.filter(
+            (part) =>
+                (part.kind !== "text" && part.kind !== "thinking") ||
+                part.sourceStreamKey === undefined ||
+                !replacedSourceStreams.has(part.sourceStreamKey)
+        );
+    }
+    const incomingRichIndexes = identifiedAssistantPartIndexes(candidateIncoming);
+    const knownRichIndexes = identifiedAssistantPartIndexes(candidateKnown);
+    const incomingAggregate = candidateIncoming.findLast((part) =>
+        isAggregateAssistantPart(part)
+    );
+    const withoutAggregate = (parts: readonly ChatMessagePart[]) =>
+        parts.filter((part) => !isAggregateAssistantPart(part));
+
+    if (incomingRichIndexes.length > 0) {
+        // The adapter emits rich assistant parts only when they cover the
+        // authoritative run.text. Missing older rich identities therefore
+        // represent replacement, not a truncated window; retain only the
+        // matching assistant identities needed for idempotent prefix replay.
+        const incomingAssistantIdentities = new Set(
+            candidateIncoming.flatMap((part) =>
+                part.kind === "text" &&
+                part.sourceKey !== undefined &&
+                !part.sourceKey.endsWith(":aggregate:assistant")
+                    ? [part.sourceKey]
+                    : []
+            )
+        );
+        candidateKnown = candidateKnown.filter(
+            (part) =>
+                part.kind !== "text" ||
+                (part.sourceKey !== undefined &&
+                    incomingAssistantIdentities.has(part.sourceKey))
+        );
+        candidateIncoming = withoutAggregate(candidateIncoming);
+    } else if (incomingAggregate !== undefined && knownRichIndexes.length > 0) {
+        const knownAssistantText = identifiedAssistantText(
+            candidateKnown,
+            knownRichIndexes
+        );
+        if (
+            extendLastIdentifiedAssistantPart(
+                candidateKnown,
+                knownRichIndexes,
+                incomingAggregate.text
+            ) ||
+            knownAssistantText.startsWith(incomingAggregate.text)
+        ) {
+            candidateKnown = withoutAggregate(candidateKnown);
+            candidateIncoming = withoutAggregate(candidateIncoming);
+        } else {
+            // The newer compact projection carries authoritative run.text. If
+            // it does not cover the retained rich lane, discard only that stale
+            // assistant lane and let incoming tool anchors place the aggregate.
+            candidateKnown = candidateKnown.filter(
+                (part) => part.kind !== "text" || part.sourceKey === undefined
+            );
+        }
+    } else if (knownRichIndexes.length > 0) {
+        candidateKnown = withoutAggregate(candidateKnown);
+    }
+    const knownParts = candidateKnown;
+    const incomingParts = candidateIncoming;
+    const streamReplay = (kind: "text" | "thinking") => {
+        const knownText = knownParts
+            .flatMap((part) =>
+                (part.kind === "text" || part.kind === "thinking") &&
+                part.kind === kind &&
+                part.sourceKey === undefined
+                    ? [part.text]
+                    : []
+            )
+            .join("");
+        const incomingText = incomingParts
+            .flatMap((part) =>
+                (part.kind === "text" || part.kind === "thinking") &&
+                part.kind === kind &&
+                part.sourceKey === undefined
+                    ? [part.text]
+                    : []
+            )
+            .join("");
+        const converged = mergeChatStreamText(knownText, incomingText);
+        let appendFrom: number | undefined = 0;
+        if (converged === knownText) appendFrom = undefined;
+        else if (incomingText.startsWith(knownText)) {
+            appendFrom = knownText.length;
+        }
+        return {
+            appendFrom,
+            offset: 0,
+        };
+    };
+    const replay = {
+        text: streamReplay("text"),
+        thinking: streamReplay("thinking"),
+    };
+    const replayedIncoming: ChatMessagePart[] = [];
+    for (const part of incomingParts) {
+        if (part.kind === "control" || part.kind === "tool") {
+            replayedIncoming.push(part);
+            continue;
+        }
+        if (part.sourceKey !== undefined) {
+            replayedIncoming.push(part);
+            continue;
+        }
+        const state = replay[part.kind];
+        const partStart = state.offset;
+        state.offset += part.text.length;
+        if (state.appendFrom === undefined || state.offset <= state.appendFrom) {
+            continue;
+        }
+        const suffix = part.text.slice(Math.max(0, state.appendFrom - partStart));
+        if (suffix === "") continue;
+        replayedIncoming.push({ ...part, text: suffix });
+    }
+
+    const merged: ChatMessagePart[] = knownParts.filter(
+        (part) => part.kind !== "control"
+    );
+    const knownIdentities = new Set(
+        merged.flatMap((part) => {
+            const identity = truncatedExternalPartIdentity(part);
+            return identity === undefined ? [] : [identity];
+        })
+    );
+    const nextKnownIdentity: (string | undefined)[] = Array.from({
+        length: replayedIncoming.length,
+    });
+    let nextIdentity: string | undefined;
+    for (let index = replayedIncoming.length - 1; index >= 0; index -= 1) {
+        nextKnownIdentity[index] = nextIdentity;
+        const identity = truncatedExternalPartIdentity(replayedIncoming[index]!);
+        if (identity !== undefined && knownIdentities.has(identity)) {
+            nextIdentity = identity;
+        }
+    }
+    let lastIncomingIndex: number | undefined;
+    for (const [incomingIndex, part] of replayedIncoming.entries()) {
+        if (part.kind === "control") continue;
+        const identity = truncatedExternalPartIdentity(part);
+        const existingIndex =
+            identity === undefined
+                ? -1
+                : merged.findIndex(
+                      (candidate) => truncatedExternalPartIdentity(candidate) === identity
+                  );
+        if (existingIndex !== -1) {
+            merged[existingIndex] = mergeMatchingTruncatedExternalPart(
+                merged[existingIndex]!,
+                part
+            );
+            lastIncomingIndex = existingIndex;
+            continue;
+        }
+        const nextIdentity = nextKnownIdentity[incomingIndex];
+        const nextIndex =
+            nextIdentity === undefined
+                ? -1
+                : merged.findIndex(
+                      (candidate) =>
+                          truncatedExternalPartIdentity(candidate) === nextIdentity
+                  );
+        let insertionIndex = nextIndex === -1 ? merged.length : nextIndex;
+        if (lastIncomingIndex !== undefined) {
+            insertionIndex = Math.min(
+                lastIncomingIndex + 1,
+                nextIndex === -1 ? Infinity : nextIndex
+            );
+        }
+        merged.splice(insertionIndex, 0, part);
+        lastIncomingIndex = insertionIndex;
+    }
+
+    const controls: ChatMessagePart[] = [];
+    for (const part of [...incomingParts, ...knownParts]) {
+        if (
+            part.kind === "control" &&
+            !controls.some(
+                (candidate) =>
+                    candidate.kind === "control" && candidate.text === part.text
+            )
+        ) {
+            controls.push(part);
+        }
+    }
+    return [...merged, ...controls];
 }
 
 function applyRunEvent(run: ChatRuntimeRun, event: ChatRuntimeEvent): ChatRuntimeRun {
@@ -344,7 +660,7 @@ function applyRunEvent(run: ChatRuntimeRun, event: ChatRuntimeEvent): ChatRuntim
                 ...parts,
                 {
                     kind: "control",
-                    text: "Runtime stream was interrupted; reconciling…",
+                    text: "The live response was interrupted. Checking chat history…",
                     tone: "warning",
                 },
             ];
@@ -852,18 +1168,51 @@ export class ChatRuntimeStore extends Store<ChatRuntimeState> {
     ): void {
         this.setState((state) => {
             const session = state.sessions[sessionKey] ?? emptySession();
+            const externalRuns = Object.fromEntries(
+                projections.map((projection) => {
+                    const existing = session.externalRuns[projection.providerRunId];
+                    if (!projection.projectionTruncated || existing === undefined) {
+                        return [projection.providerRunId, projection] as const;
+                    }
+                    const existingResetByStream = new Map(
+                        (existing.streamResets ?? []).map(
+                            ({ resetKey, sourceStreamKey }) =>
+                                [sourceStreamKey, resetKey] as const
+                        )
+                    );
+                    const newlyReplacedStreams = new Set(
+                        (projection.streamResets ?? [])
+                            .filter(
+                                ({ resetKey, sourceStreamKey }) =>
+                                    existingResetByStream.get(sourceStreamKey) !==
+                                    resetKey
+                            )
+                            .map(({ sourceStreamKey }) => sourceStreamKey)
+                    );
+                    const parts = mergeTruncatedExternalParts(
+                        existing.message.parts,
+                        projection.message.parts,
+                        newlyReplacedStreams
+                    );
+                    const streamResets = projection.streamResets ?? existing.streamResets;
+                    const preserved: ChatExternalRunProjection = {
+                        ...projection,
+                        message: { ...projection.message, parts },
+                        ...((projection.plan ?? existing.plan) === undefined
+                            ? {}
+                            : { plan: projection.plan ?? existing.plan }),
+                        ...(streamResets === undefined ? {} : { streamResets }),
+                    };
+                    return [projection.providerRunId, preserved] as const;
+                })
+            );
             return {
                 ...state,
                 sessions: {
                     ...state.sessions,
                     [sessionKey]: {
                         ...session,
-                        externalRuns: Object.fromEntries(
-                            projections.map((projection) => [
-                                projection.providerRunId,
-                                projection,
-                            ])
-                        ),
+                        externalRuns,
                         externalRunsTruncated: truncated,
                     },
                 },
@@ -938,7 +1287,7 @@ export function chatRuntimeMessages(
                       parts: [
                           {
                               kind: "control",
-                              text: "Additional provider-origin runs were omitted by the bounded response.",
+                              text: "Some OpenClaw activity was not returned. Refresh chat history to check for updates.",
                               tone: "warning",
                           },
                       ],

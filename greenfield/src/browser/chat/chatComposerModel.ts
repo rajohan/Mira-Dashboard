@@ -24,12 +24,12 @@ export function chatSlashSuggestions(
             title: "/help",
         },
         {
-            description: "Compact the selected session context",
+            description: "Shorten the selected chat history",
             replacement: "/compact",
             title: "/compact",
         },
         {
-            description: "Reset the selected provider transcript",
+            description: "Reset the selected OpenClaw chat history",
             replacement: "/reset",
             title: "/reset",
         },

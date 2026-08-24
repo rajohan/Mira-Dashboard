@@ -18,17 +18,23 @@ const stateDirectoryName = "state";
 const stateChildDirectoryNames = Object.freeze([
     "backups",
     "job-output",
+    "log-maintenance",
     "logs",
+    "terminal-broker",
+    "workspace-file-uploads",
 ] as const);
 
 /** Stable paths created beneath one canonical Dashboard project root. */
 export interface PreparedProductionStatePaths {
     readonly backupsDirectory: string;
     readonly jobOutputDirectory: string;
+    readonly logMaintenanceDirectory: string;
     readonly logsDirectory: string;
     readonly productionDirectory: string;
     readonly projectRoot: string;
     readonly stateDirectory: string;
+    readonly terminalBrokerDirectory: string;
+    readonly workspaceFileUploadsDirectory: string;
 }
 
 /** Deterministic mutation boundaries exposed only to adversarial tests. */
@@ -511,17 +517,30 @@ export async function prepareProtectedProductionStatePath(
 
         const backups = stateChildren.get("backups");
         const jobOutput = stateChildren.get("job-output");
+        const logMaintenance = stateChildren.get("log-maintenance");
         const logs = stateChildren.get("logs");
-        if (!backups || !jobOutput || !logs) {
+        const terminalBroker = stateChildren.get("terminal-broker");
+        const workspaceFileUploads = stateChildren.get("workspace-file-uploads");
+        if (
+            !backups ||
+            !jobOutput ||
+            !logMaintenance ||
+            !logs ||
+            !terminalBroker ||
+            !workspaceFileUploads
+        ) {
             throw invalidProductionStateFilesystem();
         }
         preparedPaths = Object.freeze({
             backupsDirectory: backups.canonicalPath,
             jobOutputDirectory: jobOutput.canonicalPath,
+            logMaintenanceDirectory: logMaintenance.canonicalPath,
             logsDirectory: logs.canonicalPath,
             productionDirectory: production.canonicalPath,
             projectRoot: canonicalProjectRoot.canonicalPath,
             stateDirectory: state.canonicalPath,
+            terminalBrokerDirectory: terminalBroker.canonicalPath,
+            workspaceFileUploadsDirectory: workspaceFileUploads.canonicalPath,
         });
     } catch (error) {
         failure = error;

@@ -23,6 +23,10 @@ import {
 } from "./chatAttachmentPresentation.ts";
 import { ChatAttachmentPreview } from "./ChatAttachmentPreview.tsx";
 import { safeChatMarkdownLink } from "./chatMarkdownPolicy.ts";
+import {
+    chatMessageHasVisibleContent,
+    visibleChatMessageParts,
+} from "./chatMessageVisibility.ts";
 import type {
     ChatDisplayMessage,
     ChatDisplaySettings,
@@ -45,6 +49,57 @@ function safeDetail(value: unknown): string | undefined {
     }
 }
 
+function toolDisplayName(name: string): string {
+    const unqualified = name.startsWith("functions.")
+        ? name.slice("functions.".length)
+        : name;
+    const normalized = ["bash", "exec", "exec_command"].includes(unqualified)
+        ? "bash"
+        : unqualified;
+    const words = normalized.replaceAll(/[_-]/gu, " ").replaceAll(/\s+/gu, " ").trim();
+    return words === "" ? "Tool" : `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
+}
+
+function toolDescription(part: ChatToolPart): string | undefined {
+    let candidate = part.input;
+    if (typeof candidate === "string") {
+        try {
+            candidate = JSON.parse(candidate) as unknown;
+        } catch {
+            return undefined;
+        }
+    }
+    if (candidate === null || typeof candidate !== "object" || Array.isArray(candidate)) {
+        return undefined;
+    }
+    const input = candidate as Readonly<Record<string, unknown>>;
+    let command: string | undefined;
+    if (typeof input.command === "string") command = input.command;
+    else if (typeof input.cmd === "string") command = input.cmd;
+    if (command !== undefined) {
+        let workingDirectory: string | undefined;
+        if (typeof input.workdir === "string") workingDirectory = input.workdir;
+        else if (typeof input.cwd === "string") workingDirectory = input.cwd;
+        const directoryName = workingDirectory?.split(/[\\/]/u).findLast(Boolean);
+        return directoryName === undefined ? command : `${command} (${directoryName})`;
+    }
+    return typeof input.path === "string" ? input.path : undefined;
+}
+
+function ToolDetailSection({
+    children,
+    label,
+}: Readonly<{ children: ReactNode; label: string }>) {
+    return (
+        <section className="border-primary-700 bg-primary-950/40 rounded-md border px-2 py-1.5">
+            <p className="text-primary-400 mb-1 text-[10px] font-medium tracking-wide uppercase">
+                {label}
+            </p>
+            {children}
+        </section>
+    );
+}
+
 interface ToolPartProps {
     readonly expanded: boolean;
     readonly part: ChatToolPart;
@@ -61,20 +116,16 @@ function ToolPart({ expanded, part }: ToolPartProps) {
     const [override, setOverride] =
         useState<Readonly<{ basis: boolean; value: boolean }>>();
     const open = override?.basis === forcedOpen ? override.value : forcedOpen;
-    const detail = [
-        safeDetail(part.input) === undefined
-            ? undefined
-            : `Input\n${safeDetail(part.input)}`,
-        safeDetail(part.output) === undefined
-            ? undefined
-            : `Output\n${safeDetail(part.output)}`,
-        part.error === undefined ? undefined : `Error\n${part.error}`,
-    ]
-        .filter((value): value is string => value !== undefined)
-        .join("\n\n");
+    const description = toolDescription(part);
+    const input = safeDetail(part.input);
+    const output = safeDetail(part.output);
+    const outputDetails = [...new Set([output, part.error])].filter(
+        (value): value is string => value !== undefined
+    );
+    const label = toolDisplayName(part.name);
     return (
         <section
-            aria-label={`${part.name}, ${part.status}`}
+            aria-label={`${label}, ${part.status}`}
             className={cn(
                 "bg-primary-800 overflow-hidden rounded-lg",
                 part.status === "failed" && "border-red-800/70"
@@ -96,7 +147,7 @@ function ToolPart({ expanded, part }: ToolPartProps) {
                     size="sm"
                     tone={part.status === "failed" ? "danger" : "inherit"}
                 />
-                <span className="min-w-0 flex-1 truncate font-medium">{part.name}</span>
+                <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
                 <span className="text-primary-400 capitalize">{part.status}</span>
                 <Icon
                     className={cn(
@@ -109,13 +160,51 @@ function ToolPart({ expanded, part }: ToolPartProps) {
                 />
             </button>
             {open && (
-                <div className="border-primary-700 border-t px-3 py-2">
-                    {detail === "" ? (
-                        <p className="text-primary-400 text-xs">No tool detail.</p>
-                    ) : (
-                        <pre className="text-primary-300 max-h-64 overflow-auto text-xs wrap-break-word whitespace-pre-wrap">
-                            {detail}
-                        </pre>
+                <div className="border-primary-700 space-y-2 border-t px-3 py-2">
+                    {description !== undefined && (
+                        <ToolDetailSection label="Description">
+                            <p className="text-primary-200 text-xs wrap-break-word">
+                                {description}
+                            </p>
+                        </ToolDetailSection>
+                    )}
+                    <ToolDetailSection label="Tool input">
+                        {input === undefined ? (
+                            <p className="text-primary-400 text-xs">No input.</p>
+                        ) : (
+                            <section
+                                aria-label={`${label} tool input`}
+                                className="text-primary-300 max-h-64 overflow-auto text-xs"
+                                data-virtualizer-scroll-region
+                                // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- Bounded tool input must remain keyboard-scrollable.
+                                tabIndex={0}
+                            >
+                                <pre className="wrap-break-word whitespace-pre-wrap">
+                                    {input}
+                                </pre>
+                            </section>
+                        )}
+                    </ToolDetailSection>
+                    {(part.status !== "running" ||
+                        output !== undefined ||
+                        part.error !== undefined) && (
+                        <ToolDetailSection label="Tool output">
+                            {outputDetails.length === 0 ? (
+                                <p className="text-primary-400 text-xs">No output.</p>
+                            ) : (
+                                <section
+                                    aria-label={`${label} tool output`}
+                                    className="text-primary-300 max-h-64 overflow-auto text-xs"
+                                    data-virtualizer-scroll-region
+                                    // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- Bounded tool output must remain keyboard-scrollable.
+                                    tabIndex={0}
+                                >
+                                    <pre className="wrap-break-word whitespace-pre-wrap">
+                                        {outputDetails.join("\n\n")}
+                                    </pre>
+                                </section>
+                            )}
+                        </ToolDetailSection>
                     )}
                 </div>
             )}
@@ -281,16 +370,11 @@ export function ChatMessageBubble({
     const author = messageAuthor(message.role);
     const hydrationLabel =
         message.hydration === "error" ? "Retry full message" : "Open full message";
-    const visibleParts = message.parts.filter(
-        (part) =>
-            (part.kind !== "thinking" ||
-                (display.showThinking &&
-                    (part.status === "running" || display.keepThinkingAfterFinal))) &&
-            (part.kind !== "tool" || display.showTools)
-    );
+    const visibleParts = visibleChatMessageParts(message, display);
     const previewAttachment = message.attachments.find(
         (attachment) => attachment.id === previewAttachmentId
     );
+    if (!chatMessageHasVisibleContent(message, display, readAloud)) return null;
     const readableText = visibleParts
         .filter((part) => part.kind === "text")
         .map((part) => part.text.trim())
@@ -304,7 +388,9 @@ export function ChatMessageBubble({
         ) &&
         (message.runId === undefined || !activeRunIds.includes(message.runId)) &&
         (message.clientRunId === undefined ||
-            !activeRunIds.includes(message.clientRunId));
+            !activeRunIds.includes(message.clientRunId)) &&
+        (message.providerRunId === undefined ||
+            !activeRunIds.includes(message.providerRunId));
     const readAloudAvailable =
         message.role === "assistant" &&
         messageFinished &&
@@ -459,11 +545,6 @@ export function ChatMessageBubble({
                                 />
                             );
                         })}
-                        {visibleParts.length === 0 && message.delivery !== "sending" && (
-                            <p className="text-primary-400 text-xs">
-                                No visible message content.
-                            </p>
-                        )}
                         {message.delivery === "sending" && visibleParts.length === 0 && (
                             <p className="text-primary-300 animate-pulse text-xs motion-reduce:animate-none">
                                 Sending…
@@ -522,7 +603,7 @@ export function ChatMessageBubble({
             {onHide !== undefined && (
                 <ConfirmModal
                     confirmLabel="Hide message"
-                    description="This hides the selected message only in this browser for this OpenClaw session. It does not delete or change the provider transcript."
+                    description="This hides the selected message only in this browser. It does not delete or change the OpenClaw chat history."
                     onCancel={() => setHideConfirmationOpen(false)}
                     onConfirm={() => {
                         onHide(message.id);

@@ -1,6 +1,10 @@
 import { queryOptions, type QueryClient } from "@tanstack/react-query";
 
 import type { DashboardTrpcClient } from "../api/trpcClient.ts";
+import {
+    dashboardUnavailableReadRetryDelay,
+    retryDashboardUnavailableRead,
+} from "../api/trpcError.ts";
 import { gatewaySessionsClient } from "./gatewaySessionClient.ts";
 
 export const gatewaySessionQueryKey = ["gateway-sessions", "snapshot"] as const;
@@ -16,7 +20,8 @@ export function gatewaySessionQueryOptions(client: DashboardTrpcClient) {
             sessionsClient.query("gatewaySessions.list", { filter: "ALL" }, { signal }),
         queryKey: gatewaySessionQueryKey,
         refetchInterval: gatewaySessionRefreshIntervalMs,
-        retry: false,
+        retry: retryDashboardUnavailableRead,
+        retryDelay: dashboardUnavailableReadRetryDelay,
         staleTime: gatewaySessionRefreshIntervalMs,
     });
 }

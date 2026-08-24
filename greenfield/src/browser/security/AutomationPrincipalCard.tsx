@@ -58,7 +58,7 @@ function AutomationCapabilityEditor({
                     size="sm"
                     variant="secondary"
                 >
-                    Replace capabilities
+                    Update permissions
                 </Button>
             )}
         </>
@@ -111,12 +111,12 @@ export function AutomationPrincipalCard({ principal }: AutomationPrincipalCardPr
                     </p>
                     <p className="text-primary-400 mt-1 text-sm">
                         {principal.disabled ? "Disabled" : "Active"} ·{" "}
-                        {principal.activeCredentialCount} active credential(s)
+                        {principal.activeCredentialCount} active access token(s)
                     </p>
                 </div>
                 {!principal.disabled && (
                     <Button
-                        aria-label={`Disable principal ${principal.label}`}
+                        aria-label={`Disable automation account ${principal.label}`}
                         busy={action.busy}
                         busyLabel="Disabling…"
                         onClick={() => setDisableConfirmationOpen(true)}
@@ -124,7 +124,7 @@ export function AutomationPrincipalCard({ principal }: AutomationPrincipalCardPr
                         variant="danger"
                     >
                         <Icon icon={ShieldOff} size="sm" tone="inherit" />
-                        Disable principal
+                        Disable account
                     </Button>
                 )}
             </div>
@@ -133,7 +133,7 @@ export function AutomationPrincipalCard({ principal }: AutomationPrincipalCardPr
                 <OneTimeSecretPanel
                     id={`automation-token-${principal.id}`}
                     onDismiss={() => setIssuedToken(undefined)}
-                    title="New automation token"
+                    title="New access token"
                 >
                     {issuedToken}
                 </OneTimeSecretPanel>
@@ -147,9 +147,9 @@ export function AutomationPrincipalCard({ principal }: AutomationPrincipalCardPr
             />
             <ExpandableCard
                 className="mt-5"
-                description="Create, stage, rotate, or revoke scoped credentials."
+                description="Create, replace, or revoke access tokens for this automation account."
                 icon={KeyRound}
-                title="Manage credentials"
+                title="Manage access tokens"
             >
                 <AutomationCredentialPanel
                     onIssuedToken={setIssuedToken}
@@ -158,13 +158,13 @@ export function AutomationPrincipalCard({ principal }: AutomationPrincipalCardPr
             </ExpandableCard>
             <ConfirmModal
                 busy={action.busy}
-                confirmLabel="Disable principal"
+                confirmLabel="Disable account"
                 danger
-                description={`Disable “${principal.label}” and revoke every active credential it owns.`}
+                description={`Disable “${principal.label}” and revoke all of its active access tokens.`}
                 onCancel={() => setDisableConfirmationOpen(false)}
                 onConfirm={() => void disablePrincipal()}
                 open={disableConfirmationOpen}
-                title="Disable automation principal?"
+                title="Disable automation account?"
             />
         </li>
     );

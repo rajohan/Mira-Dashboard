@@ -18,7 +18,7 @@ import { openClawCronRealtimeRefreshDelayMs } from "./useOpenClawCronRealtimeInv
 
 const { render, waitFor } = await import("@testing-library/react");
 
-describe("OpenClaw cron realtime invalidation", () => {
+describe("OpenClaw scheduled jobs realtime invalidation", () => {
     test("subscribes once to the cron topic and refreshes every cron projection", async () => {
         const queryClient = createDashboardQueryClient();
         const realtimeClient = new ControlledDashboardRealtimeClient();

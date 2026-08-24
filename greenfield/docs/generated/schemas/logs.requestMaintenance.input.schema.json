@@ -1,0 +1,28 @@
+{
+  "$id": "urn:mira-dashboard:logs.requestMaintenance.input",
+  "type": "object",
+  "properties": {
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 32,
+      "maxLength": 128,
+      "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
+    },
+    "policyId": {
+      "enum": [
+        "docker-managed",
+        "host-alternatives",
+        "host-apport",
+        "host-dpkg",
+        "host-rsyslog"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "idempotencyKey",
+    "policyId"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

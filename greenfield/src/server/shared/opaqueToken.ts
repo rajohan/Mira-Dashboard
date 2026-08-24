@@ -19,7 +19,7 @@ const opaqueTokenSchema = v.pipe(
 export const opaqueTokenValidatorVersion = 1;
 
 /** Prevents a validator from being replayed across independent trust domains. */
-export type OpaqueTokenDomain = "automation" | "pending-login" | "session";
+export type OpaqueTokenDomain = "automation" | "pending-login" | "session" | "terminal";
 
 function validatorHash(
     domain: OpaqueTokenDomain,

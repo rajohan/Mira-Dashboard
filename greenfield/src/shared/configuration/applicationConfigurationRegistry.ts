@@ -9,8 +9,10 @@ export const applicationConfigurationLimits = Object.freeze({
     elevenLabsApiKeyMaximumLength: 4096,
     gatewayTokenMaximumLength: 4096,
     gatewayUrlMaximumLength: 2048,
+    openClawRootMaximumLength: 4096,
     port: Object.freeze({ maximum: 65_535, minimum: 1 }),
     projectRootMaximumLength: 4096,
+    workspaceRootMaximumLength: 4096,
     publicOriginMaximumLength: 2048,
     recentAuthenticationMinutes: Object.freeze({ maximum: 60, minimum: 1 }),
     sessionIdleMinutes: Object.freeze({ maximum: 1440, minimum: 5 }),
@@ -32,6 +34,7 @@ export type ApplicationConfigurationField =
     | "gatewayUrl"
     | "logLevel"
     | "nodeEnvironment"
+    | "openClawRoot"
     | "port"
     | "projectRoot"
     | "publicOrigin"
@@ -39,6 +42,7 @@ export type ApplicationConfigurationField =
     | "sessionIdleDurationMs"
     | "totpKeyring"
     | "trustedProxyAddresses"
+    | "workspaceRoot"
     | "webAuthnRelyingParty.allowedOrigins"
     | "webAuthnRelyingParty.rpId"
     | "webAuthnRelyingParty.rpName";
@@ -47,6 +51,8 @@ export type ApplicationConfigurationField =
 export const applicationConfigurationEnvironmentNames = [
     "NODE_ENV",
     "MIRA_DASHBOARD_PROJECT_ROOT",
+    "MIRA_DASHBOARD_OPENCLAW_ROOT",
+    "MIRA_DASHBOARD_WORKSPACE_ROOT",
     "PORT",
     "MIRA_DASHBOARD_PUBLIC_ORIGIN",
     "MIRA_DASHBOARD_TRUSTED_PROXY_IPS",
@@ -150,6 +156,38 @@ export const applicationConfigurationRegistry: readonly ApplicationConfiguration
             roles: Object.freeze(["web", "worker", "build", "script"]),
             secret: false,
             validationConstraints: `Non-root normalized absolute path, at most ${applicationConfigurationLimits.projectRootMaximumLength} code units; realpath validation is staged for startup.`,
+            valueType: "absolute-path",
+        }),
+        metadata({
+            allowedValues: null,
+            browserExposure: "none",
+            defaultValue: null,
+            description:
+                "Explicit reviewed OpenClaw home used only by the fixed Files manifest and worker replacement allowlist.",
+            environmentName: "MIRA_DASHBOARD_OPENCLAW_ROOT",
+            field: "openClawRoot",
+            operationalEffect:
+                "Selects the descriptor-rooted OpenClaw Config tree; only reviewed config can be explicitly revealed, only two files can be replaced, and arbitrary OpenClaw state remains opaque.",
+            restartRequired: true,
+            roles: Object.freeze(["web", "worker"]),
+            secret: false,
+            validationConstraints: `Non-root normalized absolute path, at most ${applicationConfigurationLimits.openClawRootMaximumLength} code units; startup requires a canonical owner-controlled mode-0700 directory disjoint from Dashboard production state.`,
+            valueType: "absolute-path",
+        }),
+        metadata({
+            allowedValues: null,
+            browserExposure: "none",
+            defaultValue: null,
+            description:
+                "Explicit reviewed workspace root exposed through bounded Files operations and as Terminal's initial working location.",
+            environmentName: "MIRA_DASHBOARD_WORKSPACE_ROOT",
+            field: "workspaceRoot",
+            operationalEffect:
+                "Selects the descriptor-rooted Files tree and Terminal's initial directory; it does not sandbox the interactive shell.",
+            restartRequired: true,
+            roles: Object.freeze(["web", "worker"]),
+            secret: false,
+            validationConstraints: `Non-root normalized absolute path, at most ${applicationConfigurationLimits.workspaceRootMaximumLength} code units; startup requires a canonical directory disjoint from Dashboard production state.`,
             valueType: "absolute-path",
         }),
         metadata({

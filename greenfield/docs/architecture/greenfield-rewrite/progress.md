@@ -14,7 +14,7 @@ closes a phase; dated entries below provide the evidence, not a second status so
 | 2 — Trust and transport             | Complete for the stated server scope | Authentication, MFA, WebAuthn, automation credentials, audit, authenticated renewable SSE, one-shot native Gateway bootstrap verification, and the consolidated [threat model](../../security/greenfield-phase-two-threat-model.md) have executable evidence. Browser UI and production cutover remain later gates.                                                                                                                                                                                                                                                                                                                                                          |
 | 3 — Core operator domains           | Started                              | Task and agent-directory parity are implemented with durable history, realtime invalidation, and browser workflows. Monitoring ingestion plus report, incident, and notification server/browser parity are implemented. Dashboard-local durable schedules/jobs, real worker execution, their `/jobs` operator UI, the first claim-fenced `system.host` cache provider, its cache browser, and bounded system metrics are implemented. Root composition covers every implemented Phase 3 operator domain, and Phase 4A now supplies the OpenClaw-cron half of `/jobs`. Full root parity and privileged/external providers remain later gates, so the Phase 3 exit stays open. |
 | 4 — Gateway and chat                | Started                              | The current installed OpenClaw source is hash-pinned for the persistent sessions, cron, chat, companion, task, and media surfaces. Process-owned Gateway lifecycle, durable realtime invalidation, sessions and agent availability, OpenClaw cron/tasks, the compact heartbeat, the durable chat journal/runtime, bounded history and reconciliation, attachments/media proxy, and the `/chat` frontend are implemented. Recorded contract, protocol, service, browser, restart, load-boundary, and security tests cover the slice; live Gateway smoke/restart evidence and the Phase 4 exit gate remain open.                                                               |
-| 5 — Privileged and external domains | Not started                          | Worker-owned file/media, Docker, database, OpenClaw, GitHub, deployment, backup, and other privileged adapters remain open.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| 5 — Privileged and external domains | Started                              | Files now has named-root browsing, ticketed raw transfer, bounded spooling, CAS writes, worker execution, and browser workflows. Logs has redacted named-source reads plus separate custom app/container rotation and fixed host-logrotate policies. Terminal is a worker-owned interactive PTY over a hardened WebSocket with bounded reconnect replay. Docker control, database, Moltbook, settings, GitHub, deployment, backup, and the remaining privileged adapters stay open; the Phase 5 exit gate is not claimed.                                                                                                                                                    |
 | 6 — Parity, hardening, and cutover  | Not started                          | Full UI parity, generated `/docs`, load/resource/restore evidence, cutover rehearsal, fresh production database, and legacy removal remain open.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
 ### 2026-08-03 — Phase 0 started
@@ -1245,3 +1245,67 @@ full-browser parity, production rehearsal, cutover, and legacy deletion remain o
   characters/16 KiB input and 8 MiB MPEG output. Both lanes are abortable, concurrency/deadline
   bounded, no-store, sanitized, and deliberately have no audio/text persistence or logging port.
   Separate identity-bounded rolling per-principal request/work budgets cap paid STT and TTS compute.
+
+### 2026-08-09 — Phase 5 Files, Logs, and interactive Terminal verticals
+
+- Files exposes the writable named `workspace` root selected by
+  `MIRA_DASHBOARD_WORKSPACE_ROOT` plus a separate fixed-manifest `openclaw-config` root selected by
+  the web-and-worker `MIRA_DASHBOARD_OPENCLAW_ROOT`; host paths never cross the browser contract, and
+  production Dashboard state cannot be selected as either root. The OpenClaw root enumerates only
+  `openclaw.json` and `hooks/transforms/agentmail.ts` plus their directory prefixes. Sessions,
+  credentials, tokens, and every unreviewed sibling remain invisible. `openclaw.json` is parsed and
+  redacted inside the descriptor adapter before default ticket metadata or bytes leave it. An
+  explicit recent-MFA mutation issues a short-lived actor-bound no-store reveal ticket, keeps raw
+  content outside Query caches, and binds any subsequent CAS replacement to that exact revealed
+  revision. Invalid JSON remains unavailable through the default redacted read but can still be
+  explicitly revealed and repaired. `agentmail.ts` is editable without a secret reveal. Both files
+  allow replacement only; the OpenClaw root offers no create, delete, rename, or recursive browse.
+  Descriptor-anchored reads
+  reject traversal, links, devices, ownership/mode drift, oversized content, and revision drift. Short-lived
+  actor-bound tickets carry raw `GET`/`HEAD` previews and downloads plus bounded streamed `PUT`
+  uploads. Upload bytes spool beneath protected Dashboard state, while only the worker performs
+  descriptor-anchored create/replace, mandatory CAS, fsync, and atomic rename. The worker's separate
+  replacement manifest admits only those two OpenClaw paths and enforces per-file size and owner/mode
+  checks. Because atomic exchange needs to create a stage file in the target directory, systemd
+  cannot express an exact-file writable exception; the descriptor manifest is the enforced write
+  boundary for this root. The `/files`
+  browser route provides bounded paginated browsing, previews, download, upload, replacement, and
+  reconciliation without treating an uncertain response as permission to redispatch.
+- Logs exposes a path-free catalog for exact Dashboard files, exact host text logs, and bounded
+  dated OpenClaw files. Descriptor reads enforce owner, mode, link, type, size, and partial-read
+  checks before centralized secret redaction; stable line identities derive only from redacted
+  text. Tail and search remain bounded and browser-session-only. The `/logs` route retains validated
+  data through safe failures and queues only fixed reviewed maintenance policy IDs after recent
+  MFA, durable audit, and job admission. The worker periodically probes its managed rotation engine
+  and only `LoadState` for the four fixed host units, then atomically publishes a private,
+  contract-ordered policy-ID projection under project-local log-maintenance state. The web process
+  has no process or rotation-state authority: it reads only that bounded `0600` projection and
+  accepts it while its worker timestamp is fresh. For `docker-managed`, the worker validates the
+  protected maintenance-state root and any existing bounded state file; an absent state file is
+  accepted as first-run state. Invalid managed state, stale or corrupt projections, missing or
+  unloaded host units, aborted checks, and unconfigured policies fail closed as unavailable.
+  Orderly worker shutdown first publishes an empty projection. The resulting Jobs run is
+  authoritative for execution outcome.
+- Log maintenance deliberately has two owners. Dashboard's worker implements size/cadence,
+  copy-truncate or reviewed rename, compression, retention, archive-only cleanup, atomic state,
+  locking, status, and dry-run mechanics for the exact reviewed Dashboard, OpenClaw, and
+  application/container manifest. Ubuntu's system logrotate remains responsible only for the
+  exact `rsyslog`, `apport`, `dpkg`, and `alternatives` policies through a separately provisioned
+  fixed broker. The provisioning artifacts are immutable release inventory, but no host policy is
+  installed or activated by this implementation change.
+- Terminal is a real xterm-compatible interactive PTY rather than persisted command-job emulation.
+  A worker-private Unix broker owns `Bun.Terminal` and a resource-bounded transient systemd
+  service; the web process owns only recent-MFA/session/capability admission and the same-origin
+  WebSocket relay. Input/output are raw bounded bytes with FIFO backpressure, resize/signals,
+  bounded reconnect replay, auth-lease renewal, and deterministic detach/terminate/shutdown.
+  Terminal content and keystrokes are never logged or persisted. Its named `workspace` root is
+  only the shell's initial working location: an interactive shell may leave it wherever its OS
+  identity has access, so it is explicitly not a filesystem sandbox.
+- `/opt/docker` remains the separate Docker-stack project and source of truth. Dashboard is a
+  control plane for later reviewed inventory/update/action adapters; it does not absorb compose
+  files, application data, or stack deployment ownership. Files, Logs, and Terminal contracts,
+  schemas, raw routes, browser routes, and reviewed legacy mappings are now represented in the
+  deterministic generated documentation/parity artifacts. `/terminal` records the explicitly
+  reviewed PTY replacement as implemented; `/files`, `/logs`, and legacy rotation-status parity
+  remain planned until their outstanding full-parity behavior and real runtime status exist. The
+  other Phase 5 domains and the aggregate privileged-operation exit gate remain open.

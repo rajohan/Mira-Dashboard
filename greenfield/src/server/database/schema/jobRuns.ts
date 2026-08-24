@@ -162,7 +162,7 @@ export const jobRuns = sqliteTable(
         check("job_runs_retry_safe_check", sql`${table.retrySafe} IN (0, 1)`),
         check(
             "job_runs_schedule_check",
-            sql`(${table.triggerType} = 'schedule' AND ${table.scheduledJobId} IS NOT NULL AND ${table.scheduledJobVersion} BETWEEN 1 AND 9007199254740991 AND ${table.scheduledForAt} IS NOT NULL AND ${timestampMillisecondsCheck(table.scheduledForAt)} AND ${table.scheduledForAt} <= ${table.queuedAt}) OR (${table.triggerType} = 'manual' AND ${table.scheduledJobId} IS NOT NULL AND ${table.scheduledJobVersion} BETWEEN 1 AND 9007199254740991 AND ${table.scheduledForAt} IS NULL) OR (${table.triggerType} IN ('startup', 'system') AND ${table.scheduledJobId} IS NULL AND ${table.scheduledJobVersion} IS NULL AND ${table.scheduledForAt} IS NULL)`
+            sql`(${table.triggerType} = 'schedule' AND ${table.scheduledJobId} IS NOT NULL AND ${table.scheduledJobVersion} BETWEEN 1 AND 9007199254740991 AND ${table.scheduledForAt} IS NOT NULL AND ${timestampMillisecondsCheck(table.scheduledForAt)} AND ${table.scheduledForAt} <= ${table.queuedAt}) OR (${table.triggerType} = 'manual' AND (((${table.scheduledJobId} IS NOT NULL AND ${table.scheduledJobVersion} BETWEEN 1 AND 9007199254740991) OR (${table.scheduledJobId} IS NULL AND ${table.scheduledJobVersion} IS NULL)) AND ${table.scheduledForAt} IS NULL)) OR (${table.triggerType} IN ('startup', 'system') AND ${table.scheduledJobId} IS NULL AND ${table.scheduledJobVersion} IS NULL AND ${table.scheduledForAt} IS NULL)`
         ),
         check(
             "job_runs_state_check",

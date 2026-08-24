@@ -53,8 +53,8 @@ describe("SystemHostCard", () => {
             />
         );
         expect(screen.getByRole("heading", { name: "mira-vps" })).toBeTruthy();
-        expect(screen.getByText("fresh")).toBeTruthy();
-        expect(screen.getByText("last attempt failed")).toBeTruthy();
+        expect(screen.getByText("Up to date")).toBeTruthy();
+        expect(screen.getByText("Last refresh Failed")).toBeTruthy();
         expect(screen.getByRole("progressbar", { name: "Memory used" })).toBeTruthy();
         expect(screen.getByText("75% used · 2.0 GiB free")).toBeTruthy();
         expect(screen.getByText("Uptime 2d 3h")).toBeTruthy();
@@ -63,7 +63,7 @@ describe("SystemHostCard", () => {
     test("fails closed when a generic cache payload is not a system.host payload", () => {
         render(<SystemHostCard entry={entry({ unexpected: "value" })} />);
         expect(
-            screen.getByRole("heading", { name: "Host projection unavailable" })
+            screen.getByRole("heading", { name: "Host data unavailable" })
         ).toBeTruthy();
         expect(screen.queryByText("value")).toBeNull();
     });
@@ -88,7 +88,7 @@ describe("SystemHostCard", () => {
             />
         );
         expect(
-            screen.getByRole("heading", { name: "Host projection unavailable" })
+            screen.getByRole("heading", { name: "Host data unavailable" })
         ).toBeTruthy();
         expect(screen.queryByText("must-not-render")).toBeNull();
     });

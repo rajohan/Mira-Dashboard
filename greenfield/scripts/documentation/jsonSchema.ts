@@ -74,6 +74,7 @@ import {
     chatMessageFitsHydrationBudget,
     chatMessagePartsHaveUniqueIds,
     chatMessagePartToolStateIsConsistent,
+    chatExternalRunFitsBudget,
     chatPlanStepsHaveAtMostOneActive,
     chatRunSummaryIsConsistent,
     chatRuntimeEventProviderRangeIsConsistent,
@@ -87,6 +88,7 @@ import {
     chatSpeechTranscriptFitsByteBudget,
     normalizeChatSpeechSynthesisText,
 } from "../../src/contracts/chatSpeech.ts";
+import { workspaceFileNameIsSafe } from "../../src/contracts/files.ts";
 import { gatewayConnectionSnapshotIsConsistent } from "../../src/contracts/gatewayConnection.ts";
 import {
     freshGatewaySessionSourceTimesAreConsistent,
@@ -127,6 +129,11 @@ import {
     newestJobRunEventOrderIsStable,
     newestJobRunOrderIsStable,
 } from "../../src/contracts/jobs.ts";
+import {
+    logLinesHaveUniqueIds,
+    logMaintenancePoliciesHaveUniqueIds,
+    logSourcesHaveUniqueIds,
+} from "../../src/contracts/logs.ts";
 import {
     activeIncidentSummaryTimesAreConsistent,
     activeIncidentTimesAreConsistent,
@@ -202,6 +209,11 @@ import {
     taskProgressPageCursorIsConsistent,
 } from "../../src/contracts/tasks.ts";
 import {
+    terminalPathIsCanonical,
+    terminalReplayWindowIsValid,
+    terminalRootsAreCanonical,
+} from "../../src/contracts/terminal.ts";
+import {
     hasMatchingWebAuthnAuthenticationCredentialIds,
     hasMatchingWebAuthnRegistrationCredentialIds,
     isCanonicalWebAuthnBase64Url,
@@ -234,6 +246,34 @@ const controlSafeTextJsonSchemaPattern = `^(?![\\s\\S]*(?:${securityLabelControl
 const noNulJsonSchemaPattern = String.raw`^[^\u0000]*$`;
 
 const runtimeCheckComments = new Map<unknown, string>([
+    [
+        workspaceFileNameIsSafe,
+        "Live Valibot validation additionally rejects traversal names and path separators and limits the literal child name to 255 UTF-8 bytes.",
+    ],
+    [
+        logSourcesHaveUniqueIds,
+        "Live Valibot validation additionally requires every named log source ID to be unique.",
+    ],
+    [
+        logLinesHaveUniqueIds,
+        "Live Valibot validation additionally requires every redacted log line ID to be unique.",
+    ],
+    [
+        logMaintenancePoliciesHaveUniqueIds,
+        "Live Valibot validation additionally requires every fixed log-maintenance policy ID to be unique.",
+    ],
+    [
+        terminalPathIsCanonical,
+        "Live Valibot validation additionally rejects dot and parent segments in the root-relative initial terminal path.",
+    ],
+    [
+        terminalRootsAreCanonical,
+        "Live Valibot validation additionally requires unique terminal root IDs in canonical ascending order.",
+    ],
+    [
+        terminalReplayWindowIsValid,
+        "Live Valibot validation additionally requires the oldest retained replay sequence not to exceed the next output sequence.",
+    ],
     [
         chatSpeechTranscriptFitsByteBudget,
         "Live Valibot validation additionally limits the ephemeral transcript to 65536 UTF-8 bytes.",
@@ -277,6 +317,10 @@ const runtimeCheckComments = new Map<unknown, string>([
     [
         chatExternalRunsHaveUniqueProviderIds,
         "Live Valibot validation additionally requires every external chat projection to have a unique provider run ID.",
+    ],
+    [
+        chatExternalRunFitsBudget,
+        "Live Valibot validation additionally limits each external chat run projection to its reviewed UTF-8 byte budget.",
     ],
     [
         chatRuntimeOutputIsConsistent,

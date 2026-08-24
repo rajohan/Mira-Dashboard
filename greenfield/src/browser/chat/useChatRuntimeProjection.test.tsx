@@ -11,7 +11,7 @@ import {
 } from "./chatRuntimeStore.ts";
 import { useChatRuntimeProjection } from "./useChatRuntimeProjection.ts";
 
-const { render, waitFor } = await import("@testing-library/react");
+const { act, render, waitFor } = await import("@testing-library/react");
 const runId = "019fe633-9133-7ba0-8b80-809dd80dfb39";
 
 function Harness({
@@ -68,6 +68,54 @@ function page(sessionKey: string, cursor: string, sequence: number, hasMore: boo
 }
 
 describe("chat runtime projection", () => {
+    test("settles an identical catch-up read without repeatedly invalidating static truncation", async () => {
+        const sessionKey = "agent:main:main";
+        const store = createChatRuntimeStore();
+        const truncatedPage = {
+            cursor: "0",
+            events: [],
+            externalRuns: [],
+            externalRunsTruncated: true,
+            hasMore: false,
+            resetRequired: false,
+            runs: [],
+            sessionKey,
+            transcriptGeneration: 1,
+        } as const;
+        const query = jest.fn(() => Promise.resolve(truncatedPage));
+        const historyRead = jest.fn();
+        const client = { query } as unknown as DashboardTrpcClient;
+        const queryClient = new QueryClient({
+            defaultOptions: { queries: { retry: false } },
+        });
+        const rendered = render(
+            <QueryClientProvider client={queryClient}>
+                <HistoryProbe onRead={historyRead} sessionKey={sessionKey} />
+                <Harness client={client} sessionKey={sessionKey} store={store} />
+            </QueryClientProvider>
+        );
+        try {
+            await waitFor(() => expect(historyRead).toHaveBeenCalledTimes(2));
+            expect(store.state.connection).toBe("connected");
+            store.setConnection("reconnecting");
+            await new Promise((resolve) => setTimeout(resolve, 2));
+
+            await act(async () => {
+                await queryClient.invalidateQueries({
+                    exact: true,
+                    queryKey: chatRuntimeQueryKey(sessionKey),
+                });
+            });
+
+            await waitFor(() => expect(query).toHaveBeenCalledTimes(2));
+            expect(store.state.connection).toBe("connected");
+            expect(historyRead).toHaveBeenCalledTimes(2);
+        } finally {
+            rendered.unmount();
+            queryClient.clear();
+        }
+    });
+
     test("serially drains clear bounded pages from each newly advanced cursor", async () => {
         const store = createChatRuntimeStore();
         const cursors: string[] = [];

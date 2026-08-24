@@ -3,7 +3,7 @@ import { describe, expect, jest, test } from "bun:test";
 import { safeChatMarkdownLink } from "./chatMarkdownPolicy.ts";
 import { ChatMessageBubble } from "./ChatMessageBubble.tsx";
 
-const { render, screen, waitFor } = await import("@testing-library/react");
+const { render, screen, waitFor, within } = await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
 const userEvent = userEventModule.default;
 
@@ -119,6 +119,7 @@ describe("chat message bubble", () => {
                             error: "Unavailable",
                             kind: "tool",
                             name: "status",
+                            output: "Unavailable",
                             status: "failed",
                         },
                     ],
@@ -130,8 +131,134 @@ describe("chat message bubble", () => {
         );
         const toggle = screen.getByRole("button", { name: /status failed/iu });
         expect(toggle).toHaveAttribute("aria-expanded", "true");
+        expect(screen.getAllByText("Unavailable")).toHaveLength(1);
+        expect(
+            screen.getByRole("region", { name: "Status tool output" })
+        ).toHaveAttribute("tabindex", "0");
         await user.click(toggle);
         expect(toggle).toHaveAttribute("aria-expanded", "false");
+    });
+
+    test("groups tool description, input, and output in one completed bubble", async () => {
+        const user = userEvent.setup();
+        render(
+            <ChatMessageBubble
+                display={display}
+                message={{
+                    attachments: [],
+                    id: "message-complete-tool",
+                    parts: [
+                        {
+                            callId: "call-1",
+                            input: {
+                                cmd: "bun test",
+                                workdir: "/workspace/mira-dashboard",
+                            },
+                            kind: "tool",
+                            name: "functions.exec_command",
+                            output: "8 pass\n0 fail",
+                            status: "completed",
+                        },
+                    ],
+                    role: "assistant",
+                    sequence: 1,
+                    sessionKey: "agent:main:main",
+                }}
+            />
+        );
+
+        const tool = screen.getByRole("region", {
+            name: "Bash, completed",
+        });
+        const toggle = screen.getByRole("button", { name: /Bash completed/iu });
+        expect(toggle).toHaveAttribute("aria-expanded", "false");
+        expect(within(tool).queryByText("Tool output")).toBeNull();
+        await user.click(toggle);
+        expect(within(tool).getByText("Description")).toBeVisible();
+        expect(within(tool).getByText("bun test (mira-dashboard)")).toBeVisible();
+        expect(within(tool).getByText("Tool input")).toBeVisible();
+        expect(within(tool).getByText("Tool output")).toBeVisible();
+        expect(within(tool).getByText(/8 pass/iu)).toBeVisible();
+        const inputRegion = within(tool).getByRole("region", {
+            name: "Bash tool input",
+        });
+        const outputRegion = within(tool).getByRole("region", {
+            name: "Bash tool output",
+        });
+        expect(inputRegion).toHaveAttribute("data-virtualizer-scroll-region");
+        expect(inputRegion).toHaveAttribute("tabindex", "0");
+        expect(outputRegion).toHaveAttribute("data-virtualizer-scroll-region");
+        expect(outputRegion).toHaveAttribute("tabindex", "0");
+        expect(within(tool).queryByText("running")).toBeNull();
+    });
+
+    test("derives tool descriptions only from valid structured string input", () => {
+        render(
+            <ChatMessageBubble
+                display={{ ...display, toolsExpanded: true }}
+                message={{
+                    attachments: [],
+                    id: "message-string-tool-input",
+                    parts: [
+                        {
+                            callId: "call-path",
+                            input: '{"path":"/workspace/report.txt"}',
+                            kind: "tool",
+                            name: "read_file",
+                            status: "completed",
+                        },
+                        {
+                            callId: "call-malformed",
+                            input: "not-json",
+                            kind: "tool",
+                            name: "inspect",
+                            status: "completed",
+                        },
+                    ],
+                    role: "assistant",
+                    sequence: 1,
+                    sessionKey: "agent:main:main",
+                }}
+            />
+        );
+
+        const fileTool = screen.getByRole("region", {
+            name: "Read file, completed",
+        });
+        expect(within(fileTool).getByText("Description").parentElement).toHaveTextContent(
+            "/workspace/report.txt"
+        );
+        expect(
+            within(
+                screen.getByRole("region", { name: "Inspect, completed" })
+            ).queryByText("Description")
+        ).toBeNull();
+    });
+
+    test("removes a tool-only message when tool visibility is disabled", () => {
+        render(
+            <ChatMessageBubble
+                display={{ ...display, showTools: false }}
+                message={{
+                    attachments: [],
+                    id: "hidden-tool-message",
+                    parts: [
+                        {
+                            callId: "call-1",
+                            kind: "tool",
+                            name: "lookup",
+                            status: "completed",
+                        },
+                    ],
+                    role: "assistant",
+                    sequence: 1,
+                    sessionKey: "agent:main:main",
+                }}
+            />
+        );
+
+        expect(screen.queryByRole("article")).toBeNull();
+        expect(screen.queryByText("No visible message content.")).toBeNull();
     });
 
     test("local hide invokes only the browser-owned callback", async () => {
@@ -323,6 +450,30 @@ describe("chat message bubble", () => {
                     parts: [{ kind: "text", text: "Partial streamed answer" }],
                     role: "assistant",
                     runId: "run-active",
+                    sequence: 1,
+                    sessionKey: "agent:main:main",
+                }}
+                onReadAloud={jest.fn()}
+                onStopReadAloud={jest.fn()}
+                readAloud={{ phase: "idle" }}
+            />
+        );
+        expect(
+            screen.queryByRole("button", { name: "Read Mira message aloud" })
+        ).toBeNull();
+    });
+
+    test("does not offer read aloud for a text-only streaming provider run", () => {
+        render(
+            <ChatMessageBubble
+                activeRunIds={["provider-run-active"]}
+                display={display}
+                message={{
+                    attachments: [],
+                    id: "streaming-provider-text",
+                    parts: [{ kind: "text", text: "Partial provider answer" }],
+                    providerRunId: "provider-run-active",
+                    role: "assistant",
                     sequence: 1,
                     sessionKey: "agent:main:main",
                 }}

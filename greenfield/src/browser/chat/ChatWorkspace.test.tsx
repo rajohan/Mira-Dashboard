@@ -150,7 +150,7 @@ describe("chat workspace", () => {
         });
     });
 
-    test("labels selected-session token use as fresh, stale, or unknown", () => {
+    test("labels selected-session token use as current, out of date, or unknown", () => {
         const props = properties();
         const session = props.view.sessions[0]!;
         const rendered = render(
@@ -170,7 +170,7 @@ describe("chat workspace", () => {
             />
         );
         expect(
-            screen.getByLabelText("Session token use: 1,200 of 200,000, fresh")
+            screen.getByLabelText("Session token use: 1,200 of 200,000, current")
         ).toBeVisible();
         expect(screen.getByText("1.2k / 200k")).toBeVisible();
 
@@ -191,7 +191,7 @@ describe("chat workspace", () => {
             />
         );
         expect(
-            screen.getByLabelText("Session token use: 1,200 of 200,000, stale")
+            screen.getByLabelText("Session token use: 1,200 of 200,000, out of date")
         ).toBeVisible();
         expect(screen.getByText("~1.2k / 200k")).toBeVisible();
 
@@ -207,14 +207,12 @@ describe("chat workspace", () => {
         expect(props.onResetTranscript).not.toHaveBeenCalled();
 
         await user.click(screen.getByRole("button", { name: "Chat settings" }));
-        await user.click(
-            screen.getByRole("button", { name: "Reset provider transcript" })
-        );
-        const dialog = screen.getByRole("dialog", { name: "Reset chat session?" });
-        expect(within(dialog).getByText(/Hiding a message only affects/u)).toBeVisible();
+        await user.click(screen.getByRole("button", { name: "Reset chat history" }));
+        const dialog = screen.getByRole("dialog", { name: "Reset this chat?" });
+        expect(within(dialog).getByText(/Hiding one message affects/u)).toBeVisible();
         await user.click(
             within(dialog).getByRole("button", {
-                name: "Reset provider transcript",
+                name: "Reset chat history",
             })
         );
         expect(props.onResetTranscript).toHaveBeenCalledTimes(1);
@@ -232,15 +230,13 @@ describe("chat workspace", () => {
         };
         const rendered = render(<ChatWorkspace {...props} canAskCompanion />);
         await user.click(screen.getByRole("button", { name: "Open activity panel" }));
-        await user.click(screen.getByRole("button", { name: /Companion Idle/iu }));
+        await user.click(screen.getByRole("button", { name: /Chat helper Idle/iu }));
         await user.type(
-            screen.getByRole("textbox", { name: "Ask companion" }),
+            screen.getByRole("textbox", { name: "Ask chat helper" }),
             "Session A draft"
         );
         await user.click(screen.getByRole("button", { name: "Chat settings" }));
-        await user.click(
-            screen.getByRole("button", { name: "Reset provider transcript" })
-        );
+        await user.click(screen.getByRole("button", { name: "Reset chat history" }));
 
         rendered.rerender(
             <ChatWorkspace
@@ -254,12 +250,12 @@ describe("chat workspace", () => {
             />
         );
         expect(
-            rendered.container.querySelector('input[aria-label="Ask companion"]')
+            rendered.container.querySelector('input[aria-label="Ask chat helper"]')
         ).toHaveValue("");
-        const dialog = screen.getByRole("dialog", { name: "Reset chat session?" });
+        const dialog = screen.getByRole("dialog", { name: "Reset this chat?" });
         await user.click(
             within(dialog).getByRole("button", {
-                name: "Reset provider transcript",
+                name: "Reset chat history",
             })
         );
         expect(props.onResetTranscript).toHaveBeenCalledWith(sessionKey);
@@ -278,10 +274,10 @@ describe("chat workspace", () => {
         expect(screen.getByRole("button", { name: "Session" })).toBeVisible();
         const status = screen.getByRole("alert");
         expect(status).toHaveTextContent("Some chat data could not be refreshed.");
-        expect(status).not.toHaveTextContent(/Showing last-known history/iu);
+        expect(status).not.toHaveTextContent(/Showing the latest saved history/iu);
         expect(
             within(rendered.container.querySelector("header")!).queryByText(
-                /Showing last-known history/iu
+                /Showing the latest saved history/iu
             )
         ).toBeNull();
     });
@@ -395,7 +391,7 @@ describe("chat workspace", () => {
             screen.getByText("Older history is capped to this browser window.")
         ).toBeVisible();
         expect(
-            screen.getByText("Older tasks are capped to this browser window.")
+            screen.getByText("Only the most recent tasks are shown here.")
         ).toBeVisible();
         await user.click(
             screen.getByRole("button", { name: "Return to latest history" })
@@ -413,6 +409,7 @@ describe("chat workspace", () => {
                 {...props}
                 canAskCompanion
                 providerWritesDisabled
+                selectedTaskId="task-1"
                 view={{
                     ...props.view,
                     backgroundTasks: [
@@ -423,14 +420,14 @@ describe("chat workspace", () => {
             />
         );
         await user.click(screen.getByRole("button", { name: "Open activity panel" }));
-        await user.click(screen.getByRole("button", { name: /Companion Idle/iu }));
+        await user.click(screen.getByRole("button", { name: /Chat helper Idle/iu }));
         await user.click(screen.getByRole("button", { name: "Chat settings" }));
         expect(screen.getByRole("button", { name: /Response speed/iu })).toBeDisabled();
-        expect(screen.getByRole("button", { name: "Compact context" })).toBeDisabled();
         expect(
-            screen.getByRole("button", { name: "Reset provider transcript" })
+            screen.getByRole("button", { name: "Shorten chat history" })
         ).toBeDisabled();
-        expect(screen.getByRole("textbox", { name: "Ask companion" })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Reset chat history" })).toBeDisabled();
+        expect(screen.getByRole("textbox", { name: "Ask chat helper" })).toBeDisabled();
         expect(screen.getByRole("button", { name: "Reset" })).toBeDisabled();
         expect(screen.getByRole("button", { name: "Cancel task" })).toBeDisabled();
     });
@@ -459,7 +456,9 @@ describe("chat workspace", () => {
         expect(screen.queryByText("Configured models are unavailable.")).toBeNull();
         await user.click(screen.getByRole("button", { name: "Chat settings" }));
         expect(screen.getByText("Configured models are unavailable.")).toBeVisible();
-        await user.click(screen.getByRole("button", { name: "Retry model inventory" }));
+        await user.click(
+            screen.getByRole("button", { name: "Try loading models again" })
+        );
         expect(onRetryModels).toHaveBeenCalledTimes(1);
         await user.click(screen.getByRole("button", { name: "Retry background tasks" }));
         expect(props.view.messages[0]).toBeDefined();
@@ -470,6 +469,7 @@ describe("chat workspace", () => {
         render(
             <ChatWorkspace
                 {...props}
+                selectedTaskId="task-1"
                 view={{
                     ...props.view,
                     backgroundTasks: [
@@ -492,6 +492,66 @@ describe("chat workspace", () => {
         expect(screen.getByText("Companion refresh failed.")).toBeVisible();
         expect(screen.getByText("Task detail refresh failed.")).toBeVisible();
         expect(screen.getByRole("log", { name: "Messages" })).toBeVisible();
+    });
+
+    test("keeps task detail beside its row and toggles it from the disclosure", async () => {
+        const user = userEvent.setup();
+        const props = properties();
+        const onSelectTask = jest.fn();
+        const taskView = {
+            ...props.view,
+            backgroundTasks: [
+                { id: "task-1", label: "First task", status: "completed" as const },
+                { id: "task-2", label: "Second task", status: "running" as const },
+            ],
+        };
+        const rendered = render(
+            <ChatWorkspace
+                {...props}
+                onSelectTask={onSelectTask}
+                selectedTaskId="task-1"
+                view={taskView}
+            />
+        );
+
+        const firstTask = screen.getByRole("button", {
+            name: "First task Completed",
+        });
+        const firstDetail = screen.getByRole("region", {
+            name: "Task detail: First task",
+        });
+        expect(firstTask.closest("li")).toContainElement(firstDetail);
+        expect(firstTask).toHaveAttribute("aria-expanded", "true");
+        expect(
+            screen.getByRole("button", { name: "Second task Running" })
+        ).toHaveAttribute("aria-expanded", "false");
+
+        await user.click(firstTask);
+        expect(onSelectTask).toHaveBeenLastCalledWith(undefined);
+        expect(
+            screen.queryByRole("button", { name: "Close details for First task" })
+        ).toBeNull();
+
+        rendered.rerender(
+            <ChatWorkspace
+                {...props}
+                onSelectTask={onSelectTask}
+                selectedTaskId="task-2"
+                view={taskView}
+            />
+        );
+        const secondTask = screen.getByRole("button", {
+            name: "Second task Running",
+        });
+        const secondDetail = screen.getByRole("region", {
+            name: "Task detail: Second task",
+        });
+        const rerenderedFirstTask = screen.getByRole("button", {
+            name: "First task Completed",
+        });
+        expect(secondTask.closest("li")).toContainElement(secondDetail);
+        expect(rerenderedFirstTask.closest("li")).not.toContainElement(secondDetail);
+        expect(secondTask).toHaveAttribute("aria-expanded", "true");
     });
 
     test("selects an agent's deterministic first session then stays within that agent", async () => {
@@ -593,13 +653,16 @@ describe("chat workspace", () => {
         expect(open.textContent).toBe("");
         expect(open.parentElement).toHaveClass(
             "border-primary-700",
-            "items-start",
+            "top-1/2",
+            "-translate-y-1/2",
+            "items-center",
+            "lg:self-stretch",
             "lg:border-l"
         );
         expect(open).toHaveClass(
             "h-10",
             "flex-none",
-            "self-start",
+            "self-center",
             "focus-visible:ring-1",
             "focus-visible:ring-offset-0"
         );
@@ -670,7 +733,7 @@ describe("chat workspace", () => {
         );
         const status = screen.getByRole("alert");
         expect(status).toHaveTextContent("Runtime reconciliation is still pending.");
-        expect(status).not.toHaveTextContent(/Showing last-known history/iu);
+        expect(status).not.toHaveTextContent(/Showing the latest saved history/iu);
         await user.click(screen.getByRole("button", { name: "Dismiss chat status" }));
         expect(screen.queryByRole("alert")).toBeNull();
         expect(screen.getByRole("textbox", { name: "Message" })).toBeDisabled();

@@ -100,7 +100,7 @@ describe("job run detail", () => {
         progressRegion.focus();
         expect(progressRegion).toHaveFocus();
         expect(
-            screen.getByText("Additional durable events", { exact: false })
+            screen.getByText("Use “Load older events”", { exact: false })
         ).toBeTruthy();
 
         await user.click(

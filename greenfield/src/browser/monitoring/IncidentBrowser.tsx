@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { Filter, RotateCcw, ShieldAlert } from "lucide-react";
-import { type FormEvent, type ReactNode, useState } from "react";
+import { type ReactNode, useState } from "react";
 
 import type { ListIncidentsInput } from "../../contracts/incidents.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
@@ -11,6 +11,7 @@ import { Alert } from "../ui/Alert.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Card } from "../ui/Card.tsx";
+import { Form } from "../ui/Form.tsx";
 import { FormField } from "../ui/FormField.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
@@ -73,7 +74,7 @@ function IncidentDetailPanel({ id }: { readonly id: string }) {
                 <Badge variant={detail.state === "active" ? "warning" : "success"}>
                     {detail.state}
                 </Badge>
-                <Badge>generation {detail.generation}</Badge>
+                <Badge>occurrence group {detail.generation}</Badge>
             </div>
             <Heading
                 className="mt-3 wrap-break-word"
@@ -150,8 +151,7 @@ export function IncidentBrowser() {
     const selectIncident = (incidentId: string) => {
         void navigate({ replace: true, search: { incidentId } });
     };
-    const applyFilters = (event: FormEvent<HTMLFormElement>) => {
-        event.preventDefault();
+    const applyFilters = () => {
         setKind(kindDraft.trim());
         setMonitor(monitorDraft.trim());
         setState(stateDraft);
@@ -190,7 +190,7 @@ export function IncidentBrowser() {
         catalogContent = (
             <div className="p-5">
                 <PageState
-                    description="Incident generations will appear when monitoring reports a problem."
+                    description="Incidents appear when monitoring detects a problem."
                     icon={ShieldAlert}
                     status="empty"
                     title="No incidents"
@@ -209,29 +209,32 @@ export function IncidentBrowser() {
 
     return (
         <div>
-            <form
+            <Form
                 aria-label="Incident filters"
                 className="border-primary-700 bg-primary-900/35 grid gap-3 rounded-xl border p-4 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_11rem_11rem_auto] xl:items-end"
                 onSubmit={applyFilters}
             >
-                <FormField label="Kind">
+                <FormField label="Problem type">
                     <Input
+                        className="mt-2"
                         maxLength={100}
                         onChange={(event) => setKindDraft(event.currentTarget.value)}
-                        placeholder="e.g. filesystem"
+                        placeholder="Example: filesystem"
                         value={kindDraft}
                     />
                 </FormField>
-                <FormField label="Monitor">
+                <FormField label="Check">
                     <Input
+                        className="mt-2"
                         maxLength={200}
                         onChange={(event) => setMonitorDraft(event.currentTarget.value)}
-                        placeholder="e.g. ops-check"
+                        placeholder="Example: ops-check"
                         value={monitorDraft}
                     />
                 </FormField>
-                <FormField label="State">
+                <FormField label="Status">
                     <Select
+                        className="mt-2"
                         onChange={setStateDraft}
                         options={incidentFilters}
                         value={stateDraft}
@@ -239,12 +242,13 @@ export function IncidentBrowser() {
                 </FormField>
                 <FormField label="Severity">
                     <Select
+                        className="mt-2"
                         onChange={setSeverityDraft}
                         options={severityFilters}
                         value={severityDraft}
                     />
                 </FormField>
-                <div className="flex gap-2">
+                <div className="flex min-h-10 items-center gap-2">
                     <Button size="sm" type="submit">
                         <Icon icon={Filter} size="sm" tone="inherit" />
                         Apply
@@ -254,7 +258,7 @@ export function IncidentBrowser() {
                         Reset
                     </Button>
                 </div>
-            </form>
+            </Form>
             {query.error !== null && query.data !== undefined && (
                 <Alert
                     className="mt-4"
@@ -286,7 +290,7 @@ export function IncidentBrowser() {
                 </Card>
                 {selectedId === undefined ? (
                     <PageState
-                        description="Choose an incident after monitoring has produced one."
+                        description="Choose an incident from the list to see its details."
                         icon={ShieldAlert}
                         status="empty"
                         title="No incident selected"
