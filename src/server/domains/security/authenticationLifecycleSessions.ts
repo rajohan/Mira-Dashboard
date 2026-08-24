@@ -396,6 +396,7 @@ export function createAuthenticationSessionOperations(
                 );
             const pendingEmail =
                 pendingEmailRecord !== undefined &&
+                pendingEmailRecord.authenticationVersion === user.authenticationVersion &&
                 +pendingEmailRecord.expiresAt > +checkedAt
                     ? (pendingEmailRecord.pendingEmail ?? undefined)
                     : undefined;
