@@ -24,6 +24,7 @@ import type { PreparedProductionDeliveryPaths } from "./productionDeliveryFilesy
 import {
     inventoryReleaseArtifactTree,
     maximumReleaseArtifactBytes,
+    maximumReleaseRuntimeBytes,
     type ReleaseArtifactInventoryRecord,
 } from "./releaseArtifactInventory.ts";
 import { type ReleaseRuntimeIdentity, verifyReleaseIdentity } from "./releaseIdentity.ts";
@@ -32,7 +33,9 @@ const productionReleaseFailureMessage = "Production release publication failed";
 const privateDirectoryMode = 0o700;
 const privateFileMode = 0o600;
 const immutableDirectoryMode = 0o500;
+const immutableExecutableMode = 0o500;
 const immutableFileMode = 0o400;
+const releaseRuntimePath = "runtime/bun";
 const commitShaPattern = /^[a-f\d]{40}$/u;
 const maximumCleanupEntries = 4608;
 const maximumCleanupDepth = 20;
@@ -291,6 +294,10 @@ async function assertReleaseTreeMode(
                 ? `${relativeDirectory}/${entry.name}`
                 : entry.name;
             const record = recordByPath.get(relativePath);
+            const expectedFileMode =
+                immutable && relativePath === releaseRuntimePath
+                    ? BigInt(immutableExecutableMode)
+                    : fileMode;
             if (
                 !record ||
                 !validFile(
@@ -299,7 +306,7 @@ async function assertReleaseTreeMode(
                     }),
                     process.getuid(),
                     rootStatus.dev,
-                    fileMode,
+                    expectedFileMode,
                     record.bytes
                 )
             ) {
@@ -372,10 +379,14 @@ async function copyReleaseTree(
     );
     await mkdir(destinationRoot, { mode: privateDirectoryMode });
     for (const record of sourceBefore) {
+        const maximumBytes =
+            record.path === releaseRuntimePath
+                ? maximumReleaseRuntimeBytes
+                : maximumReleaseArtifactBytes;
         const contents = await readBoundedRegularFile(
             path.join(sourceRoot, record.path),
             sourceRoot,
-            maximumReleaseArtifactBytes,
+            maximumBytes,
             productionReleaseFailureMessage
         );
         if (
@@ -415,7 +426,12 @@ async function freezeReleaseTree(
 ): Promise<void> {
     for (const record of records) {
         const filePath = path.join(releaseRoot, record.path);
-        await chmod(filePath, immutableFileMode);
+        await chmod(
+            filePath,
+            record.path === releaseRuntimePath
+                ? immutableExecutableMode
+                : immutableFileMode
+        );
         let handle: FileHandle | undefined;
         let failed = false;
         try {
