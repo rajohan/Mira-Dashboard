@@ -6,7 +6,8 @@ Install the exact Bun version in `.bun-version` as a root-owned executable that 
 its group or other users, plus Git, GitHub CLI, Doppler CLI, Tailscale, Docker Engine, and sudo.
 Docker must be running, its `docker` group must exist, and `ubuntu` must already be able to query
 the daemon in its current login session. OpenClaw must be installed and initialized first so
-`/home/ubuntu/.openclaw` exists as canonical `ubuntu`-owned mode `0700` state.
+`/home/ubuntu/.openclaw` exists as canonical `ubuntu`-owned mode `0700` state and its canonical
+`workspace` directory is `ubuntu`-owned without group/other write access.
 Doppler must be initialized for `ubuntu` with canonical `ubuntu`-owned mode `0700`
 `/home/ubuntu/.doppler` state, a single-link mode `0600` `.doppler.yaml` config file, and access to
 the required `rajohan`/`prd` production secrets. Tailscale must be running, joined, and online.

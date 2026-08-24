@@ -484,14 +484,20 @@ export async function verifyProductionBootstrapPrerequisites(
     v.parse(tailscaleStatusSchema, JSON.parse(tailscaleStatus) as unknown);
     const dopplerRoot = "/home/ubuntu/.doppler";
     const dopplerConfig = `${dopplerRoot}/.doppler.yaml`;
-    const [runtimePath, openClawPath, dopplerPath, dopplerConfigPath] = await Promise.all(
-        [
-            filesystem.canonical(process.execPath),
-            filesystem.canonical("/home/ubuntu/.openclaw"),
-            filesystem.canonical(dopplerRoot),
-            filesystem.canonical(dopplerConfig),
-        ]
-    );
+    const openClawWorkspace = "/home/ubuntu/.openclaw/workspace";
+    const [
+        runtimePath,
+        openClawPath,
+        openClawWorkspacePath,
+        dopplerPath,
+        dopplerConfigPath,
+    ] = await Promise.all([
+        filesystem.canonical(process.execPath),
+        filesystem.canonical("/home/ubuntu/.openclaw"),
+        filesystem.canonical(openClawWorkspace),
+        filesystem.canonical(dopplerRoot),
+        filesystem.canonical(dopplerConfig),
+    ]);
     const runtimeAncestorPaths: string[] = [];
     let runtimeAncestor = path.dirname(runtimePath);
     while (true) {
@@ -499,13 +505,19 @@ export async function verifyProductionBootstrapPrerequisites(
         if (runtimeAncestor === path.parse(runtimeAncestor).root) break;
         runtimeAncestor = path.dirname(runtimeAncestor);
     }
-    const [runtimeStatus, openClawStatus, dopplerStatus, dopplerConfigStatus] =
-        await Promise.all([
-            filesystem.status(runtimePath),
-            filesystem.status(openClawPath),
-            filesystem.status(dopplerPath),
-            filesystem.status(dopplerConfigPath),
-        ]);
+    const [
+        runtimeStatus,
+        openClawStatus,
+        openClawWorkspaceStatus,
+        dopplerStatus,
+        dopplerConfigStatus,
+    ] = await Promise.all([
+        filesystem.status(runtimePath),
+        filesystem.status(openClawPath),
+        filesystem.status(openClawWorkspacePath),
+        filesystem.status(dopplerPath),
+        filesystem.status(dopplerConfigPath),
+    ]);
     const runtimeAncestorStatuses = await Promise.all(
         runtimeAncestorPaths.map((ancestor) => filesystem.status(ancestor))
     );
@@ -527,6 +539,11 @@ export async function verifyProductionBootstrapPrerequisites(
         openClawStatus.uid !== userId ||
         openClawStatus.gid !== userGroupId ||
         (openClawStatus.mode & 0o7777) !== 0o700 ||
+        openClawWorkspacePath !== openClawWorkspace ||
+        !openClawWorkspaceStatus.isDirectory() ||
+        openClawWorkspaceStatus.uid !== userId ||
+        openClawWorkspaceStatus.gid !== userGroupId ||
+        (openClawWorkspaceStatus.mode & 0o022) !== 0 ||
         dopplerPath !== dopplerRoot ||
         !dopplerStatus.isDirectory() ||
         dopplerStatus.uid !== userId ||
@@ -565,7 +582,7 @@ export async function verifyProductionBootstrapPrerequisites(
             "--preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT,MIRA_DASHBOARD_OPENCLAW_ROOT,MIRA_DASHBOARD_WORKSPACE_ROOT,PORT",
             "--",
             process.execPath,
-            path.join(repositoryRoot, "scripts/productionBootstrapDopplerCheck.ts"),
+            path.join(repositoryRoot, "src/app/productionBootstrapConfigurationCheck.ts"),
         ],
         repositoryRoot
     );

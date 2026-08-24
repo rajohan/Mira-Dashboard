@@ -3,7 +3,6 @@ import { cp, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { applicationConfigurationRegistry } from "../src/shared/configuration/applicationConfigurationRegistry.ts";
 import { packageProductionReleaseArtifact } from "./delivery/packageProductionReleaseArtifact.ts";
 import {
     admitProductionBootstrapRelease,
@@ -16,7 +15,6 @@ import {
     verifyProductionBootstrapPrerequisites,
     type ProductionBootstrapDependencies,
 } from "./productionBootstrap.ts";
-import { assertProductionBootstrapDopplerEnvironment } from "./productionBootstrapDopplerCheck.ts";
 import {
     createLocalReleaseFixture,
     removeProductionDeliveryFixtures,
@@ -53,26 +51,6 @@ async function captureFailure(operation: Promise<unknown>): Promise<unknown> {
 }
 
 describe("production bootstrap admission", () => {
-    test("requires every production credential without exposing values", () => {
-        const environment = Object.fromEntries(
-            applicationConfigurationRegistry
-                .filter(
-                    (entry) =>
-                        entry.required ||
-                        entry.environmentName ===
-                            "MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD"
-                )
-                .map((entry) => [entry.environmentName, "present"])
-        );
-        expect(() =>
-            assertProductionBootstrapDopplerEnvironment(environment)
-        ).not.toThrow();
-        delete environment.MIRA_DASHBOARD_PUBLIC_ORIGIN;
-        expect(() => assertProductionBootstrapDopplerEnvironment(environment)).toThrow(
-            "Production Doppler configuration is incomplete"
-        );
-    });
-
     test("accepts only a GitHub release for the exact clean checkout", () => {
         expect(
             parseProductionBootstrapRelease({ tagName: "v0.2.0" }, releaseId, releaseId)
@@ -181,7 +159,7 @@ describe("production bootstrap admission", () => {
             {
                 canonical: (target) => {
                     if (
-                        target === "/home/ubuntu/.openclaw" ||
+                        target.startsWith("/home/ubuntu/.openclaw") ||
                         target.startsWith("/home/ubuntu/.doppler")
                     ) {
                         return Promise.resolve(target);
@@ -206,6 +184,7 @@ describe("production bootstrap admission", () => {
                         gid: runtimeControlled ? 0 : 1000,
                         isDirectory: () =>
                             target === "/home/ubuntu/.openclaw" ||
+                            target === "/home/ubuntu/.openclaw/workspace" ||
                             target === "/home/ubuntu/.doppler" ||
                             (runtimeControlled && target !== "/usr/local/bin/bun"),
                         isFile: () =>

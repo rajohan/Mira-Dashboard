@@ -469,6 +469,8 @@
         "scripts/documentation/routesMarkdown.test.ts": 1,
         "scripts/packageIdentity.test.ts": 1,
         "src/contracts/agentModel.test.ts": 1,
+        "src/server/platform/configuration/productionBootstrapConfigurationCheck.test.ts": 2,
+        "src/app/productionBootstrapConfigurationCheck.test.ts": 1,
         "src/contracts/chatMedia.test.ts": 1,
         "src/contracts/deliveryGithub.test.ts": 1,
         "src/contracts/gatewayConnection.test.ts": 1,

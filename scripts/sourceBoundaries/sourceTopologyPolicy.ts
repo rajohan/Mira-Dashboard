@@ -31,6 +31,7 @@ const webApplicationFiles = new Set([
 
 const workerApplicationFiles = new Set([
     "src/app/developmentWorker.ts",
+    "src/app/productionBootstrapConfigurationCheck.ts",
     "src/app/worker.ts",
 ]);
 
@@ -40,6 +41,7 @@ const applicationCompositionTestFiles: ReadonlySet<string> = new Set([
     "src/app/dashboardServerProcess.test.ts",
     "src/app/databaseMaintenance.test.ts",
     "src/app/developmentProcesses.test.ts",
+    "src/app/productionBootstrapConfigurationCheck.test.ts",
     "src/app/runtimeAuthorityBundle.test.ts",
     "src/app/trpcHttpHandler.test.ts",
     "src/app/trpcRequestPolicy.test.ts",
@@ -50,6 +52,12 @@ const reviewedApplicationServerTargets: ReadonlyMap<
     string,
     ReadonlySet<string>
 > = new Map([
+    [
+        "src/app/productionBootstrapConfigurationCheck.ts",
+        new Set([
+            "src/server/platform/configuration/productionBootstrapConfigurationCheck.ts",
+        ]),
+    ],
     [
         "src/app/worker.ts",
         new Set([
@@ -103,6 +111,7 @@ export const environmentSourceConsumers: ReadonlySet<string> = new Set([
     "src/app/dashboardServer.ts",
     "src/app/developmentWeb.ts",
     "src/app/developmentWorker.ts",
+    "src/app/productionBootstrapConfigurationCheck.ts",
     "src/app/worker.ts",
 ]);
 
