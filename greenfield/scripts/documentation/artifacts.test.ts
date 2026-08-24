@@ -192,7 +192,7 @@ describe("generated contract documentation", () => {
         expect(routeDocumentation).toContain(
             "| `/terminal` | Browser session | Terminal | `terminal` |"
         );
-        expect(routeDocumentation?.match(/^\| `\//gmu)).toHaveLength(17);
+        expect(routeDocumentation?.match(/^\| `\//gmu)).toHaveLength(18);
         expect(first.has("schemas/files.upload.accepted.schema.json")).toBe(true);
         expect(first.has("schemas/logs.tail.output.schema.json")).toBe(true);
         expect(first.has("schemas/moltbook.feed.result.v1.schema.json")).toBe(true);

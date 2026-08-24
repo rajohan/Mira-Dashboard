@@ -7,6 +7,7 @@ import { rejectionError } from "../../../scripts/testSupport/rejection.ts";
 import {
     parseReleaseManifest,
     releaseBuildCommands,
+    releaseDeliveryProtocols,
     releaseProcessRoles,
 } from "../../shared/releaseManifest.ts";
 import type { RuntimeRelease } from "../platform/release/runtimeRelease.ts";
@@ -82,6 +83,8 @@ async function frontendReleaseFixture(): Promise<RuntimeRelease> {
         manifest: parseReleaseManifest({
             artifacts,
             buildCommands: [...releaseBuildCommands],
+            deliveryProtocols: [...releaseDeliveryProtocols],
+            display: { builtAtMs: 1, commitTitle: "Test release", schemaTarget: 1 },
             documentationSha256: checksum,
             formatVersion: 1,
             lockfileSha256: checksum,

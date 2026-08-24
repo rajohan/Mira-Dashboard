@@ -13,6 +13,7 @@ import {
     lt,
     lte,
     min,
+    ne,
     or,
     sql,
     type SQL,
@@ -20,10 +21,13 @@ import {
 import type { SQLiteBunDatabase } from "drizzle-orm/bun-sqlite";
 import * as v from "valibot";
 
+import { deliveryProductionActionKey } from "../../../contracts/deliveryWorker.ts";
 import {
+    jobAttemptLimitSchema,
     jobActionKeySchema,
     jobPayloadMaximumBytes,
     jobPayloadSchema,
+    jobRunIdSchema,
     jobRunEventMaximum,
     jobRunEventMessageMaximumBytes,
     jobRunPayloadEventMaximum,
@@ -69,7 +73,10 @@ import { realtimeEvents } from "../../database/schema/realtime.ts";
 import { resourceLeases } from "../../database/schema/resourceLeases.ts";
 import { scheduledJobs } from "../../database/schema/scheduledJobs.ts";
 import { workerInstances } from "../../database/schema/workerInstances.ts";
-import { auditEventInsertSchema } from "../../database/validation/auditEvents.ts";
+import {
+    auditEventInsertSchema,
+    auditEventSelectSchema,
+} from "../../database/validation/auditEvents.ts";
 import {
     hostRestartClaimFenceInsertSchema,
     hostRestartClaimFenceSelectSchema,
@@ -164,6 +171,18 @@ export interface JobQueueState {
     readonly oldestQueuedAt?: Date;
     readonly stateCounts: Readonly<Record<JobRunState, number>>;
     readonly workers: readonly JobQueueWorkerRecord[];
+}
+
+/** Bounded newest-first history for one exact internal action key. */
+export interface ListActionRunsInput {
+    readonly actionKey: string;
+    readonly limit: number;
+}
+
+/** Constant-size active-state lookup across a bounded exact action-key set. */
+export interface ReadActiveActionsInput {
+    readonly actionKeys: readonly string[];
+    readonly excludeRunId?: string;
 }
 
 /** Constant-size queue and worker aggregates consumed only by health diagnostics. */
@@ -276,6 +295,7 @@ export interface ReconcileSchedulesInput {
 
 export interface EnqueueManualRunInput extends JobMutationSideEffects {
     readonly queuedEvent: JobRunEventInsert;
+    readonly rejectWhenAnyActionActive?: readonly string[];
     readonly rejectWhenActionActive?: boolean;
     readonly run: JobRunInsert;
 }
@@ -396,9 +416,22 @@ export type WorkerLifecycleResult =
 export interface RecoverExpiredClaimsInput {
     readonly at: Date;
     readonly limit?: number;
+    /** Optional exact run fence used by receipt-backed production recovery. */
+    readonly runId?: string;
     readonly retryAt: (run: JobRunRecord) => Date;
     readonly sideEffectsForRun: (run: JobRunRecord) => JobMutationSideEffects;
 }
+
+export interface RecoverDeliveryProductionTerminalRunInput {
+    readonly at: Date;
+    readonly expectedAudit: JobEnqueueAuditProvenance;
+    readonly expectedRun: JobRunRecord;
+    readonly sideEffectsForRun: (run: JobRunRecord) => JobMutationSideEffects;
+}
+
+export type RecoverDeliveryProductionTerminalRunResult =
+    | { readonly kind: "recovered"; readonly run: JobRunRecord }
+    | { readonly kind: "state-changed" };
 
 export interface ExpireDisableIntentsInput {
     readonly at: Date;
@@ -540,6 +573,7 @@ export type JobSettlementResult =
     | { readonly kind: "settled"; readonly run: JobRunRecord };
 
 export interface JobRepositoryReader {
+    findEnqueueAuditProvenance(runId: string): JobEnqueueAuditProvenance | undefined;
     findActiveDisableIntent(scheduleId: string): JobDisableIntentRecord | undefined;
     findActiveRunForSchedule(scheduleId: string): JobRunRecord | undefined;
     findLatestRunForSchedule(scheduleId: string): JobRunRecord | undefined;
@@ -556,6 +590,7 @@ export interface JobRepositoryReader {
     listActiveActionPayloads(
         input: ListActiveActionPayloadsInput
     ): ActiveActionPayloadPage;
+    listActionRuns(input: ListActionRunsInput): JobRunRecord[];
     listRunEvents(input: ListJobRunEventsInput): JobRunEventRecord[];
     listRuns(input: ListJobRunsInput): JobRunRecord[];
     listRunsWithQueueState(input: ListJobRunsWithQueueStateInput): JobRunPageSnapshot;
@@ -565,8 +600,19 @@ export interface JobRepositoryReader {
     readActionPayloadRunSnapshots(
         input: ReadActionPayloadRunSnapshotsInput
     ): readonly ActionPayloadRunSnapshot[];
+    readAnyActionActive(input: ReadActiveActionsInput): boolean;
     readQueueState(input: ReadQueueStateInput): JobQueueState;
     readWorkerControl(): JobWorkerControlRecord;
+}
+
+/** Exact secret-free audit identity atomically appended with a manual Delivery run. */
+export interface JobEnqueueAuditProvenance {
+    readonly auditEventId: string;
+    readonly authenticatorId: string;
+    readonly requestId: string;
+    readonly actorId: string;
+    readonly actorKind: "user";
+    readonly occurredAt: Date;
 }
 
 /** One run page and queue summary read from the same SQLite snapshot. */
@@ -603,6 +649,9 @@ export interface JobRepository extends JobRepositoryReader {
     recoverExpiredClaims(
         input: RecoverExpiredClaimsInput
     ): Promise<readonly JobRunRecord[]>;
+    recoverDeliveryProductionTerminalRun(
+        input: RecoverDeliveryProductionTerminalRunInput
+    ): Promise<RecoverDeliveryProductionTerminalRunResult>;
     registerWorker(input: RegisterWorkerInput): Promise<WorkerInstanceRecord>;
     renewClaim(input: RenewClaimInput): Promise<JobClaimMutationResult>;
     setClaimingPaused(
@@ -619,6 +668,7 @@ const claimCandidateMaximum = 32;
 const recoveryBatchMaximum = 32;
 const activeActionPayloadMaximum = 256;
 const actionPayloadRunSnapshotMaximum = 32;
+const activeActionKeyMaximum = 16;
 const activeRunStateList = [
     "queued",
     "running",
@@ -627,6 +677,11 @@ const terminalRunStateList = [
     "cancelled",
     "failed",
     "succeeded",
+    "timed-out",
+] as const satisfies readonly JobRunState[];
+const recoverableDeliveryProductionTerminalStates = [
+    "cancelled",
+    "failed",
     "timed-out",
 ] as const satisfies readonly JobRunState[];
 const serviceActionJobActionKeyList = [
@@ -819,6 +874,33 @@ function effectiveSettlementOutcome(
     };
 }
 
+function exactJobRunSnapshot(left: JobRunRecord, right: JobRunRecord): boolean {
+    const leftKeys = Object.keys(left) as readonly (keyof JobRunRecord)[];
+    const rightKeys = Object.keys(right);
+    if (leftKeys.length !== rightKeys.length) return false;
+    return leftKeys.every((key) => {
+        const leftValue = left[key];
+        const rightValue = right[key];
+        return leftValue instanceof Date && rightValue instanceof Date
+            ? getTime(leftValue) === getTime(rightValue)
+            : leftValue === rightValue;
+    });
+}
+
+function exactEnqueueAuditProvenance(
+    left: JobEnqueueAuditProvenance | undefined,
+    right: JobEnqueueAuditProvenance
+): boolean {
+    return (
+        left?.actorId === right.actorId &&
+        left.actorKind === right.actorKind &&
+        left.auditEventId === right.auditEventId &&
+        left.authenticatorId === right.authenticatorId &&
+        left.requestId === right.requestId &&
+        getTime(left.occurredAt) === getTime(right.occurredAt)
+    );
+}
+
 class DrizzleJobReader implements JobRepositoryReader {
     protected readonly database: JobPersistenceDatabase;
 
@@ -840,6 +922,46 @@ class DrizzleJobReader implements JobRepositoryReader {
             )
             .get();
         return row === undefined ? undefined : parseDisableIntent(row);
+    }
+
+    public findEnqueueAuditProvenance(
+        runId: string
+    ): JobEnqueueAuditProvenance | undefined {
+        const canonicalRunId = v.parse(jobRunIdSchema, runId);
+        const rows = this.database
+            .select()
+            .from(auditEvents)
+            .where(
+                and(
+                    eq(auditEvents.action, "delivery.operation.enqueue"),
+                    eq(auditEvents.outcome, "accepted"),
+                    eq(auditEvents.targetType, "job-run"),
+                    eq(auditEvents.targetId, canonicalRunId)
+                )
+            )
+            .orderBy(asc(auditEvents.occurredAt), asc(auditEvents.id))
+            .limit(2)
+            .all();
+        if (rows.length === 0) return undefined;
+        if (rows.length !== 1) {
+            throw new Error("Job enqueue audit provenance is ambiguous");
+        }
+        const event = v.parse(auditEventSelectSchema, rows[0]);
+        if (
+            event.actorKind !== "user" ||
+            event.authenticatorId === null ||
+            event.requestId === null
+        ) {
+            throw new Error("Job enqueue audit provenance is invalid");
+        }
+        return Object.freeze({
+            actorId: event.actorId,
+            actorKind: event.actorKind,
+            auditEventId: event.id,
+            authenticatorId: event.authenticatorId,
+            occurredAt: event.occurredAt,
+            requestId: event.requestId,
+        });
     }
 
     public findActiveRunForSchedule(scheduleId: string): JobRunRecord | undefined {
@@ -1064,6 +1186,54 @@ class DrizzleJobReader implements JobRepositoryReader {
             .limit(input.limit + 1)
             .all()
             .map((row) => parseEvent(row));
+    }
+
+    public listActionRuns(input: ListActionRunsInput): JobRunRecord[] {
+        const actionKey = v.parse(jobActionKeySchema, input.actionKey);
+        assertLimit(input.limit, jobRunPageMaximum, "action run page");
+        return this.database
+            .select()
+            .from(jobRuns)
+            .where(eq(jobRuns.actionKey, actionKey))
+            .orderBy(desc(jobRuns.updatedAt), asc(jobRuns.id))
+            .limit(input.limit)
+            .all()
+            .map((row) => parseRun(row));
+    }
+
+    public readAnyActionActive(input: ReadActiveActionsInput): boolean {
+        if (
+            input.actionKeys.length === 0 ||
+            input.actionKeys.length > activeActionKeyMaximum
+        ) {
+            throw new RangeError("Jobs repository active action key count is invalid");
+        }
+        const actionKeys = input.actionKeys.map((actionKey) =>
+            v.parse(jobActionKeySchema, actionKey)
+        );
+        if (new Set(actionKeys).size !== actionKeys.length) {
+            throw new TypeError("Jobs repository active action keys must be unique");
+        }
+        const excludeRunId =
+            input.excludeRunId === undefined
+                ? undefined
+                : v.parse(jobRunIdSchema, input.excludeRunId);
+        return (
+            this.database
+                .select({ id: jobRuns.id })
+                .from(jobRuns)
+                .where(
+                    and(
+                        inArray(jobRuns.actionKey, actionKeys),
+                        activeStateFilter,
+                        excludeRunId === undefined
+                            ? undefined
+                            : ne(jobRuns.id, excludeRunId)
+                    )
+                )
+                .limit(1)
+                .get() !== undefined
+        );
     }
 
     public listRuns(input: ListJobRunsInput): JobRunRecord[] {
@@ -1415,6 +1585,77 @@ class DrizzleJobWriter extends DrizzleJobReader {
         this.#transaction = transaction;
     }
 
+    public recoverDeliveryProductionTerminalRun(
+        input: RecoverDeliveryProductionTerminalRunInput
+    ): RecoverDeliveryProductionTerminalRunResult {
+        const expectedRun = v.parse(jobRunSelectSchema, input.expectedRun);
+        const current = this.findRun(expectedRun.id);
+        const currentAudit = this.findEnqueueAuditProvenance(expectedRun.id);
+        if (
+            current === undefined ||
+            current.actionKey !== deliveryProductionActionKey ||
+            current.requiredWorkerReleaseId !== null ||
+            current.retrySafe !== true ||
+            current.scheduledJobId !== null ||
+            current.scheduledJobVersion !== null ||
+            current.triggerType !== "manual" ||
+            !recoverableDeliveryProductionTerminalStates.includes(
+                current.state as (typeof recoverableDeliveryProductionTerminalStates)[number]
+            ) ||
+            !exactJobRunSnapshot(current, expectedRun) ||
+            !exactEnqueueAuditProvenance(currentAudit, input.expectedAudit)
+        ) {
+            return { kind: "state-changed" };
+        }
+
+        const at = maximumDate(
+            current.updatedAt,
+            new Date(v.parse(jobTimestampSchema, getTime(input.at)))
+        );
+        const attemptLimit = Math.max(current.attemptLimit, current.attemptCount + 1);
+        const parsedAttemptLimit = v.safeParse(jobAttemptLimitSchema, attemptLimit);
+        if (!parsedAttemptLimit.success) return { kind: "state-changed" };
+        const row = this.#transaction
+            .update(jobRuns)
+            .set({
+                attemptLimit: parsedAttemptLimit.output,
+                availableAt: at,
+                cancelRequestedAt: null,
+                cancelRequestedById: null,
+                cancelRequestedByKind: null,
+                finishedAt: null,
+                resultJson: null,
+                state: "queued",
+                stateVersion: current.stateVersion + 1,
+                terminalCode: null,
+                terminalMessage: null,
+                updatedAt: at,
+            })
+            .where(
+                and(
+                    eq(jobRuns.id, current.id),
+                    eq(jobRuns.actionKey, deliveryProductionActionKey),
+                    eq(jobRuns.state, current.state),
+                    eq(jobRuns.stateVersion, current.stateVersion)
+                )
+            )
+            .returning()
+            .get();
+        if (row === undefined) return { kind: "state-changed" };
+        this.#appendEvent(current.id, {
+            attempt: current.attemptCount,
+            kind: "retry-scheduled",
+            occurredAt: at,
+            workerInstanceId: null,
+        });
+        const recovered = requiredRow(
+            this.findRun(current.id),
+            "delivery production terminal recovery refresh"
+        );
+        this.#insertSideEffects(input.sideEffectsForRun(recovered));
+        return { kind: "recovered", run: recovered };
+    }
+
     #reconcileHostRestartClaimFence(
         bootIdentity: LinuxBootIdentity,
         at: Date
@@ -1721,6 +1962,26 @@ class DrizzleJobWriter extends DrizzleJobReader {
             }
             const active = this.findActiveRunForSchedule(run.scheduledJobId);
             if (active !== undefined) return { kind: "active", run: active };
+        }
+        if (input.rejectWhenAnyActionActive !== undefined) {
+            const actionKeys = v.parse(
+                v.pipe(
+                    v.array(jobActionKeySchema),
+                    v.minLength(1),
+                    v.maxLength(32),
+                    v.check(
+                        (keys) => new Set(keys).size === keys.length,
+                        "Active action keys must be unique"
+                    )
+                ),
+                input.rejectWhenAnyActionActive
+            );
+            const active = this.#transaction
+                .select()
+                .from(jobRuns)
+                .where(and(inArray(jobRuns.actionKey, actionKeys), activeStateFilter))
+                .get();
+            if (active !== undefined) return { kind: "active", run: parseRun(active) };
         }
         if (input.rejectWhenActionActive === true) {
             const active = this.#transaction
@@ -2264,11 +2525,17 @@ class DrizzleJobWriter extends DrizzleJobReader {
     ): readonly JobRunRecord[] {
         const limit = input.limit ?? recoveryBatchMaximum;
         assertLimit(limit, recoveryBatchMaximum, "expired claim recovery");
+        const runId =
+            input.runId === undefined ? undefined : v.parse(jobRunIdSchema, input.runId);
         const expired = this.#transaction
             .select()
             .from(jobRuns)
             .where(
-                and(eq(jobRuns.state, "running"), lte(jobRuns.leaseExpiresAt, input.at))
+                and(
+                    eq(jobRuns.state, "running"),
+                    lte(jobRuns.leaseExpiresAt, input.at),
+                    ...(runId === undefined ? [] : [eq(jobRuns.id, runId)])
+                )
             )
             .orderBy(asc(jobRuns.leaseExpiresAt), asc(jobRuns.id))
             .limit(limit)
@@ -3093,6 +3360,8 @@ export function createJobRepository(
             write((writer) => writer.expireDisableIntents(input)),
         findActiveDisableIntent: (scheduleId: string) =>
             read((reader) => reader.findActiveDisableIntent(scheduleId)),
+        findEnqueueAuditProvenance: (runId: string) =>
+            read((reader) => reader.findEnqueueAuditProvenance(runId)),
         findActiveRunForSchedule: (scheduleId: string) =>
             read((reader) => reader.findActiveRunForSchedule(scheduleId)),
         findLatestRunForSchedule: (scheduleId: string) =>
@@ -3121,6 +3390,8 @@ export function createJobRepository(
             read((reader) => reader.listDueSchedules(input)),
         listActiveActionPayloads: (input: ListActiveActionPayloadsInput) =>
             read((reader) => reader.listActiveActionPayloads(input)),
+        listActionRuns: (input: ListActionRunsInput) =>
+            read((reader) => reader.listActionRuns(input)),
         listRunEvents: (input: ListJobRunEventsInput) =>
             read((reader) => reader.listRunEvents(input)),
         listRuns: (input: ListJobRunsInput) => read((reader) => reader.listRuns(input)),
@@ -3134,6 +3405,8 @@ export function createJobRepository(
             read((reader) => reader.readClaimCancellation(input)),
         readActionPayloadRunSnapshots: (input: ReadActionPayloadRunSnapshotsInput) =>
             read((reader) => reader.readActionPayloadRunSnapshots(input)),
+        readAnyActionActive: (input: ReadActiveActionsInput) =>
+            read((reader) => reader.readAnyActionActive(input)),
         readHealthState: (input: ReadJobHealthStateInput) =>
             read((reader) => reader.readHealthState(input)),
         readQueueState: (input: ReadQueueStateInput) =>
@@ -3145,6 +3418,9 @@ export function createJobRepository(
             write((writer) => writer.reconcileSchedules(input)),
         recoverExpiredClaims: (input: RecoverExpiredClaimsInput) =>
             write((writer) => writer.recoverExpiredClaims(input)),
+        recoverDeliveryProductionTerminalRun: (
+            input: RecoverDeliveryProductionTerminalRunInput
+        ) => write((writer) => writer.recoverDeliveryProductionTerminalRun(input)),
         registerWorker: (input: RegisterWorkerInput) =>
             write((writer) => writer.registerWorker(input)),
         renewClaim: (input: RenewClaimInput) =>

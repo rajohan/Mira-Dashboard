@@ -37,6 +37,7 @@ export interface DashboardReleaseBuildDependencies {
         command: ReleaseBuildCommand,
         repositoryRoot: string
     ) => Promise<void>;
+    readonly nowMs?: () => number;
     readonly runtimeIdentity?: ReleaseRuntimeIdentity;
 }
 
@@ -48,6 +49,7 @@ export interface DashboardReleaseBuild {
 
 type CleanBuildSourceIdentity = Readonly<{
     commitSha: string;
+    commitTitle: string;
     state: "clean";
 }>;
 
@@ -138,6 +140,10 @@ export async function buildDashboardRelease(
     const sourceResolver =
         dependencies.resolveSourceIdentity ?? resolveBuildSourceIdentity;
     const commandRunner = dependencies.runCommand ?? runReleaseBuildCommand;
+    const builtAtMs = (dependencies.nowMs ?? Date.now)();
+    if (!Number.isSafeInteger(builtAtMs) || builtAtMs < 0) {
+        throw releaseBuildFailure();
+    }
     let candidateRoot: string | undefined;
     try {
         await assertRepositoryRoot(repositoryRoot);
@@ -162,6 +168,10 @@ export async function buildDashboardRelease(
             releaseRoot: paths.stagingRoot,
             repositoryRoot,
             runtimeIdentity: dependencies.runtimeIdentity,
+            sourceDisplay: {
+                builtAtMs,
+                commitTitle: source.commitTitle,
+            },
             sourceIdentity: source,
         });
         await verifyReleaseIdentity(paths.stagingRoot, manifest.runtime);

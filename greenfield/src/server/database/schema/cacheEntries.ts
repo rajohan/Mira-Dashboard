@@ -9,6 +9,10 @@ import {
     cacheLastAttemptNumberMaximum,
 } from "../../../contracts/cache.ts";
 import {
+    deliveryOverviewSectionKeys,
+    deliveryPullRequestsPayloadMaximumBytes,
+} from "../../../contracts/delivery.ts";
+import {
     boundedControlSafeTextCheck,
     timestampMillisecondsCheck,
     uuidV7TextCheck,
@@ -20,6 +24,10 @@ import {
     optionalJobTerminalCodeCheck,
 } from "./jobChecks.ts";
 import { jobRuns } from "./jobRuns.ts";
+
+const deliveryPullRequestsCacheKeySql = sql.raw(
+    `'${deliveryOverviewSectionKeys["pull-requests"].replaceAll("'", "''")}'`
+);
 
 /** Durable last-known-good provider projection and separate latest-attempt outcome. */
 export const cacheEntries = sqliteTable(
@@ -92,7 +100,7 @@ export const cacheEntries = sqliteTable(
         ),
         check(
             "cache_entries_payload_json_check",
-            sql`${table.payloadJson} IS NULL OR (${boundedJsonObjectCheck(table.payloadJson, cacheEntryPayloadMaximumBytes)})`
+            sql`${table.payloadJson} IS NULL OR (${boundedJsonObjectCheck(table.payloadJson, cacheEntryPayloadMaximumBytes)}) OR (${table.key} = ${deliveryPullRequestsCacheKeySql} AND ${boundedJsonObjectCheck(table.payloadJson, deliveryPullRequestsPayloadMaximumBytes)})`
         ),
         check(
             "cache_entries_projection_check",

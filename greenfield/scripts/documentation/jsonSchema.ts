@@ -102,6 +102,26 @@ import {
     sqliteMigrationStateIsConsistent,
 } from "../../src/contracts/database.ts";
 import {
+    actionCapabilityIsConsistent,
+    deliveryCheckoutSafetyIsConsistent,
+    deliveryDeploymentsAreCanonical,
+    deliveryOperationAuthoritySnapshotFitsBudget,
+    deliveryOperationAuthoritySnapshotReferencesAreConsistent,
+    deliveryPreviewIsConsistent,
+    deliveryPullRequestBodyFitsUtf8Budget,
+    deliveryPullRequestsCachePayloadFitsBudget,
+    deliveryPullRequestsCachePayloadReferencesAreConsistent,
+    deliveryReleasesAreConsistent,
+    deliveryUrlUsesHttps,
+    expectedHeadsAreUnique,
+    operationScopeIsConsistent,
+    pullRequestActionsAreCanonical,
+    pullRequestGroupIsConsistent,
+    pullRequestGroupsAreCanonical,
+    readFreshnessIsCausal,
+    selectedPullRequestEndsScope,
+} from "../../src/contracts/delivery.ts";
+import {
     dockerContainerIsConsistent,
     dockerContainerMountDestinationIsAbsolute,
     dockerContainerMountsAreCanonical,
@@ -277,6 +297,7 @@ import {
     isCanonicalWebAuthnBase64Url,
     sortWebAuthnTransports,
 } from "../../src/contracts/webauthn.ts";
+import { deliveryOperationWarningsAreCanonical } from "../../src/shared/deliveryOperationWarnings.ts";
 import { jsonObjectSchema } from "../../src/shared/json.ts";
 import {
     getBoundedNonBlankTextMaximumLength,
@@ -304,6 +325,82 @@ const controlSafeTextJsonSchemaPattern = `^(?![\\s\\S]*(?:${controlSafeTextExclu
 const noNulJsonSchemaPattern = String.raw`^[^\u0000]*$`;
 
 const runtimeCheckComments = new Map<unknown, string>([
+    [
+        deliveryOperationWarningsAreCanonical,
+        "Live Valibot validation additionally requires Delivery warning lists to be nonempty, unique, and canonically ordered.",
+    ],
+    [
+        deliveryUrlUsesHttps,
+        "Live Valibot validation additionally requires every Delivery URL to use HTTPS.",
+    ],
+    [
+        deliveryPullRequestBodyFitsUtf8Budget,
+        "Live Valibot validation additionally limits each pull request body to 65536 UTF-8 bytes.",
+    ],
+    [
+        expectedHeadsAreUnique,
+        "Live Valibot validation additionally requires every pull request number in an exact Delivery scope to be unique.",
+    ],
+    [
+        actionCapabilityIsConsistent,
+        "Live Valibot validation additionally binds Delivery action availability to the absence of a blocking reason, review approval to Raymond, every other action to Mira, and each action to its reviewed scope kind.",
+    ],
+    [
+        pullRequestActionsAreCanonical,
+        "Live Valibot validation additionally requires Delivery pull request actions to be unique and strictly ordered by action ID.",
+    ],
+    [
+        pullRequestGroupIsConsistent,
+        "Live Valibot validation additionally requires unique pull request numbers within each Delivery group and enforces the reviewed group cardinality.",
+    ],
+    [
+        pullRequestGroupsAreCanonical,
+        "Live Valibot validation additionally requires Delivery groups to have globally unique pull request numbers, strictly ordered group IDs, and at most 500 pull requests in aggregate.",
+    ],
+    [
+        deliveryPreviewIsConsistent,
+        "Live Valibot validation additionally binds Delivery preview owner, exact head, URL, lifecycle state, and control availability.",
+    ],
+    [
+        deliveryCheckoutSafetyIsConsistent,
+        "Live Valibot validation additionally permits a Delivery checkout to be safe for deploy if and only if its condition is ready.",
+    ],
+    [
+        deliveryReleasesAreConsistent,
+        "Live Valibot validation additionally requires distinct current and previous Delivery releases and binds an available rollback target to the exact previous release and runtime.",
+    ],
+    [
+        deliveryOperationAuthoritySnapshotFitsBudget,
+        "Live Valibot validation additionally limits the serialized Delivery operation-authority snapshot to 524288 UTF-8 bytes.",
+    ],
+    [
+        deliveryOperationAuthoritySnapshotReferencesAreConsistent,
+        "Live Valibot validation additionally requires every Delivery action scope to be representable by its owning canonical pull request group.",
+    ],
+    [
+        deliveryPullRequestsCachePayloadFitsBudget,
+        "Live Valibot validation additionally limits the serialized Delivery pull request cache payload to 524288 UTF-8 bytes.",
+    ],
+    [
+        deliveryPullRequestsCachePayloadReferencesAreConsistent,
+        "Live Valibot validation additionally requires every cached Delivery action scope to be representable by its owning canonical pull request group.",
+    ],
+    [
+        readFreshnessIsCausal,
+        "Live Valibot validation additionally requires Delivery observation, staleness, and response-check timestamps to be causally ordered.",
+    ],
+    [
+        deliveryDeploymentsAreCanonical,
+        "Live Valibot validation additionally requires Delivery deployment job IDs to be unique and rows to be ordered newest-first with stable ID tie-breaking.",
+    ],
+    [
+        selectedPullRequestEndsScope,
+        "Live Valibot validation additionally requires the selected pull request and exact head to be the final member of its submitted scope.",
+    ],
+    [
+        operationScopeIsConsistent,
+        "Live Valibot validation additionally requires merge and preview-start operations to end their exact submitted scope at the selected pull request.",
+    ],
     [
         dockerContainerNetworksAreCanonical,
         "Live Valibot validation additionally requires Docker container networks to be strictly ordered by name.",

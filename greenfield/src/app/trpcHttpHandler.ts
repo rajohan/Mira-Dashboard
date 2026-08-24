@@ -4,6 +4,7 @@ import type { AgentService } from "../server/domains/agents/service.ts";
 import type { CacheService } from "../server/domains/cache/service.ts";
 import type { ChatService } from "../server/domains/chat/service.ts";
 import type { DatabaseObservabilityService } from "../server/domains/database/service.ts";
+import type { DeliveryService } from "../server/domains/delivery/service.ts";
 import type { DockerService } from "../server/domains/docker/service.ts";
 import type { WorkspaceFilesService } from "../server/domains/files/service.ts";
 import type { GatewayConnectionService } from "../server/domains/gatewayConnection/service.ts";
@@ -55,6 +56,7 @@ export interface TrpcHttpHandlerOptions {
     readonly cacheService: CacheService["Service"];
     readonly chatService?: ChatService;
     readonly databaseObservabilityService: DatabaseObservabilityService;
+    readonly deliveryService?: DeliveryService;
     readonly dockerService?: DockerService;
     readonly workspaceFilesService?: WorkspaceFilesService;
     readonly gatewayConnectionService: GatewayConnectionService;
@@ -250,6 +252,9 @@ export function createTrpcHttpHandler(options: TrpcHttpHandlerOptions) {
                         ? {}
                         : { chatService: options.chatService }),
                     databaseObservabilityService: options.databaseObservabilityService,
+                    ...(options.deliveryService === undefined
+                        ? {}
+                        : { deliveryService: options.deliveryService }),
                     ...(options.dockerService === undefined
                         ? {}
                         : { dockerService: options.dockerService }),

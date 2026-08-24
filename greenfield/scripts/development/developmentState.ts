@@ -482,6 +482,20 @@ export async function prepareDevelopmentRuntimeState(
 }
 
 /**
+ * Opens an already prepared owner-marked state session without importing host state.
+ * Managed PR code can reuse only its mounted isolated state and cannot create a new authority.
+ * @param config Validated managed-preview stack configuration.
+ * @returns Open isolated runtime state session.
+ */
+export async function openPreparedDevelopmentRuntimeState(
+    config: DevelopmentStackConfig
+): Promise<PreparedDevelopmentStateSession> {
+    await assertPrivateRealDirectory(config.stateRoot);
+    await readMarker(config);
+    return prepareDevelopmentRuntimeState(config);
+}
+
+/**
  * Creates or reuses marked owner-only state without touching production state.
  * @param config Validated development stack configuration.
  * @returns Prepared isolated state plus its database transition.

@@ -235,6 +235,62 @@
             "name": "database.overview"
         },
         {
+            "kind": "mutation",
+            "name": "delivery.approvePullRequest"
+        },
+        {
+            "kind": "mutation",
+            "name": "delivery.approveReview"
+        },
+        {
+            "kind": "mutation",
+            "name": "delivery.createPullRequestStack"
+        },
+        {
+            "kind": "mutation",
+            "name": "delivery.deploy"
+        },
+        {
+            "kind": "query",
+            "name": "delivery.getPreview"
+        },
+        {
+            "kind": "query",
+            "name": "delivery.getProductionCheckout"
+        },
+        {
+            "kind": "query",
+            "name": "delivery.getReleases"
+        },
+        {
+            "kind": "query",
+            "name": "delivery.listDeployments"
+        },
+        {
+            "kind": "query",
+            "name": "delivery.listPullRequests"
+        },
+        {
+            "kind": "mutation",
+            "name": "delivery.rejectPullRequest"
+        },
+        {
+            "kind": "mutation",
+            "name": "delivery.rollbackRelease"
+        },
+        {
+            "kind": "mutation",
+            "name": "delivery.startPreview"
+        },
+        {
+            "kind": "mutation",
+            "name": "delivery.stopPreview"
+        },
+        {
+            "kind": "mutation",
+            "name": "delivery.updateBranch"
+        },
+        {
             "kind": "query",
             "name": "docker.getContainerLogs"
         },

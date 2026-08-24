@@ -1,19 +1,28 @@
 import { realpath } from "node:fs/promises";
 import path from "node:path";
 
+import { Effect } from "effect";
 import * as v from "valibot";
 
 import type { DatabaseObservabilityCollector } from "../contracts/databaseObservabilityCollector.ts";
+import {
+    deliveryGitHubMiraLogin,
+    deliveryGitHubReviewerLogin,
+} from "../contracts/deliveryGithub.ts";
 import type { DockerJobExecutionPort } from "../contracts/dockerWorker.ts";
 import type { FixedHostOperationsExecutionPort } from "../server/domains/jobs/actionExecutors.ts";
+import { managedPreviewJobActionDefinitions } from "../server/domains/jobs/actionRegistry.ts";
+import { createDeliveryProductionRecovery } from "../server/domains/jobs/deliveryProductionRecovery.ts";
 import {
     createDashboardWorkerRuntime,
     createSystemJobWorkerSideEffects,
+    type DeliveryWorkerCompositionFactory,
 } from "../server/domains/jobs/workerRuntime.ts";
 import {
     createMoltbookDashboardCollector,
     type MoltbookDashboardCollector,
 } from "../server/domains/moltbook/provider.ts";
+import type { GitHubCredentialsConfiguration } from "../server/platform/configuration/githubCredentialsConfiguration.ts";
 import {
     parseWorkerConfiguration,
     type WorkerConfiguration,
@@ -24,10 +33,13 @@ import {
 } from "../server/platform/filesystem/projectLayout.ts";
 import { createPersistentGatewayOpenClawServiceActionsProvider } from "../server/platform/gateway/persistentGatewayOpenClawServiceActionsProvider.ts";
 import {
+    createPersistentGatewayTransport,
     createPersistentGatewayTaskNotificationTransport,
+    type PersistentGatewayTransport,
     type PersistentGatewayTaskNotificationTransport,
     type PersistentGatewayTransportOptions,
 } from "../server/platform/gateway/persistentGatewayTransport.ts";
+import { createPersistentGatewayPreviewProxyPort } from "../server/platform/gateway/previewGatewayTransport.ts";
 import {
     createProjectFileLogDestination,
     type ProjectFileLogDestination,
@@ -36,6 +48,10 @@ import {
     createStructuredLogger,
     type StructuredLogger,
 } from "../server/platform/observability/structuredLogger.ts";
+import {
+    productionCutoverRequiresReconciliation,
+    readActiveProductionCutoverRecord,
+} from "../server/platform/release/deliveryCutoverValidation.ts";
 import {
     loadRuntimeRelease,
     type RuntimeRelease,
@@ -48,10 +64,39 @@ import type { DatabaseObservabilityReconciliationPort } from "../shared/database
 import type { LinuxBootIdentity } from "../shared/linuxBootIdentity.ts";
 import type { OpenClawGatewayLifecycleExecutionPort } from "../shared/openClawGatewayLifecycle.ts";
 import type { OpenClawServiceActionsExecutionPort } from "../shared/openClawServiceActions.ts";
-import { createBunSqlDatabaseObservabilityCollector } from "../worker/database/bunSqlDatabaseObservabilityCollector.ts";
+import {
+    createBunSqlDatabaseObservabilityCollector,
+    createUnavailableDatabaseObservabilityCollector,
+} from "../worker/database/bunSqlDatabaseObservabilityCollector.ts";
 import { createDockerDatabaseObservabilityConnectionResolver } from "../worker/database/dockerDatabaseObservabilityEndpointResolver.ts";
 import { createFixedDatabaseObservabilityReconciler } from "../worker/database/fixedDatabaseObservabilityReconciler.ts";
 import { createFixedSqliteLifecycleMaintenance } from "../worker/database/fixedSqliteLifecycleMaintenance.ts";
+import { createDashboardMainGitSync } from "../worker/delivery/dashboardMainGitSync.ts";
+import {
+    DeliveryGitHubError,
+    createDeliveryGitHubHttpTransport,
+} from "../worker/delivery/githubHttpTransport.ts";
+import { createDeliveryGitHubPullRequestPort } from "../worker/delivery/githubPullRequestPort.ts";
+import { createDeliveryGitHubReviewerPort } from "../worker/delivery/githubReviewer.ts";
+import { createDeliveryOverviewCollector } from "../worker/delivery/overviewCollector.ts";
+import {
+    createDeliveryPreviewScopeAuthority,
+    createPreviewHost,
+} from "../worker/delivery/previewHost.ts";
+import { createPreviewSystemdRuntime } from "../worker/delivery/previewSystemdRuntime.ts";
+import { createPreviewTailscaleServe } from "../worker/delivery/previewTailscaleServe.ts";
+import {
+    createDeliveryProductionAuthorityReader,
+    type DeliveryProductionAuthorityReader,
+} from "../worker/delivery/productionAuthorityReader.ts";
+import { createProductionDeliveryControlPort } from "../worker/delivery/productionDeliveryControl.ts";
+import { createDeliveryProductionExecutionPort } from "../worker/delivery/productionExecution.ts";
+import { reconcileDeliveryProductionCutoverBeforeValidation } from "../worker/delivery/productionRecovery.ts";
+import {
+    createDeliveryRuntime,
+    type DeliveryPreviewExecutionPort,
+    type DeliveryProductionExecutionPort,
+} from "../worker/delivery/runtime.ts";
 import {
     createFixedDockerOperations,
     fixedDockerOperationPayloadSchema,
@@ -118,6 +163,9 @@ export interface DashboardWorkerProcessDependencies {
     readonly createGatewayTransport: (
         options: PersistentGatewayTransportOptions
     ) => PersistentGatewayTaskNotificationTransport;
+    readonly createPreviewGatewayTransport?: (
+        options: PersistentGatewayTransportOptions
+    ) => PersistentGatewayTransport;
     readonly createDatabaseObservabilityConnectionResolver: typeof createDockerDatabaseObservabilityConnectionResolver;
     readonly createDatabaseObservabilityReconciler: typeof createFixedDatabaseObservabilityReconciler;
     readonly createLogDestination: (
@@ -131,6 +179,9 @@ export interface DashboardWorkerProcessDependencies {
     readonly createDocker?: (
         options: WorkerDockerCompositionOptions
     ) => WorkerDockerComposition;
+    readonly createDelivery?: (
+        options: WorkerDeliveryProcessCompositionOptions
+    ) => DeliveryWorkerCompositionFactory | undefined;
     readonly createOpenClawGatewayLifecycle: (
         openClawRoot: string
     ) => OpenClawGatewayLifecycleExecutionPort | undefined;
@@ -154,9 +205,24 @@ export interface DashboardWorkerProcessDependencies {
             | undefined,
         hostOperations: FixedHostOperationsExecutionPort | undefined,
         bootIdentity: LinuxBootIdentity,
-        docker: Omit<DockerJobExecutionPort, "publishEvents" | "readPrevious"> | undefined
+        docker:
+            | Omit<DockerJobExecutionPort, "publishEvents" | "readPrevious">
+            | undefined,
+        createDelivery: DeliveryWorkerCompositionFactory | undefined
     ) => DashboardWorkerRuntime;
+    readonly createCutoverRuntime?: (
+        layout: DashboardProjectLayout,
+        release: RuntimeRelease,
+        configuration: WorkerConfiguration,
+        bootIdentity: LinuxBootIdentity
+    ) => DashboardWorkerRuntime;
+    readonly reconcileCutoverValidation?: (
+        layout: DashboardProjectLayout,
+        release: RuntimeRelease,
+        port: number
+    ) => Promise<boolean>;
     readonly createTerminationController: () => ProcessTerminationController;
+    readonly detectCutoverValidation?: (stateDirectory: string) => Promise<boolean>;
     readonly loadRelease: (
         releasesDirectory: string,
         releaseRoot: string,
@@ -188,6 +254,218 @@ export interface WorkerDockerComposition {
 export interface WorkerDockerCompositionOptions {
     readonly gitCredentials?: DockerUpdaterGitCredentials;
     readonly registryCredentials?: DockerRegistryClientOptions["credentials"];
+}
+
+/** Fixed process-owned inputs used to choose whether Delivery can be composed. */
+export interface WorkerDeliveryProcessCompositionOptions {
+    readonly gatewayTransport: PersistentGatewayTransport;
+    readonly githubCredentials: GitHubCredentialsConfiguration;
+    readonly layout: DashboardProjectLayout;
+    readonly port: number;
+    readonly release: RuntimeRelease;
+}
+
+/** Authorities intentionally supplied by the preview and cutover compositions. */
+export interface WorkerDeliveryCompositionOptions {
+    readonly checkoutRoot: string;
+    readonly createPreview?: (
+        github: ReturnType<typeof createDeliveryGitHubPullRequestPort>
+    ) => DeliveryPreviewExecutionPort;
+    readonly createProduction?: (input: {
+        readonly authority: DeliveryProductionAuthorityReader;
+        readonly github: ReturnType<typeof createDeliveryGitHubPullRequestPort>;
+        readonly mainGit: ReturnType<typeof createDashboardMainGitSync>;
+        readonly preview: DeliveryPreviewExecutionPort;
+    }) => DeliveryProductionExecutionPort;
+    readonly githubCredentials: GitHubCredentialsConfiguration;
+    readonly preview?: DeliveryPreviewExecutionPort;
+    readonly previewControlsAvailable?: boolean;
+    readonly releasesDirectory: string;
+    readonly stateDirectory: string;
+}
+
+/**
+ * Creates Delivery only after the Job repository can provide active-action authority.
+ * Preview and production mutation ports stay explicit capabilities and are never invented.
+ * @param options Fixed worker-owned Delivery authorities.
+ * @returns A repository-bound Delivery factory, or undefined without Mira credentials.
+ */
+export function createWorkerDeliveryComposition(
+    options: WorkerDeliveryCompositionOptions
+): DeliveryWorkerCompositionFactory | undefined {
+    const ordinary = options.githubCredentials.ordinary;
+    if (ordinary === undefined) return undefined;
+    return (authority) => {
+        const miraTransport = createDeliveryGitHubHttpTransport({
+            expectedLogin: deliveryGitHubMiraLogin,
+            token: ordinary.token,
+        });
+        const github = createDeliveryGitHubPullRequestPort({
+            transport: miraTransport,
+        });
+        const mainGit = createDashboardMainGitSync({
+            checkoutRoot: options.checkoutRoot,
+            credentials: {
+                password: ordinary.token,
+                username: ordinary.username,
+            },
+        });
+        const preview = options.preview ?? options.createPreview?.(github);
+        if (preview === undefined) {
+            throw new Error("Delivery preview authority is unavailable");
+        }
+        const reviewerTransport =
+            options.githubCredentials.reviewerToken === undefined
+                ? undefined
+                : createDeliveryGitHubHttpTransport({
+                      expectedLogin: deliveryGitHubReviewerLogin,
+                      token: options.githubCredentials.reviewerToken,
+                  });
+        const reviewer =
+            reviewerTransport === undefined
+                ? undefined
+                : createDeliveryGitHubReviewerPort({
+                      readPort: github,
+                      reviewerTransport,
+                  });
+        const productionAuthority = createDeliveryProductionAuthorityReader({
+            readActionActive: authority.readActionActive,
+            releasesDirectory: options.releasesDirectory,
+            stateDirectory: options.stateDirectory,
+        });
+        const collector = createDeliveryOverviewCollector({
+            activePreviewOperation: authority.readActivePreviewOperation,
+            github,
+            mainGit,
+            preview,
+            ...(options.previewControlsAvailable === undefined
+                ? {}
+                : {
+                      previewControlsAvailable: options.previewControlsAvailable,
+                  }),
+            production: productionAuthority,
+            ...(reviewerTransport === undefined
+                ? {}
+                : {
+                      reviewer: Object.freeze({
+                          async probe(signal?: AbortSignal) {
+                              try {
+                                  await reviewerTransport.verifyIdentity(signal);
+                                  return Object.freeze({ state: "available" as const });
+                              } catch (error) {
+                                  return Object.freeze({
+                                      reason:
+                                          error instanceof DeliveryGitHubError &&
+                                          error.reason === "authentication"
+                                              ? ("identity-mismatch" as const)
+                                              : ("provider-unavailable" as const),
+                                      state: "unavailable" as const,
+                                  });
+                              }
+                          },
+                      }),
+                  }),
+        });
+        const production = options.createProduction?.({
+            authority: productionAuthority,
+            github,
+            mainGit,
+            preview,
+        });
+        return createDeliveryRuntime({
+            collector,
+            github,
+            mainGit,
+            preview,
+            ...(production === undefined ? {} : { production }),
+            readPrevious: authority.readPrevious,
+            ...(reviewer === undefined ? {} : { reviewer }),
+        });
+    };
+}
+
+/**
+ * Composes the production Delivery worker from exact project, release, and Gateway authority.
+ * @param options Exact process, release, and credential authority.
+ * @returns A repository-bound Delivery factory, or undefined without Mira credentials.
+ */
+export function createWorkerDeliveryProcessComposition({
+    gatewayTransport,
+    githubCredentials,
+    layout,
+    port,
+    release,
+}: WorkerDeliveryProcessCompositionOptions):
+    | DeliveryWorkerCompositionFactory
+    | undefined {
+    const ordinary = githubCredentials.ordinary;
+    if (ordinary === undefined) return undefined;
+    const executorReleaseId = release.manifest.source.commitSha;
+    const executorRuntimeRevision = release.manifest.runtime.revision;
+    const runtimeExecutable = path.join(
+        layout.production.runtimes,
+        "bun",
+        executorRuntimeRevision,
+        "bun"
+    );
+    const productionControl = () =>
+        createProductionDeliveryControlPort({
+            executorReleaseId,
+            projectRoot: layout.root,
+            runtimeRevision: executorRuntimeRevision,
+        });
+    return createWorkerDeliveryComposition({
+        checkoutRoot: layout.production.checkout,
+        createPreview: (github) =>
+            createPreviewHost(
+                {
+                    bunExecutable: runtimeExecutable,
+                    checkoutRoot: layout.production.checkout,
+                    ingressSocket: path.join(
+                        layout.production.state.previews,
+                        "ingress.sock"
+                    ),
+                    previewRoot: layout.production.state.previews,
+                },
+                {
+                    credentials: { token: ordinary.token },
+                    runtime: createPreviewSystemdRuntime({
+                        gatewayPort:
+                            createPersistentGatewayPreviewProxyPort(gatewayTransport),
+                    }),
+                    scope: createDeliveryPreviewScopeAuthority(github),
+                    tailscale: createPreviewTailscaleServe(),
+                }
+            ),
+        createProduction: ({ authority, github, mainGit, preview }) =>
+            createDeliveryProductionExecutionPort({
+                authority,
+                cleanupConfirmed: async (expectedHeads, signal) => {
+                    for (const expectedHead of expectedHeads) {
+                        const cleaned = await preview.cleanupConfirmed?.(
+                            {
+                                expectedHeadSha: expectedHead.headSha,
+                                number: expectedHead.number,
+                                operationId: Bun.randomUUIDv7(),
+                            },
+                            signal
+                        );
+                        if (cleaned !== true) return false;
+                    }
+                    return true;
+                },
+                control: productionControl(),
+                executorReleaseId,
+                executorRuntimeRevision,
+                github,
+                mainGit,
+                projectRoot: layout.root,
+                readinessUrl: `http://127.0.0.1:${String(port)}/api/health/ready`,
+            }),
+        githubCredentials,
+        releasesDirectory: layout.production.releases,
+        stateDirectory: layout.production.state.root,
+    });
 }
 
 /**
@@ -309,11 +587,40 @@ export function createWorkerLogMaintenanceExecutor(
 }
 
 const defaultDependencies = Object.freeze({
+    createCutoverRuntime: (layout, release, configuration, bootIdentity) =>
+        createDashboardWorkerRuntime({
+            actionDefinitions: managedPreviewJobActionDefinitions,
+            bootIdentity,
+            database: {
+                migrationsDirectory: path.join(release.releaseRoot, "migrations"),
+                releaseId: release.manifest.source.commitSha,
+                startupMode: "validate-only",
+                stateDirectory: layout.production.state.root,
+            },
+            databaseObservability: createUnavailableDatabaseObservabilityCollector(),
+            logMaintenance: createWorkerLogMaintenanceExecutor(layout),
+            moltbook: createMoltbookDashboardCollector({
+                agentName: configuration.moltbookAgentName,
+                apiKey: configuration.moltbookApiKey,
+            }),
+            persistentGatewayTransport: createPersistentGatewayTaskNotificationTransport({
+                clientVersion: release.manifest.source.commitSha,
+                token: configuration.gatewayToken,
+                url: configuration.gatewayUrl,
+            }),
+            pid: process.pid,
+            releaseId: release.manifest.source.commitSha,
+            sideEffects: createSystemJobWorkerSideEffects(),
+            taskNotificationLoop: () => Effect.never,
+            workerInstanceId: Bun.randomUUIDv7(),
+        }),
     createDocker: createWorkerDockerComposition,
+    createDelivery: createWorkerDeliveryProcessComposition,
     createDatabaseObservabilityConnectionResolver:
         createDockerDatabaseObservabilityConnectionResolver,
     createDatabaseObservabilityReconciler: createFixedDatabaseObservabilityReconciler,
     createGatewayTransport: createPersistentGatewayTaskNotificationTransport,
+    createPreviewGatewayTransport: createPersistentGatewayTransport,
     createLogDestination: (logsDirectory, processRole) =>
         createProjectFileLogDestination(logsDirectory, processRole),
     createLogMaintenanceExecutor: createWorkerLogMaintenanceExecutor,
@@ -335,8 +642,14 @@ const defaultDependencies = Object.freeze({
         databaseObservabilityReconciler,
         hostOperations,
         bootIdentity,
-        docker
+        docker,
+        createDelivery
     ) => {
+        const productionControl = createProductionDeliveryControlPort({
+            executorReleaseId: release.manifest.source.commitSha,
+            projectRoot: layout.root,
+            runtimeRevision: release.manifest.runtime.revision,
+        });
         const writer = createDescriptorWorkspaceFileStructuralWriter({
             roots: [workspaceRoot, openClawRoot],
             spoolRoot: layout.production.state.workspaceFileUploads,
@@ -359,9 +672,17 @@ const defaultDependencies = Object.freeze({
             ...(openClawServiceActions === undefined ? {} : { openClawServiceActions }),
             ...(hostOperations === undefined ? {} : { hostOperations }),
             ...(docker === undefined ? {} : { docker }),
+            ...(createDelivery === undefined ? {} : { createDelivery }),
             persistentGatewayTransport: gatewayTransport,
             pid: process.pid,
             releaseId: release.manifest.source.commitSha,
+            reconcileDeliveryProductionBeforeClaims: (repository, signal) =>
+                createDeliveryProductionRecovery({
+                    control: productionControl,
+                    readActive: () =>
+                        readActiveProductionCutoverRecord(layout.production.state.root),
+                    repository,
+                }).reconcileBeforeClaims(signal),
             sideEffects: createSystemJobWorkerSideEffects(),
             sqliteMaintenance: createFixedSqliteLifecycleMaintenance({
                 migrationsDirectory: path.join(release.releaseRoot, "migrations"),
@@ -375,6 +696,19 @@ const defaultDependencies = Object.freeze({
         });
     },
     createTerminationController: createProcessTerminationController,
+    detectCutoverValidation: productionCutoverRequiresReconciliation,
+    async reconcileCutoverValidation(layout, _release, port) {
+        const inspection = await reconcileDeliveryProductionCutoverBeforeValidation({
+            projectRoot: layout.root,
+            readActive: () =>
+                readActiveProductionCutoverRecord(layout.production.state.root),
+            readinessUrl: `http://127.0.0.1:${String(port)}/api/health/ready`,
+        });
+        return (
+            inspection.state === "in-progress" &&
+            inspection.record.phase !== "normal-runtime-starting"
+        );
+    },
     loadRelease: (releasesDirectory, releaseRoot, processRole) =>
         loadRuntimeRelease(releasesDirectory, releaseRoot, processRole),
     resolveProjectLayout: resolveDashboardProjectLayout,
@@ -479,11 +813,44 @@ export async function runDashboardWorkerProcess(
     const termination = dependencies.createTerminationController();
     let runtime: DashboardWorkerRuntime | undefined;
     let gatewayTransport: PersistentGatewayTaskNotificationTransport | undefined;
+    let previewGatewayTransport: PersistentGatewayTransport | undefined;
     let logMaintenanceAvailability: LogMaintenanceAvailabilityPublisher | undefined;
     let terminalBroker: WorkerTerminalBrokerLifecycle | undefined;
     let dockerBroker: WorkerDockerBroker | undefined;
     let failure: Error | undefined;
     try {
+        const bootIdentity = await dependencies.readBootIdentity();
+        let cutoverValidation = await (
+            dependencies.detectCutoverValidation ??
+            productionCutoverRequiresReconciliation
+        )(layout.production.state.root);
+        if (cutoverValidation) {
+            cutoverValidation = await (
+                dependencies.reconcileCutoverValidation ??
+                defaultDependencies.reconcileCutoverValidation
+            )(layout, release, configuration.port);
+        }
+        if (cutoverValidation) {
+            runtime = (
+                dependencies.createCutoverRuntime ??
+                defaultDependencies.createCutoverRuntime
+            )(layout, release, configuration, bootIdentity);
+            await runtime.initialize();
+            logger.info({
+                component: "runtime",
+                event: "runtime.cutover_validation_started",
+                outcome: "success",
+            });
+            await termination.termination;
+            await runtime.dispose(termination.forceSignal);
+            await runtime.completion;
+            logger.info({
+                component: "runtime",
+                event: "runtime.stopped",
+                outcome: "success",
+            });
+            return;
+        }
         terminalBroker = await dependencies.startTerminalBroker({
             projectRoot: layout.root,
         });
@@ -516,6 +883,27 @@ export async function runDashboardWorkerProcess(
             token: configuration.gatewayToken,
             url: configuration.gatewayUrl,
         });
+        if (configuration.githubCredentials?.ordinary !== undefined) {
+            previewGatewayTransport = (
+                dependencies.createPreviewGatewayTransport ??
+                createPersistentGatewayTransport
+            )({
+                clientVersion: release.manifest.source.commitSha,
+                token: configuration.gatewayToken,
+                url: configuration.gatewayUrl,
+            });
+            previewGatewayTransport.start();
+        }
+        const createDelivery =
+            configuration.githubCredentials?.ordinary === undefined
+                ? undefined
+                : dependencies.createDelivery?.({
+                      gatewayTransport: previewGatewayTransport!,
+                      githubCredentials: configuration.githubCredentials,
+                      layout,
+                      port: configuration.port,
+                      release,
+                  });
         const logMaintenance = dependencies.createLogMaintenanceExecutor(layout);
         const openClawGateway = dependencies.createOpenClawGatewayLifecycle(
             openClawRoot.path
@@ -523,7 +911,6 @@ export async function runDashboardWorkerProcess(
         const openClawServiceActions =
             dependencies.createOpenClawServiceActions(gatewayTransport);
         const hostOperations = dependencies.createHostOperations?.();
-        const bootIdentity = await dependencies.readBootIdentity();
         const moltbook = createMoltbookDashboardCollector({
             agentName: configuration.moltbookAgentName,
             apiKey: configuration.moltbookApiKey,
@@ -566,7 +953,8 @@ export async function runDashboardWorkerProcess(
             databaseObservabilityReconciler,
             hostOperations,
             bootIdentity,
-            docker?.runtime
+            docker?.runtime,
+            createDelivery
         );
         const runtimeCompletion = runtime.completion.then(
             () => ({ kind: "stopped" as const }),
@@ -614,6 +1002,7 @@ export async function runDashboardWorkerProcess(
         await dockerBroker?.stop();
         await runtime.dispose(termination.forceSignal);
         await runtime.completion;
+        await previewGatewayTransport?.stop();
         logger.info({
             component: "runtime",
             event: "runtime.stopped",
@@ -653,6 +1042,13 @@ export async function runDashboardWorkerProcess(
                 await gatewayTransport.stop();
             } catch {
                 // Preserve the initiating composition failure.
+            }
+        }
+        if (previewGatewayTransport) {
+            try {
+                await previewGatewayTransport.stop();
+            } catch {
+                // Preserve the initiating process failure.
             }
         }
         logger.fatal({

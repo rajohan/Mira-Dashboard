@@ -6196,6 +6196,28 @@
           "isExpression": false
         },
         {
+          "value": "\"updated_at\" desc",
+          "isExpression": true
+        },
+        {
+          "value": "\"id\" desc",
+          "isExpression": true
+        }
+      ],
+      "isUnique": false,
+      "where": "\"job_runs\".\"action_key\" = 'delivery.production.v1'",
+      "origin": "manual",
+      "name": "job_runs_delivery_production_history_idx",
+      "entityType": "indexes",
+      "table": "job_runs"
+    },
+    {
+      "columns": [
+        {
+          "value": "action_key",
+          "isExpression": false
+        },
+        {
           "value": "payload_json",
           "isExpression": false
         },
@@ -7252,7 +7274,7 @@
       "table": "automation_credentials"
     },
     {
-      "value": "\"capability\" IN ('agents:read', 'agents:write', 'cache:read', 'cache:write', 'chat:read', 'chat:write', 'database:read', 'docker:read', 'docker:write', 'files:read', 'files:write', 'gateway-sessions:read', 'gateway-sessions:write', 'jobs:read', 'jobs:write', 'logs:read', 'logs:write', 'monitoring:write', 'notifications:read', 'notifications:write', 'openclaw-settings:read', 'openclaw-settings:write', 'openclaw-tasks:read', 'openclaw-tasks:write', 'reports:read', 'reports:write', 'service-actions:read', 'service-actions:write', 'tasks:read', 'tasks:write', 'terminal:read', 'terminal:write')",
+      "value": "\"capability\" IN ('agents:read', 'agents:write', 'cache:read', 'cache:write', 'chat:read', 'chat:write', 'database:read', 'delivery:read', 'delivery:write', 'docker:read', 'docker:write', 'files:read', 'files:write', 'gateway-sessions:read', 'gateway-sessions:write', 'jobs:read', 'jobs:write', 'logs:read', 'logs:write', 'monitoring:write', 'notifications:read', 'notifications:write', 'openclaw-settings:read', 'openclaw-settings:write', 'openclaw-tasks:read', 'openclaw-tasks:write', 'reports:read', 'reports:write', 'service-actions:read', 'service-actions:write', 'tasks:read', 'tasks:write', 'terminal:read', 'terminal:write')",
       "name": "automation_principal_capabilities_capability_check",
       "entityType": "checks",
       "table": "automation_principal_capabilities"
@@ -7342,7 +7364,7 @@
       "table": "cache_entries"
     },
     {
-      "value": "\"payload_json\" IS NULL OR (length(CAST(\"payload_json\" AS BLOB)) <= 262144 AND CASE WHEN json_valid(\"payload_json\") THEN json_type(\"payload_json\") = 'object' ELSE 0 END)",
+      "value": "\"payload_json\" IS NULL OR (length(CAST(\"payload_json\" AS BLOB)) <= 262144 AND CASE WHEN json_valid(\"payload_json\") THEN json_type(\"payload_json\") = 'object' ELSE 0 END) OR (\"key\" = 'delivery.overview.pull-requests' AND length(CAST(\"payload_json\" AS BLOB)) <= 2359296 AND CASE WHEN json_valid(\"payload_json\") THEN json_type(\"payload_json\") = 'object' ELSE 0 END)",
       "name": "cache_entries_payload_json_check",
       "entityType": "checks",
       "table": "cache_entries"

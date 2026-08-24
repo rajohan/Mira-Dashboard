@@ -16,9 +16,11 @@ import {
     discardDatabaseTransitionWorkspace,
     discardOrphanDatabaseTransitionWorkspace,
     inspectDatabaseTransitionRecovery,
+    loadDatabaseSnapshotArtifact,
     prepareDatabaseRollbackCandidate,
     prepareDatabaseTransitionWorkspace,
     promoteDatabaseTransitionCandidate,
+    replaceDatabaseTransitionCandidateFromSnapshot,
     restorePromotedDatabaseState,
     verifyDatabaseTransitionCandidate,
     type DatabaseTransitionWorkspace,
@@ -78,6 +80,12 @@ export interface ProductionServiceController {
         release: PublishedProductionRelease,
         runtime: InstalledProductionRuntime
     ) => Promise<void>;
+    /** Full commit-bound production smoke after bootstrap readiness and before activation commit. */
+    readonly verifySmoke: (
+        release: PublishedProductionRelease,
+        runtime: InstalledProductionRuntime,
+        transitionId: string
+    ) => Promise<void>;
 }
 
 /** Activation dependencies kept explicit for disposable-host lifecycle tests. */
@@ -87,6 +95,24 @@ export interface ProductionReleaseActivationDependencies {
     readonly runtimeVerification?: ProductionRuntimeVerificationDependencies;
     readonly services: ProductionServiceController;
     readonly testHooks?: ProductionReleaseActivationTestHooks;
+}
+
+/** Observable durable cutover milestones mirrored into the Delivery operation journal. */
+export type ProductionReleaseActivationProgress =
+    | "current-snapshot-created"
+    | "services-stopped"
+    | "target-database-ready"
+    | "target-services-started"
+    | "target-verified"
+    | "target-smoke-verified";
+
+/** Caller-owned transition identity and optional exact retained rollback snapshot. */
+export interface ProductionReleaseActivationOptions {
+    readonly onProgress?: (
+        phase: ProductionReleaseActivationProgress
+    ) => Promise<void> | void;
+    readonly targetDatabaseSnapshotTransitionId?: string;
+    readonly transitionId?: string;
 }
 
 /** Deterministic crash-boundary hooks used only by activation lifecycle tests. */
@@ -452,8 +478,12 @@ async function rollbackTransition(
     const previous = journal.previousActivation
         ? await loadActiveArtifacts(paths, journal.previousActivation, dependencies)
         : undefined;
+    const targetMayOwnProcesses =
+        candidateCommitted ||
+        journal.phase === "database-promoted" ||
+        journal.phase === "rollback-required";
     const stopOwner =
-        candidateCommitted || !previous
+        targetMayOwnProcesses || !previous
             ? await loadExactArtifacts(
                   paths,
                   journal.candidate.releaseId,
@@ -558,7 +588,8 @@ async function activateRelease(
     paths: PreparedProductionDeliveryPaths,
     candidateRelease: PublishedProductionRelease,
     candidateRuntime: InstalledProductionRuntime,
-    dependencies: ProductionReleaseActivationDependencies
+    dependencies: ProductionReleaseActivationDependencies,
+    options: ProductionReleaseActivationOptions
 ): Promise<ProductionActivationRecord> {
     const activation = await recoverExistingTransition(lease, paths, dependencies);
     await retainCommittedDatabaseSnapshots(lease, paths, activation);
@@ -588,7 +619,16 @@ async function activateRelease(
     const previous = activation.record
         ? await loadActiveArtifacts(paths, activation.record, dependencies)
         : undefined;
-    const transitionId = Bun.randomUUIDv7();
+    const transitionId = options.transitionId ?? Bun.randomUUIDv7();
+    const targetDatabaseSnapshot =
+        options.targetDatabaseSnapshotTransitionId === undefined
+            ? undefined
+            : await loadDatabaseSnapshotArtifact(
+                  lease,
+                  paths,
+                  options.targetDatabaseSnapshotTransitionId,
+                  candidate.release.manifest.source.commitSha
+              );
     const expectedCommitted = nextActivationRecord(transitionId, activation, candidate);
     let journal: ProductionActivationTransition | undefined;
     let workspace: DatabaseTransitionWorkspace | undefined;
@@ -603,6 +643,7 @@ async function activateRelease(
         );
         await dependencies.services.stop();
         await dependencies.testHooks?.afterServicesStopped?.();
+        await options.onProgress?.("services-stopped");
         const snapshotOwner = previous ?? candidate;
         const snapshot = await runDatabaseSnapshotMaintenance(
             lease,
@@ -619,12 +660,19 @@ async function activateRelease(
             journal,
             previousDatabaseForSnapshot(snapshot)
         );
+        await options.onProgress?.("current-snapshot-created");
         workspace = await prepareDatabaseTransitionWorkspace(
             lease,
             paths,
             transitionId,
             snapshot
         );
+        if (targetDatabaseSnapshot) {
+            await replaceDatabaseTransitionCandidateFromSnapshot(
+                workspace,
+                targetDatabaseSnapshot
+            );
+        }
         await runDatabaseCandidateMaintenance(
             lease,
             paths,
@@ -641,6 +689,22 @@ async function activateRelease(
             verifiedCandidate
         );
         journal = await markProductionDatabasePromoted(lease, paths, journal);
+        await options.onProgress?.("target-database-ready");
+        try {
+            await prepareAndStartServices(dependencies.services, candidate);
+            await options.onProgress?.("target-services-started");
+            await dependencies.services.verifyReady(candidate.release, candidate.runtime);
+            await options.onProgress?.("target-verified");
+            await dependencies.services.verifySmoke(
+                candidate.release,
+                candidate.runtime,
+                transitionId
+            );
+            await options.onProgress?.("target-smoke-verified");
+        } catch {
+            journal = await markProductionRollbackRequired(lease, paths, journal);
+            throw activationError();
+        }
         const committedState = await reconcileActivationCommit(
             lease,
             paths,
@@ -650,13 +714,6 @@ async function activateRelease(
         const committed = committedState.record;
         if (!committed) throw activationError();
         await dependencies.testHooks?.afterActivationCommit?.();
-        try {
-            await prepareAndStartServices(dependencies.services, candidate);
-            await dependencies.services.verifyReady(candidate.release, candidate.runtime);
-        } catch {
-            journal = await markProductionRollbackRequired(lease, paths, journal);
-            throw activationError();
-        }
         await discardDatabaseTransitionWorkspace(lease, paths, workspace);
         workspace = undefined;
         await clearProductionActivationJournal(lease, paths, journal);
@@ -753,7 +810,8 @@ export function activatePublishedProductionRelease(
     paths: PreparedProductionDeliveryPaths,
     candidateRelease: PublishedProductionRelease,
     candidateRuntime: InstalledProductionRuntime,
-    dependencies: ProductionReleaseActivationDependencies
+    dependencies: ProductionReleaseActivationDependencies,
+    options: ProductionReleaseActivationOptions = {}
 ): Effect.Effect<ProductionActivationRecord, ProductionReleaseActivationError> {
     return Effect.tryPromise({
         catch: () => activationError(),
@@ -763,7 +821,8 @@ export function activatePublishedProductionRelease(
                 paths,
                 candidateRelease,
                 candidateRuntime,
-                dependencies
+                dependencies,
+                options
             ),
     });
 }

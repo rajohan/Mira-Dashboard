@@ -4,6 +4,10 @@ import { inspect } from "node:util";
 
 import { Redacted } from "effect";
 
+import type {
+    DeliveryWorkerCompositionAuthority,
+    DeliveryWorkerCompositionFactory,
+} from "../server/domains/jobs/workerRuntime.ts";
 import { deriveDashboardProjectLayout } from "../server/platform/filesystem/projectLayout.ts";
 import type { PersistentGatewayTaskNotificationTransport } from "../server/platform/gateway/persistentGatewayTransport.ts";
 import type { ProjectFileLogDestination } from "../server/platform/observability/projectFileLogSink.ts";
@@ -12,15 +16,23 @@ import type { ProcessTerminationController } from "../server/platform/runtime/pr
 import {
     parseReleaseManifest,
     releaseBuildCommands,
+    releaseDeliveryProtocols,
     releaseProcessRoles,
 } from "../shared/releaseManifest.ts";
+import type {
+    DeliveryPreviewExecutionPort,
+    DeliveryProductionExecutionPort,
+} from "../worker/delivery/runtime.ts";
 import type { ManagedLogManifest } from "../worker/logs/managedLogManifest.ts";
 import type { DashboardWorkerRuntime } from "../worker/runtime.ts";
 import {
     createDefaultDashboardWorkerProcessDependencies,
+    createWorkerDeliveryComposition,
+    createWorkerDeliveryProcessComposition,
     createWorkerDockerComposition,
     createWorkerLogMaintenanceExecutor,
     type DashboardWorkerProcessDependencies,
+    type WorkerDeliveryProcessCompositionOptions,
     type WorkerDockerCompositionOptions,
     runDashboardWorkerProcess,
 } from "./worker.ts";
@@ -37,6 +49,8 @@ const release: RuntimeRelease = Object.freeze({
     manifest: parseReleaseManifest({
         artifacts: [{ bytes: 3, path: "server/worker.js", sha256: checksum }],
         buildCommands: [...releaseBuildCommands],
+        deliveryProtocols: [...releaseDeliveryProtocols],
+        display: { builtAtMs: 1, commitTitle: "Test release", schemaTarget: 1 },
         documentationSha256: checksum,
         formatVersion: 1,
         lockfileSha256: checksum,
@@ -54,6 +68,24 @@ const release: RuntimeRelease = Object.freeze({
     }),
     releaseRoot: `${layout.production.releases}/${releaseId}`,
 });
+
+const unusedDeliveryPreview = Object.freeze({
+    start: () => Promise.reject(new Error("Unused preview start")),
+    status: () => Promise.reject(new Error("Unused preview status")),
+    stop: () => Promise.reject(new Error("Unused preview stop")),
+}) satisfies DeliveryPreviewExecutionPort;
+
+const unusedDeliveryProduction = Object.freeze({
+    execute: () => Promise.reject(new Error("Unused production execution")),
+}) satisfies DeliveryProductionExecutionPort;
+
+const deliveryCompositionAuthority = Object.freeze({
+    readActionActive: () => Promise.resolve(false),
+    readActivePreviewOperation: () => Promise.resolve(undefined),
+    readPrevious() {
+        return;
+    },
+}) satisfies DeliveryWorkerCompositionAuthority;
 
 function processFixture(
     initializationFailure?: Error,
@@ -255,7 +287,9 @@ function processFixture(
             observedDatabaseObservability,
             observedDatabaseObservabilityReconciler,
             observedHostOperations,
-            observedBootIdentity
+            observedBootIdentity,
+            _observedDocker,
+            observedCreateDelivery
         ) {
             expect(observedLayout).toBe(layout);
             expect(observedRelease).toBe(release);
@@ -294,6 +328,9 @@ function processFixture(
             }
             expect(observedHostOperations).toBeUndefined();
             expect(observedBootIdentity).toBe(bootIdentity);
+            if (observedCreateDelivery !== undefined) {
+                events.push("delivery-factory-passed");
+            }
             expect(Object.keys(observedGatewayTransport).toSorted()).toEqual([
                 "requestOpenClawServiceAction",
                 "start",
@@ -427,6 +464,153 @@ const processOptions = Object.freeze({
         OPENCLAW_GATEWAY_URL: "ws://127.0.0.1:18789",
     },
     releaseRoot: release.releaseRoot,
+});
+
+function deliveryGitHubCredentials(includeReviewer = false) {
+    return Object.freeze({
+        ordinary: Object.freeze({
+            token: Redacted.make("mira-token-long-enough-for-composition"),
+            username: Redacted.make("mira-2026"),
+        }),
+        ...(includeReviewer
+            ? {
+                  reviewerToken: Redacted.make(
+                      "raymond-token-long-enough-for-composition"
+                  ),
+              }
+            : {}),
+    });
+}
+
+describe("Delivery worker composition", () => {
+    test("stays unavailable when only reviewer authority is configured", () => {
+        expect(
+            createWorkerDeliveryComposition({
+                checkoutRoot: layout.production.checkout,
+                githubCredentials: {
+                    reviewerToken: Redacted.make(
+                        "raymond-token-long-enough-for-composition"
+                    ),
+                },
+                preview: unusedDeliveryPreview,
+                releasesDirectory: layout.production.releases,
+                stateDirectory: layout.production.state.root,
+            })
+        ).toBeUndefined();
+    });
+
+    test("fails closed when no preview mutation authority is supplied", () => {
+        const factory = createWorkerDeliveryComposition({
+            checkoutRoot: layout.production.checkout,
+            githubCredentials: deliveryGitHubCredentials(),
+            releasesDirectory: layout.production.releases,
+            stateDirectory: layout.production.state.root,
+        });
+
+        expect(factory).toBeFunction();
+        expect(() => factory!(deliveryCompositionAuthority)).toThrow(
+            "Delivery preview authority is unavailable"
+        );
+    });
+
+    test("binds explicit preview, production, and separated reviewer capabilities", () => {
+        let observedProduction:
+            | Parameters<
+                  NonNullable<
+                      Parameters<
+                          typeof createWorkerDeliveryComposition
+                      >[0]["createProduction"]
+                  >
+              >[0]
+            | undefined;
+        const factory = createWorkerDeliveryComposition({
+            checkoutRoot: layout.production.checkout,
+            createPreview: () => {
+                throw new Error("Explicit preview authority must win");
+            },
+            createProduction(input) {
+                observedProduction = input;
+                return unusedDeliveryProduction;
+            },
+            githubCredentials: deliveryGitHubCredentials(true),
+            preview: unusedDeliveryPreview,
+            previewControlsAvailable: false,
+            releasesDirectory: layout.production.releases,
+            stateDirectory: layout.production.state.root,
+        });
+
+        const runtime = factory!(deliveryCompositionAuthority);
+
+        expect(Object.keys(runtime).toSorted()).toEqual([
+            "execute",
+            "readPrevious",
+            "refresh",
+        ]);
+        expect(observedProduction?.preview).toBe(unusedDeliveryPreview);
+        expect(observedProduction?.authority.readExact).toBeFunction();
+        expect(observedProduction?.authority.readForOperation).toBeFunction();
+        expect(observedProduction?.github.listOpenPullRequests).toBeFunction();
+        expect(observedProduction?.mainGit.inspect).toBeFunction();
+        expect(observedProduction?.mainGit.syncMainToExactRef).toBeFunction();
+        expect(runtime.readPrevious("pull-requests")).toBeUndefined();
+    });
+
+    test("creates preview authority from the ordinary GitHub port when requested", () => {
+        let previewCreated = false;
+        const factory = createWorkerDeliveryComposition({
+            checkoutRoot: layout.production.checkout,
+            createPreview(github) {
+                previewCreated = true;
+                expect(github.getPullRequest).toBeFunction();
+                return unusedDeliveryPreview;
+            },
+            githubCredentials: deliveryGitHubCredentials(),
+            releasesDirectory: layout.production.releases,
+            stateDirectory: layout.production.state.root,
+        });
+
+        const runtime = factory!(deliveryCompositionAuthority);
+
+        expect(previewCreated).toBe(true);
+        expect(runtime.execute).toBeFunction();
+    });
+
+    test("keeps the production process composition unavailable without Mira", () => {
+        expect(
+            createWorkerDeliveryProcessComposition({
+                gatewayTransport: {} as never,
+                githubCredentials: {
+                    reviewerToken: Redacted.make(
+                        "raymond-token-long-enough-for-composition"
+                    ),
+                },
+                layout,
+                port: 3100,
+                release,
+            })
+        ).toBeUndefined();
+    });
+
+    test("builds immutable preview and cutover capabilities without executing them", () => {
+        const factory = createWorkerDeliveryProcessComposition({
+            gatewayTransport: {} as never,
+            githubCredentials: deliveryGitHubCredentials(true),
+            layout,
+            port: 3100,
+            release,
+        });
+
+        expect(factory).toBeFunction();
+        const runtime = factory!(deliveryCompositionAuthority);
+
+        expect(Object.keys(runtime).toSorted()).toEqual([
+            "execute",
+            "readPrevious",
+            "refresh",
+        ]);
+        expect(runtime.execute).toBeFunction();
+        expect(runtime.refresh).toBeFunction();
+    });
 });
 
 describe("Dashboard worker process", () => {
@@ -600,6 +784,53 @@ describe("Dashboard worker process", () => {
             expect(inspect(observedOptions)).not.toContain(secret);
             expect(fixture.logLines.join("\n")).not.toContain(secret);
         }
+    });
+
+    test("passes configured GitHub authority through the late Delivery factory seam", async () => {
+        const fixture = processFixture();
+        const deliveryFactory = (() => {
+            throw new Error(
+                "Late Delivery factory is not invoked by this process fixture"
+            );
+        }) satisfies DeliveryWorkerCompositionFactory;
+        const dependencies = Object.freeze({
+            ...fixture.dependencies,
+            createDelivery(options: WorkerDeliveryProcessCompositionOptions) {
+                expect(options.layout).toBe(layout);
+                expect(options.release).toBe(release);
+                const ordinary = options.githubCredentials.ordinary;
+                if (ordinary === undefined) {
+                    throw new Error("Fixture ordinary GitHub credentials are missing");
+                }
+                expect(Redacted.value(ordinary.username)).toBe("mira-2026");
+                expect(Redacted.value(ordinary.token)).toBe(
+                    "mira-token-long-enough-for-composition"
+                );
+                const reviewerToken = options.githubCredentials.reviewerToken;
+                if (reviewerToken === undefined) {
+                    throw new Error("Fixture reviewer GitHub credential is missing");
+                }
+                expect(Redacted.value(reviewerToken)).toBe(
+                    "raymond-token-long-enough-for-composition"
+                );
+                return deliveryFactory;
+            },
+        }) satisfies DashboardWorkerProcessDependencies;
+
+        await runDashboardWorkerProcess(
+            {
+                ...processOptions,
+                configurationSource: {
+                    ...processOptions.configurationSource,
+                    MIRA_GITHUB_TOKEN: "mira-token-long-enough-for-composition",
+                    MIRA_GITHUB_USERNAME: "mira-2026",
+                    RAJOHAN_GITHUB_TOKEN: "raymond-token-long-enough-for-composition",
+                },
+            },
+            dependencies
+        );
+
+        expect(fixture.events).toContain("delivery-factory-passed");
     });
 
     test("disposes partial ownership and reports a redacted startup failure", () => {

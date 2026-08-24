@@ -23,6 +23,7 @@ const temporaryDirectories: string[] = [];
 const commitSha = "b".repeat(40);
 const cleanSource: BuildSourceIdentity = Object.freeze({
     commitSha,
+    commitTitle: "Test release",
     state: "clean",
 });
 const runtimeIdentity: ReleaseRuntimeIdentity = Object.freeze({
@@ -111,6 +112,10 @@ async function materializeCommandOutput(
                 path.join(repositoryRoot, "dist/processes/databaseMaintenance.js"),
                 "database-maintenance"
             ),
+            writeFile(
+                path.join(repositoryRoot, "dist/processes/productionDelivery.js"),
+                "production-delivery"
+            ),
             writeFile(path.join(repositoryRoot, "dist/processes/web.js"), "web"),
             writeFile(path.join(repositoryRoot, "dist/processes/worker.js"), "worker"),
         ]);
@@ -122,6 +127,7 @@ describe("Dashboard release build", () => {
         const repositoryRoot = await repositoryFixture();
         const commands: ReleaseBuildCommand[] = [];
         const result = await buildDashboardRelease(repositoryRoot, {
+            nowMs: () => 1_800_000_000_000,
             resolveSourceIdentity: () => Promise.resolve(cleanSource),
             runCommand: async (command, root) => {
                 commands.push(command);
@@ -135,6 +141,11 @@ describe("Dashboard release build", () => {
             path.join(repositoryRoot, "dist/releases", commitSha)
         );
         expect(result.manifest.source.commitSha).toBe(commitSha);
+        expect(result.manifest.display).toEqual({
+            builtAtMs: 1_800_000_000_000,
+            commitTitle: "Test release",
+            schemaTarget: 1,
+        });
         const releaseStatus = await stat(result.releaseRoot);
         const manifestStatus = await stat(
             path.join(result.releaseRoot, "release-manifest.json")
@@ -151,7 +162,11 @@ describe("Dashboard release build", () => {
         const dirtyFailure = await rejectionError(
             buildDashboardRelease(dirtyRoot, {
                 resolveSourceIdentity: () =>
-                    Promise.resolve({ commitSha, state: "dirty" }),
+                    Promise.resolve({
+                        commitSha,
+                        commitTitle: "Test release",
+                        state: "dirty",
+                    }),
                 runCommand: () => {
                     dirtyCommandRan = true;
                     return Promise.resolve();
@@ -171,7 +186,11 @@ describe("Dashboard release build", () => {
                     return Promise.resolve(
                         sourceReadCount === 1
                             ? cleanSource
-                            : { commitSha, state: "dirty" }
+                            : {
+                                  commitSha,
+                                  commitTitle: "Test release",
+                                  state: "dirty",
+                              }
                     );
                 },
                 runCommand: materializeCommandOutput,

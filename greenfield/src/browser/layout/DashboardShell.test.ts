@@ -14,6 +14,11 @@ describe("Dashboard shell layout", () => {
         expect(paths.indexOf("/database")).toBeLessThan(paths.indexOf("/moltbook"));
     });
 
+    test("keeps Delivery directly after Jobs in reviewed navigation order", () => {
+        const paths = dashboardNavigationItems.map(({ to }) => to);
+        expect(paths.indexOf("/delivery")).toBe(paths.indexOf("/jobs") + 1);
+    });
+
     test("keeps the Terminal workspace full-height with the standard responsive gutter", () => {
         expect(dashboardMainClassName("/terminal").split(" ")).toEqual(
             expect.arrayContaining([

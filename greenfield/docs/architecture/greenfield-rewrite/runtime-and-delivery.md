@@ -738,6 +738,7 @@ Recommended layout:
     checkout/
     releases/<release-id>/
       server/
+        productionDelivery.js
       browser/
       migrations/
       docs/generated/
@@ -751,6 +752,7 @@ Recommended layout:
       activation.json  # authoritative current/previous release-runtime pairs
       mira-dashboard.db
       backups/
+      delivery-production-operations/
       job-output/
       log-maintenance/
       logs/
@@ -766,7 +768,17 @@ Recommended layout:
 
 The release manifest contains Git commit, clean-tree state, Bun revision, lockfile hash,
 direct package versions, schema migration/checksum set, asset hashes, docs hash, build commands,
-and required process roles. It contains no secrets.
+required process roles, and the exact cross-release Delivery protocol. Every release contains the
+manifest-bound `productionDelivery.js` executor for `delivery.production.v1`. It contains no
+secrets.
+
+PR-preview publication requires one explicit new-host bootstrap: a root operator runs the
+manifest-inventoried Tailscale provisioning artifact, which delegates the fixed local account
+`ubuntu` through `/usr/bin/tailscale set --operator=ubuntu`. The production worker keeps
+`NoNewPrivileges=true` and invokes only the fixed `/usr/bin/tailscale` binary directly; it never
+uses `sudo`. Production cutover reads Tailscale preferences and requires the exact operator before
+confirming the journal or stopping services. Missing or drifted delegation therefore fails closed
+before deployment effects, and bootstrap is never applied implicitly by deployment.
 
 Deployment flow:
 
@@ -783,19 +795,32 @@ Deployment flow:
    before publication or runtime installation returns. Install/publication failure repeats the
    same journal-aware retention pass immediately; a crash between those operations is reconciled
    before the next attempt, so distinct failed candidates cannot accumulate indefinitely or consume
-   space needed by the authoritative pair. Install/reload the verified stop-owner units, drain
-   active jobs, enter maintenance mode, durably journal the exact stop intent, and only then quiesce
-   all database writers. Recovery treats this pre-snapshot phase as database-unmodified and
-   idempotently restores the previous service owner before clearing the journal.
+   space needed by the authoritative pair. The worker then fsyncs one secret-free
+   `delivery.production.v1` capsule containing the exact original production Job payload, actor,
+   authenticator, audit, idempotency, source, release, runtime, and snapshot CAS identities. It
+   manifest-verifies the current immutable executor and launches it through a fixed transient
+   user-systemd unit in a separate cgroup with `env -i`; GitHub, Doppler, Gateway, Docker, and
+   reviewer credentials never cross that handoff. The executor confirms the exact journal before
+   installing/reloading the verified stop-owner units, draining active jobs, entering maintenance
+   mode, and quiescing database writers. Recovery treats the pre-snapshot phase as
+   database-unmodified and idempotently restores the previous service owner.
 5. Snapshot and verify the current database while writers remain stopped.
 6. Apply migrations to a copy, run schema/preflight checks, then atomically promote the
    database state.
 7. Reinstall the candidate release's manifest-verified user units, reload user systemd, then let
    the deployment-held activation start worker in `validate-only` mode before web, with readiness
-   deadlines. A rollback reinstalls the previous release's units before restarting its paired
-   release/database state.
+   deadlines. The authoritative activation record is not committed until target readiness and the
+   required target validation succeed. A rollback preloads only the exact authoritative previous
+   snapshot, snapshots the current database before restoring it, and records that fresh snapshot
+   beside the now-previous release. Repeated `current → previous → current` rollback therefore
+   preserves the correct database state in both directions.
 8. Run authenticated smoke checks, including tRPC, SSE, Gateway, docs, and one safe queued job.
-9. Atomically record current/previous and run release/runtime retention only after the complete
+9. Store one immutable terminal operation receipt before clearing the in-flight record. A restarted
+   worker reconciles that receipt before ordinary Job claiming; if paired rollback restored an
+   older SQLite snapshot, it rehydrates the exact original run from the capsule and settles through
+   the normal coordinator without repeating the external effect. Receipts remain pinned while
+   current, previous, or in-flight snapshots can resurrect their Job rows. Atomically record
+   current/previous and run release/runtime retention only after the complete
    managed inventories verify. Retention preserves the authoritative current and rollback pairs
    plus the candidate while a transition is being prepared, so successful activation converges to
    at most two immutable releases and at most two Bun revisions. Every other commit-addressed

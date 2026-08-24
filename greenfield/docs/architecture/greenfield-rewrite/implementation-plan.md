@@ -94,6 +94,21 @@ including restart during streaming.
   to an exact-container, fixed-shell handoff into the existing bounded interactive Terminal
   lifecycle. No second generic exec/job/output API is introduced. Production deployment remains a separate activation step; this implementation
   does not mutate or restart the live `/opt/docker` stack.
+- Delivery is implemented as five bounded reads and nine durable operations over the existing cache,
+  Jobs, audit, and immutable activation foundations. Pull requests, preview, checkout, and release
+  authority refresh and retain independently; deployment history is an exact indexed projection
+  of `delivery.production.v1` Jobs rather than a second deployment queue. All ordinary GitHub and
+  Git synchronization uses only the verified `mira-2026` worker credential. Review approval is the
+  sole `rajohan` mutation and has a separate, non-fallback worker credential and port. It preserves
+  normal, inferred, and native stacked PR inventory, grouping, preview, and review scope. Ordinary
+  merge/update/review use provider-enforced exact-head guards. Native stack create/merge and pull
+  request close dispatch nothing while GitHub lacks full-scope or expected-head CAS; the browser
+  exposes the stable `head-guard-unavailable` reason instead of reproducing legacy post-effect
+  validation. One isolated four-hour global PR preview slot runs without production credentials
+  or host-network authority. Deploy and paired rollback use one fsynced,
+  versioned cross-release operation capsule and immutable transient executor so cutover survives
+  stopping its originating worker, process crashes, and host reboot without adding a second queue
+  or permanent service.
 - keep `/opt/docker` as the separate Docker-stack project and source of truth. Dashboard is its
   control plane: reviewed worker adapters may inspect or queue bounded operations, but compose
   files, application data, and deployment ownership do not move into Dashboard state.
@@ -273,7 +288,17 @@ including restart during streaming.
   root-owned immutable handoff and different-principal garbage collector are required to defend
   against malicious concurrent mutation by that UID.
   Keep the six Kopia/WAL-G status/control rows and database backup/restore in their separate
-  privileged slices.
+  privileged slices. The final backup slice must discover exactly one healthy provider per
+  reviewed capability from the canonical root Compose graph, using only
+  `mira.dashboard.backup=kopia-v1` or `mira.dashboard.backup=wal-g-v1` as membership authority.
+  Container, service, project, image, port, and source-mount names remain data rather than
+  allowlists; additions, removals, and renames therefore converge without Dashboard changes.
+  Ambiguity, disappearance, or graph drift preserves bounded last-known-good state and never
+  becomes a fresh empty inventory. Kopia source roots are derived from validated read-only
+  `/source/<safe-id>` mounts. Provider actions reuse durable Jobs, exact source CAS, recent MFA,
+  non-retryable unknown-outcome handling, and one shared heavy-I/O lease. The coordinated
+  `/opt/docker` capability-label/wrapper change remains a separate reviewed infrastructure PR and
+  is not applied implicitly by Dashboard delivery.
 
 **Exit gate:** capability, step-up, audit, cancellation, resource-limit, and failure-recovery
 tests pass for every privileged operation.
@@ -282,6 +307,10 @@ tests pass for every privileged operation.
 
 - finish responsive/accessibility/visual parity, generated `/docs`, retention, load/resource
   tests, restore drills, fresh-database cutover rehearsal, and production runbooks;
+- audit every remaining `node:*` compatibility import. Where Bun exposes a native API that is at
+  least as correct, secure, portable within the supported Bun runtime, and maintainable, use the
+  Bun API instead. Keep a `node:*` import only for a concrete capability or cross-runtime need and
+  document that exception at the call site or in the relevant architecture boundary;
 - perform the fresh-database cutover and monitor the full operational cycle.
 
 **Exit gate:** the definition of done below is satisfied; no compatibility code remains.
@@ -358,6 +387,8 @@ The rewrite is ready only when all of the following are true:
   disclosure;
 - oxfmt, typed Oxlint, TypeScript, Bun tests, coverage gates, build, bundle budgets, and
   release preflight pass;
+- every `node:*` compatibility import has been reviewed; an equally capable Bun-native API is used
+  wherever available, and each retained exception has an explicit technical reason;
 - web, worker, child jobs, streams, caches, logs, and test/build commands have observed resource
   bounds below their cgroup limits;
 - production smoke checks cover every major external dependency and one safe worker job;

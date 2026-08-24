@@ -1,11 +1,16 @@
 import path from "node:path";
 
-import { runDevelopmentStack } from "./development/developmentRuntime.ts";
+import {
+    runDevelopmentStack,
+    runManagedPreviewStackWithPreparedState,
+} from "./development/developmentRuntime.ts";
 import {
     type DevelopmentStackConfig,
     resolveDevelopmentStackConfig as resolveForRoot,
+    resolveManagedPreviewStackConfig,
 } from "./development/developmentStackConfig.ts";
 import {
+    openPreparedDevelopmentRuntimeState,
     prepareDevelopmentState,
     resetDevelopmentDatabase,
     resetDevelopmentState,
@@ -39,8 +44,28 @@ export function resolveDevelopmentStackConfig(
 }
 
 async function main(): Promise<number> {
-    const config = resolveDevelopmentStackConfig();
     const [command] = Bun.argv.slice(2);
+    if (command === "--managed-preview") {
+        const [, expectedHeadSha] = Bun.argv.slice(2);
+        if (expectedHeadSha === undefined) {
+            throw new TypeError(
+                "Usage: developmentStack.ts --managed-preview <expected-head-sha>"
+            );
+        }
+        const config = resolveManagedPreviewStackConfig(process.env, repositoryRoot);
+        const stateSession = await openPreparedDevelopmentRuntimeState(config);
+        try {
+            return await runManagedPreviewStackWithPreparedState(
+                config,
+                stateSession,
+                expectedHeadSha,
+                config.gatewaySocket
+            );
+        } finally {
+            await stateSession.release();
+        }
+    }
+    const config = resolveDevelopmentStackConfig();
     if (command === "--prepare-state") {
         const state = await prepareDevelopmentState(config);
         process.stdout.write(
@@ -66,7 +91,7 @@ async function main(): Promise<number> {
     }
     if (command !== undefined) {
         throw new TypeError(
-            "Usage: developmentStack.ts [--prepare-state|--reset-database|--reset-state]"
+            "Usage: developmentStack.ts [--managed-preview <sha>|--prepare-state|--reset-database|--reset-state]"
         );
     }
     return runDevelopmentStack(config);

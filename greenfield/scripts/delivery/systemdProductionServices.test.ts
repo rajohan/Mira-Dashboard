@@ -96,6 +96,7 @@ describe("production user-systemd service control", () => {
             );
             const commands: string[][] = [];
             const requests: Request[] = [];
+            const smokes: string[] = [];
             const controller = createSystemdProductionServiceController(lease, paths, {
                 execute: (_executable, arguments_) => {
                     commands.push([...arguments_]);
@@ -112,11 +113,25 @@ describe("production user-systemd service control", () => {
                     return Promise.resolve();
                 },
                 readinessUrl: "http://127.0.0.1:3100/api/health/ready",
+                smoke: (observedPaths, release, runtime, readinessUrl, transitionId) => {
+                    expect(observedPaths).toBe(paths);
+                    expect(release).toBe(fixtures.first);
+                    expect(runtime).toBe(fixtures.runtime);
+                    expect(readinessUrl).toBe("http://127.0.0.1:3100/api/health/ready");
+                    smokes.push(transitionId);
+                    return Promise.resolve();
+                },
             });
 
             await controller.prepare(fixtures.first, fixtures.runtime);
             await controller.start(fixtures.first, fixtures.runtime);
             await controller.verifyReady(fixtures.first, fixtures.runtime);
+            const smokeTransitionId = Bun.randomUUIDv7();
+            await controller.verifySmoke(
+                fixtures.first,
+                fixtures.runtime,
+                smokeTransitionId
+            );
             await controller.stop();
             expect(await readlink(path.join(paths.releasesDirectory, "current"))).toBe(
                 firstReleaseId
@@ -131,12 +146,15 @@ describe("production user-systemd service control", () => {
                 ["--user", "is-active", "--quiet", "mira-dashboard-web.service"],
                 ["--user", "is-active", "--quiet", "mira-dashboard-worker.service"],
                 ["--user", "is-active", "--quiet", "mira-dashboard-web.service"],
+                ["--user", "is-active", "--quiet", "mira-dashboard-worker.service"],
+                ["--user", "is-active", "--quiet", "mira-dashboard-web.service"],
                 ["--user", "stop", "mira-dashboard-web.service"],
                 ["--user", "stop", "mira-dashboard-worker.service"],
             ]);
             expect(requests).toHaveLength(1);
             expect(requests[0]?.method).toBe("HEAD");
             expect(requests[0]?.url).toBe("http://127.0.0.1:3100/api/health/ready");
+            expect(smokes).toEqual([smokeTransitionId]);
             expect(() =>
                 createSystemdProductionServiceController(lease, paths, {
                     readinessUrl: "http://[::1]:3100/api/health/ready",
@@ -445,7 +463,7 @@ describe("production user-systemd service control", () => {
         );
         expect(webExecStart).not.toContain("MOLTBOOK_API_KEY");
         expect(web).toContain(
-            "UnsetEnvironment=MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD DOCKER_LOGIN DOCKER_TOKEN MIRA_GITHUB_USERNAME MIRA_GITHUB_TOKEN MOLTBOOK_API_KEY MOLTBOOK_AGENT_NAME"
+            "UnsetEnvironment=MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD DOCKER_LOGIN DOCKER_TOKEN MIRA_GITHUB_USERNAME MIRA_GITHUB_TOKEN RAJOHAN_GITHUB_TOKEN MOLTBOOK_API_KEY MOLTBOOK_AGENT_NAME"
         );
         expect(worker).toContain("Environment=MIRA_DASHBOARD_OPENCLAW_ROOT=%h/.openclaw");
         expect(worker).toContain(

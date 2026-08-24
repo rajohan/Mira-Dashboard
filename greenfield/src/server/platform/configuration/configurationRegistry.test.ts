@@ -24,6 +24,7 @@ describe("application configuration registry", () => {
             "DOCKER_TOKEN",
             "MIRA_GITHUB_USERNAME",
             "MIRA_GITHUB_TOKEN",
+            "RAJOHAN_GITHUB_TOKEN",
             "MOLTBOOK_API_KEY",
             "MOLTBOOK_AGENT_NAME",
             "OPENCLAW_GATEWAY_TOKEN",
@@ -36,7 +37,7 @@ describe("application configuration registry", () => {
             "MIRA_DASHBOARD_TOTP_KEYRING",
             "MIRA_DASHBOARD_LOG_LEVEL",
         ]);
-        expect(applicationConfigurationRegistry).toHaveLength(24);
+        expect(applicationConfigurationRegistry).toHaveLength(25);
         expect(
             applicationConfigurationRegistry
                 .map((entry) => entry.environmentName)
@@ -86,6 +87,7 @@ describe("application configuration registry", () => {
             "DOCKER_TOKEN",
             "MIRA_GITHUB_USERNAME",
             "MIRA_GITHUB_TOKEN",
+            "RAJOHAN_GITHUB_TOKEN",
             "MOLTBOOK_API_KEY",
             "OPENCLAW_GATEWAY_TOKEN",
             "MIRA_DASHBOARD_TOTP_KEYRING",
@@ -106,8 +108,8 @@ describe("application configuration registry", () => {
             DOCKER_TOKEN: "dockerRegistryCredentials.dockerHub.token",
             MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD:
                 "databaseObservabilityPassword",
-            MIRA_GITHUB_TOKEN: "dockerRegistryCredentials.github.token",
-            MIRA_GITHUB_USERNAME: "dockerRegistryCredentials.github.username",
+            MIRA_GITHUB_TOKEN: "githubCredentials.ordinary.token",
+            MIRA_GITHUB_USERNAME: "githubCredentials.ordinary.username",
             MIRA_DASHBOARD_LOG_LEVEL: "logLevel",
             MOLTBOOK_AGENT_NAME: "moltbookAgentName",
             MOLTBOOK_API_KEY: "moltbookApiKey",
@@ -126,6 +128,7 @@ describe("application configuration registry", () => {
             OPENCLAW_GATEWAY_TOKEN: "gatewayToken",
             OPENCLAW_GATEWAY_URL: "gatewayUrl",
             PORT: "port",
+            RAJOHAN_GITHUB_TOKEN: "githubCredentials.reviewerToken",
         });
     });
 
@@ -154,11 +157,13 @@ describe("application configuration registry", () => {
             "MIRA_DASHBOARD_PROJECT_ROOT",
             "MIRA_DASHBOARD_OPENCLAW_ROOT",
             "MIRA_DASHBOARD_WORKSPACE_ROOT",
+            "PORT",
             "MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD",
             "DOCKER_LOGIN",
             "DOCKER_TOKEN",
             "MIRA_GITHUB_USERNAME",
             "MIRA_GITHUB_TOKEN",
+            "RAJOHAN_GITHUB_TOKEN",
             "MOLTBOOK_API_KEY",
             "MOLTBOOK_AGENT_NAME",
             "OPENCLAW_GATEWAY_URL",
@@ -173,6 +178,7 @@ describe("application configuration registry", () => {
         expect(workerEnvironment).toHaveProperty("DOCKER_TOKEN");
         expect(workerEnvironment).toHaveProperty("MIRA_GITHUB_USERNAME");
         expect(workerEnvironment).toHaveProperty("MIRA_GITHUB_TOKEN");
+        expect(workerEnvironment).toHaveProperty("RAJOHAN_GITHUB_TOKEN");
         expect(workerEnvironment).toHaveProperty("MOLTBOOK_API_KEY");
         expect(workerEnvironment).not.toHaveProperty("MIRA_DASHBOARD_TOTP_KEYRING");
         expect(workerEnvironment).not.toHaveProperty("ELEVENLABS_API_KEY");
@@ -182,6 +188,7 @@ describe("application configuration registry", () => {
             "DOCKER_TOKEN",
             "MIRA_GITHUB_USERNAME",
             "MIRA_GITHUB_TOKEN",
+            "RAJOHAN_GITHUB_TOKEN",
         ] as const) {
             const metadata = configurationMetadata(environmentName);
             expect(metadata.roles).toEqual(["worker"]);

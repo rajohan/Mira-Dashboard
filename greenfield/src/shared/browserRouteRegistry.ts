@@ -71,6 +71,14 @@ export const dashboardRouteDocumentation = Object.freeze([
     },
     {
         access: "session",
+        featureOwner: "delivery",
+        navigationLabel: "Delivery",
+        path: "/delivery",
+        summary:
+            "Reviews ordinary and stacked pull requests, manages one isolated preview, and queues exact deploy or paired rollback operations.",
+    },
+    {
+        access: "session",
         featureOwner: "monitoring",
         navigationLabel: null,
         path: "/incidents",

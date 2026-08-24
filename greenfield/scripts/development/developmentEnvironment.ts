@@ -135,6 +135,48 @@ export async function developmentProcessEnvironments(
 }
 
 /**
+ * Creates the credential-free child environments used only by a managed PR preview.
+ * Sentinel values satisfy the ordinary process parsers but grant no external authority;
+ * the web process receives its sole Gateway capability through the mounted Unix socket.
+ * @param config Validated managed-preview stack configuration.
+ * @param serializedKeyring Ephemeral preview-local session keyring.
+ * @returns Exact credential-free web and worker child environments.
+ */
+export function managedPreviewProcessEnvironments(
+    config: DevelopmentStackConfig,
+    serializedKeyring: string
+): Readonly<{ web: Record<string, string>; worker: Record<string, string> }> {
+    const shared = {
+        HOME: "/home/preview",
+        LANG: "C.UTF-8",
+        LC_ALL: "C.UTF-8",
+        MIRA_DASHBOARD_OPENCLAW_ROOT: config.openClawRoot,
+        MIRA_DASHBOARD_PROJECT_ROOT: config.stateRoot,
+        MIRA_DASHBOARD_WORKSPACE_ROOT: config.workspaceRoot,
+        NODE_ENV: "development",
+        OPENCLAW_GATEWAY_TOKEN: "managed-preview-no-bearer-credential",
+        OPENCLAW_GATEWAY_URL: "ws://127.0.0.1:9/",
+        PATH: "/usr/bin:/bin",
+    };
+    return Object.freeze({
+        web: {
+            ...shared,
+            MIRA_DASHBOARD_PUBLIC_ORIGIN: config.publicOrigin,
+            MIRA_DASHBOARD_TOTP_KEYRING: serializedKeyring,
+            MIRA_DASHBOARD_TRUSTED_PROXY_IPS: "127.0.0.1,::1",
+            MIRA_DASHBOARD_WEBAUTHN_ORIGINS: config.publicOrigin,
+            MIRA_DASHBOARD_WEBAUTHN_RP_ID: config.rpId,
+            MIRA_DASHBOARD_WEBAUTHN_RP_NAME: "Mira Dashboard PR Preview",
+            PORT: String(config.backendPort),
+        },
+        worker: {
+            ...shared,
+            MOLTBOOK_API_KEY: "managed-preview-no-moltbook-credential",
+        },
+    });
+}
+
+/**
  * Creates the explicit Bun HTML/HMR proxy child environment.
  * @param config Validated development stack configuration.
  * @param environment Source environment from which reviewed values are copied.

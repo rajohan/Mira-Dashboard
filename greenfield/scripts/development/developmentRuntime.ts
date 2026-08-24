@@ -3,6 +3,7 @@ import path from "node:path";
 import {
     developmentFrontendEnvironment,
     developmentProcessEnvironments,
+    managedPreviewProcessEnvironments,
 } from "./developmentEnvironment.ts";
 import {
     isDevelopmentMigrationIdentityFailure,
@@ -39,6 +40,8 @@ export interface DevelopmentRuntimeDependencies {
         }
     ) => DevelopmentChildProcess;
 }
+
+type DevelopmentRuntimeProfile = "development" | "managed-preview";
 
 interface DevelopmentStopController {
     children: DevelopmentChildProcess[];
@@ -148,32 +151,50 @@ async function startDevelopmentChildren(
     state: PreparedDevelopmentState,
     sourceCommit: string,
     dependencies: DevelopmentRuntimeDependencies,
-    stopController: DevelopmentStopController
+    stopController: DevelopmentStopController,
+    profile: DevelopmentRuntimeProfile = "development",
+    managedPreviewGatewaySocket?: string
 ): Promise<
     | readonly [DevelopmentChildProcess, DevelopmentChildProcess, DevelopmentChildProcess]
     | undefined
 > {
-    const environments = await developmentProcessEnvironments(
-        config,
-        state.keyring,
-        dependencies.environment ?? process.env
-    );
+    const environments =
+        profile === "managed-preview"
+            ? managedPreviewProcessEnvironments(config, state.keyring)
+            : await developmentProcessEnvironments(
+                  config,
+                  state.keyring,
+                  dependencies.environment ?? process.env
+              );
     if (stopController.stopRequested) return;
     const bun = process.execPath;
     const watch = config.hotReload ? ["--watch"] : [];
+    const managedArguments =
+        profile === "managed-preview" && managedPreviewGatewaySocket !== undefined
+            ? ["--managed-preview", managedPreviewGatewaySocket]
+            : [];
     const web = dependencies.spawn(
-        [bun, ...watch, "src/app/developmentWeb.ts", sourceCommit],
+        [bun, ...watch, "src/app/developmentWeb.ts", sourceCommit, ...managedArguments],
         { cwd: config.repositoryRoot, env: environments.web }
     );
     stopController.children.push(web);
     const worker = dependencies.spawn(
-        [bun, ...watch, "src/app/developmentWorker.ts", sourceCommit],
+        [
+            bun,
+            ...watch,
+            "src/app/developmentWorker.ts",
+            sourceCommit,
+            ...managedArguments,
+        ],
         { cwd: config.repositoryRoot, env: environments.worker }
     );
     stopController.children.push(worker);
     const frontend = dependencies.spawn([bun, "scripts/developmentFrontend.ts"], {
         cwd: config.repositoryRoot,
-        env: developmentFrontendEnvironment(config),
+        env: developmentFrontendEnvironment(
+            config,
+            profile === "managed-preview" ? {} : (dependencies.environment ?? process.env)
+        ),
     });
     stopController.children.push(frontend);
     return [frontend, web, worker];
@@ -263,14 +284,18 @@ async function runPreparedDevelopmentStack(
     sourceCommit: string,
     dependencies: DevelopmentRuntimeDependencies,
     stopController: DevelopmentStopController,
-    migrationIdentityChanged?: Promise<string>
+    migrationIdentityChanged?: Promise<string>,
+    profile: DevelopmentRuntimeProfile = "development",
+    managedPreviewGatewaySocket?: string
 ): Promise<Awaited<ReturnType<typeof coordinateDevelopmentChildren>>> {
     const children = await startDevelopmentChildren(
         config,
         state,
         sourceCommit,
         dependencies,
-        stopController
+        stopController,
+        profile,
+        managedPreviewGatewaySocket
     );
     if (children === undefined) {
         return Object.freeze({ status: "stopped" });
@@ -350,7 +375,9 @@ async function runPreparedDevelopmentLifecycle(
     stateSession: PreparedDevelopmentStateSession,
     sourceCommit: string,
     dependencies: DevelopmentRuntimeDependencies,
-    stopController: DevelopmentStopController
+    stopController: DevelopmentStopController,
+    profile: DevelopmentRuntimeProfile = "development",
+    managedPreviewGatewaySocket?: string
 ): Promise<number> {
     let state = stateSession.state;
     while (!stopController.stopRequested) {
@@ -386,7 +413,9 @@ async function runPreparedDevelopmentLifecycle(
                 sourceCommit,
                 dependencies,
                 stopController,
-                observation.changed
+                observation.changed,
+                profile,
+                managedPreviewGatewaySocket
             );
         } finally {
             observation.close();
@@ -460,6 +489,50 @@ export async function runDevelopmentStackWithPreparedState(
             sourceCommit,
             dependencies,
             stopController
+        );
+    } finally {
+        await settleRemainingChildren(stopController);
+        process.removeListener("SIGINT", stopController.requestStop);
+        process.removeListener("SIGTERM", stopController.requestStop);
+    }
+}
+
+/**
+ * Runs one exact candidate commit against a caller-owned isolated state session.
+ * No Git metadata or ambient credential is needed inside the managed sandbox.
+ * @param config Validated managed-preview stack configuration.
+ * @param stateSession Caller-owned isolated state session.
+ * @param sourceCommit Exact candidate commit SHA.
+ * @param gatewaySocket Mounted host capability socket.
+ * @param dependencies Fixed process dependencies.
+ * @returns Candidate process exit status.
+ */
+export async function runManagedPreviewStackWithPreparedState(
+    config: DevelopmentStackConfig,
+    stateSession: PreparedDevelopmentStateSession,
+    sourceCommit: string,
+    gatewaySocket: string,
+    dependencies: DevelopmentRuntimeDependencies = defaultDependencies
+): Promise<number> {
+    if (
+        !/^[0-9a-f]{40}$/u.test(sourceCommit) ||
+        !path.isAbsolute(gatewaySocket) ||
+        path.normalize(gatewaySocket) !== gatewaySocket
+    ) {
+        throw new TypeError("Managed preview runtime identity is invalid");
+    }
+    const stopController = createStopController();
+    process.on("SIGINT", stopController.requestStop);
+    process.on("SIGTERM", stopController.requestStop);
+    try {
+        return await runPreparedDevelopmentLifecycle(
+            config,
+            stateSession,
+            sourceCommit,
+            dependencies,
+            stopController,
+            "managed-preview",
+            gatewaySocket
         );
     } finally {
         await settleRemainingChildren(stopController);

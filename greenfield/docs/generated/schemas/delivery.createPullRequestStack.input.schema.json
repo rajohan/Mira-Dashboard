@@ -1,0 +1,56 @@
+{
+  "$id": "urn:mira-dashboard:delivery.createPullRequestStack.input",
+  "type": "object",
+  "properties": {
+    "confirmation": {
+      "const": "create-delivery-stack"
+    },
+    "expectedHeads": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "headSha": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$"
+          },
+          "number": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "headSha",
+          "number"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 2,
+      "maxItems": 100,
+      "$comment": "Live Valibot validation additionally requires every pull request number in an exact Delivery scope to be unique."
+    },
+    "operation": {
+      "const": "create-pull-request-stack"
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 32,
+      "maxLength": 128,
+      "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
+    },
+    "sourceRevision": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  },
+  "required": [
+    "confirmation",
+    "expectedHeads",
+    "operation",
+    "idempotencyKey",
+    "sourceRevision"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

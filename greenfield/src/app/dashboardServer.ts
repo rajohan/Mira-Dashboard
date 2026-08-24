@@ -24,6 +24,11 @@ import { createChatTranscriptLifecycleCoordinator } from "../server/domains/chat
 import { createDatabaseObservabilityService } from "../server/domains/database/service.ts";
 import { createDatabaseObservabilitySnapshotRepository } from "../server/domains/database/snapshotRepository.ts";
 import { createSqliteLifecycleReader } from "../server/domains/database/sqliteLifecycle.ts";
+import { createDeliveryDeploymentHistoryReader } from "../server/domains/delivery/deploymentHistory.ts";
+import { createSqliteDeliveryOperationAuditWriter } from "../server/domains/delivery/operationAudit.ts";
+import { createDeliveryOperationQueue } from "../server/domains/delivery/operationQueue.ts";
+import { createDeliveryService } from "../server/domains/delivery/service.ts";
+import { createDeliveryOverviewSnapshotRepository } from "../server/domains/delivery/snapshotRepository.ts";
 import { createSqliteDockerOperationAuditWriter } from "../server/domains/docker/operationAudit.ts";
 import { createDockerOperationQueue } from "../server/domains/docker/operationQueue.ts";
 import { createDockerService } from "../server/domains/docker/service.ts";
@@ -58,6 +63,10 @@ import {
     hostSystemRestartJobActionDefinition,
     hostSystemUpdateJobActionDefinition,
     jobActionDefinitions,
+    managedPreviewJobActionDefinitions,
+    deliveryGitHubJobActionDefinition,
+    deliveryPreviewJobActionDefinition,
+    deliveryProductionJobActionDefinition,
     openClawGatewayRestartJobActionDefinition,
     openClawInstallationUpdateJobActionDefinition,
     openClawSessionsCleanupJobActionDefinition,
@@ -185,6 +194,7 @@ import {
     type StructuredLogger,
 } from "../server/platform/observability/structuredLogger.ts";
 import { createReadinessController } from "../server/platform/readiness/readinessState.ts";
+import { productionCutoverRequiresValidationMode } from "../server/platform/release/deliveryCutoverValidation.ts";
 import {
     loadRuntimeRelease,
     type RuntimeRelease,
@@ -232,6 +242,7 @@ export interface DashboardServerOptions extends Omit<
     | "chatRawHttpHandler"
     | "chatService"
     | "databaseObservabilityService"
+    | "deliveryService"
     | "dockerService"
     | "workspaceFileRawHttpHandler"
     | "workspaceFilesService"
@@ -257,6 +268,7 @@ export interface DashboardServerOptions extends Omit<
     | "terminalSocketBoundary"
 > {
     readonly applicationRuntime: DashboardApplicationRuntime;
+    readonly cutoverValidation?: boolean;
     readonly authenticationLeaseDurationMs?: number;
     /** Canonical public origin used by browser Origin checks behind the proxy. */
     readonly browserOrigin: string;
@@ -840,6 +852,59 @@ export async function createDashboardServer(
                           socketPath: options.dockerBrokerSocket,
                       }),
                   });
+        const deliveryService = createDeliveryService({
+            auditWriter: createSqliteDeliveryOperationAuditWriter({
+                ...(domainNow === undefined ? {} : { clock: domainNow }),
+                database,
+                writeAdmission: databaseRuntime,
+            }),
+            deploymentHistory: createDeliveryDeploymentHistoryReader({
+                ...(domainNow === undefined
+                    ? {}
+                    : { nowMs: () => domainNow().getTime() }),
+                repository: {
+                    listByActionKey(actionKey, limit) {
+                        return jobRepository.listActionRuns({ actionKey, limit });
+                    },
+                },
+            }),
+            ...(domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }),
+            onAuditSettlementFailure: ({ operation, settlement }) =>
+                options.applicationRuntime.logger.error({
+                    component: "delivery-audit",
+                    event: "delivery.audit_settlement.failed",
+                    failure: new Error(
+                        `Delivery ${operation} audit ${settlement} settlement failed`
+                    ),
+                    outcome: "server-error",
+                }),
+            operationQueue: createDeliveryOperationQueue({
+                actionDefinitions: {
+                    "delivery.github": {
+                        ...deliveryGitHubJobActionDefinition,
+                        actionKey: "delivery.github",
+                    },
+                    "delivery.preview": {
+                        ...deliveryPreviewJobActionDefinition,
+                        actionKey: "delivery.preview",
+                    },
+                    "delivery.production.v1": {
+                        ...deliveryProductionJobActionDefinition,
+                        actionKey: "delivery.production.v1",
+                    },
+                },
+                ...(domainNow === undefined
+                    ? {}
+                    : { nowMs: () => domainNow().getTime() }),
+                repository: jobRepository,
+                requiredWorkerReleaseId: (actionKey) =>
+                    actionKey === deliveryProductionJobActionDefinition.actionKey
+                        ? null
+                        : options.verifiedReleaseId,
+                wakeEventPump,
+            }),
+            snapshotRepository: createDeliveryOverviewSnapshotRepository(cacheRepository),
+        });
         const taskRepository = createTaskRepository(database, databaseRuntime);
         const taskService = createTaskService({
             ...(domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }),
@@ -1502,9 +1567,13 @@ export async function createDashboardServer(
             automationSecurityLifecycle,
             browserOrigin,
             cacheService,
+            ...(options.cutoverValidation === undefined
+                ? {}
+                : { cutoverValidation: options.cutoverValidation }),
             ...(chatRawHttpHandler === undefined ? {} : { chatRawHttpHandler }),
             ...(chatService === undefined ? {} : { chatService }),
             databaseObservabilityService,
+            deliveryService,
             ...(dockerService === undefined ? {} : { dockerService }),
             ...(workspaceFileRawHttpHandler === undefined
                 ? {}
@@ -1595,6 +1664,7 @@ export interface DashboardWebProcessDependencies {
         options: DashboardServerOptions
     ) => Promise<ApplicationServer>;
     readonly createTerminationController: () => ProcessTerminationController;
+    readonly detectCutoverValidation?: (stateDirectory: string) => Promise<boolean>;
     readonly createTotpCipher: (serializedKeyring: string) => Promise<TotpSecretCipher>;
     readonly loadRelease: (
         releasesDirectory: string,
@@ -1629,6 +1699,7 @@ const defaultWebProcessDependencies = Object.freeze({
         }),
     createServer: createDashboardServer,
     createTerminationController: createProcessTerminationController,
+    detectCutoverValidation: productionCutoverRequiresValidationMode,
     createTotpCipher: (serializedKeyring) => createTotpSecretCipher(serializedKeyring),
     loadRelease: (releasesDirectory, releaseRoot, processRole) =>
         loadRuntimeRelease(releasesDirectory, releaseRoot, processRole),
@@ -1714,11 +1785,15 @@ export async function runDashboardWebProcess(
     };
     termination.forceSignal.addEventListener("abort", forceStop, { once: true });
     try {
+        const readiness = createReadinessController();
+        const cutoverValidation = await (
+            dependencies.detectCutoverValidation ??
+            productionCutoverRequiresValidationMode
+        )(layout.production.state.root);
         const frontendAssets = await dependencies.createFrontendAssets(release);
         const totpSecretCipher = await dependencies.createTotpCipher(
             Redacted.value(configuration.totpKeyring)
         );
-        const readiness = createReadinessController();
         applicationRuntime = dependencies.createRuntime(
             configuration,
             layout,
@@ -1729,6 +1804,12 @@ export async function runDashboardWebProcess(
         server = await dependencies.createServer({
             applicationRuntime,
             browserOrigin: configuration.publicOrigin,
+            ...(cutoverValidation
+                ? {
+                      cutoverValidation: true,
+                      jobActionDefinitions: managedPreviewJobActionDefinitions,
+                  }
+                : {}),
             dashboardLogMaintenanceRoot: layout.production.state.logMaintenance,
             dashboardLogsRoot: layout.production.state.logs,
             databaseStateDirectory: layout.production.state.root,

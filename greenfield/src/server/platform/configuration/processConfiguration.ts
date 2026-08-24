@@ -22,6 +22,7 @@ type RuntimeApplicationRole = Extract<ApplicationProcessRole, "web" | "worker">;
 type ProjectedEnvironment = Readonly<Partial<Record<string, unknown>>>;
 
 const unsafeTextPattern = /[\p{Cc}\p{Cf}]/u;
+const canonicalUnsignedIntegerPattern = /^(?:0|[1-9][0-9]*)$/u;
 
 /** Throws one redacted immutable-configuration failure. */
 export function configurationError(
@@ -100,6 +101,27 @@ export function requiredConfigurationString(
         configurationError(field, "invalid");
     }
     return value;
+}
+
+/**
+ * Parses the shared loopback web port for web and worker-owned readiness checks.
+ * @param input Process-owned environment values.
+ * @returns Validated TCP port.
+ */
+export function configurationWebPort(input: PickedApplicationEnvironment): number {
+    const value = requiredConfigurationString(input, "PORT", 16);
+    if (!canonicalUnsignedIntegerPattern.test(value)) {
+        configurationError("PORT", "invalid");
+    }
+    const parsed = Number(value);
+    if (
+        !Number.isSafeInteger(parsed) ||
+        parsed < applicationConfigurationLimits.port.minimum ||
+        parsed > applicationConfigurationLimits.port.maximum
+    ) {
+        configurationError("PORT", "invalid");
+    }
+    return parsed;
 }
 
 /**

@@ -12,6 +12,10 @@ import {
     configurationGatewayUrl,
 } from "./gatewayConfiguration.ts";
 import {
+    configurationGitHubCredentials,
+    type GitHubCredentialsConfiguration,
+} from "./githubCredentialsConfiguration.ts";
+import {
     configurationMoltbookAgentName,
     configurationMoltbookApiKey,
 } from "./moltbookConfiguration.ts";
@@ -19,6 +23,7 @@ import {
     configurationChoice,
     configurationOpenClawRoot,
     configurationProjectRoot,
+    configurationWebPort,
     configurationWorkspaceRoot,
     pickApplicationEnvironment,
     type ApplicationLogLevel,
@@ -31,11 +36,13 @@ export interface WorkerConfiguration {
     readonly dockerRegistryCredentials?: DockerRegistryCredentialsConfiguration;
     readonly gatewayToken: Redacted.Redacted<string>;
     readonly gatewayUrl: string;
+    readonly githubCredentials?: GitHubCredentialsConfiguration;
     readonly logLevel: ApplicationLogLevel;
     readonly moltbookAgentName: string;
     readonly moltbookApiKey: Redacted.Redacted<string>;
     readonly nodeEnvironment: ApplicationNodeEnvironment;
     readonly openClawRoot: string;
+    readonly port: number;
     readonly projectRoot: string;
     readonly workspaceRoot: string;
 }
@@ -49,6 +56,7 @@ export const workerConfigurationEnvironmentSchema = v.object({
     MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD: optionalEnvironmentValueSchema,
     MIRA_GITHUB_TOKEN: optionalEnvironmentValueSchema,
     MIRA_GITHUB_USERNAME: optionalEnvironmentValueSchema,
+    RAJOHAN_GITHUB_TOKEN: optionalEnvironmentValueSchema,
     MIRA_DASHBOARD_LOG_LEVEL: optionalEnvironmentValueSchema,
     MIRA_DASHBOARD_OPENCLAW_ROOT: optionalEnvironmentValueSchema,
     MIRA_DASHBOARD_PROJECT_ROOT: optionalEnvironmentValueSchema,
@@ -58,6 +66,7 @@ export const workerConfigurationEnvironmentSchema = v.object({
     NODE_ENV: optionalEnvironmentValueSchema,
     OPENCLAW_GATEWAY_TOKEN: optionalEnvironmentValueSchema,
     OPENCLAW_GATEWAY_URL: optionalEnvironmentValueSchema,
+    PORT: optionalEnvironmentValueSchema,
 });
 
 /** Registered environment names consumed by the worker-process parser. */
@@ -81,6 +90,7 @@ export function parseWorkerConfiguration(
     const databaseObservabilityPassword =
         configurationDatabaseObservabilityPassword(input);
     const dockerRegistryCredentials = configurationDockerRegistryCredentials(input);
+    const githubCredentials = configurationGitHubCredentials(input);
     return Object.freeze({
         ...(databaseObservabilityPassword === undefined
             ? {}
@@ -88,6 +98,7 @@ export function parseWorkerConfiguration(
                   databaseObservabilityPassword,
               }),
         ...(dockerRegistryCredentials === undefined ? {} : { dockerRegistryCredentials }),
+        ...(githubCredentials === undefined ? {} : { githubCredentials }),
         gatewayToken: configurationGatewayToken(input),
         gatewayUrl: configurationGatewayUrl(input),
         logLevel: configurationChoice(input, "MIRA_DASHBOARD_LOG_LEVEL", [
@@ -104,6 +115,7 @@ export function parseWorkerConfiguration(
             "test",
         ] as const),
         openClawRoot: configurationOpenClawRoot(input),
+        port: configurationWebPort(input),
         projectRoot: configurationProjectRoot(input),
         workspaceRoot: configurationWorkspaceRoot(input),
     });

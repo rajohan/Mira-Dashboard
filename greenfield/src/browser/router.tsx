@@ -57,6 +57,10 @@ const dockerRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/docker",
 }).lazy(() => import("./routes/docker.lazy.tsx").then((module) => module.Route));
+const deliveryRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/delivery",
+}).lazy(() => import("./routes/delivery.lazy.tsx").then((module) => module.Route));
 const logsRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/logs",
@@ -101,6 +105,7 @@ const routeTree = rootRoute.addChildren([
     agentsRoute,
     chatRoute,
     databaseRoute,
+    deliveryRoute,
     dockerRoute,
     filesRoute,
     incidentsRoute,

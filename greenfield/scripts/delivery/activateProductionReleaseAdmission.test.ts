@@ -47,6 +47,7 @@ const services: ProductionServiceController = Object.freeze({
     start: () => Promise.resolve(),
     stop: () => Promise.resolve(),
     verifyReady: () => Promise.resolve(),
+    verifySmoke: () => Promise.resolve(),
 });
 
 afterEach(async () => {

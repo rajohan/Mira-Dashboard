@@ -1,0 +1,37 @@
+{
+  "$id": "urn:mira-dashboard:delivery.approvePullRequest.output",
+  "type": "object",
+  "properties": {
+    "jobRunId": {
+      "type": "string",
+      "minLength": 36,
+      "maxLength": 36,
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "operation": {
+      "enum": [
+        "approve-review",
+        "create-pull-request-stack",
+        "deploy",
+        "merge-pull-request",
+        "reject-pull-request",
+        "rollback-release",
+        "start-preview",
+        "stop-preview",
+        "update-branch"
+      ],
+      "type": "string"
+    },
+    "queued": {
+      "const": true
+    }
+  },
+  "required": [
+    "jobRunId",
+    "operation",
+    "queued"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

@@ -219,6 +219,9 @@ export const jobRuns = sqliteTable(
         index("job_runs_action_active_idx")
             .on(table.actionKey, desc(table.state), desc(table.queuedAt), desc(table.id))
             .where(sql`${table.state} IN ('queued', 'running')`),
+        index("job_runs_delivery_production_history_idx")
+            .on(table.actionKey, desc(table.updatedAt), desc(table.id))
+            .where(sql`${table.actionKey} = 'delivery.production.v1'`),
         index("job_runs_action_payload_terminal_idx")
             .on(table.actionKey, table.payloadJson, desc(table.queuedAt), desc(table.id))
             .where(

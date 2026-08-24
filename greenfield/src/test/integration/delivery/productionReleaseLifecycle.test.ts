@@ -95,6 +95,7 @@ async function realReleaseFixture(
     );
     const sourceIdentity: BuildSourceIdentity = Object.freeze({
         commitSha: releaseId,
+        commitTitle: "Lifecycle release",
         state: "clean",
     });
     const release = await buildDashboardRelease(repositoryRoot, {
@@ -387,6 +388,10 @@ class DirectProcessController implements ProductionServiceController {
             await Bun.sleep(50);
         }
         throw new Error("Production readiness timed out");
+    }
+
+    verifySmoke(): Promise<void> {
+        return this.verifyReady();
     }
 }
 

@@ -5,6 +5,7 @@ import {
     databaseProcedureNames,
     databaseRouter,
 } from "../domains/database/procedures.ts";
+import { deliveryProcedureNames, deliveryRouter } from "../domains/delivery/routes.ts";
 import { dockerProcedureNames, dockerRouter } from "../domains/docker/routes.ts";
 import {
     workspaceFileProcedureNames,
@@ -93,6 +94,7 @@ export const appRouter = router({
     cache: cacheRouter,
     chat: chatRouter,
     database: databaseRouter,
+    delivery: deliveryRouter,
     docker: dockerRouter,
     events: eventsRouter,
     files: workspaceFilesRouter,
@@ -125,6 +127,7 @@ export const appRouterProcedureNames = Object.freeze([
     ...namespacedProcedureNames("cache", cacheProcedureNames),
     ...namespacedProcedureNames("chat", chatProcedureNames),
     ...namespacedProcedureNames("database", databaseProcedureNames),
+    ...namespacedProcedureNames("delivery", deliveryProcedureNames),
     ...namespacedProcedureNames("docker", dockerProcedureNames),
     ...namespacedProcedureNames("events", eventsProcedureNames),
     ...namespacedProcedureNames("files", workspaceFileProcedureNames),

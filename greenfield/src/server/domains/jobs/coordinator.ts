@@ -79,7 +79,8 @@ type JobWorkerRepository = Pick<
     | "renewClaim"
     | "settleClaim"
     | "stopWorker"
->;
+> &
+    Partial<Pick<JobRepository, "findEnqueueAuditProvenance">>;
 
 export type JobWorkerMutationOutcome = "accepted" | "cancelled" | "failed" | "succeeded";
 
@@ -600,6 +601,15 @@ async function executeClaim(options: ExecuteClaimOptions): Promise<void> {
         });
         return;
     }
+    const enqueueAudit = options.repository.findEnqueueAuditProvenance?.(run.id);
+    if (
+        enqueueAudit !== undefined &&
+        (enqueueAudit.actorId !== run.requestedById ||
+            enqueueAudit.actorKind !== run.requestedByKind ||
+            enqueueAudit.occurredAt.getTime() !== run.queuedAt.getTime())
+    ) {
+        throw new Error("Durable job enqueue provenance is inconsistent");
+    }
 
     const actionController = new AbortController();
     let monitorFailure: unknown;
@@ -750,6 +760,19 @@ async function executeClaim(options: ExecuteClaimOptions): Promise<void> {
                 },
                 databaseReleaseId: options.databaseReleaseId,
                 nowMs: options.nowMs,
+                runIdentity: Object.freeze({
+                    actionKey: run.actionKey,
+                    enqueueAuditEventId: enqueueAudit?.auditEventId ?? null,
+                    enqueueAuthenticatorId: enqueueAudit?.authenticatorId ?? null,
+                    enqueueRequestId: enqueueAudit?.requestId ?? null,
+                    enqueueSha256: run.enqueueSha256,
+                    idempotencyKey: run.idempotencyKey,
+                    payloadSha256: sha256Hex(run.payloadJson),
+                    queuedAtMs: run.queuedAt.getTime(),
+                    requestedById: run.requestedById,
+                    requestedByKind: run.requestedByKind,
+                    runId: run.id,
+                }),
                 reportProgress: (progress: JsonObject) =>
                     Effect.tryPromise(() => appendEvent("progress", progress)),
                 workerInstanceId: options.workerInstanceId,

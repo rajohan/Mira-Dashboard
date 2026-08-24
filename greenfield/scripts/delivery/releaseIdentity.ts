@@ -4,11 +4,15 @@ import path from "node:path";
 import * as v from "valibot";
 
 import { bunRuntimePolicy } from "../../src/shared/bunRuntimePolicy.ts";
-import { migrationManifest } from "../../src/shared/databaseMigrationManifest.ts";
+import {
+    databaseSchemaTarget,
+    migrationManifest,
+} from "../../src/shared/databaseMigrationManifest.ts";
 import {
     parseReleaseManifest,
     type ReleaseManifest,
     releaseBuildCommands,
+    releaseDeliveryProtocols,
     releaseProcessRoles,
     serializeReleaseManifest,
 } from "../../src/shared/releaseManifest.ts";
@@ -21,6 +25,7 @@ import { resolveDirectPackageVersions } from "../packageIdentity.ts";
 import { databaseObservabilityProvisioningReleaseArtifactPaths } from "./databaseObservabilityProvisioningPolicy.ts";
 import { hostOperationsProvisioningReleaseArtifactPaths } from "./hostOperationsProvisioningPolicy.ts";
 import { logMaintenanceProvisioningReleaseArtifactPaths } from "./logMaintenanceProvisioningPolicy.ts";
+import { previewTailscaleProvisioningReleaseArtifactPaths } from "./previewTailscaleProvisioningPolicy.ts";
 import { productionSystemdUnits } from "./productionSystemdUnitPolicy.ts";
 import {
     inventoryReleaseArtifactTree,
@@ -61,6 +66,7 @@ const exactScriptPaths = Object.freeze(
         ...databaseObservabilityProvisioningReleaseArtifactPaths,
         ...hostOperationsProvisioningReleaseArtifactPaths,
         ...logMaintenanceProvisioningReleaseArtifactPaths,
+        ...previewTailscaleProvisioningReleaseArtifactPaths,
     ].toSorted()
 );
 
@@ -75,6 +81,10 @@ export interface CreateReleaseIdentityOptions {
     readonly releaseRoot: string;
     readonly repositoryRoot: string;
     readonly runtimeIdentity?: ReleaseRuntimeIdentity;
+    readonly sourceDisplay: Readonly<{
+        readonly builtAtMs: number;
+        readonly commitTitle: string;
+    }>;
     readonly sourceIdentity?: BuildSourceIdentity;
 }
 
@@ -228,6 +238,7 @@ function assertArtifactShape(
         ...exactSystemdPaths,
         "browser/index.html",
         "server/databaseMaintenance.js",
+        "server/productionDelivery.js",
         "server/web.js",
         "server/worker.js",
     ]) {
@@ -369,6 +380,12 @@ export async function createReleaseIdentity(
     return parseReleaseManifest({
         artifacts,
         buildCommands: [...releaseBuildCommands],
+        deliveryProtocols: [...releaseDeliveryProtocols],
+        display: {
+            builtAtMs: options.sourceDisplay.builtAtMs,
+            commitTitle: options.sourceDisplay.commitTitle,
+            schemaTarget: databaseSchemaTarget,
+        },
         documentationSha256: stagedDocumentationSha256,
         formatVersion: 1,
         lockfileSha256: artifactByPath(artifacts, "metadata/bun.lock").sha256,

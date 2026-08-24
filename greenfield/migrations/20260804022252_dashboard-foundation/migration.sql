@@ -139,7 +139,7 @@ CREATE TABLE `automation_principal_capabilities` (
 	`principal_id` text NOT NULL,
 	CONSTRAINT `automation_principal_capabilities_pk` PRIMARY KEY(`principal_id`, `capability`),
 	CONSTRAINT `fk_automation_principal_capabilities_principal_id_automation_principals_id_fk` FOREIGN KEY (`principal_id`) REFERENCES `automation_principals`(`id`) ON DELETE CASCADE,
-	CONSTRAINT "automation_principal_capabilities_capability_check" CHECK("capability" IN ('agents:read', 'agents:write', 'cache:read', 'cache:write', 'chat:read', 'chat:write', 'database:read', 'docker:read', 'docker:write', 'files:read', 'files:write', 'gateway-sessions:read', 'gateway-sessions:write', 'jobs:read', 'jobs:write', 'logs:read', 'logs:write', 'monitoring:write', 'notifications:read', 'notifications:write', 'openclaw-settings:read', 'openclaw-settings:write', 'openclaw-tasks:read', 'openclaw-tasks:write', 'reports:read', 'reports:write', 'service-actions:read', 'service-actions:write', 'tasks:read', 'tasks:write', 'terminal:read', 'terminal:write')),
+	CONSTRAINT "automation_principal_capabilities_capability_check" CHECK("capability" IN ('agents:read', 'agents:write', 'cache:read', 'cache:write', 'chat:read', 'chat:write', 'database:read', 'delivery:read', 'delivery:write', 'docker:read', 'docker:write', 'files:read', 'files:write', 'gateway-sessions:read', 'gateway-sessions:write', 'jobs:read', 'jobs:write', 'logs:read', 'logs:write', 'monitoring:write', 'notifications:read', 'notifications:write', 'openclaw-settings:read', 'openclaw-settings:write', 'openclaw-tasks:read', 'openclaw-tasks:write', 'reports:read', 'reports:write', 'service-actions:read', 'service-actions:write', 'tasks:read', 'tasks:write', 'terminal:read', 'terminal:write')),
 	CONSTRAINT "automation_principal_capabilities_granted_at_check" CHECK("granted_at" BETWEEN 0 AND 8640000000000000)
 ) STRICT;
 --> statement-breakpoint
@@ -293,7 +293,7 @@ CREATE TABLE `cache_entries` (
 	CONSTRAINT "cache_entries_failure_state_check" CHECK(("last_attempt_status" = 'succeeded' AND "consecutive_failures" = 0 AND "failure_code" IS NULL AND "failure_message" IS NULL) OR ("last_attempt_status" = 'failed' AND "consecutive_failures" BETWEEN 1 AND 9007199254740991 AND "failure_code" IS NOT NULL AND "failure_message" IS NOT NULL)),
 	CONSTRAINT "cache_entries_key_check" CHECK(length("key") BETWEEN 1 AND 128 AND instr("key", char(0)) = 0 AND "key" = lower("key") AND substr("key", 1, 1) GLOB '[a-z0-9]' AND "key" NOT GLOB '*[^a-z0-9._-]*'),
 	CONSTRAINT "cache_entries_metadata_json_check" CHECK("metadata_json" IS NULL OR (length(CAST("metadata_json" AS BLOB)) <= 16384 AND CASE WHEN json_valid("metadata_json") THEN json_type("metadata_json") = 'object' ELSE 0 END)),
-	CONSTRAINT "cache_entries_payload_json_check" CHECK("payload_json" IS NULL OR (length(CAST("payload_json" AS BLOB)) <= 262144 AND CASE WHEN json_valid("payload_json") THEN json_type("payload_json") = 'object' ELSE 0 END)),
+	CONSTRAINT "cache_entries_payload_json_check" CHECK("payload_json" IS NULL OR (length(CAST("payload_json" AS BLOB)) <= 262144 AND CASE WHEN json_valid("payload_json") THEN json_type("payload_json") = 'object' ELSE 0 END) OR ("key" = 'delivery.overview.pull-requests' AND length(CAST("payload_json" AS BLOB)) <= 2359296 AND CASE WHEN json_valid("payload_json") THEN json_type("payload_json") = 'object' ELSE 0 END)),
 	CONSTRAINT "cache_entries_projection_check" CHECK(("payload_json" IS NULL AND "metadata_json" IS NULL AND "source" IS NULL AND "schema_id" IS NULL AND "last_success_at" IS NULL AND "expires_at" IS NULL) OR ("payload_json" IS NOT NULL AND "metadata_json" IS NOT NULL AND "source" IS NOT NULL AND "schema_id" IS NOT NULL AND "last_success_at" IS NOT NULL AND "expires_at" IS NOT NULL)),
 	CONSTRAINT "cache_entries_schema_id_check" CHECK("schema_id" IS NULL OR (length("schema_id") BETWEEN 1 AND 128 AND instr("schema_id", char(0)) = 0 AND "schema_id" = lower("schema_id") AND substr("schema_id", 1, 1) GLOB '[a-z0-9]' AND "schema_id" NOT GLOB '*[^a-z0-9._-]*')),
 	CONSTRAINT "cache_entries_source_check" CHECK("source" IS NULL OR (length("source") BETWEEN 1 AND 128 AND instr("source", char(0)) = 0 AND length(trim("source", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND "source" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8232) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*') AND length(CAST("source" AS BLOB)) <= 512)),
@@ -1131,6 +1131,7 @@ CREATE UNIQUE INDEX `job_runs_idempotency_unique` ON `job_runs` (`requested_by_k
 CREATE INDEX `job_runs_claim_idx` ON `job_runs` ("available_at" asc,"priority" desc,"queued_at" asc,"id" asc) WHERE "job_runs"."state" = 'queued';--> statement-breakpoint
 CREATE UNIQUE INDEX `job_runs_one_active_schedule_idx` ON `job_runs` (`scheduled_job_id`) WHERE "job_runs"."scheduled_job_id" IS NOT NULL AND "job_runs"."state" IN ('queued', 'running');--> statement-breakpoint
 CREATE INDEX `job_runs_action_active_idx` ON `job_runs` (`action_key`,"state" desc,"queued_at" desc,"id" desc) WHERE "job_runs"."state" IN ('queued', 'running');--> statement-breakpoint
+CREATE INDEX `job_runs_delivery_production_history_idx` ON `job_runs` (`action_key`,"updated_at" desc,"id" desc) WHERE "job_runs"."action_key" = 'delivery.production.v1';--> statement-breakpoint
 CREATE INDEX `job_runs_action_payload_terminal_idx` ON `job_runs` (`action_key`,`payload_json`,"queued_at" desc,"id" desc) WHERE "job_runs"."action_key" = 'maintenance.rotate-logs' AND length(CAST("job_runs"."payload_json" AS BLOB)) <= 128 AND "job_runs"."state" IN ('cancelled', 'failed', 'succeeded', 'timed-out');--> statement-breakpoint
 CREATE INDEX `job_runs_service_action_terminal_idx` ON `job_runs` (`action_key`,"queued_at" desc,"id" desc) WHERE "job_runs"."action_key" IN ('openclaw.sessions.cleanup', 'openclaw.gateway.restart', 'openclaw.installation.update', 'host.system.cleanup', 'host.system.restart', 'host.system.update') AND "job_runs"."payload_json" = '{}' AND "job_runs"."state" IN ('cancelled', 'failed', 'succeeded', 'timed-out');--> statement-breakpoint
 CREATE INDEX `job_runs_queued_id_idx` ON `job_runs` (`queued_at`,`id`);--> statement-breakpoint
@@ -1958,13 +1959,89 @@ BEFORE UPDATE OF
     priority, timeout_ms, attempt_limit, retry_safe, cancellation_policy,
     queued_at, scheduled_for_at
 ON job_runs
+WHEN NOT (
+    OLD.action_key = 'delivery.production.v1'
+    AND OLD.state IN ('cancelled', 'failed', 'timed-out')
+    AND OLD.required_worker_release_id IS NULL
+    AND NEW.required_worker_release_id IS NULL
+    AND OLD.retry_safe = 1
+    AND NEW.retry_safe = 1
+    AND OLD.trigger_type = 'manual'
+    AND NEW.trigger_type = 'manual'
+    AND OLD.scheduled_job_id IS NULL
+    AND NEW.scheduled_job_id IS NULL
+    AND OLD.scheduled_job_version IS NULL
+    AND NEW.scheduled_job_version IS NULL
+    AND NEW.state = 'queued'
+    AND NEW.attempt_count = OLD.attempt_count
+    AND NEW.attempt_limit = CASE
+        WHEN OLD.attempt_count >= OLD.attempt_limit THEN OLD.attempt_count + 1
+        ELSE OLD.attempt_limit
+    END
+    AND NEW.id IS OLD.id
+    AND NEW.action_key IS OLD.action_key
+    AND NEW.display_name IS OLD.display_name
+    AND NEW.requested_by_kind IS OLD.requested_by_kind
+    AND NEW.requested_by_id IS OLD.requested_by_id
+    AND NEW.idempotency_key IS OLD.idempotency_key
+    AND NEW.enqueue_sha256 IS OLD.enqueue_sha256
+    AND NEW.payload_json IS OLD.payload_json
+    AND NEW.resource_class IS OLD.resource_class
+    AND NEW.resource_keys_json IS OLD.resource_keys_json
+    AND NEW.priority IS OLD.priority
+    AND NEW.timeout_ms IS OLD.timeout_ms
+    AND NEW.cancellation_policy IS OLD.cancellation_policy
+    AND NEW.queued_at IS OLD.queued_at
+    AND NEW.scheduled_for_at IS OLD.scheduled_for_at
+)
 BEGIN
 	SELECT RAISE(ABORT, 'job_runs execution snapshot is immutable');
 END;
 --> statement-breakpoint
 CREATE TRIGGER job_runs_validate_lifecycle_update
 BEFORE UPDATE ON job_runs
-WHEN (
+WHEN NOT (
+        OLD.action_key = 'delivery.production.v1'
+        AND OLD.state IN ('cancelled', 'failed', 'timed-out')
+        AND OLD.required_worker_release_id IS NULL
+        AND NEW.required_worker_release_id IS NULL
+        AND OLD.retry_safe = 1
+        AND NEW.retry_safe = 1
+        AND OLD.trigger_type = 'manual'
+        AND NEW.trigger_type = 'manual'
+        AND OLD.scheduled_job_id IS NULL
+        AND NEW.scheduled_job_id IS NULL
+        AND OLD.scheduled_job_version IS NULL
+        AND NEW.scheduled_job_version IS NULL
+        AND NEW.state = 'queued'
+        AND NEW.attempt_count = OLD.attempt_count
+        AND NEW.attempt_limit = CASE
+            WHEN OLD.attempt_count >= OLD.attempt_limit THEN OLD.attempt_count + 1
+            ELSE OLD.attempt_limit
+        END
+        AND NEW.attempt_count < NEW.attempt_limit
+        AND NEW.available_at = NEW.updated_at
+        AND NEW.available_at >= OLD.updated_at
+        AND NEW.cancel_requested_at IS NULL
+        AND NEW.cancel_requested_by_kind IS NULL
+        AND NEW.cancel_requested_by_id IS NULL
+        AND NEW.finished_at IS NULL
+        AND NEW.first_started_at IS OLD.first_started_at
+        AND NEW.heartbeat_at IS NULL
+        AND NEW.last_attempt_started_at IS OLD.last_attempt_started_at
+        AND NEW.lease_expires_at IS NULL
+        AND NEW.lease_owner_id IS NULL
+        AND NEW.lease_token IS NULL
+        AND NEW.result_json IS NULL
+        AND NEW.state_version = OLD.state_version + 1
+        AND NEW.terminal_code IS NULL
+        AND NEW.terminal_message IS NULL
+        AND NEW.event_count = OLD.event_count
+        AND NEW.payload_event_count = OLD.payload_event_count
+        AND NEW.event_bytes = OLD.event_bytes
+    )
+AND (
+    (
         OLD.state IN ('cancelled', 'failed', 'succeeded', 'timed-out')
         AND (
             NEW.state IS NOT OLD.state
@@ -2087,6 +2164,7 @@ WHEN (
         AND NEW.cancel_requested_by_id IS OLD.cancel_requested_by_id
         AND NEW.state_version <> OLD.state_version
     )
+)
 BEGIN
 	SELECT RAISE(ABORT, 'job_runs lifecycle transition is invalid');
 END;

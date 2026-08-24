@@ -31,6 +31,8 @@
                   "chat:read",
                   "chat:write",
                   "database:read",
+                  "delivery:read",
+                  "delivery:write",
                   "docker:read",
                   "docker:write",
                   "files:read",
@@ -59,7 +61,7 @@
                 ],
                 "type": "string"
               },
-              "maxItems": 32,
+              "maxItems": 34,
               "uniqueItems": true
             },
             "createdAtMs": {
@@ -130,6 +132,8 @@
                   "chat:read",
                   "chat:write",
                   "database:read",
+                  "delivery:read",
+                  "delivery:write",
                   "docker:read",
                   "docker:write",
                   "files:read",
@@ -158,7 +162,7 @@
                 ],
                 "type": "string"
               },
-              "maxItems": 32,
+              "maxItems": 34,
               "uniqueItems": true
             },
             "createdAtMs": {

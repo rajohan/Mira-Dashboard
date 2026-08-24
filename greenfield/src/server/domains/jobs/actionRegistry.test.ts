@@ -3,6 +3,9 @@ import { describe, expect, test } from "bun:test";
 import * as v from "valibot";
 
 import {
+    deliveryGitHubJobActionDefinition,
+    deliveryPreviewJobActionDefinition,
+    deliveryProductionJobActionDefinition,
     findJobActionDefinition,
     hostSystemCleanupJobActionDefinition,
     hostSystemRestartJobActionDefinition,
@@ -35,6 +38,14 @@ describe("durable job action registry", () => {
             initialDue: "immediate",
             manualExposure: "cache-write",
             scheduleId: "cache.system-host",
+        });
+        expect(findJobActionDefinition("cache.refresh.delivery-overview")).toMatchObject({
+            actionPayload: { key: "delivery.overview" },
+            defaultSchedule: { intervalMs: 60_000, kind: "interval" },
+            manualExposure: "cache-internal",
+            resourceClass: "host-heavy",
+            resourceKeys: ["cache.delivery", "delivery.preview", "github.repository"],
+            scheduleId: "cache.delivery-overview",
         });
         expect(
             findJobActionDefinition("cache.refresh.database-observability")
@@ -168,6 +179,37 @@ describe("durable job action registry", () => {
             attemptLimit: 3,
             retrySafe: true,
         });
+    });
+
+    test("separates GitHub, preview, and versioned production Delivery effects", () => {
+        expect(deliveryGitHubJobActionDefinition).toMatchObject({
+            actionKey: "delivery.github",
+            attemptLimit: 1,
+            cancellationPolicy: "never",
+            resourceClass: "network",
+            retrySafe: false,
+        });
+        expect(deliveryPreviewJobActionDefinition).toMatchObject({
+            actionKey: "delivery.preview",
+            attemptLimit: 1,
+            cancellationPolicy: "never",
+            resourceClass: "host-heavy",
+            retrySafe: false,
+        });
+        expect(deliveryProductionJobActionDefinition).toMatchObject({
+            actionKey: "delivery.production.v1",
+            attemptLimit: 3,
+            cancellationPolicy: "never",
+            resourceClass: "exclusive",
+            retrySafe: true,
+        });
+        for (const definition of [
+            deliveryGitHubJobActionDefinition,
+            deliveryPreviewJobActionDefinition,
+            deliveryProductionJobActionDefinition,
+        ]) {
+            expect(definition).not.toHaveProperty("scheduleId");
+        }
     });
 
     test("publishes the fixed restart as exclusive and never retryable", () => {

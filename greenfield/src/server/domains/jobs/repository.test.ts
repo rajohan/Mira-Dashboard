@@ -144,6 +144,135 @@ function worker(
 }
 
 describe("durable jobs repository", () => {
+    test("lists bounded newest-first history for one exact action key", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createJobRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        try {
+            const olderDeliveryRun = queuedRun(4, {
+                actionKey: "delivery.production.v1",
+                scheduledJobId: null,
+                scheduledJobVersion: null,
+            });
+            const tiedDeliveryRuns = [7, 8].map((index) =>
+                queuedRun(index, {
+                    actionKey: "delivery.production.v1",
+                    availableAt: new Date(5000),
+                    queuedAt: new Date(5000),
+                    scheduledJobId: null,
+                    scheduledJobVersion: null,
+                    updatedAt: new Date(5000),
+                })
+            );
+            for (const run of [
+                olderDeliveryRun,
+                queuedRun(5, {
+                    actionKey: "system.worker-smoke",
+                    scheduledJobId: null,
+                    scheduledJobVersion: null,
+                }),
+                queuedRun(6, {
+                    actionKey: "delivery.production.v1",
+                    scheduledJobId: null,
+                    scheduledJobVersion: null,
+                }),
+                ...tiedDeliveryRuns,
+            ]) {
+                await repository.enqueueManualRun({
+                    ...noSideEffects,
+                    queuedEvent: queuedEvent(run),
+                    run,
+                });
+            }
+
+            await repository.cancelRun({
+                actor: { id: userId, kind: "user" },
+                at: new Date(10_000),
+                id: olderDeliveryRun.id,
+                sideEffectsForRun: () => noSideEffects,
+                terminalCode: "delivery/cancelled",
+                terminalMessage: "Delivery operation was cancelled.",
+            });
+
+            expect(
+                repository
+                    .listActionRuns({
+                        actionKey: "delivery.production.v1",
+                        limit: 10,
+                    })
+                    .map(({ id }) => id)
+            ).toEqual([uuid(4), uuid(7), uuid(8), uuid(6)]);
+            expect(() =>
+                repository.listActionRuns({
+                    actionKey: "delivery.production.v1",
+                    limit: 0,
+                })
+            ).toThrow("Jobs repository action run page limit is invalid");
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("reads any bounded active action while excluding only one exact run", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createJobRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        const githubRun = queuedRun(7, {
+            actionKey: "delivery.github",
+            scheduledJobId: null,
+            scheduledJobVersion: null,
+        });
+        const previewRun = queuedRun(8, {
+            actionKey: "delivery.preview",
+            scheduledJobId: null,
+            scheduledJobVersion: null,
+        });
+        try {
+            await repository.enqueueManualRun({
+                ...noSideEffects,
+                queuedEvent: queuedEvent(githubRun),
+                run: githubRun,
+            });
+            expect(
+                repository.readAnyActionActive({
+                    actionKeys: ["delivery.github", "delivery.preview"],
+                })
+            ).toBe(true);
+            expect(
+                repository.readAnyActionActive({
+                    actionKeys: ["delivery.github", "delivery.preview"],
+                    excludeRunId: githubRun.id,
+                })
+            ).toBe(false);
+
+            await repository.enqueueManualRun({
+                ...noSideEffects,
+                queuedEvent: queuedEvent(previewRun),
+                run: previewRun,
+            });
+            expect(
+                repository.readAnyActionActive({
+                    actionKeys: ["delivery.github", "delivery.preview"],
+                    excludeRunId: githubRun.id,
+                })
+            ).toBe(true);
+            expect(() => repository.readAnyActionActive({ actionKeys: [] })).toThrow(
+                "active action key count is invalid"
+            );
+            expect(() =>
+                repository.readAnyActionActive({
+                    actionKeys: ["delivery.github", "delivery.github"],
+                })
+            ).toThrow("active action keys must be unique");
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
     test("rechecks authority after write admission and rolls back a rejected enqueue", async () => {
         const database = await openFreshMigratedDatabase();
         let releaseAdmission: (() => void) | undefined;

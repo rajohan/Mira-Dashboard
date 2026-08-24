@@ -1,0 +1,523 @@
+{
+  "$id": "urn:mira-dashboard:delivery.getReleases.output",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "checkedAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8640000000000000
+        },
+        "state": {
+          "const": "unavailable"
+        }
+      },
+      "required": [
+        "checkedAtMs",
+        "state"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "actionActive": {
+          "type": "boolean"
+        },
+        "releases": {
+          "type": "object",
+          "properties": {
+            "activationRevision": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "current": {
+              "type": "object",
+              "properties": {
+                "builtAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "commitTitle": {
+                  "type": "string",
+                  "maxLength": 500,
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "allOf": [
+                    {
+                      "pattern": "^[^\\u0000]*$"
+                    },
+                    {
+                      "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                    }
+                  ]
+                },
+                "commitUrl": {
+                  "type": "string",
+                  "maxLength": 2048,
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "allOf": [
+                    {
+                      "pattern": "^[^\\u0000]*$"
+                    },
+                    {
+                      "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                    }
+                  ],
+                  "format": "uri",
+                  "$comment": "Live Valibot validation additionally requires every Delivery URL to use HTTPS."
+                },
+                "releaseId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{40}$"
+                },
+                "runtimeRevision": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{40}$"
+                },
+                "schemaTarget": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "builtAtMs",
+                "commitTitle",
+                "commitUrl",
+                "releaseId",
+                "runtimeRevision",
+                "schemaTarget"
+              ],
+              "additionalProperties": false
+            },
+            "previous": {
+              "type": "object",
+              "properties": {
+                "builtAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "commitTitle": {
+                  "type": "string",
+                  "maxLength": 500,
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "allOf": [
+                    {
+                      "pattern": "^[^\\u0000]*$"
+                    },
+                    {
+                      "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                    }
+                  ]
+                },
+                "commitUrl": {
+                  "type": "string",
+                  "maxLength": 2048,
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "allOf": [
+                    {
+                      "pattern": "^[^\\u0000]*$"
+                    },
+                    {
+                      "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                    }
+                  ],
+                  "format": "uri",
+                  "$comment": "Live Valibot validation additionally requires every Delivery URL to use HTTPS."
+                },
+                "releaseId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{40}$"
+                },
+                "runtimeRevision": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{40}$"
+                },
+                "schemaTarget": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "builtAtMs",
+                "commitTitle",
+                "commitUrl",
+                "releaseId",
+                "runtimeRevision",
+                "schemaTarget"
+              ],
+              "additionalProperties": false
+            },
+            "rollback": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "actor": {
+                      "const": "mira"
+                    },
+                    "available": {
+                      "const": true
+                    },
+                    "target": {
+                      "type": "object",
+                      "properties": {
+                        "databaseSnapshotTransitionId": {
+                          "type": "string",
+                          "minLength": 36,
+                          "maxLength": 36,
+                          "format": "uuid",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                        },
+                        "releaseId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{40}$"
+                        },
+                        "runtimeRevision": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{40}$"
+                        }
+                      },
+                      "required": [
+                        "databaseSnapshotTransitionId",
+                        "releaseId",
+                        "runtimeRevision"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "actor",
+                    "available",
+                    "target"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "actor": {
+                      "const": "mira"
+                    },
+                    "available": {
+                      "const": false
+                    },
+                    "reason": {
+                      "enum": [
+                        "action-active",
+                        "incompatible",
+                        "no-previous-release",
+                        "source-unavailable"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "actor",
+                    "available",
+                    "reason"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "required": [
+            "activationRevision",
+            "rollback"
+          ],
+          "additionalProperties": false,
+          "$comment": "Live Valibot validation additionally requires distinct current and previous Delivery releases and binds an available rollback target to the exact previous release and runtime."
+        },
+        "checkedAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8640000000000000
+        },
+        "observedAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8640000000000000
+        },
+        "sourceRevision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "state": {
+          "const": "fresh"
+        }
+      },
+      "required": [
+        "actionActive",
+        "releases",
+        "checkedAtMs",
+        "observedAtMs",
+        "sourceRevision",
+        "state"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "actionActive": {
+          "type": "boolean"
+        },
+        "releases": {
+          "type": "object",
+          "properties": {
+            "activationRevision": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "current": {
+              "type": "object",
+              "properties": {
+                "builtAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "commitTitle": {
+                  "type": "string",
+                  "maxLength": 500,
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "allOf": [
+                    {
+                      "pattern": "^[^\\u0000]*$"
+                    },
+                    {
+                      "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                    }
+                  ]
+                },
+                "commitUrl": {
+                  "type": "string",
+                  "maxLength": 2048,
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "allOf": [
+                    {
+                      "pattern": "^[^\\u0000]*$"
+                    },
+                    {
+                      "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                    }
+                  ],
+                  "format": "uri",
+                  "$comment": "Live Valibot validation additionally requires every Delivery URL to use HTTPS."
+                },
+                "releaseId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{40}$"
+                },
+                "runtimeRevision": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{40}$"
+                },
+                "schemaTarget": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "builtAtMs",
+                "commitTitle",
+                "commitUrl",
+                "releaseId",
+                "runtimeRevision",
+                "schemaTarget"
+              ],
+              "additionalProperties": false
+            },
+            "previous": {
+              "type": "object",
+              "properties": {
+                "builtAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "commitTitle": {
+                  "type": "string",
+                  "maxLength": 500,
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "allOf": [
+                    {
+                      "pattern": "^[^\\u0000]*$"
+                    },
+                    {
+                      "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                    }
+                  ]
+                },
+                "commitUrl": {
+                  "type": "string",
+                  "maxLength": 2048,
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "allOf": [
+                    {
+                      "pattern": "^[^\\u0000]*$"
+                    },
+                    {
+                      "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                    }
+                  ],
+                  "format": "uri",
+                  "$comment": "Live Valibot validation additionally requires every Delivery URL to use HTTPS."
+                },
+                "releaseId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{40}$"
+                },
+                "runtimeRevision": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{40}$"
+                },
+                "schemaTarget": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "builtAtMs",
+                "commitTitle",
+                "commitUrl",
+                "releaseId",
+                "runtimeRevision",
+                "schemaTarget"
+              ],
+              "additionalProperties": false
+            },
+            "rollback": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "actor": {
+                      "const": "mira"
+                    },
+                    "available": {
+                      "const": true
+                    },
+                    "target": {
+                      "type": "object",
+                      "properties": {
+                        "databaseSnapshotTransitionId": {
+                          "type": "string",
+                          "minLength": 36,
+                          "maxLength": 36,
+                          "format": "uuid",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                        },
+                        "releaseId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{40}$"
+                        },
+                        "runtimeRevision": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{40}$"
+                        }
+                      },
+                      "required": [
+                        "databaseSnapshotTransitionId",
+                        "releaseId",
+                        "runtimeRevision"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "actor",
+                    "available",
+                    "target"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "actor": {
+                      "const": "mira"
+                    },
+                    "available": {
+                      "const": false
+                    },
+                    "reason": {
+                      "enum": [
+                        "action-active",
+                        "incompatible",
+                        "no-previous-release",
+                        "source-unavailable"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "actor",
+                    "available",
+                    "reason"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "required": [
+            "activationRevision",
+            "rollback"
+          ],
+          "additionalProperties": false,
+          "$comment": "Live Valibot validation additionally requires distinct current and previous Delivery releases and binds an available rollback target to the exact previous release and runtime."
+        },
+        "checkedAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8640000000000000
+        },
+        "observedAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8640000000000000
+        },
+        "sourceRevision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "state": {
+          "const": "last-known-good"
+        },
+        "staleSinceMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8640000000000000
+        }
+      },
+      "required": [
+        "actionActive",
+        "releases",
+        "checkedAtMs",
+        "observedAtMs",
+        "sourceRevision",
+        "state",
+        "staleSinceMs"
+      ],
+      "additionalProperties": false
+    }
+  ],
+  "$comment": "Live Valibot validation additionally requires Delivery observation, staleness, and response-check timestamps to be causally ordered.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

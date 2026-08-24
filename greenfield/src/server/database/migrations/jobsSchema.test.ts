@@ -39,6 +39,7 @@ interface ScheduleFixture {
 }
 
 interface QueuedRunFixture {
+    actionKey: string;
     attemptLimit: number;
     cancellationPolicy: CancellationPolicy;
     id: string;
@@ -167,6 +168,7 @@ function insertQueuedRun(
     overrides: Partial<QueuedRunFixture> & Pick<QueuedRunFixture, "id" | "idempotencyKey">
 ): void {
     const fixture: QueuedRunFixture = {
+        actionKey: "system.worker-smoke",
         attemptLimit: 3,
         cancellationPolicy: "cooperative",
         requestedById: "job-scheduler",
@@ -191,10 +193,11 @@ function insertQueuedRun(
             scheduled_job_id, scheduled_job_version, state, timeout_ms,
             trigger_type, updated_at
         ) VALUES (
-            'system.worker-smoke', ?, 1000, ?, 'Worker smoke', ?, ?, ?, '{}',
+            ?, ?, 1000, ?, 'Worker smoke', ?, ?, ?, '{}',
             0, 1000, ?, ?, ?, 'light', ?, ?, ?, ?, ?, 'queued', 10000, ?, 1000
         )`,
         [
+            fixture.actionKey,
             fixture.attemptLimit,
             fixture.cancellationPolicy,
             enqueueSha256,
@@ -1154,6 +1157,126 @@ describe("jobs baseline schema", () => {
                     [userId, queuedOnlyRunId]
                 )
             ).toThrow("job_runs lifecycle transition is invalid");
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("permits only the exact exhausted Delivery terminal receipt recovery transition", async () => {
+        const database = await openFreshMigratedDatabase();
+        const workerId = uuid(110);
+        const failedRunId = uuid(111);
+        const succeededRunId = uuid(113);
+        try {
+            insertWorker(database, workerId);
+            for (const [runId, keyIndex] of [
+                [failedRunId, 111],
+                [succeededRunId, 113],
+            ] as const) {
+                insertQueuedRun(database, {
+                    actionKey: "delivery.production.v1",
+                    attemptLimit: 1,
+                    cancellationPolicy: "never",
+                    id: runId,
+                    idempotencyKey: idempotencyKey(keyIndex),
+                    requestedById: userId,
+                    requestedByKind: "user",
+                    resourceKeysJson: '["delivery.production"]',
+                    triggerType: "manual",
+                });
+                insertEvent(database, { jobRunId: runId, kind: "queued", sequence: 1 });
+                claimRun(database, runId, workerId, uuid(keyIndex + 1));
+            }
+            database.sqlite.run(
+                `UPDATE job_runs
+                 SET finished_at = 2500, heartbeat_at = NULL,
+                     lease_expires_at = NULL, lease_owner_id = NULL,
+                     lease_token = NULL, state = 'failed',
+                     state_version = state_version + 1,
+                     terminal_code = 'delivery/recovery-test-failed',
+                     terminal_message = 'Stale failed Delivery receipt state.',
+                     updated_at = 2500
+                 WHERE id = ?`,
+                [failedRunId]
+            );
+            database.sqlite.run(
+                `UPDATE job_runs
+                 SET finished_at = 2500, heartbeat_at = NULL,
+                     lease_expires_at = NULL, lease_owner_id = NULL,
+                     lease_token = NULL, result_json = '{}', state = 'succeeded',
+                     state_version = state_version + 1, updated_at = 2500
+                 WHERE id = ?`,
+                [succeededRunId]
+            );
+
+            expect(() =>
+                database.sqlite.run(
+                    `UPDATE job_runs
+                     SET attempt_limit = 3, available_at = 3000,
+                         finished_at = NULL, state = 'queued',
+                         state_version = state_version + 1,
+                         terminal_code = NULL, terminal_message = NULL,
+                         updated_at = 3000
+                     WHERE id = ?`,
+                    [failedRunId]
+                )
+            ).toThrow();
+            expect(() =>
+                database.sqlite.run(
+                    `UPDATE job_runs
+                     SET attempt_limit = 2, available_at = 3000,
+                         finished_at = NULL, payload_json = '{"changed":true}',
+                         state = 'queued', state_version = state_version + 1,
+                         terminal_code = NULL, terminal_message = NULL,
+                         updated_at = 3000
+                     WHERE id = ?`,
+                    [failedRunId]
+                )
+            ).toThrow("job_runs execution snapshot is immutable");
+            expect(() =>
+                database.sqlite.run(
+                    `UPDATE job_runs
+                     SET attempt_limit = 2, available_at = 3000,
+                         finished_at = NULL, result_json = NULL, state = 'queued',
+                         state_version = state_version + 1,
+                         terminal_code = NULL, terminal_message = NULL,
+                         updated_at = 3000
+                     WHERE id = ?`,
+                    [succeededRunId]
+                )
+            ).toThrow();
+
+            database.sqlite.run(
+                `UPDATE job_runs
+                 SET attempt_limit = 2, available_at = 3000,
+                     finished_at = NULL, state = 'queued',
+                     state_version = state_version + 1,
+                     terminal_code = NULL, terminal_message = NULL,
+                     updated_at = 3000
+                 WHERE id = ?`,
+                [failedRunId]
+            );
+            expect(
+                database.sqlite
+                    .query<
+                        {
+                            attempt_count: number;
+                            attempt_limit: number;
+                            state: string;
+                            terminal_code: string | null;
+                        },
+                        [string]
+                    >(
+                        `SELECT attempt_count, attempt_limit, state, terminal_code
+                         FROM job_runs WHERE id = ?`
+                    )
+                    .get(failedRunId)
+            ).toEqual({
+                attempt_count: 1,
+                attempt_limit: 2,
+                state: "queued",
+                terminal_code: null,
+            });
         } finally {
             database.sqlite.close(true);
         }

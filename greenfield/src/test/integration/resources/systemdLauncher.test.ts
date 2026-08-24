@@ -28,6 +28,7 @@ function launcherOptions(): SystemdLauncherOptions {
             HOME: "/home/ubuntu",
             LANG: "nb_NO.UTF-8",
             MIRA_GITHUB_TOKEN: "must-not-leak",
+            RAJOHAN_GITHUB_TOKEN: "must-not-leak",
             PATH: "/untrusted/path",
             XDG_RUNTIME_DIR: "/run/user/1001",
         },

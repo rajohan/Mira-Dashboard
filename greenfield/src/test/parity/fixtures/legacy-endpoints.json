@@ -803,7 +803,7 @@
             "purpose": "Lists Dashboard PRs.",
             "section": "Pull Requests And Deployments",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["delivery.listPullRequests"],
                 "phase": "phase-5"
@@ -816,7 +816,7 @@
             "purpose": "Lists deploy and rollback jobs.",
             "section": "Pull Requests And Deployments",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["delivery.listDeployments"],
                 "phase": "phase-5"
@@ -829,7 +829,7 @@
             "purpose": "Reads the single managed PR-dev slot.",
             "section": "Pull Requests And Deployments",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["delivery.getPreview"],
                 "phase": "phase-5"
@@ -842,7 +842,7 @@
             "purpose": "Reads production checkout status.",
             "section": "Pull Requests And Deployments",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["delivery.getProductionCheckout"],
                 "phase": "phase-5"
@@ -855,7 +855,7 @@
             "purpose": "Reads immutable `current`/`previous` release status.",
             "section": "Pull Requests And Deployments",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["delivery.getReleases"],
                 "phase": "phase-5"
@@ -1710,10 +1710,10 @@
             "id": "POST /api/pull-requests/:number/approve",
             "method": "POST",
             "path": "/api/pull-requests/:number/approve",
-            "purpose": "Queues merge, optionally followed by deploy.",
+            "purpose": "Queues exact-head ordinary merge, optionally followed by deploy; native-stack merge is fail-closed without provider full-prefix CAS.",
             "section": "Pull Requests And Deployments",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["delivery.approvePullRequest"],
                 "phase": "phase-5"
@@ -1726,7 +1726,7 @@
             "purpose": "Validates and queues trusted PR dev (`202 Starting`).",
             "section": "Pull Requests And Deployments",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["delivery.startPreview"],
                 "phase": "phase-5"
@@ -1739,7 +1739,7 @@
             "purpose": "Stops PR dev while retaining isolated state.",
             "section": "Pull Requests And Deployments",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["delivery.stopPreview"],
                 "phase": "phase-5"
@@ -1749,10 +1749,10 @@
             "id": "POST /api/pull-requests/:number/reject",
             "method": "POST",
             "path": "/api/pull-requests/:number/reject",
-            "purpose": "Queues reject/close.",
+            "purpose": "Retains a fail-closed close contract; GitHub exposes no expected-head close guard.",
             "section": "Pull Requests And Deployments",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["delivery.rejectPullRequest"],
                 "phase": "phase-5"
@@ -1765,7 +1765,7 @@
             "purpose": "Queues review approval.",
             "section": "Pull Requests And Deployments",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["delivery.approveReview"],
                 "phase": "phase-5"
@@ -1778,7 +1778,7 @@
             "purpose": "Queues branch update.",
             "section": "Pull Requests And Deployments",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["delivery.updateBranch"],
                 "phase": "phase-5"
@@ -1791,7 +1791,7 @@
             "purpose": "Queues an atomic deploy of latest `main`.",
             "section": "Pull Requests And Deployments",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["delivery.deploy"],
                 "phase": "phase-5"
@@ -1804,7 +1804,7 @@
             "purpose": "Queues atomic rollback to the confirmed previous full SHA.",
             "section": "Pull Requests And Deployments",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["delivery.rollbackRelease"],
                 "phase": "phase-5"
@@ -1814,10 +1814,10 @@
             "id": "POST /api/pull-requests/stacks",
             "method": "POST",
             "path": "/api/pull-requests/stacks",
-            "purpose": "Creates one reviewed native GitHub PR stack.",
+            "purpose": "Retains a fail-closed stack-create contract; GitHub exposes no expected-head guards.",
             "section": "Pull Requests And Deployments",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["delivery.createPullRequestStack"],
                 "phase": "phase-5"

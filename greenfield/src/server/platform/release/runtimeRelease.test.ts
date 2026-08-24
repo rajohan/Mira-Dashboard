@@ -14,6 +14,7 @@ import path from "node:path";
 
 import {
     releaseBuildCommands,
+    releaseDeliveryProtocols,
     releaseProcessRoles,
     serializeReleaseManifest,
 } from "../../../shared/releaseManifest.ts";
@@ -47,6 +48,8 @@ function manifest() {
     return {
         artifacts: [{ bytes: 3, path: "server/web.js", sha256: checksum }],
         buildCommands: [...releaseBuildCommands],
+        deliveryProtocols: [...releaseDeliveryProtocols],
+        display: { builtAtMs: 1, commitTitle: "Test release", schemaTarget: 1 },
         documentationSha256: checksum,
         formatVersion: 1,
         lockfileSha256: checksum,

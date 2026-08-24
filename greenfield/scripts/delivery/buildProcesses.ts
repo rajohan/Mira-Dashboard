@@ -9,7 +9,9 @@ import { resolveRepositoryBuildPath } from "./buildPaths.ts";
 const webEntrypoint = "src/app/dashboardServer.ts";
 const workerEntrypoint = "src/app/worker.ts";
 const databaseMaintenanceEntrypoint = "src/app/databaseMaintenance.ts";
+const productionDeliveryEntrypoint = "scripts/delivery/productionDeliveryExecutor.ts";
 const maximumDatabaseMaintenanceGzipBytes = 2 * 1024 * 1024;
+const maximumProductionDeliveryGzipBytes = 2 * 1024 * 1024;
 const maximumWebGzipBytes = 4 * 1024 * 1024;
 const maximumWorkerGzipBytes = 2 * 1024 * 1024;
 
@@ -20,6 +22,10 @@ export interface ProcessBuildResult {
         rawBytes: number;
     }>;
     readonly outputDirectory: string;
+    readonly productionDelivery: Readonly<{
+        gzipBytes: number;
+        rawBytes: number;
+    }>;
     readonly web: Readonly<{ gzipBytes: number; rawBytes: number }>;
     readonly worker: Readonly<{ gzipBytes: number; rawBytes: number }>;
 }
@@ -38,7 +44,7 @@ function validatedOutputDirectory(
 async function measurements(
     filePath: string,
     maximumGzipBytes: number,
-    role: "database-maintenance" | "web" | "worker"
+    role: "database-maintenance" | "production-delivery" | "web" | "worker"
 ): Promise<Readonly<{ gzipBytes: number; rawBytes: number }>> {
     const contents = await readFile(filePath);
     const gzipBytes = gzipSync(contents, { level: 9 }).byteLength;
@@ -68,6 +74,7 @@ export async function buildProcessArtifacts(
             conditions: ["production"],
             entrypoints: [
                 path.join(repositoryRoot, databaseMaintenanceEntrypoint),
+                path.join(repositoryRoot, productionDeliveryEntrypoint),
                 path.join(repositoryRoot, webEntrypoint),
                 path.join(repositoryRoot, workerEntrypoint),
             ],
@@ -89,10 +96,11 @@ export async function buildProcessArtifacts(
             .map(({ path: outputPath }) => path.basename(outputPath))
             .toSorted();
         if (
-            emittedNames.length !== 3 ||
+            emittedNames.length !== 4 ||
             emittedNames[0] !== "dashboardServer.js" ||
             emittedNames[1] !== "databaseMaintenance.js" ||
-            emittedNames[2] !== "worker.js"
+            emittedNames[2] !== "productionDeliveryExecutor.js" ||
+            emittedNames[3] !== "worker.js"
         ) {
             throw new Error("Dashboard process build emitted an unexpected artifact set");
         }
@@ -100,11 +108,20 @@ export async function buildProcessArtifacts(
             path.join(output, "dashboardServer.js"),
             path.join(output, "web.js")
         );
-        const [databaseMaintenance, web, worker] = await Promise.all([
+        await rename(
+            path.join(output, "productionDeliveryExecutor.js"),
+            path.join(output, "productionDelivery.js")
+        );
+        const [databaseMaintenance, productionDelivery, web, worker] = await Promise.all([
             measurements(
                 path.join(output, "databaseMaintenance.js"),
                 maximumDatabaseMaintenanceGzipBytes,
                 "database-maintenance"
+            ),
+            measurements(
+                path.join(output, "productionDelivery.js"),
+                maximumProductionDeliveryGzipBytes,
+                "production-delivery"
             ),
             measurements(path.join(output, "web.js"), maximumWebGzipBytes, "web"),
             measurements(
@@ -116,6 +133,7 @@ export async function buildProcessArtifacts(
         return Object.freeze({
             databaseMaintenance,
             outputDirectory: output,
+            productionDelivery,
             web,
             worker,
         });
@@ -138,6 +156,8 @@ if (import.meta.main) {
                 status: "BUILT",
                 databaseMaintenanceGzipBytes: result.databaseMaintenance.gzipBytes,
                 databaseMaintenanceRawBytes: result.databaseMaintenance.rawBytes,
+                productionDeliveryGzipBytes: result.productionDelivery.gzipBytes,
+                productionDeliveryRawBytes: result.productionDelivery.rawBytes,
                 webGzipBytes: result.web.gzipBytes,
                 webRawBytes: result.web.rawBytes,
                 workerGzipBytes: result.worker.gzipBytes,

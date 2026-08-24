@@ -8,6 +8,7 @@ import type { AgentService } from "../server/domains/agents/service.ts";
 import type { CacheService } from "../server/domains/cache/service.ts";
 import type { ChatService } from "../server/domains/chat/service.ts";
 import type { DatabaseObservabilityService } from "../server/domains/database/service.ts";
+import type { DeliveryService } from "../server/domains/delivery/service.ts";
 import type { DockerService } from "../server/domains/docker/service.ts";
 import type { WorkspaceFileRawHttpHandler } from "../server/domains/files/rawHttp.ts";
 import type { WorkspaceFilesService } from "../server/domains/files/service.ts";
@@ -197,10 +198,13 @@ export interface ServerOptions {
     /** Explicit public browser origin when TLS terminates at a trusted proxy. */
     readonly browserOrigin?: string;
     readonly cacheService: CacheService["Service"];
+    /** During production cutover, allow reads and only the fixed worker-smoke enqueue. */
+    readonly cutoverValidation?: boolean;
     /** Raw attachment/media routes mounted before browser asset fallback. */
     readonly chatRawHttpHandler?: ChatRawHttpHandler;
     readonly chatService?: ChatService;
     readonly databaseObservabilityService: DatabaseObservabilityService;
+    readonly deliveryService?: DeliveryService;
     readonly dockerService?: DockerService;
     readonly workspaceFilesService?: WorkspaceFilesService;
     /** Ticket-bound Files GET/HEAD/PUT routes mounted before browser asset fallback. */
@@ -272,6 +276,9 @@ export async function createServer(options: ServerOptions): Promise<ApplicationS
             cacheService: options.cacheService,
             chatService: options.chatService,
             databaseObservabilityService: options.databaseObservabilityService,
+            ...(options.deliveryService === undefined
+                ? {}
+                : { deliveryService: options.deliveryService }),
             ...(options.dockerService === undefined
                 ? {}
                 : { dockerService: options.dockerService }),
@@ -307,6 +314,17 @@ export async function createServer(options: ServerOptions): Promise<ApplicationS
                 try {
                     const requestUrl = new URL(request.url);
                     const pathname = requestUrl.pathname;
+                    if (
+                        options.cutoverValidation === true &&
+                        request.method !== "GET" &&
+                        request.method !== "HEAD" &&
+                        !(request.method === "POST" && pathname === "/trpc/schedules.run")
+                    ) {
+                        return new Response("Production cutover validation in progress", {
+                            headers: { "cache-control": "no-store" },
+                            status: 503,
+                        });
+                    }
                     const terminalSocketResult =
                         await options.terminalSocketBoundary?.handle(
                             request,
