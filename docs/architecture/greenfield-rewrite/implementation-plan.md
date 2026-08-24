@@ -29,9 +29,20 @@ compatibility migration inside it.
 ### Phase 2: trust and transport
 
 - implement bootstrap, sessions, password, MFA, WebAuthn, recovery, step-up, automation
-  principals, capabilities, audit, tRPC context, raw HTTP policy, and one browser SSE stream.
+  principals, exact capabilities, staged credential rotation, audit, tRPC context, raw HTTP
+  policy, and one browser SSE stream.
 
-**Exit gate:** security threat-model tests, reconnect/resume tests, and credential rotation pass.
+**Exit gate:** security threat-model tests, reconnect/resume tests, and lost-response-safe
+credential rotation pass. Automation administration must be browser-session-only, revalidate
+recent MFA inside the state-change transaction, and prove that revocation, capability replacement,
+and terminal disablement affect new requests and renewable leases without a process restart.
+
+The automation lifecycle slice implements its eight server-side procedures, database-owned
+principals and credentials, stable history pagination, exact capability replacement, staged
+rotation plus explicit revocation, and terminal disablement. Phase 2 remains open until the narrow
+native Gateway credential-verifier composition adapter and consolidated threat-model/rotation exit
+evidence are delivered; the greenfield browser UI and production credential cutover belong to
+later parity and release work.
 
 ### Phase 3: core operator domains
 

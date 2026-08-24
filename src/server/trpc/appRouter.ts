@@ -1,5 +1,9 @@
 import { eventsProcedureNames, eventsRouter } from "../domains/realtime/procedures.ts";
 import {
+    automationSecurityProcedureNames,
+    automationSecurityRouter,
+} from "../domains/security/automation/procedures.ts";
+import {
     accountSecurityProcedureNames,
     accountSecurityRouter,
 } from "../domains/security/mfa/procedures.ts";
@@ -18,6 +22,7 @@ function namespacedProcedureNames(
 export const appRouter = router({
     accountSecurity: accountSecurityRouter,
     auth: authRouter,
+    automationSecurity: automationSecurityRouter,
     events: eventsRouter,
     system: systemRouter,
 });
@@ -26,6 +31,7 @@ export const appRouter = router({
 export const appRouterProcedureNames = Object.freeze([
     ...namespacedProcedureNames("accountSecurity", accountSecurityProcedureNames),
     ...namespacedProcedureNames("auth", authProcedureNames),
+    ...namespacedProcedureNames("automationSecurity", automationSecurityProcedureNames),
     ...namespacedProcedureNames("events", eventsProcedureNames),
     ...namespacedProcedureNames("system", systemProcedureNames),
 ]);

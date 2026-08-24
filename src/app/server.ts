@@ -3,6 +3,7 @@ import * as v from "valibot";
 
 import { healthLivenessPath, healthReadinessPath } from "../contracts/system.ts";
 import type { AuthenticationLifecycleService } from "../server/domains/security/authenticationLifecycle.ts";
+import type { AutomationSecurityLifecycleService } from "../server/domains/security/automation/lifecycle.ts";
 import type { MfaAccountLifecycleService } from "../server/domains/security/mfa/accountLifecycle.ts";
 import type { MfaLoginLifecycleService } from "../server/domains/security/mfa/loginLifecycle.ts";
 import type { ReadinessState } from "../server/platform/readiness/readinessState.ts";
@@ -68,6 +69,7 @@ export {
 export interface ServerOptions {
     readonly applicationRuntime: ApplicationRuntime;
     readonly authenticationLifecycle: AuthenticationLifecycleService;
+    readonly automationSecurityLifecycle: AutomationSecurityLifecycleService;
     readonly authenticateCredential: AuthenticateCredential;
     /** Explicit public browser origin when TLS terminates at a trusted proxy. */
     readonly browserOrigin?: string;
@@ -109,6 +111,7 @@ export async function createServer(options: ServerOptions): Promise<ApplicationS
             applicationRuntime: options.applicationRuntime,
             authenticateCredential: options.authenticateCredential,
             authenticationLifecycle: options.authenticationLifecycle,
+            automationSecurityLifecycle: options.automationSecurityLifecycle,
             browserOrigin,
             mfaAccountLifecycle: options.mfaAccountLifecycle,
             mfaLoginLifecycle: options.mfaLoginLifecycle,

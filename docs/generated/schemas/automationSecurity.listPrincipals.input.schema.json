@@ -1,0 +1,36 @@
+{
+  "$id": "urn:mira-dashboard:automationSecurity.listPrincipals.input",
+  "type": "object",
+  "properties": {
+    "cursor": {
+      "type": "object",
+      "properties": {
+        "createdAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8640000000000000
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        }
+      },
+      "required": [
+        "createdAtMs",
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 50,
+      "default": 20
+    }
+  },
+  "required": [],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

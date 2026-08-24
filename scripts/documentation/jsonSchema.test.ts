@@ -16,6 +16,12 @@ import {
     isValidBrowserSessionUserAgent,
 } from "../../src/contracts/auth.ts";
 import {
+    automationCredentialSummarySchema,
+    createAutomationPrincipalResultSchema,
+    listAutomationPrincipalsResultSchema,
+} from "../../src/contracts/automationSecurity.ts";
+import { applicationCapabilityListSchema } from "../../src/contracts/security.ts";
+import {
     webAuthnAuthenticationResponseSchema,
     webAuthnTransportListSchema,
 } from "../../src/contracts/webauthn.ts";
@@ -70,6 +76,54 @@ describe("contract JSON Schema conversion", () => {
                 "output"
             )
         ).toThrow('The "transform" action cannot be converted to JSON Schema.');
+    });
+
+    test("documents automation normalization and runtime-only cross-field checks", () => {
+        expect(
+            convertContractSchema(
+                applicationCapabilityListSchema,
+                "test.applicationCapabilities",
+                "output"
+            )
+        ).toMatchObject({
+            items: { enum: ["notifications:read", "reports:read"] },
+            maxItems: 2,
+            type: "array",
+            uniqueItems: true,
+        });
+
+        const credentialDocument = JSON.stringify(
+            convertContractSchema(
+                automationCredentialSummarySchema,
+                "test.automationCredentialSummary",
+                "output"
+            )
+        );
+        expect(credentialDocument).toContain(
+            "credential expiry after creation and revocation no earlier than creation"
+        );
+        expect(credentialDocument).toContain(
+            "replacement credential to reference a different credential ID"
+        );
+
+        const pageDocument = JSON.stringify(
+            convertContractSchema(
+                listAutomationPrincipalsResultSchema,
+                "test.automationPrincipalPage",
+                "output"
+            )
+        );
+        expect(pageDocument).toContain("strict newest-first ordering");
+        expect(pageDocument).toContain("principal continuation cursor");
+
+        const creationDocument = JSON.stringify(
+            convertContractSchema(
+                createAutomationPrincipalResultSchema,
+                "test.createAutomationPrincipal",
+                "output"
+            )
+        );
+        expect(creationDocument).toContain("matching one-time token prefix");
     });
 
     test("documents runtime-only WebAuthn identifier equality", () => {

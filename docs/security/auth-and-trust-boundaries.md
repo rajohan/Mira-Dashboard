@@ -25,9 +25,12 @@ principal is rejected even if it is otherwise authenticated. Other procedures
 declare their session/automation capability policy in the generated contract
 registry.
 
-An explicitly scoped automation credential can replace the session only for the
-small route allowlist documented below. It cannot authenticate WebSockets or
-other Dashboard route families. Account-security routes are never public merely
+An automation credential can replace the session only for a procedure or
+current-production route that explicitly declares its exact capability. It
+cannot authenticate browser-session-only security administration. The
+greenfield and current-production credential systems are documented separately
+below because their token formats, capability catalogs, and persistence models
+are intentionally incompatible. Account-security routes are never public merely
 because they contain authentication functionality.
 
 The browser session is stored in the `__Host-mira_dashboard_session` HTTP-only cookie.
@@ -154,7 +157,92 @@ an interactive TTY, never accepts password material through arguments or
 environment variables, preserves MFA by default, revokes all sessions and
 pending ceremonies, and writes an audit event.
 
-## Scoped Automation Credentials
+## Greenfield Automation Principals
+
+The rewrite stores named automation principals, their exact capability sets,
+and their independently rotatable credentials in SQLite. The only capabilities
+implemented by the current greenfield contract surface are
+`notifications:read` and `reports:read`. There are no wildcards, prefix grants,
+credential-specific grants, or implication rules. Ordinary procedures use
+`capabilityProcedure(capability)` to require exact membership.
+
+The canonical greenfield bearer token is:
+
+```http
+Authorization: Bearer <32-lowercase-hex-prefix>.<64-lowercase-hex-validator>
+```
+
+The prefix is a non-secret 128-bit lookup value. The 256-bit validator is
+hashed with SHA-256 over a versioned, automation-domain-bound input that also
+includes the prefix. SQLite stores only the prefix, validator version, and
+validator hash. The complete token appears once in a successful principal,
+credential, or staged-rotation creation response; list responses, audits,
+errors, and logs cannot reconstruct or expose it.
+
+Browser-session operators manage this state through exactly these procedures:
+
+- `automationSecurity.listPrincipals`
+- `automationSecurity.listCredentials`
+- `automationSecurity.createPrincipal`
+- `automationSecurity.createCredential`
+- `automationSecurity.rotateCredential`
+- `automationSecurity.revokeCredential`
+- `automationSecurity.replaceCapabilities`
+- `automationSecurity.disablePrincipal`
+
+The two list operations require a browser session. Every mutation requires
+recent MFA; an operator without MFA receives `mfa_enrollment_required`, and an
+expired recent-MFA window receives `step_up_required`. The lifecycle revalidates
+the session, authentication version, MFA state, and recent-MFA timestamp after
+acquiring the SQLite immediate-transaction lock. It never relies on only the
+earlier request-context snapshot. An automation principal cannot call this
+administration surface even when it has every application capability.
+
+At most 32 principals may be enabled and at most four non-revoked,
+non-expired credentials may be usable for one principal. Disabled principals
+and revoked or expired credentials remain stable, newest-first history through
+bounded `(created_at, id)` cursor pages. Authentication and renewable-lease
+checks are deliberately read-only; the greenfield credential table has no
+`last_used_at` field or per-request write path.
+
+Existing-principal mutations carry `expectedAuthorizationVersion`. Replacing
+capabilities applies a real set diff, retains the original `granted_at` for
+unchanged grants, timestamps only additions, and increments the version once.
+Submitting the same set changes nothing and creates no audit event. Request
+authentication and lease renewal fail closed when a grant predates principal
+creation, follows its current `updated_at`, or is in the future.
+
+Rotation is staged so a lost HTTP response cannot lock out an automation.
+`rotateCredential` creates one linked replacement and leaves the predecessor
+usable until explicit `revokeCredential` after installation. The replacement
+is visible by non-secret metadata; if its one-time token response is lost, the
+operator revokes it and retries while the predecessor still works. A partial
+unique index permits one unrevoked replacement per predecessor, and SQLite
+triggers reject invalid or cross-principal replacement links. Revocation is
+idempotent. Disabling a principal is terminal in this slice, increments its
+authorization version, and revokes every then-usable credential in the same
+transaction. The disabled principal invalidates every historical token whether
+or not an already expired row receives a redundant revoke timestamp. Clock
+rollback cannot block terminal containment: a credential created ahead of the
+current clock may remain physically unrevoked, but the disabled principal keeps
+it invalid when the clock catches up. Repeat no-ops do not grow the append-only
+audit ledger.
+
+Generation, domain-bound hashing, lifecycle policy, and SQLite transactions are
+bounded synchronous work and do not receive a dedicated Effect service.
+Effect remains for cancellation, deadlines, asynchronous concurrency, and
+scoped resources where those semantics materially improve correctness.
+
+## Current Production Scoped Credentials (Legacy During Rewrite)
+
+The following environment-owned credential model is the **current production
+implementation only**. It remains operational until greenfield cutover, but its
+`<credential-id>.<validator>` token, per-credential scopes, hash-only Doppler
+configuration, provisioner, and raw-route allowlist are incompatible with the
+greenfield database-owned model above. Do not insert its generated tokens or
+hashes into greenfield tables. At cutover, clients must install server-issued
+greenfield tokens through a separately reviewed secret-file workflow; the
+legacy provisioner does not create greenfield principal or credential state.
 
 Configure hash-only credentials in the Dashboard runtime:
 

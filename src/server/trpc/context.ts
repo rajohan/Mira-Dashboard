@@ -4,6 +4,7 @@ import {
     type AuthenticationLease,
     parseAuthenticationResolution,
 } from "../domains/security/authenticationResolution.ts";
+import type { AutomationSecurityLifecycleService } from "../domains/security/automation/lifecycle.ts";
 import type { MfaAccountLifecycleService } from "../domains/security/mfa/accountLifecycle.ts";
 import type { MfaLoginLifecycleService } from "../domains/security/mfa/loginLifecycle.ts";
 import type {
@@ -24,6 +25,7 @@ export interface RequestContextOptions {
     readonly authenticationCredential: RawAuthenticationCredential;
     readonly authenticationClientSourceId: string;
     readonly authenticationLifecycle: AuthenticationLifecycleService;
+    readonly automationSecurityLifecycle: AutomationSecurityLifecycleService;
     readonly authenticateCredential: AuthenticateCredential;
     readonly mfaAccountLifecycle: MfaAccountLifecycleService;
     readonly mfaLoginLifecycle: MfaLoginLifecycleService;
@@ -37,6 +39,7 @@ export interface RequestContext {
     readonly authentication: RequestAuthentication;
     readonly authenticationClientSourceId: string;
     readonly authenticationLifecycle: AuthenticationLifecycleService;
+    readonly automationSecurityLifecycle: AutomationSecurityLifecycleService;
     readonly authenticationLease?: AuthenticationLease;
     readonly mfaAccountLifecycle: MfaAccountLifecycleService;
     readonly mfaLoginLifecycle: MfaLoginLifecycleService;
@@ -63,6 +66,7 @@ export async function createRequestContext(
         authentication: resolution.authentication,
         authenticationClientSourceId: options.authenticationClientSourceId,
         authenticationLifecycle: options.authenticationLifecycle,
+        automationSecurityLifecycle: options.automationSecurityLifecycle,
         mfaAccountLifecycle: options.mfaAccountLifecycle,
         mfaLoginLifecycle: options.mfaLoginLifecycle,
         ...(resolution.lease && { authenticationLease: resolution.lease }),

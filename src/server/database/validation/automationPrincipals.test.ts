@@ -50,6 +50,8 @@ describe("automation principal row schemas", () => {
         { id: "openclaw-task-tracking\0suffix" },
         { label: "   " },
         { label: "\t\n" },
+        { label: "OpenClaw\u0007tracking" },
+        { label: "OpenClaw\u200Btracking" },
         { updatedAt: subMilliseconds(securityCreatedAt, 1) },
     ])("rejects invalid automation principal %#", (replacement) => {
         expect(() =>

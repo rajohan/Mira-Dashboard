@@ -24,6 +24,16 @@ describe("tRPC request policy", () => {
             rejectsBatch: true,
             requestBodyMaximumBytes: authenticationRequestBodyMaximumBytes,
         });
+        expect(policy("/trpc/automationSecurity.listPrincipals?batch=1")).toEqual({
+            handlerIdleTimeoutSeconds: authenticationHandlerIdleTimeoutSeconds,
+            rejectsBatch: false,
+            requestBodyMaximumBytes: authenticationRequestBodyMaximumBytes,
+        });
+        expect(policy("/trpc/automationSecurity.createPrincipal?batch=1")).toEqual({
+            handlerIdleTimeoutSeconds: authenticationHandlerIdleTimeoutSeconds,
+            rejectsBatch: true,
+            requestBodyMaximumBytes: authenticationRequestBodyMaximumBytes,
+        });
         expect(policy("/trpc/events.stream")).toEqual({
             handlerIdleTimeoutSeconds: 0,
             rejectsBatch: false,
@@ -53,6 +63,7 @@ describe("tRPC request policy", () => {
             "/trpc/auth.future?batch=1",
             "/trpc/auth.statusExtra?batch=1",
             "/trpc/accountSecurity.future?batch=1",
+            "/trpc/automationSecurity.future?batch=1",
         ]) {
             expect(policy(path)).toEqual({
                 handlerIdleTimeoutSeconds: authenticationHandlerIdleTimeoutSeconds,
@@ -68,6 +79,7 @@ describe("tRPC request policy", () => {
             "/trpc/auth%2Elogin%?batch=1",
             "/trpc/system.runtimeIdentity%2Cauth.login%?batch=1",
             "/trpc/ACCOUNTSECURITY%2EstepUpTotp%?batch=1",
+            "/trpc/AUTOMATIONSECURITY%2EcreatePrincipal%?batch=1",
         ]) {
             expect(policy(path)).toEqual({
                 handlerIdleTimeoutSeconds: authenticationHandlerIdleTimeoutSeconds,

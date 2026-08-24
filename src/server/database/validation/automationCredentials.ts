@@ -11,7 +11,7 @@ import { automationCredentials } from "../schema/automationCredentials.ts";
 import { nonnegativeDateSchema, uuidV7TextSchema } from "./scalars.ts";
 import {
     automationPrincipalIdSchema,
-    securityLabelSchema,
+    controlSafeSecurityLabelSchema,
     opaqueSelectorSchema,
     sha256TextSchema,
 } from "./securityScalars.ts";
@@ -19,20 +19,23 @@ import {
 function credentialTimesAreOrdered(credential: {
     readonly createdAt: Date;
     readonly expiresAt?: Date | null;
-    readonly lastUsedAt?: Date | null;
     readonly revokedAt?: Date | null;
 }): boolean {
     return (
         (credential.expiresAt == null ||
             compareAsc(credential.expiresAt, credential.createdAt) > 0) &&
-        (credential.lastUsedAt == null ||
-            (compareAsc(credential.lastUsedAt, credential.createdAt) >= 0 &&
-                (credential.expiresAt == null ||
-                    compareAsc(credential.lastUsedAt, credential.expiresAt) < 0) &&
-                (credential.revokedAt == null ||
-                    compareAsc(credential.lastUsedAt, credential.revokedAt) <= 0))) &&
         (credential.revokedAt == null ||
             compareAsc(credential.revokedAt, credential.createdAt) >= 0)
+    );
+}
+
+function credentialDoesNotReplaceItself(credential: {
+    readonly id: string;
+    readonly replacesCredentialId?: string | null;
+}): boolean {
+    return (
+        credential.replacesCredentialId == null ||
+        credential.replacesCredentialId !== credential.id
     );
 }
 
@@ -40,10 +43,10 @@ const credentialRefinements = {
     createdAt: nonnegativeDateSchema,
     expiresAt: nonnegativeDateSchema,
     id: uuidV7TextSchema,
-    label: () => securityLabelSchema,
-    lastUsedAt: nonnegativeDateSchema,
+    label: () => controlSafeSecurityLabelSchema,
     prefix: () => opaqueSelectorSchema,
     principalId: () => automationPrincipalIdSchema,
+    replacesCredentialId: uuidV7TextSchema,
     revokedAt: nonnegativeDateSchema,
     validatorHash: sha256TextSchema,
     validatorVersion: (
@@ -62,6 +65,10 @@ export const automationCredentialSelectSchema = v.pipe(
     v.check(
         (credential) => credentialTimesAreOrdered(credential),
         "Automation credential timestamps are inconsistent"
+    ),
+    v.check(
+        (credential) => credentialDoesNotReplaceItself(credential),
+        "Automation credential cannot replace itself"
     )
 );
 
@@ -79,5 +86,9 @@ export const automationCredentialInsertSchema = v.pipe(
     v.check(
         (credential) => credentialTimesAreOrdered(credential),
         "Automation credential timestamps are inconsistent"
+    ),
+    v.check(
+        (credential) => credentialDoesNotReplaceItself(credential),
+        "Automation credential cannot replace itself"
     )
 );

@@ -116,19 +116,21 @@ CREATE TABLE `automation_credentials` (
 	`expires_at` integer,
 	`id` text PRIMARY KEY,
 	`label` text NOT NULL,
-	`last_used_at` integer,
 	`prefix` text NOT NULL,
 	`principal_id` text NOT NULL,
+	`replaces_credential_id` text,
 	`revoked_at` integer,
 	`validator_hash` text NOT NULL,
 	`validator_version` integer DEFAULT 1 NOT NULL,
 	CONSTRAINT `fk_automation_credentials_principal_id_automation_principals_id_fk` FOREIGN KEY (`principal_id`) REFERENCES `automation_principals`(`id`) ON DELETE CASCADE,
+	CONSTRAINT `fk_automation_credentials_replaces_credential_id_automation_credentials_id_fk` FOREIGN KEY (`replaces_credential_id`) REFERENCES `automation_credentials`(`id`) ON DELETE SET NULL,
 	CONSTRAINT "automation_credentials_id_check" CHECK(length("id") = 36 AND instr("id", char(0)) = 0 AND length(replace("id", '-', '')) = 32 AND replace("id", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr("id", 9, 1) = '-' AND substr("id", 14, 1) = '-' AND substr("id", 15, 1) = '7' AND substr("id", 19, 1) = '-' AND substr("id", 20, 1) GLOB '[89ab]' AND substr("id", 24, 1) = '-'),
-	CONSTRAINT "automation_credentials_label_check" CHECK(length("label") BETWEEN 1 AND 128 AND instr("label", char(0)) = 0 AND length(trim("label", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0),
+	CONSTRAINT "automation_credentials_label_check" CHECK(length("label") BETWEEN 1 AND 128 AND instr("label", char(0)) = 0 AND length(trim("label", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND "label" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*')),
 	CONSTRAINT "automation_credentials_prefix_check" CHECK(length("prefix") = 32 AND instr("prefix", char(0)) = 0 AND "prefix" NOT GLOB '*[^0-9a-f]*'),
 	CONSTRAINT "automation_credentials_validator_hash_check" CHECK(length("validator_hash") = 64 AND instr("validator_hash", char(0)) = 0 AND "validator_hash" NOT GLOB '*[^0-9a-f]*'),
 	CONSTRAINT "automation_credentials_validator_version_check" CHECK("validator_version" = 1),
-	CONSTRAINT "automation_credentials_time_check" CHECK("created_at" BETWEEN 0 AND 8640000000000000 AND ("expires_at" IS NULL OR ("expires_at" BETWEEN 0 AND 8640000000000000 AND "expires_at" > "created_at")) AND ("revoked_at" IS NULL OR ("revoked_at" BETWEEN 0 AND 8640000000000000 AND "revoked_at" >= "created_at")) AND ("last_used_at" IS NULL OR ("last_used_at" BETWEEN 0 AND 8640000000000000 AND "last_used_at" >= "created_at" AND ("expires_at" IS NULL OR "last_used_at" < "expires_at") AND ("revoked_at" IS NULL OR "last_used_at" <= "revoked_at"))))
+	CONSTRAINT "automation_credentials_replacement_check" CHECK("replaces_credential_id" IS NULL OR (length("replaces_credential_id") = 36 AND instr("replaces_credential_id", char(0)) = 0 AND length(replace("replaces_credential_id", '-', '')) = 32 AND replace("replaces_credential_id", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr("replaces_credential_id", 9, 1) = '-' AND substr("replaces_credential_id", 14, 1) = '-' AND substr("replaces_credential_id", 15, 1) = '7' AND substr("replaces_credential_id", 19, 1) = '-' AND substr("replaces_credential_id", 20, 1) GLOB '[89ab]' AND substr("replaces_credential_id", 24, 1) = '-' AND "replaces_credential_id" <> "id")),
+	CONSTRAINT "automation_credentials_time_check" CHECK("created_at" BETWEEN 0 AND 8640000000000000 AND ("expires_at" IS NULL OR ("expires_at" BETWEEN 0 AND 8640000000000000 AND "expires_at" > "created_at")) AND ("revoked_at" IS NULL OR ("revoked_at" BETWEEN 0 AND 8640000000000000 AND "revoked_at" >= "created_at")))
 ) STRICT;
 --> statement-breakpoint
 CREATE TABLE `automation_principal_capabilities` (
@@ -150,7 +152,7 @@ CREATE TABLE `automation_principals` (
 	`updated_at` integer NOT NULL,
 	CONSTRAINT "automation_principals_authorization_version_check" CHECK("authorization_version" BETWEEN 1 AND 9007199254740991),
 	CONSTRAINT "automation_principals_id_check" CHECK(length("id") BETWEEN 1 AND 64 AND instr("id", char(0)) = 0 AND "id" = lower("id") AND substr("id", 1, 1) GLOB '[a-z0-9]' AND "id" NOT GLOB '*[^a-z0-9._-]*'),
-	CONSTRAINT "automation_principals_label_check" CHECK(length("label") BETWEEN 1 AND 128 AND instr("label", char(0)) = 0 AND length(trim("label", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0),
+	CONSTRAINT "automation_principals_label_check" CHECK(length("label") BETWEEN 1 AND 128 AND instr("label", char(0)) = 0 AND length(trim("label", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND "label" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*')),
 	CONSTRAINT "automation_principals_time_check" CHECK("created_at" BETWEEN 0 AND 8640000000000000 AND "updated_at" BETWEEN 0 AND 8640000000000000 AND "updated_at" >= "created_at" AND ("disabled_at" IS NULL OR ("disabled_at" BETWEEN 0 AND 8640000000000000 AND "disabled_at" >= "created_at" AND "disabled_at" <= "updated_at")))
 ) STRICT;
 --> statement-breakpoint
@@ -358,9 +360,54 @@ CREATE INDEX `auth_rate_limit_buckets_kind_updated_at_idx` ON `auth_rate_limit_b
 CREATE INDEX `auth_sessions_expires_at_idx` ON `auth_sessions` (`expires_at`);--> statement-breakpoint
 CREATE INDEX `auth_sessions_user_last_seen_idx` ON `auth_sessions` (`user_id`,`last_seen_at`,`created_at`,`id`);--> statement-breakpoint
 CREATE UNIQUE INDEX `auth_sessions_validator_hash_unique` ON `auth_sessions` (`validator_hash`);--> statement-breakpoint
-CREATE INDEX `automation_credentials_principal_created_idx` ON `automation_credentials` (`principal_id`,`created_at`);--> statement-breakpoint
+CREATE INDEX `automation_credentials_principal_created_idx` ON `automation_credentials` (`principal_id`,`created_at`,`id`);--> statement-breakpoint
+CREATE INDEX `automation_credentials_active_principal_created_idx` ON `automation_credentials` (`principal_id`,`created_at`,`id`) WHERE "automation_credentials"."revoked_at" IS NULL;--> statement-breakpoint
+CREATE INDEX `automation_credentials_replacement_idx` ON `automation_credentials` (`replaces_credential_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `automation_credentials_active_replacement_unique` ON `automation_credentials` (`replaces_credential_id`) WHERE "automation_credentials"."replaces_credential_id" IS NOT NULL AND "automation_credentials"."revoked_at" IS NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX `automation_credentials_prefix_unique` ON `automation_credentials` (`prefix`);--> statement-breakpoint
 CREATE UNIQUE INDEX `automation_credentials_validator_unique` ON `automation_credentials` (`validator_version`,`validator_hash`);--> statement-breakpoint
+CREATE INDEX `automation_principals_created_id_idx` ON `automation_principals` (`created_at`,`id`);--> statement-breakpoint
+CREATE INDEX `automation_principals_active_created_id_idx` ON `automation_principals` (`created_at`,`id`) WHERE "automation_principals"."disabled_at" IS NULL;--> statement-breakpoint
+CREATE TRIGGER automation_credentials_validate_replacement_insert
+BEFORE INSERT ON automation_credentials
+WHEN NEW.replaces_credential_id IS NOT NULL
+    AND NEW.replaces_credential_id <> NEW.id
+    AND NOT EXISTS (
+        SELECT 1
+        FROM automation_credentials AS predecessor
+        WHERE predecessor.id = NEW.replaces_credential_id
+          AND predecessor.principal_id = NEW.principal_id
+    )
+BEGIN
+	SELECT RAISE(ABORT, 'automation credential replacement must share principal');
+END;
+--> statement-breakpoint
+CREATE TRIGGER automation_credentials_validate_replacement_update
+BEFORE UPDATE OF principal_id, replaces_credential_id ON automation_credentials
+WHEN NEW.replaces_credential_id IS NOT NULL
+    AND NEW.replaces_credential_id <> NEW.id
+    AND NOT EXISTS (
+        SELECT 1
+        FROM automation_credentials AS predecessor
+        WHERE predecessor.id = NEW.replaces_credential_id
+          AND predecessor.principal_id = NEW.principal_id
+    )
+BEGIN
+	SELECT RAISE(ABORT, 'automation credential replacement must share principal');
+END;
+--> statement-breakpoint
+CREATE TRIGGER automation_credentials_validate_predecessor_update
+BEFORE UPDATE OF principal_id ON automation_credentials
+WHEN EXISTS (
+    SELECT 1
+    FROM automation_credentials AS replacement
+    WHERE replacement.replaces_credential_id = OLD.id
+      AND replacement.principal_id <> NEW.principal_id
+)
+BEGIN
+	SELECT RAISE(ABORT, 'automation credential predecessor must share principal');
+END;
+--> statement-breakpoint
 CREATE UNIQUE INDEX `incident_observations_run_incident_unique` ON `incident_observations` (`monitor_run_id`,`incident_id`);--> statement-breakpoint
 CREATE INDEX `incident_observations_incident_observed_id_idx` ON `incident_observations` (`incident_id`,`observed_at`,`id`);--> statement-breakpoint
 CREATE INDEX `incident_observations_run_idx` ON `incident_observations` (`monitor_run_id`,`id`);--> statement-breakpoint

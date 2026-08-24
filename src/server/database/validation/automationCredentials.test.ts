@@ -8,6 +8,7 @@ import {
     automationCredentialSelectSchema,
 } from "./automationCredentials.ts";
 import {
+    automationReplacementSourceCredentialId,
     securityCreatedAt,
     validAutomationCredentialInsert,
 } from "./testSupport/securityRows.ts";
@@ -21,11 +22,16 @@ describe("automation credential row schemas", () => {
             v.parse(automationCredentialSelectSchema, {
                 ...validAutomationCredentialInsert,
                 expiresAt: null,
-                lastUsedAt: null,
                 revokedAt: null,
                 validatorVersion: 1,
             })
         ).toBeDefined();
+        expect(
+            v.parse(automationCredentialInsertSchema, {
+                ...validAutomationCredentialInsert,
+                replacesCredentialId: automationReplacementSourceCredentialId,
+            }).replacesCredentialId
+        ).toBe(automationReplacementSourceCredentialId);
     });
 
     test.each([
@@ -34,15 +40,27 @@ describe("automation credential row schemas", () => {
         { validatorHash: "d".repeat(63) },
         { validatorHash: `${"d".repeat(64)}\0suffix` },
         { label: "\0" },
+        { label: "Primary\u0007credential" },
+        { label: "Primary\u200Bcredential" },
         { label: "\u3000" },
         { expiresAt: securityCreatedAt },
-        { lastUsedAt: subMilliseconds(securityCreatedAt, 1) },
+        { replacesCredentialId: "not-a-credential-id" },
+        { replacesCredentialId: validAutomationCredentialInsert.id },
         { revokedAt: subMilliseconds(securityCreatedAt, 1) },
     ])("rejects invalid automation credential %#", (replacement) => {
         expect(() =>
             v.parse(automationCredentialInsertSchema, {
                 ...validAutomationCredentialInsert,
                 ...replacement,
+            })
+        ).toThrow();
+    });
+
+    test("rejects the removed lastUsedAt column", () => {
+        expect(() =>
+            v.parse(automationCredentialInsertSchema, {
+                ...validAutomationCredentialInsert,
+                lastUsedAt: null,
             })
         ).toThrow();
     });

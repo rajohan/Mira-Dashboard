@@ -1,0 +1,171 @@
+{
+  "$id": "urn:mira-dashboard:automationSecurity.disablePrincipal.output",
+  "type": "object",
+  "properties": {
+    "changed": {
+      "type": "boolean"
+    },
+    "principal": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "activeCredentialCount": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4
+            },
+            "authorizationVersion": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "capabilities": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "notifications:read",
+                  "reports:read"
+                ],
+                "type": "string"
+              },
+              "maxItems": 2,
+              "uniqueItems": true
+            },
+            "createdAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[a-z0-9][a-z0-9._-]*$"
+            },
+            "label": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^(?=[\\s\\S]*\\S)(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]+$"
+            },
+            "totalCredentialCount": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "updatedAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            },
+            "disabled": {
+              "const": false
+            }
+          },
+          "required": [
+            "activeCredentialCount",
+            "authorizationVersion",
+            "capabilities",
+            "createdAtMs",
+            "id",
+            "label",
+            "totalCredentialCount",
+            "updatedAtMs",
+            "disabled"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "activeCredentialCount": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4
+            },
+            "authorizationVersion": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "capabilities": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "notifications:read",
+                  "reports:read"
+                ],
+                "type": "string"
+              },
+              "maxItems": 2,
+              "uniqueItems": true
+            },
+            "createdAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[a-z0-9][a-z0-9._-]*$"
+            },
+            "label": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^(?=[\\s\\S]*\\S)(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]+$"
+            },
+            "totalCredentialCount": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "updatedAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            },
+            "disabled": {
+              "const": true
+            },
+            "disabledAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            }
+          },
+          "required": [
+            "activeCredentialCount",
+            "authorizationVersion",
+            "capabilities",
+            "createdAtMs",
+            "id",
+            "label",
+            "totalCredentialCount",
+            "updatedAtMs",
+            "disabled",
+            "disabledAtMs"
+          ],
+          "additionalProperties": false
+        }
+      ],
+      "$comment": "Live Valibot validation additionally orders principal creation, update, and disable timestamps. Live Valibot validation additionally bounds active credentials by the total and requires zero active credentials when disabled."
+    },
+    "revokedCredentials": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "changed",
+    "principal",
+    "revokedCredentials"
+  ],
+  "additionalProperties": false,
+  "$comment": "Live Valibot validation additionally requires terminal disabled state and zero newly revoked credentials for an idempotent no-op.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

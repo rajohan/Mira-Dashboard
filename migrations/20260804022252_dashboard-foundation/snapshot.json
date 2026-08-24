@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "ccf6127d-529f-4458-a83b-06bf4c04cfb3",
+  "id": "e7bb3180-9946-4254-9b22-e00d9871a332",
   "prevIds": [
     "00000000-0000-0000-0000-000000000000"
   ],
@@ -653,16 +653,6 @@
       "table": "automation_credentials"
     },
     {
-      "type": "integer",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "last_used_at",
-      "entityType": "columns",
-      "table": "automation_credentials"
-    },
-    {
       "type": "text",
       "notNull": true,
       "autoincrement": false,
@@ -679,6 +669,16 @@
       "default": null,
       "generated": null,
       "name": "principal_id",
+      "entityType": "columns",
+      "table": "automation_credentials"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "replaces_credential_id",
       "entityType": "columns",
       "table": "automation_credentials"
     },
@@ -1864,6 +1864,21 @@
     },
     {
       "columns": [
+        "replaces_credential_id"
+      ],
+      "tableTo": "automation_credentials",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "SET NULL",
+      "nameExplicit": false,
+      "name": "fk_automation_credentials_replaces_credential_id_automation_credentials_id_fk",
+      "entityType": "fks",
+      "table": "automation_credentials"
+    },
+    {
+      "columns": [
         "principal_id"
       ],
       "tableTo": "automation_principals",
@@ -2427,12 +2442,66 @@
         {
           "value": "created_at",
           "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
         }
       ],
       "isUnique": false,
       "where": null,
       "origin": "manual",
       "name": "automation_credentials_principal_created_idx",
+      "entityType": "indexes",
+      "table": "automation_credentials"
+    },
+    {
+      "columns": [
+        {
+          "value": "principal_id",
+          "isExpression": false
+        },
+        {
+          "value": "created_at",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": "\"automation_credentials\".\"revoked_at\" IS NULL",
+      "origin": "manual",
+      "name": "automation_credentials_active_principal_created_idx",
+      "entityType": "indexes",
+      "table": "automation_credentials"
+    },
+    {
+      "columns": [
+        {
+          "value": "replaces_credential_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "automation_credentials_replacement_idx",
+      "entityType": "indexes",
+      "table": "automation_credentials"
+    },
+    {
+      "columns": [
+        {
+          "value": "replaces_credential_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": "\"automation_credentials\".\"replaces_credential_id\" IS NOT NULL AND \"automation_credentials\".\"revoked_at\" IS NULL",
+      "origin": "manual",
+      "name": "automation_credentials_active_replacement_unique",
       "entityType": "indexes",
       "table": "automation_credentials"
     },
@@ -2467,6 +2536,42 @@
       "name": "automation_credentials_validator_unique",
       "entityType": "indexes",
       "table": "automation_credentials"
+    },
+    {
+      "columns": [
+        {
+          "value": "created_at",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "automation_principals_created_id_idx",
+      "entityType": "indexes",
+      "table": "automation_principals"
+    },
+    {
+      "columns": [
+        {
+          "value": "created_at",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": "\"automation_principals\".\"disabled_at\" IS NULL",
+      "origin": "manual",
+      "name": "automation_principals_active_created_id_idx",
+      "entityType": "indexes",
+      "table": "automation_principals"
     },
     {
       "columns": [
@@ -3107,7 +3212,7 @@
       "table": "automation_credentials"
     },
     {
-      "value": "length(\"label\") BETWEEN 1 AND 128 AND instr(\"label\", char(0)) = 0 AND length(trim(\"label\", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0",
+      "value": "length(\"label\") BETWEEN 1 AND 128 AND instr(\"label\", char(0)) = 0 AND length(trim(\"label\", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND \"label\" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*')",
       "name": "automation_credentials_label_check",
       "entityType": "checks",
       "table": "automation_credentials"
@@ -3131,7 +3236,13 @@
       "table": "automation_credentials"
     },
     {
-      "value": "\"created_at\" BETWEEN 0 AND 8640000000000000 AND (\"expires_at\" IS NULL OR (\"expires_at\" BETWEEN 0 AND 8640000000000000 AND \"expires_at\" > \"created_at\")) AND (\"revoked_at\" IS NULL OR (\"revoked_at\" BETWEEN 0 AND 8640000000000000 AND \"revoked_at\" >= \"created_at\")) AND (\"last_used_at\" IS NULL OR (\"last_used_at\" BETWEEN 0 AND 8640000000000000 AND \"last_used_at\" >= \"created_at\" AND (\"expires_at\" IS NULL OR \"last_used_at\" < \"expires_at\") AND (\"revoked_at\" IS NULL OR \"last_used_at\" <= \"revoked_at\")))",
+      "value": "\"replaces_credential_id\" IS NULL OR (length(\"replaces_credential_id\") = 36 AND instr(\"replaces_credential_id\", char(0)) = 0 AND length(replace(\"replaces_credential_id\", '-', '')) = 32 AND replace(\"replaces_credential_id\", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr(\"replaces_credential_id\", 9, 1) = '-' AND substr(\"replaces_credential_id\", 14, 1) = '-' AND substr(\"replaces_credential_id\", 15, 1) = '7' AND substr(\"replaces_credential_id\", 19, 1) = '-' AND substr(\"replaces_credential_id\", 20, 1) GLOB '[89ab]' AND substr(\"replaces_credential_id\", 24, 1) = '-' AND \"replaces_credential_id\" <> \"id\")",
+      "name": "automation_credentials_replacement_check",
+      "entityType": "checks",
+      "table": "automation_credentials"
+    },
+    {
+      "value": "\"created_at\" BETWEEN 0 AND 8640000000000000 AND (\"expires_at\" IS NULL OR (\"expires_at\" BETWEEN 0 AND 8640000000000000 AND \"expires_at\" > \"created_at\")) AND (\"revoked_at\" IS NULL OR (\"revoked_at\" BETWEEN 0 AND 8640000000000000 AND \"revoked_at\" >= \"created_at\"))",
       "name": "automation_credentials_time_check",
       "entityType": "checks",
       "table": "automation_credentials"
@@ -3161,7 +3272,7 @@
       "table": "automation_principals"
     },
     {
-      "value": "length(\"label\") BETWEEN 1 AND 128 AND instr(\"label\", char(0)) = 0 AND length(trim(\"label\", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0",
+      "value": "length(\"label\") BETWEEN 1 AND 128 AND instr(\"label\", char(0)) = 0 AND length(trim(\"label\", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND \"label\" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*')",
       "name": "automation_principals_label_check",
       "entityType": "checks",
       "table": "automation_principals"

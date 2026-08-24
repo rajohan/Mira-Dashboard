@@ -1,6 +1,7 @@
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 
 import type { AuthenticationLifecycleService } from "../server/domains/security/authenticationLifecycle.ts";
+import type { AutomationSecurityLifecycleService } from "../server/domains/security/automation/lifecycle.ts";
 import type { MfaAccountLifecycleService } from "../server/domains/security/mfa/accountLifecycle.ts";
 import type { MfaLoginLifecycleService } from "../server/domains/security/mfa/loginLifecycle.ts";
 import type { ApplicationRuntime } from "../server/platform/runtime/applicationRuntime.ts";
@@ -28,6 +29,7 @@ export interface TrpcHttpHandlerOptions {
     readonly applicationRuntime: ApplicationRuntime;
     readonly authenticateCredential: AuthenticateCredential;
     readonly authenticationLifecycle: AuthenticationLifecycleService;
+    readonly automationSecurityLifecycle: AutomationSecurityLifecycleService;
     readonly browserOrigin?: string;
     readonly mfaAccountLifecycle: MfaAccountLifecycleService;
     readonly mfaLoginLifecycle: MfaLoginLifecycleService;
@@ -199,6 +201,7 @@ export function createTrpcHttpHandler(options: TrpcHttpHandlerOptions) {
                     authenticationClientSourceId,
                     authenticationCredential: credentials.authentication,
                     authenticationLifecycle: options.authenticationLifecycle,
+                    automationSecurityLifecycle: options.automationSecurityLifecycle,
                     authenticateCredential: options.authenticateCredential,
                     mfaAccountLifecycle: options.mfaAccountLifecycle,
                     mfaLoginLifecycle: options.mfaLoginLifecycle,
