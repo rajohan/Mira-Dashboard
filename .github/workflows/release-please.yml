@@ -5,7 +5,6 @@ on:
         branches: [main]
 
 permissions:
-    actions: write
     contents: write
     pull-requests: write
 
@@ -14,20 +13,20 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 20
         steps:
+            - name: Create release automation token
+              id: release-token
+              uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+              with:
+                  client-id: ${{ secrets.RELEASE_PLEASE_APP_CLIENT_ID }}
+                  private-key: ${{ secrets.RELEASE_PLEASE_APP_PRIVATE_KEY }}
+                  permission-contents: write
+                  permission-pull-requests: write
+
             - name: Create or update release PR
               id: release
               uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
-
-            - name: Dispatch checks for the release PR
-              env:
-                  GH_TOKEN: ${{ github.token }}
-                  GH_REPO: ${{ github.repository }}
-              shell: bash
-              run: |
-                  branch="$(gh pr list --state open --label 'autorelease: pending' --json headRefName --jq '.[0].headRefName // ""')"
-                  if [[ -n "$branch" ]]; then
-                      gh workflow run dashboard-checks.yml --ref "$branch"
-                  fi
+              with:
+                  token: ${{ steps.release-token.outputs.token }}
 
             - name: Checkout main commit
               uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
