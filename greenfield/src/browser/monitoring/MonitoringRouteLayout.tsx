@@ -1,7 +1,7 @@
 import { useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
-import { PageHeader } from "../ui/PageHeader.tsx";
+import { Heading } from "../ui/Heading.tsx";
 import { Tabs } from "../ui/Tabs.tsx";
 
 type MonitoringRoutePath = "/incidents" | "/reports";
@@ -12,24 +12,11 @@ interface MonitoringRouteLayoutProps {
     readonly pathname: MonitoringRoutePath;
 }
 
-const monitoringRouteCopy = Object.freeze({
-    incidents: Object.freeze({
-        description:
-            "See current and resolved problems reported by monitoring. This page updates automatically and checks again every 30 seconds if live updates stop.",
-        title: "Incidents",
-    }),
-    reports: Object.freeze({
-        description:
-            "Read daily briefs, summaries, health checks, and other monitoring reports. This page updates automatically and checks again every 30 seconds if live updates stop.",
-        title: "Reports",
-    }),
-});
-
 /**
  * Keeps monitoring tabs mounted while the selected child route changes so
  * keyboard focus and browser history remain part of one accessible tab set.
  *
- * @returns The shared monitoring page header, route tabs, and active child.
+ * @returns The shared monitoring route tabs and active child.
  */
 export function MonitoringRouteLayout({
     children,
@@ -38,18 +25,14 @@ export function MonitoringRouteLayout({
     const navigate = useNavigate();
     const value: MonitoringRouteView =
         pathname === "/incidents" ? "incidents" : "reports";
-    const copy = monitoringRouteCopy[value];
 
     return (
         <div>
-            <PageHeader
-                description={copy.description}
-                eyebrow="Monitoring"
-                title={copy.title}
-            />
+            <Heading className="sr-only" level={1}>
+                {value === "incidents" ? "Incidents" : "Reports"}
+            </Heading>
             <Tabs
                 ariaLabel="Monitoring views"
-                className="mt-8"
                 onChange={(nextView) => {
                     void navigate({
                         to: nextView === "reports" ? "/reports" : "/incidents",

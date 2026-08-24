@@ -41,16 +41,16 @@ const overallLabels: Readonly<Record<DashboardSystemComponentState, string>> =
 function statusClassName(state: DashboardSystemComponentState): string {
     switch (state) {
         case "online": {
-            return "border-green-500/40 bg-green-500/10 text-green-300 data-hover:bg-green-500/20 data-hover:text-green-300 hover:bg-green-500/20 hover:text-green-300";
+            return "border-green-500/40 bg-green-500/10 text-green-300 data-hover:bg-green-500/20 data-hover:text-green-300 data-active:bg-green-500/20 data-active:text-green-300 data-open:bg-green-500/20 data-open:text-green-300 hover:bg-green-500/20 hover:text-green-300 active:bg-green-500/20 active:text-green-300";
         }
         case "offline": {
-            return "border-red-500/40 bg-red-500/10 text-red-300 data-hover:bg-red-500/20 data-hover:text-red-300 hover:bg-red-500/20 hover:text-red-300";
+            return "border-red-500/40 bg-red-500/10 text-red-300 data-hover:bg-red-500/20 data-hover:text-red-300 data-active:bg-red-500/20 data-active:text-red-300 data-open:bg-red-500/20 data-open:text-red-300 hover:bg-red-500/20 hover:text-red-300 active:bg-red-500/20 active:text-red-300";
         }
         case "stale": {
-            return "border-amber-500/40 bg-amber-500/10 text-amber-200 data-hover:bg-amber-500/20 data-hover:text-amber-200 hover:bg-amber-500/20 hover:text-amber-200";
+            return "border-amber-500/40 bg-amber-500/10 text-amber-200 data-hover:bg-amber-500/20 data-hover:text-amber-200 data-active:bg-amber-500/20 data-active:text-amber-200 data-open:bg-amber-500/20 data-open:text-amber-200 hover:bg-amber-500/20 hover:text-amber-200 active:bg-amber-500/20 active:text-amber-200";
         }
         case "unavailable": {
-            return "border-amber-500/40 bg-amber-500/10 text-amber-200 data-hover:bg-amber-500/20 data-hover:text-amber-200 hover:bg-amber-500/20 hover:text-amber-200";
+            return "border-amber-500/40 bg-amber-500/10 text-amber-200 data-hover:bg-amber-500/20 data-hover:text-amber-200 data-active:bg-amber-500/20 data-active:text-amber-200 data-open:bg-amber-500/20 data-open:text-amber-200 hover:bg-amber-500/20 hover:text-amber-200 active:bg-amber-500/20 active:text-amber-200";
         }
     }
 }
@@ -62,14 +62,14 @@ interface StatusRowProps {
 
 function StatusRow({ label, state }: StatusRowProps) {
     return (
-        <div className="flex items-center justify-between gap-4">
-            <Text size="sm" tone="muted">
+        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4">
+            <Text className="whitespace-nowrap" size="sm" tone="muted">
                 {label}
             </Text>
             <Text
                 as="span"
                 className={cn(
-                    "font-medium",
+                    "inline-flex items-center gap-1 font-medium whitespace-nowrap",
                     state === "online" && "text-green-300",
                     state === "offline" && "text-red-300",
                     state === "stale" && "text-amber-200",
@@ -78,7 +78,7 @@ function StatusRow({ label, state }: StatusRowProps) {
                 size="sm"
                 tone="inherit"
             >
-                {componentLabels[state]} {state === "online" ? "●" : "○"}
+                {componentLabels[state]} ●
             </Text>
         </div>
     );
@@ -147,11 +147,9 @@ function AuthenticatedDashboardHeaderControls() {
                     variant="ghost"
                 >
                     <Icon icon={Activity} size="sm" tone="inherit" />
-                    <span aria-hidden="true">
-                        {status.overall === "online" ? "●" : "○"}
-                    </span>
+                    <span aria-hidden="true">●</span>
                 </PopoverTrigger>
-                <PopoverContent className="w-64 space-y-3">
+                <PopoverContent className="w-72 space-y-3">
                     <Heading level={2} size="subsection">
                         System status
                     </Heading>

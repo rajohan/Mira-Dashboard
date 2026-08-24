@@ -39,6 +39,7 @@ import {
     persistentGatewayChatReadMethods,
     persistentGatewayChatReadMutationMethods,
     persistentGatewayChatWriteMethods,
+    persistentGatewayEventNames,
     persistentGatewayOpenClawSettingsReadMethods,
     persistentGatewayOpenClawSettingsPatchMaximumBytes,
     persistentGatewayOpenClawSettingsWriteMethods,
@@ -60,7 +61,7 @@ function hello(input: {
     return {
         auth: { role: "operator", scopes: input.scopes },
         features: {
-            events: input.events ?? ["tick", "sessions.changed", "cron", "task"],
+            events: input.events ?? ["tick", ...persistentGatewayEventNames],
             methods: ["sessions.list", "chat.send", "cron.run"],
         },
         policy: {
@@ -179,6 +180,8 @@ describe("persistent Gateway protocol-v4 boundary", () => {
         expect(persistentGatewayAdminMethods).toEqual([
             "cron.remove",
             "cron.run",
+            "cron.scratch.get",
+            "cron.scratch.set",
             "cron.update",
             "sessions.compact",
             "sessions.delete",
@@ -251,6 +254,15 @@ describe("persistent Gateway protocol-v4 boundary", () => {
         expect(() =>
             assertPersistentGatewayOpenClawSettingsReadParameters("skills.status", {
                 agentId: "main",
+            })
+        ).not.toThrow();
+        expect(() =>
+            assertPersistentGatewayOpenClawSettingsReadParameters("skills.status", {})
+        ).toThrow(TypeError);
+        expect(() =>
+            assertPersistentGatewayOpenClawSettingsReadParameters("skills.status", {
+                agentId: "main",
+                workspace: "/private/path",
             })
         ).toThrow(TypeError);
         const skillUpdate = { enabled: false, skillKey: "imagegen" };
@@ -734,11 +746,16 @@ describe("persistent Gateway protocol-v4 boundary", () => {
                     },
                 },
             }),
-            parameters({ session: { reset: { idleMinutes: 60, mode: "idle" } } }),
+            parameters({
+                session: {
+                    reset: { atHour: null, idleMinutes: 60, mode: "idle" },
+                },
+            }),
             parameters({ channels: { discord: { enabled: false } } }),
             parameters({ tools: { agentToAgent: { enabled: false } } }),
             parameters({ tools: { elevated: { enabled: true } } }),
             parameters({ tools: { exec: { ask: "always", security: "deny" } } }),
+            parameters({ tools: { exec: { mode: "full" } } }),
             parameters({ tools: { profile: null } }),
             parameters({ tools: { sessions: { visibility: null } } }),
             parameters({ tools: { web: { fetch: { enabled: true } } } }),
@@ -822,7 +839,6 @@ describe("persistent Gateway protocol-v4 boundary", () => {
                 { agents: { defaults: { heartbeat: { every: "3600s" } } } },
                 fallbackPath
             ),
-            parameters({ session: { reset: { idleMinutes: 60 } } }),
             parameters({ session: { reset: { idleMinutes: 60, mode: "daily" } } }),
             parameters({
                 session: { reset: { idleMinutes: 60, mode: "idle", extra: true } },
@@ -861,6 +877,7 @@ describe("persistent Gateway protocol-v4 boundary", () => {
     test("strictly validates every audited chat request shape", () => {
         expect(() =>
             assertPersistentGatewayChatReadParameters("chat.history", {
+                agentId: "main",
                 limit: 100,
                 maxChars: persistentGatewayChatHistoryMaximumChars,
                 offset: 0,
@@ -869,6 +886,7 @@ describe("persistent Gateway protocol-v4 boundary", () => {
         ).not.toThrow();
         expect(() =>
             assertPersistentGatewayChatReadParameters("chat.history", {
+                agentId: "main",
                 limit: 100,
                 maxChars: persistentGatewayChatHistoryMaximumChars + 1,
                 offset: 0,
@@ -877,6 +895,7 @@ describe("persistent Gateway protocol-v4 boundary", () => {
         ).toThrow(TypeError);
         expect(() =>
             assertPersistentGatewayChatReadParameters("chat.history", {
+                agentId: "main",
                 messageId: "message-1",
                 offset: 0,
                 sessionKey: "agent:main:main",
@@ -884,6 +903,7 @@ describe("persistent Gateway protocol-v4 boundary", () => {
         ).toThrow(TypeError);
         expect(() =>
             assertPersistentGatewayChatReadParameters("chat.message.get", {
+                agentId: "main",
                 maxChars: 1024 * 1024,
                 messageId: "message-1",
                 sessionKey: "agent:main:main",
@@ -891,6 +911,7 @@ describe("persistent Gateway protocol-v4 boundary", () => {
         ).not.toThrow();
         expect(() =>
             assertPersistentGatewayChatReadParameters("models.list", {
+                agentId: "main",
                 includeProviderCapabilities: false,
                 view: "configured",
             })
@@ -957,6 +978,7 @@ describe("persistent Gateway protocol-v4 boundary", () => {
         ).toThrow(TypeError);
         expect(() =>
             assertPersistentGatewayAdminParameters("sessions.patch", {
+                agentId: "main",
                 expectedSessionId: "session-1",
                 fastMode: "auto",
                 key: "agent:main:main",
@@ -992,6 +1014,7 @@ describe("persistent Gateway protocol-v4 boundary", () => {
         ).not.toThrow();
         expect(() =>
             assertPersistentGatewayAdminParameters("sessions.patch", {
+                agentId: "main",
                 key: "agent:main:main",
                 model: "x".repeat(257),
             })
@@ -1178,6 +1201,131 @@ describe("persistent Gateway protocol-v4 boundary", () => {
             type: "event",
         });
         expect(JSON.stringify(resetLifecycle)).not.toContain(sessionLifecycleSecret);
+        const ordinaryActivity = parsePersistentGatewayEvent({
+            event: "sessions.changed",
+            payload: {
+                agentId: "main",
+                privateField: sessionLifecycleSecret,
+                sessionKey: "agent:main:main",
+                ts: 1250,
+                updatedAt: 1240,
+            },
+            type: "event",
+        });
+        expect(ordinaryActivity).toEqual({
+            event: "sessions.changed",
+            sessionActivity: {
+                agentId: "main",
+                occurredAtMs: 1250,
+                sessionKey: "agent:main:main",
+                updatedAtMs: 1240,
+            },
+            type: "event",
+        });
+        expect(JSON.stringify(ordinaryActivity)).not.toContain(sessionLifecycleSecret);
+        const persistedUser = parsePersistentGatewayEvent({
+            event: "session.message",
+            payload: {
+                activeRunIds: ["provider-run-1"],
+                message: {
+                    content: [
+                        { text: "Visible immediately", type: "text" },
+                        { credential: sessionLifecycleSecret, type: "private" },
+                    ],
+                    role: "user",
+                },
+                messageId: "message-user-1",
+                privateField: sessionLifecycleSecret,
+                sessionKey: "agent:main:main",
+            },
+            type: "event",
+        });
+        expect(persistedUser).toEqual({
+            event: "session.message",
+            sessionMessage: {
+                sessionKey: "agent:main:main",
+                userMessage: {
+                    attachments: [],
+                    idempotencyKey: "message-user-1",
+                    messageId: "message-user-1",
+                    providerRunIds: ["provider-run-1"],
+                    text: "Visible immediately",
+                },
+            },
+            type: "event",
+        });
+        expect(JSON.stringify(persistedUser)).not.toContain(sessionLifecycleSecret);
+        expect(
+            parsePersistentGatewayEvent({
+                event: "session.message",
+                payload: {
+                    activeRunIds: ["side-run", "provider-run-2"],
+                    message: {
+                        __openclaw: {
+                            id: "message-user-2",
+                            idempotencyKey: "1244ca30-7f9c-431c-9a1a-512df105edb6:user",
+                            media: [
+                                {
+                                    contentType: "image/jpeg",
+                                    sizeBytes: 7861,
+                                    url: "media://inbound/b2ea3e92-1844-42d3-a512-d0c48e560657.jpg",
+                                },
+                            ],
+                            runId: "provider-run-2",
+                        },
+                        content: [{ text: "Projected beta user", type: "input_text" }],
+                        role: "user",
+                    },
+                    sessionKey: "agent:main:main",
+                },
+                type: "event",
+            })
+        ).toEqual({
+            event: "session.message",
+            sessionMessage: {
+                sessionKey: "agent:main:main",
+                userMessage: {
+                    attachments: [
+                        {
+                            contentType: "image/jpeg",
+                            fileName: "b2ea3e92-1844-42d3-a512-d0c48e560657.jpg",
+                            sizeBytes: 7861,
+                            url: "media://inbound/b2ea3e92-1844-42d3-a512-d0c48e560657.jpg",
+                        },
+                    ],
+                    idempotencyKey: "1244ca30-7f9c-431c-9a1a-512df105edb6",
+                    messageId: "message-user-2",
+                    providerRunIds: ["provider-run-2", "side-run"],
+                    text: "Projected beta user",
+                },
+            },
+            type: "event",
+        });
+        expect(
+            parsePersistentGatewayEvent({
+                event: "sessions.changed",
+                payload: {
+                    agentId: "main",
+                    idempotencyKey:
+                        "dashboard-chat-1244ca30-7f9c-431c-9a1a-512df105edb6:user",
+                    message: "accepted live user text",
+                    reason: "steer",
+                    runId: "provider-run-1",
+                    sessionKey: "agent:main:main",
+                    ts: 1260,
+                },
+                type: "event",
+            })
+        ).toEqual({
+            event: "sessions.changed",
+            sessionActivity: {
+                agentId: "main",
+                occurredAtMs: 1260,
+                reason: "steer",
+                sessionKey: "agent:main:main",
+            },
+            type: "event",
+        });
         expect(
             parsePersistentGatewayEvent({
                 event: "sessions.changed",

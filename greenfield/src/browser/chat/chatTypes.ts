@@ -126,6 +126,8 @@ export interface ChatDisplayMessage {
     readonly runId?: string;
     readonly sequence: number;
     readonly sessionKey: string;
+    /** Canonical identity when one message is shown as multiple semantic surfaces. */
+    readonly sourceMessageId?: string;
     readonly timestampMs?: number;
 }
 
@@ -214,14 +216,12 @@ export interface ChatWorkspaceView {
     readonly backgroundTasksHasNextPage: boolean;
     readonly backgroundTasksLoading: boolean;
     readonly backgroundTasksLoadingMore: boolean;
-    readonly backgroundTasksWindowLimited?: boolean;
     readonly companion: ChatCompanionView;
     readonly companionError?: string;
     readonly connection: ChatConnectionState;
     readonly historyHasNextPage: boolean;
     readonly historyInitialLoading: boolean;
     readonly historyLoading: boolean;
-    readonly historyWindowLimited?: boolean;
     readonly messages: readonly ChatDisplayMessage[];
     readonly modelInventoryError?: string;
     readonly selectedSessionKey: string;

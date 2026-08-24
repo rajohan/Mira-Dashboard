@@ -82,6 +82,7 @@ const sharedMarkdownComponents = {
 export function Markdown({
     className,
     components,
+    remarkPlugins,
     source,
     ...properties
 }: MarkdownProps) {
@@ -95,7 +96,7 @@ export function Markdown({
             <ReactMarkdown
                 {...properties}
                 components={{ ...sharedMarkdownComponents, ...components }}
-                remarkPlugins={[remarkGfm]}
+                remarkPlugins={[remarkGfm, ...(remarkPlugins ?? [])]}
             >
                 {source}
             </ReactMarkdown>

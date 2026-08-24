@@ -5,12 +5,7 @@ import {
     HeartPulse,
     Layers3,
     Package,
-    Play,
-    RefreshCw,
-    RotateCw,
     ServerOff,
-    Square,
-    SquareTerminal,
     X,
 } from "lucide-react";
 import { useState } from "react";
@@ -22,18 +17,15 @@ import type {
     DockerRequestOperationInput,
     DockerRequestOperationResult,
 } from "../../contracts/docker.ts";
-import { dockerOverviewCacheKey } from "../../contracts/docker.ts";
 import {
     classifyDashboardBrowserFailure,
     dashboardBrowserFailureMessage,
     isDashboardOperationOutcomeUnknown,
 } from "../api/trpcError.ts";
 import { useAuthenticatedMutationBoundary } from "../auth/useAuthenticatedMutationBoundary.ts";
-import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { formatByteCount } from "../lib/formatMeasurements.ts";
 import { ActionLink } from "../ui/ActionLink.tsx";
 import { Alert } from "../ui/Alert.tsx";
-import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Card } from "../ui/Card.tsx";
 import { ConfirmModal } from "../ui/ConfirmModal.tsx";
@@ -41,7 +33,6 @@ import { EmptyState } from "../ui/EmptyState.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { MetricCard } from "../ui/MetricCard.tsx";
-import { PageHeader } from "../ui/PageHeader.tsx";
 import { PageState } from "../ui/PageState.tsx";
 import { Text } from "../ui/Text.tsx";
 import type { DockerClient } from "./dockerClient.ts";
@@ -73,7 +64,7 @@ function dockerFailureMessage(error: unknown): string {
     }
     switch (classifyDashboardBrowserFailure(error)) {
         case "conflict": {
-            return "Docker state changed. Refresh the snapshot and try again.";
+            return "Docker state changed. Wait for a fresh snapshot and try again.";
         }
         case "not-found": {
             return "The exact Docker target or one-time ticket no longer exists.";
@@ -110,60 +101,6 @@ function pruneInput(
           };
 }
 
-function freshnessBadge(overview: DockerOverview) {
-    switch (overview.state) {
-        case "fresh": {
-            return <Badge variant="success">Fresh snapshot</Badge>;
-        }
-        case "last-known-good": {
-            return <Badge variant="warning">Last-known-good snapshot</Badge>;
-        }
-        case "unavailable": {
-            return <Badge variant="danger">Snapshot unavailable</Badge>;
-        }
-    }
-}
-
-function FreshnessBanner({ overview }: { readonly overview: DockerOverview }) {
-    switch (overview.state) {
-        case "fresh": {
-            return (
-                <Alert
-                    focusOnError={false}
-                    message={
-                        "Docker state is fresh as of " +
-                        formatDashboardDateTime(overview.observedAtMs) +
-                        ". Exact controls are available."
-                    }
-                    variant="success"
-                />
-            );
-        }
-        case "last-known-good": {
-            return (
-                <Alert
-                    focusOnError={false}
-                    message={
-                        "Showing last-known-good Docker state from " +
-                        formatDashboardDateTime(overview.observedAtMs) +
-                        ". Mutations and live logs are disabled until a fresh snapshot is available."
-                    }
-                    variant="warning"
-                />
-            );
-        }
-        case "unavailable": {
-            return (
-                <Alert
-                    focusOnError={false}
-                    message="No usable Docker snapshot is available. Inventory, mutations, and live logs are unavailable."
-                    variant="warning"
-                />
-            );
-        }
-    }
-}
-
 interface DockerSummaryProps {
     readonly overview: Exclude<DockerOverview, { readonly state: "unavailable" }>;
 }
@@ -181,11 +118,11 @@ function DockerSummary({ overview }: DockerSummaryProps) {
         0
     );
     return (
-        <section aria-labelledby="docker-summary-heading">
-            <Heading id="docker-summary-heading" level={2}>
+        <section aria-labelledby="docker-engine-summary-heading">
+            <Heading className="sr-only" id="docker-engine-summary-heading" level={2}>
                 Engine summary
             </Heading>
-            <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                 <MetricCard
                     description={overview.containers.length + " discovered in total"}
                     icon={Boxes}
@@ -212,68 +149,6 @@ function DockerSummary({ overview }: DockerSummaryProps) {
                 />
             </div>
         </section>
-    );
-}
-
-interface DockerStackControlsProps {
-    readonly busy: boolean;
-    readonly disabled: boolean;
-    readonly onRequest: (
-        operation: "stack-restart" | "stack-start" | "stack-stop"
-    ) => void;
-}
-
-function DockerStackControls({ busy, disabled, onRequest }: DockerStackControlsProps) {
-    return (
-        <Card aria-labelledby="docker-stack-heading">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                <div className="flex items-start gap-3">
-                    <span className="bg-accent-500/10 shrink-0 rounded-lg p-2.5">
-                        <Icon icon={Layers3} tone="accent" />
-                    </span>
-                    <div>
-                        <Heading id="docker-stack-heading" level={2}>
-                            Compose stack
-                        </Heading>
-                        <Text className="mt-1" tone="muted">
-                            Fixed root-stack controls use the discovered source revision.
-                        </Text>
-                    </div>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                    <Button
-                        aria-label="Start Docker stack"
-                        disabled={disabled || busy}
-                        onClick={() => onRequest("stack-start")}
-                        size="sm"
-                        variant="secondary"
-                    >
-                        <Icon icon={Play} size="sm" />
-                        Start stack
-                    </Button>
-                    <Button
-                        aria-label="Stop Docker stack"
-                        disabled={disabled || busy}
-                        onClick={() => onRequest("stack-stop")}
-                        size="sm"
-                        variant="secondary"
-                    >
-                        <Icon icon={Square} size="sm" />
-                        Stop stack
-                    </Button>
-                    <Button
-                        aria-label="Restart Docker stack"
-                        disabled={disabled || busy}
-                        onClick={() => onRequest("stack-restart")}
-                        size="sm"
-                        variant="secondary"
-                    >
-                        <Icon icon={RotateCw} size="sm" />
-                        Restart stack
-                    </Button>
-                </div>
-            </div>
-        </Card>
     );
 }
 
@@ -329,26 +204,24 @@ export function DockerRoute({ client }: DockerRouteProps) {
     const overview = overviewQuery.data;
     const controlsAvailable = overview?.state === "fresh" && overviewQuery.error === null;
     const [pendingOperation, setPendingOperation] = useState<DockerOperationPrompt>();
+    const [displayedOperation, setDisplayedOperation] = useState<DockerOperationPrompt>();
     const [operationBusy, setOperationBusy] = useState(false);
     const [operationError, setOperationError] = useState<string>();
     const [queuedResult, setQueuedResult] = useState<DockerRequestOperationResult>();
-    const [refreshBusy, setRefreshBusy] = useState(false);
-    const [refreshError, setRefreshError] = useState<string>();
-    const [refreshIdempotencyKey, setRefreshIdempotencyKey] = useState(() =>
-        createDockerIdempotencyKey()
-    );
-    const [refreshRunId, setRefreshRunId] = useState<string>();
     const [prunePreview, setPrunePreview] = useState<DockerPrunePreview>();
     const [preparingPrune, setPreparingPrune] = useState<"images" | "volumes">();
     const [detailsContainerId, setDetailsContainerId] = useState<string>();
+    const [displayedDetailsContainer, setDisplayedDetailsContainer] =
+        useState<DockerContainer>();
     const [logsSelection, setLogsSelection] = useState<DockerLogsSelection>();
     const [logsTail, setLogsTail] = useState<100 | 200 | 500>(200);
-    const detailsContainer =
+    const selectedDetailsContainer =
         detailsContainerId === undefined ||
         overview === undefined ||
         overview.state === "unavailable"
             ? undefined
             : overview.containers.find(({ id }) => id === detailsContainerId);
+    const detailsContainer = selectedDetailsContainer ?? displayedDetailsContainer;
     const logsSourceCurrent =
         controlsAvailable &&
         logsSelection !== undefined &&
@@ -378,7 +251,7 @@ export function DockerRoute({ client }: DockerRouteProps) {
         ],
         retry: false,
     });
-    const busy = operationBusy || preparingPrune !== undefined || refreshBusy;
+    const busy = operationBusy || preparingPrune !== undefined;
     const freshRevision =
         controlsAvailable && overview.state === "fresh"
             ? overview.sourceRevision
@@ -387,36 +260,8 @@ export function DockerRoute({ client }: DockerRouteProps) {
     function showPrompt(prompt: DockerOperationPrompt): void {
         setOperationError(undefined);
         setQueuedResult(undefined);
+        setDisplayedOperation(prompt);
         setPendingOperation(prompt);
-    }
-
-    async function refreshSnapshot(): Promise<void> {
-        if (refreshBusy || operationBusy) return;
-        setRefreshBusy(true);
-        setRefreshError(undefined);
-        setRefreshRunId(undefined);
-        try {
-            const run = await mutationBoundary.run((signal) =>
-                client.mutation(
-                    "cache.refreshEntry",
-                    {
-                        idempotencyKey: refreshIdempotencyKey,
-                        key: dockerOverviewCacheKey,
-                    },
-                    { signal }
-                )
-            );
-            if (!mutationBoundary.completionIsCurrent()) return;
-            setRefreshRunId(run.id);
-            setRefreshIdempotencyKey(createDockerIdempotencyKey());
-            void overviewQuery.refetch();
-        } catch (error) {
-            if (mutationBoundary.completionIsCurrent()) {
-                setRefreshError(dockerFailureMessage(error));
-            }
-        } finally {
-            if (mutationBoundary.completionIsCurrent()) setRefreshBusy(false);
-        }
     }
 
     async function queueOperation(input: DockerRequestOperationInput): Promise<boolean> {
@@ -529,30 +374,10 @@ export function DockerRoute({ client }: DockerRouteProps) {
 
     return (
         <div>
-            <PageHeader
-                actions={
-                    <div className="flex flex-wrap gap-2">
-                        <ActionLink to="/terminal" variant="secondary">
-                            <Icon icon={SquareTerminal} size="sm" />
-                            Open terminal
-                        </ActionLink>
-                        <Button
-                            busy={refreshBusy}
-                            busyLabel="Queueing refresh…"
-                            disabled={operationBusy}
-                            onClick={() => void refreshSnapshot()}
-                            variant="secondary"
-                        >
-                            <Icon icon={RefreshCw} size="sm" />
-                            Refresh snapshot
-                        </Button>
-                    </div>
-                }
-                description="Inspect the bounded Docker Engine and Compose projection, then queue exact audited operations."
-                eyebrow="Operations"
-                title="Docker"
-            />
-            <div className="mt-8">
+            <Heading className="sr-only" level={1}>
+                Docker
+            </Heading>
+            <div>
                 {overviewQuery.isPending && overview === undefined && (
                     <PageState label="Loading Docker…" size="lg" status="loading" />
                 )}
@@ -567,42 +392,14 @@ export function DockerRoute({ client }: DockerRouteProps) {
                 )}
                 {overview !== undefined && (
                     <div className="space-y-6">
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                            {freshnessBadge(overview)}
-                            <Text size="sm" tone="muted">
-                                Checked {formatDashboardDateTime(overview.checkedAtMs)}
-                            </Text>
-                        </div>
-                        <FreshnessBanner overview={overview} />
                         {overviewQuery.error !== null && (
                             <Alert
                                 focusOnError={false}
                                 message={
                                     dockerFailureMessage(overviewQuery.error) +
-                                    " Docker controls remain disabled until refresh succeeds."
+                                    " Docker controls remain disabled until a fresh snapshot loads."
                                 }
                             />
-                        )}
-                        {refreshError !== undefined && (
-                            <Alert
-                                message={refreshError}
-                                onDismiss={() => setRefreshError(undefined)}
-                            />
-                        )}
-                        {refreshRunId !== undefined && (
-                            <Card>
-                                <div className="flex flex-wrap items-center justify-between gap-3">
-                                    <Text>Docker snapshot refresh queued.</Text>
-                                    <ActionLink
-                                        search={{ runId: refreshRunId }}
-                                        to="/jobs"
-                                        variant="ghost"
-                                    >
-                                        <Icon icon={ExternalLink} size="sm" />
-                                        View refresh job
-                                    </ActionLink>
-                                </div>
-                            </Card>
                         )}
                         {operationError !== undefined &&
                             pendingOperation === undefined &&
@@ -637,20 +434,6 @@ export function DockerRoute({ client }: DockerRouteProps) {
                         ) : (
                             <>
                                 <DockerSummary overview={overview} />
-                                <DockerStackControls
-                                    busy={busy}
-                                    disabled={!controlsAvailable}
-                                    onRequest={(operation) => {
-                                        if (freshRevision !== undefined) {
-                                            showPrompt(
-                                                stackOperationPrompt(
-                                                    operation,
-                                                    freshRevision
-                                                )
-                                            );
-                                        }
-                                    }}
-                                />
                                 <DockerUpdaterPanel
                                     busy={busy}
                                     controlsDisabled={!controlsAvailable}
@@ -691,9 +474,11 @@ export function DockerRoute({ client }: DockerRouteProps) {
                                     busy={busy}
                                     containers={overview.containers}
                                     controlsDisabled={!controlsAvailable}
-                                    onOpenDetails={(container) =>
-                                        setDetailsContainerId(container.id)
-                                    }
+                                    observedAtMs={overview.observedAtMs}
+                                    onOpenDetails={(container) => {
+                                        setDisplayedDetailsContainer(container);
+                                        setDetailsContainerId(container.id);
+                                    }}
                                     onOpenLogs={(container) => {
                                         if (freshRevision !== undefined) {
                                             setLogsSelection({
@@ -704,6 +489,16 @@ export function DockerRoute({ client }: DockerRouteProps) {
                                         }
                                     }}
                                     onRequestOperation={requestContainerOperation}
+                                    onRequestStackOperation={(operation) => {
+                                        if (freshRevision !== undefined) {
+                                            showPrompt(
+                                                stackOperationPrompt(
+                                                    operation,
+                                                    freshRevision
+                                                )
+                                            );
+                                        }
+                                    }}
                                 />
                                 <DockerResourcePanels
                                     busy={busy}
@@ -732,25 +527,25 @@ export function DockerRoute({ client }: DockerRouteProps) {
                     </div>
                 )}
             </div>
-            <ConfirmModal
-                busy={operationBusy}
-                confirmDisabled={!pendingSourceCurrent}
-                confirmLabel={pendingOperation?.confirmLabel}
-                danger={pendingOperation?.danger}
-                description={
-                    pendingOperation?.description ?? "No Docker operation is selected."
-                }
-                error={operationError}
-                onCancel={() => {
-                    if (!operationBusy) {
-                        setPendingOperation(undefined);
-                        setOperationError(undefined);
-                    }
-                }}
-                onConfirm={() => void confirmPendingOperation()}
-                open={pendingOperation !== undefined}
-                title={pendingOperation?.title ?? "Confirm Docker operation"}
-            />
+            {displayedOperation !== undefined && (
+                <ConfirmModal
+                    busy={operationBusy}
+                    confirmDisabled={!pendingSourceCurrent}
+                    confirmLabel={displayedOperation.confirmLabel}
+                    danger={displayedOperation.danger}
+                    description={displayedOperation.description}
+                    error={operationError}
+                    onCancel={() => {
+                        if (!operationBusy) {
+                            setPendingOperation(undefined);
+                            setOperationError(undefined);
+                        }
+                    }}
+                    onConfirm={() => void confirmPendingOperation()}
+                    open={pendingOperation !== undefined}
+                    title={displayedOperation.title}
+                />
+            )}
             <DockerPrunePreviewDialog
                 busy={operationBusy}
                 error={operationError}
@@ -766,7 +561,13 @@ export function DockerRoute({ client }: DockerRouteProps) {
             />
             <DockerContainerDetailsDialog
                 container={detailsContainer}
-                onClose={() => setDetailsContainerId(undefined)}
+                onClose={() => {
+                    if (detailsContainer !== undefined) {
+                        setDisplayedDetailsContainer(detailsContainer);
+                    }
+                    setDetailsContainerId(undefined);
+                }}
+                open={detailsContainerId !== undefined}
             />
             <DockerLogsDialog
                 error={logsError}

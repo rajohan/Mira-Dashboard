@@ -79,9 +79,9 @@ export function Tabs<TValue extends string>({
                         <Tab
                             className={cn(
                                 interactiveTapClassName,
-                                "text-primary-300 min-h-10 min-w-0 rounded-md px-3 py-2 text-sm font-medium whitespace-nowrap transition-colors",
+                                "text-primary-300 min-h-10 min-w-0 rounded-md px-3 py-2 text-sm font-medium whitespace-nowrap transition-colors [&_svg]:text-inherit",
                                 "not-data-selected:not-data-disabled:data-hover:bg-primary-800 not-data-selected:not-data-disabled:data-hover:text-primary-50 hover:not-data-selected:not-data-disabled:bg-primary-800 hover:not-data-selected:not-data-disabled:text-primary-50",
-                                "data-selected:bg-accent-500 data-selected:text-primary-950",
+                                "data-selected:bg-accent-700 data-selected:text-white",
                                 "data-focus:ring-accent-300 data-focus:ring-2 data-focus:outline-none data-focus:ring-inset",
                                 "data-disabled:cursor-not-allowed data-disabled:opacity-45",
                                 vertical

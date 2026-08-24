@@ -848,7 +848,7 @@ describe("OpenClawCronSection", () => {
         ).toBeTrue();
         expect(
             within(dialog).getByText(
-                /You can edit only name, description, delivery, schedule, payload, and wakeMode/u
+                /You can edit only name, description, delivery, schedule, payload, scratch, and wakeMode/u
             )
         ).toBeVisible();
         expect(actions.onUpdate).not.toHaveBeenCalled();

@@ -2,6 +2,10 @@ import * as v from "valibot";
 
 import { chatAttachmentLimits } from "../../../contracts/chatMedia.ts";
 import {
+    chatMessageTextSchema,
+    normalizeChatProviderUserIdentity,
+} from "../../../contracts/chatModel.ts";
+import {
     openClawAgentIdSchema,
     openClawChannelIdSchema,
     openClawChannelMaximum,
@@ -62,6 +66,7 @@ export type PersistentGatewayConnectionProfile =
 /** Exact Phase 4A application-event surface delivered beyond the transport boundary. */
 export const persistentGatewayEventNames = Object.freeze([
     "cron",
+    "session.message",
     "sessions.changed",
     "task",
 ] as const);
@@ -165,6 +170,8 @@ export const persistentGatewayReadWriteMethods = persistentGatewayWebReadMethods
 export const persistentGatewayAdminMethods = Object.freeze([
     "cron.remove",
     "cron.run",
+    "cron.scratch.get",
+    "cron.scratch.set",
     "cron.update",
     "sessions.compact",
     "sessions.delete",
@@ -389,6 +396,13 @@ const gatewaySessionLifecycleEventSchema = v.variant("reason", [
         reason: v.literal("reset"),
     }),
 ]);
+const gatewaySessionActivityEventSchema = v.object({
+    agentId: v.optional(chatAgentIdSchema),
+    reason: v.optional(v.string()),
+    sessionKey: chatSessionKeySchema,
+    ts: nonnegativeSafeIntegerSchema,
+    updatedAt: v.optional(nonnegativeSafeIntegerSchema),
+});
 const gatewayChatEventBaseSchemas = {
     agentId: v.optional(chatAgentIdSchema),
     runId: chatRunIdSchema,
@@ -540,8 +554,9 @@ const gatewayChatMessageGetParamsSchema = v.strictObject({
     sessionKey: chatSessionKeySchema,
 });
 const gatewayModelsListParamsSchema = v.strictObject({
+    agentId: chatAgentIdSchema,
     includeProviderCapabilities: v.literal(true),
-    view: v.literal("configured"),
+    view: v.literal("all"),
 });
 const gatewayCompanionStateParamsSchema = v.strictObject({
     sessionKey: chatSessionKeySchema,
@@ -590,6 +605,7 @@ const gatewayChatSendParamsObjectSchema = v.strictObject({
     attachments: v.optional(
         v.pipe(v.array(gatewayChatAttachmentSchema), v.maxLength(10))
     ),
+    expectedRunId: v.optional(chatRunIdSchema),
     fastMode: v.optional(v.union([v.boolean(), v.literal("auto")])),
     idempotencyKey: chatIdempotencyKeySchema,
     message: v.pipe(
@@ -649,6 +665,7 @@ const gatewayChatAbortParamsSchema = v.strictObject({
 });
 const gatewayCompanionResetParamsSchema = gatewayCompanionStateParamsSchema;
 const gatewayChatSessionPatchParamsSchema = v.strictObject({
+    agentId: chatAgentIdSchema,
     expectedSessionId: v.optional(chatRunIdSchema),
     fastMode: v.optional(v.nullable(v.union([v.boolean(), v.literal("auto")]))),
     key: chatSessionKeySchema,
@@ -657,6 +674,9 @@ const gatewayChatSessionPatchParamsSchema = v.strictObject({
 });
 
 const gatewayOpenClawSettingsEmptyParamsSchema = v.strictObject({});
+const gatewayOpenClawSkillsStatusParamsSchema = v.strictObject({
+    agentId: chatAgentIdSchema,
+});
 const gatewayOpenClawSkillUpdateParamsSchema = v.strictObject({
     enabled: v.boolean("OpenClaw skill enabled state is invalid"),
     skillKey: openClawSkillKeySchema,
@@ -805,8 +825,11 @@ const gatewayOpenClawModelsPatchSchema = v.strictObject({
 const gatewayOpenClawSessionResetPatchSchema = v.strictObject({
     session: v.strictObject({
         reset: v.strictObject({
+            atHour: v.nullable(
+                v.pipe(v.number(), v.safeInteger(), v.minValue(0), v.maxValue(23))
+            ),
             idleMinutes: v.pipe(positiveSafeIntegerSchema, v.maxValue(10_080)),
-            mode: v.literal("idle"),
+            mode: v.picklist(["daily", "idle", "none"]),
         }),
     }),
 });
@@ -852,10 +875,15 @@ const gatewayOpenClawToolsLeavesSchema = v.pipe(
         agentToAgent: v.optional(v.strictObject({ enabled: v.boolean() })),
         elevated: v.optional(v.strictObject({ enabled: v.boolean() })),
         exec: v.optional(
-            v.strictObject({
-                ask: v.picklist(["off", "on-miss", "always"]),
-                security: v.picklist(["allowlist", "deny", "full"]),
-            })
+            v.union([
+                v.strictObject({
+                    ask: v.picklist(["off", "on-miss", "always"]),
+                    security: v.picklist(["allowlist", "deny", "full"]),
+                }),
+                v.strictObject({
+                    mode: v.picklist(["deny", "allowlist", "ask", "auto", "full"]),
+                }),
+            ])
         ),
         profile: v.optional(gatewayOpenClawSettingsNullableTextSchema(64)),
         sessions: v.optional(
@@ -1034,9 +1062,39 @@ export interface PersistentGatewayResponseFrame {
 
 export interface PersistentGatewayEventFrame {
     readonly event: PersistentGatewayEventName;
+    readonly sessionMessage?: PersistentGatewaySessionMessageEvent;
+    readonly sessionActivity?: PersistentGatewaySessionActivityEvent;
     readonly sessionLifecycle?: PersistentGatewaySessionLifecycleEvent;
     readonly seq?: number;
     readonly type: "event";
+}
+
+/** Sanitized canonical transcript update projected from session.message. */
+export interface PersistentGatewaySessionMessageEvent {
+    readonly sessionKey: string;
+    readonly userMessage?: Readonly<{
+        readonly attachments: readonly PersistentGatewaySessionAttachment[];
+        readonly idempotencyKey: string;
+        readonly messageId: string;
+        readonly providerRunIds: readonly string[];
+        readonly text: string;
+    }>;
+}
+
+export interface PersistentGatewaySessionAttachment {
+    readonly contentType: string;
+    readonly fileName: string;
+    readonly sizeBytes?: number;
+    readonly url: string;
+}
+
+/** Sanitized ordinary session activity projected from sessions.changed. */
+export interface PersistentGatewaySessionActivityEvent {
+    readonly agentId?: string;
+    readonly occurredAtMs: number;
+    readonly reason?: string;
+    readonly sessionKey: string;
+    readonly updatedAtMs?: number;
 }
 
 /** Sanitized session transcript-generation boundary projected from sessions.changed. */
@@ -1376,10 +1434,14 @@ export function assertPersistentGatewayAdminParameters(
 }
 
 export function assertPersistentGatewayOpenClawSettingsReadParameters(
-    _method: PersistentGatewayOpenClawSettingsReadMethod,
+    method: PersistentGatewayOpenClawSettingsReadMethod,
     parameters: unknown
 ): asserts parameters is Readonly<Record<string, unknown>> {
-    if (!v.safeParse(gatewayOpenClawSettingsEmptyParamsSchema, parameters).success) {
+    const schema =
+        method === "skills.status"
+            ? gatewayOpenClawSkillsStatusParamsSchema
+            : gatewayOpenClawSettingsEmptyParamsSchema;
+    if (!v.safeParse(schema, parameters).success) {
         throw new TypeError("Persistent Gateway request parameters are invalid");
     }
 }
@@ -1724,6 +1786,151 @@ function parsePersistentGatewaySessionLifecycleEvent(
     });
 }
 
+function parsePersistentGatewaySessionActivityEvent(
+    value: unknown
+): PersistentGatewaySessionActivityEvent | undefined {
+    if (
+        value !== null &&
+        typeof value === "object" &&
+        "reason" in value &&
+        ["compact", "delete", "new", "reset"].includes(String(value.reason))
+    ) {
+        return undefined;
+    }
+    const parsed = v.safeParse(gatewaySessionActivityEventSchema, value);
+    if (!parsed.success) return undefined;
+    return Object.freeze({
+        ...(parsed.output.agentId === undefined
+            ? {}
+            : { agentId: parsed.output.agentId }),
+        occurredAtMs: parsed.output.ts,
+        ...(parsed.output.reason === undefined ? {} : { reason: parsed.output.reason }),
+        sessionKey: parsed.output.sessionKey,
+        ...(parsed.output.updatedAt === undefined
+            ? {}
+            : { updatedAtMs: parsed.output.updatedAt }),
+    });
+}
+
+function persistentGatewaySessionUserText(value: unknown): string | undefined {
+    if (typeof value === "string") return value;
+    if (!Array.isArray(value)) return undefined;
+    return value
+        .flatMap((part) => {
+            if (part === null || typeof part !== "object") return [];
+            const candidate = part as Readonly<Record<string, unknown>>;
+            return (candidate.type === "text" || candidate.type === "input_text") &&
+                typeof candidate.text === "string"
+                ? [candidate.text]
+                : [];
+        })
+        .join("");
+}
+
+function persistentGatewaySessionAttachments(
+    metadata: Readonly<Record<string, unknown>> | undefined,
+    message: Readonly<Record<string, unknown>>
+): readonly PersistentGatewaySessionAttachment[] {
+    const media = Array.isArray(metadata?.media) ? metadata.media : message.media;
+    if (!Array.isArray(media)) return [];
+    if (media.length > 10) return [];
+    return Object.freeze(
+        media.flatMap((value) => {
+            if (value === null || typeof value !== "object") return [];
+            const fact = value as Readonly<Record<string, unknown>>;
+            if (
+                typeof fact.url !== "string" ||
+                !/^media:\/\/inbound\/[0-9a-f-]{36}\.[a-z\d]{1,16}$/iu.test(fact.url) ||
+                typeof fact.contentType !== "string" ||
+                !/^[a-z\d!#$&^_.+-]+\/[a-z\d!#$&^_.+-]+$/iu.test(fact.contentType)
+            ) {
+                return [];
+            }
+            const fileName = fact.url.slice("media://inbound/".length);
+            const sizeBytes =
+                typeof fact.sizeBytes === "number" &&
+                Number.isSafeInteger(fact.sizeBytes) &&
+                fact.sizeBytes >= 0 &&
+                fact.sizeBytes <= 25 * 1024 * 1024
+                    ? fact.sizeBytes
+                    : undefined;
+            return [
+                Object.freeze({
+                    contentType: fact.contentType.toLowerCase(),
+                    fileName,
+                    ...(sizeBytes === undefined ? {} : { sizeBytes }),
+                    url: fact.url,
+                }),
+            ];
+        })
+    );
+}
+
+function parsePersistentGatewaySessionMessageEvent(
+    value: unknown
+): PersistentGatewaySessionMessageEvent | undefined {
+    if (value === null || typeof value !== "object") return undefined;
+    const record = value as Readonly<Record<string, unknown>>;
+    const sessionKey = record.sessionKey;
+    const parsed = v.safeParse(chatSessionKeySchema, sessionKey);
+    if (!parsed.success) return undefined;
+    const message =
+        record.message !== null && typeof record.message === "object"
+            ? (record.message as Readonly<Record<string, unknown>>)
+            : undefined;
+    if (message?.role !== "user") {
+        return Object.freeze({ sessionKey: parsed.output });
+    }
+    const text = persistentGatewaySessionUserText(message.content);
+    const activeRunIds = Array.isArray(record.activeRunIds)
+        ? (record.activeRunIds as readonly unknown[])
+        : undefined;
+    if (text === undefined) {
+        return Object.freeze({ sessionKey: parsed.output });
+    }
+    const metadata =
+        message.__openclaw !== null && typeof message.__openclaw === "object"
+            ? (message.__openclaw as Readonly<Record<string, unknown>>)
+            : undefined;
+    const attachments = persistentGatewaySessionAttachments(metadata, message);
+    const messageId = v.safeParse(
+        chatMessageIdSchema,
+        record.messageId ?? metadata?.id ?? message.id
+    );
+    const rawIdempotencyKey = metadata?.idempotencyKey ?? message.idempotencyKey;
+    const idempotencyKey = v.safeParse(
+        chatMessageIdSchema,
+        normalizeChatProviderUserIdentity(rawIdempotencyKey) ?? messageId.output
+    );
+    const providerRunIds = [
+        ...(metadata?.runId === undefined ? [] : [metadata.runId]),
+        ...(activeRunIds ?? []),
+    ].flatMap((candidate) => {
+        const runId = v.safeParse(chatRunIdSchema, candidate);
+        return runId.success ? [runId.output] : [];
+    });
+    const uniqueProviderRunIds = [...new Set(providerRunIds)].slice(0, 32);
+    const parsedText = v.safeParse(chatMessageTextSchema, text);
+    if (
+        !messageId.success ||
+        !idempotencyKey.success ||
+        uniqueProviderRunIds.length === 0 ||
+        !parsedText.success
+    ) {
+        return Object.freeze({ sessionKey: parsed.output });
+    }
+    return Object.freeze({
+        sessionKey: parsed.output,
+        userMessage: Object.freeze({
+            attachments,
+            idempotencyKey: idempotencyKey.output,
+            messageId: messageId.output,
+            providerRunIds: Object.freeze(uniqueProviderRunIds),
+            text: parsedText.output,
+        }),
+    });
+}
+
 export function parsePersistentGatewayEvent(
     value: unknown
 ): PersistentGatewayEventFrame | undefined {
@@ -1733,8 +1940,21 @@ export function parsePersistentGatewayEvent(
         parsed.output.event === "sessions.changed"
             ? parsePersistentGatewaySessionLifecycleEvent(parsed.output.payload)
             : undefined;
+    const sessionActivity =
+        parsed.output.event === "sessions.changed" && sessionLifecycle === undefined
+            ? parsePersistentGatewaySessionActivityEvent(parsed.output.payload)
+            : undefined;
+    const sessionMessage =
+        parsed.output.event === "session.message"
+            ? parsePersistentGatewaySessionMessageEvent(parsed.output.payload)
+            : undefined;
+    if (parsed.output.event === "session.message" && sessionMessage === undefined) {
+        return undefined;
+    }
     return Object.freeze({
         event: parsed.output.event as PersistentGatewayEventName,
+        ...(sessionMessage === undefined ? {} : { sessionMessage }),
+        ...(sessionActivity === undefined ? {} : { sessionActivity }),
         ...(sessionLifecycle === undefined ? {} : { sessionLifecycle }),
         ...(parsed.output.seq === undefined ? {} : { seq: parsed.output.seq }),
         type: parsed.output.type,

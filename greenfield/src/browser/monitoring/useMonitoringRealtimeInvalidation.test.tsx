@@ -51,7 +51,6 @@ describe("monitoring realtime invalidation", () => {
             );
 
             expect(realtimeClient.input).toEqual({
-                lastEventId: "0",
                 topics: [monitoringRealtimeTopics.reports],
             });
             expect(realtimeClient.activeSubscriptionCount).toBe(1);
@@ -102,7 +101,6 @@ describe("monitoring realtime invalidation", () => {
             );
 
             expect(realtimeClient.input).toEqual({
-                lastEventId: "0",
                 topics: [monitoringRealtimeTopics.incidents],
             });
             await act(async () => {

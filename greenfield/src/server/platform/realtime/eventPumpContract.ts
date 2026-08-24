@@ -61,7 +61,8 @@ export type RealtimeEventDelivery =
     | RealtimeResyncRequiredDelivery;
 
 export interface RealtimeEventSubscriptionOptions {
-    readonly afterId: string;
+    /** Missing on a fresh subscription; explicit only when resuming a known cursor. */
+    readonly afterId?: string;
     readonly signal: AbortSignal;
     readonly topics?: readonly string[];
 }

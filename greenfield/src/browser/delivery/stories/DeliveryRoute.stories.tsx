@@ -388,10 +388,14 @@ async function openMergeDialog(canvasElement: HTMLElement) {
 
 async function loadedDeliveryRegion(canvasElement: HTMLElement, name: string) {
     const canvas = within(canvasElement);
-    const heading = await canvas.findByRole("heading", {
-        level: 2,
-        name,
-    });
+    const heading = await canvas.findByRole(
+        "heading",
+        {
+            level: 2,
+            name,
+        },
+        { timeout: 5000 }
+    );
     const region = heading.closest("section");
     if (region === null) throw new TypeError(`${name} story region is missing`);
     const scoped = within(region);

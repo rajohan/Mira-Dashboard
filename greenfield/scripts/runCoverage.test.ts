@@ -10,6 +10,7 @@ import {
     createCoverageTestArguments,
     createCoverageTestCommand,
     loadCoverageTestInventories,
+    normalizeMergedLineCoverage,
     normalizeStorybookProductionCoverage,
     parseCoverageRunMode,
     runCoverage,
@@ -38,10 +39,33 @@ const samplePlans = createCoveragePartitionPlan("/tmp/coverage", sampleInventori
 const sampleReportPaths = Object.freeze(samplePlans.map(({ reportPath }) => reportPath));
 
 describe("coverage runner", () => {
+    test("removes incomparable Storybook branch records from merged line coverage", () => {
+        expect(
+            normalizeMergedLineCoverage(
+                [
+                    "TN:",
+                    "SF:src/example.ts",
+                    "DA:10,4",
+                    "BRDA:10,0,0,0",
+                    "BRDA:10,0,1,4",
+                    "BRF:2",
+                    "BRH:1",
+                    "LF:1",
+                    "LH:1",
+                    "end_of_record",
+                ].join("\n")
+            )
+        ).toBe(
+            ["TN:", "SF:src/example.ts", "DA:10,4", "LF:1", "LH:1", "end_of_record"].join(
+                "\n"
+            )
+        );
+    });
+
     test("discovers exact current inventories and creates nine complete batches", async () => {
         const inventories = await loadCoverageTestInventories(projectRoot);
-        expect(inventories.bun).toHaveLength(508);
-        expect(inventories.browser).toHaveLength(188);
+        expect(inventories.bun).toHaveLength(510);
+        expect(inventories.browser).toHaveLength(190);
         expect(inventories.storybook).toHaveLength(87);
 
         const plans = createCoveragePartitionPlan("/tmp/coverage", inventories);
@@ -67,14 +91,14 @@ describe("coverage runner", () => {
                     .filter(({ partition }) => partition === "bun")
                     .flatMap(({ testFiles }) => testFiles)
             ).size
-        ).toBe(508);
+        ).toBe(510);
         expect(
             new Set(
                 plans
                     .filter(({ partition }) => partition === "browser")
                     .flatMap(({ testFiles }) => testFiles)
             ).size
-        ).toBe(188);
+        ).toBe(190);
         expect(
             new Set(
                 plans

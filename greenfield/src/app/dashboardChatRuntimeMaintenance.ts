@@ -43,8 +43,22 @@ export async function startDashboardChatRuntimeMaintenance(
     if (!Number.isSafeInteger(options.intervalMs) || options.intervalMs < 1) {
         throw new TypeError("Dashboard chat maintenance interval is invalid");
     }
+    const report = (error: unknown): void => {
+        try {
+            options.onFailure?.(error);
+        } catch {
+            // Failure reporting cannot terminate maintenance supervision.
+        }
+    };
     await options.service.sweepRetention();
-    await options.service.recover();
+    try {
+        await options.service.recover();
+    } catch (error) {
+        // Gateway startup and reconnect are asynchronous. Recovery owns durable
+        // retry semantics and must not prevent the HTTP/SSE process from becoming
+        // ready while its subscription scopes wait for the connected transport.
+        report(error);
+    }
 
     const scheduler = options.scheduler ?? defaultScheduler;
     let active: Promise<void> | undefined;
@@ -60,13 +74,7 @@ export async function startDashboardChatRuntimeMaintenance(
     const handle = scheduler.setInterval(() => {
         if (stopped || active !== undefined) return;
         const operation = sweep()
-            .catch((error: unknown) => {
-                try {
-                    options.onFailure?.(error);
-                } catch {
-                    // Failure reporting cannot terminate maintenance supervision.
-                }
-            })
+            .catch(report)
             .finally(() => {
                 if (active === operation) active = undefined;
             });

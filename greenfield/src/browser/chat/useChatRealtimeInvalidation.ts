@@ -17,7 +17,6 @@ import {
 import type { ChatRuntimeStore } from "./chatRuntimeStore.ts";
 
 const safetyRefreshIntervalMs = 30_000;
-const trailingRefreshBackoffMs = 1000;
 type ChatRefreshTarget = "history" | "runtime" | "sessions" | "task-details" | "tasks";
 
 /**
@@ -38,13 +37,10 @@ export function useChatRealtimeInvalidation(
     }, [sessionKey]);
 
     useEffect(() => {
-        let active = false;
-        let backoff: ReturnType<typeof setTimeout> | undefined;
         let disposed = false;
-        let scheduled = false;
-        let trailing = false;
-        let runningTrailing = false;
-        let pending = new Set<ChatRefreshTarget>();
+        const active = new Set<ChatRefreshTarget>();
+        const pending = new Set<ChatRefreshTarget>();
+        const drains = new Map<ChatRefreshTarget, Promise<void>>();
         const invalidate = async (targets: ReadonlySet<ChatRefreshTarget>) => {
             const selected = selectedSession.current;
             const invalidations: Promise<unknown>[] = [];
@@ -57,34 +53,26 @@ export function useChatRealtimeInvalidation(
                 );
             }
             if (selected !== "") {
-                let historyRefresh: Promise<unknown> | undefined;
                 if (targets.has("history")) {
-                    historyRefresh = queryClient.invalidateQueries(
-                        {
-                            exact: true,
-                            queryKey: chatHistoryQueryKey(selected),
-                        },
-                        { cancelRefetch: false }
+                    invalidations.push(
+                        queryClient.invalidateQueries(
+                            {
+                                exact: true,
+                                queryKey: chatHistoryQueryKey(selected),
+                            },
+                            { cancelRefetch: false }
+                        )
                     );
-                    invalidations.push(historyRefresh);
                 }
                 if (targets.has("runtime")) {
                     invalidations.push(
-                        (async () => {
-                            // `chat.history` performs the provider observation that
-                            // can retire a missed live activity. Read runtime only
-                            // after that reconciliation has had a chance to publish.
-                            if (historyRefresh !== undefined) {
-                                await Promise.allSettled([historyRefresh]);
-                            }
-                            return queryClient.invalidateQueries(
-                                {
-                                    exact: true,
-                                    queryKey: chatRuntimeQueryKey(selected),
-                                },
-                                { cancelRefetch: false }
-                            );
-                        })()
+                        queryClient.invalidateQueries(
+                            {
+                                exact: true,
+                                queryKey: chatRuntimeQueryKey(selected),
+                            },
+                            { cancelRefetch: false }
+                        )
                     );
                 }
                 if (targets.has("tasks")) {
@@ -108,49 +96,42 @@ export function useChatRealtimeInvalidation(
             }
             await Promise.allSettled(invalidations);
         };
-        const drain = async () => {
-            if (disposed || active) return;
-            scheduled = false;
-            active = true;
-            const initial = pending;
-            pending = new Set();
-            try {
-                await invalidate(initial);
-                if (!disposed && trailing) {
-                    trailing = false;
-                    runningTrailing = true;
-                    const next = pending;
-                    pending = new Set();
-                    await invalidate(next);
+        const drain = (target: ChatRefreshTarget): Promise<void> => {
+            const existing = drains.get(target);
+            if (existing !== undefined) return existing;
+            if (disposed || !pending.delete(target)) return Promise.resolve();
+            const operation = (async () => {
+                active.add(target);
+                try {
+                    do {
+                        await invalidate(new Set([target]));
+                    } while (!disposed && pending.delete(target));
+                } finally {
+                    active.delete(target);
                 }
-            } finally {
-                active = false;
-                runningTrailing = false;
-                if (!disposed && pending.size > 0 && backoff === undefined) {
-                    backoff = setTimeout(() => {
-                        backoff = undefined;
-                        if (disposed || scheduled || active) return;
-                        scheduled = true;
-                        queueMicrotask(() => void drain());
-                    }, trailingRefreshBackoffMs);
+            })();
+            drains.set(target, operation);
+            void operation.finally(() => {
+                drains.delete(target);
+                if (!disposed && pending.has(target)) {
+                    queueMicrotask(() => void drain(target));
                 }
-            }
+            });
+            return operation;
         };
         const refresh = (...targets: readonly ChatRefreshTarget[]) => {
             if (disposed) return;
-            for (const target of targets) pending.add(target);
-            if (active && runningTrailing) return;
-            if (active) {
-                trailing = true;
-                return;
+            for (const target of targets) {
+                pending.add(target);
+                if (!active.has(target)) queueMicrotask(() => void drain(target));
             }
-            if (backoff !== undefined) return;
-            if (scheduled) return;
-            scheduled = true;
-            queueMicrotask(() => void drain());
         };
-        const refreshAll = () =>
-            refresh("sessions", "runtime", "history", "tasks", "task-details");
+        const refreshAll = () => {
+            refresh("sessions", "history", "tasks", "task-details");
+            queueMicrotask(() => {
+                void drain("history").then(() => refresh("runtime"));
+            });
+        };
         const handleRealtimeFailure = () => {
             runtimeStore.setConnection("disconnected");
             refreshAll();
@@ -170,6 +151,7 @@ export function useChatRealtimeInvalidation(
                         refreshAll();
                         return;
                     }
+                    runtimeStore.setConnection("connected");
                     const selected = selectedSession.current;
                     if (
                         output.data.event.topic === chatRealtimeTopic &&
@@ -204,7 +186,6 @@ export function useChatRealtimeInvalidation(
             disposed = true;
             subscription.unsubscribe();
             clearInterval(safetyRefresh);
-            if (backoff !== undefined) clearTimeout(backoff);
             globalThis.removeEventListener?.("offline", offline);
             globalThis.removeEventListener?.("online", online);
         };

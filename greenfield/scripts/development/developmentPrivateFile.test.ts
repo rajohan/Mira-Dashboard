@@ -76,10 +76,15 @@ test("reads the Gateway token from a private file without following a symlink", 
         const environments = await developmentProcessEnvironments(
             config,
             "serialized-keyring",
-            { MOLTBOOK_API_KEY: "private-moltbook-key" }
+            {
+                ELEVENLABS_API_KEY: "private-elevenlabs-key",
+                MOLTBOOK_API_KEY: "private-moltbook-key",
+            }
         );
+        expect(environments.web.ELEVENLABS_API_KEY).toBe("private-elevenlabs-key");
         expect(environments.web.OPENCLAW_GATEWAY_TOKEN).toBe("private-token");
         expect(environments.web.MOLTBOOK_API_KEY).toBeUndefined();
+        expect(environments.worker.ELEVENLABS_API_KEY).toBeUndefined();
         expect(environments.worker.MOLTBOOK_API_KEY).toBe("private-moltbook-key");
         expect(environments.worker.OPENCLAW_GATEWAY_TOKEN).toBe(
             "source-development-no-gateway-credential"

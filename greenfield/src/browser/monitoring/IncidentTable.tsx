@@ -1,85 +1,52 @@
-import { createColumnHelper, tableFeatures, useTable } from "@tanstack/react-table";
-
 import type { IncidentSummary } from "../../contracts/monitoring.ts";
 import { cn } from "../lib/classNames.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
-import { DataTable } from "../ui/DataTable.tsx";
-import { Text } from "../ui/Text.tsx";
-import { Virtualizer, type VirtualizerRenderState } from "../ui/Virtualizer.tsx";
 import { incidentSeverityVariant } from "./incidentPresentation.ts";
+import { MonitoringSelectionList } from "./MonitoringSelectionList.tsx";
 
-const minimumVirtualizedRows = 50;
-const incidentTableFeatures = tableFeatures({});
-
-interface IncidentTableRow {
+interface IncidentListItemProps {
     readonly incident: IncidentSummary;
     readonly onSelect: (id: string) => void;
     readonly selected: boolean;
 }
 
-const incidentColumnHelper = createColumnHelper<
-    typeof incidentTableFeatures,
-    IncidentTableRow
->();
-
-const incidentColumns = incidentColumnHelper.columns([
-    incidentColumnHelper.accessor((row) => row.incident.title, {
-        cell: ({ getValue, row }) => (
-            <Button
-                aria-current={row.original.selected ? "true" : undefined}
-                aria-label={`${row.original.incident.title}; ${row.original.incident.monitorKey}; occurrence group ${row.original.incident.generation}`}
-                className={cn(
-                    "text-primary-100 hover:text-accent-300 text-left font-medium wrap-break-word",
-                    row.original.selected && "text-accent-300"
-                )}
-                onClick={() => row.original.onSelect(row.original.incident.id)}
-                variant="unstyled"
-                type="button"
+function IncidentListItem({ incident, onSelect, selected }: IncidentListItemProps) {
+    return (
+        <Button
+            aria-current={selected ? "true" : undefined}
+            aria-label={`${incident.title}; ${incident.severity}; ${incident.state}`}
+            className={cn(
+                "border-primary-700 bg-primary-900/45 hover:border-primary-500 w-full rounded-lg border px-3 py-2 text-left transition",
+                selected && "border-accent-500 bg-accent-500/10"
+            )}
+            onClick={() => onSelect(incident.id)}
+            type="button"
+            variant="unstyled"
+        >
+            <span className="flex min-w-0 items-start justify-between gap-2">
+                <span className="min-w-0">
+                    <span className="text-primary-100 block truncate text-sm font-medium">
+                        {incident.title}
+                    </span>
+                    <span className="text-primary-400 mt-1 block text-xs capitalize">
+                        {incident.state}
+                    </span>
+                </span>
+                <Badge variant={incidentSeverityVariant(incident.severity)}>
+                    {incident.severity}
+                </Badge>
+            </span>
+            <time
+                className="text-primary-400 mt-2 block text-xs"
+                dateTime={new Date(incident.lastSeenAtMs).toISOString()}
             >
-                {getValue()}
-            </Button>
-        ),
-        header: "Incident",
-        id: "title",
-    }),
-    incidentColumnHelper.accessor((row) => row.incident.state, {
-        cell: ({ getValue }) => (
-            <Badge variant={getValue() === "active" ? "warning" : "success"}>
-                {getValue()}
-            </Badge>
-        ),
-        header: "Status",
-        id: "state",
-    }),
-    incidentColumnHelper.accessor((row) => row.incident.severity, {
-        cell: ({ getValue }) => (
-            <Badge variant={incidentSeverityVariant(getValue())}>{getValue()}</Badge>
-        ),
-        header: "Severity",
-        id: "severity",
-    }),
-    incidentColumnHelper.accessor((row) => row.incident.monitorKey, {
-        cell: ({ getValue }) => <Text className="wrap-break-word">{getValue()}</Text>,
-        header: "Check",
-        id: "monitorKey",
-    }),
-    incidentColumnHelper.accessor((row) => row.incident.kind, {
-        cell: ({ getValue }) => <Text className="wrap-break-word">{getValue()}</Text>,
-        header: "Type",
-        id: "kind",
-    }),
-    incidentColumnHelper.accessor((row) => row.incident.lastSeenAtMs, {
-        cell: ({ getValue }) => (
-            <time dateTime={new Date(getValue()).toISOString()}>
-                {formatDashboardDateTime(getValue())}
+                {formatDashboardDateTime(incident.lastSeenAtMs)}
             </time>
-        ),
-        header: "Last seen",
-        id: "lastSeenAtMs",
-    }),
-]);
+        </Button>
+    );
+}
 
 interface IncidentTableProps {
     readonly incidents: readonly IncidentSummary[];
@@ -87,37 +54,20 @@ interface IncidentTableProps {
     readonly selectedId: string | undefined;
 }
 
-/** @returns Selectable incident lifecycle table with bounded virtual rendering. */
+/** @returns Compact incident selection list with bounded virtual rendering. */
 export function IncidentTable({ incidents, onSelect, selectedId }: IncidentTableProps) {
-    const table = useTable({
-        columns: incidentColumns,
-        data: incidents.map((incident) => ({
-            incident,
-            onSelect,
-            selected: incident.id === selectedId,
-        })),
-        features: incidentTableFeatures,
-        getRowId: ({ incident }) => incident.id,
-    });
-    const rows = table.getRowModel().rows;
-    const tableElement = (rowWindow?: VirtualizerRenderState<HTMLTableRowElement>) => (
-        <DataTable
-            label="Incidents"
-            rowWindow={rowWindow}
-            scrollContainerRef={rowWindow?.scrollContainerRef}
-            table={table}
-            tableClassName="min-w-192"
-        />
-    );
-
-    if (rows.length < minimumVirtualizedRows) return tableElement();
     return (
-        <Virtualizer<HTMLTableRowElement>
-            count={rows.length}
-            estimateSize={() => 72}
-            getItemKey={(index) => rows[index]?.id ?? `missing-incident-${index}`}
-        >
-            {(virtualization) => tableElement(virtualization)}
-        </Virtualizer>
+        <MonitoringSelectionList
+            getKey={(incident) => incident.id}
+            items={incidents}
+            label="Incidents"
+            renderItem={(incident) => (
+                <IncidentListItem
+                    incident={incident}
+                    onSelect={onSelect}
+                    selected={incident.id === selectedId}
+                />
+            )}
+        />
     );
 }

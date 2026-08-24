@@ -25,6 +25,7 @@ export interface TimePickerProps {
     readonly error?: string;
     readonly invalid?: boolean;
     readonly label: string;
+    readonly minuteStep?: 1 | 5 | 15 | 30 | 60;
     readonly onChange: (value: string) => void;
     readonly value: string;
 }
@@ -38,6 +39,7 @@ export function TimePicker({
     error,
     invalid = error !== undefined,
     label,
+    minuteStep = 1,
     onChange,
     value,
 }: TimePickerProps) {
@@ -72,7 +74,9 @@ export function TimePicker({
                     disabled={disabled}
                     invalid={invalid}
                     onChange={(nextMinute) => onChange(`${hour}:${nextMinute}`)}
-                    options={minuteOptions}
+                    options={minuteOptions.filter(
+                        (option) => Number(option.value) % minuteStep === 0
+                    )}
                     value={minute}
                 />
             </div>

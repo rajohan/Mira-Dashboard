@@ -4,6 +4,7 @@ import {
     type OpenClawCronJob,
     type OpenClawCronRun,
     type UpdateOpenClawCronPatch,
+    updateOpenClawCronPatchObjectSchema,
     updateOpenClawCronPatchSchema,
 } from "../../contracts/openClawCron.ts";
 import { compareStrings } from "../../shared/validation.ts";
@@ -213,6 +214,9 @@ export function editableOpenClawCronPatch(job: OpenClawCronJob): UpdateOpenClawC
         ...(job.nameTruncated ? {} : { name: job.name }),
         ...(payload === undefined ? {} : { payload }),
         ...(schedule === undefined ? {} : { schedule }),
+        ...(job.scratch === undefined || job.scratch.truncated
+            ? {}
+            : { scratch: job.scratch.content }),
         wakeMode: job.wakeMode,
     };
 }
@@ -231,6 +235,7 @@ const updatePatchFields = [
     "name",
     "payload",
     "schedule",
+    "scratch",
     "wakeMode",
 ] as const satisfies readonly (keyof UpdateOpenClawCronPatch)[];
 
@@ -264,13 +269,13 @@ export function parseOpenClawCronPatchJson(
     } catch {
         return { message: "Enter valid JSON.", success: false };
     }
-    const parsed = v.safeParse(updateOpenClawCronPatchSchema, decoded, {
+    const parsed = v.safeParse(updateOpenClawCronPatchObjectSchema, decoded, {
         abortEarly: true,
     });
     if (!parsed.success) {
         return {
             message:
-                "You can edit only name, description, delivery, schedule, payload, and wakeMode. Delivery supports none, announce, or webhook.",
+                "You can edit only name, description, delivery, schedule, payload, scratch, and wakeMode. Delivery supports none, announce, or webhook.",
             success: false,
         };
     }

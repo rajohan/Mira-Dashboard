@@ -10,9 +10,9 @@ const variantClasses: Readonly<Record<VisualButtonVariant, string>> = Object.fre
     danger: "bg-red-700 text-white data-hover:bg-red-600 data-active:bg-red-800 hover:bg-red-600 active:bg-red-800",
     ghost: "bg-transparent text-primary-300 data-hover:bg-primary-700 data-hover:text-primary-50 data-active:bg-primary-600 hover:bg-primary-700 hover:text-primary-50 active:bg-primary-600",
     primary:
-        "bg-accent-500 text-primary-950 data-hover:bg-accent-400 data-active:bg-accent-600 hover:bg-accent-400 active:bg-accent-600",
+        "bg-accent-700 text-white data-hover:bg-accent-800 data-active:bg-accent-900 hover:bg-accent-800 active:bg-accent-900",
     secondary:
-        "bg-primary-700 text-primary-100 data-hover:bg-primary-600 data-active:bg-primary-800 hover:bg-primary-600 active:bg-primary-800",
+        "bg-primary-700 text-white data-hover:bg-primary-600 data-active:bg-primary-800 hover:bg-primary-600 active:bg-primary-800",
 });
 
 const sizeClasses: Readonly<Record<ButtonSize, string>> = Object.freeze({
@@ -44,7 +44,7 @@ export function buttonClassNames({
         "focus-visible:ring-accent-300 outline-none focus-visible:ring-2",
         "disabled:cursor-not-allowed disabled:opacity-55 aria-disabled:cursor-not-allowed data-disabled:cursor-not-allowed data-disabled:opacity-55",
         variant !== "unstyled" &&
-            "focus-visible:ring-offset-primary-900 inline-flex items-center justify-center gap-2 rounded-lg font-semibold transition-colors focus-visible:ring-offset-2",
+            "focus-visible:ring-offset-primary-900 inline-flex items-center justify-center gap-2 rounded-lg font-semibold transition-colors focus-visible:ring-offset-2 [&_svg]:text-inherit",
         variant !== "unstyled" && variantClasses[variant],
         variant !== "unstyled" && sizeClasses[size],
         fullWidth && "w-full",

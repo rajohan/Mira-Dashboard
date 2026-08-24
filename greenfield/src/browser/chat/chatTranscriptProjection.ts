@@ -2,7 +2,7 @@ import { chatToolActivityText } from "./chatToolPresentation.ts";
 import type { ChatDisplayMessage } from "./chatTypes.ts";
 
 export const activeCompactionMaximumAgeMs = 5 * 60_000;
-export const completedCompactionMaximumAgeMs = 5000;
+export const completedCompactionMaximumAgeMs = 15_000;
 
 function messageMatchesActiveRun(
     message: ChatDisplayMessage,
@@ -40,43 +40,40 @@ function withActiveChatActivity(
     activeRunIds: readonly string[],
     sessionKey: string
 ): readonly ChatDisplayMessage[] {
-    const activityAfterMessage = new Map<string, ChatDisplayMessage[]>();
-    const trailingActivity: ChatDisplayMessage[] = [];
-    const emittedTargets = new Set<string>();
-    for (const activeRunId of activeRunIds) {
-        const candidates = messages.filter((message) =>
-            messageMatchesActiveRun(message, activeRunId)
-        );
-        const target = candidates.at(-1);
-        const latestUserIndex = candidates.findLastIndex(
-            (message) => message.role === "user"
-        );
-        const assistantCandidates = candidates
-            .slice(latestUserIndex + 1)
-            .filter((message) => message.role === "assistant");
-        const activitySource = assistantCandidates.at(-1);
-        if (
-            (target !== undefined && emittedTargets.has(target.id)) ||
-            candidates.some((message) =>
-                message.parts.some(
-                    (part) => part.kind === "control" && part.activity === "running"
-                )
-            ) ||
-            activitySource?.parts.some(
-                (part) => part.kind === "text" && part.text.trim() !== ""
+    const activeRunId = activeRunIds.at(-1);
+    if (activeRunId === undefined) return messages;
+
+    const candidates = messages.filter((message) =>
+        messageMatchesActiveRun(message, activeRunId)
+    );
+    const latestUserIndex = candidates.findLastIndex(
+        (message) => message.role === "user"
+    );
+    const assistantCandidates = candidates
+        .slice(latestUserIndex + 1)
+        .filter((message) => message.role === "assistant");
+    const activitySource = assistantCandidates.at(-1);
+    if (
+        candidates.some((message) =>
+            message.parts.some(
+                (part) => part.kind === "control" && part.activity === "running"
             )
-        ) {
-            continue;
-        }
-        if (target !== undefined) emittedTargets.add(target.id);
-        const latestPart = activitySource?.parts.at(-1);
-        const text =
-            latestPart?.kind === "tool" ? chatToolActivityText(latestPart) : "Thinking…";
-        const identity =
-            latestPart?.kind === "tool" ? `tool:${latestPart.callId}` : "thinking";
-        const activity: ChatDisplayMessage = {
+        ) ||
+        activitySource?.parts.some(
+            (part) => part.kind === "text" && part.text.trim() !== ""
+        )
+    ) {
+        return messages;
+    }
+
+    const latestPart = activitySource?.parts.at(-1);
+    const text =
+        latestPart?.kind === "tool" ? chatToolActivityText(latestPart) : "Thinking…";
+    return [
+        ...messages,
+        {
             attachments: [],
-            id: `activity:${activeRunId}:${identity}`,
+            id: `activity:${activeRunId}`,
             parts: [
                 {
                     activity: "running",
@@ -86,32 +83,14 @@ function withActiveChatActivity(
                 },
             ],
             role: "assistant",
-            sequence: target?.sequence ?? Number.MAX_SAFE_INTEGER,
-            sessionKey: target?.sessionKey ?? sessionKey,
-            ...(target?.timestampMs === undefined
-                ? {}
-                : { timestampMs: target.timestampMs }),
-        };
-        if (target === undefined) {
-            trailingActivity.push(activity);
-        } else {
-            activityAfterMessage.set(target.id, [
-                ...(activityAfterMessage.get(target.id) ?? []),
-                activity,
-            ]);
-        }
-    }
-    return [
-        ...messages.flatMap((message) => [
-            message,
-            ...(activityAfterMessage.get(message.id) ?? []),
-        ]),
-        ...trailingActivity,
+            sequence: Number.MAX_SAFE_INTEGER,
+            sessionKey,
+        },
     ];
 }
 
 /**
- * Projects bounded compaction feedback and one live activity row per active run.
+ * Projects bounded compaction feedback and one trailing live activity row.
  * @param messages Canonical and provider-runtime transcript rows.
  * @param activeRunIds Authoritative currently active run identities.
  * @param sessionKey Current chat session identity.

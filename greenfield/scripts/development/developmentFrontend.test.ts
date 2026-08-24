@@ -1,18 +1,22 @@
 import { expect, test } from "bun:test";
 
 import { startDevelopmentFrontend } from "../developmentFrontend.ts";
+import developmentFixture from "./testSupport/developmentFrontendFixture.html";
 
 test("serves remote Bun HMR, React Fast Refresh, and React Compiler output together", async () => {
     const publicHost = "dashboard.example.ts.net:3445";
-    const runtime = await startDevelopmentFrontend({
-        apiTarget: "http://127.0.0.1:65534",
-        cookieNamespace: "__Host-mira_dashboard_dev_hmr",
-        host: "127.0.0.1",
-        hotReload: true,
-        port: 0,
-        publicOrigin: `https://${publicHost}`,
-        remoteProxyPort: 0,
-    });
+    const runtime = await startDevelopmentFrontend(
+        {
+            apiTarget: "http://127.0.0.1:65534",
+            cookieNamespace: "__Host-mira_dashboard_dev_hmr",
+            host: "127.0.0.1",
+            hotReload: true,
+            port: 0,
+            publicOrigin: `https://${publicHost}`,
+            remoteProxyPort: 0,
+        },
+        { dashboardRoute: developmentFixture }
+    );
 
     try {
         const remoteProxyPort = runtime.remoteProxy?.port;
@@ -38,11 +42,7 @@ test("serves remote Bun HMR, React Fast Refresh, and React Compiler output toget
 
         expect(javascript).toContain("/_bun/hmr");
         expect(javascript).toContain("react-refresh/runtime");
-        expect(javascript).toContain("dashboardBrowserRoot");
-        expect(javascript).toMatch(
-            /\.prototype\._replaceRouteChunk = \(\.\.\.([A-Za-z_$][\w$]*)\) => [A-Za-z_$][\w$]*\.replaceRouteChunk\(\.\.\.\1\);/u
-        );
-        expect(javascript).toContain("globalThis.location.reload()");
+        expect(javascript).toContain("developmentFrontendFixtureRoot");
         expect(javascript).toContain("useMemoCache");
     } finally {
         await runtime.stop(true);

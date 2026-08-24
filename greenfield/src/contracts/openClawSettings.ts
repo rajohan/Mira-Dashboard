@@ -60,6 +60,8 @@ const openClawModelSettingsSchema = v.strictObject({
         ),
         v.check(hasUniqueArrayItems, "OpenClaw model fallbacks must be unique")
     ),
+    imageGenerationModel: v.optional(openClawModelIdSchema),
+    imageModel: v.optional(openClawModelIdSchema),
     primary: v.optional(openClawModelIdSchema),
 });
 
@@ -82,6 +84,10 @@ const openClawSessionResetSettingsSchema = v.variant("state", [
     v.strictObject({ state: v.literal("inherited-none") }),
     v.strictObject({ state: v.literal("implicit-daily") }),
     v.strictObject({
+        atHour: v.optional(
+            v.pipe(v.number(), v.safeInteger(), v.minValue(0), v.maxValue(23))
+        ),
+        idleMinutes: v.optional(openClawSessionResetIdleMinutesSchema),
         mode: v.picklist(["daily", "none"]),
         state: v.literal("locked-mode"),
     }),
@@ -284,10 +290,12 @@ export function openClawAgentAccessHasStableUniqueOrder(
     agents: OpenClawAgentAccessValue[]
 ): boolean {
     if (!hasUniqueArrayItems(agents.map(({ id }) => id))) return false;
-    return agents.every(
-        (agent, index) =>
-            index === 0 || compareStrings(agents[index - 1]?.id ?? "", agent.id) < 0
-    );
+    return agents.every((agent, index) => {
+        if (index === 0) return true;
+        const previousId = agents[index - 1]?.id ?? "";
+        if (previousId === "main") return agent.id !== "main";
+        return agent.id !== "main" && compareStrings(previousId, agent.id) < 0;
+    });
 }
 
 export const openClawAgentAccessListSchema = v.pipe(
@@ -340,8 +348,11 @@ const updateOpenClawModelsSchema = v.strictObject({
 });
 
 const updateOpenClawSessionResetSchema = v.strictObject({
+    atHour: v.optional(
+        v.nullable(v.pipe(v.number(), v.safeInteger(), v.minValue(0), v.maxValue(23)))
+    ),
     idleMinutes: openClawSessionResetIdleMinutesSchema,
-    mode: v.literal("idle"),
+    mode: v.picklist(["daily", "idle", "none"]),
     section: v.literal("session-reset"),
 });
 

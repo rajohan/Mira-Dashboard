@@ -46,7 +46,7 @@ export function sortChatDisplayMessages(
         const rightGroup = messageOrderGroup(right);
         if (leftGroup === rightGroup && left.providerRunId !== undefined) {
             return (
-                left.sequence - right.sequence || compareExactStrings(left.id, right.id)
+                left.sequence - right.sequence || chronologicalMessageOrder(left, right)
             );
         }
         const leftOrder = groupOrder.get(leftGroup) ?? left;

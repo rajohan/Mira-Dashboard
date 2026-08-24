@@ -80,7 +80,6 @@ describe("jobs realtime invalidation", () => {
 
         try {
             expect(realtimeClient.input).toEqual({
-                lastEventId: "0",
                 topics: [jobRealtimeTopics.runs, jobRealtimeTopics.schedules],
             });
             expect(realtimeClient.activeSubscriptionCount).toBe(1);

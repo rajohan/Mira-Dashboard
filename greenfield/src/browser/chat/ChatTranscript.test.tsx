@@ -1,6 +1,7 @@
 import { describe, expect, jest, spyOn, test } from "bun:test";
 
 import { visibleChatTranscriptMessages } from "./chatMessageVisibility.ts";
+import { activeStreamingTextMessageIds } from "./chatReadAloudProjection.ts";
 import { ChatTranscript } from "./ChatTranscript.tsx";
 import {
     activeCompactionMaximumAgeMs,
@@ -37,7 +38,6 @@ function properties(messages: readonly ChatDisplayMessage[]) {
         historyLoading: false,
         initialLoading: false,
         messages,
-        onHideMessage: jest.fn(),
         onHydrateMessage: jest.fn(),
         onLoadOlder: jest.fn(),
         sessionKey,
@@ -56,17 +56,34 @@ async function flushAnimationFrames(): Promise<void> {
 }
 
 describe("chat transcript", () => {
-    test("projects one default activity row before the first assistant part", () => {
+    test("marks only the latest text in an active run as streaming for TTS", () => {
+        const providerRunId = "provider-steered-run";
+        const earlier = {
+            ...message("earlier-final", 1),
+            providerRunId,
+        };
+        const latest = {
+            ...message("latest-stream", 2),
+            providerRunId,
+        };
+        expect([
+            ...activeStreamingTextMessageIds([earlier, latest], [providerRunId]),
+        ]).toEqual(["latest-stream"]);
+    });
+
+    test("projects one trailing activity row for the current active run", () => {
+        const older = message("older", 1);
         const projected = projectChatTranscriptMessages(
-            [],
-            ["provider-empty"],
+            [older],
+            ["provider-stale", "provider-current"],
             sessionKey,
             Date.now()
         );
 
         expect(projected).toEqual([
+            older,
             expect.objectContaining({
-                id: "activity:provider-empty:thinking",
+                id: "activity:provider-current",
                 parts: [
                     {
                         activity: "running",
@@ -75,6 +92,7 @@ describe("chat transcript", () => {
                         tone: "muted",
                     },
                 ],
+                sequence: Number.MAX_SAFE_INTEGER,
             }),
         ]);
     });
@@ -120,7 +138,7 @@ describe("chat transcript", () => {
         expect(projected.map(({ id }) => id)).toEqual([
             tool.id,
             steer.id,
-            "activity:provider-steer:thinking",
+            "activity:provider-steer",
         ]);
         expect(projected.at(-1)?.parts).toEqual([
             expect.objectContaining({ kind: "control", text: "Thinking…" }),
@@ -155,7 +173,7 @@ describe("chat transcript", () => {
 
         expect(projected.map(({ id }) => id)).toEqual([
             runningTool.id,
-            "activity:provider-tool:tool:call-2",
+            "activity:provider-tool",
         ]);
         expect(projected.at(-1)?.parts).toEqual([
             expect.objectContaining({
@@ -194,7 +212,7 @@ describe("chat transcript", () => {
         const projected = projectChatTranscriptMessages(
             [
                 compaction("fresh-complete", "complete", nowMs - 1000),
-                compaction("stale-complete", "complete", nowMs - 6000),
+                compaction("stale-complete", "complete", nowMs - 16_000),
                 compaction("stale-active", "running", nowMs - 300_001),
             ],
             [],
@@ -372,35 +390,109 @@ describe("chat transcript", () => {
         expect(visibleChatTranscriptMessages(messages, display)).toHaveLength(2);
     });
 
-    test("keeps older-history paging available when filters hide the loaded page", () => {
-        const toolOnly: ChatDisplayMessage = {
-            attachments: [],
-            id: "tool-only-page",
-            parts: [
-                {
-                    callId: "call-1",
-                    kind: "tool",
-                    name: "search",
-                    status: "completed",
-                },
-            ],
-            role: "assistant",
-            sequence: 1,
-            sessionKey,
-        };
+    test("loads one older page at the top and preserves the visible row", async () => {
         const onLoadOlder = jest.fn();
+        const current = message("current", 2);
         const rendered = render(
             <ChatTranscript
-                {...properties([toolOnly])}
-                display={{ ...display, showTools: false }}
+                {...properties([current])}
                 hasOlder
                 onLoadOlder={onLoadOlder}
             />
         );
 
-        fireEvent.click(screen.getByRole("button", { name: "Load older messages" }));
+        const log = screen.getByRole("log", { name: "Messages" });
+        Object.defineProperties(log, {
+            clientHeight: { configurable: true, value: 200 },
+            scrollHeight: { configurable: true, value: 1000 },
+            scrollTop: {
+                configurable: true,
+                value: 0,
+                writable: true,
+            },
+        });
+        log.scrollTop = 100;
+        fireEvent.scroll(log);
+        log.scrollTop = 0;
+        fireEvent.scroll(log);
+        await act(async () => {});
         expect(onLoadOlder).toHaveBeenCalledTimes(1);
-        expect(screen.queryByText("No messages yet")).toBeNull();
+        expect(screen.queryByRole("button", { name: "Load older messages" })).toBeNull();
+
+        rendered.rerender(
+            <ChatTranscript
+                {...properties([current])}
+                hasOlder
+                historyLoading
+                onLoadOlder={onLoadOlder}
+            />
+        );
+        await flushAnimationFrames();
+        expect(log).toHaveAttribute("aria-busy", "true");
+        rendered.rerender(
+            <ChatTranscript
+                {...properties([message("older-visible", 1), current])}
+                hasOlder
+                onLoadOlder={onLoadOlder}
+            />
+        );
+        await flushAnimationFrames();
+        expect(log.scrollTop).toBeGreaterThan(32);
+        fireEvent.scroll(log);
+        expect(onLoadOlder).toHaveBeenCalledTimes(1);
+        expect(log).toHaveAttribute("aria-busy", "false");
+        fireEvent.wheel(log, { deltaY: -100 });
+        log.scrollTop = 0;
+        fireEvent.scroll(log);
+        expect(onLoadOlder).toHaveBeenCalledTimes(2);
+        act(() => rendered.unmount());
+    });
+
+    test("continues one top gesture until a visible older row moves the viewport", async () => {
+        const secondPage = Promise.withResolvers<boolean>();
+        let page = 0;
+        const onLoadOlder = jest.fn(() => {
+            page += 1;
+            return page === 1 ? true : secondPage.promise;
+        });
+        const current = message("current", 2);
+        const rendered = render(
+            <ChatTranscript
+                {...properties([current])}
+                hasOlder
+                onLoadOlder={onLoadOlder}
+            />
+        );
+        const log = screen.getByRole("log", { name: "Messages" });
+        Object.defineProperties(log, {
+            clientHeight: { configurable: true, value: 200 },
+            scrollHeight: { configurable: true, value: 1000 },
+            scrollTop: { configurable: true, value: 100, writable: true },
+        });
+
+        await act(async () => {
+            fireEvent.scroll(log);
+            log.scrollTop = 0;
+            fireEvent.scroll(log);
+            await Promise.resolve();
+            await Promise.resolve();
+        });
+        expect(onLoadOlder).toHaveBeenCalledTimes(2);
+
+        rendered.rerender(
+            <ChatTranscript
+                {...properties([message("older", 1), current])}
+                hasOlder
+                onLoadOlder={onLoadOlder}
+            />
+        );
+        await act(async () => {
+            secondPage.resolve(true);
+            await secondPage.promise;
+        });
+        await flushAnimationFrames();
+        expect(log.scrollTop).toBeGreaterThan(32);
+        expect(onLoadOlder).toHaveBeenCalledTimes(2);
         act(() => rendered.unmount());
     });
 

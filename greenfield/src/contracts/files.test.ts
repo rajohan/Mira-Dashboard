@@ -78,6 +78,7 @@ describe("workspace files contracts", () => {
             },
             expect.objectContaining({ kind: "query", name: "files.list" }),
             expect.objectContaining({ kind: "query", name: "files.prepareContent" }),
+            expect.objectContaining({ kind: "query", name: "files.prepareReference" }),
             {
                 access: {
                     capabilities: ["files:write"],

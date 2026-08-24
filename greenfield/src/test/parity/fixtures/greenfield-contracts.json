@@ -351,6 +351,10 @@
             "name": "files.prepareContent"
         },
         {
+            "kind": "query",
+            "name": "files.prepareReference"
+        },
+        {
             "kind": "mutation",
             "name": "files.prepareReveal"
         },

@@ -16,6 +16,11 @@
         }
       ]
     },
+    "expectedScratchRevision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
     "id": {
       "type": "string",
       "maxLength": 256,
@@ -495,6 +500,10 @@
             }
           ]
         },
+        "scratch": {
+          "type": "string",
+          "maxLength": 16384
+        },
         "wakeMode": {
           "enum": [
             "next-heartbeat",
@@ -505,7 +514,7 @@
       },
       "required": [],
       "additionalProperties": false,
-      "$comment": "Live Valibot validation additionally requires at least one reviewed OpenClaw cron field to change."
+      "$comment": "Live Valibot validation additionally requires at least one reviewed OpenClaw cron field to change. Live Valibot validation additionally requires OpenClaw cron scratch changes to be isolated from configuration-field changes."
     }
   },
   "required": [
@@ -514,5 +523,6 @@
     "patch"
   ],
   "additionalProperties": false,
+  "$comment": "Live Valibot validation additionally requires an expected scratch revision exactly when the patch changes scratch.",
   "$schema": "https://json-schema.org/draft/2020-12/schema"
 }

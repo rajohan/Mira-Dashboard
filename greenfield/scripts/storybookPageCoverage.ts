@@ -103,7 +103,6 @@ export const dashboardPageStoryRequirements = Object.freeze([
             "Fresh",
             "Empty",
             "LastKnownGood",
-            "BrowserRetained",
             "Unavailable",
             "UpdatesAvailable",
             "Confirmation",

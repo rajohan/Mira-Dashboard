@@ -1,6 +1,6 @@
 import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from "@headlessui/react";
 import { Check, ChevronsUpDown } from "lucide-react";
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 
 import { cn } from "../lib/classNames.ts";
 import { useFormFieldInvalid } from "./formFieldContext.ts";
@@ -10,6 +10,7 @@ import { interactiveTapClassName } from "./interactionStyles.ts";
 export interface SelectOption<TValue extends string> {
     readonly description?: ReactNode;
     readonly disabled?: boolean;
+    readonly group?: string;
     readonly label: ReactNode;
     readonly value: TValue;
 }
@@ -81,33 +82,43 @@ export function Select<TValue extends string>({
                         modal={false}
                         transition
                     >
-                        {options.map((option) => (
-                            <ListboxOption
-                                className={cn(
-                                    "group text-primary-200 relative flex cursor-pointer items-start gap-2 rounded-md py-2 pr-3 pl-9 text-sm select-none",
-                                    "data-focus:bg-primary-700 data-focus:text-primary-50 data-disabled:cursor-not-allowed data-disabled:opacity-50"
-                                )}
-                                disabled={option.disabled}
-                                key={option.value}
-                                value={option.value}
-                            >
-                                <Icon
-                                    className="text-accent-300 invisible absolute top-2.5 left-3 group-data-selected:visible"
-                                    icon={Check}
-                                    size="sm"
-                                    tone="inherit"
-                                />
-                                <span className="min-w-0">
-                                    <span className="block truncate font-medium">
-                                        {option.label}
-                                    </span>
-                                    {option.description !== undefined && (
-                                        <span className="text-primary-400 group-data-focus:text-primary-300 mt-0.5 block text-xs leading-5">
-                                            {option.description}
-                                        </span>
+                        {options.map((option, index) => (
+                            <Fragment key={option.value}>
+                                {option.group !== undefined &&
+                                    option.group !== options[index - 1]?.group && (
+                                        <div
+                                            className="text-primary-400 px-3 pt-2 pb-1 text-[11px] font-semibold tracking-wide uppercase first:pt-1"
+                                            role="presentation"
+                                        >
+                                            {option.group}
+                                        </div>
                                     )}
-                                </span>
-                            </ListboxOption>
+                                <ListboxOption
+                                    className={cn(
+                                        "group text-primary-200 relative flex cursor-pointer items-start gap-2 rounded-md py-2 pr-3 pl-9 text-sm select-none",
+                                        "data-focus:bg-primary-700 data-focus:text-primary-50 data-disabled:cursor-not-allowed data-disabled:opacity-50"
+                                    )}
+                                    disabled={option.disabled}
+                                    value={option.value}
+                                >
+                                    <Icon
+                                        className="text-accent-300 invisible absolute top-2.5 left-3 group-data-selected:visible"
+                                        icon={Check}
+                                        size="sm"
+                                        tone="inherit"
+                                    />
+                                    <span className="min-w-0">
+                                        <span className="block truncate font-medium">
+                                            {option.label}
+                                        </span>
+                                        {option.description !== undefined && (
+                                            <span className="text-primary-400 group-data-focus:text-primary-300 mt-0.5 block text-xs leading-5">
+                                                {option.description}
+                                            </span>
+                                        )}
+                                    </span>
+                                </ListboxOption>
+                            </Fragment>
                         ))}
                     </ListboxOptions>
                 </>

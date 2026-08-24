@@ -16,9 +16,7 @@ import type {
     DockerPreparePruneResult,
     DockerRequestOperationResult,
 } from "../../contracts/docker.ts";
-import type { JobRunSummary } from "../../contracts/jobModel.ts";
 import { parseJobsRouteSearch } from "../jobs/jobRouteSearch.ts";
-import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { parseTerminalRouteSearch } from "../terminal/terminalRouteSearch.ts";
 import type { DockerClient } from "./dockerClient.ts";
 import { dockerOverviewQueryKey } from "./dockerQueries.ts";
@@ -40,7 +38,7 @@ const freshOverview = {
     checkedAtMs: observedAtMs + 1000,
     containers: [
         {
-            createdAtMs: observedAtMs - 20_000,
+            createdAtMs: observedAtMs - 8 * 60 * 60_000,
             health: "healthy",
             id: firstContainerId,
             image: "example/api:1.0.0",
@@ -76,7 +74,7 @@ const freshOverview = {
             project: "example",
             restartCount: 2,
             service: "api",
-            startedAtMs: observedAtMs - 10_000,
+            startedAtMs: observedAtMs - 7 * 60 * 60_000,
             state: "running",
             stats: {
                 blockReadBytes: 1024,
@@ -209,11 +207,6 @@ const minimalRefreshOverview = {
     volumes: [],
 } as const satisfies DockerOverview;
 
-const minimalRefreshedOverview = {
-    ...minimalRefreshOverview,
-    checkedAtMs: freshOverview.checkedAtMs + 60_000,
-} as const satisfies DockerOverview;
-
 const refreshedOverview = {
     ...freshOverview,
     checkedAtMs: freshOverview.checkedAtMs + 60_000,
@@ -265,27 +258,6 @@ const queuedResult = {
     operation: "container-stop",
     queued: true,
 } as const satisfies DockerRequestOperationResult;
-
-const refreshRun = {
-    actionKey: "cache.refresh.docker-overview",
-    attemptCount: 0,
-    attemptLimit: 3,
-    availableAtMs: observedAtMs,
-    cancellationPolicy: "cooperative",
-    displayName: "Docker overview cache",
-    eventCount: 1,
-    id: "019fdf70-0000-7000-8000-000000000042",
-    priority: 0,
-    queuedAtMs: observedAtMs,
-    resourceClass: "host-heavy",
-    resourceKeys: ["docker.engine"],
-    retrySafe: true,
-    state: "queued",
-    stateVersion: 1,
-    timeoutMs: 45_000,
-    triggerType: "manual",
-    updatedAtMs: observedAtMs,
-} as const satisfies JobRunSummary;
 
 function deferred<T>() {
     let resolveDeferred!: (value: T) => void;
@@ -386,51 +358,52 @@ function renderDocker(client: DockerClient) {
     };
 }
 
+function getDesktopContainerActionTrigger(containerName: string): HTMLElement {
+    const table = screen.getByRole("table", { name: "Docker containers" });
+    return within(table).getByRole("button", {
+        name: `Actions for ${containerName}`,
+    });
+}
+
+function expectDecorativeAccentHeadingIcon(headingId: string, headingName: string): void {
+    const heading = document.querySelector(`#${headingId}`);
+    expect(heading).not.toBeNull();
+    expect(heading).toHaveTextContent(headingName);
+    const icon = heading?.previousElementSibling;
+    expect(icon).not.toBeNull();
+    expect(icon?.tagName.toLowerCase()).toBe("svg");
+    expect(icon).toHaveClass("text-accent-300");
+    expect(icon).toHaveAttribute("aria-hidden", "true");
+    expect(icon?.parentElement).not.toHaveClass("bg-accent-500/10");
+}
+
 describe("DockerRoute", () => {
-    test("queues an actual worker snapshot refresh and links its durable job", async () => {
-        const mutation = jest.fn((name: string) => {
-            if (name === "cache.refreshEntry") return Promise.resolve(refreshRun);
-            return Promise.resolve(queuedResult);
-        }) as unknown as DockerClient["mutation"];
-        const harness = createClient({
-            mutation,
-            overview: minimalRefreshOverview,
-            overviewAfterFirstRead: minimalRefreshedOverview,
-        });
+    test("starts with engine metrics without the Docker page or snapshot header", async () => {
+        const harness = createClient();
         const view = renderDocker(harness.client);
         try {
-            await screen.findByText("Fresh snapshot");
-            const overviewReadsBeforeRefresh = harness.overviewReadCount;
-            const user = userEvent.setup();
-            await user.click(screen.getByRole("button", { name: "Refresh snapshot" }));
-            expect(
-                await screen.findByText("Docker snapshot refresh queued.")
-            ).toBeVisible();
-            expect(mutation).toHaveBeenCalledWith(
-                "cache.refreshEntry",
-                {
-                    idempotencyKey: expect.stringMatching(/^[0-9a-f]{32}$/u),
-                    key: "docker.overview",
-                },
-                expect.objectContaining({ signal: expect.any(AbortSignal) })
-            );
-            expect(
-                screen.getByRole("link", { name: "View refresh job" })
-            ).toHaveAttribute("href", "/jobs?runId=" + refreshRun.id);
-            expect(
-                await screen.findByText(
-                    "Checked " +
-                        formatDashboardDateTime(minimalRefreshedOverview.checkedAtMs)
-                )
-            ).toBeVisible();
-            await waitFor(() => {
-                expect(harness.overviewReadCount).toBeGreaterThan(
-                    overviewReadsBeforeRefresh
-                );
-                expect(
-                    view.queryClient.isFetching({ queryKey: dockerOverviewQueryKey })
-                ).toBe(0);
+            const summary = await screen.findByRole("region", {
+                name: "Engine summary",
             });
+            expect(summary).toBeVisible();
+            const summaryHeading = within(summary).getByRole("heading", {
+                name: "Engine summary",
+            });
+            const pageHeading = screen.getByRole("heading", { name: "Docker" });
+            expect(summaryHeading).toHaveClass("sr-only");
+            expect(pageHeading).toHaveClass("sr-only");
+            expect(screen.queryByText("Operations")).toBeNull();
+            expect(
+                screen.queryByText(
+                    "Inspect the bounded Docker Engine and Compose projection, then queue exact audited operations."
+                )
+            ).toBeNull();
+            expect(screen.queryByRole("link", { name: "Open terminal" })).toBeNull();
+            expect(screen.queryByRole("button", { name: "Refresh snapshot" })).toBeNull();
+            expect(screen.queryByText("Fresh snapshot")).toBeNull();
+            expect(screen.queryByText(/^Checked /u)).toBeNull();
+            expect(screen.queryByText(/Docker state is fresh/iu)).toBeNull();
+            expect(harness.mutation).not.toHaveBeenCalled();
         } finally {
             view.unmount();
         }
@@ -440,25 +413,110 @@ describe("DockerRoute", () => {
         const harness = createClient();
         const view = renderDocker(harness.client);
         try {
-            expect(await screen.findByText("Fresh snapshot")).toBeVisible();
-            expect(screen.getByRole("link", { name: "Open terminal" })).toHaveAttribute(
-                "href",
-                "/terminal"
-            );
             expect(
-                screen.getByRole("link", { name: "Open console for alpha-api" })
-            ).toHaveAttribute(
-                "href",
-                `/terminal?dockerContainerId=${encodeURIComponent(
-                    JSON.stringify(firstContainerId)
-                )}`
+                await screen.findByRole("region", { name: "Engine summary" })
+            ).toBeVisible();
+            expectDecorativeAccentHeadingIcon("docker-updater-heading", "Updater");
+            expectDecorativeAccentHeadingIcon(
+                "docker-updater-services-heading",
+                "Services"
             );
+            expectDecorativeAccentHeadingIcon("docker-containers-heading", "Containers");
+            expectDecorativeAccentHeadingIcon("docker-images-heading", "Images");
+            expectDecorativeAccentHeadingIcon("docker-volumes-heading", "Volumes");
+
+            const scanUpdates = screen.getByRole("button", {
+                name: "Scan Docker services for updates",
+            });
+            const runUpdates = screen.getByRole("button", {
+                name: "Run automatic Docker updates",
+            });
+            expect(scanUpdates.parentElement).toBe(runUpdates.parentElement);
+            expect(scanUpdates.parentElement).toHaveClass(
+                "grid",
+                "w-full",
+                "grid-cols-1",
+                "min-[28rem]:grid-cols-2",
+                "lg:flex",
+                "lg:w-auto"
+            );
+            expect(scanUpdates).toHaveClass("w-full", "lg:w-auto");
+            expect(runUpdates).toHaveClass("w-full", "lg:w-auto");
+
+            expect(screen.queryByRole("heading", { name: "Compose stack" })).toBeNull();
             expect(
-                screen.queryByRole("link", { name: "Open console for zulu-worker" })
+                screen.queryByRole("button", { name: "Start Docker stack" })
             ).toBeNull();
             expect(
-                screen.queryByRole("button", { name: "Open console for zulu-worker" })
+                screen.queryByRole("button", { name: "Stop Docker stack" })
             ).toBeNull();
+            expect(
+                screen.queryByRole("button", { name: "Restart Docker stack" })
+            ).toBeNull();
+
+            const user = userEvent.setup();
+            const stackActions = screen.getByRole("button", {
+                name: "Docker stack actions",
+            });
+            const containerHeading = document.querySelector("#docker-containers-heading");
+            const containerHeader =
+                containerHeading?.parentElement?.parentElement?.parentElement;
+            expect(containerHeader).toHaveClass(
+                "grid",
+                "grid-cols-[minmax(0,1fr)_auto]",
+                "xl:grid-cols-[minmax(0,1fr)_24rem_auto]",
+                "xl:items-end"
+            );
+            const containerSearch = screen.getByRole("searchbox", {
+                name: "Search Docker containers",
+            });
+            expect(containerSearch).toHaveAttribute("placeholder", "Search containers");
+            expect(containerSearch.parentElement).toHaveClass(
+                "col-span-2",
+                "row-start-2",
+                "w-full",
+                "xl:col-span-1",
+                "xl:col-start-2",
+                "xl:row-start-1",
+                "xl:w-96"
+            );
+            expect(stackActions.parentElement?.parentElement).toHaveClass(
+                "col-start-2",
+                "row-start-1",
+                "xl:col-start-3",
+                "xl:self-end",
+                "xl:pb-1"
+            );
+            await user.click(stackActions);
+            const stackMenu = screen.getByRole("menu");
+            expect(within(stackMenu).getAllByRole("menuitem")).toHaveLength(3);
+            expect(
+                within(stackMenu).getByRole("menuitem", { name: /^Start stack/u })
+            ).toBeEnabled();
+            expect(
+                within(stackMenu).getByRole("menuitem", { name: /^Stop stack/u })
+            ).toBeEnabled();
+            const restartStackAction = within(stackMenu).getByRole("menuitem", {
+                name: /^Restart stack/u,
+            });
+            expect(restartStackAction).toBeEnabled();
+            await user.click(restartStackAction);
+            const stackDialog = screen.getByRole("dialog", {
+                name: "Restart Docker stack?",
+            });
+            expect(stackDialog).toHaveTextContent(
+                "Restart the discovered root Compose stack at this exact source revision?"
+            );
+            expect(
+                within(stackDialog).getByRole("button", {
+                    name: "Queue stack restart",
+                })
+            ).toBeVisible();
+            await user.click(within(stackDialog).getByRole("button", { name: "Cancel" }));
+            await waitForDialogExit();
+
+            const table = screen.getByRole("table", { name: "Docker containers" });
+            expect(table.parentElement).toHaveClass("hidden", "@min-[66rem]:block");
             expect(screen.getByText("2 discovered in total")).toBeVisible();
             const composeSummary = screen
                 .getByRole("heading", { name: "Compose managed" })
@@ -487,14 +545,134 @@ describe("DockerRoute", () => {
             expect(screen.getAllByText("Registry unavailable")).not.toHaveLength(0);
             expect(screen.getByText(/Inventory only · not opted in/u)).toBeVisible();
             expect(screen.getByText("A newer API image is available.")).toBeVisible();
-            expect(screen.getByText("127.0.0.1:3100 → 3000/tcp")).toBeVisible();
-            expect(screen.getByText("example_old")).toBeVisible();
-            expect(screen.getByText(secondImageId)).toBeVisible();
+            expect(within(table).getByText("127.0.0.1:3100 → 3000/tcp")).toBeVisible();
 
-            const user = userEvent.setup();
-            await user.click(
-                screen.getByRole("button", { name: "Show details for alpha-api" })
+            const imagesTable = screen.getByRole("table", {
+                name: "Docker images",
+            });
+            const volumesTable = screen.getByRole("table", {
+                name: "Docker volumes",
+            });
+            const imagesMobileList = screen.getByRole("list", {
+                name: "Docker images",
+            });
+            const volumesMobileList = screen.getByRole("list", {
+                name: "Docker volumes",
+            });
+            expect(within(imagesTable).getByText(secondImageId)).toBeVisible();
+            expect(within(volumesTable).getByText("example_old")).toBeVisible();
+
+            const imagesCard = screen
+                .getByRole("heading", { name: "Images" })
+                .closest("section");
+            const volumesCard = screen
+                .getByRole("heading", { name: "Volumes" })
+                .closest("section");
+            expect(imagesCard).not.toBeNull();
+            expect(volumesCard).not.toBeNull();
+            expect(imagesCard).toHaveClass("@container", "min-w-0");
+            expect(volumesCard).toHaveClass("@container", "min-w-0");
+            expect(imagesCard?.parentElement).toBe(volumesCard?.parentElement);
+            expect(imagesCard?.parentElement).toHaveClass(
+                "grid",
+                "min-w-0",
+                "xl:grid-cols-2",
+                "@min-[66rem]:grid-cols-2"
             );
+
+            expect(imagesMobileList).toHaveClass("@min-[30rem]:hidden");
+            expect(volumesMobileList).toHaveClass("@min-[30rem]:hidden");
+            expect(imagesTable.parentElement).toHaveClass(
+                "hidden",
+                "overflow-hidden",
+                "@min-[30rem]:block"
+            );
+            expect(volumesTable.parentElement).toHaveClass(
+                "hidden",
+                "overflow-hidden",
+                "@min-[30rem]:block"
+            );
+            expect(imagesTable.parentElement).not.toHaveClass("overflow-x-auto");
+            expect(volumesTable.parentElement).not.toHaveClass("overflow-x-auto");
+            for (const resourceTable of [imagesTable, volumesTable]) {
+                expect(resourceTable).toHaveClass(
+                    "bg-primary-950/40",
+                    "w-full",
+                    "table-fixed"
+                );
+                expect(resourceTable.className).not.toMatch(/\bmin-w-/u);
+                expect(resourceTable.querySelector("thead")).toHaveClass(
+                    "bg-primary-950"
+                );
+            }
+
+            const pruneImages = screen.getByRole("button", {
+                name: "Prune unused images",
+            });
+            const pruneVolumes = screen.getByRole("button", {
+                name: "Prune unused volumes",
+            });
+            expect(pruneImages).toHaveTextContent("Prune unused (1)");
+            expect(pruneVolumes).toHaveTextContent("Prune unused (1)");
+
+            const mobileImageDelete = within(imagesMobileList).getByRole("button", {
+                name: `Delete exact image ${secondImageId}`,
+            });
+            const desktopImageDelete = within(imagesTable).getByRole("button", {
+                name: `Delete exact image ${secondImageId}`,
+            });
+            const mobileVolumeDelete = within(volumesMobileList).getByRole("button", {
+                name: "Delete exact volume example_old",
+            });
+            const desktopVolumeDelete = within(volumesTable).getByRole("button", {
+                name: "Delete exact volume example_old",
+            });
+            for (const deleteButton of [
+                mobileImageDelete,
+                desktopImageDelete,
+                mobileVolumeDelete,
+                desktopVolumeDelete,
+            ]) {
+                expect(deleteButton).toBeEnabled();
+                expect(deleteButton.textContent?.trim()).toBe("");
+                expect(deleteButton.querySelector("svg")).not.toBeNull();
+            }
+
+            const alphaRow = within(table).getByRole("row", {
+                name: "Open details for alpha-api",
+            });
+            expect(alphaRow).toHaveClass("hover:bg-primary-700/30");
+            expect(within(alphaRow).getByText("running")).toBeVisible();
+            expect(within(alphaRow).getByText("Up 7 hours")).toBeVisible();
+            expect(within(alphaRow).getByText("healthy")).toBeVisible();
+            expect(within(alphaRow).getByText("restarts: 2")).toBeVisible();
+            expect(within(alphaRow).getByText("256 MiB")).toBeVisible();
+            expect(within(alphaRow).getByText("service: api")).toBeVisible();
+            expect(within(alphaRow).getByText("project: example")).toBeVisible();
+            expect(alphaRow).not.toHaveTextContent("256 MiB / 1 GiB (25%)");
+            expect(alphaRow).not.toHaveTextContent(firstContainerId.slice(0, 12));
+
+            const alphaActions = within(table).getByRole("button", {
+                name: "Actions for alpha-api",
+            });
+            await user.click(alphaActions);
+            const alphaMenu = screen.getByRole("menu");
+            expect(within(alphaMenu).getAllByRole("menuitem")).toHaveLength(4);
+            expect(
+                within(alphaMenu).getByRole("menuitem", { name: /^Console/u })
+            ).toBeEnabled();
+            expect(
+                within(alphaMenu).getByRole("menuitem", { name: /^Stop/u })
+            ).toBeEnabled();
+            expect(
+                within(alphaMenu).queryByRole("menuitem", { name: /^Start/u })
+            ).toBeNull();
+            expect(
+                within(alphaMenu).queryByRole("menuitem", { name: /^Details/u })
+            ).toBeNull();
+            await user.keyboard("{Escape}");
+
+            await user.click(alphaRow);
             const detailsDialog = screen.getByRole("dialog");
             expect(
                 within(detailsDialog).getByRole("heading", {
@@ -511,9 +689,16 @@ describe("DockerRoute", () => {
             await user.click(
                 within(detailsDialog).getByRole("button", { name: "Close dialog" })
             );
+            expect(
+                screen.queryByRole("heading", {
+                    hidden: true,
+                    name: "Container details",
+                })
+            ).toBeNull();
             await waitForDialogExit();
+            expect(screen.queryByText("Container details")).toBeNull();
+            await waitFor(() => expect(alphaRow).toHaveFocus());
 
-            const table = screen.getByRole("table", { name: "Docker containers" });
             let rows = within(table).getAllByRole("row").slice(1);
             expect(rows[0]).toHaveTextContent("alpha-api");
             await user.click(
@@ -535,7 +720,119 @@ describe("DockerRoute", () => {
         }
     });
 
-    test("shows Console only for running containers in a fresh snapshot", async () => {
+    test("renders compact mobile cards with separate details and action targets", async () => {
+        const harness = createClient();
+        const view = renderDocker(harness.client);
+        try {
+            expect(
+                await screen.findByRole("region", { name: "Engine summary" })
+            ).toBeVisible();
+            const mobileList = screen.getByRole("list", {
+                name: "Docker containers",
+            });
+            expect(mobileList).toHaveClass("@min-[66rem]:hidden");
+            const card = within(mobileList).getByRole("listitem", {
+                name: "alpha-api container",
+            });
+            expect(within(card).getByText("service: api")).toBeVisible();
+            expect(within(card).getByText("project: example")).toBeVisible();
+            expect(within(card).getByText("running")).toBeVisible();
+            expect(within(card).getByText("Up 7 hours")).toHaveClass("block");
+            expect(within(card).getByText("healthy")).toBeVisible();
+            expect(within(card).getByText("2 restarts")).toHaveClass("block");
+            expect(within(card).getByText("1.5%")).toBeVisible();
+            expect(within(card).getByText("256 MiB")).toBeVisible();
+            expect(card).toHaveTextContent("Ports: 127.0.0.1:3100 → 3000/tcp");
+            expect(card).not.toHaveTextContent(firstContainerId.slice(0, 12));
+            expect(within(card).queryByText("I/O and processes")).toBeNull();
+            const stateTerm = within(card).getByText("State", { selector: "dt" });
+            expect(stateTerm.closest("dl")).toHaveClass("grid-cols-2");
+
+            const user = userEvent.setup();
+            await user.click(
+                within(card).getByRole("button", {
+                    name: "Actions for alpha-api",
+                })
+            );
+            expect(screen.getByRole("menu")).toBeVisible();
+            expect(screen.queryByRole("dialog")).toBeNull();
+            await user.keyboard("{Escape}");
+
+            const detailsTrigger = within(card).getByRole("button", {
+                name: "Open details for alpha-api",
+            });
+            await user.click(detailsTrigger);
+            const detailsDialog = screen.getByRole("dialog");
+            expect(
+                within(detailsDialog).getByRole("heading", {
+                    name: "alpha-api details",
+                })
+            ).toBeVisible();
+            await user.click(
+                within(detailsDialog).getByRole("button", { name: "Close dialog" })
+            );
+            expect(
+                screen.queryByRole("heading", {
+                    hidden: true,
+                    name: "Container details",
+                })
+            ).toBeNull();
+            await waitForDialogExit();
+            expect(screen.queryByText("Container details")).toBeNull();
+            await waitFor(() => expect(detailsTrigger).toHaveFocus());
+        } finally {
+            view.unmount();
+        }
+    });
+
+    test("keeps exact resource confirmation copy while delete dialogs close", async () => {
+        const harness = createClient();
+        const view = renderDocker(harness.client);
+        try {
+            await screen.findByRole("region", { name: "Engine summary" });
+            const user = userEvent.setup();
+            const imagesTable = screen.getByRole("table", {
+                name: "Docker images",
+            });
+            const volumesTable = screen.getByRole("table", {
+                name: "Docker volumes",
+            });
+
+            await user.click(
+                within(imagesTable).getByRole("button", {
+                    name: `Delete exact image ${secondImageId}`,
+                })
+            );
+            let dialog = screen.getByRole("dialog");
+            expect(
+                within(dialog).getByRole("heading", { name: "Delete Docker image?" })
+            ).toBeVisible();
+            expect(dialog).toHaveTextContent(secondImageId);
+            expect(screen.queryByText("No Docker operation is selected.")).toBeNull();
+            await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+            expect(screen.queryByText("No Docker operation is selected.")).toBeNull();
+            await waitForDialogExit();
+
+            await user.click(
+                within(volumesTable).getByRole("button", {
+                    name: "Delete exact volume example_old",
+                })
+            );
+            dialog = screen.getByRole("dialog");
+            expect(
+                within(dialog).getByRole("heading", { name: "Delete Docker volume?" })
+            ).toBeVisible();
+            expect(dialog).toHaveTextContent("example_old");
+            expect(screen.queryByText("No Docker operation is selected.")).toBeNull();
+            await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+            expect(screen.queryByText("No Docker operation is selected.")).toBeNull();
+            await waitForDialogExit();
+        } finally {
+            view.unmount();
+        }
+    });
+
+    test("disables Console for non-running containers in a fresh snapshot", async () => {
         const pausedOverview = {
             ...freshOverview,
             containers: [
@@ -549,16 +846,21 @@ describe("DockerRoute", () => {
         const harness = createClient({ overview: pausedOverview });
         const view = renderDocker(harness.client);
         try {
-            expect(await screen.findByText("Fresh snapshot")).toBeVisible();
             expect(
-                screen.queryByRole("link", { name: "Open console for alpha-api" })
-            ).toBeNull();
-            expect(
-                screen.queryByRole("button", { name: "Open console for alpha-api" })
-            ).toBeNull();
-            expect(
-                screen.queryByRole("link", { name: "Open console for zulu-worker" })
-            ).toBeNull();
+                await screen.findByRole("region", { name: "Engine summary" })
+            ).toBeVisible();
+            const user = userEvent.setup();
+            await user.click(getDesktopContainerActionTrigger("alpha-api"));
+            expect(screen.getByRole("menuitem", { name: /^Console/u })).toBeDisabled();
+            expect(screen.getByRole("menuitem", { name: /^Stop/u })).toBeEnabled();
+            expect(screen.queryByRole("menuitem", { name: /^Start/u })).toBeNull();
+            await user.keyboard("{Escape}");
+
+            await user.click(getDesktopContainerActionTrigger("zulu-worker"));
+            expect(screen.getByRole("menuitem", { name: /^Console/u })).toBeDisabled();
+            expect(screen.getByRole("menuitem", { name: /^Start/u })).toBeEnabled();
+            expect(screen.queryByRole("menuitem", { name: /^Stop/u })).toBeNull();
+            expect(screen.getByRole("menuitem", { name: /^Restart/u })).toBeDisabled();
         } finally {
             view.unmount();
         }
@@ -574,22 +876,24 @@ describe("DockerRoute", () => {
         const retainedHarness = createClient({ overview: retained });
         const retainedView = renderDocker(retainedHarness.client);
         try {
-            expect(await screen.findByText("Last-known-good snapshot")).toBeVisible();
-            expect(screen.getByText(/live logs are disabled/u)).toBeVisible();
-            expect(screen.getByRole("button", { name: "Stop alpha-api" })).toBeDisabled();
             expect(
-                screen.queryByRole("link", { name: "Open console for alpha-api" })
-            ).toBeNull();
-            expect(
-                screen.queryByRole("button", { name: "Open console for alpha-api" })
-            ).toBeNull();
+                await screen.findByRole("region", { name: "Engine summary" })
+            ).toBeVisible();
+            expect(screen.queryByText("Last-known-good snapshot")).toBeNull();
+            expect(screen.queryByText(/live logs are disabled/u)).toBeNull();
+            const user = userEvent.setup();
+            await user.click(getDesktopContainerActionTrigger("alpha-api"));
+            expect(screen.getByRole("menuitem", { name: /^Logs/u })).toBeDisabled();
+            expect(screen.getByRole("menuitem", { name: /^Console/u })).toBeDisabled();
+            expect(screen.getByRole("menuitem", { name: /^Stop/u })).toBeDisabled();
+            await user.keyboard("{Escape}");
             expect(
                 screen.getByRole("button", {
                     name: "Run automatic Docker updates",
                 })
             ).toBeDisabled();
             expect(
-                screen.getByRole("button", { name: "Preview unused image prune" })
+                screen.getByRole("button", { name: "Prune unused images" })
             ).toBeDisabled();
             expect(retainedHarness.mutation).not.toHaveBeenCalled();
         } finally {
@@ -604,9 +908,8 @@ describe("DockerRoute", () => {
         });
         const unavailableView = renderDocker(unavailableHarness.client);
         try {
-            expect(await screen.findByText("Snapshot unavailable")).toBeVisible();
             expect(
-                screen.getByRole("heading", {
+                await screen.findByRole("heading", {
                     name: "Docker inventory unavailable",
                 })
             ).toBeVisible();
@@ -627,10 +930,11 @@ describe("DockerRoute", () => {
         });
         const view = renderDocker(harness.client);
         try {
-            await screen.findByText("Fresh snapshot");
+            await screen.findByRole("region", { name: "Engine summary" });
             const overviewReadsBeforeOperation = harness.overviewReadCount;
             const user = userEvent.setup();
-            await user.click(screen.getByRole("button", { name: "Stop alpha-api" }));
+            await user.click(getDesktopContainerActionTrigger("alpha-api"));
+            await user.click(screen.getByRole("menuitem", { name: /^Stop/u }));
             expect(screen.getByRole("dialog")).toHaveTextContent(firstContainerId);
             await user.click(screen.getByRole("button", { name: "Queue stop" }));
             expect(screen.queryByText("Docker operation queued")).toBeNull();
@@ -660,11 +964,6 @@ describe("DockerRoute", () => {
                 "/jobs?runId=" + queuedJobId
             );
             expect(screen.getByText(/No runtime success is assumed/u)).toBeVisible();
-            expect(
-                await screen.findByText(
-                    "Checked " + formatDashboardDateTime(refreshedOverview.checkedAtMs)
-                )
-            ).toBeVisible();
             await waitForDialogExit();
             await waitFor(() => {
                 expect(
@@ -695,7 +994,7 @@ describe("DockerRoute", () => {
         });
         const view = renderDocker(harness.client);
         try {
-            await screen.findByText("Fresh snapshot");
+            await screen.findByRole("region", { name: "Engine summary" });
             const overviewReadsBeforeOperation = harness.overviewReadCount;
             const user = userEvent.setup();
             await user.click(
@@ -731,14 +1030,6 @@ describe("DockerRoute", () => {
                     name: "Docker operation queued",
                 })
             ).toBeVisible();
-            expect(
-                await screen.findByText(
-                    "Checked " +
-                        formatDashboardDateTime(
-                            refreshedServiceUpdateOverview.checkedAtMs
-                        )
-                )
-            ).toBeVisible();
             await waitForDialogExit();
             await waitFor(() => {
                 expect(harness.overviewReadCount).toBeGreaterThan(
@@ -766,11 +1057,10 @@ describe("DockerRoute", () => {
         const harness = createClient({ query });
         const view = renderDocker(harness.client);
         try {
-            await screen.findByText("Fresh snapshot");
+            await screen.findByRole("region", { name: "Engine summary" });
             const user = userEvent.setup();
-            await user.click(
-                screen.getByRole("button", { name: "Show logs for alpha-api" })
-            );
+            await user.click(getDesktopContainerActionTrigger("alpha-api"));
+            await user.click(screen.getByRole("menuitem", { name: /^Logs/u }));
             const output = await screen.findByLabelText("Docker container log output");
             expect(output).toHaveTextContent("token=[redacted]");
             expect(screen.getByText("Redacted")).toBeVisible();
@@ -818,11 +1108,9 @@ describe("DockerRoute", () => {
         });
         const view = renderDocker(harness.client);
         try {
-            await screen.findByText("Fresh snapshot");
+            await screen.findByRole("region", { name: "Engine summary" });
             const user = userEvent.setup();
-            await user.click(
-                screen.getByRole("button", { name: "Preview unused image prune" })
-            );
+            await user.click(screen.getByRole("button", { name: "Prune unused images" }));
             expect(
                 await screen.findByRole("heading", {
                     name: "Prune unused Docker images?",
@@ -838,7 +1126,7 @@ describe("DockerRoute", () => {
             );
             const overviewReadsBeforeOperation = harness.overviewReadCount;
 
-            await user.click(screen.getByRole("button", { name: "Queue exact prune" }));
+            await user.click(screen.getByRole("button", { name: "Queue prune" }));
             await waitFor(() => expect(harness.mutation).toHaveBeenCalledTimes(1));
             expect(harness.mutation).toHaveBeenCalledWith(
                 "docker.requestOperation",
@@ -856,11 +1144,6 @@ describe("DockerRoute", () => {
                 await screen.findByRole("heading", {
                     name: "Docker operation queued",
                 })
-            ).toBeVisible();
-            expect(
-                await screen.findByText(
-                    "Checked " + formatDashboardDateTime(refreshedOverview.checkedAtMs)
-                )
             ).toBeVisible();
             await waitForDialogExit();
             await waitFor(() => {
@@ -887,7 +1170,7 @@ describe("DockerRoute", () => {
         const harness = createClient({ mutation });
         const view = renderDocker(harness.client);
         try {
-            await screen.findByText("Fresh snapshot");
+            await screen.findByRole("region", { name: "Engine summary" });
             const user = userEvent.setup();
             await user.click(
                 screen.getByRole("button", {

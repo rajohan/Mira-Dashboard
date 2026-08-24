@@ -197,13 +197,30 @@
         {
           "type": "object",
           "properties": {
+            "atHour": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 23
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "idleMinutes": {
               "type": "integer",
               "minimum": 1,
               "maximum": 10080
             },
             "mode": {
-              "const": "idle"
+              "enum": [
+                "daily",
+                "idle",
+                "none"
+              ],
+              "type": "string"
             },
             "section": {
               "const": "session-reset"

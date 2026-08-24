@@ -1387,12 +1387,30 @@ export function createOpenClawCronService(
             assertExpectedRevision(preflight.value, parsed.expectedConfigRevision);
             let updateAcknowledged = false;
             try {
-                await options.provider.update({
-                    expectedConfigRevision: parsed.expectedConfigRevision,
-                    id: parsed.id,
-                    patch: providerUpdatePatch(parsed),
-                    ...signalOptions(signal),
-                });
+                if (typeof parsed.patch.scratch === "string") {
+                    if (
+                        preflight.value.scratch === undefined ||
+                        preflight.value.scratch.revision !==
+                            parsed.expectedScratchRevision
+                    ) {
+                        throw new OpenClawCronServiceError("conflict", {
+                            id: parsed.id,
+                        });
+                    }
+                    await options.provider.setScratch({
+                        content: parsed.patch.scratch,
+                        expectedRevision: preflight.value.scratch.revision,
+                        id: parsed.id,
+                        ...signalOptions(signal),
+                    });
+                } else {
+                    await options.provider.update({
+                        expectedConfigRevision: parsed.expectedConfigRevision,
+                        id: parsed.id,
+                        patch: providerUpdatePatch(parsed),
+                        ...signalOptions(signal),
+                    });
+                }
                 updateAcknowledged = true;
                 const readback = await freshProviderJob(parsed.id);
                 invalidateInventory();

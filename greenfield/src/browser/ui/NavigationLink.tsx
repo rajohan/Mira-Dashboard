@@ -32,7 +32,7 @@ export function NavigationLink({
                 "mb-1 flex min-h-11 items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
                 "focus-visible:ring-accent-300 focus-visible:ring-2 focus-visible:outline-none",
                 active
-                    ? "bg-accent-500/90 text-primary-950"
+                    ? "bg-accent-700 text-white"
                     : "text-primary-300 hover:bg-primary-800 hover:text-primary-50",
                 className
             )}

@@ -58,7 +58,6 @@ describe("Gateway session realtime invalidation", () => {
 
         try {
             expect(realtimeClient.input).toEqual({
-                lastEventId: "0",
                 topics: [gatewayRealtimeTopics.sessions],
             });
             expect(realtimeClient.activeSubscriptionCount).toBe(1);

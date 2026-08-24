@@ -1,3 +1,4 @@
+import { gatewaySessionAgentId } from "../../../contracts/gatewaySessions.ts";
 import type {
     ChatEventProvider,
     ChatEventSubscription,
@@ -153,9 +154,17 @@ export class ChatSessionSubscriptionManager {
         if (this.#leases.size >= this.#maximum) {
             throw new ChatSubscriptionCapacityError();
         }
+        const agentId =
+            sessionKey === "main" || sessionKey === "global"
+                ? "main"
+                : gatewaySessionAgentId(sessionKey);
+        if (agentId === undefined) {
+            throw new TypeError("Chat subscription requires a canonical session owner");
+        }
         const lease: SubscriptionLease = { lastTouchedAtMs: now };
         this.#leases.set(sessionKey, lease);
         const opening = this.#provider.subscribeChat({
+            agentId,
             onEvent: async (event) => {
                 if (this.#disposed || this.#leases.get(sessionKey) !== lease) {
                     return;
@@ -167,16 +176,20 @@ export class ChatSessionSubscriptionManager {
                     return;
                 }
                 await this.#onGap(gap);
-                await this.#rotateAfterTerminalBoundary(sessionKey, lease);
             },
             onReconciliationRequired: async (reason) => {
                 if (this.#disposed || this.#leases.get(sessionKey) !== lease) {
                     return;
                 }
-                await this.#onReconciliationRequired(sessionKey, reason);
-                // Every terminal transport boundary removes the provider listener.
-                // Reacquire pinned runs with the latest durable watermark.
-                await this.#rotateAfterTerminalBoundary(sessionKey, lease);
+                try {
+                    await this.#onReconciliationRequired(sessionKey, reason);
+                } finally {
+                    // The provider listener is terminal even when canonical
+                    // reconciliation fails. Never retain a zombie lease: pinned
+                    // work must reacquire immediately, while unpinned work waits
+                    // for the next explicit touch.
+                    await this.#rotateAfterTerminalBoundary(sessionKey, lease);
+                }
             },
             runWatermarks: this.#watermarks(sessionKey),
             sessionKey,

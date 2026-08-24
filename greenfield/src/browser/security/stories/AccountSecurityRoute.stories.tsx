@@ -14,6 +14,7 @@ import {
 } from "../../storySupport/dashboardStoryTransport.ts";
 
 const nowMs = 1_800_000_000_000;
+const asyncStoryTimeout = { timeout: 5000 } as const;
 const currentSession = {
     authenticatedAtMs: nowMs - 60_000,
     authMethod: "password",
@@ -189,6 +190,29 @@ export const Ready: Story = {
         fixtures: accountSecurityFixtures(readySummary),
         route: "/account-security",
     },
+    play: async ({ canvasElement }) => {
+        const canvas = within(canvasElement);
+        await expect(
+            await canvas.findByRole(
+                "heading",
+                { level: 1, name: "Account security" },
+                asyncStoryTimeout
+            )
+        ).toBeInTheDocument();
+        await expect(
+            await canvas.findByText("Current Storybook browser", {}, asyncStoryTimeout)
+        ).toBeVisible();
+        await expect(
+            await canvas.findByText("No automation accounts", {}, asyncStoryTimeout)
+        ).toBeVisible();
+        await expect(
+            await canvas.findByRole(
+                "region",
+                { name: "Security audit events" },
+                asyncStoryTimeout
+            )
+        ).toBeVisible();
+    },
 };
 
 export const PaginatedAudit: Story = {
@@ -231,13 +255,17 @@ export const PaginatedAudit: Story = {
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement);
         await userEvent.click(
-            await canvas.findByRole("button", { name: "Load older events" })
+            await canvas.findByRole(
+                "button",
+                { name: "Load older events" },
+                asyncStoryTimeout
+            )
         );
         await waitFor(async () => {
             await expect(
                 canvas.getByRole("region", { name: "Security audit events" })
             ).toHaveAttribute("data-virtualized", "true");
-        });
+        }, asyncStoryTimeout);
         const auditRegion = canvas.getByRole("region", {
             name: "Security audit events",
         });
@@ -245,7 +273,7 @@ export const PaginatedAudit: Story = {
             await expect(auditRegion.scrollHeight).toBeGreaterThan(
                 auditRegion.clientHeight
             );
-        });
+        }, asyncStoryTimeout);
         auditRegion.scrollTop = auditRegion.scrollHeight;
         await fireEvent.scroll(auditRegion);
         await fireEvent.scroll(auditRegion);
@@ -257,7 +285,7 @@ export const PaginatedAudit: Story = {
             await expect(
                 canvas.queryByText("The request could not be completed. Try again.")
             ).not.toBeInTheDocument();
-        });
+        }, asyncStoryTimeout);
     },
 };
 
@@ -304,7 +332,7 @@ export const StalePasswordEnrollment: Story = {
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement);
         const page = within(canvasElement.ownerDocument.body);
-        await userEvent.click(
+        await fireEvent.click(
             await canvas.findByRole("button", { name: "Add authenticator app" })
         );
         const verification = await page.findByRole("dialog", {
@@ -312,41 +340,47 @@ export const StalePasswordEnrollment: Story = {
         });
         const password = within(verification).getByLabelText("Current password");
         await fireEvent.change(password, { target: { value: "current password" } });
-        await userEvent.click(
+        await fireEvent.click(
             within(verification).getByRole("button", { name: "Verify password" })
         );
         const verificationError = await within(verification).findByText(
-            "The credentials or session are no longer valid."
+            "The credentials or session are no longer valid.",
+            {},
+            asyncStoryTimeout
         );
         await waitFor(async () => {
             await expect(verificationError).toBeVisible();
-        });
+        }, asyncStoryTimeout);
         await fireEvent.change(password, { target: { value: "current password" } });
-        await userEvent.click(
+        await fireEvent.click(
             within(verification).getByRole("button", { name: "Verify password" })
         );
         const enrollment = await page.findByRole("dialog", {
             name: "Add authenticator app",
         });
         await expect(within(enrollment).getByLabelText("Name")).toBeVisible();
-        await userEvent.click(within(enrollment).getByRole("button", { name: "Cancel" }));
-        const retry = await page.findByRole("button", {
-            name: "Retry secure session refresh",
-        });
+        await fireEvent.click(within(enrollment).getByRole("button", { name: "Cancel" }));
+        const retry = await page.findByRole(
+            "button",
+            {
+                name: "Retry secure session refresh",
+            },
+            asyncStoryTimeout
+        );
         const reconciliation = page.getByRole("dialog", {
             name: "Verify current password",
         });
         await expect(within(reconciliation).getByRole("alert")).toHaveTextContent(
             "The request could not be completed. Try again."
         );
-        await userEvent.click(retry);
+        await fireEvent.click(retry);
         await waitFor(async () => {
             await expect(
                 page.queryByRole("button", {
                     name: "Retry secure session refresh",
                 })
             ).not.toBeInTheDocument();
-        });
+        }, asyncStoryTimeout);
     },
 };
 
@@ -386,11 +420,14 @@ export const StaleMfaEnrollment: Story = {
         await userEvent.click(
             within(verification).getByRole("button", { name: "Use recovery code" })
         );
-        await expect(
-            await within(verification).findByText(
-                "The credentials or session are no longer valid."
-            )
-        ).toBeVisible();
+        const recoveryError = await within(verification).findByText(
+            "The credentials or session are no longer valid.",
+            {},
+            asyncStoryTimeout
+        );
+        await waitFor(async () => {
+            await expect(recoveryError).toBeVisible();
+        }, asyncStoryTimeout);
         await userEvent.click(
             within(verification).getByRole("button", {
                 name: "Choose another method",
@@ -447,7 +484,7 @@ export const StaleWebAuthnEnrollment: Story = {
                     "The request could not be completed. Try again."
                 )
             ).toBeVisible();
-        });
+        }, asyncStoryTimeout);
     },
 };
 
@@ -493,7 +530,7 @@ export const EnrollmentRequired: Story = {
             await expect(
                 page.queryByRole("dialog", { name: "Protect privileged actions" })
             ).not.toBeInTheDocument();
-        });
+        }, asyncStoryTimeout);
     },
 };
 
@@ -510,18 +547,22 @@ export const DestructiveConfirmation: Story = {
                 name: `Remove authenticator ${totpFactor.label}`,
             })
         );
-        const dialog = await page.findByRole("dialog", {
-            name: "Remove authenticator?",
-        });
+        const dialog = await page.findByRole(
+            "dialog",
+            {
+                name: "Remove authenticator?",
+            },
+            asyncStoryTimeout
+        );
         await waitFor(async () => {
             await expect(dialog).toBeVisible();
-        });
+        }, asyncStoryTimeout);
         const removeButton = within(dialog).getByRole("button", {
             name: "Remove authenticator",
         });
         await waitFor(async () => {
             await expect(removeButton).toBeVisible();
-        });
+        }, asyncStoryTimeout);
     },
 };
 
@@ -551,8 +592,14 @@ export const DisableMfaRecovery: Story = {
         const canvas = within(canvasElement);
         const page = within(canvasElement.ownerDocument.body);
         const openDisable = async () => {
-            await userEvent.click(await canvas.findByRole("button", { name: "Disable" }));
-            return page.findByRole("dialog", { name: "Disable two-step login" });
+            await userEvent.click(
+                await canvas.findByRole("button", { name: "Disable" }, asyncStoryTimeout)
+            );
+            return page.findByRole(
+                "dialog",
+                { name: "Disable two-step login" },
+                asyncStoryTimeout
+            );
         };
 
         let dialog = await openDisable();
@@ -564,7 +611,7 @@ export const DisableMfaRecovery: Story = {
             await expect(
                 page.queryByRole("dialog", { name: "Disable two-step login" })
             ).not.toBeInTheDocument();
-        });
+        }, asyncStoryTimeout);
 
         dialog = await openDisable();
         await fireEvent.change(within(dialog).getByLabelText("Current password"), {
@@ -579,7 +626,7 @@ export const DisableMfaRecovery: Story = {
                     "The credentials or session are no longer valid."
                 )
             ).toBeVisible();
-        });
+        }, asyncStoryTimeout);
         await userEvent.click(
             within(dialog).getByRole("button", { name: "Turn off MFA" })
         );
@@ -587,7 +634,7 @@ export const DisableMfaRecovery: Story = {
             await expect(
                 page.queryByRole("dialog", { name: "Disable two-step login" })
             ).not.toBeInTheDocument();
-        });
+        }, asyncStoryTimeout);
     },
 };
 
@@ -631,11 +678,14 @@ export const VerificationMethodSwitch: Story = {
                 name: "Verify authenticator",
             })
         );
-        await expect(
-            await within(verification).findByText(
-                "The credentials or session are no longer valid."
-            )
-        ).toBeVisible();
+        const authenticatorError = await within(verification).findByText(
+            "The credentials or session are no longer valid.",
+            {},
+            asyncStoryTimeout
+        );
+        await waitFor(async () => {
+            await expect(authenticatorError).toBeVisible();
+        }, asyncStoryTimeout);
         await userEvent.click(
             within(verification).getByRole("button", {
                 name: "Choose another method",

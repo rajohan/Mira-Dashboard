@@ -223,7 +223,13 @@ function helloPayload(input: {
     return {
         auth: { role: "operator", scopes: input.scopes },
         features: {
-            events: input.events ?? ["tick", "cron", "sessions.changed", "task"],
+            events: input.events ?? [
+                "tick",
+                "cron",
+                "session.message",
+                "sessions.changed",
+                "task",
+            ],
             methods: input.methods,
         },
         policy: {
@@ -559,6 +565,23 @@ describe("persistent native Gateway transport", () => {
         expect(events).toEqual([]);
 
         socket.receive({
+            event: "session.message",
+            payload: {
+                message: { privateProviderShape: "must-not-cross" },
+                sessionKey: "agent:main:main",
+            },
+            seq: irrelevantEvents.length + 1,
+            type: "event",
+        });
+        expect(events.at(-1)?.frame).toEqual({
+            event: "session.message",
+            sessionMessage: { sessionKey: "agent:main:main" },
+            seq: irrelevantEvents.length + 1,
+            type: "event",
+        });
+        expect(JSON.stringify(events)).not.toContain("privateProviderShape");
+
+        socket.receive({
             event: "sessions.changed",
             payload: {
                 privateProviderShape: "must-not-cross",
@@ -568,11 +591,11 @@ describe("persistent native Gateway transport", () => {
                 ts: 2000,
                 updatedAt: 1900,
             },
-            seq: irrelevantEvents.length + 1,
+            seq: irrelevantEvents.length + 2,
             type: "event",
         });
-        expect(events).toHaveLength(1);
-        expect(events[0]?.frame).toEqual({
+        expect(events).toHaveLength(2);
+        expect(events[1]?.frame).toEqual({
             event: "sessions.changed",
             sessionLifecycle: {
                 occurredAtMs: 2000,
@@ -581,7 +604,7 @@ describe("persistent native Gateway transport", () => {
                 sessionKey: "agent:main:main",
                 updatedAtMs: 1900,
             },
-            seq: irrelevantEvents.length + 1,
+            seq: irrelevantEvents.length + 2,
             type: "event",
         });
         expect(JSON.stringify(events)).not.toContain("privateProviderShape");
@@ -591,7 +614,7 @@ describe("persistent native Gateway transport", () => {
             payload: { privateProviderShape: "targeted-after-baseline" },
             type: "event",
         });
-        expect(transport.snapshot.lastEventSequence).toBe(irrelevantEvents.length + 1);
+        expect(transport.snapshot.lastEventSequence).toBe(irrelevantEvents.length + 2);
         expect(socket.closeCalls).toHaveLength(0);
 
         await stopConnected(transport, socket);
@@ -1661,7 +1684,9 @@ describe("persistent native Gateway transport", () => {
                 baseHash: "a".repeat(64),
                 note: "Updated from Mira Dashboard settings",
                 raw: JSON.stringify({
-                    session: { reset: { idleMinutes: 60, mode: "idle" } },
+                    session: {
+                        reset: { atHour: null, idleMinutes: 60, mode: "idle" },
+                    },
                 }),
             },
             { beforeDispatch: () => Promise.resolve() }
@@ -1813,7 +1838,9 @@ describe("persistent native Gateway transport", () => {
                 baseHash: "a".repeat(64),
                 note: "Updated from Mira Dashboard settings",
                 raw: JSON.stringify({
-                    session: { reset: { idleMinutes: 60, mode: "idle" } },
+                    session: {
+                        reset: { atHour: null, idleMinutes: 60, mode: "idle" },
+                    },
                 }),
             },
             {
@@ -1871,7 +1898,9 @@ describe("persistent native Gateway transport", () => {
                 baseHash: "a".repeat(64),
                 note: "Updated from Mira Dashboard settings",
                 raw: JSON.stringify({
-                    session: { reset: { idleMinutes: 60, mode: "idle" } },
+                    session: {
+                        reset: { atHour: null, idleMinutes: 60, mode: "idle" },
+                    },
                 }),
             },
             { beforeDispatch: () => authorization.promise }
@@ -1905,7 +1934,9 @@ describe("persistent native Gateway transport", () => {
                 baseHash: "a".repeat(64),
                 note: "Updated from Mira Dashboard settings",
                 raw: JSON.stringify({
-                    session: { reset: { idleMinutes: 60, mode: "idle" } },
+                    session: {
+                        reset: { atHour: null, idleMinutes: 60, mode: "idle" },
+                    },
                 }),
             },
             {
@@ -2457,7 +2488,9 @@ describe("persistent native Gateway transport", () => {
                 baseHash: "a".repeat(64),
                 note: "Updated from Mira Dashboard settings",
                 raw: JSON.stringify({
-                    session: { reset: { idleMinutes: 60, mode: "idle" } },
+                    session: {
+                        reset: { atHour: null, idleMinutes: 60, mode: "idle" },
+                    },
                 }),
             },
             { beforeDispatch: () => Promise.resolve() }
@@ -2643,7 +2676,7 @@ describe("persistent native Gateway transport", () => {
         expect(() => transport.start()).toThrow(TypeError);
     });
 
-    test("shares one strict sequence across private agent and chat events and quarantines gaps", async () => {
+    test("shares one strict sequence and resumes from a reported future-only gap", async () => {
         const scheduler = new ManualScheduler();
         const harness = new SocketHarness();
         const transport = createFixtureTransport(harness, scheduler);
@@ -2808,9 +2841,12 @@ describe("persistent native Gateway transport", () => {
         ).toEqual([
             ["run-contiguous", 1],
             ["run-contiguous", 2],
+            ["run-first-gap", 5],
             ["run-contiguous", 3],
             ["run-contiguous", 4],
             ["run-mid-gap", 1],
+            ["run-mid-gap", 3],
+            ["run-mid-gap", 4],
         ]);
         expect(gaps).toHaveLength(2);
         expect(gaps).toContainEqual({

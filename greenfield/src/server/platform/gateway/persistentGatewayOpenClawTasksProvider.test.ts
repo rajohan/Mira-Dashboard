@@ -93,7 +93,10 @@ describe("persistent Gateway OpenClaw tasks provider", () => {
                 tasks: [
                     {
                         createdAt: 1000,
+                        deliveryStatus: "pending",
+                        diffStat: { added: 2, files: 1, removed: 0 },
                         id: "task-running",
+                        lastActivity: "Editing the task adapter",
                         ownerKey: "",
                         sessionKey: "",
                         startedAt: 1100,
@@ -107,7 +110,8 @@ describe("persistent Gateway OpenClaw tasks provider", () => {
                         id: "task-failed",
                         status: "failed",
                         terminalSummary: "Worker was lost",
-                        updatedAt: 2400,
+                        terminalOutcome: "blocked",
+                        updatedAt: 2300,
                     },
                 ],
             },
@@ -151,6 +155,7 @@ describe("persistent Gateway OpenClaw tasks provider", () => {
             ],
         });
         expect(JSON.stringify(page)).not.toContain("prompt");
+        expect(JSON.stringify(page)).not.toContain("deliveryStatus");
     });
 
     test("allows a bounded prompt only on get and maps audited not-found errors", async () => {
@@ -166,6 +171,7 @@ describe("persistent Gateway OpenClaw tasks provider", () => {
                         id: "task-1",
                         ownerKey: "",
                         prompt: "Inspect the deployment",
+                        result: "Deployment inspection completed",
                         sessionKey: "",
                         startedAt: 1100,
                         status: "running",
@@ -177,7 +183,8 @@ describe("persistent Gateway OpenClaw tasks provider", () => {
             ],
         });
 
-        expect(await harness.provider.get({ taskId: "task-1" })).toEqual({
+        const detail = await harness.provider.get({ taskId: "task-1" });
+        expect(detail).toEqual({
             task: {
                 createdAtMs: 1000,
                 id: "task-1",
@@ -188,6 +195,7 @@ describe("persistent Gateway OpenClaw tasks provider", () => {
                 updatedAtMs: 1200,
             },
         });
+        expect(JSON.stringify(detail)).not.toContain("Deployment inspection completed");
         expect(
             await captureFailure(() => harness.provider.get({ taskId: "task-1" }))
         ).toBeInstanceOf(OpenClawTaskProviderNotFoundError);

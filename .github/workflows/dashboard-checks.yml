@@ -210,9 +210,7 @@ jobs:
             - name: Install Chromium
               if: ${{ matrix.partition == 'storybook' }}
               working-directory: ${{ runner.temp }}/mira-dashboard-greenfield
-              run: |
-                  bunx playwright install-deps chromium
-                  bun run storybook:install-browser
+              run: bun run storybook:install-browser
 
             - name: Test ${{ matrix.partition }} coverage
               working-directory: ${{ runner.temp }}/mira-dashboard-greenfield

@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { TriangleAlert, X } from "lucide-react";
 import { useState } from "react";
 
 import type {
@@ -10,8 +11,9 @@ import { dashboardBrowserFailureMessage } from "../api/trpcError.ts";
 import { ActionLink } from "../ui/ActionLink.tsx";
 import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
+import { Icon } from "../ui/Icon.tsx";
 import { LoadingState } from "../ui/LoadingState.tsx";
-import { PageHeader } from "../ui/PageHeader.tsx";
+import { Modal } from "../ui/Modal.tsx";
 import { OpenClawAgentAccessSection } from "./OpenClawAgentAccessSection.tsx";
 import { OpenClawConfigurationSections } from "./OpenClawConfigurationSections.tsx";
 import { useOpenClawSettingsMutations } from "./openClawSettingsMutations.ts";
@@ -22,6 +24,7 @@ import {
 import { OpenClawSkillsSection } from "./OpenClawSkillsSection.tsx";
 
 type OpenClawSkill = ListOpenClawSkillsResult["skills"][number];
+type RestartConfirmation = "discard-recovery" | "restart";
 
 interface QueryFailureProps {
     readonly busy: boolean;
@@ -57,6 +60,7 @@ export function OpenClawSettingsPanel() {
     const skillsQuery = useQuery(openClawSkillsQueryOptions(client));
     const mutations = useOpenClawSettingsMutations();
     const [activeAgentId, setActiveAgentId] = useState("");
+    const [restartConfirmation, setRestartConfirmation] = useState<RestartConfirmation>();
     const configuration = configurationQuery.data;
     const configurationMutationBusy = mutations.configuration.isPending;
     const configurationWritesSupported =
@@ -79,6 +83,21 @@ export function OpenClawSettingsPanel() {
         !skillsQuery.isFetching &&
         !skillsQuery.isError &&
         !mutations.reconciliationRequired;
+    let restartConfirmationTitle = "Restart OpenClaw Gateway?";
+    let restartConfirmationDescription =
+        "Active Gateway requests may be interrupted. The restart is audited and requires recent multi-factor authentication.";
+    let restartConfirmationLabel = "Restart Gateway";
+    if (restartConfirmation === "discard-recovery") {
+        restartConfirmationTitle = "Discard Gateway restart recovery key?";
+        restartConfirmationDescription =
+            "The previous restart may already have completed. Discarding its recovery key allows a new intent that can restart the Gateway a second time. Review Dashboard jobs first.";
+        restartConfirmationLabel = "Discard recovery key";
+    } else if (mutations.restartRecoveryPending) {
+        restartConfirmationTitle = "Retry Gateway restart request?";
+        restartConfirmationDescription =
+            "This retries the unresolved request with the same recovery key. It does not create a second restart intent.";
+        restartConfirmationLabel = "Retry restart request";
+    }
 
     async function saveConfiguration(update: OpenClawConfigurationUpdate): Promise<void> {
         const current = configurationQuery.data;
@@ -112,19 +131,7 @@ export function OpenClawSettingsPanel() {
 
     return (
         <div>
-            <PageHeader
-                description="Review and change only the bounded, secret-free OpenClaw settings supported by this Dashboard. Configuration writes are root-hash-fenced with a revision preflight; skill changes update one freshly verified leaf on the latest configuration. Every change is audited and requires recent multi-factor authentication."
-                eyebrow="Settings"
-                title="OpenClaw settings"
-            />
-            <div className="mt-6 grid gap-3">
-                {configuration?.valid && (
-                    <Alert
-                        focusOnError={false}
-                        message="Saving a reviewed setting makes OpenClaw rewrite the touched JSON5 config source; comments may be removed and existing formatting may be changed."
-                        variant="info"
-                    />
-                )}
+            <div className="grid gap-3">
                 {configuration?.valid && configuration.includesPresent && (
                     <Alert
                         focusOnError={false}
@@ -169,7 +176,7 @@ export function OpenClawSettingsPanel() {
                 )}
             </div>
 
-            <div className="mt-8 grid gap-8">
+            <div className="mt-6 grid gap-6">
                 <section
                     aria-labelledby="openclaw-operations-title"
                     className="rounded-lg border border-slate-700 p-5"
@@ -198,15 +205,9 @@ export function OpenClawSettingsPanel() {
                                 </ActionLink>
                                 <Button
                                     disabled={mutations.isBusy}
-                                    onClick={() => {
-                                        if (
-                                            globalThis.confirm(
-                                                "WARNING: the previous Gateway restart may already have completed. Starting a new intent can restart the Gateway a second time. Review Dashboard jobs first. Discard the recovery key?"
-                                            )
-                                        ) {
-                                            mutations.startNewRestartIntent();
-                                        }
-                                    }}
+                                    onClick={() =>
+                                        setRestartConfirmation("discard-recovery")
+                                    }
                                     variant="danger"
                                 >
                                     Discard recovery key for new intent
@@ -228,17 +229,7 @@ export function OpenClawSettingsPanel() {
                             busy={mutations.restart.isPending}
                             busyLabel="Restarting Gateway…"
                             disabled={mutations.isBusy && !mutations.restart.isPending}
-                            onClick={() => {
-                                if (
-                                    globalThis.confirm(
-                                        mutations.restartRecoveryPending
-                                            ? "Retry the unresolved Gateway restart request with the same recovery key? This does not create a new restart intent."
-                                            : "Restart the OpenClaw Gateway now? Active Gateway requests may be interrupted."
-                                    )
-                                ) {
-                                    mutations.restart.mutate();
-                                }
-                            }}
+                            onClick={() => setRestartConfirmation("restart")}
                             variant="danger"
                         >
                             {mutations.restartRecoveryPending
@@ -328,6 +319,55 @@ export function OpenClawSettingsPanel() {
                     )}
                 </section>
             </div>
+            {restartConfirmation !== undefined && (
+                <Modal
+                    dismissible={!mutations.restart.isPending}
+                    onClose={() => setRestartConfirmation(undefined)}
+                    open
+                    size="sm"
+                    title={restartConfirmationTitle}
+                >
+                    <div className="flex min-w-0 items-start gap-3">
+                        <Icon
+                            className="mt-0.5 shrink-0"
+                            icon={TriangleAlert}
+                            tone="danger"
+                        />
+                        <p className="text-primary-300 min-w-0 text-sm leading-6">
+                            {restartConfirmationDescription}
+                        </p>
+                    </div>
+                    <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-end">
+                        <Button
+                            className="w-full sm:w-auto"
+                            disabled={mutations.restart.isPending}
+                            onClick={() => setRestartConfirmation(undefined)}
+                            variant="secondary"
+                        >
+                            <Icon icon={X} size="sm" tone="inherit" />
+                            Cancel
+                        </Button>
+                        <Button
+                            busy={mutations.restart.isPending}
+                            busyLabel="Restarting Gateway…"
+                            className="w-full sm:w-auto"
+                            onClick={() => {
+                                if (restartConfirmation === "discard-recovery") {
+                                    mutations.startNewRestartIntent();
+                                    setRestartConfirmation(undefined);
+                                    return;
+                                }
+                                mutations.restart.mutate(undefined, {
+                                    onSuccess: () => setRestartConfirmation(undefined),
+                                });
+                            }}
+                            variant="danger"
+                        >
+                            {restartConfirmationLabel}
+                        </Button>
+                    </div>
+                </Modal>
+            )}
         </div>
     );
 }

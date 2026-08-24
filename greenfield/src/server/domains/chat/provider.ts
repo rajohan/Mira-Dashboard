@@ -15,7 +15,7 @@ import type {
     ChatAttachmentTicketPrepareInput,
     ChatAttachmentTicketPrepareOutput,
 } from "../../../contracts/chatMedia.ts";
-import type { ChatPlanStep } from "../../../contracts/chatModel.ts";
+import type { ChatMessagePart, ChatPlanStep } from "../../../contracts/chatModel.ts";
 
 export interface ChatProviderHistoryRequest {
     readonly limit: number;
@@ -58,6 +58,7 @@ export interface ChatProviderAttachment {
 
 export interface ChatProviderSendRequest {
     readonly attachments: readonly ChatProviderAttachment[];
+    readonly expectedRunId?: string;
     readonly fastMode?: boolean | "auto";
     readonly idempotencyKey: string;
     readonly message: string;
@@ -105,6 +106,15 @@ export interface ChatProviderAbortAcknowledgement {
 }
 
 export type ChatProviderEvent =
+    | Readonly<{
+          idempotencyKey: string;
+          attachments?: readonly Extract<ChatMessagePart, { kind: "attachment" }>[];
+          kind: "user";
+          providerRunId: string;
+          receivedAtMs: number;
+          sessionKey: string;
+          text: string;
+      }>
     | Readonly<{
           kind: "compaction";
           phase: "active" | "complete" | "inactive";
@@ -186,14 +196,6 @@ export type ChatProviderEvent =
           stopReason?: string;
       }>
     | Readonly<{
-          idempotencyKey: string;
-          kind: "user-echo";
-          providerRunId?: string;
-          providerSequence: number;
-          receivedAtMs: number;
-          sessionKey: string;
-      }>
-    | Readonly<{
           kind: "noop";
           providerRunId: string;
           providerSequence: number;
@@ -273,8 +275,9 @@ export interface ChatProvider extends ChatEventProvider {
     ) => Promise<ChatProviderHistoryPage>;
     readonly listModels: (
         request: Readonly<{
+            agentId: string;
             includeProviderCapabilities: true;
-            view: "configured";
+            view: "all";
         }>,
         signal?: AbortSignal
     ) => Promise<ChatModelsListOutput>;

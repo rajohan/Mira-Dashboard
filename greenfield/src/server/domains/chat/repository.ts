@@ -63,6 +63,7 @@ import {
     chatExternalRuntimeSnapshotInsertSchema,
     chatExternalRuntimeSnapshotPayloadSchema,
     chatExternalRuntimeSnapshotSelectSchema,
+    parseChatExternalRuntimeSnapshotPayload,
     type ChatExternalRuntimeSnapshotPayload,
     type ChatExternalRuntimeSnapshotRow,
 } from "../../database/validation/chatExternalRuntimeSnapshots.ts";
@@ -1903,6 +1904,54 @@ export function createChatRepository(
                             );
                             runtimeChanged = true;
                         }
+                        continue;
+                    }
+                    const externalSnapshot = transaction
+                        .select({
+                            snapshotJson: chatExternalRuntimeSnapshots.snapshotJson,
+                        })
+                        .from(chatExternalRuntimeSnapshots)
+                        .where(
+                            and(
+                                eq(
+                                    chatExternalRuntimeSnapshots.gatewayScope,
+                                    gatewayScope
+                                ),
+                                eq(
+                                    chatExternalRuntimeSnapshots.sessionKey,
+                                    row.sessionKey
+                                ),
+                                eq(
+                                    chatExternalRuntimeSnapshots.transcriptGeneration,
+                                    row.currentGeneration
+                                )
+                            )
+                        )
+                        .get();
+                    const externalSnapshotHasActiveRun =
+                        externalSnapshot !== undefined &&
+                        parseChatExternalRuntimeSnapshotPayload(
+                            externalSnapshot.snapshotJson
+                        ).entries.some(({ run }) => run.lifecycle === "active");
+                    if (externalSnapshotHasActiveRun) {
+                        updateTranscriptGeneration(
+                            transaction,
+                            row,
+                            {
+                                lastBoundaryAction: "transport",
+                                observedAt: toDate(
+                                    Math.max(
+                                        row.observedAt === null
+                                            ? 0
+                                            : getTime(row.observedAt),
+                                        occurredAtMs
+                                    )
+                                ),
+                            },
+                            at
+                        );
+                        historyChanged = true;
+                        runtimeChanged = true;
                         continue;
                     }
                     changes.push(

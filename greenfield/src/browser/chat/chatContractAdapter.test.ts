@@ -18,6 +18,59 @@ const runId = "019fe633-9133-7ba0-8b80-809dd80dfb39";
 const timestampMs = 1_800_000_000_000;
 
 describe("chat contract adapter", () => {
+    test("projects bounded hydration attachments with safe transfer defaults", () => {
+        const message: ChatMessage = {
+            content: {
+                attachments: [
+                    {
+                        fileName: "archive.bin",
+                        id: "attachment-1",
+                        kind: "attachment",
+                        mediaType: "application/octet-stream",
+                        renderPolicy: "download-only",
+                        url: "/api/chat/media/attachment-1",
+                    },
+                ],
+                kind: "hydration-required",
+                reason: "response-budget",
+            },
+            id: "hydrated-message",
+            role: "user",
+            source: "gateway-history",
+        };
+
+        expect(projectChatContractMessage(message, sessionKey, 0)).toMatchObject({
+            attachments: [
+                {
+                    downloadUrl: "/api/chat/media/attachment-1",
+                    name: "archive.bin",
+                    sizeBytes: 0,
+                },
+            ],
+            parts: [{ kind: "control", tone: "warning" }],
+        });
+    });
+
+    test("keeps canonical user admission identity separate from provider run identity", () => {
+        const message: ChatMessage = {
+            content: {
+                kind: "complete",
+                parts: [{ id: "user-text", kind: "text", text: "Send files" }],
+            },
+            id: "provider-user-message",
+            idempotencyKey: "0123456789abcdef0123456789abcdef",
+            role: "user",
+            source: "gateway-history",
+        };
+
+        const projected = projectChatContractMessage(message, sessionKey, 0);
+        expect(projected).toMatchObject({
+            idempotencyKey: "0123456789abcdef0123456789abcdef",
+            role: "user",
+        });
+        expect(projected.providerRunId).toBeUndefined();
+    });
+
     test("projects ordered hydrated parts and managed media", () => {
         const message: ChatMessage = {
             content: {
@@ -293,6 +346,7 @@ describe("chat contract adapter", () => {
                 id: runId,
                 reconciliation: "history-authoritative",
                 reconciledAtMs: timestampMs + 2,
+                providerRunId: "provider-run",
                 sessionKey,
                 state: "completed",
                 stateVersion: 2,
@@ -309,6 +363,7 @@ describe("chat contract adapter", () => {
                     { kind: "tool", status: "completed" },
                     { kind: "text", text: "Final" },
                 ],
+                providerRunId: "provider-run",
             },
             phase: "completed",
             reconciliation: "history-authoritative",
@@ -352,7 +407,7 @@ describe("chat contract adapter", () => {
                 settlement: "unknown",
             },
             continuity: "interrupted",
-            hasUnprojectedActivity: false,
+            hasUnprojectedActivity: true,
             lifecycle: "active",
             observationEpoch: 7,
             observedAtMs: timestampMs,
@@ -377,7 +432,7 @@ describe("chat contract adapter", () => {
                 phase: "update",
                 steps: [{ status: "in_progress", text: "Inspect provider state" }],
             },
-            projectionTruncated: false,
+            projectionTruncated: true,
             providerRunId: "provider-run-1",
             sessionKey,
             source: "provider-runtime",
@@ -397,15 +452,14 @@ describe("chat contract adapter", () => {
                     output: "Found runtime activity",
                     status: "completed",
                 },
-                {
-                    kind: "control",
-                    text: expect.stringContaining("updates were interrupted"),
-                },
             ],
             role: "assistant",
         });
         expect(projection.message.parts).not.toEqual(
             expect.arrayContaining([
+                expect.objectContaining({
+                    text: expect.stringContaining("updates were interrupted"),
+                }),
                 expect.objectContaining({
                     text: expect.stringContaining("started outside the Dashboard"),
                 }),
@@ -417,6 +471,30 @@ describe("chat contract adapter", () => {
             runId: "provider:provider-run-1",
             title: "OpenClaw plan",
         });
+    });
+
+    test("shows an interrupted activity warning only before assistant output exists", () => {
+        const projection = projectChatExternalRun({
+            continuity: "interrupted",
+            hasUnprojectedActivity: true,
+            lifecycle: "active",
+            observationEpoch: 1,
+            observedAtMs: timestampMs,
+            parts: [],
+            projectionTruncated: false,
+            providerRunId: "provider-gap",
+            sessionKey,
+            source: "provider-runtime",
+            text: "",
+            updatedAtMs: timestampMs,
+        });
+
+        expect(projection.message.parts).toEqual([
+            expect.objectContaining({
+                kind: "control",
+                text: expect.stringContaining("updates were interrupted"),
+            }),
+        ]);
     });
 
     test("retains provider thinking while suppressing mirrored items and user echoes", () => {
@@ -520,6 +598,13 @@ describe("chat contract adapter", () => {
         });
 
         expect(projection.lifecycle).toBe("terminal-pending-history");
+        expect(
+            projection.message.parts.some(
+                (part) =>
+                    part.kind === "control" &&
+                    part.text.includes("activity details could not be shown")
+            )
+        ).toBeFalse();
         expect(projection.segments).toMatchObject([
             {
                 message: {
@@ -556,6 +641,19 @@ describe("chat contract adapter", () => {
                 observedAtMs: timestampMs,
                 parts: [
                     {
+                        attachments: [
+                            {
+                                downloadUrl:
+                                    "/api/chat/media/00000000-0000-4000-8000-000000000002?disposition=download",
+                                fileName: "logo.jpg",
+                                id: "session-media:1",
+                                kind: "attachment",
+                                mediaType: "image/jpeg",
+                                renderPolicy: "inline-image",
+                                sizeBytes: 7861,
+                                url: "/api/chat/media/00000000-0000-4000-8000-000000000002?disposition=preview",
+                            },
+                        ],
                         kind: "user",
                         ...(messageId === undefined ? {} : { messageId }),
                         sequence,
@@ -575,6 +673,7 @@ describe("chat contract adapter", () => {
         const beforeReindex = projectAnchor(2, "canonical-steer-message");
         const afterReindex = projectAnchor(7, "canonical-steer-message");
         expect(beforeReindex?.segmentId).toBe("user:canonical-steer-message");
+        expect(beforeReindex?.message.attachments).toHaveLength(1);
         expect(afterReindex?.segmentId).toBe(beforeReindex?.segmentId);
         expect(afterReindex?.message.id).toBe(beforeReindex?.message.id);
         expect(projectAnchor(7)?.segmentId).toBe("user:7");
@@ -604,6 +703,36 @@ describe("chat contract adapter", () => {
             description: "Why the provider is doing this work.",
             items: [{ label: "Inspect runtime", status: "in-progress" }],
         });
+    });
+
+    test("settles provider thinking when later assistant output has begun", () => {
+        const projection = projectChatExternalRun({
+            continuity: "complete",
+            lifecycle: "active" as const,
+            hasUnprojectedActivity: false,
+            observationEpoch: 2,
+            observedAtMs: timestampMs,
+            parts: [
+                { kind: "thinking", sequence: 1, text: "Finished reasoning" },
+                { kind: "assistant", sequence: 2, text: "Partial final" },
+            ],
+            projectionTruncated: false,
+            providerRunId: "provider-thinking-transition",
+            sessionKey,
+            source: "provider-runtime",
+            text: "Partial final",
+            updatedAtMs: timestampMs,
+        });
+
+        expect(projection.message.parts).toEqual([
+            expect.objectContaining({
+                kind: "thinking",
+                status: "complete",
+                text: "Finished reasoning",
+            }),
+            expect.objectContaining({ kind: "text", text: "Partial final" }),
+        ]);
+        expect(projection.lifecycle).toBe("active");
     });
 
     test("keeps truncated assistant text authoritative and folds synthetic tool lifecycle", () => {
@@ -660,13 +789,9 @@ describe("chat contract adapter", () => {
                 output: "found",
                 status: "completed",
             },
-            {
-                kind: "control",
-                text: "Some OpenClaw activity details could not be shown.",
-                tone: "warning",
-            },
         ]);
         expect(JSON.stringify(projection)).not.toContain("stale tail");
+        expect(JSON.stringify(projection)).not.toContain("activity details");
     });
 
     test("treats truncated projections as explicit placeholders, not empty transcripts", () => {

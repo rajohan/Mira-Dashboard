@@ -1,6 +1,7 @@
 import type {
     ChatExternalRun,
     ChatMessage,
+    ChatMessagePart as ContractChatMessagePart,
     ChatRuntimeEvent as ContractChatRuntimeEvent,
     ChatRuntimeSnapshot,
 } from "../../contracts/chatModel.ts";
@@ -113,6 +114,20 @@ function appendChatMessagePart(parts: ChatMessagePart[], part: ChatMessagePart):
     if (previous?.kind === "tool") parts[index] = mergeChatToolPart(previous, part);
 }
 
+function projectContractAttachment(
+    part: Extract<ContractChatMessagePart, { kind: "attachment" }>
+): ChatMessageAttachment {
+    return {
+        downloadUrl: part.downloadUrl ?? part.url,
+        id: part.id,
+        mediaType: part.mediaType,
+        name: part.fileName,
+        ...(part.renderPolicy === "download-only" ? {} : { previewUrl: part.url }),
+        renderPolicy: part.renderPolicy,
+        sizeBytes: part.sizeBytes ?? 0,
+    };
+}
+
 /**
  * Projects one canonical contract message into the pure browser view model.
  * @param message Validated provider history row.
@@ -133,6 +148,11 @@ export function projectChatContractMessage(
             text: message.content.preview ?? "Message content requires hydration.",
             tone: "warning",
         });
+        for (const part of message.content.attachments ?? []) {
+            if (part.kind === "attachment") {
+                attachments.push(projectContractAttachment(part));
+            }
+        }
     } else {
         for (const part of message.content.parts) {
             switch (part.kind) {
@@ -163,17 +183,7 @@ export function projectChatContractMessage(
                     break;
                 }
                 case "attachment": {
-                    attachments.push({
-                        downloadUrl: part.downloadUrl ?? part.url,
-                        id: part.id,
-                        mediaType: part.mediaType,
-                        name: part.fileName,
-                        ...(part.renderPolicy === "download-only"
-                            ? {}
-                            : { previewUrl: part.url }),
-                        renderPolicy: part.renderPolicy,
-                        sizeBytes: part.sizeBytes ?? 0,
-                    });
+                    attachments.push(projectContractAttachment(part));
                     break;
                 }
                 case "control": {
@@ -380,6 +390,9 @@ function snapshotPhase(
         case "unresolved": {
             return "unresolved";
         }
+        case "interrupted": {
+            return "unresolved";
+        }
         default: {
             return "active";
         }
@@ -409,6 +422,9 @@ export function projectChatRuntimeSnapshot(
                     },
                 ],
                 role: "assistant",
+                ...(snapshot.run.providerRunId === undefined
+                    ? {}
+                    : { providerRunId: snapshot.run.providerRunId }),
                 runId: snapshot.run.id,
                 sequence: snapshot.firstSequence,
                 sessionKey: snapshot.run.sessionKey,
@@ -483,6 +499,9 @@ export function projectChatRuntimeSnapshot(
             clientRunId: snapshot.run.id,
             id: `runtime:${snapshot.run.sessionKey}:${snapshot.run.id}`,
             parts,
+            ...(snapshot.run.providerRunId === undefined
+                ? {}
+                : { providerRunId: snapshot.run.providerRunId }),
             role: "assistant",
             runId: snapshot.run.id,
             sequence: snapshot.firstSequence,
@@ -546,10 +565,11 @@ export function projectChatExternalRun(run: ChatExternalRun): ChatExternalRunPro
         precedingUserText?: string,
         role: ChatDisplayMessage["role"] = "assistant",
         timestampMs = run.updatedAtMs,
-        precedingUserMessageId?: string
+        precedingUserMessageId?: string,
+        attachments: readonly ChatMessageAttachment[] = []
     ): ChatExternalRunSegmentProjection => ({
         message: {
-            attachments: [],
+            attachments,
             id: `external:${run.sessionKey}:${run.providerRunId}:segment:${segmentId}`,
             parts,
             providerRunId: run.providerRunId,
@@ -753,7 +773,12 @@ export function projectChatExternalRun(run: ChatExternalRun): ChatExternalRunPro
                             part.text,
                             "assistant",
                             part.occurredAtMs,
-                            part.messageId
+                            part.messageId,
+                            part.attachments
+                                ?.filter((attachment) => attachment.kind === "attachment")
+                                .map((attachment) =>
+                                    projectContractAttachment(attachment)
+                                ) ?? []
                         )
                     );
                     break;
@@ -835,16 +860,13 @@ export function projectChatExternalRun(run: ChatExternalRun): ChatExternalRunPro
         }
     }
     if (
-        run.continuity === "interrupted" ||
-        run.projectionTruncated ||
-        run.hasUnprojectedActivity
+        run.lifecycle === "active" &&
+        run.continuity === "interrupted" &&
+        run.text.trim() === ""
     ) {
         const gapPart: ChatMessagePart = {
             kind: "control",
-            text:
-                run.continuity === "interrupted"
-                    ? "Some OpenClaw activity may be missing because updates were interrupted."
-                    : "Some OpenClaw activity details could not be shown.",
+            text: "Some OpenClaw activity may be missing because updates were interrupted.",
             tone: "warning",
         };
         const lastContentIndex = segments.findLastIndex(
@@ -872,6 +894,24 @@ export function projectChatExternalRun(run: ChatExternalRun): ChatExternalRunPro
                 };
             }
         }
+    }
+    let followingOutput = false;
+    for (let index = segments.length - 1; index >= 0; index -= 1) {
+        const segment = segments[index];
+        if (segment === undefined) continue;
+        const nextParts = [...segment.message.parts];
+        for (let partIndex = nextParts.length - 1; partIndex >= 0; partIndex -= 1) {
+            const part = nextParts[partIndex];
+            if (part?.kind === "thinking" && followingOutput) {
+                nextParts[partIndex] = { ...part, status: "complete" };
+            } else if (part?.kind === "text" || part?.kind === "tool") {
+                followingOutput = true;
+            }
+        }
+        segments[index] = {
+            ...segment,
+            message: { ...segment.message, parts: nextParts },
+        };
     }
     const parts = segments.flatMap((segment) => segment.message.parts);
     return {

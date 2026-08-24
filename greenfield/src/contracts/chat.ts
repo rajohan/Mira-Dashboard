@@ -171,7 +171,6 @@ const chatSendInputObjectSchema = v.strictObject({
     clientRunId: chatRunIdSchema,
     idempotencyKey: jobIdempotencyKeySchema,
     message: chatMessageTextSchema,
-    queueMode: v.optional(v.picklist(["collect", "followup", "interrupt", "steer"])),
     sessionKey: gatewaySessionKeySchema,
     settings: v.optional(chatSendSettingsSchema),
 });
@@ -232,7 +231,9 @@ export const chatAbortOutputSchema = v.union([
     }),
 ]);
 
-export const chatModelsListInputSchema = v.strictObject({});
+export const chatModelsListInputSchema = v.strictObject({
+    agentId: boundedControlSafeTextSchema(128, "Chat model agent id is invalid"),
+});
 
 const chatModelSummarySchema = v.strictObject({
     id: boundedControlSafeTextSchema(256, "Chat model id is invalid"),

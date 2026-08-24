@@ -1,3 +1,4 @@
+import { HeartPulse, Radio, RotateCcw, Wrench } from "lucide-react";
 import { useId, useState, type ReactNode } from "react";
 import * as v from "valibot";
 
@@ -11,6 +12,7 @@ import { Alert } from "../ui/Alert.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Card } from "../ui/Card.tsx";
+import { ExpandableCard } from "../ui/ExpandableCard.tsx";
 import { Form } from "../ui/Form.tsx";
 import { FormField } from "../ui/FormField.tsx";
 import { Heading } from "../ui/Heading.tsx";
@@ -18,7 +20,7 @@ import { Input } from "../ui/Input.tsx";
 import { Select, type SelectOption } from "../ui/Select.tsx";
 import { Switch } from "../ui/Switch.tsx";
 import { Text } from "../ui/Text.tsx";
-import { Textarea } from "../ui/Textarea.tsx";
+import { TimePicker } from "../ui/TimePicker.tsx";
 
 interface OpenClawConfigurationSectionsProps {
     readonly busy: boolean;
@@ -29,22 +31,24 @@ interface OpenClawConfigurationSectionsProps {
 
 interface SettingsSectionProps {
     readonly children: ReactNode;
-    readonly description: string;
     readonly id: string;
+    readonly icon: typeof Wrench;
     readonly title: string;
 }
 
-function SettingsSection({ children, description, id, title }: SettingsSectionProps) {
+function SettingsSection({ children, icon, id, title }: SettingsSectionProps) {
     return (
-        <Card aria-labelledby={id}>
-            <Heading id={id} level={2}>
-                {title}
-            </Heading>
-            <Text className="mt-2" tone="muted">
-                {description}
-            </Text>
-            <div className="mt-5">{children}</div>
-        </Card>
+        <ExpandableCard
+            compact
+            icon={icon}
+            title={
+                <Heading id={id} level={2} size="subsection">
+                    {title}
+                </Heading>
+            }
+        >
+            {children}
+        </ExpandableCard>
     );
 }
 
@@ -115,10 +119,10 @@ interface ModelsFormProps {
 function ModelsForm({ busy, disabled, models, onSave }: ModelsFormProps) {
     const formId = useId();
     const [primary, setPrimary] = useState(models.primary ?? "");
-    const [fallbacksText, setFallbacksText] = useState(models.fallbacks.join("\n"));
+    const [fallbacksText, setFallbacksText] = useState(models.fallbacks.join(", "));
     const [error, setError] = useState<string>();
     const fallbacks = fallbacksText
-        .split(/\r?\n/u)
+        .split(/[,\n]/u)
         .map((fallback) => fallback.trim())
         .filter((fallback) => fallback.length > 0);
     const update = reviewedUpdate({
@@ -132,9 +136,7 @@ function ModelsForm({ busy, disabled, models, onSave }: ModelsFormProps) {
 
     async function submit(): Promise<void> {
         if (update === undefined) {
-            setError(
-                "Enter a primary model and up to 16 unique fallback model IDs, one per line."
-            );
+            setError("Enter a primary model and up to 16 unique fallback model IDs.");
             focusFirstInvalid(formId);
             return;
         }
@@ -144,36 +146,55 @@ function ModelsForm({ busy, disabled, models, onSave }: ModelsFormProps) {
 
     return (
         <SettingsSection
-            description="Choose the default model and the ordered fallback chain used by OpenClaw. Secret provider credentials are never shown here."
             id="openclaw-model-settings"
-            title="Models"
+            icon={Wrench}
+            title="Model Configuration"
         >
             <Form className="grid gap-4" id={formId} onSubmit={submit}>
-                <FormField disabled={disabled} error={error} label="Primary model">
-                    <Input
-                        className="mt-2 font-mono"
-                        disabled={disabled}
-                        maxLength={200}
-                        onChange={(event) => setPrimary(event.currentTarget.value)}
-                        placeholder="provider/model"
-                        required
-                        value={primary}
-                    />
-                </FormField>
-                <FormField
-                    description="One model ID per line, in failover order."
-                    disabled={disabled}
-                    label="Fallback models"
-                >
-                    <Textarea
-                        className="mt-2 min-h-32 font-mono text-sm"
-                        disabled={disabled}
-                        maxLength={3216}
-                        onChange={(event) => setFallbacksText(event.currentTarget.value)}
-                        placeholder="provider/fallback-one"
-                        value={fallbacksText}
-                    />
-                </FormField>
+                <div className="grid gap-4 lg:grid-cols-2">
+                    <FormField disabled={disabled} error={error} label="Default model">
+                        <Input
+                            className="mt-2 font-mono"
+                            disabled={disabled}
+                            maxLength={200}
+                            onChange={(event) => setPrimary(event.currentTarget.value)}
+                            placeholder="codex"
+                            required
+                            value={primary}
+                        />
+                    </FormField>
+                    <FormField disabled={disabled} label="Fallback models">
+                        <Input
+                            className="mt-2 font-mono"
+                            disabled={disabled}
+                            maxLength={3216}
+                            onChange={(event) =>
+                                setFallbacksText(event.currentTarget.value)
+                            }
+                            placeholder="glm, kimi"
+                            value={fallbacksText}
+                        />
+                    </FormField>
+                </div>
+                <dl className="border-primary-800 bg-primary-900/50 rounded-lg border px-3 py-2">
+                    {[
+                        ["Image model", models.imageModel ?? "Not set"],
+                        [
+                            "Image generation model",
+                            models.imageGenerationModel ?? "Not set",
+                        ],
+                    ].map(([label, value]) => (
+                        <div
+                            className="flex flex-wrap items-baseline justify-between gap-2 py-1"
+                            key={label}
+                        >
+                            <dt className="text-primary-400 text-sm">{label}</dt>
+                            <dd className="text-primary-100 font-mono text-sm">
+                                {value}
+                            </dd>
+                        </div>
+                    ))}
+                </dl>
                 <SectionSaveButton
                     busy={busy}
                     disabled={disabled || !changed}
@@ -216,11 +237,7 @@ function ChannelsForm({
     }
 
     return (
-        <SettingsSection
-            description="Enable or disable only channels already present in the reviewed OpenClaw configuration. Channel credentials and allowlists stay hidden."
-            id="openclaw-channel-settings"
-            title="Channels"
-        >
+        <SettingsSection id="openclaw-channel-settings" icon={Radio} title="Channels">
             <Form onSubmit={submit}>
                 <Alert className="mb-4" message={error} />
                 {truncated && (
@@ -268,6 +285,7 @@ function ChannelsForm({
 
 type ExecPolicy = OpenClawConfigurationSnapshot["tools"]["execPolicy"];
 type ExplicitExecPolicy = Extract<ExecPolicy, { readonly state: "explicit" }>;
+type LegacyExecPolicy = Extract<ExecPolicy, { readonly state: "legacy-mode" }>;
 type ExecAsk = ExplicitExecPolicy["ask"];
 type ExecSecurity = ExplicitExecPolicy["security"];
 type VisibilitySelection =
@@ -284,6 +302,13 @@ const execSecurityOptions = Object.freeze([
     { label: "Deny", value: "deny" },
     { label: "Full", value: "full" },
 ] satisfies readonly SelectOption<ExecSecurity>[]);
+const legacyExecModeOptions = Object.freeze([
+    { label: "Deny", value: "deny" },
+    { label: "Allowlist", value: "allowlist" },
+    { label: "Ask", value: "ask" },
+    { label: "Auto", value: "auto" },
+    { label: "Full", value: "full" },
+] satisfies readonly SelectOption<LegacyExecPolicy["mode"]>[]);
 const visibilityOptions = Object.freeze([
     { label: "OpenClaw default", value: "default" },
     { label: "Current agent", value: "agent" },
@@ -324,6 +349,13 @@ function updateExplicitExecPolicy(
     update: Partial<Pick<ExplicitExecPolicy, "ask" | "security">>
 ): ExecPolicy {
     return policy.state === "explicit" ? { ...policy, ...update } : policy;
+}
+
+function updateLegacyExecMode(
+    policy: ExecPolicy,
+    mode: LegacyExecPolicy["mode"]
+): ExecPolicy {
+    return policy.state === "legacy-mode" ? { ...policy, mode } : policy;
 }
 
 function lockedExecPolicyMessage(
@@ -372,11 +404,7 @@ function ToolsForm({ busy, disabled, onSave, tools }: ToolsFormProps) {
     }
 
     return (
-        <SettingsSection
-            description="Control only the reviewed OpenClaw tool switches and policy labels. Command allowlists, credentials, and executable content are not exposed."
-            id="openclaw-tool-settings"
-            title="Tools"
-        >
+        <SettingsSection id="openclaw-tool-settings" icon={Wrench} title="Tools">
             <Form className="grid gap-5" id={formId} onSubmit={submit}>
                 <Alert message={error} />
                 <div className="grid gap-4 lg:grid-cols-2">
@@ -421,7 +449,7 @@ function ToolsForm({ busy, disabled, onSave, tools }: ToolsFormProps) {
                     />
                 </div>
                 <div className="grid gap-4 lg:grid-cols-2">
-                    {execPolicy.state === "explicit" ? (
+                    {execPolicy.state === "explicit" && (
                         <>
                             <FormField disabled={disabled} label="Exec approval policy">
                                 <Select
@@ -458,7 +486,32 @@ function ToolsForm({ busy, disabled, onSave, tools }: ToolsFormProps) {
                                 />
                             </FormField>
                         </>
-                    ) : (
+                    )}
+                    {execPolicy.state === "legacy-mode" && (
+                        <FormField
+                            description="OpenClaw's normalized exec policy. Saving changes only this mode and preserves the configured exec host."
+                            disabled={disabled}
+                            label="Exec mode"
+                        >
+                            <Select
+                                className="mt-2"
+                                disabled={disabled}
+                                onChange={(mode) =>
+                                    setDraft((current) => ({
+                                        ...current,
+                                        execPolicy: updateLegacyExecMode(
+                                            current.execPolicy,
+                                            mode
+                                        ),
+                                    }))
+                                }
+                                options={legacyExecModeOptions}
+                                value={execPolicy.mode}
+                            />
+                        </FormField>
+                    )}
+                    {(execPolicy.state === "inherited" ||
+                        execPolicy.state === "partial") && (
                         <Alert
                             className="lg:col-span-2"
                             focusOnError={false}
@@ -564,21 +617,35 @@ function SessionResetForm({
     sessionReset,
 }: SessionResetFormProps) {
     const formId = useId();
-    const editable = sessionReset.state === "explicit-idle";
+    const editable = "idleMinutes" in sessionReset;
     const initialMinutes = editable ? sessionReset.idleMinutes : undefined;
+    const initialMode = "mode" in sessionReset ? sessionReset.mode : "idle";
+    const initialAtHour = "atHour" in sessionReset ? sessionReset.atHour : undefined;
     const initial = initialMinutes?.toString() ?? "";
     const [idleMinutes, setIdleMinutes] = useState(initial);
+    const [mode, setMode] = useState<"daily" | "idle" | "none">(initialMode);
+    const [atHour, setAtHour] = useState(
+        `${String(initialAtHour ?? 0).padStart(2, "0")}:00`
+    );
     const [error, setError] = useState<string>();
     const parsedMinutes = positiveInteger(idleMinutes);
+    const parsedAtHour = /^([01]\d|2[0-3]):00$/u.test(atHour)
+        ? Number(atHour.slice(0, 2))
+        : undefined;
     const update = reviewedUpdate({
+        atHour: mode === "daily" ? parsedAtHour : null,
         idleMinutes: parsedMinutes,
-        mode: "idle",
+        mode,
         section: "session-reset",
     });
 
     async function submit(): Promise<void> {
         if (update === undefined) {
-            setError("Enter a whole number from 1 to 10,080 minutes.");
+            setError(
+                mode === "daily"
+                    ? "Enter idle minutes from 1 to 10,080 and a daily reset hour from 0 to 23."
+                    : "Enter a whole number from 1 to 10,080 minutes."
+            );
             focusFirstInvalid(formId);
             return;
         }
@@ -588,35 +655,66 @@ function SessionResetForm({
 
     return (
         <SettingsSection
-            description="Set how long an inactive OpenClaw session may remain before its configured reset boundary."
             id="openclaw-session-reset-settings"
-            title="Session reset"
+            icon={RotateCcw}
+            title="Session"
         >
             {editable ? (
                 <Form id={formId} onSubmit={submit}>
-                    <FormField
-                        disabled={disabled}
-                        error={error}
-                        label="Idle timeout (minutes)"
-                    >
-                        <Input
-                            className="mt-2"
+                    <div className="grid gap-4 lg:grid-cols-3">
+                        <FormField disabled={disabled} label="Reset mode">
+                            <Select
+                                className="mt-2"
+                                disabled={disabled}
+                                onChange={setMode}
+                                options={[
+                                    { label: "Daily", value: "daily" },
+                                    { label: "Idle", value: "idle" },
+                                    { label: "None", value: "none" },
+                                ]}
+                                value={mode}
+                            />
+                        </FormField>
+                        <FormField
                             disabled={disabled}
-                            inputMode="numeric"
-                            max="10080"
-                            min="1"
-                            onChange={(event) =>
-                                setIdleMinutes(event.currentTarget.value)
-                            }
-                            required
-                            step="1"
-                            type="number"
-                            value={idleMinutes}
-                        />
-                    </FormField>
+                            error={error}
+                            label="Idle timeout (minutes)"
+                        >
+                            <Input
+                                className="mt-2"
+                                disabled={disabled}
+                                inputMode="numeric"
+                                max="10080"
+                                min="1"
+                                onChange={(event) =>
+                                    setIdleMinutes(event.currentTarget.value)
+                                }
+                                required
+                                step="1"
+                                type="number"
+                                value={idleMinutes}
+                            />
+                        </FormField>
+                        {mode === "daily" && (
+                            <TimePicker
+                                className="min-w-0"
+                                disabled={disabled}
+                                error={error}
+                                label="Daily reset time (24-hour)"
+                                minuteStep={60}
+                                onChange={setAtHour}
+                                value={atHour}
+                            />
+                        )}
+                    </div>
                     <SectionSaveButton
                         busy={busy}
-                        disabled={disabled || parsedMinutes === initialMinutes}
+                        disabled={
+                            disabled ||
+                            (parsedMinutes === initialMinutes &&
+                                mode === initialMode &&
+                                (mode !== "daily" || parsedAtHour === initialAtHour))
+                        }
                         label="Save session reset"
                     />
                 </Form>
@@ -670,8 +768,8 @@ function HeartbeatForm({ busy, disabled, heartbeat, onSave }: HeartbeatFormProps
 
     return (
         <SettingsSection
-            description="Configure OpenClaw's heartbeat cadence and optional reviewed target label. Heartbeat instructions and payloads are not exposed."
             id="openclaw-heartbeat-settings"
+            icon={HeartPulse}
             title="Heartbeat"
         >
             <Form
@@ -718,40 +816,13 @@ function HeartbeatForm({ busy, disabled, heartbeat, onSave }: HeartbeatFormProps
     );
 }
 
-function SecuritySummary({
-    security,
-}: {
-    readonly security: OpenClawConfigurationSnapshot["security"];
-}) {
-    const rows = [
-        ["Authentication profiles", security.authProfileCount.toString()],
-        ["Owner allowlist entries", security.ownerAllowFromCount.toString()],
-        ["Command restart", security.commandRestartEnabled ? "Enabled" : "Disabled"],
-        ["Redaction mode", security.redactionMode ?? "OpenClaw default"],
-    ] as const;
-    return (
-        <SettingsSection
-            description="Secret-free counts and security modes reported by OpenClaw. Credential values and allowlist members remain hidden."
-            id="openclaw-security-summary"
-            title="Security summary"
-        >
-            <dl className="grid gap-3 sm:grid-cols-2">
-                {rows.map(([label, value]) => (
-                    <div
-                        className="border-primary-700 bg-primary-900/45 rounded-lg border p-3"
-                        key={label}
-                    >
-                        <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
-                            {label}
-                        </dt>
-                        <dd className="text-primary-100 mt-1 text-sm font-medium wrap-anywhere">
-                            {value}
-                        </dd>
-                    </div>
-                ))}
-            </dl>
-        </SettingsSection>
-    );
+function formatExecPolicyValue(
+    policy: OpenClawConfigurationSnapshot["tools"]["execPolicy"],
+    field: "ask" | "security"
+): string {
+    if (policy.state === "explicit") return policy[field];
+    if (policy.state === "legacy-mode") return policy.mode;
+    return policy.state === "partial" ? "Partially inherited" : "OpenClaw default";
 }
 
 function ConfigurationSummary({
@@ -759,6 +830,27 @@ function ConfigurationSummary({
 }: {
     readonly configuration: OpenClawConfigurationSnapshot;
 }) {
+    const configurationStats = [
+        ["Reported issues", configuration.issueCount.toString()],
+        ["Last touched version", configuration.lastTouchedVersion ?? "Not reported"],
+        ["Last touched", formatConfigurationLastTouchedAt(configuration.lastTouchedAt)],
+    ] as const;
+    const securityStats = [
+        ["Auth profiles", configuration.security.authProfileCount.toString()],
+        [
+            "Command restart",
+            configuration.security.commandRestartEnabled ? "Enabled" : "Disabled",
+        ],
+        ["Elevated tools", configuration.tools.elevatedEnabled ? "Enabled" : "Disabled"],
+        [
+            "Exec security",
+            formatExecPolicyValue(configuration.tools.execPolicy, "security"),
+        ],
+        ["Exec approval", formatExecPolicyValue(configuration.tools.execPolicy, "ask")],
+        ["Log redaction", configuration.security.redactionMode ?? "OpenClaw default"],
+    ] as const;
+    const stats = [...configurationStats, ...securityStats];
+
     return (
         <Card aria-labelledby="openclaw-configuration-status">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -775,25 +867,20 @@ function ConfigurationSummary({
                     {configuration.valid ? "Valid" : "Needs attention"}
                 </Badge>
             </div>
-            <dl className="mt-5 grid gap-3 sm:grid-cols-3">
-                <div>
-                    <dt className="text-primary-400 text-xs">Reported issues</dt>
-                    <dd className="text-primary-100 mt-1 text-sm font-medium">
-                        {configuration.issueCount}
-                    </dd>
-                </div>
-                <div>
-                    <dt className="text-primary-400 text-xs">Last touched version</dt>
-                    <dd className="text-primary-100 mt-1 text-sm wrap-anywhere">
-                        {configuration.lastTouchedVersion ?? "Not reported"}
-                    </dd>
-                </div>
-                <div>
-                    <dt className="text-primary-400 text-xs">Last touched</dt>
-                    <dd className="text-primary-100 mt-1 text-sm wrap-anywhere">
-                        {formatConfigurationLastTouchedAt(configuration.lastTouchedAt)}
-                    </dd>
-                </div>
+            <dl className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {stats.map(([label, value]) => (
+                    <div
+                        className="border-primary-700 bg-primary-900/45 rounded-lg border p-3"
+                        key={label}
+                    >
+                        <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
+                            {label}
+                        </dt>
+                        <dd className="text-primary-100 mt-1 text-sm font-medium wrap-anywhere">
+                            {value}
+                        </dd>
+                    </div>
+                ))}
             </dl>
         </Card>
     );
@@ -837,7 +924,6 @@ export function OpenClawConfigurationSections({
                 onSave={onSave}
                 tools={configuration.tools}
             />
-            <SecuritySummary security={configuration.security} />
             <SessionResetForm
                 busy={busy}
                 disabled={disabled}

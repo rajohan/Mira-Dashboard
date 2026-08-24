@@ -20,6 +20,7 @@ import {
 } from "../chat/inMemoryChatMediaReferences.ts";
 import {
     createPersistentGatewayChatProvider,
+    projectPersistentGatewaySessionAttachments,
     type PersistentGatewayChatMediaReferenceRegistrar,
     type PersistentGatewayChatProviderTransport,
 } from "./persistentGatewayChatProvider.ts";
@@ -132,9 +133,98 @@ function projectedAttachmentUrl(projected: ChatMessage): string {
 }
 
 describe("persistent Gateway chat provider", () => {
+    test("retains canonical user media after the realtime run has ended", async () => {
+        const harness = createHarness({
+            "chat.history": {
+                messages: [
+                    {
+                        __openclaw: {
+                            id: "a54e8555-865c-4ae9-88be-0d020fa3e7ee",
+                            idempotencyKey: "cc3d2a76-f5cc-49df-9ed2-48b8a01294d6:user",
+                            media: [
+                                {
+                                    contentType: "image/jpeg",
+                                    kind: "image",
+                                    sizeBytes: 7861,
+                                    url: "media://inbound/b2ea3e92-1844-42d3-a512-d0c48e560657.jpg",
+                                },
+                            ],
+                        },
+                        content: "her er bilde",
+                        idempotencyKey: "cc3d2a76-f5cc-49df-9ed2-48b8a01294d6:user",
+                        role: "user",
+                    },
+                ],
+                offset: 0,
+                sessionKey,
+            },
+        });
+
+        const history = await harness.provider.history({
+            limit: 1,
+            maxChars: 64 * 1024,
+            offset: 0,
+            sessionKey,
+        });
+
+        expect(history.messages[0]).toMatchObject({
+            idempotencyKey: "cc3d2a76-f5cc-49df-9ed2-48b8a01294d6",
+            role: "user",
+        });
+        expect(history.messages[0]?.content).toEqual({
+            kind: "complete",
+            parts: [
+                { id: "1", kind: "text", text: "her er bilde" },
+                expect.objectContaining({
+                    fileName: "b2ea3e92-1844-42d3-a512-d0c48e560657.jpg",
+                    kind: "attachment",
+                    mediaType: "image/jpeg",
+                    renderPolicy: "inline-image",
+                    sizeBytes: 7861,
+                }),
+            ],
+        });
+    });
+
+    test("projects sanitized inbound session media through the local media registrar", () => {
+        const harness = createHarness({});
+        const parts = projectPersistentGatewaySessionAttachments(
+            [
+                {
+                    contentType: "image/jpeg",
+                    fileName: "b2ea3e92-1844-42d3-a512-d0c48e560657.jpg",
+                    sizeBytes: 7861,
+                    url: "media://inbound/b2ea3e92-1844-42d3-a512-d0c48e560657.jpg",
+                },
+            ],
+            sessionKey,
+            "message-inbound",
+            harness.mediaReferences
+        );
+
+        expect(parts).toEqual([
+            expect.objectContaining({
+                fileName: "b2ea3e92-1844-42d3-a512-d0c48e560657.jpg",
+                kind: "attachment",
+                mediaType: "image/jpeg",
+                renderPolicy: "inline-image",
+                sizeBytes: 7861,
+            }),
+        ]);
+        expect(harness.references[0]?.source).toEqual({
+            kind: "openclaw-local-history",
+            segments: ["inbound", "b2ea3e92-1844-42d3-a512-d0c48e560657.jpg"],
+        });
+    });
     test("keeps Dashboard's response budget while bounding the Gateway history request", async () => {
         const harness = createHarness({
             "chat.history": {
+                inFlightRun: {
+                    events: [{ providerOnly: true }],
+                    runId: "provider-run-1",
+                    startedAt: 1000,
+                    text: "",
+                },
                 messages: [],
                 offset: 0,
                 sessionKey,
@@ -145,7 +235,7 @@ describe("persistent Gateway chat provider", () => {
             persistentGatewayChatHistoryMaximumChars
         );
 
-        await harness.provider.history({
+        const page = await harness.provider.history({
             limit: 1,
             maxChars: chatHistoryResponseMaximumBytes,
             offset: 0,
@@ -156,6 +246,7 @@ describe("persistent Gateway chat provider", () => {
             {
                 method: "chat.history",
                 parameters: {
+                    agentId: "main",
                     limit: 1,
                     maxChars: persistentGatewayChatHistoryMaximumChars,
                     offset: 0,
@@ -163,6 +254,9 @@ describe("persistent Gateway chat provider", () => {
                 },
             },
         ]);
+        expect(page).toMatchObject({
+            inFlightRun: { runId: "provider-run-1", text: "" },
+        });
     });
 
     test("normalizes Codex commentary and provider reasoning blocks as thinking without changing final text", async () => {
@@ -227,6 +321,33 @@ describe("persistent Gateway chat provider", () => {
                 parts: [{ id: "1", kind: "text", text: "The final answer." }],
             },
         ]);
+    });
+
+    test("normalizes OpenClaw user admission identity to the client send identity", async () => {
+        const idempotencyKey = "a".repeat(32);
+        const harness = createHarness({
+            "chat.history": {
+                messages: [
+                    {
+                        content: "Sent from Dashboard.",
+                        id: "user-message-1",
+                        idempotencyKey: `${idempotencyKey}:user`,
+                        role: "user",
+                    },
+                ],
+                offset: 0,
+                sessionKey,
+            },
+        });
+
+        const history = await harness.provider.history({
+            limit: 1,
+            maxChars: 32 * 1024,
+            offset: 0,
+            sessionKey,
+        });
+
+        expect(history.messages[0]?.idempotencyKey).toBe(idempotencyKey);
     });
 
     test("reconstructs a completed run on late open and after restart without a live subscription", async () => {
@@ -595,6 +716,122 @@ describe("persistent Gateway chat provider", () => {
             },
             runId: "provider-run-in-flight",
             text: "Partial answer",
+        });
+    });
+
+    test("projects delivery-mirror managed image and document blocks as attachments", async () => {
+        const imageId = "00000000-0000-4000-8000-000000000011";
+        const documentId = "00000000-0000-4000-8000-000000000012";
+        const harness = createHarness({
+            "chat.history": {
+                hasMore: false,
+                messages: [
+                    {
+                        content: [
+                            { text: "Delivered files.", type: "text" },
+                            {
+                                alt: "diagram.jpg",
+                                mimeType: "image/jpeg",
+                                openUrl: `/api/chat/media/outgoing/${encodeURIComponent(sessionKey)}/${imageId}/full`,
+                                sizeBytes: 7861,
+                                type: "image",
+                                url: `/api/chat/media/outgoing/${encodeURIComponent(sessionKey)}/${imageId}/full`,
+                            },
+                            {
+                                fileName: "notes.md",
+                                mimeType: "text/markdown",
+                                sizeBytes: 1285,
+                                type: "document",
+                                url: `/api/chat/media/outgoing/${encodeURIComponent(sessionKey)}/${documentId}/full`,
+                            },
+                        ],
+                        id: "message-delivery-mirror-media",
+                        model: "delivery-mirror",
+                        provider: "openclaw",
+                        role: "assistant",
+                    },
+                ],
+                offset: 0,
+                sessionKey,
+            },
+        });
+
+        const history = await harness.provider.history({
+            limit: 1,
+            maxChars: 512 * 1024,
+            offset: 0,
+            sessionKey,
+        });
+
+        expect(history.messages[0]?.content).toEqual({
+            kind: "complete",
+            parts: [
+                { id: "1", kind: "text", text: "Delivered files." },
+                expect.objectContaining({
+                    fileName: "diagram.jpg",
+                    kind: "attachment",
+                    mediaType: "image/jpeg",
+                    renderPolicy: "inline-image",
+                    sizeBytes: 7861,
+                }),
+                expect.objectContaining({
+                    fileName: "notes.md",
+                    kind: "attachment",
+                    mediaType: "text/markdown",
+                    renderPolicy: "bounded-text",
+                    sizeBytes: 1285,
+                }),
+            ],
+        });
+        expect(harness.references).toHaveLength(2);
+    });
+
+    test("recovers a trusted delivery-mirror outbound file without exposing its generated name", async () => {
+        const generatedName = "2026-08-16---04f0d34e-6407-4c26-922d-60bdd998c904.md";
+        const harness = createHarness({
+            "chat.history": {
+                hasMore: false,
+                messages: [
+                    {
+                        content: [
+                            { text: `Markdown-test\n${generatedName}`, type: "text" },
+                        ],
+                        id: "message-delivery-mirror-outbound",
+                        idempotencyKey:
+                            "0123456789abcdef0123456789abcdef:internal-source-reply:1",
+                        model: "delivery-mirror",
+                        provider: "openclaw",
+                        role: "assistant",
+                    },
+                ],
+                offset: 0,
+                sessionKey,
+            },
+        });
+
+        const history = await harness.provider.history({
+            limit: 1,
+            maxChars: 512 * 1024,
+            offset: 0,
+            sessionKey,
+        });
+
+        expect(history.messages[0]?.content).toEqual({
+            kind: "complete",
+            parts: [
+                { id: "1", kind: "text", text: "Markdown-test" },
+                expect.objectContaining({
+                    fileName: "2026-08-16.md",
+                    kind: "attachment",
+                    mediaType: "text/markdown",
+                    renderPolicy: "bounded-text",
+                }),
+            ],
+        });
+        expect(JSON.stringify(history)).not.toContain(generatedName);
+        expect(harness.references[0]?.source).toEqual({
+            kind: "openclaw-local-history",
+            segments: ["outbound", generatedName],
         });
     });
 
@@ -2103,6 +2340,7 @@ describe("persistent Gateway chat provider", () => {
             {
                 method: "chat.message.get",
                 parameters: {
+                    agentId: "main",
                     maxChars: 16 * 1024,
                     messageId: "message-requested",
                     sessionKey,
@@ -2171,8 +2409,9 @@ describe("persistent Gateway chat provider", () => {
 
         expect(
             await harness.provider.listModels({
+                agentId: "main",
                 includeProviderCapabilities: true,
-                view: "configured",
+                view: "all",
             })
         ).toEqual({
             models: [
@@ -2185,6 +2424,25 @@ describe("persistent Gateway chat provider", () => {
                 },
             ],
         });
+    });
+
+    test("bounds the expanded available model inventory", async () => {
+        const harness = createHarness({
+            "models.list": {
+                models: Array.from({ length: 300 }, (_, index) => ({
+                    id: `model-${index.toString().padStart(3, "0")}`,
+                    name: `Model ${index}`,
+                    provider: "fixture",
+                })),
+            },
+        });
+        const result = await harness.provider.listModels({
+            agentId: "main",
+            includeProviderCapabilities: true,
+            view: "all",
+        });
+        expect(result.models).toHaveLength(256);
+        expect(result.models.at(-1)?.id).toBe("fixture/model-255");
     });
 
     test("returns only settings values read back from the Gateway", async () => {
@@ -2245,6 +2503,7 @@ describe("persistent Gateway chat provider", () => {
             {
                 method: "sessions.patch",
                 parameters: {
+                    agentId: "main",
                     expectedSessionId: "session-expected",
                     fastMode: true,
                     key: sessionKey,
@@ -2253,6 +2512,7 @@ describe("persistent Gateway chat provider", () => {
             {
                 method: "sessions.patch",
                 parameters: {
+                    agentId: "main",
                     expectedSessionId: "session-expected",
                     fastMode: false,
                     key: sessionKey,
@@ -2331,6 +2591,34 @@ describe("persistent Gateway chat provider", () => {
                 (failure) => failure instanceof ChatProviderUnknownOutcomeError
             )
         ).toBe(true);
+    });
+
+    test("forwards exact active-run steering identity", async () => {
+        const idempotencyKey = "A".repeat(32);
+        const harness = createHarness({
+            "chat.send": { runId: idempotencyKey, status: "started" },
+        });
+
+        await harness.provider.send({
+            attachments: [],
+            expectedRunId: "active-provider-run",
+            idempotencyKey,
+            message: "steer now",
+            queueMode: "steer",
+            sessionKey,
+        });
+
+        expect(harness.requests).toContainEqual({
+            method: "chat.send",
+            parameters: {
+                attachments: [],
+                expectedRunId: "active-provider-run",
+                idempotencyKey,
+                message: "steer now",
+                queueMode: "steer",
+                sessionKey,
+            },
+        });
     });
 
     test("maps an audited tool error phase to a consistent failed event", async () => {
@@ -2554,7 +2842,7 @@ describe("persistent Gateway chat provider", () => {
             {
                 event: "chat",
                 payload: {
-                    deltaText: " Confirmed.",
+                    deltaText: "Checking cancellation. Confirmed.",
                     runId: "cancelled-run",
                     seq: 2,
                     sessionKey,
@@ -2619,14 +2907,14 @@ describe("persistent Gateway chat provider", () => {
             },
             {
                 kind: "delta",
-                mode: "append",
+                mode: "merge",
                 providerRunId: "cancelled-run",
                 providerSequence: 2,
                 receivedAtMs: 2,
                 sessionKey,
                 stream: "assistant",
                 streamId: "assistant",
-                text: " Confirmed.",
+                text: "Checking cancellation. Confirmed.",
             },
             {
                 kind: "delta",
@@ -2641,7 +2929,7 @@ describe("persistent Gateway chat provider", () => {
             },
             {
                 kind: "delta",
-                mode: "append",
+                mode: "merge",
                 providerRunId: "completed-run",
                 providerSequence: 5,
                 receivedAtMs: 4,

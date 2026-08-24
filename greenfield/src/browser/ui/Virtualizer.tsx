@@ -60,6 +60,8 @@ export interface VirtualizerFollowToEndState {
     readonly following: boolean;
     /** Re-measures async media or other content whose load is not represented by layoutRevision. */
     readonly notifyDynamicContentChange: () => void;
+    /** Stops sticky end correction before an intentional in-list reposition. */
+    readonly stopFollowing: () => void;
 }
 
 export interface VirtualizerRenderState<TItemElement extends Element> {
@@ -69,6 +71,7 @@ export interface VirtualizerRenderState<TItemElement extends Element> {
     ) => Readonly<{ index: number }> | undefined;
     readonly measure: () => void;
     readonly measureElement: (node: TItemElement | null) => void;
+    readonly preserveVisibleAnchor: () => void;
     readonly scrollToIndex: (
         index: number,
         options?: Readonly<{ align?: "auto" | "center" | "end" | "start" }>
@@ -100,7 +103,6 @@ type VirtualizerProps<TItemElement extends Element> = VirtualizerBaseProps<TItem
 
 interface FollowControllerArguments<TItemElement extends Element> {
     readonly count: number;
-    readonly estimateSize: (index: number) => number;
     readonly following: boolean;
     readonly getItemKey: ((index: number) => VirtualizerItemKey) | undefined;
     readonly onFollowStateChange: (following: boolean) => void;
@@ -168,18 +170,6 @@ function tailAddition(
     return current.slice(previous.length);
 }
 
-function purePrependCount(
-    previous: readonly VirtualizerItemKey[],
-    current: readonly VirtualizerItemKey[]
-): number {
-    const prependedCount = current.length - previous.length;
-    return previous.length > 0 &&
-        prependedCount > 0 &&
-        previous.every((key, index) => key === current[index + prependedCount])
-        ? prependedCount
-        : 0;
-}
-
 function remeasureMountedItems<TItemElement extends Element>(
     virtualizer: TanStackVirtualizer<HTMLDivElement, TItemElement>
 ): void {
@@ -195,7 +185,6 @@ function remeasureMountedItems<TItemElement extends Element>(
 
 function useFollowToEndController<TItemElement extends Element>({
     count,
-    estimateSize,
     following,
     getItemKey,
     onFollowStateChange,
@@ -320,6 +309,13 @@ function useFollowToEndController<TItemElement extends Element>({
         scheduleFollow(true);
     }
 
+    function stopFollowing(): void {
+        userScrollIntent.current = false;
+        cancelScheduledFollow();
+        setFollowState(false);
+        setAtEnd(false);
+    }
+
     const handleScroll = useEffectEvent(() => {
         const element = scrollContainerRef.current;
         if (!enabled || element === null) return;
@@ -432,8 +428,6 @@ function useFollowToEndController<TItemElement extends Element>({
         const keysChanged = !sameKeys(oldKeys, currentKeys);
         const appendedKeys = scopeChanged ? [] : tailAddition(oldKeys, currentKeys);
         const wasFollowing = followingReference.current;
-        const prependedCount =
-            scopeChanged || wasFollowing ? 0 : purePrependCount(oldKeys, currentKeys);
 
         previousScopeKey.current = options.scopeKey;
         previousLayoutRevision.current = options.layoutRevision;
@@ -452,17 +446,6 @@ function useFollowToEndController<TItemElement extends Element>({
         }
         if (appendedKeys.length > 0) {
             options.onItemsAppended?.({ itemKeys: appendedKeys, wasFollowing });
-        }
-        if (prependedCount > 0) {
-            const element = scrollContainerRef.current;
-            let prependedSize = 0;
-            for (let index = 0; index < prependedCount; index += 1) {
-                prependedSize += estimateSize(index);
-            }
-            if (element !== null && prependedSize > 0) {
-                element.scrollTop += prependedSize;
-                previousScrollTop.current = element.scrollTop;
-            }
         }
         if (layoutChanged && !keysChanged) remeasureMountedItems(virtualizer);
         if (followingReference.current && (keysChanged || layoutChanged)) {
@@ -581,6 +564,7 @@ function useFollowToEndController<TItemElement extends Element>({
         follow: followLatest,
         following,
         notifyDynamicContentChange,
+        stopFollowing,
     };
 }
 
@@ -599,12 +583,42 @@ export function Virtualizer<TItemElement extends Element = HTMLElement>({
     overscan = 6,
 }: VirtualizerProps<TItemElement>) {
     const scrollContainerRef = useRef<HTMLDivElement>(null);
+    const pendingVisibleAnchor = useRef<
+        | Readonly<{
+              candidates: readonly Readonly<{
+                  key: VirtualizerItemKey;
+                  viewportOffset: number;
+              }>[];
+              itemKeys: readonly VirtualizerItemKey[];
+              lastTarget?: number;
+          }>
+        | undefined
+    >(undefined);
+    const previousCount = useRef(count);
+    const previousFirstKey = useRef<VirtualizerItemKey | undefined>(
+        count === 0 || getItemKey === undefined ? undefined : getItemKey(0)
+    );
     const [following, setFollowing] = useState(followToEnd !== undefined);
     const [scrollbarGestureActive, setScrollbarGestureActive] = useState(false);
     const tanStackEndFollowEnabled =
         followToEnd !== undefined && following && !scrollbarGestureActive;
+    const itemKeys = Array.from({ length: count }, (_, index) =>
+        getItemKey === undefined ? index : getItemKey(index)
+    );
+    const pendingAnchor = pendingVisibleAnchor.current;
+    const previousFirstKeyIndex =
+        previousFirstKey.current === undefined
+            ? -1
+            : itemKeys.indexOf(previousFirstKey.current);
+    const strictPrepend =
+        followToEnd !== undefined &&
+        !following &&
+        ((count > previousCount.current && previousFirstKeyIndex > 0) ||
+            (pendingAnchor !== undefined &&
+                !sameKeys(pendingAnchor.itemKeys, itemKeys) &&
+                pendingAnchor.candidates.some(({ key }) => itemKeys.indexOf(key) > 0)));
     const virtualizer = useVirtualizer<HTMLDivElement, TItemElement>({
-        anchorTo: tanStackEndFollowEnabled ? "end" : undefined,
+        anchorTo: tanStackEndFollowEnabled || strictPrepend ? "end" : undefined,
         count,
         estimateSize,
         followOnAppend: tanStackEndFollowEnabled ? "auto" : undefined,
@@ -618,7 +632,6 @@ export function Virtualizer<TItemElement extends Element = HTMLElement>({
     });
     const followController = useFollowToEndController({
         count,
-        estimateSize,
         following,
         getItemKey,
         onFollowStateChange: setFollowing,
@@ -627,12 +640,65 @@ export function Virtualizer<TItemElement extends Element = HTMLElement>({
         scrollContainerRef,
         virtualizer,
     });
+    useLayoutEffect(() => {
+        previousCount.current = count;
+        previousFirstKey.current = itemKeys[0];
+    }, [count, itemKeys]);
+    useLayoutEffect(() => {
+        const anchor = pendingVisibleAnchor.current;
+        if (
+            anchor === undefined ||
+            sameKeys(anchor.itemKeys, itemKeys) ||
+            getItemKey === undefined
+        ) {
+            return;
+        }
+        const retained = anchor.candidates
+            .map((candidate) => ({
+                ...candidate,
+                index: itemKeys.indexOf(candidate.key),
+            }))
+            .find(({ index }) => index > 0);
+        if (retained === undefined) {
+            pendingVisibleAnchor.current = undefined;
+            return;
+        }
+        remeasureMountedItems(virtualizer);
+        const offset = virtualizer.getOffsetForIndex(retained.index, "start")?.[0];
+        if (offset === undefined) return;
+        const target = offset - retained.viewportOffset;
+        virtualizer.scrollToOffset(target, { align: "start" });
+        pendingVisibleAnchor.current =
+            anchor.lastTarget !== undefined && Math.abs(anchor.lastTarget - target) <= 1
+                ? undefined
+                : { ...anchor, lastTarget: target };
+    });
 
+    function preserveVisibleAnchor(): void {
+        const scrollElement = scrollContainerRef.current;
+        if (scrollElement === null) return;
+        const viewportEnd = scrollElement.scrollTop + scrollElement.clientHeight;
+        const candidates = virtualizer
+            .getVirtualItems()
+            .filter(
+                (item) => item.end > scrollElement.scrollTop && item.start < viewportEnd
+            )
+            .map((item) => ({
+                key: item.key,
+                viewportOffset: item.start - scrollElement.scrollTop,
+            }));
+        if (candidates.length === 0) return;
+        pendingVisibleAnchor.current = {
+            candidates,
+            itemKeys,
+        };
+    }
     return children({
         followToEnd: followController,
         getVirtualItemForOffset: virtualizer.getVirtualItemForOffset,
         measure: virtualizer.measure,
         measureElement: virtualizer.measureElement,
+        preserveVisibleAnchor,
         scrollToIndex: virtualizer.scrollToIndex,
         scrollContainerRef,
         totalSize: virtualizer.getTotalSize(),

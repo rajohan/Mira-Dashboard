@@ -1,5 +1,5 @@
-import { ArrowDown, MessagesSquare } from "lucide-react";
-import { useEffect, useEffectEvent, useLayoutEffect, useState } from "react";
+import { ArrowDown, LoaderCircle, MessagesSquare } from "lucide-react";
+import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 /* eslint-disable jsx-a11y/no-noninteractive-tabindex -- The scrollable transcript log must be keyboard-focusable. */
 
 import { Button } from "../ui/Button.tsx";
@@ -9,6 +9,7 @@ import { LoadingState } from "../ui/LoadingState.tsx";
 import { Virtualizer, type VirtualizerItemsAppendedEvent } from "../ui/Virtualizer.tsx";
 import { ChatMessageBubble } from "./ChatMessageBubble.tsx";
 import { visibleChatTranscriptMessages } from "./chatMessageVisibility.ts";
+import { activeStreamingTextMessageIds } from "./chatReadAloudProjection.ts";
 import {
     activeCompactionMaximumAgeMs,
     completedCompactionMaximumAgeMs,
@@ -21,6 +22,7 @@ import type {
 } from "./chatTypes.ts";
 
 const estimatedMessageHeightPx = 148;
+const olderHistoryLoadThresholdPx = 32;
 
 function hashRevisionPart(hash: number, value: string): number {
     let next = hash;
@@ -75,16 +77,24 @@ function messageRevision(message: ChatDisplayMessage): number {
     return hash;
 }
 
+function isActivityOnlyMessage(message: ChatDisplayMessage): boolean {
+    return (
+        message.parts.length > 0 &&
+        message.parts.every(
+            (part) => part.kind === "control" && part.activity !== undefined
+        )
+    );
+}
+
 function transcriptLayoutRevision(
     messages: readonly ChatDisplayMessage[],
     display: ChatDisplaySettings,
     activeRunIds: readonly string[],
-    readAloud: ChatReadAloudView | undefined,
-    windowLimited: boolean
+    readAloud: ChatReadAloudView | undefined
 ): number {
     let hash = hashRevisionPart(
         2_166_136_261,
-        `${display.keepThinkingAfterFinal}|${display.showThinking}|${display.showTools}|${display.toolsExpanded}|${windowLimited}`
+        `${display.keepThinkingAfterFinal}|${display.showThinking}|${display.showTools}|${display.toolsExpanded}`
     );
     for (const activeRunId of activeRunIds) {
         hash = hashRevisionPart(hash, activeRunId);
@@ -109,15 +119,13 @@ interface ChatTranscriptProps {
     readonly initialLoading: boolean;
     readonly messages: readonly ChatDisplayMessage[];
     readonly onDismissReadAloudError?: () => void;
-    readonly onHideMessage: (messageId: string) => void;
     readonly onHydrateMessage: (messageId: string) => void;
-    readonly onLoadOlder: () => void;
+    readonly onLoadOlder: () => boolean | Promise<boolean>;
+    readonly onOpenLocalFile?: (reference: string) => void;
     readonly onReadAloud?: (messageId: string, text: string) => void;
-    readonly onReturnToLatest?: () => void;
     readonly onStopReadAloud?: () => void;
     readonly readAloud?: ChatReadAloudView;
     readonly sessionKey: string;
-    readonly windowLimited?: boolean;
 }
 
 interface ChatTranscriptNotice {
@@ -165,16 +173,21 @@ export function ChatTranscript({
     initialLoading,
     messages,
     onDismissReadAloudError,
-    onHideMessage,
     onHydrateMessage,
     onLoadOlder,
+    onOpenLocalFile,
     onReadAloud,
-    onReturnToLatest,
     onStopReadAloud,
     readAloud,
     sessionKey,
-    windowLimited = false,
 }: ChatTranscriptProps) {
+    const olderHistoryRequestPending = useRef(false);
+    const olderHistoryCycleActive = useRef(false);
+    const [olderHistoryCompletion, setOlderHistoryCompletion] = useState(0);
+    const [olderHistoryCycleLoading, setOlderHistoryCycleLoading] = useState(false);
+    const historyViewport = useRef<HTMLDivElement>(null);
+    const previousHistoryScrollTop = useRef(0);
+    const preserveHistoryAnchor = useRef<(() => void) | null>(null);
     const [notice, setNotice] = useState<ChatTranscriptNotice>(() =>
         emptyTranscriptNotice(sessionKey)
     );
@@ -198,10 +211,62 @@ export function ChatTranscript({
         display,
         readAloud
     );
+    const streamingTextMessageIds = activeStreamingTextMessageIds(
+        visibleMessages,
+        activeRunIds
+    );
+    const layoutRevision = transcriptLayoutRevision(
+        visibleMessages,
+        display,
+        activeRunIds,
+        readAloud
+    );
     const stopReadAloud = useEffectEvent(() => onStopReadAloud?.());
     const stopActiveReadAloud = useEffectEvent(() => {
         if (readAloud?.phase !== "idle") stopReadAloud();
     });
+    async function requestOlderAtTop(): Promise<void> {
+        if (
+            historyViewport.current === null ||
+            historyViewport.current.scrollTop > olderHistoryLoadThresholdPx ||
+            !hasOlder ||
+            historyLoading ||
+            olderHistoryRequestPending.current
+        ) {
+            return;
+        }
+        olderHistoryRequestPending.current = true;
+        setOlderHistoryCycleLoading(true);
+        preserveHistoryAnchor.current?.();
+        try {
+            if (!(await onLoadOlder())) {
+                olderHistoryCycleActive.current = false;
+                setOlderHistoryCycleLoading(false);
+            }
+        } catch {
+            olderHistoryCycleActive.current = false;
+            setOlderHistoryCycleLoading(false);
+        } finally {
+            olderHistoryRequestPending.current = false;
+            setOlderHistoryCompletion((current) => current + 1);
+        }
+    }
+    const continueOlderHistory = useEffectEvent(() => {
+        void requestOlderAtTop();
+    });
+    function handleHistoryScroll(): void {
+        const scrollTop = historyViewport.current?.scrollTop ?? 0;
+        const movedUp = scrollTop + 1 < previousHistoryScrollTop.current;
+        previousHistoryScrollTop.current = scrollTop;
+        if (!movedUp) return;
+        olderHistoryCycleActive.current = true;
+        void requestOlderAtTop();
+    }
+    function handleHistoryWheel(deltaY: number): void {
+        if (deltaY >= 0) return;
+        olderHistoryCycleActive.current = true;
+        void requestOlderAtTop();
+    }
     function handleItemsAppended({
         itemKeys,
         wasFollowing,
@@ -257,6 +322,26 @@ export function ChatTranscript({
         );
         return () => globalThis.clearTimeout(timeout);
     }, [nextCompactionExpiry, nowMs]);
+    useEffect(() => {
+        if (
+            !olderHistoryCycleActive.current ||
+            olderHistoryRequestPending.current ||
+            historyLoading
+        ) {
+            return;
+        }
+        const viewport = historyViewport.current;
+        if (
+            viewport === null ||
+            !hasOlder ||
+            viewport.scrollTop > olderHistoryLoadThresholdPx
+        ) {
+            olderHistoryCycleActive.current = false;
+            setOlderHistoryCycleLoading(false);
+            return;
+        }
+        continueOlderHistory();
+    }, [hasOlder, historyLoading, layoutRevision, olderHistoryCompletion]);
 
     if (visibleMessages.length === 0 && initialLoading) {
         return (
@@ -281,17 +366,10 @@ export function ChatTranscript({
         currentNotice.newMessageCount === 0
             ? currentNotice.announcement
             : `${currentNotice.newMessageCount} new ${currentNotice.newMessageCount === 1 ? "message" : "messages"}`;
-    const layoutRevision = transcriptLayoutRevision(
-        visibleMessages,
-        display,
-        activeRunIds,
-        readAloud,
-        windowLimited
-    );
     return (
         <section
             aria-label="Chat transcript"
-            className="relative isolate min-h-0 flex-1 overflow-hidden"
+            className="relative isolate flex min-h-0 flex-1 flex-col overflow-hidden"
         >
             <output aria-atomic="true" aria-live="polite" className="sr-only">
                 {newMessageLabel}
@@ -307,67 +385,57 @@ export function ChatTranscript({
                 }}
                 getItemKey={(index) => visibleMessages[index]?.id ?? `message:${index}`}
                 initialRect={{ height: 560, width: 880 }}
-                overscan={8}
+                overscan={50}
             >
                 {(virtualization) => (
-                    <>
+                    <div className="relative flex h-full min-h-0 flex-col">
+                        {virtualization.followToEnd?.awayFromEnd === true && (
+                            <Button
+                                className="border-primary-600 absolute top-2 right-4 z-20 rounded-full border px-3 py-1 text-xs shadow-lg sm:right-5"
+                                onClick={() => {
+                                    setNotice(emptyTranscriptNotice(sessionKey));
+                                    virtualization.followToEnd?.follow();
+                                }}
+                                size="sm"
+                                variant="secondary"
+                            >
+                                <Icon icon={ArrowDown} size="sm" tone="inherit" />
+                                {currentNotice.newMessageCount === 0
+                                    ? "Back to latest"
+                                    : `${currentNotice.newMessageCount} new ${currentNotice.newMessageCount === 1 ? "message" : "messages"}`}
+                            </Button>
+                        )}
+                        {olderHistoryCycleLoading && (
+                            <output
+                                aria-label="Loading older messages"
+                                className="text-primary-200 flex h-8 shrink-0 items-center justify-center gap-2 text-sm"
+                            >
+                                <Icon
+                                    className="motion-safe:animate-spin"
+                                    icon={LoaderCircle}
+                                    size="sm"
+                                    tone="inherit"
+                                />
+                                Loading older messages…
+                            </output>
+                        )}
                         <div
-                            aria-busy={historyLoading}
+                            aria-busy={historyLoading || olderHistoryCycleLoading}
                             aria-label="Messages"
                             aria-live="off"
-                            className="h-full min-h-0 overflow-x-hidden overflow-y-auto overscroll-contain px-2 py-3 sm:px-3"
-                            ref={virtualization.scrollContainerRef}
+                            className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-2 py-3 sm:px-3"
+                            ref={(node) => {
+                                virtualization.scrollContainerRef.current = node;
+                                historyViewport.current = node;
+                                preserveHistoryAnchor.current =
+                                    virtualization.preserveVisibleAnchor;
+                            }}
                             role="log"
+                            onScroll={handleHistoryScroll}
+                            onWheel={(event) => handleHistoryWheel(event.deltaY)}
                             style={{ overflowAnchor: "none" }}
                             tabIndex={0}
                         >
-                            {virtualization.followToEnd?.awayFromEnd === true && (
-                                <Button
-                                    className="border-primary-600 sticky top-0 z-10 float-right mb-2 rounded-full border px-3 py-1 text-xs shadow-lg sm:mr-2"
-                                    onClick={() => {
-                                        setNotice(emptyTranscriptNotice(sessionKey));
-                                        virtualization.followToEnd?.follow();
-                                    }}
-                                    size="sm"
-                                    variant="secondary"
-                                >
-                                    <Icon icon={ArrowDown} size="sm" tone="inherit" />
-                                    {currentNotice.newMessageCount === 0
-                                        ? "Back to latest"
-                                        : `${currentNotice.newMessageCount} new ${currentNotice.newMessageCount === 1 ? "message" : "messages"}`}
-                                </Button>
-                            )}
-                            <div className="mb-3 flex min-h-8 justify-center">
-                                {hasOlder && (
-                                    <Button
-                                        busy={historyLoading}
-                                        busyLabel="Loading older messages…"
-                                        onClick={onLoadOlder}
-                                        size="sm"
-                                        variant="secondary"
-                                    >
-                                        Load older messages
-                                    </Button>
-                                )}
-                                {windowLimited && (
-                                    <div className="text-primary-300 text-center text-xs">
-                                        <p>
-                                            Older history is capped to this browser
-                                            window.
-                                        </p>
-                                        {onReturnToLatest !== undefined && (
-                                            <Button
-                                                className="mt-2"
-                                                onClick={onReturnToLatest}
-                                                size="sm"
-                                                variant="secondary"
-                                            >
-                                                Return to latest history
-                                            </Button>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
                             <div
                                 className="relative w-full"
                                 style={{ height: `${virtualization.totalSize}px` }}
@@ -377,7 +445,13 @@ export function ChatTranscript({
                                     if (message === undefined) return null;
                                     return (
                                         <div
-                                            className="absolute top-0 left-0 w-full pb-3"
+                                            className={`absolute top-0 left-0 w-full ${
+                                                virtualItem.index ===
+                                                    visibleMessages.length - 1 &&
+                                                isActivityOnlyMessage(message)
+                                                    ? "pb-1"
+                                                    : "pb-3"
+                                            }`}
                                             data-index={virtualItem.index}
                                             key={virtualItem.key}
                                             ref={virtualization.measureElement}
@@ -386,7 +460,13 @@ export function ChatTranscript({
                                             }}
                                         >
                                             <ChatMessageBubble
-                                                activeRunIds={activeRunIds}
+                                                activeRunIds={
+                                                    streamingTextMessageIds.has(
+                                                        message.id
+                                                    )
+                                                        ? activeRunIds
+                                                        : []
+                                                }
                                                 display={display}
                                                 message={message}
                                                 onDismissReadAloudError={
@@ -396,10 +476,14 @@ export function ChatTranscript({
                                                     virtualization.followToEnd
                                                         ?.notifyDynamicContentChange
                                                 }
-                                                onHide={onHideMessage}
                                                 onHydrate={onHydrateMessage}
+                                                onOpenLocalFile={onOpenLocalFile}
                                                 onReadAloud={onReadAloud}
                                                 onStopReadAloud={onStopReadAloud}
+                                                onToolExpand={
+                                                    virtualization.followToEnd
+                                                        ?.stopFollowing
+                                                }
                                                 readAloud={readAloud}
                                             />
                                         </div>
@@ -407,7 +491,7 @@ export function ChatTranscript({
                                 })}
                             </div>
                         </div>
-                    </>
+                    </div>
                 )}
             </Virtualizer>
         </section>

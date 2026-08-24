@@ -103,4 +103,35 @@ describe("Dashboard chat runtime maintenance", () => {
         expect(failures).toHaveLength(2);
         await maintenance.stop();
     });
+
+    test("starts maintenance when initial Gateway recovery is unavailable", async () => {
+        const failures: unknown[] = [];
+        let callback: (() => void) | undefined;
+        let recoveries = 0;
+        const maintenance = await startDashboardChatRuntimeMaintenance({
+            intervalMs: 1,
+            onFailure: (error) => failures.push(error),
+            scheduler: {
+                clearInterval: () => {},
+                setInterval: (next) => {
+                    callback = next;
+                    return;
+                },
+            },
+            service: {
+                recover: async () => {
+                    recoveries += 1;
+                    if (recoveries === 1) throw new Error("Gateway connecting");
+                },
+                sweepRetention: async () => 0,
+                sweepSubscriptions: async () => 0,
+            },
+        });
+
+        expect(failures).toHaveLength(1);
+        callback?.();
+        await flush();
+        expect(recoveries).toBe(2);
+        await maintenance.stop();
+    });
 });

@@ -41,6 +41,7 @@ function service(overrides: Partial<WorkspaceFilesService> = {}): WorkspaceFiles
                 ],
             }),
         prepareContent: () => Promise.reject(new Error("unused")),
+        prepareReference: () => Promise.reject(new Error("unused")),
         prepareReveal: () => Promise.reject(new Error("unused")),
         prepareUpload: () =>
             Promise.resolve({

@@ -102,6 +102,10 @@ export interface WorkspaceFileReader {
         signal?: AbortSignal,
         contentAccess?: WorkspaceFileContentAccess
     ) => Promise<WorkspaceFileReadResult>;
+    readonly resolveReference?: (
+        reference: string,
+        signal?: AbortSignal
+    ) => Promise<WorkspaceFileLocator | undefined>;
     readonly roots: () => readonly WorkspaceFileRootPolicy[];
 }
 

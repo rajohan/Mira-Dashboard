@@ -77,7 +77,6 @@ describe("notification realtime invalidation", () => {
         );
 
         expect(realtimeClient.input).toEqual({
-            lastEventId: "0",
             topics: [monitoringRealtimeTopics.notifications],
         });
         expect(realtimeClient.activeSubscriptionCount).toBe(1);

@@ -87,6 +87,25 @@ afterEach(async () => {
 });
 
 describe("descriptor workspace file reader", () => {
+    test("resolves only regular files beneath a reviewed root", async () => {
+        const { reader, root } = fixture();
+        Fs.mkdirSync(Path.join(root, "docs"));
+        const file = Path.join(root, "docs", "guide.md");
+        Fs.writeFileSync(file, "# Guide\n");
+        const resolveReference = reader.resolveReference;
+        if (resolveReference === undefined) {
+            throw new TypeError("Descriptor reader does not resolve references");
+        }
+
+        expect(await resolveReference(file)).toEqual({
+            rootId: "workspace",
+            segments: ["docs", "guide.md"],
+        });
+        expect(await resolveReference(Path.join(root, "docs"))).toBeUndefined();
+        expect(await resolveReference("/etc/passwd")).toBeUndefined();
+        expect(await resolveReference(`${root}/docs/../docs/guide.md`)).toBeUndefined();
+    });
+
     test("lists stable visible regular entries without exposing symlinks or hard links", async () => {
         const { reader, root } = fixture();
         Fs.mkdirSync(Path.join(root, "docs"));

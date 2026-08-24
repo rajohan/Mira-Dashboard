@@ -1,17 +1,9 @@
-import {
-    ChevronRight,
-    Eye,
-    EyeOff,
-    LoaderCircle,
-    Square,
-    Volume2,
-    X,
-} from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { ChevronRight, Eye, LoaderCircle, Square, Volume2, X } from "lucide-react";
+import { type ReactNode, useRef, useState } from "react";
 
 import { cn } from "../lib/classNames.ts";
+import { formatDashboardDateTimeToMinute } from "../lib/formatDateTime.ts";
 import { Button } from "../ui/Button.tsx";
-import { ConfirmModal } from "../ui/ConfirmModal.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { IconOnlyButton } from "../ui/IconOnlyButton.tsx";
 import { interactiveTapClassName } from "../ui/interactionStyles.ts";
@@ -24,6 +16,7 @@ import {
     formatChatAttachmentSize,
 } from "./chatAttachmentPresentation.ts";
 import { ChatAttachmentPreview } from "./ChatAttachmentPreview.tsx";
+import { remarkChatLocalFileReferences } from "./chatLocalFileMarkdown.ts";
 import { safeChatMarkdownLink } from "./chatMarkdownPolicy.ts";
 import {
     chatMessageHasVisibleContent,
@@ -88,12 +81,6 @@ function ToolSourceRegion({ ariaLabel, details }: ToolSourceRegionProps) {
         <ToolScrollRegion
             ariaLabel={ariaLabel}
             className="max-h-64 overflow-auto text-[11px] leading-normal"
-            contentRevision={details
-                .map(
-                    (detail) =>
-                        `${detail.language}:${detail.content.length}:${detail.content.slice(-16)}`
-                )
-                .join("|")}
         >
             {details.map((detail, index) => (
                 <div
@@ -125,6 +112,7 @@ function ToolSourceRegion({ ariaLabel, details }: ToolSourceRegionProps) {
 
 interface ToolPartProps {
     readonly expanded: boolean;
+    readonly onExpand?: () => void;
     readonly part: ChatToolPart;
 }
 
@@ -137,7 +125,8 @@ function toolPartDescription(
     return diff.files.length === 1 ? diff.files[0] : `${diff.files.length} files changed`;
 }
 
-function ToolPart({ expanded, part }: ToolPartProps) {
+function ToolPart({ expanded, onExpand, part }: ToolPartProps) {
+    const regionRef = useRef<HTMLElement>(null);
     const defaultOpen = expanded;
     const [override, setOverride] =
         useState<Readonly<{ basis: boolean; value: boolean }>>();
@@ -168,6 +157,24 @@ function ToolPart({ expanded, part }: ToolPartProps) {
                 ) === index
         );
     const tone = part.status === "failed" ? "danger" : "warning";
+    function toggle(): void {
+        const nextOpen = !open;
+        if (nextOpen) onExpand?.();
+        setOverride({ basis: defaultOpen, value: nextOpen });
+        if (!nextOpen) return;
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                const region = regionRef.current;
+                const scrollContainer = region?.closest('[role="log"]');
+                if (!(scrollContainer instanceof HTMLElement) || region === null) return;
+                const top =
+                    scrollContainer.scrollTop +
+                    region.getBoundingClientRect().top -
+                    scrollContainer.getBoundingClientRect().top;
+                scrollContainer.scrollTo({ top: Math.max(0, top) });
+            });
+        });
+    }
     return (
         <section
             aria-label={`${label}, ${part.status}`}
@@ -177,6 +184,7 @@ function ToolPart({ expanded, part }: ToolPartProps) {
                     ? "border-red-500/30 bg-red-500/10 text-red-100"
                     : "border-amber-500/30 bg-amber-500/10 text-amber-100"
             )}
+            ref={regionRef}
         >
             <Button
                 aria-expanded={open}
@@ -184,7 +192,7 @@ function ToolPart({ expanded, part }: ToolPartProps) {
                     "flex w-full min-w-0 items-start gap-1.5 px-2 py-1.5 text-left text-xs focus-visible:ring-inset",
                     tone === "danger" ? "hover:bg-red-500/10" : "hover:bg-amber-500/10"
                 )}
-                onClick={() => setOverride({ basis: defaultOpen, value: !open })}
+                onClick={toggle}
                 type="button"
                 variant="unstyled"
             >
@@ -266,8 +274,9 @@ interface ChatMessageBubbleProps {
     readonly message: ChatDisplayMessage;
     readonly onDismissReadAloudError?: () => void;
     readonly onDynamicContentLoad?: () => void;
-    readonly onHide?: (messageId: string) => void;
     readonly onHydrate?: (messageId: string) => void;
+    readonly onToolExpand?: () => void;
+    readonly onOpenLocalFile?: (reference: string) => void;
     readonly onReadAloud?: (messageId: string, text: string) => void;
     readonly onStopReadAloud?: () => void;
     readonly readAloud?: ChatReadAloudView;
@@ -293,9 +302,25 @@ function controlToneClass(tone: ChatControlPart["tone"]): string {
 function SafeMarkdownAnchor({
     children,
     href,
-}: Readonly<{ children?: ReactNode; href?: string }>) {
+    onOpenLocalFile,
+}: Readonly<{
+    children?: ReactNode;
+    href?: string;
+    onOpenLocalFile?: (reference: string) => void;
+}>) {
     const link = safeChatMarkdownLink(href);
     if (link === undefined) return <span>{children}</span>;
+    if (link.kind === "workspace-file") {
+        return (
+            <button
+                className={cn(interactiveTapClassName, "cursor-pointer underline")}
+                onClick={() => onOpenLocalFile?.(link.reference)}
+                type="button"
+            >
+                {children}
+            </button>
+        );
+    }
     const externalProperties = link.external
         ? { rel: "noopener noreferrer", target: "_blank" }
         : {};
@@ -327,28 +352,22 @@ function MessageAttachment({
         previewCandidate.endsWith("?disposition=preview")
             ? previewCandidate
             : undefined;
-    const managedDownloadUrl =
-        attachment.downloadUrl !== undefined &&
-        managedChatMediaUrlPattern.test(attachment.downloadUrl) &&
-        attachment.downloadUrl.endsWith("?disposition=download")
-            ? attachment.downloadUrl
-            : undefined;
     const imageUrl =
         managedPreviewUrl !== undefined && attachment.renderPolicy === "inline-image"
             ? managedPreviewUrl
             : undefined;
     return (
-        <li className="border-primary-600 bg-primary-800 max-w-full overflow-hidden rounded-lg border">
-            {imageUrl !== undefined && (
-                <a
-                    className={cn(
-                        interactiveTapClassName,
-                        "focus-visible:ring-accent-400 block rounded-lg outline-none focus-visible:ring-2"
-                    )}
-                    href={imageUrl}
-                    rel="noopener noreferrer"
-                    target="_blank"
-                >
+        <li className="border-primary-600 bg-primary-800 hover:border-accent-500 hover:bg-primary-700 focus-within:border-accent-400 relative max-w-full overflow-hidden rounded-lg border transition-colors">
+            <button
+                aria-label={`Open preview of ${attachment.name}`}
+                className={cn(
+                    interactiveTapClassName,
+                    "focus-visible:ring-accent-400 block w-full cursor-pointer rounded-lg text-left outline-none focus-visible:ring-2"
+                )}
+                onClick={() => onPreview(attachment.id)}
+                type="button"
+            >
+                {imageUrl !== undefined && (
                     <img
                         alt={attachment.name}
                         className="max-h-56 max-w-full object-contain"
@@ -356,40 +375,26 @@ function MessageAttachment({
                         onLoad={onDynamicContentLoad}
                         src={imageUrl}
                     />
-                </a>
-            )}
-            <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 p-2">
-                <span className="min-w-0">
-                    {imageUrl === undefined && managedDownloadUrl !== undefined ? (
-                        <a
-                            className={cn(
-                                interactiveTapClassName,
-                                "text-accent-300 focus-visible:ring-accent-400 block max-w-72 truncate rounded outline-none focus-visible:ring-2"
-                            )}
-                            download={attachment.name}
-                            href={managedDownloadUrl}
-                        >
-                            {attachment.name}
-                        </a>
-                    ) : (
-                        <span className="text-primary-100 block max-w-72 truncate">
-                            {attachment.name}
-                        </span>
-                    )}
+                )}
+                <span className="block min-w-0 p-2 pr-11">
+                    <span className="text-primary-100 block max-w-72 truncate">
+                        {attachment.name}
+                    </span>
                     <span className="text-primary-400 mt-0.5 block text-xs">
-                        {chatAttachmentTypeLabel(attachment.mediaType)} ·{" "}
-                        {formatChatAttachmentSize(attachment.sizeBytes)}
+                        {chatAttachmentTypeLabel(attachment.mediaType)}
+                        {attachment.sizeBytes > 0
+                            ? ` · ${formatChatAttachmentSize(attachment.sizeBytes)}`
+                            : ""}
                         {attachment.status === undefined ? "" : ` · ${attachment.status}`}
                     </span>
                 </span>
-                <IconOnlyButton
-                    icon={Eye}
-                    label={`Preview ${attachment.name}`}
-                    onClick={() => onPreview(attachment.id)}
-                    size="sm"
-                    variant="ghost"
-                />
-            </div>
+            </button>
+            <span
+                aria-hidden="true"
+                className="text-primary-300 pointer-events-none absolute top-1/2 right-3 -translate-y-1/2"
+            >
+                <Icon icon={Eye} size="sm" />
+            </span>
             {(attachment.status === "preparing" || attachment.status === "uploading") && (
                 <ProgressBar
                     className="w-full rounded-none"
@@ -413,13 +418,13 @@ export function ChatMessageBubble({
     message,
     onDismissReadAloudError,
     onDynamicContentLoad,
-    onHide,
     onHydrate,
+    onOpenLocalFile,
     onReadAloud,
+    onToolExpand,
     onStopReadAloud,
     readAloud,
 }: ChatMessageBubbleProps) {
-    const [hideConfirmationOpen, setHideConfirmationOpen] = useState(false);
     const [previewAttachmentId, setPreviewAttachmentId] = useState<string>();
     const isUser = message.role === "user";
     const author = messageAuthor(message.role);
@@ -432,11 +437,37 @@ export function ChatMessageBubble({
         (attachment) => attachment.id === previewAttachmentId
     );
     if (!chatMessageHasVisibleContent(message, display, readAloud)) return null;
-    const readableText = visibleParts
-        .filter((part) => part.kind === "text")
-        .map((part) => part.text.trim())
-        .filter(Boolean)
-        .join("\n\n");
+    const activityParts = visibleParts.filter(
+        (
+            part
+        ): part is ChatControlPart & {
+            readonly activity: NonNullable<ChatControlPart["activity"]>;
+        } => part.kind === "control" && part.activity !== undefined
+    );
+    if (activityParts.length > 0 && activityParts.length === visibleParts.length) {
+        return (
+            <article
+                aria-label="OpenClaw activity"
+                className="text-primary-400 px-3 py-0.5 text-sm font-medium"
+                data-message-id={message.id}
+                data-part-kinds="control"
+            >
+                {activityParts.map((part, index) => (
+                    <output
+                        aria-label={part.text}
+                        className="block [&_.loading-state-dots]:ml-0.5 [&_.loading-state-dots]:text-lg [&_.loading-state-dots]:leading-none"
+                        key={`activity:${index}`}
+                    >
+                        {part.activity === "running" ? (
+                            <LoadingDots label={part.text} />
+                        ) : (
+                            part.text
+                        )}
+                    </output>
+                ))}
+            </article>
+        );
+    }
     const messageFinished =
         !message.parts.some(
             (part) =>
@@ -448,9 +479,19 @@ export function ChatMessageBubble({
             !activeRunIds.includes(message.clientRunId)) &&
         (message.providerRunId === undefined ||
             !activeRunIds.includes(message.providerRunId));
+    const readableText = visibleParts
+        .flatMap((part) => {
+            if (part.kind === "thinking" && part.status === "complete") {
+                return [part.text];
+            }
+            if (part.kind === "text" && messageFinished) return [part.text];
+            return [];
+        })
+        .map((text) => text.trim())
+        .filter(Boolean)
+        .join("\n\n");
     const readAloudAvailable =
         message.role === "assistant" &&
-        messageFinished &&
         readableText !== "" &&
         onReadAloud !== undefined &&
         onStopReadAloud !== undefined &&
@@ -471,13 +512,16 @@ export function ChatMessageBubble({
                 aria-label={`${author} message`}
                 className={cn("flex", isUser ? "justify-end" : "justify-start")}
                 data-message-id={message.id}
+                data-part-kinds={[...new Set(visibleParts.map(({ kind }) => kind))].join(
+                    ","
+                )}
             >
                 <div
                     className={cn(
                         "max-w-[94%] min-w-0 rounded-2xl px-3 py-2 text-sm sm:max-w-[86%] lg:max-w-[80%]",
                         !isUser && showsTool && "w-full",
                         isUser
-                            ? "bg-accent-500 text-primary-950"
+                            ? "bg-accent-700 text-white"
                             : "bg-primary-950 text-primary-100"
                     )}
                     data-testid={`chat-message-surface-${message.role}`}
@@ -485,7 +529,7 @@ export function ChatMessageBubble({
                     <header
                         className={cn(
                             "mb-1 flex items-center gap-2 text-[11px] tracking-wide uppercase",
-                            isUser ? "text-primary-950" : "text-primary-300"
+                            isUser ? "text-white" : "text-primary-300"
                         )}
                     >
                         <span className={showsThinkingLabel ? "normal-case" : undefined}>
@@ -498,30 +542,18 @@ export function ChatMessageBubble({
                                     · {deliveryLabel(message.delivery)}
                                 </span>
                             )}
-                        {onHide !== undefined && (
-                            <IconOnlyButton
-                                className="ml-auto min-h-7 px-1.5"
-                                icon={EyeOff}
-                                label="Hide message from this browser"
-                                onClick={() => setHideConfirmationOpen(true)}
-                                size="sm"
-                                title="Hide locally"
-                                variant="ghost"
-                            />
-                        )}
                         {readAloudAvailable && (
                             <IconOnlyButton
                                 aria-pressed={
                                     readAloudActive && readAloud.phase === "playing"
                                 }
-                                className={cn(
-                                    "ml-auto min-h-8 min-w-8 px-0",
-                                    onHide !== undefined && "ml-0",
-                                    readAloudActive &&
-                                        readAloud.phase === "loading" &&
-                                        "animate-pulse motion-reduce:animate-none"
-                                )}
+                                className="ml-auto min-h-8 min-w-8 px-0"
                                 icon={readAloudIcon}
+                                iconClassName={
+                                    readAloudActive && readAloud.phase === "loading"
+                                        ? "animate-spin motion-reduce:animate-none"
+                                        : undefined
+                                }
                                 label={readAloudLabel}
                                 onClick={() => {
                                     if (readAloudActive && readAloud.phase !== "idle") {
@@ -556,15 +588,21 @@ export function ChatMessageBubble({
                                 return (
                                     <Markdown
                                         components={{
-                                            a: SafeMarkdownAnchor,
+                                            a: (properties) => (
+                                                <SafeMarkdownAnchor
+                                                    {...properties}
+                                                    onOpenLocalFile={onOpenLocalFile}
+                                                />
+                                            ),
                                             img: BlockedMarkdownImage,
                                         }}
                                         className={
                                             isUser
-                                                ? "prose-a:text-primary-950 prose-blockquote:text-primary-950 prose-code:text-primary-950 prose-headings:text-primary-950 prose-li:text-primary-950 prose-p:text-primary-950 prose-strong:text-primary-950"
+                                                ? "prose-a:text-white prose-blockquote:text-white prose-code:text-white prose-headings:text-white prose-li:text-white prose-p:text-white prose-strong:text-white"
                                                 : undefined
                                         }
                                         key={`text:${index}`}
+                                        remarkPlugins={[remarkChatLocalFileReferences]}
                                         source={part.text}
                                     />
                                 );
@@ -577,10 +615,18 @@ export function ChatMessageBubble({
                                     >
                                         <Markdown
                                             components={{
-                                                a: SafeMarkdownAnchor,
+                                                a: (properties) => (
+                                                    <SafeMarkdownAnchor
+                                                        {...properties}
+                                                        onOpenLocalFile={onOpenLocalFile}
+                                                    />
+                                                ),
                                                 img: BlockedMarkdownImage,
                                             }}
                                             className="prose-p:text-primary-200 prose-headings:text-primary-100 prose-code:text-primary-100"
+                                            remarkPlugins={[
+                                                remarkChatLocalFileReferences,
+                                            ]}
                                             source={part.text}
                                         />
                                     </aside>
@@ -618,6 +664,7 @@ export function ChatMessageBubble({
                                 <ToolPart
                                     expanded={display.toolsExpanded}
                                     key={`tool:${part.callId}`}
+                                    onExpand={onToolExpand}
                                     part={part}
                                 />
                             );
@@ -633,7 +680,9 @@ export function ChatMessageBubble({
                             <Button
                                 busy={message.hydration === "loading"}
                                 busyLabel="Loading full message…"
-                                onClick={() => onHydrate(message.id)}
+                                onClick={() =>
+                                    onHydrate(message.sourceMessageId ?? message.id)
+                                }
                                 size="sm"
                                 variant="secondary"
                             >
@@ -665,31 +714,15 @@ export function ChatMessageBubble({
                         <time
                             className={cn(
                                 "mt-2 block text-[11px]",
-                                isUser ? "text-primary-950" : "text-primary-400"
+                                isUser ? "text-white" : "text-primary-400"
                             )}
                             dateTime={new Date(message.timestampMs).toISOString()}
                         >
-                            {new Intl.DateTimeFormat("en-GB", {
-                                hour: "2-digit",
-                                minute: "2-digit",
-                            }).format(message.timestampMs)}
+                            {formatDashboardDateTimeToMinute(message.timestampMs)}
                         </time>
                     )}
                 </div>
             </article>
-            {onHide !== undefined && (
-                <ConfirmModal
-                    confirmLabel="Hide message"
-                    description="This hides the selected message only in this browser. It does not delete or change the OpenClaw chat history."
-                    onCancel={() => setHideConfirmationOpen(false)}
-                    onConfirm={() => {
-                        onHide(message.id);
-                        setHideConfirmationOpen(false);
-                    }}
-                    open={hideConfirmationOpen}
-                    title="Hide this message locally?"
-                />
-            )}
             <ChatAttachmentPreview
                 attachment={previewAttachment}
                 key={previewAttachment?.id ?? "closed-preview"}

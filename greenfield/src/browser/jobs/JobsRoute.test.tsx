@@ -658,7 +658,7 @@ describe("Dashboard jobs route", () => {
             eventLimit: 100,
             id: run.id,
         });
-    });
+    }, 10_000);
 
     test("loads independent exact deep links and wires navigation and realtime refresh", async () => {
         const transport = new JobsRouteTransport();

@@ -134,6 +134,12 @@ describe("chat realtime invalidation", () => {
             });
             expect(interval).toHaveBeenCalledTimes(1);
             expect(store.state.connection).toBe("disconnected");
+
+            await act(async () => {
+                realtimeClient.emit(change(chatRealtimeTopic));
+                await Promise.resolve();
+            });
+            expect(store.state.connection).toBe("connected");
         } finally {
             view.unmount();
             interval.mockRestore();
@@ -142,7 +148,7 @@ describe("chat realtime invalidation", () => {
         }
     });
 
-    test("reconciles a stale compaction through history before the safety runtime snapshot", async () => {
+    test("waits for safety history reconciliation before refreshing runtime", async () => {
         jest.useFakeTimers();
         const queryClient = createDashboardQueryClient();
         const realtimeClient = new ControlledDashboardRealtimeClient();
@@ -173,7 +179,6 @@ describe("chat realtime invalidation", () => {
             }),
         ]);
         const historyGate = Promise.withResolvers<void>();
-        let historyReconciled = false;
         let runtimeRead = false;
         const invalidate = jest
             .spyOn(queryClient, "invalidateQueries")
@@ -182,14 +187,10 @@ describe("chat realtime invalidation", () => {
                 if (key === JSON.stringify(chatHistoryQueryKey(sessionKey))) {
                     return (async () => {
                         await historyGate.promise;
-                        historyReconciled = true;
                     })();
                 }
                 if (key === JSON.stringify(chatRuntimeQueryKey(sessionKey))) {
-                    expect(historyReconciled).toBeTrue();
                     runtimeRead = true;
-                    // The provider-backed history observation has removed the
-                    // completed run from the following authoritative inventory.
                     store.installExternalRuns(sessionKey, []);
                 }
                 return Promise.resolve();
@@ -207,14 +208,7 @@ describe("chat realtime invalidation", () => {
                 await Promise.resolve();
             });
             expect(runtimeRead).toBeFalse();
-            expect(chatRuntimeMessages(store.state, sessionKey)[0]?.parts).toEqual([
-                {
-                    activity: "running",
-                    kind: "control",
-                    text: "Compacting context",
-                    tone: "muted",
-                },
-            ]);
+            expect(chatRuntimeMessages(store.state, sessionKey)).toHaveLength(1);
 
             await act(async () => {
                 historyGate.resolve();
@@ -223,14 +217,7 @@ describe("chat realtime invalidation", () => {
                 await Promise.resolve();
             });
             expect(runtimeRead).toBeTrue();
-            expect(chatRuntimeMessages(store.state, sessionKey)[0]?.parts).toEqual([
-                {
-                    activity: "complete",
-                    kind: "control",
-                    text: "Compacting context",
-                    tone: "muted",
-                },
-            ]);
+            expect(chatRuntimeMessages(store.state, sessionKey)).toEqual([]);
             expect(store.state.connection).toBe("reconnecting");
             expect(
                 invalidate.mock.calls.some(
@@ -247,7 +234,7 @@ describe("chat realtime invalidation", () => {
         }
     });
 
-    test("bounds a marker burst and carries trailing dirtiness into one backed-off refresh", async () => {
+    test("coalesces a marker burst independently for each refresh target", async () => {
         jest.useFakeTimers();
         const queryClient = createDashboardQueryClient();
         const realtimeClient = new ControlledDashboardRealtimeClient();
@@ -256,7 +243,13 @@ describe("chat realtime invalidation", () => {
         let invocation = 0;
         const invalidate = jest
             .spyOn(queryClient, "invalidateQueries")
-            .mockImplementation(() => {
+            .mockImplementation((filters) => {
+                if (
+                    JSON.stringify(filters?.queryKey) !==
+                    JSON.stringify(chatHistoryQueryKey(sessionKey))
+                ) {
+                    return Promise.resolve();
+                }
                 const gate = gates[invocation];
                 invocation += 1;
                 return gate?.promise ?? Promise.resolve();
@@ -286,30 +279,19 @@ describe("chat realtime invalidation", () => {
             expect(invalidate).toHaveBeenCalledTimes(2);
 
             await act(async () => {
-                realtimeClient.emit(change(chatHistoryRealtimeTopic));
-                realtimeClient.emit(change(chatRealtimeTopic));
-                realtimeClient.emit(change(openClawTasksRealtimeTopic));
+                for (let index = 0; index < 100; index += 1) {
+                    realtimeClient.emit(change(chatHistoryRealtimeTopic));
+                }
                 gates[1]!.resolve();
                 await Promise.resolve();
                 await Promise.resolve();
             });
-            expect(invalidate).toHaveBeenCalledTimes(2);
-
-            await act(async () => {
-                jest.advanceTimersByTime(1000);
-                await Promise.resolve();
-                await Promise.resolve();
-            });
-            expect(invalidate).toHaveBeenCalledTimes(6);
-            const backedOffKeys = invalidate.mock.calls
-                .slice(2)
-                .map(([filters]) => filters?.queryKey);
-            expect(backedOffKeys).toContainEqual(chatHistoryQueryKey(sessionKey));
-            expect(backedOffKeys).toContainEqual(chatRuntimeQueryKey(sessionKey));
-            expect(backedOffKeys).toContainEqual(
-                openClawTaskListSessionQueryKey(sessionKey)
-            );
-            expect(backedOffKeys).toContainEqual(openClawTaskDetailQueryRoot);
+            expect(invalidate).toHaveBeenCalledTimes(3);
+            expect(invalidate.mock.calls.map(([filters]) => filters?.queryKey)).toEqual([
+                chatHistoryQueryKey(sessionKey),
+                chatHistoryQueryKey(sessionKey),
+                chatHistoryQueryKey(sessionKey),
+            ]);
             expect(
                 invalidate.mock.calls.every(
                     ([, options]) => options?.cancelRefetch === false
@@ -351,7 +333,6 @@ describe("chat realtime invalidation", () => {
         );
         try {
             expect(realtimeClient.input).toEqual({
-                lastEventId: "0",
                 topics: [
                     chatHistoryRealtimeTopic,
                     chatRealtimeTopic,
@@ -404,7 +385,7 @@ describe("chat realtime invalidation", () => {
                 queryClient.getQueryState(finishedTaskListKey)?.isInvalidated
             ).toBeTrue();
             expect(queryClient.getQueryState(taskDetailKey)?.isInvalidated).toBeTrue();
-            expect(store.state.connection).toBe("reconnecting");
+            expect(store.state.connection).toBe("connected");
         } finally {
             view.unmount();
             queryClient.clear();

@@ -92,7 +92,7 @@ describe("events.stream procedure", () => {
         );
 
         const observedSignal = observedOptions?.signal;
-        expect(observedOptions?.afterId).toBe("0");
+        expect(observedOptions?.afterId).toBeUndefined();
         expect(observedOptions?.topics).toEqual([monitoringRealtimeTopics.reports]);
         expect(observedSignal).toBeDefined();
         expect(observedSignal).toBe(controller.signal);

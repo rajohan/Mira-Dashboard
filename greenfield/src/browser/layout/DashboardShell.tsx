@@ -124,7 +124,7 @@ export function DashboardShell() {
             <a
                 className={cn(
                     interactiveTapClassName,
-                    "bg-accent-500 text-primary-950 fixed top-3 left-3 z-60 -translate-y-24 rounded-lg px-3 py-2 font-semibold transition-transform focus:translate-y-0"
+                    "bg-accent-700 fixed top-3 left-3 z-60 -translate-y-24 rounded-lg px-3 py-2 font-semibold text-white transition-transform focus:translate-y-0"
                 )}
                 href="#dashboard-content"
             >

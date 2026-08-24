@@ -1,4 +1,5 @@
 import { realpath } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 
 import {
@@ -131,8 +132,33 @@ export async function runDevelopmentWebProcess(
             ? sourceDevelopmentScheduledJobActionDefinitions
             : managedPreviewJobActionDefinitions
     );
+    const sourceDevelopmentDefaults =
+        previewSocket === undefined
+            ? Object.freeze({
+                  ...defaults,
+                  createServer: async (options: DashboardServerOptions) => {
+                      const isolatedOpenClawRoot = options.openClawFileRoot;
+                      if (isolatedOpenClawRoot === undefined) {
+                          return defaults.createServer(options);
+                      }
+                      const mediaRoot = await defaults
+                          .resolveOpenClawFileRoot(
+                              path.join(os.homedir(), ".openclaw"),
+                              path.join(
+                                  path.dirname(isolatedOpenClawRoot.path),
+                                  "production"
+                              )
+                          )
+                          .catch((): undefined => {});
+                      return defaults.createServer({
+                          ...options,
+                          openClawMediaFileRoot: mediaRoot,
+                      });
+                  },
+              } satisfies DashboardWebProcessDependencies)
+            : defaults;
     const dependencies = Object.freeze({
-        ...defaults,
+        ...sourceDevelopmentDefaults,
         createFrontendAssets: () => Promise.resolve(noFrontendAssets),
         createRuntime:
             previewSocket === undefined

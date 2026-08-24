@@ -89,11 +89,25 @@ function managerHarness(
 }
 
 describe("ChatSessionSubscriptionManager", () => {
+    test("maps projected legacy main sessions to the implicit main owner", async () => {
+        const harness = managerHarness();
+        await harness.manager.touch("main");
+        await harness.manager.touch("global");
+        expect(harness.requests).toEqual([
+            expect.objectContaining({ agentId: "main", sessionKey: "main" }),
+            expect.objectContaining({ agentId: "main", sessionKey: "global" }),
+        ]);
+    });
+
     test("shares one lease, retains pinned work, and sweeps idle unpinned leases", async () => {
         const harness = managerHarness({ idleMilliseconds: 100 });
         await harness.manager.touch("agent:main:main");
         await harness.manager.touch("agent:main:main");
         expect(harness.requests).toHaveLength(1);
+        expect(harness.requests[0]).toMatchObject({
+            agentId: "main",
+            sessionKey: "agent:main:main",
+        });
 
         harness.setPinned(true);
         harness.setNow(1200);
@@ -112,13 +126,15 @@ describe("ChatSessionSubscriptionManager", () => {
         );
         harness.setNow(1200);
         await harness.manager.touch("agent:main:second");
-        expect(harness.requests.map(({ sessionKey }) => sessionKey)).toEqual([
-            "agent:main:first",
-            "agent:main:second",
+        expect(
+            harness.requests.map(({ agentId, sessionKey }) => ({ agentId, sessionKey }))
+        ).toEqual([
+            { agentId: "main", sessionKey: "agent:main:first" },
+            { agentId: "main", sessionKey: "agent:main:second" },
         ]);
     });
 
-    test("rotates every dead transport boundary with current durable watermarks", async () => {
+    test("keeps recoverable gaps live and rotates terminal boundaries with current watermarks", async () => {
         const harness = managerHarness({ pinned: true });
         await harness.manager.touch("agent:main:main");
         harness.setWatermark(1);
@@ -128,22 +144,22 @@ describe("ChatSessionSubscriptionManager", () => {
             receivedSequence: 2,
             sessionKey: "agent:main:main",
         });
-        expect(harness.requests).toHaveLength(2);
-        expect(harness.requests[1]!.runWatermarks[0]!.lastProviderSequence).toBe(1);
+        expect(harness.requests).toHaveLength(1);
+        expect(harness.closes).toBe(0);
 
         for (const [index, reason] of (
             ["backpressure", "transport", "subscription"] as const
         ).entries()) {
             harness.setWatermark(index + 2);
             await harness.requests.at(-1)!.onReconciliationRequired(reason);
-            expect(harness.requests).toHaveLength(index + 3);
+            expect(harness.requests).toHaveLength(index + 2);
             expect(harness.requests.at(-1)!.runWatermarks[0]!.lastProviderSequence).toBe(
                 index + 2
             );
         }
-        expect(harness.closes).toBe(4);
+        expect(harness.closes).toBe(3);
         await harness.manager.dispose();
-        expect(harness.closes).toBe(5);
+        expect(harness.closes).toBe(4);
     });
 
     test("an unpinned dead lease is reacquired on the next touch", async () => {
@@ -155,6 +171,55 @@ describe("ChatSessionSubscriptionManager", () => {
         await harness.manager.touch("agent:main:main");
         expect(harness.requests).toHaveLength(2);
         expect(harness.requests[1]!.runWatermarks[0]!.lastProviderSequence).toBe(7);
+    });
+
+    test("retains a recoverable gap lease but never a failed terminal lease", async () => {
+        const requests: ChatEventSubscriptionRequest[] = [];
+        let closes = 0;
+        const manager = new ChatSessionSubscriptionManager({
+            isPinned: () => true,
+            onEvent: () => {},
+            onGap: () => Promise.reject(new Error("history unavailable")),
+            onReconciliationRequired: () =>
+                Promise.reject(new Error("history unavailable")),
+            provider: {
+                subscribeChat: async (request) => {
+                    requests.push(request);
+                    return {
+                        close: async () => {
+                            closes += 1;
+                        },
+                    };
+                },
+            },
+            watermarks: () => [],
+        });
+
+        await manager.touch("agent:main:main");
+        const reconciliationFailure = await Promise.resolve(
+            requests[0]!.onReconciliationRequired("transport")
+        ).then(
+            () => null,
+            (error: unknown) => error
+        );
+        expect(reconciliationFailure).toEqual(new Error("history unavailable"));
+        expect(requests).toHaveLength(2);
+        expect(closes).toBe(1);
+
+        const gapFailure = await Promise.resolve(
+            requests[1]!.onGap({
+                expectedSequence: 1,
+                providerRunId: "provider-run",
+                receivedSequence: 2,
+                sessionKey: "agent:main:main",
+            })
+        ).then(
+            () => null,
+            (error: unknown) => error
+        );
+        expect(gapFailure).toEqual(new Error("history unavailable"));
+        expect(requests).toHaveLength(2);
+        expect(closes).toBe(1);
     });
 
     test("drops every callback from an invalidated transcript lease", async () => {

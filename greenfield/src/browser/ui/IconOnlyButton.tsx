@@ -8,6 +8,7 @@ interface IconOnlyButtonProps extends Omit<
     "busy" | "busyLabel" | "children"
 > {
     readonly icon: LucideIcon;
+    readonly iconClassName?: string;
     readonly label: string;
 }
 
@@ -17,6 +18,7 @@ interface IconOnlyButtonProps extends Omit<
  */
 export function IconOnlyButton({
     icon,
+    iconClassName,
     label,
     size = "sm",
     title = label,
@@ -24,7 +26,12 @@ export function IconOnlyButton({
 }: IconOnlyButtonProps) {
     return (
         <Button {...properties} aria-label={label} size={size} title={title}>
-            <Icon icon={icon} size={size === "lg" ? "md" : "sm"} tone="inherit" />
+            <Icon
+                className={iconClassName}
+                icon={icon}
+                size={size === "lg" ? "md" : "sm"}
+                tone="inherit"
+            />
         </Button>
     );
 }

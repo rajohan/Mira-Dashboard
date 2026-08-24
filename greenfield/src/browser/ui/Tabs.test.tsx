@@ -47,7 +47,10 @@ describe("Tabs", () => {
         expect(overview).toHaveAttribute("aria-selected", "true");
         expect(overview).toHaveClass(
             "not-data-selected:not-data-disabled:data-hover:bg-primary-800",
-            "hover:not-data-selected:not-data-disabled:bg-primary-800"
+            "hover:not-data-selected:not-data-disabled:bg-primary-800",
+            "data-selected:bg-accent-700",
+            "data-selected:text-white",
+            "[&_svg]:text-inherit"
         );
         expect(screen.getByRole("tabpanel")).toHaveTextContent("Current worker state");
 

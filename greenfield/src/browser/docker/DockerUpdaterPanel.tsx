@@ -1,7 +1,6 @@
-import { ArrowUpCircle, History, Play, RefreshCw } from "lucide-react";
+import { ArrowUpCircle, History, Layers3, Play, RefreshCw } from "lucide-react";
 
 import {
-    dockerUpdaterEventMaximum,
     type DockerUpdaterEvent,
     type DockerUpdaterService,
 } from "../../contracts/docker.ts";
@@ -84,18 +83,22 @@ export function DockerUpdaterPanel({
     return (
         <Card aria-labelledby="docker-updater-heading" className="min-w-0">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                <div>
-                    <Heading id="docker-updater-heading" level={2}>
-                        Updater
-                    </Heading>
+                <div className="min-w-0">
+                    <div className="flex min-w-0 items-center gap-2">
+                        <Icon icon={RefreshCw} tone="accent" />
+                        <Heading id="docker-updater-heading" level={2}>
+                            Updater
+                        </Heading>
+                    </div>
                     <Text className="mt-1" tone="muted">
                         Compose-owned service inventory, registry candidates, and recent
                         updater outcomes.
                     </Text>
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div className="grid w-full grid-cols-1 gap-2 min-[28rem]:grid-cols-2 lg:flex lg:w-auto">
                     <Button
                         aria-label="Scan Docker services for updates"
+                        className="w-full lg:w-auto"
                         disabled={controlsDisabled || busy}
                         onClick={onScan}
                         size="sm"
@@ -106,6 +109,7 @@ export function DockerUpdaterPanel({
                     </Button>
                     <Button
                         aria-label="Run automatic Docker updates"
+                        className="w-full lg:w-auto"
                         disabled={controlsDisabled || busy}
                         onClick={onRun}
                         size="sm"
@@ -166,13 +170,16 @@ export function DockerUpdaterPanel({
                     aria-labelledby="docker-updater-services-heading"
                     className="min-w-0"
                 >
-                    <Heading
-                        id="docker-updater-services-heading"
-                        level={3}
-                        size="subsection"
-                    >
-                        Services
-                    </Heading>
+                    <div className="flex items-center gap-2">
+                        <Icon icon={Layers3} tone="accent" />
+                        <Heading
+                            id="docker-updater-services-heading"
+                            level={3}
+                            size="subsection"
+                        >
+                            Services
+                        </Heading>
+                    </div>
                     {services.length === 0 ? (
                         <Text className="mt-3" tone="muted">
                             No Compose updater services were discovered.
@@ -282,9 +289,6 @@ export function DockerUpdaterPanel({
                             Recent events
                         </Heading>
                     </div>
-                    <Text className="mt-1" size="sm" tone="muted">
-                        {events.length} shown · bounded to {dockerUpdaterEventMaximum}
-                    </Text>
                     {events.length === 0 ? (
                         <Text className="mt-3" tone="muted">
                             No updater events are available.

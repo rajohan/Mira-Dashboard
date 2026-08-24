@@ -59,7 +59,9 @@ export function ConfirmModal({
                         tone="danger"
                     />
                 )}
-                <p className="text-primary-300 text-sm leading-6">{description}</p>
+                <p className="text-primary-300 min-w-0 flex-1 text-sm leading-6 wrap-anywhere">
+                    {description}
+                </p>
             </div>
             <Alert className="mt-4" message={error} />
             <div className="mt-5 flex justify-end gap-2">

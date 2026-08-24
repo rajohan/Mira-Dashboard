@@ -66,8 +66,8 @@ const incidents: readonly IncidentSummary[] = Object.freeze(
     }))
 );
 
-describe("incident table", () => {
-    test("uses a bounded virtual row window when the catalog reaches its threshold", () => {
+describe("incident selection list", () => {
+    test("uses the compact report-style layout and a bounded virtual item window", () => {
         const onSelect = jest.fn();
         const view = render(
             <IncidentTable
@@ -77,14 +77,14 @@ describe("incident table", () => {
             />
         );
 
-        const table = screen.getByRole("table", { name: "Incidents" });
+        const list = screen.getByRole("list", { name: "Incidents" });
         expect(
             screen.getByRole("button", {
-                name: "Incident 0; monitor-0; occurrence group 1",
+                name: "Incident 0; warning; active",
             })
         ).toBeTruthy();
         expect(screen.queryByText("Incident 49")).toBeNull();
-        expect(table.querySelector("td[height]")).toBeTruthy();
+        expect(list.style.height).not.toBe("");
         view.unmount();
     });
 });

@@ -88,6 +88,16 @@ export function OpenClawCronDetail({
         ...(job.agentId === undefined ? [] : ([["Agent", job.agentId]] as const)),
         ["Session", openClawCronSessionTargetLabel(job.sessionTarget)],
         ["Task type", openClawCronPayloadLabel(job.payload.kind)],
+        ...(job.scratch === undefined
+            ? []
+            : ([
+                  [
+                      "Heartbeat instructions",
+                      job.scratch.truncated
+                          ? "Available in the JSON editor (content shortened)"
+                          : "Available in the JSON editor",
+                  ],
+              ] as const)),
         ...(payloadRedacted ? ([["Task content", "Hidden for security"]] as const) : []),
         ["Delivery", openClawCronDeliveryModeLabel(job.deliveryMode)],
         ...(delivery === undefined

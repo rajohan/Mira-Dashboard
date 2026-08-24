@@ -58,16 +58,12 @@ describe("chat mutation reconciliation gates", () => {
         const ready = {
             actionBusy: false,
             connection: "connected" as const,
-            needsReconciliation: false,
             sourceFresh: true,
         };
         expect(chatAbortControlsAreEnabled(ready)).toBe(true);
         expect(
             chatAbortControlsAreEnabled({ ...ready, connection: "disconnected" })
         ).toBe(false);
-        expect(chatAbortControlsAreEnabled({ ...ready, needsReconciliation: true })).toBe(
-            false
-        );
         expect(chatAbortControlsAreEnabled({ ...ready, sourceFresh: false })).toBe(false);
     });
 

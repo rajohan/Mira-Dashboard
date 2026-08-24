@@ -30,7 +30,6 @@ export async function* subscribeRealtimeEvents(
     if (state.closed) {
         throw new Error("Realtime event pump is closed");
     }
-    const afterId = parseResumeCursor(options.afterId);
     const topics = normalizeTopics(options.topics);
     if (options.signal.aborted) {
         return;
@@ -78,6 +77,10 @@ export async function* subscribeRealtimeEvents(
         state.latestIssuedId,
         state.pollCursor
     );
+    const afterId =
+        options.afterId === undefined
+            ? replayBoundary
+            : parseResumeCursor(options.afterId);
     if (bounds.latestIssuedId >= state.latestIssuedId) {
         state.observeBounds(bounds);
     }

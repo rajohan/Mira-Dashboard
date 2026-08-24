@@ -376,7 +376,6 @@ describe("generated contract documentation", () => {
                 additionalProperties: false,
                 properties: expect.objectContaining({
                     lastEventId: expect.objectContaining({
-                        default: "0",
                         type: "string",
                     }),
                     topics: {

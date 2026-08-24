@@ -4,7 +4,7 @@ import * as v from "valibot";
 
 import { listIncidentsResultSchema } from "../../../contracts/incidents.ts";
 import type { IncidentSummary } from "../../../contracts/monitoring.ts";
-import { expectVirtualizedTable } from "../../storySupport/virtualizationAssertions.ts";
+import { expectVirtualizedList } from "../../storySupport/virtualizationAssertions.ts";
 import { IncidentTable } from "../IncidentTable.tsx";
 
 const timestampMs = 1_800_000_000_000;
@@ -116,7 +116,7 @@ export const LifecycleAndSeverity: Story = {
 
         await userEvent.click(
             within(canvasElement).getByRole("button", {
-                name: `${incident.title}; ${incident.monitorKey}; occurrence group ${incident.generation}`,
+                name: `${incident.title}; ${incident.severity}; ${incident.state}`,
             })
         );
         await expect(args.onSelect).toHaveBeenCalledWith(incident.id);
@@ -129,10 +129,10 @@ export const VirtualizedInventory: Story = {
         selectedId: virtualizedIncidents[0]?.id,
     },
     play: async ({ canvasElement }) => {
-        await expectVirtualizedTable({
+        await expectVirtualizedList({
             canvasElement,
             label: "Incidents",
-            rowCount: virtualizedIncidents.length,
+            itemCount: virtualizedIncidents.length,
         });
     },
 };

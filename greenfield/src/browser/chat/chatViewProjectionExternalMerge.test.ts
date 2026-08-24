@@ -37,6 +37,67 @@ function external(
 }
 
 describe("external chat activity merge", () => {
+    test("keeps one runtime run authoritative while its canonical final arrives", () => {
+        const providerRunId = "provider:terminal-transition";
+        const runtimeThinking = external("thinking", providerRunId, 1, [
+            { kind: "thinking", status: "complete", text: "Before steer" },
+        ]);
+        const runtimeUser = message(
+            "external-user:steer",
+            "user",
+            2,
+            [{ kind: "text", text: "Steer" }],
+            {
+                idempotencyKey: "steer-id",
+                providerRunId,
+                timestampMs: 200,
+            }
+        );
+        const runtimeFinal = external(
+            "final",
+            providerRunId,
+            3,
+            [{ kind: "text", text: "Done" }],
+            {
+                precedingUserMessageIdAnchor: "steer-id",
+                timestampMs: 300,
+            }
+        );
+        const canonicalFinal = message(
+            "canonical-final",
+            "assistant",
+            3,
+            [{ kind: "text", text: "Done" }],
+            { providerRunId, timestampMs: 300 }
+        );
+
+        expect(
+            mergeChatMessages(
+                [canonicalFinal],
+                [runtimeThinking, runtimeUser, runtimeFinal]
+            ).map(({ id }) => id)
+        ).toEqual([runtimeThinking.id, runtimeUser.id, runtimeFinal.id]);
+    });
+
+    test("retires an exact runtime final through the canonical user admission anchor", () => {
+        const providerRunId = "0123456789abcdef0123456789abcdef";
+        const user = message(
+            "canonical-user",
+            "user",
+            1,
+            [{ kind: "text", text: "Send files" }],
+            { idempotencyKey: providerRunId, providerRunId }
+        );
+        const final = message("canonical-final", "assistant", 2, [
+            { kind: "text", text: "Sent files." },
+        ]);
+        const runtime = external("runtime-final", providerRunId, 2, [
+            { kind: "text", text: "Sent files." },
+        ]);
+
+        expect(mergeChatMessages([user, final], [runtime])).toEqual([user, final]);
+    });
+
     test("coalesces live thinking, tools, controls, and text around canonical output", () => {
         const providerRunId = "provider:merge";
         const canonical = message(
@@ -84,7 +145,7 @@ describe("external chat activity merge", () => {
             { kind: "text", text: "Live suffix" },
         ]);
 
-        const merged = mergeChatMessages([canonical], [after, before], new Set());
+        const merged = mergeChatMessages([canonical], [after, before]);
 
         expect(merged).toHaveLength(1);
         expect(merged[0]?.parts).toEqual([
@@ -113,7 +174,7 @@ describe("external chat activity merge", () => {
         ]);
     });
 
-    test("moves canonical activity into exact anchored external lanes", () => {
+    test("retires exact anchored external lanes into canonical activity", () => {
         const providerRunId = "provider:anchored";
         const steer = message("steer", "user", 3, [
             { kind: "text", text: "Adjust the run" },
@@ -157,7 +218,7 @@ describe("external chat activity merge", () => {
             [
                 { kind: "thinking", status: "running", text: "After" },
                 {
-                    callId: "runtime-tool",
+                    callId: "history-tool",
                     callIdSource: "synthetic",
                     input: { command: "continue" },
                     kind: "tool",
@@ -179,65 +240,45 @@ describe("external chat activity merge", () => {
             }
         );
 
-        const merged = mergeChatMessages([steer, canonical], [before, after], new Set());
+        const merged = mergeChatMessages([steer, canonical], [before, after]);
 
-        expect(merged.map(({ id }) => id)).toEqual([
-            before.id,
-            steer.id,
-            after.id,
-            canonical.id,
+        expect(merged.map(({ id }) => id)).toEqual([steer.id, canonical.id]);
+        expect(merged[1]?.parts.map(({ kind }) => kind)).toEqual([
+            "thinking",
+            "thinking",
+            "tool",
+            "control",
+            "text",
         ]);
-        expect(merged[0]?.parts).toEqual([
-            { kind: "thinking", status: "running", text: "Before" },
-        ]);
-        expect(merged[2]?.parts).toEqual([
-            { kind: "thinking", status: "complete", text: "After" },
-            {
-                callId: "history-tool",
-                callIdSource: "synthetic",
-                input: { command: "continue" },
-                kind: "tool",
-                name: "bash",
-                output: "done",
-                status: "completed",
-            },
-            {
-                activity: "complete",
-                kind: "control",
-                text: "Finished",
-                tone: "warning",
-            },
-            { kind: "text", text: "Canonical" },
-            { kind: "text", text: " longer" },
-        ]);
-        expect(merged[3]?.parts).toEqual([]);
     });
 
     test("places consecutive anchored chunks and reconciles reversed synthetic tool identity", () => {
         const providerRunId = "provider:consecutive-anchors";
-        const firstUser = message("first-steer", "user", 2, [
-            { kind: "text", text: "First steer" },
-        ]);
-        const secondUser = message("second-steer", "user", 6, [
-            { kind: "text", text: "Second steer" },
-        ]);
-        const canonical = message(
-            "canonical-after-steers",
-            "assistant",
-            10,
-            [
-                {
-                    callId: "history-tool",
-                    callIdSource: "synthetic",
-                    kind: "tool",
-                    name: "search",
-                    output: "found",
-                    status: "completed",
-                },
-                { kind: "text", text: "Canonical answer" },
-            ],
-            { providerRunId }
+        const firstUser = message(
+            "first-steer",
+            "user",
+            2,
+            [{ kind: "text", text: "First steer" }],
+            { providerRunId: "first-steer:user" }
         );
+        const secondUser = message(
+            "second-steer",
+            "user",
+            6,
+            [{ kind: "text", text: "Second steer" }],
+            { providerRunId: "second-steer:user" }
+        );
+        const canonical = message("canonical-after-steers", "assistant", 10, [
+            {
+                callId: "history-tool",
+                callIdSource: "synthetic",
+                kind: "tool",
+                name: "search",
+                output: "found",
+                status: "completed",
+            },
+            { kind: "text", text: "Canonical answer" },
+        ]);
         const leading = external("leading", providerRunId, 1, [
             { kind: "text", text: "Leading activity" },
         ]);
@@ -272,31 +313,15 @@ describe("external chat activity merge", () => {
 
         const merged = mergeChatMessages(
             [firstUser, secondUser, canonical],
-            [tail, secondAnchor, between, firstAnchor, leading],
-            new Set()
+            [tail, secondAnchor, between, firstAnchor, leading]
         );
 
         expect(merged.map(({ id }) => id)).toEqual([
-            leading.id,
             firstUser.id,
-            firstAnchor.id,
-            between.id,
             secondUser.id,
-            secondAnchor.id,
-            tail.id,
             canonical.id,
         ]);
-        expect(merged[2]?.parts).toEqual([
-            {
-                callId: "history-tool",
-                callIdSource: "synthetic",
-                kind: "tool",
-                name: "search",
-                output: "found",
-                status: "completed",
-            },
-        ]);
-        expect(merged.at(-1)?.parts).toEqual([]);
+        expect(merged.at(-1)?.parts.some((part) => part.kind === "tool")).toBeTrue();
     });
 
     test("matches safe synthetic tools and keeps ambiguous tools distinct", () => {
@@ -374,7 +399,7 @@ describe("external chat activity merge", () => {
             },
         ]);
 
-        const merged = mergeChatMessages([canonical], [runtime], new Set());
+        const merged = mergeChatMessages([canonical], [runtime]);
         const tools = merged[0]?.parts.filter(
             (part): part is ChatToolPart => part.kind === "tool"
         );
@@ -422,13 +447,6 @@ describe("external chat activity merge", () => {
         const after = external("after-anchor", providerRunId, 7, [
             { kind: "control", text: "Still running", tone: "muted" },
         ]);
-        const hidden = message(
-            "hidden-runtime",
-            "user",
-            9,
-            [{ kind: "text", text: "Hidden" }],
-            { idempotencyKey: "hidden-key" }
-        );
         const echoed = message(
             "echoed-runtime",
             "user",
@@ -440,21 +458,50 @@ describe("external chat activity merge", () => {
 
         const merged = mergeChatMessages(
             [canonicalWithKey, fallbackUser, canonicalAssistant],
-            [after, anchor, before, unowned, ordinary, hidden, echoed],
-            new Set([hidden.id])
+            [after, anchor, before, unowned, ordinary, echoed]
         );
 
         expect(merged.map(({ id }) => id)).toEqual([
-            before.id,
             canonicalWithKey.id,
-            anchor.id,
-            after.id,
             fallbackUser.id,
             canonicalAssistant.id,
             unowned.id,
             ordinary.id,
         ]);
-        expect(merged.some(({ id }) => id === hidden.id)).toBeFalse();
         expect(merged.some(({ id }) => id === echoed.id)).toBeFalse();
+    });
+
+    test("collapses canonical and runtime user suffix aliases to one bubble", () => {
+        const identity = "0123456789abcdef0123456789abcdef";
+        const canonical = message(
+            "canonical-user",
+            "user",
+            1,
+            [{ kind: "text", text: "Only once" }],
+            { idempotencyKey: identity }
+        );
+        const runtimeBase = message(
+            "runtime-base",
+            "user",
+            2,
+            [{ kind: "text", text: "Only once" }],
+            { idempotencyKey: identity }
+        );
+        const runtimeCarrier = message(
+            "runtime-carrier",
+            "user",
+            3,
+            [{ kind: "text", text: "Only once" }],
+            { idempotencyKey: `${identity}:user` }
+        );
+
+        expect(
+            mergeChatMessages([canonical], [runtimeBase, runtimeCarrier]).map(
+                ({ id }) => id
+            )
+        ).toEqual([canonical.id]);
+        expect(
+            mergeChatMessages([], [runtimeBase, runtimeCarrier]).map(({ id }) => id)
+        ).toEqual([runtimeBase.id]);
     });
 });

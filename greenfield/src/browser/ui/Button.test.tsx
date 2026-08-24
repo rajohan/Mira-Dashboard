@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
+import { Save } from "lucide-react";
+
 import { Button } from "./Button.tsx";
 import type { ButtonVariant } from "./buttonStyles.ts";
+import { Icon } from "./Icon.tsx";
 
 const { render, screen } = await import("@testing-library/react");
 
@@ -87,5 +90,23 @@ describe("Button", () => {
             "data-hover:bg-primary-600",
             "data-active:bg-primary-800"
         );
+    });
+
+    test("uses white content and inherited icon color for every filled variant", () => {
+        render(
+            <>
+                {(["primary", "secondary", "danger"] as const).map((variant) => (
+                    <Button key={variant} variant={variant}>
+                        <Icon icon={Save} size="sm" />
+                        Save {variant}
+                    </Button>
+                ))}
+            </>
+        );
+
+        for (const variant of ["primary", "secondary", "danger"] as const) {
+            const button = screen.getByRole("button", { name: `Save ${variant}` });
+            expect(button).toHaveClass("text-white", "[&_svg]:text-inherit");
+        }
     });
 });

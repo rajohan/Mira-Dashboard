@@ -247,16 +247,21 @@ describe("Dashboard browser application", () => {
             });
             expect(screen.getByRole("button", { name: "Log out" })).toBeTruthy();
             await userEvent.click(statusButton);
-            expect(
-                screen.getByRole("heading", { level: 2, name: "System status" })
-            ).toBeTruthy();
+            expect(statusButton).toHaveAttribute("data-open");
+            expect(statusButton).toHaveClass("data-open:bg-green-500/20");
+            const statusHeading = screen.getByRole("heading", {
+                level: 2,
+                name: "System status",
+            });
+            expect(statusHeading.parentElement).toHaveClass("w-72");
             expect(screen.getByText("Dashboard backend")).toBeTruthy();
-            expect(screen.getByText("Dashboard worker")).toBeTruthy();
+            expect(screen.getByText("Dashboard worker")).toHaveClass("whitespace-nowrap");
             expect(screen.getByText("OpenClaw Gateway")).toBeTruthy();
             const statusValues = screen.getAllByText("Online ●");
             expect(statusValues).toHaveLength(3);
             for (const statusValue of statusValues) {
                 expect(statusValue).toHaveClass("text-xs", "leading-5", "font-medium");
+                expect(statusValue).toHaveClass("whitespace-nowrap");
                 expect(statusValue).not.toHaveClass("text-sm");
             }
             expect(healthStatusCalls).toBe(1);
@@ -272,7 +277,8 @@ describe("Dashboard browser application", () => {
                     "System status: last known status is stale. Open details"
                 )
             );
-            expect(screen.getAllByText("Stale ○")).toHaveLength(3);
+            expect(statusButton).toHaveClass("data-open:bg-amber-500/20");
+            expect(screen.getAllByText("Stale ●")).toHaveLength(3);
             await userEvent.click(screen.getByRole("button", { name: "Log out" }));
             expect(logoutCalls).toBe(1);
             expect(settleLogout).toBeDefined();

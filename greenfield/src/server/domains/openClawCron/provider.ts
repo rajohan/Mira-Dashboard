@@ -45,6 +45,11 @@ export interface OpenClawCronProviderJob {
     readonly name: string;
     readonly payload: OpenClawCronProviderPayload;
     readonly schedule: OpenClawCronProviderSchedule;
+    readonly scratch?: Readonly<{
+        readonly content: string;
+        readonly revision: number;
+        readonly updatedAtMs?: number;
+    }>;
     readonly sessionTarget: string;
     readonly state: Readonly<{
         consecutiveErrors?: number;
@@ -202,6 +207,14 @@ export interface OpenClawCronProvider {
             reason?: "already-running" | "invalid-spec" | "not-due";
         }>
     >;
+    setScratch(
+        input: Readonly<{
+            content: string;
+            expectedRevision: number;
+            id: string;
+            signal?: AbortSignal;
+        }>
+    ): Promise<Readonly<{ revision: number }>>;
     update(
         input: Readonly<{
             expectedConfigRevision: string;

@@ -1,11 +1,10 @@
 import { describe, expect, jest, test } from "bun:test";
 
-import { safeChatMarkdownLink } from "./chatMarkdownPolicy.ts";
+import { chatLocalFileReference, safeChatMarkdownLink } from "./chatMarkdownPolicy.ts";
 import { ChatMessageBubble } from "./ChatMessageBubble.tsx";
 import { toolDisplayName } from "./chatToolPresentation.ts";
 
-const { fireEvent, render, screen, waitFor, within } =
-    await import("@testing-library/react");
+const { render, screen, waitFor, within } = await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
 const userEvent = userEventModule.default;
 
@@ -29,14 +28,14 @@ describe("chat message bubble", () => {
                             {
                                 activity: "running",
                                 kind: "control",
-                                text: "Thinking…",
+                                text: "OpenClaw is Thinking…",
                                 tone: "muted",
                             },
                         ],
                         role: "assistant",
                         sequence: 1,
                         sessionKey: "agent:main:main",
-                        timestampMs: Date.UTC(2026, 7, 14, 20, 15),
+                        timestampMs: new Date(2026, 7, 14, 20, 15).getTime(),
                     }}
                 />
                 <ChatMessageBubble
@@ -60,18 +59,21 @@ describe("chat message bubble", () => {
             </>
         );
 
-        const [thinkingMessage] = screen.getAllByRole("article", {
-            name: "Mira message",
+        const [thinkingActivity] = screen.getAllByRole("article", {
+            name: "OpenClaw activity",
         });
-        expect(within(thinkingMessage!).getByText("Mira")).toBeVisible();
-        expect(within(thinkingMessage!).queryByText("Mira (thinking)")).toBeNull();
-        const running = within(thinkingMessage!).getByRole("status", {
-            name: "Thinking…",
+        expect(within(thinkingActivity!).queryByText("Mira")).toBeNull();
+        const running = within(thinkingActivity!).getByRole("status", {
+            name: "OpenClaw is Thinking…",
         });
         expect(running).toBeVisible();
-        expect(running).toHaveClass("text-sm", "[&_.loading-state-dots]:text-lg");
-        expect(running.textContent).toBe("Thinking...");
-        expect(thinkingMessage!.querySelector("time")).not.toBeNull();
+        expect(running).toHaveClass("[&_.loading-state-dots]:text-lg");
+        expect(running).not.toHaveClass("bg-primary-800", "rounded-lg");
+        expect(running.textContent).toBe("OpenClaw is Thinking...");
+        expect(running.querySelector(".whitespace-nowrap")?.textContent).toBe(
+            "Thinking..."
+        );
+        expect(screen.queryByText("14.08.2026 · 20:15")).toBeNull();
         expect(screen.getByRole("status", { name: "Context compacted" })).toBeVisible();
     });
 
@@ -153,16 +155,72 @@ describe("chat message bubble", () => {
         expect(safeChatMarkdownLink("javascript:alert(1)")).toBeUndefined();
         expect(safeChatMarkdownLink("data:text/plain,bad")).toBeUndefined();
         const protocolRelative = safeChatMarkdownLink("//evil.example/path");
-        expect(protocolRelative).toMatchObject({ external: true });
-        expect(new URL(protocolRelative!.href).hostname).toBe("evil.example");
+        expect(protocolRelative).toMatchObject({ external: true, kind: "url" });
+        if (protocolRelative?.kind !== "url") {
+            throw new TypeError("Protocol-relative URL was not classified as a URL");
+        }
+        expect(new URL(protocolRelative.href).hostname).toBe("evil.example");
         expect(safeChatMarkdownLink("/reports")).toMatchObject({ external: false });
         expect(safeChatMarkdownLink("#part")).toEqual({
             external: false,
             href: "#part",
+            kind: "url",
+        });
+        expect(
+            safeChatMarkdownLink("/home/ubuntu/.openclaw/workspace/AGENTS.md:12")
+        ).toEqual({
+            kind: "workspace-file",
+            reference: "/home/ubuntu/.openclaw/workspace/AGENTS.md",
         });
         expect(safeChatMarkdownLink("mailto:mira@example.com")).toMatchObject({
             external: false,
         });
+        expect(
+            safeChatMarkdownLink("file:///home/ubuntu/My%20Project/report.md:7:2")
+        ).toEqual({
+            kind: "workspace-file",
+            reference: "/home/ubuntu/My Project/report.md",
+        });
+        expect(safeChatMarkdownLink("file://%zz")).toBeUndefined();
+        expect(chatLocalFileReference("/tmp/private.txt")).toBeUndefined();
+        expect(safeChatMarkdownLink(undefined)).toBeUndefined();
+    });
+
+    test("linkifies raw, code, and explicit reviewed-root file references", async () => {
+        const user = userEvent.setup();
+        const opened: string[] = [];
+        render(
+            <ChatMessageBubble
+                display={display}
+                message={{
+                    attachments: [],
+                    id: "message-files",
+                    parts: [
+                        {
+                            kind: "text",
+                            text: "Raw /home/ubuntu/.openclaw/workspace/AGENTS.md:12, code `/home/ubuntu/.openclaw/workspace/SOUL.md`, and [named](/home/ubuntu/.openclaw/workspace/USER.md:4).",
+                        },
+                    ],
+                    role: "assistant",
+                    sequence: 1,
+                    sessionKey: "agent:main:main",
+                }}
+                onOpenLocalFile={(reference) => opened.push(reference)}
+            />
+        );
+
+        for (const name of [
+            "/home/ubuntu/.openclaw/workspace/AGENTS.md:12",
+            "/home/ubuntu/.openclaw/workspace/SOUL.md",
+            "named",
+        ]) {
+            await user.click(screen.getByRole("button", { name }));
+        }
+        expect(opened).toEqual([
+            "/home/ubuntu/.openclaw/workspace/AGENTS.md",
+            "/home/ubuntu/.openclaw/workspace/SOUL.md",
+            "/home/ubuntu/.openclaw/workspace/USER.md",
+        ]);
     });
 
     test("keeps failed tools collapsed by default while preserving local and global expansion", async () => {
@@ -214,6 +272,64 @@ describe("chat message bubble", () => {
             />
         );
         expect(toggle).toHaveAttribute("aria-expanded", "true");
+    });
+
+    test("scrolls an expanded tool call to the top of the chat viewport", async () => {
+        const user = userEvent.setup();
+        const onToolExpand = jest.fn();
+        const rendered = render(
+            <div aria-label="Messages" role="log">
+                <ChatMessageBubble
+                    display={display}
+                    message={{
+                        attachments: [],
+                        id: "message-scroll-tool",
+                        parts: [
+                            {
+                                callId: "call-scroll",
+                                input: "bun test",
+                                kind: "tool",
+                                name: "functions.exec_command",
+                                output: "pass",
+                                status: "completed",
+                            },
+                        ],
+                        role: "assistant",
+                        sequence: 1,
+                        sessionKey: "agent:main:main",
+                    }}
+                    onToolExpand={onToolExpand}
+                />
+            </div>
+        );
+        const messages = screen.getByRole("log", { name: "Messages" });
+        const tool = screen.getByRole("region", { name: "Bash, completed" });
+        const scrollTo = jest.fn();
+        Object.defineProperties(messages, {
+            getBoundingClientRect: {
+                configurable: true,
+                value: () => ({ top: 40 }),
+            },
+            scrollTo: { configurable: true, value: scrollTo },
+            scrollTop: { configurable: true, value: 120, writable: true },
+        });
+        Object.defineProperty(tool, "getBoundingClientRect", {
+            configurable: true,
+            value: () => ({ top: 240 }),
+        });
+
+        const toggle = within(tool).getByRole("button", { name: /bash completed/iu });
+        await user.click(toggle);
+        expect(onToolExpand).toHaveBeenCalledTimes(1);
+        await waitFor(() => expect(scrollTo).toHaveBeenCalledWith({ top: 320 }));
+        expect(messages.style.paddingBottom).toBe("");
+        expect(toggle).toHaveFocus();
+
+        await user.click(toggle);
+        expect(scrollTo).toHaveBeenCalledTimes(1);
+        expect(onToolExpand).toHaveBeenCalledTimes(1);
+        expect(messages.style.paddingBottom).toBe("");
+        rendered.unmount();
     });
 
     test("groups tool description, input, and output in one completed bubble", async () => {
@@ -280,17 +396,9 @@ describe("chat message bubble", () => {
         expect(inputRegion).toHaveAttribute("tabindex", "0");
         expect(outputRegion).toHaveAttribute("data-virtualizer-scroll-region");
         expect(outputRegion).toHaveAttribute("tabindex", "0");
-        Object.defineProperties(inputRegion, {
-            clientHeight: { configurable: true, value: 100 },
-            scrollHeight: { configurable: true, value: 500 },
-            scrollTop: { configurable: true, value: 0, writable: true },
-        });
-        fireEvent.scroll(inputRegion);
-        const toBottom = within(tool).getByRole("button", {
-            name: "Bash tool input: scroll to bottom",
-        });
-        await user.click(toBottom);
-        expect(inputRegion.scrollTop).toBe(500);
+        expect(
+            within(tool).queryByRole("button", { name: /scroll to bottom/iu })
+        ).toBeNull();
         expect(toggle.querySelector(".lucide-chevron-right")).toHaveClass("rotate-90");
         expect(within(tool).queryByText("running")).toBeNull();
     });
@@ -700,37 +808,8 @@ describe("chat message bubble", () => {
         expect(screen.queryByText("No visible message content.")).toBeNull();
     });
 
-    test("local hide invokes only the browser-owned callback", async () => {
+    test("previews approved inline raster images inside the authenticated chat", async () => {
         const user = userEvent.setup();
-        let hidden = "";
-        render(
-            <ChatMessageBubble
-                display={display}
-                message={{
-                    attachments: [],
-                    id: "message-local",
-                    parts: [{ kind: "text", text: "Keep provider history" }],
-                    role: "assistant",
-                    sequence: 1,
-                    sessionKey: "agent:main:main",
-                }}
-                onHide={(messageId) => {
-                    hidden = messageId;
-                }}
-            />
-        );
-        await user.click(
-            screen.getByRole("button", { name: "Hide message from this browser" })
-        );
-        expect(hidden).toBe("");
-        expect(
-            screen.getByRole("heading", { name: "Hide this message locally?" })
-        ).toBeVisible();
-        await user.click(screen.getByRole("button", { name: "Hide message" }));
-        expect(hidden).toBe("message-local");
-    });
-
-    test("previews only attachments explicitly approved as inline raster images", () => {
         render(
             <ChatMessageBubble
                 display={display}
@@ -780,14 +859,24 @@ describe("chat message bubble", () => {
             "src",
             "/api/chat/media/019fe633-9133-4ba0-8b80-809dd80dfb40?disposition=preview"
         );
-        expect(screen.getByRole("link", { name: "vector.svg" })).toHaveAttribute(
+        expect(screen.queryByRole("link", { name: "photo.png" })).toBeNull();
+        await user.click(
+            screen.getByRole("button", { name: "Open preview of photo.png" })
+        );
+        expect(screen.getByRole("dialog", { name: "photo.png" })).toBeVisible();
+        expect(screen.getByRole("img", { name: "Preview of photo.png" })).toHaveAttribute(
+            "src",
+            "/api/chat/media/019fe633-9133-4ba0-8b80-809dd80dfb40?disposition=preview"
+        );
+        await user.click(
+            screen.getByRole("button", { name: "Open preview of vector.svg" })
+        );
+        expect(screen.getByRole("dialog", { name: "vector.svg" })).toBeVisible();
+        expect(screen.getByRole("link", { name: "Download file" })).toHaveAttribute(
             "href",
             "/api/chat/media/019fe633-9133-4ba0-8b80-809dd80dfb41?disposition=download"
         );
-        expect(screen.getByRole("link", { name: "document.html" })).toHaveAttribute(
-            "href",
-            "/api/chat/media/019fe633-9133-4ba0-8b80-809dd80dfb42?disposition=download"
-        );
+        expect(screen.queryByRole("link", { name: "Download document.html" })).toBeNull();
     });
 
     test("uses distinct solid outer and nested assistant surfaces without bubble chrome", () => {
@@ -819,7 +908,7 @@ describe("chat message bubble", () => {
         );
     });
 
-    test("reads only finished assistant final text and exposes playing stop state", async () => {
+    test("reads finished assistant thinking and final text and exposes playing stop state", async () => {
         const onReadAloud = jest.fn();
         const onStopReadAloud = jest.fn();
         const user = userEvent.setup();
@@ -830,7 +919,7 @@ describe("chat message bubble", () => {
                 {
                     kind: "thinking" as const,
                     status: "complete" as const,
-                    text: "Do not narrate this",
+                    text: "Narrate this reasoning",
                 },
                 {
                     callId: "tool-complete",
@@ -847,7 +936,7 @@ describe("chat message bubble", () => {
         };
         const rendered = render(
             <ChatMessageBubble
-                display={display}
+                display={{ ...display, keepThinkingAfterFinal: true }}
                 message={message}
                 onReadAloud={onReadAloud}
                 onStopReadAloud={onStopReadAloud}
@@ -857,8 +946,24 @@ describe("chat message bubble", () => {
         await user.click(screen.getByRole("button", { name: "Read Mira message aloud" }));
         expect(onReadAloud).toHaveBeenCalledWith(
             "read-message",
-            "Narrate only this final answer."
+            "Narrate this reasoning\n\nNarrate only this final answer."
         );
+
+        rendered.rerender(
+            <ChatMessageBubble
+                display={{ ...display, keepThinkingAfterFinal: true }}
+                message={message}
+                onReadAloud={onReadAloud}
+                onStopReadAloud={onStopReadAloud}
+                readAloud={{
+                    activeMessageId: "read-message",
+                    phase: "loading",
+                }}
+            />
+        );
+        expect(
+            screen.getByRole("button", { name: "Cancel read aloud" })
+        ).toContainElement(document.querySelector(".lucide-loader-circle.animate-spin"));
 
         rendered.rerender(
             <ChatMessageBubble
@@ -876,6 +981,75 @@ describe("chat message bubble", () => {
         expect(stop).toHaveAttribute("aria-pressed", "true");
         await user.click(stop);
         expect(onStopReadAloud).toHaveBeenCalledTimes(1);
+    });
+
+    test("offers read aloud for a completed thinking-only bubble", async () => {
+        const onReadAloud = jest.fn();
+        const user = userEvent.setup();
+        render(
+            <ChatMessageBubble
+                display={{ ...display, keepThinkingAfterFinal: true }}
+                message={{
+                    attachments: [],
+                    id: "completed-thinking",
+                    parts: [
+                        {
+                            kind: "thinking",
+                            status: "complete",
+                            text: "Completed reasoning",
+                        },
+                    ],
+                    role: "assistant",
+                    sequence: 1,
+                    sessionKey: "agent:main:main",
+                }}
+                onReadAloud={onReadAloud}
+                onStopReadAloud={jest.fn()}
+                readAloud={{ phase: "idle" }}
+            />
+        );
+
+        await user.click(screen.getByRole("button", { name: "Read Mira message aloud" }));
+        expect(onReadAloud).toHaveBeenCalledWith(
+            "completed-thinking",
+            "Completed reasoning"
+        );
+    });
+
+    test("offers completed thinking during an active run without reading partial final text", async () => {
+        const onReadAloud = jest.fn();
+        const user = userEvent.setup();
+        render(
+            <ChatMessageBubble
+                activeRunIds={["active-run"]}
+                display={{ ...display, keepThinkingAfterFinal: true }}
+                message={{
+                    attachments: [],
+                    id: "active-completed-thinking",
+                    parts: [
+                        {
+                            kind: "thinking",
+                            status: "complete",
+                            text: "Finished reasoning",
+                        },
+                        { kind: "text", text: "Partial final" },
+                    ],
+                    role: "assistant",
+                    runId: "active-run",
+                    sequence: 1,
+                    sessionKey: "agent:main:main",
+                }}
+                onReadAloud={onReadAloud}
+                onStopReadAloud={jest.fn()}
+                readAloud={{ phase: "idle" }}
+            />
+        );
+
+        await user.click(screen.getByRole("button", { name: "Read Mira message aloud" }));
+        expect(onReadAloud).toHaveBeenCalledWith(
+            "active-completed-thinking",
+            "Finished reasoning"
+        );
     });
 
     test("does not offer read aloud for text-only streaming runs", () => {
@@ -963,11 +1137,9 @@ describe("chat message bubble", () => {
                     }}
                 />
             );
-            expect(screen.getByRole("link", { name: "notes.txt" })).toHaveAttribute(
-                "href",
-                "/api/chat/media/019fe633-9133-4ba0-8b80-809dd80dfb43?disposition=download"
+            await user.click(
+                screen.getByRole("button", { name: "Open preview of notes.txt" })
             );
-            await user.click(screen.getByRole("button", { name: "Preview notes.txt" }));
             expect(screen.getByRole("link", { name: "Download file" })).toHaveAttribute(
                 "href",
                 "/api/chat/media/019fe633-9133-4ba0-8b80-809dd80dfb43?disposition=download"
@@ -1114,6 +1286,11 @@ describe("chat message bubble", () => {
                     }}
                 />
             </>
+        );
+
+        expect(screen.getByTestId("chat-message-surface-user")).toHaveClass(
+            "bg-accent-700",
+            "text-white"
         );
 
         for (const content of ["bun test", "exitCode=0"]) {

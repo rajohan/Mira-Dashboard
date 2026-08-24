@@ -127,7 +127,10 @@ const realtimeStreamTopicsSchema = v.pipe(
 
 /** Input accepted by the authenticated tracked-SSE procedure. */
 export const realtimeStreamInputSchema = v.strictObject({
-    lastEventId: v.optional(realtimeCursorSchema, "0"),
+    // A missing cursor means "attach at the current durable tail". Only an
+    // explicit cursor requests replay, which keeps a fresh tab from draining
+    // the entire retained outbox before it can observe live changes.
+    lastEventId: v.optional(realtimeCursorSchema),
     topics: realtimeStreamTopicsSchema,
 });
 

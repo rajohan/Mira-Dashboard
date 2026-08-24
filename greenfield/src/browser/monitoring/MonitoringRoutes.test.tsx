@@ -329,7 +329,7 @@ describe("monitoring browser routes", () => {
             name: "Reports",
         });
         expect(reportsNavigation).not.toHaveAttribute("aria-current");
-        expect(reportsNavigation).toHaveClass("bg-accent-500/90");
+        expect(reportsNavigation).toHaveClass("bg-accent-700", "text-white");
 
         await act(async () => {
             incidentsTab.dispatchEvent(
@@ -372,7 +372,7 @@ describe("monitoring browser routes", () => {
         expect(
             await screen.findByRole("heading", { level: 1, name: "Reports" })
         ).toBeTruthy();
-        expect(screen.getByText(/This page updates automatically/u)).toBeTruthy();
+        expect(screen.queryByText(/This page updates automatically/u)).toBeNull();
         expect(screen.getByRole("tab", { name: "Reports" })).toHaveAttribute(
             "aria-selected",
             "true"
@@ -402,7 +402,7 @@ describe("monitoring browser routes", () => {
         expect(
             await screen.findByRole("heading", { level: 1, name: "Incidents" })
         ).toBeTruthy();
-        expect(screen.getByText(/This page updates automatically/u)).toBeTruthy();
+        expect(screen.queryByText(/This page updates automatically/u)).toBeNull();
         expect(screen.getByRole("tab", { name: "Incidents" })).toHaveAttribute(
             "aria-selected",
             "true"
@@ -573,7 +573,7 @@ describe("monitoring browser routes", () => {
         expect(await screen.findByText(/This report no longer exists/u)).toBeTruthy();
     });
 
-    test("renders the hidden incident table and an exact detail outside its first page", async () => {
+    test("renders the incident selection list and an exact detail outside its first page", async () => {
         const transport = new MonitoringRouteTransport();
         transport.incidentListIds = [incidentId];
         await renderMonitoringRoute(
@@ -587,7 +587,7 @@ describe("monitoring browser routes", () => {
                 name: "Secondary disk warning",
             })
         ).toBeTruthy();
-        expect(screen.getByRole("table", { name: "Incidents" })).toBeTruthy();
+        expect(screen.getByRole("list", { name: "Incidents" })).toBeTruthy();
         const navigation = screen.getByRole("navigation", {
             name: "Main navigation",
         });
@@ -596,7 +596,7 @@ describe("monitoring browser routes", () => {
             name: "Reports",
         });
         expect(reportsNavigation).not.toHaveAttribute("aria-current");
-        expect(reportsNavigation).toHaveClass("bg-accent-500/90");
+        expect(reportsNavigation).toHaveClass("bg-accent-700", "text-white");
         expect(screen.getByText("Incidents", { selector: "header p" })).toBeTruthy();
         expect(
             transport.calls.find(({ path }) => path === "incidents.get")?.input
@@ -605,7 +605,7 @@ describe("monitoring browser routes", () => {
         const user = userEvent.setup();
         await user.click(
             screen.getByRole("button", {
-                name: "Primary disk warning; ops-check; occurrence group 1",
+                name: "Primary disk warning; warning; active",
             })
         );
         expect(

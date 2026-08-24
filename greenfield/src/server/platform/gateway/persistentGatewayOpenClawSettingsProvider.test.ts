@@ -204,6 +204,10 @@ function configGetFixture(hash = currentHash): unknown {
                     fallbacks: ["openai/gpt-5.6-terra"],
                     primary: "openai/gpt-5.6-sol",
                 },
+                imageModel: { primary: "openai/gpt-5.6-sol" },
+                mediaModels: {
+                    image: { primary: "openai/gpt-image-2", timeoutMs: 180_000 },
+                },
             },
             entries: {
                 main: {
@@ -359,6 +363,8 @@ describe("persistent Gateway OpenClaw Settings provider", () => {
             lastTouchedVersion: "2026.7.2-beta.7",
             models: {
                 fallbacks: ["openai/gpt-5.6-terra"],
+                imageGenerationModel: "openai/gpt-image-2",
+                imageModel: "openai/gpt-5.6-sol",
                 primary: "openai/gpt-5.6-sol",
             },
             modelNormalizationState: "clean",
@@ -495,6 +501,37 @@ describe("persistent Gateway OpenClaw Settings provider", () => {
         }
     });
 
+    test("projects the ops-owned heartbeat that backs the system cron monitor", async () => {
+        const response = structuredClone(configGetFixture()) as {
+            config: {
+                agents: {
+                    defaults: { heartbeat?: unknown };
+                    entries: Record<string, Record<string, unknown>>;
+                };
+            };
+        };
+        delete response.config.agents.defaults.heartbeat;
+        response.config.agents.entries.ops = {
+            heartbeat: {
+                every: "60m",
+                isolatedSession: true,
+                lightContext: true,
+                model: "kimi",
+                prompt: "private runtime policy",
+                target: "none",
+                timeoutSeconds: 180,
+            },
+        };
+        const fixture = createFixtureTransport({ reads: [{ payload: response }] });
+
+        const result = await createPersistentGatewayOpenClawSettingsProvider(
+            fixture.transport
+        ).getConfiguration({});
+
+        expect(result.heartbeat).toEqual({ everySeconds: 3600, target: "none" });
+        expect(JSON.stringify(result)).not.toContain("private runtime policy");
+    });
+
     test("treats a blank current heartbeat target as absent before patch comparison", async () => {
         const response = structuredClone(configGetFixture()) as {
             config: {
@@ -529,6 +566,10 @@ describe("persistent Gateway OpenClaw Settings provider", () => {
             [undefined, { state: "inherited-none" }],
             [{}, { state: "implicit-daily" }],
             [{ mode: "daily" }, { mode: "daily", state: "locked-mode" }],
+            [
+                { idleMinutes: 60, mode: "daily" },
+                { idleMinutes: 60, mode: "daily", state: "locked-mode" },
+            ],
             [{ mode: "none" }, { mode: "none", state: "locked-mode" }],
             [
                 { idleMinutes: 45, mode: "idle" },
@@ -981,7 +1022,9 @@ describe("persistent Gateway OpenClaw Settings provider", () => {
 
         const write = fixture.calls.find(({ lane }) => lane === "write");
         expect(JSON.parse(String(write?.parameters.raw))).toEqual({
-            session: { reset: { idleMinutes: 60, mode: "idle" } },
+            session: {
+                reset: { atHour: null, idleMinutes: 60, mode: "idle" },
+            },
         });
         expect(write?.parameters).not.toHaveProperty("replacePaths");
         expect(result.configuration.sessionReset).toEqual({
@@ -1015,6 +1058,52 @@ describe("persistent Gateway OpenClaw Settings provider", () => {
         ).toEqual(new OpenClawSettingsProviderError("data-invalid"));
         expect(fixture.calls).toHaveLength(1);
         expect(fixture.calls[0]?.lane).toBe("read");
+    });
+
+    test("allows changing reset mode while retaining the idle timeout", async () => {
+        const acknowledgedConfig = structuredClone(
+            (configGetFixture() as { config: Record<string, unknown> }).config
+        ) as {
+            session: { reset: { atHour: number; idleMinutes: number; mode: string } };
+        };
+        acknowledgedConfig.session.reset = { atHour: 4, idleMinutes: 45, mode: "daily" };
+        const fixture = createFixtureTransport({
+            reads: [{ payload: configGetFixture() }],
+            writes: [
+                {
+                    payload: {
+                        config: acknowledgedConfig,
+                        hash: nextHash,
+                        ok: true,
+                        sentinel: {
+                            payload: { stats: { requiresRestart: false } },
+                            persisted: true,
+                        },
+                    },
+                },
+            ],
+        });
+
+        const result = await createPersistentGatewayOpenClawSettingsProvider(
+            fixture.transport
+        ).updateConfiguration({
+            authorizeDispatch,
+            baseHash: currentHash,
+            baseRevisionHash: currentRevisionHash,
+            confirmation: "apply-reviewed-settings",
+            update: {
+                atHour: 4,
+                idleMinutes: 45,
+                mode: "daily",
+                section: "session-reset",
+            },
+        });
+
+        expect(result.configuration.sessionReset).toMatchObject({
+            atHour: 4,
+            idleMinutes: 45,
+            mode: "daily",
+        });
     });
 
     test("retains only the ordered bounded channel prefix", async () => {
@@ -1085,11 +1174,56 @@ describe("persistent Gateway OpenClaw Settings provider", () => {
         expect(fixture.calls[1]).toMatchObject({
             lane: "read",
             method: "skills.status",
-            parameters: {},
+            parameters: { agentId: "main" },
         });
         expect(JSON.stringify(result)).not.toContain(hiddenValue);
         expect(JSON.stringify(result)).not.toContain("baseDir");
         expect(JSON.stringify(result)).not.toContain("filePath");
+    });
+
+    test("uses the configured main workspace when explicit ownership has no default agent", async () => {
+        const configuration = structuredClone(configGetFixture()) as {
+            config: {
+                agents: {
+                    entries: Record<string, { default?: boolean; name?: string }>;
+                };
+            };
+        };
+        configuration.config.agents.entries = {
+            main: { name: "Main" },
+            ops: { name: "Operations" },
+        };
+        const fixture = createFixtureTransport({
+            reads: [{ payload: configuration }, { payload: skillsFixture() }],
+        });
+
+        await createPersistentGatewayOpenClawSettingsProvider(
+            fixture.transport
+        ).listSkills({});
+
+        expect(fixture.calls[1]).toMatchObject({
+            method: "skills.status",
+            parameters: { agentId: "main" },
+        });
+    });
+
+    test("uses the implicit main agent when no agent entries are configured", async () => {
+        const configuration = structuredClone(configGetFixture()) as {
+            config: { agents?: unknown };
+        };
+        delete configuration.config.agents;
+        const fixture = createFixtureTransport({
+            reads: [{ payload: configuration }, { payload: skillsFixture() }],
+        });
+
+        await createPersistentGatewayOpenClawSettingsProvider(
+            fixture.transport
+        ).listSkills({});
+
+        expect(fixture.calls[1]).toMatchObject({
+            method: "skills.status",
+            parameters: { agentId: "main" },
+        });
     });
 
     test("omits unadmitted configured skill keys without invalidating the list", async () => {
@@ -1428,6 +1562,8 @@ describe("persistent Gateway OpenClaw Settings provider", () => {
         });
         expect(result.configuration.models).toEqual({
             fallbacks: ["together/moonshotai/Kimi-K2.6", "google/gemini-3-flash-preview"],
+            imageGenerationModel: "openai/gpt-image-2",
+            imageModel: "openai/gpt-5.6-sol",
             primary: "google/gemini-3.1-pro-preview",
         });
     });
@@ -1553,6 +1689,8 @@ describe("persistent Gateway OpenClaw Settings provider", () => {
         });
         expect(result.configuration.models).toEqual({
             fallbacks: ["openai/gpt-5.6-terra"],
+            imageGenerationModel: "openai/gpt-image-2",
+            imageModel: "openai/gpt-5.6-sol",
             primary: "openai/gpt-5.6-sol",
         });
     });

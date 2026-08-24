@@ -54,6 +54,18 @@ describe("in-memory chat media references", () => {
             sessionKey: "agent:main:main",
             sourceSlot: "structured:0",
         });
+        const inbound = references.registerLocal({
+            candidate: "media://inbound/b2ea3e92-1844-42d3-a512-d0c48e560657.jpg",
+            messageId: "message-inbound",
+            sessionKey: "agent:main:main",
+            sourceSlot: "session-message:0",
+        });
+        const outbound = references.registerLocal({
+            candidate: "media://outbound/notes---04f0d34e-6407-4c26-922d-60bdd998c904.md",
+            messageId: "message-outbound",
+            sessionKey: "agent:main:main",
+            sourceSlot: "delivery-mirror-outbound:0",
+        });
 
         expect(relative).toEqual(absolute);
         expect(relative).toEqual(fileUrl);
@@ -69,6 +81,14 @@ describe("in-memory chat media references", () => {
             chatMediaAttachmentMatchesSession(relative!.attachmentId, "agent:other:main")
         ).toBeFalse();
         expect(JSON.stringify(relative)).not.toContain("/srv/openclaw");
+        expect(references.resolve(inbound!.attachmentId)?.source).toEqual({
+            kind: "openclaw-local-history",
+            segments: ["inbound", "b2ea3e92-1844-42d3-a512-d0c48e560657.jpg"],
+        });
+        expect(references.resolve(outbound!.attachmentId)?.source).toEqual({
+            kind: "openclaw-local-history",
+            segments: ["outbound", "notes---04f0d34e-6407-4c26-922d-60bdd998c904.md"],
+        });
         expect(references.resolve(relative!.attachmentId)).toEqual({
             attachmentId: relative!.attachmentId,
             messageId: "message-1",
@@ -185,6 +205,8 @@ describe("in-memory chat media references", () => {
             "file://remotehost/srv/openclaw/media/file.png",
             "file:///srv/openclaw/media/../openclaw.json",
             "file:///srv/openclaw/media/images%5Cescaped.png",
+            "media://outbound/notes.md",
+            "media://outbound/../notes---04f0d34e-6407-4c26-922d-60bdd998c904.md",
         ];
 
         for (const candidate of candidates) {

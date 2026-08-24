@@ -143,7 +143,6 @@ export function ChatToolDiff({ diff, label, status }: ChatToolDiffProps) {
                         <ToolScrollRegion
                             ariaLabel={`${label} diff source`}
                             className="max-h-[min(30rem,55vh)] overflow-x-hidden overflow-y-auto font-mono text-[11px] leading-[1.55]"
-                            contentRevision={diff.lines.length}
                             scrollContainerRef={scrollContainerRef}
                         >
                             <div

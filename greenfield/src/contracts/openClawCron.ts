@@ -452,6 +452,18 @@ const openClawCronJobObjectSchema = v.strictObject({
     nameTruncated: v.boolean("OpenClaw cron name completeness is invalid"),
     payload: openClawCronPayloadSchema,
     schedule: openClawCronScheduleSchema,
+    scratch: v.optional(
+        v.strictObject({
+            content: openClawCronBoundedOptionalTextSchema(
+                openClawCronPayloadTextMaximumLength,
+                "OpenClaw cron scratch is invalid"
+            ),
+            revision: nonnegativeSafeIntegerSchema(
+                "OpenClaw cron scratch revision is invalid"
+            ),
+            truncated: v.boolean("OpenClaw cron scratch completeness is invalid"),
+        })
+    ),
     sessionTarget: v.picklist(
         ["current", "isolated", "main", "named-session"],
         "OpenClaw session target is invalid"
@@ -771,7 +783,7 @@ export const setOpenClawCronEnabledInputSchema = v.pipe(
     )
 );
 
-const updateOpenClawCronPatchObjectSchema = v.strictObject({
+export const updateOpenClawCronPatchObjectSchema = v.strictObject({
     delivery: v.optional(openClawCronDeliveryPatchSchema),
     description: v.optional(v.nullable(openClawCronDescriptionSchema)),
     name: v.optional(openClawCronJobNameSchema),
@@ -782,6 +794,12 @@ const updateOpenClawCronPatchObjectSchema = v.strictObject({
         ])
     ),
     schedule: v.optional(openClawCronEditableScheduleSchema),
+    scratch: v.optional(
+        openClawCronBoundedOptionalTextSchema(
+            openClawCronPayloadTextMaximumLength,
+            "OpenClaw cron scratch is invalid"
+        )
+    ),
     wakeMode: v.optional(
         v.picklist(["next-heartbeat", "now"], "OpenClaw cron wake mode is invalid")
     ),
@@ -794,15 +812,46 @@ export function openClawCronUpdatePatchIsNonempty(
 ): boolean {
     return Object.values(patch).some((value) => value !== undefined);
 }
+export function openClawCronScratchPatchIsSeparate(
+    patch: UpdateOpenClawCronPatch
+): boolean {
+    return (
+        patch.scratch === undefined ||
+        Object.keys(patch).every((field) => field === "scratch")
+    );
+}
 export const updateOpenClawCronPatchSchema = v.pipe(
     updateOpenClawCronPatchObjectSchema,
-    v.check(openClawCronUpdatePatchIsNonempty, "OpenClaw cron update is empty")
+    v.check(openClawCronUpdatePatchIsNonempty, "OpenClaw cron update is empty"),
+    v.check(
+        openClawCronScratchPatchIsSeparate,
+        "OpenClaw scratch must be updated separately"
+    )
 );
-export const updateOpenClawCronInputSchema = v.strictObject({
+const updateOpenClawCronInputObjectSchema = v.strictObject({
     expectedConfigRevision: openClawCronConfigRevisionSchema,
+    expectedScratchRevision: v.optional(
+        nonnegativeSafeIntegerSchema("OpenClaw cron scratch revision is invalid")
+    ),
     id: openClawCronJobIdSchema,
     patch: updateOpenClawCronPatchSchema,
 });
+type UpdateOpenClawCronInputCandidate = v.InferOutput<
+    typeof updateOpenClawCronInputObjectSchema
+>;
+export function openClawCronScratchRevisionIsConsistent({
+    expectedScratchRevision,
+    patch,
+}: UpdateOpenClawCronInputCandidate): boolean {
+    return (patch.scratch === undefined) === (expectedScratchRevision === undefined);
+}
+export const updateOpenClawCronInputSchema = v.pipe(
+    updateOpenClawCronInputObjectSchema,
+    v.check(
+        openClawCronScratchRevisionIsConsistent,
+        "OpenClaw cron scratch revision is required"
+    )
+);
 
 export const deleteOpenClawCronInputSchema = v.strictObject({
     expectedConfigRevision: openClawCronConfigRevisionSchema,

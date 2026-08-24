@@ -36,6 +36,7 @@ import {
 } from "../../storySupport/dashboardStoryTransport.ts";
 
 const observedAtMs = 1_800_000_000_000;
+const asyncStoryTimeout = { timeout: 5000 } as const;
 const runId = "019fe400-0000-7000-8000-000000000001";
 const serviceActionRunId = "019fe400-0000-7000-8000-000000000002";
 const scheduleId = "system.worker-smoke";
@@ -347,16 +348,28 @@ export const DashboardJobs: Story = {
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement);
         await expect(
-            await canvas.findByRole("heading", { level: 1, name: "Jobs" })
+            await canvas.findByRole(
+                "heading",
+                { level: 1, name: "Jobs" },
+                asyncStoryTimeout
+            )
         ).toBeVisible();
         const [serviceActionsHeading, jobRunsTable, dashboardSchedulesTable] =
             await Promise.all([
-                canvas.findByRole("heading", {
-                    level: 2,
-                    name: "Service actions",
-                }),
-                canvas.findByRole("table", { name: "Job runs" }),
-                canvas.findByRole("table", { name: "Dashboard schedules" }),
+                canvas.findByRole(
+                    "heading",
+                    {
+                        level: 2,
+                        name: "Service actions",
+                    },
+                    asyncStoryTimeout
+                ),
+                canvas.findByRole("table", { name: "Job runs" }, asyncStoryTimeout),
+                canvas.findByRole(
+                    "table",
+                    { name: "Dashboard schedules" },
+                    asyncStoryTimeout
+                ),
             ]);
         await expect(serviceActionsHeading).toBeVisible();
         await expect(jobRunsTable).toBeVisible();

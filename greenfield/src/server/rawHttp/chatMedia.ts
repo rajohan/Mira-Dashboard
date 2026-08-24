@@ -597,9 +597,24 @@ function mediaResponseHeaders(
     const inline =
         disposition === "preview" &&
         (safeInlineMimeTypes.has(mimeType) || safePreviewTextMimeTypes.has(mimeType));
+    const localFileName =
+        reference.source.kind === "openclaw-local-history"
+            ? reference.source.segments.at(-1)
+            : undefined;
+    const downloadFileName = (
+        localFileName?.replace(
+            /---[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(\.[a-z\d]{1,16})$/iu,
+            "$1"
+        ) ?? `attachment-${reference.attachmentId}`
+    ).replaceAll('"', "_");
+    const asciiFileName = downloadFileName.replaceAll(/[^\u0020-\u007E]/gu, "_");
+    const encodedFileName = encodeURIComponent(downloadFileName).replaceAll("'", "%27");
+    const contentDisposition = `${inline ? "inline" : "attachment"}; filename="${asciiFileName}"${
+        asciiFileName === downloadFileName ? "" : `; filename*=UTF-8''${encodedFileName}`
+    }`;
     const headers = new Headers({
         "cache-control": "private, no-store",
-        "content-disposition": `${inline ? "inline" : "attachment"}; filename="attachment-${reference.attachmentId}"`,
+        "content-disposition": contentDisposition,
         "content-security-policy": "sandbox; default-src 'none'",
         "content-type": mimeType,
         "referrer-policy": "no-referrer",

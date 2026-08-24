@@ -426,7 +426,6 @@ describe("LogsBrowser", () => {
         try {
             await screen.findByRole("heading", { name: "Dashboard web stderr" });
             expect(realtimeClient.input).toEqual({
-                lastEventId: "0",
                 topics: [jobRealtimeTopics.runs],
             });
             const user = userEvent.setup();
