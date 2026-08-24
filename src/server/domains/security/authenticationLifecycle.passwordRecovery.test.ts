@@ -385,14 +385,12 @@ describe("authentication password recovery", () => {
                     authenticationLifecycleMetadata
                 )
             ).toMatchObject({ status: "verified" });
-            for (const clientSourceId of ["source-a", "source-b", "source-c"]) {
-                expect(
-                    await harness.service.requestPasswordReset(
-                        { username: "operator" },
-                        { ...authenticationLifecycleMetadata, clientSourceId }
-                    )
-                ).toEqual({ status: "accepted" });
-            }
+            const requests = ["source-a", "source-b", "source-c"].map((clientSourceId) =>
+                harness.service.requestPasswordReset(
+                    { username: "operator" },
+                    { ...authenticationLifecycleMetadata, clientSourceId }
+                )
+            );
             await waitForMessageCount(1);
             expect(messages).toHaveLength(1);
             deliveries[0]?.resolve();
@@ -402,7 +400,11 @@ describe("authentication password recovery", () => {
             await waitForMessageCount(3);
             expect(messages).toHaveLength(3);
             deliveries[2]?.resolve();
-            await Bun.sleep(0);
+            expect(await Promise.all(requests)).toEqual([
+                { status: "accepted" },
+                { status: "accepted" },
+                { status: "accepted" },
+            ]);
 
             const tokens = messages.map(({ resetUrl }) =>
                 new URL(resetUrl).searchParams.get("resetToken")

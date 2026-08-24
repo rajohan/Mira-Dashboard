@@ -124,7 +124,7 @@ export function createAuthenticationPasswordRecoveryOperations(
             }
             if (prepared.status === "accepted") return { status: "accepted" };
 
-            void serializePasswordResetDelivery(prepared.user.id, async () => {
+            await serializePasswordResetDelivery(prepared.user.id, async () => {
                 const token = context.generatePasswordResetToken();
                 const previousTokenPrefix =
                     await context.repository.withImmediateTransaction((unit) => {
