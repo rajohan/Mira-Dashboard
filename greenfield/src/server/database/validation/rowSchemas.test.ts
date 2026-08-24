@@ -8,6 +8,17 @@ import {
     incidentSelectSchema,
     incidentUpdateSchema,
 } from "./incidents.ts";
+import {
+    jobDisableIntentCloseSchema,
+    jobDisableIntentInsertSchema,
+    jobDisableIntentSelectSchema,
+} from "./jobDisableIntents.ts";
+import { jobRunEventInsertSchema, jobRunEventSelectSchema } from "./jobRunEvents.ts";
+import { jobRunInsertSchema, jobRunSelectSchema } from "./jobRuns.ts";
+import {
+    jobWorkerControlSelectSchema,
+    jobWorkerControlUpdateSchema,
+} from "./jobWorkerControl.ts";
 import { monitorRunInsertSchema, monitorRunUpdateSchema } from "./monitorRuns.ts";
 import { notificationInsertSchema, notificationUpdateSchema } from "./notifications.ts";
 import {
@@ -17,6 +28,11 @@ import {
     realtimeEventSelectSchema,
 } from "./realtimeEvents.ts";
 import { reportInsertSchema } from "./reports.ts";
+import {
+    resourceLeaseInsertSchema,
+    resourceLeaseSelectSchema,
+} from "./resourceLeases.ts";
+import { scheduledJobInsertSchema, scheduledJobSelectSchema } from "./scheduledJobs.ts";
 import { schemaMigrationInsertSchema } from "./schemaMigrations.ts";
 import {
     incidentFingerprint,
@@ -31,6 +47,103 @@ import {
     validObservationValues,
     validRealtimeEventValues,
 } from "./testSupport/rows.ts";
+import {
+    workerInstanceInsertSchema,
+    workerInstanceSelectSchema,
+} from "./workerInstances.ts";
+
+const jobUserId = "019fc968-1a9b-7764-bf1b-d5b863b0e7b4";
+const jobRunId = "019fc968-1a9b-7765-8f1b-d5b863b0e7b4";
+const jobEventRunId = "019fc968-1a9b-7766-9f1b-d5b863b0e7b4";
+const jobWorkerId = "019fc968-1a9b-7767-af1b-d5b863b0e7b4";
+const jobLeaseToken = "019fc968-1a9b-7768-bf1b-d5b863b0e7b4";
+const jobDisableIntentId = "019fc968-1a9b-7769-8f1b-d5b863b0e7b4";
+const jobScheduleId = "system.worker-smoke";
+const jobCreatedAt = new Date(1000);
+const jobUpdatedAt = new Date(2000);
+const jobNextRunAt = new Date(61_000);
+
+const validScheduledJobRow = Object.freeze({
+    actionKey: "system.worker-smoke",
+    actionPayloadJson: "{}",
+    attemptLimit: 2,
+    cancellationPolicy: "cooperative" as const,
+    createdAt: jobCreatedAt,
+    cronExpression: null,
+    description: "Verifies the worker runtime without external side effects.",
+    enabled: true,
+    id: jobScheduleId,
+    intervalMs: 60_000,
+    name: "Worker smoke check",
+    nextRunAt: jobNextRunAt,
+    priority: 0,
+    resourceClass: "light" as const,
+    resourceKeysJson: '["database"]',
+    retrySafe: true,
+    scheduleKind: "interval" as const,
+    timeOfDay: null,
+    timeZone: null,
+    timeoutMs: 30_000,
+    updatedAt: jobUpdatedAt,
+    version: 1,
+});
+
+const validJobRunRow = Object.freeze({
+    actionKey: "system.worker-smoke",
+    attemptCount: 0,
+    attemptLimit: 2,
+    availableAt: jobUpdatedAt,
+    cancellationPolicy: "cooperative" as const,
+    cancelRequestedAt: null,
+    cancelRequestedById: null,
+    cancelRequestedByKind: null,
+    displayName: "Worker smoke check",
+    enqueueSha256: "a".repeat(64),
+    eventBytes: 0,
+    eventCount: 0,
+    finishedAt: null,
+    firstStartedAt: null,
+    heartbeatAt: null,
+    id: jobRunId,
+    idempotencyKey: "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcY",
+    lastAttemptStartedAt: null,
+    leaseExpiresAt: null,
+    leaseOwnerId: null,
+    leaseToken: null,
+    payloadEventCount: 0,
+    payloadJson: "{}",
+    priority: 0,
+    queuedAt: jobUpdatedAt,
+    requestedById: jobUserId,
+    requestedByKind: "user" as const,
+    resourceClass: "light" as const,
+    resourceKeysJson: '["database"]',
+    resultJson: null,
+    retrySafe: true,
+    scheduledForAt: null,
+    scheduledJobId: jobScheduleId,
+    scheduledJobVersion: 1,
+    state: "queued" as const,
+    stateVersion: 1,
+    terminalCode: null,
+    terminalMessage: null,
+    timeoutMs: 30_000,
+    triggerType: "manual" as const,
+    updatedAt: jobUpdatedAt,
+});
+
+const generatedJobRunInsertFields = new Set([
+    "attemptCount",
+    "eventBytes",
+    "eventCount",
+    "payloadEventCount",
+    "stateVersion",
+]);
+const validJobRunInsert = Object.fromEntries(
+    Object.entries(validJobRunRow).filter(
+        ([key]) => !generatedJobRunInsertFields.has(key)
+    )
+);
 
 describe("Drizzle-generated Valibot row schemas", () => {
     test("validate every foundation table at its database boundary", () => {
@@ -326,6 +439,260 @@ describe("Drizzle-generated Valibot row schemas", () => {
                 checksum: "a".repeat(64),
                 id: `20260804022252_${"a".repeat(114)}`,
                 releaseId: "b".repeat(40),
+            })
+        ).toThrow();
+    });
+
+    test("validates all seven durable job table boundaries", () => {
+        expect(v.parse(scheduledJobInsertSchema, validScheduledJobRow)).toBeDefined();
+        expect(v.parse(scheduledJobSelectSchema, validScheduledJobRow)).toBeDefined();
+
+        const disableIntent = {
+            createdAt: jobCreatedAt,
+            createdById: jobUserId,
+            createdByKind: "user" as const,
+            endedAt: null,
+            endedById: null,
+            endedByKind: null,
+            endedReason: null,
+            expiresAt: jobNextRunAt,
+            externalJobId: null,
+            externalProvider: null,
+            id: jobDisableIntentId,
+            reason: "Paused during maintenance.",
+            scheduledJobId: jobScheduleId,
+            targetKind: "dashboard-schedule" as const,
+        };
+        expect(v.parse(jobDisableIntentInsertSchema, disableIntent)).toBeDefined();
+        expect(v.parse(jobDisableIntentSelectSchema, disableIntent)).toBeDefined();
+        expect(
+            v.parse(jobDisableIntentCloseSchema, {
+                endedAt: jobUpdatedAt,
+                endedById: jobUserId,
+                endedByKind: "user",
+                endedReason: "re-enabled",
+            })
+        ).toBeDefined();
+
+        expect(v.parse(jobRunInsertSchema, validJobRunInsert)).toBeDefined();
+        expect(v.parse(jobRunSelectSchema, validJobRunRow)).toBeDefined();
+
+        const jobEvent = {
+            attempt: 0,
+            jobRunId: jobEventRunId,
+            kind: "queued" as const,
+            message: "Queued for execution.",
+            occurredAt: jobUpdatedAt,
+            progressJson: null,
+            sequence: 1,
+            workerInstanceId: null,
+        };
+        expect(v.parse(jobRunEventInsertSchema, jobEvent)).toBeDefined();
+        expect(v.parse(jobRunEventSelectSchema, jobEvent)).toBeDefined();
+
+        const worker = {
+            capacity: 2,
+            drainingAt: null,
+            heartbeatAt: jobUpdatedAt,
+            id: jobWorkerId,
+            pid: 1234,
+            releaseId: "b".repeat(40),
+            startedAt: jobCreatedAt,
+            state: "online" as const,
+            stoppedAt: null,
+        };
+        expect(v.parse(workerInstanceInsertSchema, worker)).toBeDefined();
+        expect(v.parse(workerInstanceSelectSchema, worker)).toBeDefined();
+
+        const lease = {
+            acquiredAt: jobCreatedAt,
+            expiresAt: jobNextRunAt,
+            jobRunId,
+            leaseToken: jobLeaseToken,
+            renewedAt: jobUpdatedAt,
+            resourceKey: "database",
+            workerInstanceId: jobWorkerId,
+        };
+        expect(v.parse(resourceLeaseInsertSchema, lease)).toBeDefined();
+        expect(v.parse(resourceLeaseSelectSchema, lease)).toBeDefined();
+
+        expect(
+            v.parse(jobWorkerControlSelectSchema, {
+                claimingPaused: false,
+                id: 1,
+                updatedAt: new Date(0),
+                updatedById: null,
+                updatedByKind: null,
+                version: 1,
+            })
+        ).toBeDefined();
+        expect(
+            v.parse(jobWorkerControlUpdateSchema, {
+                claimingPaused: true,
+                updatedAt: jobUpdatedAt,
+                updatedById: jobUserId,
+                updatedByKind: "user",
+                version: 2,
+            })
+        ).toBeDefined();
+    });
+
+    test("refines durable job identifiers, JSON roots, and bounded counters", () => {
+        expect(() =>
+            v.parse(scheduledJobSelectSchema, {
+                ...validScheduledJobRow,
+                id: "System.Worker-Smoke",
+            })
+        ).toThrow("Schedule id is invalid");
+        expect(() =>
+            v.parse(scheduledJobSelectSchema, {
+                ...validScheduledJobRow,
+                actionPayloadJson: "[]",
+            })
+        ).toThrow("Stored job payload must contain a JSON object");
+        expect(() =>
+            v.parse(scheduledJobSelectSchema, {
+                ...validScheduledJobRow,
+                resourceKeysJson: '["database","database"]',
+            })
+        ).toThrow("Stored job resource keys are not canonical");
+        expect(() =>
+            v.parse(scheduledJobSelectSchema, {
+                ...validScheduledJobRow,
+                resourceKeysJson: "{}",
+            })
+        ).toThrow("Stored job resource keys are not canonical");
+        expect(() =>
+            v.parse(jobRunSelectSchema, {
+                ...validJobRunRow,
+                id: "550e8400-e29b-41d4-a716-446655440000",
+            })
+        ).toThrow("Expected a lowercase UUIDv7 identifier");
+        expect(() =>
+            v.parse(jobRunInsertSchema, {
+                ...validJobRunInsert,
+                availableAt: new Date(1999),
+            })
+        ).toThrow("New job run must be an internally consistent queued row");
+        expect(() =>
+            v.parse(jobRunSelectSchema, {
+                ...validJobRunRow,
+                eventCount: 1001,
+            })
+        ).toThrow("Stored job event count is invalid");
+        expect(() =>
+            v.parse(jobRunSelectSchema, {
+                ...validJobRunRow,
+                eventCount: 1,
+                payloadEventCount: 2,
+            })
+        ).toThrow("Stored job run is inconsistent");
+        expect(() =>
+            v.parse(resourceLeaseSelectSchema, {
+                acquiredAt: jobCreatedAt,
+                expiresAt: jobNextRunAt,
+                jobRunId,
+                leaseToken: jobLeaseToken,
+                renewedAt: jobUpdatedAt,
+                resourceKey: "Database",
+                workerInstanceId: jobWorkerId,
+            })
+        ).toThrow("Job resource key is invalid");
+    });
+
+    test("rejects inconsistent durable job lifecycle rows", () => {
+        expect(
+            v.parse(scheduledJobSelectSchema, {
+                ...validScheduledJobRow,
+                enabled: false,
+            })
+        ).toMatchObject({ enabled: false, nextRunAt: jobNextRunAt });
+        expect(() =>
+            v.parse(scheduledJobSelectSchema, {
+                ...validScheduledJobRow,
+                nextRunAt: null,
+            })
+        ).toThrow();
+        expect(() =>
+            v.parse(jobDisableIntentSelectSchema, {
+                createdAt: jobCreatedAt,
+                createdById: jobUserId,
+                createdByKind: "user",
+                endedAt: jobUpdatedAt,
+                endedById: null,
+                endedByKind: null,
+                endedReason: null,
+                expiresAt: null,
+                externalJobId: null,
+                externalProvider: null,
+                id: jobDisableIntentId,
+                reason: "Incomplete closure.",
+                scheduledJobId: jobScheduleId,
+                targetKind: "dashboard-schedule",
+            })
+        ).toThrow();
+        expect(() =>
+            v.parse(jobRunSelectSchema, {
+                ...validJobRunRow,
+                attemptCount: 1,
+                firstStartedAt: jobUpdatedAt,
+                lastAttemptStartedAt: jobUpdatedAt,
+                state: "running",
+            })
+        ).toThrow();
+        expect(() =>
+            v.parse(jobRunEventSelectSchema, {
+                attempt: 0,
+                jobRunId,
+                kind: "progress",
+                message: null,
+                occurredAt: jobUpdatedAt,
+                progressJson: null,
+                sequence: 1,
+                workerInstanceId: null,
+            })
+        ).toThrow();
+        expect(() =>
+            v.parse(workerInstanceSelectSchema, {
+                capacity: 1,
+                drainingAt: null,
+                heartbeatAt: jobUpdatedAt,
+                id: jobWorkerId,
+                pid: 1234,
+                releaseId: "b".repeat(40),
+                startedAt: jobCreatedAt,
+                state: "stopped",
+                stoppedAt: null,
+            })
+        ).toThrow();
+        expect(() =>
+            v.parse(resourceLeaseSelectSchema, {
+                acquiredAt: jobCreatedAt,
+                expiresAt: jobUpdatedAt,
+                jobRunId,
+                leaseToken: jobLeaseToken,
+                renewedAt: jobUpdatedAt,
+                resourceKey: "database",
+                workerInstanceId: jobWorkerId,
+            })
+        ).toThrow();
+        expect(() =>
+            v.parse(jobWorkerControlSelectSchema, {
+                claimingPaused: false,
+                id: 1,
+                updatedAt: new Date(0),
+                updatedById: null,
+                updatedByKind: null,
+                version: 2,
+            })
+        ).toThrow();
+        expect(() => v.parse(jobDisableIntentCloseSchema, {})).toThrow();
+        expect(() =>
+            v.parse(jobDisableIntentCloseSchema, {
+                endedAt: jobUpdatedAt,
+                endedById: jobUserId,
+                endedByKind: "user",
+                endedReason: "expired",
             })
         ).toThrow();
     });

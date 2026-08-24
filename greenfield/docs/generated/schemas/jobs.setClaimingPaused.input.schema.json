@@ -1,0 +1,20 @@
+{
+  "$id": "urn:mira-dashboard:jobs.setClaimingPaused.input",
+  "type": "object",
+  "properties": {
+    "expectedVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "paused": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "expectedVersion",
+    "paused"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

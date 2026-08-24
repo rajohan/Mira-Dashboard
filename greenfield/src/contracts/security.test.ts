@@ -3,6 +3,8 @@ import { describe, expect, test } from "bun:test";
 import * as v from "valibot";
 
 import {
+    applicationCapabilities,
+    applicationCapabilityListSchema,
     authenticationMethods,
     multiFactorAuthenticationMethods,
     requestAuthenticationSchema,
@@ -12,6 +14,25 @@ const userId = "019fc968-1a9b-7770-8f1b-d5b863b0e7b4";
 const sessionSelector = "a".repeat(32);
 
 describe("request authentication contract", () => {
+    test("includes canonical least-privilege job capabilities", () => {
+        expect(applicationCapabilities).toEqual([
+            "agents:read",
+            "agents:write",
+            "jobs:read",
+            "jobs:write",
+            "monitoring:write",
+            "notifications:read",
+            "notifications:write",
+            "reports:read",
+            "reports:write",
+            "tasks:read",
+            "tasks:write",
+        ]);
+        expect(
+            v.parse(applicationCapabilityListSchema, ["jobs:write", "jobs:read"])
+        ).toEqual(["jobs:read", "jobs:write"]);
+    });
+
     test("advertises only authentication methods implemented by this slice", () => {
         expect(authenticationMethods).toEqual([
             "password",

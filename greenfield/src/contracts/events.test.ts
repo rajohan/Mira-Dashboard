@@ -5,6 +5,7 @@ import * as v from "valibot";
 import {
     eventsStreamContract,
     realtimeStreamCapabilities,
+    realtimeStreamDataSchema,
     realtimeStreamInputSchema,
     realtimeStreamOutputSchema,
     realtimeTopicDefinitions,
@@ -18,6 +19,7 @@ describe("realtime transport contracts", () => {
     test("documents only capabilities required by registered topics", () => {
         expect(realtimeStreamCapabilities).toEqual([
             "agents:read",
+            "jobs:read",
             "notifications:read",
             "reports:read",
             "tasks:read",
@@ -87,6 +89,42 @@ describe("realtime transport contracts", () => {
                 id: "1",
             })
         ).toMatchObject({ id: "1" });
+    });
+
+    test("rejects mismatched durable job entity and payload identities", () => {
+        const runId = "018f6f50-6a9e-7b88-8000-000000000001";
+        const mismatchedChanges = [
+            {
+                entityId: runId,
+                entityType: "job-run",
+                occurredAtMs: 1000,
+                operation: "updated",
+                payload: { id: "system.worker-smoke" },
+                topic: "jobs.runs",
+            },
+            {
+                entityId: "queue",
+                entityType: "job-queue",
+                occurredAtMs: 1000,
+                operation: "snapshot-required",
+                payload: { id: runId },
+                topic: "jobs.runs",
+            },
+            {
+                entityId: "system.worker-smoke",
+                entityType: "schedule",
+                occurredAtMs: 1000,
+                operation: "updated",
+                payload: { id: "queue" },
+                topic: "schedules.records",
+            },
+        ];
+
+        for (const event of mismatchedChanges) {
+            expect(
+                v.safeParse(realtimeStreamDataSchema, { event, kind: "change" }).success
+            ).toBeFalse();
+        }
     });
 
     test("shares exact producer routing policies with the client contract", () => {

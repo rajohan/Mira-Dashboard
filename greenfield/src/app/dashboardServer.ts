@@ -5,6 +5,11 @@ import { Redacted } from "effect";
 
 import { createAgentRepository } from "../server/domains/agents/repository.ts";
 import { createAgentService } from "../server/domains/agents/service.ts";
+import { createJobRepository } from "../server/domains/jobs/repository.ts";
+import {
+    createJobService,
+    reconcileJobSchedules,
+} from "../server/domains/jobs/service.ts";
 import { createMonitoringCatalogService } from "../server/domains/monitoring/catalogService.ts";
 import { createMonitoringRepository } from "../server/domains/monitoring/repository.ts";
 import { createMonitoringService } from "../server/domains/monitoring/service.ts";
@@ -86,6 +91,7 @@ export interface DashboardServerOptions extends Omit<
     | "hostname"
     | "mfaAccountLifecycle"
     | "mfaLoginLifecycle"
+    | "jobService"
     | "monitoringCatalogService"
     | "monitoringService"
     | "securityAuditLifecycle"
@@ -274,6 +280,17 @@ export async function createDashboardServer(
             repository: createTaskRepository(database, databaseRuntime),
             wakeEventPump,
         });
+        const jobRepository = createJobRepository(database, databaseRuntime);
+        await reconcileJobSchedules({
+            ...(domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }),
+            repository: jobRepository,
+            wakeEventPump,
+        });
+        const jobService = createJobService({
+            ...(domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }),
+            repository: jobRepository,
+            wakeEventPump,
+        });
         const monitoringRepository = createMonitoringRepository(
             database,
             databaseRuntime
@@ -301,6 +318,7 @@ export async function createDashboardServer(
             hostname: "127.0.0.1",
             mfaAccountLifecycle,
             mfaLoginLifecycle,
+            jobService,
             monitoringCatalogService,
             monitoringService,
             port: options.port,

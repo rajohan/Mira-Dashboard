@@ -5,7 +5,9 @@
 | Topic | Payload | Snapshot | Retention | Summary |
 | --- | --- | --- | --- | --- |
 | `agents.status` | [payload](./schemas/agents.status.realtime.payload.schema.json) | `agents.listStatuses` | 7 days | Invalidates one agent status row after a durable metadata change. |
+| `jobs.runs` | [payload](./schemas/jobs.runs.realtime.payload.schema.json) | `jobs.listRuns` | 7 days | Invalidates durable run rows and exact queue state. |
 | `monitoring.incidents` | [payload](./schemas/monitoring.incidents.realtime.payload.schema.json) | `incidents.list` | 7 days | Invalidates incident lifecycle rows after a complete monitor snapshot. |
 | `monitoring.notifications` | [payload](./schemas/monitoring.notifications.realtime.payload.schema.json) | `notifications.list` | 7 days | Invalidates Dashboard notifications after catalog changes. |
 | `monitoring.reports` | [payload](./schemas/monitoring.reports.realtime.payload.schema.json) | `reports.list` | 7 days | Invalidates immutable reports after catalog changes. |
+| `schedules.records` | [payload](./schemas/schedules.records.realtime.payload.schema.json) | `schedules.list` | 7 days | Invalidates the code-owned Dashboard schedule directory. |
 | `tasks.records` | [payload](./schemas/tasks.records.realtime.payload.schema.json) | `tasks.list` | 7 days | Invalidates one task row after a durable task-domain change. |

@@ -13,6 +13,8 @@
       "items": {
         "enum": [
           "agents.status",
+          "jobs.runs",
+          "schedules.records",
           "monitoring.incidents",
           "monitoring.notifications",
           "monitoring.reports",

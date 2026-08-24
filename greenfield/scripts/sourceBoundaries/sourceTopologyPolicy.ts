@@ -39,8 +39,8 @@ const reviewedApplicationServerTargets: ReadonlyMap<
     [
         "src/app/worker.ts",
         new Set([
+            "src/server/domains/jobs/workerRuntime.ts",
             "src/server/platform/configuration/workerConfiguration.ts",
-            "src/server/database/runtime/databaseRuntimeOwner.ts",
             "src/server/platform/filesystem/projectLayout.ts",
             "src/server/platform/observability/projectFileLogSink.ts",
             "src/server/platform/observability/structuredLogger.ts",

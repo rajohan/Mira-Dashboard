@@ -1,9 +1,12 @@
+import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
 import { cp, lstat, mkdtemp, readFile, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { drizzle } from "drizzle-orm/bun-sqlite";
 import { Effect } from "effect";
+import * as v from "valibot";
 
 import type { BuildSourceIdentity } from "../../../../scripts/buildSourceIdentity.ts";
 import { buildDashboardRelease } from "../../../../scripts/delivery/buildRelease.ts";
@@ -21,6 +24,10 @@ import { pointProductionProcessesAtRelease } from "../../../../scripts/delivery/
 import { prepareProtectedProductionStatePath } from "../../../../scripts/delivery/productionStateFilesystem.ts";
 import type { ReleaseRuntimeIdentity } from "../../../../scripts/delivery/releaseIdentity.ts";
 import { removeProductionDeliveryFixtures } from "../../../../scripts/testSupport/productionDeliveryFixture.ts";
+import { jobRunSummarySchema } from "../../../contracts/jobModel.ts";
+import { jobRunDetailSchema } from "../../../contracts/jobs.ts";
+import { seedAuthenticationTestDatabase } from "../../../server/domains/security/testSupport/authentication.ts";
+import { dashboardSessionCookieName } from "../../../server/rawHttp/authenticationCredentials.ts";
 
 const sourceProjectRoot = path.resolve(import.meta.dir, "../../../..");
 const releaseId = "d".repeat(40);
@@ -98,19 +105,104 @@ function webEnvironment(projectRoot: string, port: number): Record<string, strin
     };
 }
 
+interface ChildStopResult {
+    readonly exitCode: number;
+    readonly forced: boolean;
+}
+
 async function stopChild(
-    child: Bun.Subprocess<"ignore", "ignore", "ignore"> | undefined
-): Promise<void> {
-    if (!child || child.exitCode !== null) return;
-    child.kill("SIGTERM");
-    const exited = await Promise.race([
-        child.exited.then(() => true),
-        Bun.sleep(5000).then(() => false),
-    ]);
-    if (!exited && child.exitCode === null) {
-        child.kill("SIGKILL");
-        await child.exited;
+    child: Bun.Subprocess<"ignore", "ignore", "ignore">
+): Promise<ChildStopResult> {
+    if (child.exitCode !== null) {
+        throw new Error("Production child exited before the shutdown signal");
     }
+    child.kill("SIGTERM");
+    const exitCodeBeforeDeadline = await Promise.race([
+        child.exited,
+        Bun.sleep(5000).then(() => null),
+    ]);
+    let forced = false;
+    if (exitCodeBeforeDeadline === null && child.exitCode === null) {
+        child.kill("SIGKILL");
+        forced = true;
+    }
+    const exitCode = await child.exited;
+    if (!forced && exitCode !== 0) {
+        throw new Error(
+            "Production child did not exit cleanly after the shutdown signal"
+        );
+    }
+    return Object.freeze({ exitCode, forced });
+}
+
+interface TrpcEnvelope {
+    readonly error?: unknown;
+    readonly result?: { readonly data?: { readonly json?: unknown } };
+}
+
+async function runBundledWorkerSmoke(
+    databasePath: string,
+    port: number
+): Promise<v.InferOutput<typeof jobRunDetailSchema>> {
+    const sqlite = new Database(databasePath, {
+        create: false,
+        readwrite: true,
+        strict: true,
+    });
+    sqlite.exec("PRAGMA busy_timeout = 5000");
+    sqlite.exec("PRAGMA foreign_keys = ON");
+    let sessionToken: string;
+    try {
+        sessionToken = seedAuthenticationTestDatabase(
+            drizzle({ client: sqlite }),
+            new Date()
+        ).session.token;
+    } finally {
+        sqlite.close(true);
+    }
+
+    const headers = {
+        cookie: `${dashboardSessionCookieName}=${sessionToken}`,
+    };
+    const enqueueResponse = await fetch(`http://127.0.0.1:${port}/trpc/schedules.run`, {
+        body: JSON.stringify({
+            json: {
+                id: "system.worker-smoke",
+                idempotencyKey: "cmVsZWFzZS13b3JrZXItc21va2UtMjAyNi0wOC0wNw",
+            },
+        }),
+        headers: { ...headers, "content-type": "application/json" },
+        method: "POST",
+    });
+    const enqueueBody = (await enqueueResponse.json()) as TrpcEnvelope;
+    expect(enqueueResponse.status).toBe(200);
+    expect(enqueueBody.error).toBeUndefined();
+    const queued = v.parse(jobRunSummarySchema, enqueueBody.result?.data?.json);
+    expect(queued).toMatchObject({
+        actionKey: "system.worker-smoke",
+        state: "queued",
+        triggerType: "manual",
+    });
+
+    const deadline = Date.now() + 15_000;
+    let last: v.InferOutput<typeof jobRunDetailSchema> | undefined;
+    while (Date.now() < deadline) {
+        const input = encodeURIComponent(JSON.stringify({ json: { id: queued.id } }));
+        const response = await fetch(
+            `http://127.0.0.1:${port}/trpc/jobs.getRun?input=${input}`,
+            { headers }
+        );
+        const body = (await response.json()) as TrpcEnvelope;
+        expect(response.status).toBe(200);
+        expect(body.error).toBeUndefined();
+        last = v.parse(jobRunDetailSchema, body.result?.data?.json);
+        if (last.run.state === "succeeded") return last;
+        if (["cancelled", "failed", "timed-out"].includes(last.run.state)) break;
+        await Bun.sleep(50);
+    }
+    throw new Error(
+        `Bundled worker smoke did not succeed: ${last?.run.state ?? "missing"}`
+    );
 }
 
 class DirectProcessController implements ProductionServiceController {
@@ -118,6 +210,9 @@ class DirectProcessController implements ProductionServiceController {
     readonly #paths: Parameters<typeof pointProductionProcessesAtRelease>[1];
     readonly #port: number;
     readonly #projectRoot: string;
+    readonly #stopResults: Array<
+        ChildStopResult & { readonly process: "web" | "worker" }
+    > = [];
     #web: Bun.Subprocess<"ignore", "ignore", "ignore"> | undefined;
     #worker: Bun.Subprocess<"ignore", "ignore", "ignore"> | undefined;
 
@@ -135,6 +230,12 @@ class DirectProcessController implements ProductionServiceController {
 
     prepare(): Promise<void> {
         return Promise.resolve();
+    }
+
+    get stopResults(): readonly (ChildStopResult & {
+        readonly process: "web" | "worker";
+    })[] {
+        return Object.freeze([...this.#stopResults]);
     }
 
     async start(
@@ -178,10 +279,35 @@ class DirectProcessController implements ProductionServiceController {
     async stop(): Promise<void> {
         const web = this.#web;
         const worker = this.#worker;
+        if (!web && !worker) return;
         this.#web = undefined;
         this.#worker = undefined;
-        await stopChild(web);
-        await stopChild(worker);
+        if (!web || !worker) {
+            const child = web ?? worker;
+            if (child && child.exitCode === null) {
+                child.kill("SIGKILL");
+                await child.exited;
+            }
+            throw new Error("Production process pair was incomplete during shutdown");
+        }
+        const failures: unknown[] = [];
+        try {
+            this.#stopResults.push(
+                Object.freeze({ ...(await stopChild(web)), process: "web" })
+            );
+        } catch (error) {
+            failures.push(error);
+        }
+        try {
+            this.#stopResults.push(
+                Object.freeze({ ...(await stopChild(worker)), process: "worker" })
+            );
+        } catch (error) {
+            failures.push(error);
+        }
+        if (failures.length > 0) {
+            throw new AggregateError(failures, "Production process shutdown failed");
+        }
     }
 
     async verifyReady(): Promise<void> {
@@ -207,6 +333,25 @@ class DirectProcessController implements ProductionServiceController {
 }
 
 describe("disposable production release lifecycle", () => {
+    test("rejects a child that exits before its shutdown signal", async () => {
+        const child = Bun.spawn([process.execPath, "-e", "process.exit(0)"], {
+            stderr: "ignore",
+            stdin: "ignore",
+            stdout: "ignore",
+        });
+        expect(await child.exited).toBe(0);
+        let stopError: unknown;
+        try {
+            await stopChild(child);
+        } catch (error) {
+            stopError = error;
+        }
+        expect(stopError).toBeInstanceOf(Error);
+        expect((stopError as Error).message).toBe(
+            "Production child exited before the shutdown signal"
+        );
+    });
+
     test("builds, migrates, activates, serves, logs, and shuts down exact artifacts", async () => {
         const runtimeIdentity = Object.freeze({
             revision: Bun.revision,
@@ -247,6 +392,19 @@ describe("disposable production release lifecycle", () => {
                 const browser = await fetch(`http://127.0.0.1:${port}/`);
                 expect(browser.status).toBe(200);
                 expect(await browser.text()).toContain("<title>Mira Dashboard</title>");
+                const smoke = await runBundledWorkerSmoke(
+                    path.join(paths.stateDirectory, "mira-dashboard.db"),
+                    port
+                );
+                expect(smoke.result).toMatchObject({
+                    databaseReleaseId: releaseId,
+                    status: "ok",
+                });
+                await services.stop();
+                expect(services.stopResults).toEqual([
+                    { exitCode: 0, forced: false, process: "web" },
+                    { exitCode: 0, forced: false, process: "worker" },
+                ]);
                 const [webLog, workerLog, databaseStatus] = await Promise.all([
                     readFile(path.join(paths.stateDirectory, "logs/web.ndjson"), "utf8"),
                     readFile(
@@ -259,6 +417,7 @@ describe("disposable production release lifecycle", () => {
                 ]);
                 expect(webLog).toContain('"event":"runtime.started"');
                 expect(workerLog).toContain('"event":"runtime.started"');
+                expect(workerLog).toContain('"event":"runtime.stopped"');
                 expect(databaseStatus.isFile()).toBeTrue();
                 expect(databaseStatus.mode & 0o777n).toBe(0o600n);
             } finally {

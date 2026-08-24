@@ -1,7 +1,10 @@
 import { realpath } from "node:fs/promises";
 import path from "node:path";
 
-import { createDatabaseRuntimeOwner } from "../server/database/runtime/databaseRuntimeOwner.ts";
+import {
+    createDashboardWorkerRuntime,
+    createSystemJobWorkerSideEffects,
+} from "../server/domains/jobs/workerRuntime.ts";
 import {
     parseWorkerConfiguration,
     type WorkerConfiguration,
@@ -62,11 +65,17 @@ const defaultDependencies = Object.freeze({
     createLogDestination: (logsDirectory, processRole) =>
         createProjectFileLogDestination(logsDirectory, processRole),
     createRuntime: (_configuration, layout, release) =>
-        createDatabaseRuntimeOwner({
-            migrationsDirectory: path.join(release.releaseRoot, "migrations"),
+        createDashboardWorkerRuntime({
+            database: {
+                migrationsDirectory: path.join(release.releaseRoot, "migrations"),
+                releaseId: release.manifest.source.commitSha,
+                startupMode: "validate-only",
+                stateDirectory: layout.production.state.root,
+            },
+            pid: process.pid,
             releaseId: release.manifest.source.commitSha,
-            startupMode: "validate-only",
-            stateDirectory: layout.production.state.root,
+            sideEffects: createSystemJobWorkerSideEffects(),
+            workerInstanceId: Bun.randomUUIDv7(),
         }),
     createTerminationController: createProcessTerminationController,
     loadRelease: (releasesDirectory, releaseRoot, processRole) =>
@@ -101,8 +110,7 @@ function normalizeWorkerProcessFailure(error: unknown): Error {
 }
 
 /**
- * Runs the database-validating worker lifecycle until a process signal requests shutdown.
- * Job capabilities are intentionally absent until their Phase 3 ports are composed.
+ * Runs durable schedule and job execution until a signal or coordinator defect wins.
  * @param options Typed environment source and exact immutable release root.
  * @param dependencies Injectable host/runtime boundaries.
  */
@@ -127,14 +135,28 @@ export async function runDashboardWorkerProcess(
     let failure: Error | undefined;
     try {
         runtime = dependencies.createRuntime(configuration, layout, release, logger);
+        const runtimeCompletion = runtime.completion.then(
+            () => ({ kind: "stopped" as const }),
+            (error: unknown) => ({ error, kind: "failed" as const })
+        );
         await runtime.initialize();
         logger.info({
             component: "runtime",
             event: "runtime.started",
             outcome: "success",
         });
-        await termination.termination;
-        await runtime.dispose();
+        const exit = await Promise.race([
+            termination.termination.then(() => ({ kind: "signal" as const })),
+            runtimeCompletion,
+        ]);
+        if (exit.kind === "failed") {
+            throw exit.error;
+        }
+        if (exit.kind === "stopped") {
+            throw new Error("Dashboard worker runtime stopped unexpectedly");
+        }
+        await runtime.dispose(termination.forceSignal);
+        await runtime.completion;
         logger.info({
             component: "runtime",
             event: "runtime.stopped",
@@ -144,7 +166,7 @@ export async function runDashboardWorkerProcess(
         failure = normalizeWorkerProcessFailure(error);
         if (runtime) {
             try {
-                await runtime.dispose();
+                await runtime.dispose(termination.forceSignal);
             } catch {
                 // Preserve the initiating process failure.
             }

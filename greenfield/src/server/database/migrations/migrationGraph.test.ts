@@ -41,10 +41,16 @@ const expectedTables: string[] = [
     "automation_principals",
     "incident_observations",
     "incidents",
+    "job_disable_intents",
+    "job_run_events",
+    "job_runs",
+    "job_worker_control",
     "monitor_runs",
     "notifications",
     "realtime_events",
     "reports",
+    "resource_leases",
+    "scheduled_jobs",
     "schema_migrations",
     "task_automation_profiles",
     "task_events",
@@ -56,6 +62,7 @@ const expectedTables: string[] = [
     "user_totp_factors",
     "user_webauthn_credentials",
     "users",
+    "worker_instances",
 ];
 describe("database migration graph", () => {
     test("bounds schema inventory by the largest valid prefix before later object drops", () => {
@@ -110,13 +117,43 @@ describe("database migration graph", () => {
             "incidents_validate_details_update",
             "incident_observations_validate_details_insert",
             "incident_observations_validate_details_update",
+            "job_disable_intents_reject_closed_update",
+            "job_disable_intents_reject_content_update",
+            "job_disable_intents_reject_delete",
+            "job_disable_intents_reject_replace",
+            "job_run_events_reject_delete",
+            "job_run_events_reject_replace",
+            "job_run_events_reject_update",
+            "job_run_events_update_parent_counters",
+            "job_run_events_validate_insert",
+            "job_runs_reject_delete",
+            "job_runs_reject_replace",
+            "job_runs_reject_snapshot_update",
+            "job_runs_validate_lifecycle_update",
+            "job_runs_validate_resource_keys_insert",
+            "job_worker_control_reject_delete",
+            "job_worker_control_reject_replace",
+            "job_worker_control_validate_update",
+            "resource_leases_reject_identity_update",
+            "resource_leases_validate_insert",
+            "resource_leases_validate_renewal_update",
             "schema_migrations_reject_replace",
             "schema_migrations_reject_update",
             "schema_migrations_reject_delete",
+            "scheduled_jobs_reject_delete",
+            "scheduled_jobs_reject_identity_update",
+            "scheduled_jobs_reject_replace",
+            "scheduled_jobs_validate_resource_keys_insert",
+            "scheduled_jobs_validate_resource_keys_update",
+            "scheduled_jobs_validate_version_update",
             "task_events_validate_payload",
             "task_events_reject_replace",
             "task_events_reject_update",
             "task_events_reject_delete",
+            "worker_instances_reject_active_delete",
+            "worker_instances_reject_identity_update",
+            "worker_instances_reject_replace",
+            "worker_instances_validate_lifecycle_update",
         ]) {
             expect(foundationSql).toContain(`CREATE TRIGGER ${trigger}`);
         }
@@ -157,6 +194,18 @@ describe("database migration graph", () => {
                 tableDefinitions.find((row) => row.name === "task_notification_outbox")
                     ?.wr
             ).toBe(1);
+            for (const tableName of [
+                "job_disable_intents",
+                "job_run_events",
+                "job_runs",
+                "resource_leases",
+                "scheduled_jobs",
+                "worker_instances",
+            ]) {
+                expect(tableDefinitions.find((row) => row.name === tableName)?.wr).toBe(
+                    1
+                );
+            }
             const textPrimaryKeys = database.sqlite
                 .query<TextPrimaryKeyRow, []>(`
                     SELECT

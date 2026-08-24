@@ -144,9 +144,9 @@ build path: releases contain prebuilt assets and production never compiles the f
 
 ## Configuration From Scratch
 
-The greenfield web configuration parser accepts only its registered-key projection. The future
-web and worker composition roots must invoke their role-specific parser exactly once; that startup
-wiring is not implemented by this slice. App, server, and worker source has no scattered
+The greenfield web configuration parser accepts only its registered-key projection. The web and
+worker composition roots invoke their role-specific parser exactly once. App, server, and worker
+source has no scattered
 runtime-environment reads and no truthy-string parsing. Repository scripts are greenfield-owned
 tools checked by the Bun graph and source-boundary policy; they do not import code outside the
 self-contained future root.
@@ -164,10 +164,10 @@ non-secret settings, and encrypted secrets. A setting is not duplicated across e
 database with implicit precedence. If bootstrap requires a temporary precedence rule, it is
 explicitly modeled as a bootstrap state and disappears after completion.
 
-The first web parser currently validates an injected registered-key projection. Its project-root
-field is only a lexically normalized absolute staging value: the future process composition must
-resolve its real path and enforce the managed-filesystem containment policy before opening host
-paths. Startup wiring and that filesystem validation are not claimed by this slice.
+Each process composition resolves the configured project root to a real path before deriving and
+opening managed production paths. The parser's project-root field remains a lexically normalized
+absolute value so parsing itself performs no host I/O; the composition boundary owns the stronger
+filesystem identity and containment checks.
 
 The target repository has exactly three TypeScript configuration files. `tsconfig.json` owns all
 shared strict compiler options, has `files: []`, and references only `tsconfig.browser.json` and

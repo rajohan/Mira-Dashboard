@@ -10,6 +10,11 @@ import {
     agentRealtimeTopicDefinition,
 } from "./agentRealtime.ts";
 import {
+    jobRealtimeChangeSchemas,
+    jobRealtimeTopicDefinitions,
+    jobRealtimeTopics,
+} from "./jobRealtime.ts";
+import {
     monitoringRealtimeChangeSchemas,
     monitoringRealtimeTopicDefinitions,
     monitoringRealtimeTopics,
@@ -26,6 +31,7 @@ import {
 /** All topic definitions currently accepted by the realtime transport. */
 export const realtimeTopicDefinitions = Object.freeze([
     agentRealtimeTopicDefinition,
+    ...jobRealtimeTopicDefinitions,
     ...monitoringRealtimeTopicDefinitions,
     taskRealtimeTopicDefinition,
 ] as const);
@@ -42,6 +48,7 @@ export function findRealtimeTopicDefinition(topic: string) {
 /** Exact unique capability vocabulary used by registered realtime topics. */
 export const realtimeStreamCapabilities = Object.freeze([
     "agents:read",
+    "jobs:read",
     "notifications:read",
     "reports:read",
     "tasks:read",
@@ -50,6 +57,8 @@ export const realtimeStreamCapabilities = Object.freeze([
 /** Exact registered topic vocabulary accepted by the tracked SSE contract. */
 export const realtimeStreamTopics = Object.freeze([
     agentRealtimeTopic,
+    jobRealtimeTopics.runs,
+    jobRealtimeTopics.schedules,
     monitoringRealtimeTopics.incidents,
     monitoringRealtimeTopics.notifications,
     monitoringRealtimeTopics.reports,
@@ -86,8 +95,9 @@ export const realtimeStreamInputSchema = v.strictObject({
 /** Data inside one tRPC tracked SSE envelope. */
 export const realtimeStreamDataSchema = v.variant("kind", [
     v.strictObject({
-        event: v.variant("topic", [
+        event: v.union([
             agentRealtimeChangeSchema,
+            ...jobRealtimeChangeSchemas,
             ...monitoringRealtimeChangeSchemas,
             taskRealtimeChangeSchema,
         ]),

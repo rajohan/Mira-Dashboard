@@ -42,6 +42,31 @@ import {
     newestIncidentOrderIsStable,
 } from "../../src/contracts/incidents.ts";
 import {
+    activeJobDisableIntentTimesAreConsistent,
+    jobPayloadFitsBudget,
+    jobResourceKeysAreCanonical,
+    jobRunEventIsConsistent,
+    jobRunEventMessageFitsBudget,
+    jobRunEventProgressFitsBudget,
+    jobRunResultFitsBudget,
+    jobRunSummaryIsConsistent,
+    jobWorkerSummaryIsConsistent,
+    normalizeScheduleCronExpression,
+    scheduleCronExpressionIsValid,
+    scheduleSummaryIsConsistent,
+    scheduleTimeZoneIsCanonical,
+} from "../../src/contracts/jobModel.ts";
+import { jobRealtimeIdentityMatches } from "../../src/contracts/jobRealtime.ts";
+import {
+    activeJobResourceClassesAreCanonical,
+    jobQueueSummaryIsConsistent,
+    jobRunDetailIsConsistent,
+    jobRunPageCursorIsConsistent,
+    jobWorkerSummariesAreCanonical,
+    newestJobRunEventOrderIsStable,
+    newestJobRunOrderIsStable,
+} from "../../src/contracts/jobs.ts";
+import {
     activeIncidentSummaryTimesAreConsistent,
     activeIncidentTimesAreConsistent,
     completeMonitoringSnapshotFitsBudget,
@@ -65,6 +90,12 @@ import {
     reportPageCursorIsConsistent,
     upsertReportInputFitsBudget,
 } from "../../src/contracts/reports.ts";
+import {
+    scheduleOrderIsStable,
+    schedulePageCursorIsConsistent,
+    scheduleRunPageCursorIsConsistent,
+    scheduleUpdatePatchIsConsistent,
+} from "../../src/contracts/schedules.ts";
 import {
     isValidSecurityLabel,
     securityLabelMaximumLength,
@@ -150,6 +181,102 @@ const runtimeCheckComments = new Map<unknown, string>([
     [
         canonicalAgentStatuses,
         "Live Valibot validation additionally requires one canonically ordered status per configured agent ID.",
+    ],
+    [
+        jobPayloadFitsBudget,
+        "Live Valibot validation additionally limits the serialized job payload to its reviewed UTF-8 byte budget.",
+    ],
+    [
+        jobRunResultFitsBudget,
+        "Live Valibot validation additionally limits the serialized job result to its reviewed UTF-8 byte budget.",
+    ],
+    [
+        jobRunEventProgressFitsBudget,
+        "Live Valibot validation additionally limits serialized job progress to its reviewed UTF-8 byte budget.",
+    ],
+    [
+        jobResourceKeysAreCanonical,
+        "Live Valibot validation additionally requires resource keys to be unique, strictly sorted, and within their aggregate UTF-8 byte budget.",
+    ],
+    [
+        scheduleCronExpressionIsValid,
+        "Live Valibot validation additionally requires a valid five-field minute cron with a future occurrence.",
+    ],
+    [
+        scheduleTimeZoneIsCanonical,
+        "Live Valibot validation additionally requires UTC or a canonical IANA time-zone identifier.",
+    ],
+    [
+        jobRunSummaryIsConsistent,
+        "Live Valibot validation additionally requires run provenance, attempts, state, cancellation, and timestamps to agree.",
+    ],
+    [
+        jobRunEventMessageFitsBudget,
+        "Live Valibot validation additionally limits the job-event message to its reviewed UTF-8 byte budget.",
+    ],
+    [
+        jobRunEventIsConsistent,
+        "Live Valibot validation additionally requires job-event payload fields to agree with the event kind.",
+    ],
+    [
+        jobWorkerSummaryIsConsistent,
+        "Live Valibot validation additionally requires worker capacity and lifecycle timestamps to agree.",
+    ],
+    [
+        activeJobDisableIntentTimesAreConsistent,
+        "Live Valibot validation additionally requires disable-intent expiry after creation.",
+    ],
+    [
+        scheduleSummaryIsConsistent,
+        "Live Valibot validation additionally binds schedule state to its cursor, disable intent, and embedded runs.",
+    ],
+    [
+        newestJobRunOrderIsStable,
+        "Live Valibot validation additionally requires strict newest-first job-run ordering by queue timestamp and ID.",
+    ],
+    [
+        activeJobResourceClassesAreCanonical,
+        "Live Valibot validation additionally requires active resource classes in canonical unique order.",
+    ],
+    [
+        jobWorkerSummariesAreCanonical,
+        "Live Valibot validation additionally requires unique workers in canonical ID order.",
+    ],
+    [
+        jobQueueSummaryIsConsistent,
+        "Live Valibot validation additionally binds queue-derived fields to their exact state counts.",
+    ],
+    [
+        jobRunPageCursorIsConsistent,
+        "Live Valibot validation additionally requires a job-run cursor to identify the returned last row.",
+    ],
+    [
+        newestJobRunEventOrderIsStable,
+        "Live Valibot validation additionally requires strict newest-first job-event sequence order.",
+    ],
+    [
+        jobRunDetailIsConsistent,
+        "Live Valibot validation additionally binds job result, events, cursor, and run state.",
+    ],
+    [
+        jobRealtimeIdentityMatches,
+        "Live Valibot validation additionally requires the realtime entity and compact payload IDs to match exactly.",
+    ],
+    [
+        scheduleOrderIsStable,
+        "Live Valibot validation additionally requires strict ascending schedule ID order.",
+    ],
+    [
+        schedulePageCursorIsConsistent,
+        "Live Valibot validation additionally requires a schedule cursor to identify the returned last row.",
+    ],
+    [
+        scheduleUpdatePatchIsConsistent,
+        "Live Valibot validation additionally requires a non-empty schedule patch with an explicit disable transition.",
+    ],
+    [
+        scheduleRunPageCursorIsConsistent,
+        "Live Valibot validation additionally requires a schedule-run cursor to identify the returned last row.",
     ],
     [
         monitoringJsonObjectFitsBudget,
@@ -561,7 +688,8 @@ export function convertContractSchema(
                         operation === sortApplicationCapabilities ||
                         operation === canonicalAgentDefinitions ||
                         operation === canonicalizeTaskStrings ||
-                        operation === freezeTaskStrings)
+                        operation === freezeTaskStrings ||
+                        operation === normalizeScheduleCronExpression)
                 ) {
                     return jsonSchema;
                 }
