@@ -12,7 +12,7 @@ updates:
       labels:
           - "type: dependencies"
       commit-message:
-          prefix: "deps"
+          prefix: "chore(deps)"
       groups:
           application-major:
               patterns:
@@ -38,7 +38,7 @@ updates:
           - "type: dependencies"
           - "area: ci"
       commit-message:
-          prefix: "ci"
+          prefix: "ci(deps)"
       groups:
           github-actions-major:
               patterns:

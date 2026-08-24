@@ -39,7 +39,7 @@
 | `drizzle-orm` | `^1.0.0-rc.5-169397b` | `1.0.0-rc.5-169397b` | runtime |
 | `effect` | `4.0.0-rc.111` | `4.0.0-rc.111` | runtime |
 | `json5` | `^2.2.3` | `2.2.3` | runtime |
-| `lucide-react` | `1.33.0` | `1.33.0` | runtime |
+| `lucide-react` | `1.34.0` | `1.34.0` | runtime |
 | `otplib` | `13.5.0` | `13.5.0` | runtime |
 | `qrcode.react` | `4.2.0` | `4.2.0` | runtime |
 | `react` | `^19.2.8` | `19.2.8` | runtime |
@@ -78,7 +78,7 @@
 | `happy-dom` | `^20.11.6` | `20.11.6` | development |
 | `lcov-result-merger` | `^6.0.0` | `6.0.0` | development |
 | `lefthook` | `2.1.10` | `2.1.10` | development |
-| `oxc-parser` | `0.146.0` | `0.146.0` | development |
+| `oxc-parser` | `0.147.0` | `0.147.0` | development |
 | `oxfmt` | `^0.64.0` | `0.64.0` | development |
 | `oxlint` | `1.79.0` | `1.79.0` | development |
 | `oxlint-config-presets` | `^0.1.19` | `0.1.19` | development |
