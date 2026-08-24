@@ -63,6 +63,26 @@
             "name": "accountSecurity.summary"
         },
         {
+            "kind": "query",
+            "name": "agents.getConfiguration"
+        },
+        {
+            "kind": "query",
+            "name": "agents.getStatus"
+        },
+        {
+            "kind": "query",
+            "name": "agents.listStatuses"
+        },
+        {
+            "kind": "query",
+            "name": "agents.listTaskHistory"
+        },
+        {
+            "kind": "mutation",
+            "name": "agents.updateMetadata"
+        },
+        {
             "kind": "mutation",
             "name": "auth.beginWebAuthnLogin"
         },

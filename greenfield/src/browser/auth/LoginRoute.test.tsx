@@ -13,6 +13,10 @@ import {
     type DashboardTrpcTransport,
 } from "../api/trpcClient.ts";
 import { DashboardBrowserApplication } from "../application.tsx";
+import {
+    createDashboardBrowserCollections,
+    type DashboardBrowserCollections,
+} from "../data/dashboardCollections.ts";
 import { createDashboardRouter } from "../router.tsx";
 import type { DashboardWebAuthnClient } from "../security/webauthn/webauthnClient.ts";
 import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
@@ -61,6 +65,7 @@ class AuthenticationTransport implements DashboardTrpcTransport {
     readonly calls: TransportCall[] = [];
     mutationHandler: (path: string, input: unknown) => Promise<unknown> = (path) =>
         Promise.reject(new TypeError(`Unexpected mutation: ${path}`));
+    statusQueryHandler: (() => Promise<AuthStatus>) | undefined;
     status: AuthStatus;
 
     constructor(status: AuthStatus) {
@@ -77,11 +82,13 @@ class AuthenticationTransport implements DashboardTrpcTransport {
         if (path !== "auth.status") {
             return Promise.reject(new TypeError(`Unexpected query: ${path}`));
         }
-        return Promise.resolve(this.status);
+        return this.statusQueryHandler?.() ?? Promise.resolve(this.status);
     }
 }
 
 const queryClients: ReturnType<typeof createDashboardQueryClient>[] = [];
+const collectionRegistries: DashboardBrowserCollections[] = [];
+const mountedViews: ReturnType<typeof render>[] = [];
 
 function renderAuthenticationRoute(
     transport: AuthenticationTransport,
@@ -95,16 +102,22 @@ function renderAuthenticationRoute(
     const router = createDashboardRouter(
         createMemoryHistory({ initialEntries: [options.initialEntry ?? "/login"] })
     );
-    render(
-        <DashboardBrowserApplication
-            queryClient={queryClient}
-            realtimeClient={noOpDashboardRealtimeClient}
-            router={router}
-            trpcClient={createDashboardTrpcClient(transport)}
-            webAuthnClient={options.webAuthnClient ?? unexpectedWebAuthnClient}
-        />
+    const trpcClient = createDashboardTrpcClient(transport);
+    const collections = createDashboardBrowserCollections(queryClient, trpcClient);
+    collectionRegistries.push(collections);
+    mountedViews.push(
+        render(
+            <DashboardBrowserApplication
+                collections={collections}
+                queryClient={queryClient}
+                realtimeClient={noOpDashboardRealtimeClient}
+                router={router}
+                trpcClient={trpcClient}
+                webAuthnClient={options.webAuthnClient ?? unexpectedWebAuthnClient}
+            />
+        )
     );
-    return { queryClient, router };
+    return { collections, queryClient, router };
 }
 
 function cachedBrowserData(queryClient: ReturnType<typeof createDashboardQueryClient>) {
@@ -116,7 +129,11 @@ function cachedBrowserData(queryClient: ReturnType<typeof createDashboardQueryCl
     );
 }
 
-afterEach(() => {
+afterEach(async () => {
+    for (const view of mountedViews.splice(0)) view.unmount();
+    await Promise.all(
+        collectionRegistries.splice(0).map((collections) => collections.cleanup())
+    );
     for (const queryClient of queryClients.splice(0)) queryClient.clear();
 });
 
@@ -367,5 +384,30 @@ describe("Dashboard login route", () => {
         expect(alert.textContent).toContain("Too many attempts");
         expect(alert.textContent).not.toContain(privateSentinel);
         await waitFor(() => expect(document.activeElement).toBe(alert));
+    });
+
+    test("preserves the operation failure when fallback cache reset also fails", async () => {
+        const transport = new AuthenticationTransport({ state: "anonymous" });
+        const privateError = Object.assign(new Error("private operation failure"), {
+            data: { code: "TOO_MANY_REQUESTS" },
+        });
+        transport.mutationHandler = () => Promise.reject(privateError);
+        const { collections } = renderAuthenticationRoute(transport);
+        const userActions = userEvent.setup();
+
+        await screen.findByRole("heading", { level: 1, name: "Sign in" });
+        transport.statusQueryHandler = () =>
+            Promise.reject(new TypeError("authentication refresh failed"));
+        await collections.cleanup();
+        await userActions.type(screen.getByLabelText("Username"), "operator");
+        await userActions.type(
+            screen.getByLabelText("Password"),
+            "correct horse battery staple"
+        );
+        await userActions.click(screen.getByRole("button", { name: "Continue" }));
+
+        const alert = await screen.findByRole("alert");
+        expect(alert.textContent).toContain("Too many attempts");
+        expect(alert.textContent).not.toContain("authentication refresh failed");
     });
 });

@@ -139,7 +139,7 @@ CREATE TABLE `automation_principal_capabilities` (
 	`principal_id` text NOT NULL,
 	CONSTRAINT `automation_principal_capabilities_pk` PRIMARY KEY(`principal_id`, `capability`),
 	CONSTRAINT `fk_automation_principal_capabilities_principal_id_automation_principals_id_fk` FOREIGN KEY (`principal_id`) REFERENCES `automation_principals`(`id`) ON DELETE CASCADE,
-	CONSTRAINT "automation_principal_capabilities_capability_check" CHECK("capability" IN ('notifications:read', 'reports:read', 'tasks:read', 'tasks:write')),
+	CONSTRAINT "automation_principal_capabilities_capability_check" CHECK("capability" IN ('agents:read', 'agents:write', 'notifications:read', 'reports:read', 'tasks:read', 'tasks:write')),
 	CONSTRAINT "automation_principal_capabilities_granted_at_check" CHECK("granted_at" BETWEEN 0 AND 8640000000000000)
 ) STRICT;
 --> statement-breakpoint
@@ -482,6 +482,65 @@ CREATE INDEX `task_updates_task_created_id_idx` ON `task_updates` (`task_id`,`cr
 CREATE INDEX `tasks_updated_id_idx` ON `tasks` (`updated_at`,`id`);--> statement-breakpoint
 CREATE INDEX `tasks_status_priority_updated_id_idx` ON `tasks` (`status`,`priority`,`updated_at`,`id`);--> statement-breakpoint
 CREATE INDEX `tasks_assignee_status_updated_id_idx` ON `tasks` (`assignee`,`status`,`updated_at`,`id`);--> statement-breakpoint
+CREATE TABLE `agent_task_runs` (
+	`agent_id` text NOT NULL,
+	`completed_at` integer,
+	`completed_by_id` text,
+	`completed_by_kind` text,
+	`id` text PRIMARY KEY NOT NULL,
+	`last_activity_at` integer NOT NULL,
+	`last_updated_by_id` text NOT NULL,
+	`last_updated_by_kind` text NOT NULL,
+	`started_at` integer NOT NULL,
+	`started_by_id` text NOT NULL,
+	`started_by_kind` text NOT NULL,
+	`task` text NOT NULL,
+	CONSTRAINT "agent_task_runs_agent_id_check" CHECK(length("agent_id") BETWEEN 1 AND 64 AND instr("agent_id", char(0)) = 0 AND "agent_id" = lower("agent_id") AND substr("agent_id", 1, 1) GLOB '[a-z0-9]' AND "agent_id" NOT GLOB '*[^a-z0-9._-]*'),
+	CONSTRAINT "agent_task_runs_completed_actor_check" CHECK(("completed_at" IS NULL AND "completed_by_kind" IS NULL AND "completed_by_id" IS NULL) OR ("completed_at" IS NOT NULL AND "completed_by_kind" IS NOT NULL AND "completed_by_id" IS NOT NULL AND (("completed_by_kind" = 'user' AND length("completed_by_id") = 36 AND instr("completed_by_id", char(0)) = 0 AND length(replace("completed_by_id", '-', '')) = 32 AND replace("completed_by_id", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr("completed_by_id", 9, 1) = '-' AND substr("completed_by_id", 14, 1) = '-' AND substr("completed_by_id", 15, 1) = '7' AND substr("completed_by_id", 19, 1) = '-' AND substr("completed_by_id", 20, 1) GLOB '[89ab]' AND substr("completed_by_id", 24, 1) = '-') OR ("completed_by_kind" = 'automation' AND length("completed_by_id") BETWEEN 1 AND 64 AND instr("completed_by_id", char(0)) = 0 AND "completed_by_id" = lower("completed_by_id") AND substr("completed_by_id", 1, 1) GLOB '[a-z0-9]' AND "completed_by_id" NOT GLOB '*[^a-z0-9._-]*')))),
+	CONSTRAINT "agent_task_runs_id_check" CHECK(length("id") = 36 AND instr("id", char(0)) = 0 AND length(replace("id", '-', '')) = 32 AND replace("id", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr("id", 9, 1) = '-' AND substr("id", 14, 1) = '-' AND substr("id", 15, 1) = '7' AND substr("id", 19, 1) = '-' AND substr("id", 20, 1) GLOB '[89ab]' AND substr("id", 24, 1) = '-'),
+	CONSTRAINT "agent_task_runs_last_updated_actor_check" CHECK(("last_updated_by_kind" = 'user' AND length("last_updated_by_id") = 36 AND instr("last_updated_by_id", char(0)) = 0 AND length(replace("last_updated_by_id", '-', '')) = 32 AND replace("last_updated_by_id", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr("last_updated_by_id", 9, 1) = '-' AND substr("last_updated_by_id", 14, 1) = '-' AND substr("last_updated_by_id", 15, 1) = '7' AND substr("last_updated_by_id", 19, 1) = '-' AND substr("last_updated_by_id", 20, 1) GLOB '[89ab]' AND substr("last_updated_by_id", 24, 1) = '-') OR ("last_updated_by_kind" = 'automation' AND length("last_updated_by_id") BETWEEN 1 AND 64 AND instr("last_updated_by_id", char(0)) = 0 AND "last_updated_by_id" = lower("last_updated_by_id") AND substr("last_updated_by_id", 1, 1) GLOB '[a-z0-9]' AND "last_updated_by_id" NOT GLOB '*[^a-z0-9._-]*')),
+	CONSTRAINT "agent_task_runs_started_actor_check" CHECK(("started_by_kind" = 'user' AND length("started_by_id") = 36 AND instr("started_by_id", char(0)) = 0 AND length(replace("started_by_id", '-', '')) = 32 AND replace("started_by_id", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr("started_by_id", 9, 1) = '-' AND substr("started_by_id", 14, 1) = '-' AND substr("started_by_id", 15, 1) = '7' AND substr("started_by_id", 19, 1) = '-' AND substr("started_by_id", 20, 1) GLOB '[89ab]' AND substr("started_by_id", 24, 1) = '-') OR ("started_by_kind" = 'automation' AND length("started_by_id") BETWEEN 1 AND 64 AND instr("started_by_id", char(0)) = 0 AND "started_by_id" = lower("started_by_id") AND substr("started_by_id", 1, 1) GLOB '[a-z0-9]' AND "started_by_id" NOT GLOB '*[^a-z0-9._-]*')),
+	CONSTRAINT "agent_task_runs_task_check" CHECK(length("task") BETWEEN 1 AND 512 AND instr("task", char(0)) = 0 AND length(trim("task", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND "task" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*')),
+	CONSTRAINT "agent_task_runs_time_check" CHECK("started_at" BETWEEN 0 AND 8640000000000000 AND "last_activity_at" BETWEEN 0 AND 8640000000000000 AND "last_activity_at" >= "started_at" AND ("completed_at" IS NULL OR ("completed_at" BETWEEN 0 AND 8640000000000000 AND "completed_at" >= "last_activity_at")))
+) STRICT, WITHOUT ROWID;
+--> statement-breakpoint
+CREATE UNIQUE INDEX `agent_task_runs_one_active_agent_idx` ON `agent_task_runs` (`agent_id`) WHERE "agent_task_runs"."completed_at" IS NULL;--> statement-breakpoint
+CREATE INDEX `agent_task_runs_started_id_idx` ON `agent_task_runs` (`started_at`,`id`);--> statement-breakpoint
+CREATE INDEX `agent_task_runs_agent_started_id_idx` ON `agent_task_runs` (`agent_id`,`started_at`,`id`);
+--> statement-breakpoint
+CREATE TRIGGER agent_task_runs_reject_replace
+BEFORE INSERT ON agent_task_runs
+WHEN EXISTS (SELECT 1 FROM agent_task_runs WHERE id = NEW.id)
+BEGIN
+	SELECT RAISE(ABORT, 'agent_task_runs identity is immutable');
+END;
+--> statement-breakpoint
+CREATE TRIGGER agent_task_runs_reject_identity_update
+BEFORE UPDATE OF agent_id, id, started_at, started_by_id, started_by_kind, task ON agent_task_runs
+BEGIN
+	SELECT RAISE(ABORT, 'agent_task_runs identity is immutable');
+END;
+--> statement-breakpoint
+CREATE TRIGGER agent_task_runs_reject_activity_regression
+BEFORE UPDATE OF last_activity_at ON agent_task_runs
+WHEN NEW.last_activity_at < OLD.last_activity_at
+BEGIN
+	SELECT RAISE(ABORT, 'agent_task_runs activity is monotonic');
+END;
+--> statement-breakpoint
+CREATE TRIGGER agent_task_runs_reject_completed_update
+BEFORE UPDATE ON agent_task_runs
+WHEN OLD.completed_at IS NOT NULL
+BEGIN
+	SELECT RAISE(ABORT, 'completed agent_task_runs are immutable');
+END;
+--> statement-breakpoint
+CREATE TRIGGER agent_task_runs_reject_delete
+BEFORE DELETE ON agent_task_runs
+BEGIN
+	SELECT RAISE(ABORT, 'agent_task_runs history cannot be deleted');
+END;
+--> statement-breakpoint
 CREATE TRIGGER automation_credentials_validate_replacement_insert
 BEFORE INSERT ON automation_credentials
 WHEN NEW.replaces_credential_id IS NOT NULL

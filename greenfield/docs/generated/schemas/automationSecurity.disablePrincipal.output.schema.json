@@ -24,6 +24,8 @@
               "type": "array",
               "items": {
                 "enum": [
+                  "agents:read",
+                  "agents:write",
                   "notifications:read",
                   "reports:read",
                   "tasks:read",
@@ -31,7 +33,7 @@
                 ],
                 "type": "string"
               },
-              "maxItems": 4,
+              "maxItems": 6,
               "uniqueItems": true
             },
             "createdAtMs": {
@@ -95,6 +97,8 @@
               "type": "array",
               "items": {
                 "enum": [
+                  "agents:read",
+                  "agents:write",
                   "notifications:read",
                   "reports:read",
                   "tasks:read",
@@ -102,7 +106,7 @@
                 ],
                 "type": "string"
               },
-              "maxItems": 4,
+              "maxItems": 6,
               "uniqueItems": true
             },
             "createdAtMs": {

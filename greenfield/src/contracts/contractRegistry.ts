@@ -1,4 +1,5 @@
 import { accountSecurityProcedureContracts } from "./accountSecurity.ts";
+import { agentProcedureContracts } from "./agents.ts";
 import { authProcedureContracts } from "./auth.ts";
 import { automationSecurityProcedureContracts } from "./automationSecurity.ts";
 import { eventsStreamContract } from "./events.ts";
@@ -15,6 +16,7 @@ import { taskProcedureContracts } from "./tasks.ts";
 /** Implemented tRPC procedure metadata used by runtime wiring and docs. */
 const registeredProcedureContracts = [
     ...accountSecurityProcedureContracts,
+    ...agentProcedureContracts,
     ...authProcedureContracts,
     ...automationSecurityProcedureContracts,
     eventsStreamContract,

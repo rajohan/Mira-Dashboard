@@ -5,6 +5,11 @@ import {
     hasUniqueArrayItems,
 } from "../shared/validation.ts";
 import {
+    agentRealtimeChangeSchema,
+    agentRealtimeTopic,
+    agentRealtimeTopicDefinition,
+} from "./agentRealtime.ts";
+import {
     monitoringRealtimeChangeSchemas,
     monitoringRealtimeTopicDefinitions,
     monitoringRealtimeTopics,
@@ -20,6 +25,7 @@ import {
 
 /** All topic definitions currently accepted by the realtime transport. */
 export const realtimeTopicDefinitions = Object.freeze([
+    agentRealtimeTopicDefinition,
     ...monitoringRealtimeTopicDefinitions,
     taskRealtimeTopicDefinition,
 ] as const);
@@ -35,17 +41,20 @@ export function findRealtimeTopicDefinition(topic: string) {
 
 /** Exact unique capability vocabulary used by registered realtime topics. */
 export const realtimeStreamCapabilities = Object.freeze([
+    "agents:read",
     "notifications:read",
     "reports:read",
     "tasks:read",
 ] as const satisfies readonly ApplicationCapability[]);
 
-const realtimeStreamTopics = [
+/** Exact registered topic vocabulary accepted by the tracked SSE contract. */
+export const realtimeStreamTopics = Object.freeze([
+    agentRealtimeTopic,
     monitoringRealtimeTopics.incidents,
     monitoringRealtimeTopics.notifications,
     monitoringRealtimeTopics.reports,
     taskRealtimeTopic,
-] as const;
+] as const);
 
 const realtimeCursorSchema = canonicalNonnegativeSafeIntegerStringSchema(
     "Realtime resume cursor is invalid"
@@ -78,6 +87,7 @@ export const realtimeStreamInputSchema = v.strictObject({
 export const realtimeStreamDataSchema = v.variant("kind", [
     v.strictObject({
         event: v.variant("topic", [
+            agentRealtimeChangeSchema,
             ...monitoringRealtimeChangeSchemas,
             taskRealtimeChangeSchema,
         ]),

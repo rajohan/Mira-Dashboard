@@ -33,7 +33,7 @@
             "searchNormalizer": null,
             "sourceRouteName": "agents",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "path": "/agents",
                 "phase": "phase-3"
             }

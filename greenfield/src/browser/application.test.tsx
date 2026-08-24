@@ -6,6 +6,7 @@ import { createDashboardQueryClient } from "./api/queryClient.ts";
 import { createDashboardTrpcClient } from "./api/trpcClient.ts";
 import { DashboardBrowserApplication } from "./application.tsx";
 import { authStatusQueryKey } from "./auth/authQueries.ts";
+import { createDashboardBrowserCollections } from "./data/dashboardCollections.ts";
 import { createDashboardRouter } from "./router.tsx";
 import type { DashboardWebAuthnClient } from "./security/webauthn/webauthnClient.ts";
 import { noOpDashboardRealtimeClient } from "./test/realtime.ts";
@@ -54,18 +55,20 @@ describe("Dashboard browser application", () => {
                 });
             },
         });
+        const collections = createDashboardBrowserCollections(queryClient, trpcClient);
+
+        const view = render(
+            <DashboardBrowserApplication
+                collections={collections}
+                queryClient={queryClient}
+                realtimeClient={noOpDashboardRealtimeClient}
+                router={router}
+                trpcClient={trpcClient}
+                webAuthnClient={unexpectedWebAuthnClient}
+            />
+        );
 
         try {
-            render(
-                <DashboardBrowserApplication
-                    queryClient={queryClient}
-                    realtimeClient={noOpDashboardRealtimeClient}
-                    router={router}
-                    trpcClient={trpcClient}
-                    webAuthnClient={unexpectedWebAuthnClient}
-                />
-            );
-
             const heading = await screen.findByRole("heading", {
                 level: 1,
                 name: "Mira Dashboard",
@@ -85,6 +88,8 @@ describe("Dashboard browser application", () => {
                 user: { username: "operator" },
             });
         } finally {
+            view.unmount();
+            await collections.cleanup();
             queryClient.clear();
         }
     });

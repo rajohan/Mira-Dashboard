@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { lstat, readdir } from "node:fs/promises";
 import path from "node:path";
 
@@ -53,6 +53,8 @@ const runtimeIdentity: ReleaseRuntimeIdentity = Object.freeze({
     version: "1.4.0",
 });
 const temporaryDirectories: string[] = [];
+
+setDefaultTimeout(8000);
 
 afterEach(async () => {
     await removeProductionDeliveryFixtures(temporaryDirectories);

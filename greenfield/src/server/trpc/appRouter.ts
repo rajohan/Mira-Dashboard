@@ -1,3 +1,4 @@
+import { agentProcedureNames, agentRouter } from "../domains/agents/procedures.ts";
 import { eventsProcedureNames, eventsRouter } from "../domains/realtime/procedures.ts";
 import {
     automationSecurityProcedureNames,
@@ -25,6 +26,7 @@ function namespacedProcedureNames(
 
 /** Root tRPC router for the application. */
 export const appRouter = router({
+    agents: agentRouter,
     accountSecurity: accountSecurityRouter,
     auth: authRouter,
     automationSecurity: automationSecurityRouter,
@@ -36,6 +38,7 @@ export const appRouter = router({
 
 /** First-party procedure inventory produced by the same route records as the root router. */
 export const appRouterProcedureNames = Object.freeze([
+    ...namespacedProcedureNames("agents", agentProcedureNames),
     ...namespacedProcedureNames("accountSecurity", accountSecurityProcedureNames),
     ...namespacedProcedureNames("auth", authProcedureNames),
     ...namespacedProcedureNames("automationSecurity", automationSecurityProcedureNames),

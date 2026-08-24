@@ -25,6 +25,16 @@ function freezeProcedureExpectedErrorPolicy<
  * independent enforcement boundary, and the startup assertion detects drift between them.
  */
 export const procedureExpectedErrorPolicy = freezeProcedureExpectedErrorPolicy({
+    "agents.getConfiguration": ["FORBIDDEN", "UNAUTHORIZED"],
+    "agents.getStatus": ["FORBIDDEN", "NOT_FOUND", "UNAUTHORIZED"],
+    "agents.listStatuses": ["FORBIDDEN", "UNAUTHORIZED"],
+    "agents.listTaskHistory": ["FORBIDDEN", "NOT_FOUND", "UNAUTHORIZED"],
+    "agents.updateMetadata": [
+        "FORBIDDEN",
+        "NOT_FOUND",
+        "SERVICE_UNAVAILABLE",
+        "UNAUTHORIZED",
+    ],
     "accountSecurity.beginTotpEnrollment": [
         "CONFLICT",
         "FORBIDDEN",

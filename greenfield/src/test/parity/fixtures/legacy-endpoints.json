@@ -156,7 +156,7 @@
             "purpose": "Reads one agent status.",
             "section": "Agents",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["agents.getStatus"],
                 "phase": "phase-3"
@@ -169,7 +169,7 @@
             "purpose": "Reads agent config.",
             "section": "Agents",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["agents.getConfiguration"],
                 "phase": "phase-3"
@@ -182,7 +182,7 @@
             "purpose": "Reads all agent statuses.",
             "section": "Agents",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["agents.listStatuses"],
                 "phase": "phase-3"
@@ -195,7 +195,7 @@
             "purpose": "Reads agent task history.",
             "section": "Agents",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["agents.listTaskHistory"],
                 "phase": "phase-3"
@@ -1987,7 +1987,7 @@
             "purpose": "Updates agent metadata, including current task.",
             "section": "Agents",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["agents.updateMetadata"],
                 "phase": "phase-3"

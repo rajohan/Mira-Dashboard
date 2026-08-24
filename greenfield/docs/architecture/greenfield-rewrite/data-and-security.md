@@ -122,6 +122,25 @@ Moltbook remain external systems. Dashboard persists only configuration, bounded
 audit/history, job state, or recovery state that it owns. It does not mirror entire external
 databases.
 
+### Task and agent ownership
+
+The reviewed agent directory is application configuration rather than database or Gateway
+discovery state. `agent_task_runs` persists only current-task intervals owned by Dashboard:
+
+- one partial unique index permits at most one active interval per configured agent;
+- run identity, agent, task, start time, and originating actor are immutable;
+- completed intervals are append-only history and cannot be reopened or rewritten;
+- user actors use UUIDv7 identities, automation actors use canonical scoped-principal IDs;
+- start, activity, and completion timestamps are monotonic and bounded; and
+- newest-first global and per-agent indexes support strict `(started_at, id)` keyset pages.
+
+An `agents:write` caller can target only an identity in the reviewed directory. It never creates
+an agent. Start, heartbeat, replace, and clear transitions run inside an admitted immediate
+transaction. State-changing start, replace, and clear transitions append the matching realtime
+event atomically; a same-task heartbeat only advances durable activity. The production
+task-tracking credential must receive this capability during the delivery/provisioning slice; no
+browser session can invoke the mutation.
+
 ### Incident and notification lifecycle
 
 Heartbeat and other monitors can report many simultaneous problems across tasks, jobs, system
@@ -173,6 +192,7 @@ queryable lifecycle.
 | Task board                    | `tasks(status, priority, updated_at_ms DESC)`                                             |
 | Task label filter             | `task_labels(label, task_id)`                                                             |
 | Task timeline                 | `task_updates(task_id, created_at_ms, id)` and equivalent event index                     |
+| Agent task history            | unique active-agent partial index plus `(agent_id, started_at_ms, id)`                    |
 | Latest reports                | `reports(kind, occurred_at_ms DESC, id DESC)`                                             |
 | Heartbeat stream              | `reports(source, source_job_id, occurred_at_ms DESC, id DESC)`                            |
 | Active incidents              | partial `incidents(monitor_key, last_seen_at_ms DESC) WHERE state = 'active'`             |
@@ -201,9 +221,10 @@ Drizzle Kit v1 stores the migration graph as timestamped directories containing
 one evolving `*_dashboard-foundation` baseline generated from the complete current Drizzle schema.
 The generated SQL includes the security identity objects, SQLite `STRICT` table options, canonical
 NUL-free constraints, bounded migration-ledger identity fields, and deliberate
-`audit_events WITHOUT ROWID` hardening. The custom audit metadata, append-only audit/migration
-ledger, monitoring-JSON, and automation replacement-integrity triggers are reviewed additions
-because Drizzle does not model them.
+`audit_events WITHOUT ROWID` and `agent_task_runs WITHOUT ROWID` hardening. The custom audit
+metadata, append-only audit/migration ledger, immutable completed agent-run history,
+monitoring-JSON, and automation replacement-integrity triggers are reviewed additions because
+Drizzle does not model them.
 There is no compatibility preflight or upgrade path for an intermediate rewrite database: every
 test and the final cutover start empty and apply this one baseline. Each schema slice regenerates
 the baseline, reviews the complete SQL/snapshot diff, and updates the explicit manifest checksums.

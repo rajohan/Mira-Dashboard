@@ -133,6 +133,8 @@
                 "type": "array",
                 "items": {
                   "enum": [
+                    "agents:read",
+                    "agents:write",
                     "notifications:read",
                     "reports:read",
                     "tasks:read",
@@ -140,7 +142,7 @@
                   ],
                   "type": "string"
                 },
-                "maxItems": 4,
+                "maxItems": 6,
                 "uniqueItems": true
               },
               "method": {
@@ -183,6 +185,8 @@
                 "type": "array",
                 "items": {
                   "enum": [
+                    "agents:read",
+                    "agents:write",
                     "notifications:read",
                     "reports:read",
                     "tasks:read",
@@ -190,7 +194,7 @@
                   ],
                   "type": "string"
                 },
-                "maxItems": 4,
+                "maxItems": 6,
                 "uniqueItems": true
               },
               "replacementCredentialId": {
