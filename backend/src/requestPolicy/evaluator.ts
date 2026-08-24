@@ -99,9 +99,6 @@ async function callHandler(
     server: Server<unknown>
 ): Promise<Response> {
     if (handler instanceof Response) {
-        // The scripts graph sees Node's Undici clone return alongside Bun's
-        // stricter Response headers, while both are the same runtime object.
-        // oxlint-disable-next-line typescript/no-unnecessary-type-assertion
         return handler.clone() as Response;
     }
     return handler(request, server);

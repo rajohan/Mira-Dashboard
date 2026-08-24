@@ -4,6 +4,16 @@ coverage:
     range: 20..85
     status:
         project:
+            dashboard:
+                target: 85%
+                threshold: 0%
+                informational: false
+                if_ci_failed: error
+                if_not_found: failure
+                flags:
+                    - dashboard
+                paths:
+                    - greenfield/src/
             backend:
                 target: 85%
                 threshold: 0%
@@ -23,6 +33,16 @@ coverage:
                 paths:
                     - frontend/src/
         patch:
+            dashboard:
+                target: 85%
+                threshold: 0%
+                informational: false
+                if_ci_failed: error
+                if_not_found: failure
+                flags:
+                    - dashboard
+                paths:
+                    - greenfield/src/
             backend:
                 target: 85%
                 threshold: 0%
@@ -48,6 +68,9 @@ comment:
     require_changes: false
 
 flags:
+    dashboard:
+        paths:
+            - greenfield/src/
     frontend:
         paths:
             - frontend/src/
