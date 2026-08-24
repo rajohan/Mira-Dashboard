@@ -11,6 +11,14 @@ export interface DashboardRouteDocumentation {
 export const dashboardRouteDocumentation = Object.freeze([
     {
         access: "session",
+        featureOwner: "documentation",
+        navigationLabel: "Docs",
+        path: "/docs",
+        summary:
+            "Searches and renders immutable generated API, database, runtime, configuration, and route references.",
+    },
+    {
+        access: "session",
         featureOwner: "overview",
         navigationLabel: "Dashboard",
         path: "/",

@@ -41,6 +41,7 @@ import { jobRunSummarySchema } from "../../../contracts/jobModel.ts";
 import { jobRunDetailSchema } from "../../../contracts/jobs.ts";
 import { seedAuthenticationTestDatabase } from "../../../server/domains/security/testSupport/authentication.ts";
 import { dashboardSessionCookieName } from "../../../server/rawHttp/authenticationCredentials.ts";
+import type { ProductionActivationRecord } from "../../../shared/productionActivationRecord.ts";
 
 const sourceProjectRoot = path.resolve(import.meta.dir, "../../../..");
 const releaseId = "d".repeat(40);
@@ -60,16 +61,31 @@ afterEach(async () => {
     await removeProductionDeliveryFixtures(temporaryDirectories);
 });
 
-async function unusedLoopbackPort(): Promise<number> {
+interface LoopbackPortReservation {
+    readonly port: number;
+    readonly release: () => Promise<void>;
+}
+
+function reserveLoopbackPort(): LoopbackPortReservation {
     const server = Bun.serve({
         fetch: () => new Response(null, { status: 503 }),
         hostname: "127.0.0.1",
         port: 0,
     });
     const port = server.port;
-    await server.stop(true);
-    if (port === undefined) throw new Error("Bun did not assign a loopback port");
-    return port;
+    if (port === undefined) {
+        void server.stop(true);
+        throw new Error("Bun did not assign a loopback port");
+    }
+    let reserved = true;
+    return Object.freeze({
+        port,
+        async release() {
+            if (!reserved) return;
+            reserved = false;
+            await server.stop(true);
+        },
+    });
 }
 
 async function realReleaseFixture(
@@ -162,7 +178,7 @@ interface ChildStopResult {
 }
 
 async function stopChild(
-    child: Bun.Subprocess<"ignore", "ignore", "ignore">
+    child: Bun.Subprocess<"ignore", "ignore", "pipe">
 ): Promise<ChildStopResult> {
     if (child.exitCode !== null) {
         throw new Error("Production child exited before the shutdown signal");
@@ -242,7 +258,8 @@ async function runBundledWorkerSmoke(
         triggerType: "manual",
     });
 
-    const deadline = Date.now() + 15_000;
+    // The coverage worker needs extra time to load instrumented server modules.
+    const deadline = Date.now() + 30_000;
     let last: v.InferOutput<typeof jobRunDetailSchema> | undefined;
     while (Date.now() < deadline) {
         const input = encodeURIComponent(JSON.stringify({ json: { id: queued.id } }));
@@ -263,27 +280,45 @@ async function runBundledWorkerSmoke(
     );
 }
 
+async function activationDiagnostics(
+    stateDirectory: string,
+    processStderr: string
+): Promise<string> {
+    const entries = await Promise.all(
+        ["web", "worker"].map(async (processName) => {
+            const logPath = path.join(stateDirectory, `logs/${processName}.ndjson`);
+            const contents = await readFile(logPath, "utf8").catch(() => "<missing>");
+            return `${processName}: ${contents}`;
+        })
+    );
+    return `${entries.join("\n")}\nstderr:\n${processStderr}`;
+}
+
 class DirectProcessController implements ProductionServiceController {
     readonly #lease: Parameters<typeof pointProductionProcessesAtRelease>[0];
     readonly #paths: Parameters<typeof pointProductionProcessesAtRelease>[1];
     readonly #port: number;
     readonly #projectRoot: string;
+    readonly #portReservation: LoopbackPortReservation;
     readonly #stopResults: Array<
         ChildStopResult & { readonly process: "web" | "worker" }
     > = [];
-    #web: Bun.Subprocess<"ignore", "ignore", "ignore"> | undefined;
-    #worker: Bun.Subprocess<"ignore", "ignore", "ignore"> | undefined;
+    #web: Bun.Subprocess<"ignore", "ignore", "pipe"> | undefined;
+    #webStderr = Promise.resolve("");
+    #worker: Bun.Subprocess<"ignore", "ignore", "pipe"> | undefined;
+    #workerStderr = Promise.resolve("");
 
     constructor(
         lease: Parameters<typeof pointProductionProcessesAtRelease>[0],
         paths: Parameters<typeof pointProductionProcessesAtRelease>[1],
         projectRoot: string,
-        port: number
+        portReservation: LoopbackPortReservation
     ) {
         this.#lease = lease;
         this.#paths = paths;
         this.#projectRoot = projectRoot;
-        this.#port = port;
+        this.#port = portReservation.port;
+        this.#portReservation = portReservation;
     }
 
     prepare(): Promise<void> {
@@ -296,11 +331,17 @@ class DirectProcessController implements ProductionServiceController {
         return Object.freeze([...this.#stopResults]);
     }
 
+    async stderrDiagnostics(): Promise<string> {
+        const [web, worker] = await Promise.all([this.#webStderr, this.#workerStderr]);
+        return `web stderr: ${web || "<empty>"}\nworker stderr: ${worker || "<empty>"}`;
+    }
+
     async start(
         release: PublishedProductionRelease,
         runtime: InstalledProductionRuntime
     ): Promise<void> {
         await this.stop();
+        await this.#portReservation.release();
         const openClawRoot = path.join(this.#projectRoot, "openclaw-test");
         await mkdir(openClawRoot, { mode: 0o700, recursive: true });
         await chmod(openClawRoot, 0o700);
@@ -312,7 +353,7 @@ class DirectProcessController implements ProductionServiceController {
         );
         const common = {
             cwd: release.releaseRoot,
-            stderr: "ignore" as const,
+            stderr: "pipe" as const,
             stdin: "ignore" as const,
             stdout: "ignore" as const,
         };
@@ -329,10 +370,12 @@ class DirectProcessController implements ProductionServiceController {
                 },
             }
         );
+        this.#workerStderr = new Response(this.#worker.stderr).text();
         this.#web = Bun.spawn(
             [runtime.executable, path.join(release.releaseRoot, "server/web.js")],
             { ...common, env: webEnvironment(this.#projectRoot, this.#port) }
         );
+        this.#webStderr = new Response(this.#web.stderr).text();
     }
 
     async stop(): Promise<void> {
@@ -370,7 +413,9 @@ class DirectProcessController implements ProductionServiceController {
     }
 
     async verifyReady(): Promise<void> {
-        const deadline = Date.now() + 15_000;
+        // Coverage instrumentation and parallel CI can make the first production
+        // process startup materially slower than an uninstrumented local run.
+        const deadline = Date.now() + 30_000;
         const readinessUrl = `http://127.0.0.1:${this.#port}/api/health/ready`;
         while (Date.now() < deadline) {
             if (this.#web?.exitCode !== null || this.#worker?.exitCode !== null) {
@@ -398,7 +443,7 @@ class DirectProcessController implements ProductionServiceController {
 describe("disposable production release lifecycle", () => {
     test("rejects a child that exits before its shutdown signal", async () => {
         const child = Bun.spawn([process.execPath, "-e", "process.exit(0)"], {
-            stderr: "ignore",
+            stderr: "pipe",
             stdin: "ignore",
             stdout: "ignore",
         });
@@ -426,7 +471,7 @@ describe("disposable production release lifecycle", () => {
         );
         temporaryDirectories.push(projectRoot);
         const state = await prepareProtectedProductionStatePath(projectRoot);
-        const port = await unusedLoopbackPort();
+        const portReservation = reserveLoopbackPort();
         await withDeploymentLease(state.stateDirectory, async (lease) => {
             const paths = await prepareProductionDeliveryDirectories(state);
             const runtime = await installProductionRuntime(
@@ -441,24 +486,41 @@ describe("disposable production release lifecycle", () => {
                 sourceRelease,
                 runtimeIdentity
             );
-            const services = new DirectProcessController(lease, paths, projectRoot, port);
+            const services = new DirectProcessController(
+                lease,
+                paths,
+                projectRoot,
+                portReservation
+            );
             try {
-                const activation = await Effect.runPromise(
-                    activatePublishedProductionRelease(lease, paths, release, runtime, {
-                        services,
-                    })
-                );
+                let activation: ProductionActivationRecord;
+                try {
+                    activation = await Effect.runPromise(
+                        activatePublishedProductionRelease(
+                            lease,
+                            paths,
+                            release,
+                            runtime,
+                            { services }
+                        )
+                    );
+                } catch (error) {
+                    process.stderr.write(
+                        `Production lifecycle activation diagnostics:\n${await activationDiagnostics(paths.stateDirectory, await services.stderrDiagnostics())}\n`
+                    );
+                    throw error;
+                }
                 expect(activation.current).toEqual({
                     releaseId,
                     runtimeRevision: Bun.revision,
                 });
-                const browser = await fetch(`http://127.0.0.1:${port}/`);
+                const browser = await fetch(`http://127.0.0.1:${portReservation.port}/`);
                 expect(browser.status).toBe(200);
                 expect(browser.headers.get("content-type")).toContain("text/html");
                 expect(await browser.text()).toBe(lifecycleBrowserHtml);
                 const smoke = await runBundledWorkerSmoke(
                     path.join(paths.stateDirectory, "mira-dashboard.db"),
-                    port
+                    portReservation.port
                 );
                 expect(smoke.result).toMatchObject({
                     databaseReleaseId: releaseId,
@@ -486,6 +548,7 @@ describe("disposable production release lifecycle", () => {
                 expect(databaseStatus.mode & 0o777n).toBe(0o600n);
             } finally {
                 await services.stop();
+                await portReservation.release();
             }
         });
     }, 120_000);

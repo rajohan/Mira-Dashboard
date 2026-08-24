@@ -1,6 +1,9 @@
 import { TRPCError } from "@trpc/server";
 
+import generatedDocuments from "../../../../docs/generated/browser-reference.json";
 import {
+    type DocumentationReference,
+    documentationReferenceContract,
     runtimeIdentityContract,
     systemHealthDiagnosticsContract,
     systemMetricsContract,
@@ -10,6 +13,10 @@ import { publicProcedure, router, sessionProcedure } from "../../trpc/trpc.ts";
 import { SystemMetricsUnavailableError } from "./systemMetricsService.ts";
 
 const systemRoutes = {
+    documentationReference: sessionProcedure
+        .input(documentationReferenceContract.input)
+        .output(documentationReferenceContract.output)
+        .query(() => generatedDocuments as DocumentationReference),
     healthDiagnostics: sessionProcedure
         .input(systemHealthDiagnosticsContract.input)
         .output(systemHealthDiagnosticsContract.output)

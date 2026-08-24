@@ -7,20 +7,23 @@ import type {
 import { TerminalWorkspace, type TerminalWorkspaceProps } from "./TerminalWorkspace.tsx";
 
 const { fireEvent, render, screen, within } = await import("@testing-library/react");
+const userEventModule = await import("@testing-library/user-event");
+const userEvent = userEventModule.default;
 
 const runtime: TerminalRuntime = {
     clientMessageMaximumBytes: 16 * 1024,
-    defaultLocation: { path: "/", rootId: "dashboard" },
-    idleTimeoutMs: 10 * 60 * 1000,
+    defaultLocation: { path: "/", rootId: "openclaw" },
+    idleTimeoutMs: 30 * 60 * 1000,
     mode: "pty",
     outputReplayMaximumBytes: 256 * 1024,
     reconnectGraceMs: 15 * 1000,
     roots: [
-        { defaultPath: "/", id: "dashboard", label: "Dashboard project" },
-        { defaultPath: "/", id: "workspace", label: "Mira workspace" },
+        { defaultPath: "/", id: "dashboard", label: "Mira Dashboard" },
+        { defaultPath: "/", id: "docker", label: "Docker" },
+        { defaultPath: "/", id: "openclaw", label: "OpenClaw" },
     ],
     serverMessageMaximumBytes: 32 * 1024,
-    sessionMaximumDurationMs: 30 * 60 * 1000,
+    sessionMaximumDurationMs: 8 * 60 * 60 * 1000,
     supportsInput: true,
     supportsPty: true,
     supportsResize: true,
@@ -48,8 +51,6 @@ function renderWorkspace(overrides: Partial<TerminalWorkspaceProps> = {}) {
         onLocation: mock(() => {}),
         onRefreshSession: mock(() => {}),
         onResume: mock(() => {}),
-        onSearch: mock(() => {}),
-        onSendInterrupt: mock(() => {}),
         onStart: mock(() => {}),
     };
     render(
@@ -69,8 +70,24 @@ function renderWorkspace(overrides: Partial<TerminalWorkspaceProps> = {}) {
 }
 
 describe("interactive terminal workspace", () => {
+    test("keeps retained output visible after the server returns to idle", () => {
+        renderWorkspace({ hasRetainedOutput: true, phase: "idle" });
+
+        expect(screen.getByTestId("terminal-canvas").parentElement).not.toHaveClass(
+            "invisible"
+        );
+        expect(screen.queryByText("Terminal not started")).toBeNull();
+    });
+
     test("starts only from a canonical reviewed location", () => {
         const handlers = renderWorkspace();
+        expect(screen.getByText("Terminal not started")).toBeTruthy();
+        expect(screen.getByTestId("terminal-canvas").parentElement).toHaveClass(
+            "invisible"
+        );
+        expect(screen.getByTestId("terminal-canvas").closest("section")).toHaveClass(
+            "mb-8"
+        );
         fireEvent.click(screen.getByRole("button", { name: "Start terminal" }));
         expect(handlers.onStart).toHaveBeenCalledTimes(1);
 
@@ -82,30 +99,51 @@ describe("interactive terminal workspace", () => {
         );
         expect(handlers.onLocation).toHaveBeenCalledWith({
             path: "/../private",
-            rootId: "dashboard",
+            rootId: "openclaw",
         });
     });
 
-    test("exposes keyboard, search, copy, clear, and focus controls without React terminal content", () => {
-        const handlers = renderWorkspace({ phase: "connected", session });
-        const search = screen.getByRole("searchbox", {
-            name: "Search terminal output",
+    test("offers the reviewed OpenClaw, Docker, and Dashboard starting roots", async () => {
+        const handlers = renderWorkspace();
+        const user = userEvent.setup();
+        const rootSelect = screen.getByRole("button", {
+            name: /Terminal starting root/,
         });
-        fireEvent.change(search, { target: { value: "worker" } });
-        fireEvent.keyDown(search, { key: "Enter" });
-        fireEvent.click(screen.getByRole("button", { name: "Send Ctrl+C" }));
+
+        await user.click(rootSelect);
+        expect(screen.getByRole("option", { name: /OpenClaw/ })).toBeTruthy();
+        expect(screen.getByRole("option", { name: /Docker/ })).toBeTruthy();
+        expect(screen.getByRole("option", { name: /Mira Dashboard/ })).toBeTruthy();
+
+        await user.click(screen.getByRole("option", { name: /Docker/ }));
+        expect(handlers.onLocation).toHaveBeenCalledWith({
+            path: "/",
+            rootId: "docker",
+        });
+    });
+
+    test("keeps terminal input in the canvas and exposes only local canvas controls", () => {
+        const handlers = renderWorkspace({ phase: "connected", session });
         fireEvent.click(screen.getByRole("button", { name: "Copy terminal selection" }));
         fireEvent.click(screen.getByRole("button", { name: "Focus terminal" }));
         fireEvent.click(
             screen.getByRole("button", { name: "Clear local terminal buffer" })
         );
 
-        expect(handlers.onSearch).toHaveBeenCalledWith("worker", "next");
-        expect(handlers.onSendInterrupt).toHaveBeenCalledTimes(1);
+        expect(screen.queryByRole("searchbox")).toBeNull();
+        expect(screen.queryByRole("button", { name: "Send Ctrl+C" })).toBeNull();
+        expect(
+            screen.getByText(/Ends after 30 minutes idle · 8 hour limit/)
+        ).toBeTruthy();
         expect(handlers.onCopySelection).toHaveBeenCalledTimes(1);
         expect(handlers.onFocus).toHaveBeenCalledTimes(1);
         expect(handlers.onClear).toHaveBeenCalledTimes(1);
         expect(screen.getByTestId("terminal-canvas")).toBeTruthy();
+        expect(screen.getByTestId("terminal-canvas").parentElement).not.toHaveClass(
+            "invisible"
+        );
+        expect(screen.queryByText("Terminal not started")).toBeNull();
+        expect(screen.getByRole("button", { name: "End terminal" })).toBeEnabled();
     });
 
     test("requires explicit confirmation before ending the worker PTY", () => {

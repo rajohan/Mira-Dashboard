@@ -1,0 +1,9 @@
+{
+  "$id": "urn:mira-dashboard:system.documentationReference.input",
+  "type": "object",
+  "properties": {},
+  "required": [],
+  "additionalProperties": false,
+  "default": {},
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

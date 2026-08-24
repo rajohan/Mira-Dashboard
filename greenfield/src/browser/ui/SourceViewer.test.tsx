@@ -87,4 +87,43 @@ describe("SourceViewer", () => {
             container.querySelector("[data-testid='syntax-highlighted-source']")
         ).toBeNull();
     });
+
+    test("marks source search matches without changing the copied content", () => {
+        const content = '{\n  "status": "ready"\n}';
+        const { container } = render(
+            <SourceViewer
+                ariaLabel="status.json source"
+                content={content}
+                copyLabel="Copy status.json"
+                highlightQuery="READY"
+                language="json"
+                languageLabel="JSON"
+            />
+        );
+
+        expect(container.querySelector("mark")).toHaveTextContent("ready");
+        expect(container.querySelector("code[data-language='json']")?.textContent).toBe(
+            content
+        );
+        expect(screen.queryByTestId("syntax-highlighted-source")).toBeNull();
+    });
+
+    test("caps marks in large source documents", () => {
+        const content = "e ".repeat(1005);
+        const { container } = render(
+            <SourceViewer
+                ariaLabel="large.json source"
+                content={content}
+                copyLabel="Copy large.json"
+                highlightQuery="e"
+                language="json"
+                languageLabel="JSON"
+            />
+        );
+
+        expect(container.querySelectorAll("mark")).toHaveLength(1000);
+        expect(container.querySelector("code[data-language='json']")?.textContent).toBe(
+            content
+        );
+    });
 });

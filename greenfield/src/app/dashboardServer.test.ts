@@ -1049,11 +1049,13 @@ describe("Dashboard workspace operations composition", () => {
                 now: () => authenticationTestNow,
                 terminalBrokerDirectory: brokerDirectory,
                 terminalBrokerSocket: path.join(brokerDirectory, "terminal.sock"),
-                workspaceRoot: {
-                    id: "workspace",
-                    label: "Workspace",
-                    path: workspaceRoot,
-                },
+                roots: [
+                    {
+                        id: "workspace",
+                        label: "Workspace",
+                        path: workspaceRoot,
+                    },
+                ],
                 writeAdmission: testImmediateDatabaseWriteAdmission,
             });
 

@@ -19,6 +19,6 @@ export function logLevelIsVisible(
     level: LogLine["severity"],
     activeLevels: ReadonlySet<FilterableLogLevel>
 ): boolean {
-    if (level === "unknown") return activeLevels.size === filterableLogLevels.length;
+    if (level === "unknown") return activeLevels.has("info");
     return activeLevels.has(level);
 }

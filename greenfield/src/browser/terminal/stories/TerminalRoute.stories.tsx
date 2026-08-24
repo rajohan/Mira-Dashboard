@@ -23,7 +23,7 @@ const dockerContainerId = "1".repeat(64);
 const runtime = {
     clientMessageMaximumBytes: 16 * 1024,
     defaultLocation: { path: "/", rootId: "dashboard" },
-    idleTimeoutMs: 10 * 60 * 1000,
+    idleTimeoutMs: 30 * 60 * 1000,
     mode: "pty",
     outputReplayMaximumBytes: 256 * 1024,
     reconnectGraceMs: 15 * 1000,
@@ -32,7 +32,7 @@ const runtime = {
         { defaultPath: "/", id: "workspace", label: "Mira workspace" },
     ],
     serverMessageMaximumBytes: 32 * 1024,
-    sessionMaximumDurationMs: 30 * 60 * 1000,
+    sessionMaximumDurationMs: 8 * 60 * 60 * 1000,
     supportsInput: true,
     supportsPty: true,
     supportsResize: true,
@@ -97,7 +97,6 @@ function createStoryEmulator(): TerminalEmulator {
         },
         onInput: () => () => {},
         reset() {},
-        search: () => false,
         setInputEnabled() {},
         write(_data, callback) {
             callback();

@@ -143,6 +143,25 @@ describe("system health diagnostics procedure", () => {
     });
 });
 
+describe("system documentation reference procedure", () => {
+    test("serves generated documentation only to a browser session", async () => {
+        const system = await caller();
+        const documents = await system.documentationReference();
+        expect(documents).toContainEqual(
+            expect.objectContaining({ kind: "markdown", path: "README.md" })
+        );
+
+        const anonymous = await caller({ kind: "anonymous" });
+        const automation = await caller(createTestAutomationAuthentication([]));
+        expect(
+            await captureFailure(() => anonymous.documentationReference())
+        ).toMatchObject({ code: "UNAUTHORIZED" });
+        expect(
+            await captureFailure(() => automation.documentationReference())
+        ).toMatchObject({ code: "FORBIDDEN" });
+    });
+});
+
 describe("system metrics procedure", () => {
     test("returns the runtime snapshot to an authenticated browser session", async () => {
         const system = await caller();

@@ -682,6 +682,7 @@ export const procedureExpectedErrorPolicy = freezeProcedureExpectedErrorPolicy({
         "UNAUTHORIZED",
     ],
     "system.healthDiagnostics": ["FORBIDDEN", "UNAUTHORIZED"],
+    "system.documentationReference": ["FORBIDDEN", "UNAUTHORIZED"],
     "system.metrics": ["FORBIDDEN", "SERVICE_UNAVAILABLE", "UNAUTHORIZED"],
     "system.runtimeIdentity": [],
     "tasks.addUpdate": [

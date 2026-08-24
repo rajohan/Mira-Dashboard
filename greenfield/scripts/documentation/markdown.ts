@@ -85,7 +85,80 @@ function errorReasonsLabel(contract: ProcedureContract): string {
  * @returns Generated Markdown index.
  */
 export function renderGeneratedIndex(): string {
-    return `${documentHeader("Generated Dashboard Reference", "bun run docs:generate")}## Current Generated Subset\n\n- [tRPC procedures](procedures.md)\n- [Raw HTTP routes](raw-http.md)\n- [Realtime events](realtime-events.md)\n- [Browser routes and features](routes-and-features.md)\n- [Application configuration](configuration.md)\n- [Packages and runtime](packages-and-runtime.md)\n- [Transport schemas](schemas/)\n\n## Required Before Cutover\n\nThe target generator must also emit the database reference plus OpenAPI 3.1 for true raw HTTP endpoints. The generated browser documentation route must render the complete checked-in set. These artifacts are future gates, not current generated outputs.\n`;
+    return `${documentHeader("Generated Dashboard Reference", "bun run docs:generate")}The complete immutable reference is available in the authenticated Dashboard at \`/docs\`.\n\n- [tRPC procedures](procedures.md)\n- [Raw HTTP routes](raw-http.md)\n- [Raw HTTP OpenAPI 3.1](openapi.raw-http.json)\n- [Realtime events](realtime-events.md)\n- [Database schema](database.md)\n- [Browser routes and features](routes-and-features.md)\n- [Application configuration](configuration.md)\n- [Packages and runtime](packages-and-runtime.md)\n- [Transport schemas](schemas/)\n`;
+}
+
+/** One immutable Drizzle table projected into generated documentation. */
+export interface DatabaseTableDocumentationInput {
+    readonly checks: readonly { readonly expression: string; readonly name: string }[];
+    readonly columns: readonly {
+        readonly autoincrement: boolean;
+        readonly defaultValue: string | null;
+        readonly name: string;
+        readonly notNull: boolean;
+        readonly primaryKey: boolean;
+        readonly type: string;
+    }[];
+    readonly name: string;
+    readonly foreignKeys: readonly {
+        readonly columns: readonly string[];
+        readonly name: string;
+        readonly onDelete: string;
+        readonly onUpdate: string;
+        readonly referencedColumns: readonly string[];
+        readonly referencedTable: string;
+    }[];
+    readonly indexes: readonly {
+        readonly columns: readonly string[];
+        readonly name: string;
+        readonly unique: boolean;
+        readonly where: string | null;
+    }[];
+}
+
+function databaseDefaultLabel(
+    column: DatabaseTableDocumentationInput["columns"][number]
+): string {
+    if (column.autoincrement) return "Autoincrement";
+    if (column.defaultValue === null) return "—";
+    return `\`${markdownTableCell(column.defaultValue)}\``;
+}
+
+/**
+ * Renders the authoritative SQLite table and column catalog.
+ * @param tables Tables projected from the checked migration snapshot.
+ * @returns Generated database Markdown.
+ */
+export function renderDatabase(
+    tables: readonly DatabaseTableDocumentationInput[]
+): string {
+    if (tables.length === 0) throw new Error("Database table registry is empty");
+    const names = tables.map(({ name }) => name);
+    if (new Set(names).size !== names.length) {
+        throw new Error("Database table registry contains duplicates");
+    }
+    const sections = tables
+        .toSorted((left, right) => left.name.localeCompare(right.name))
+        .map((table) => {
+            const rows = table.columns.map(
+                (column) =>
+                    `| \`${markdownTableCell(column.name)}\` | \`${markdownTableCell(column.type)}\` | ${column.notNull ? "No" : "Yes"} | ${column.primaryKey ? "Yes" : "No"} | ${databaseDefaultLabel(column)} |`
+            );
+            const foreignKeys = table.foreignKeys.map(
+                (foreignKey) =>
+                    `| \`${markdownTableCell(foreignKey.name)}\` | \`${foreignKey.columns.map(markdownTableCell).join(", ")}\` | \`${markdownTableCell(foreignKey.referencedTable)}(${foreignKey.referencedColumns.map(markdownTableCell).join(", ")})\` | \`${markdownTableCell(foreignKey.onUpdate)}\` | \`${markdownTableCell(foreignKey.onDelete)}\` |`
+            );
+            const indexes = table.indexes.map(
+                (index) =>
+                    `| \`${markdownTableCell(index.name)}\` | \`${index.columns.map(markdownTableCell).join(", ")}\` | ${index.unique ? "Yes" : "No"} | ${index.where === null ? "—" : `\`${markdownTableCell(index.where)}\``} |`
+            );
+            const checks = table.checks.map(
+                (check) =>
+                    `| \`${markdownTableCell(check.name)}\` | \`${markdownTableCell(check.expression)}\` |`
+            );
+            return `## \`${markdownTableCell(table.name)}\`\n\n| Column | SQLite type | Nullable | Primary key | Default |\n| --- | --- | --- | --- | --- |\n${rows.join("\n")}\n\n### Foreign keys\n\n| Name | Columns | References | On update | On delete |\n| --- | --- | --- | --- | --- |\n${foreignKeys.length === 0 ? "| — | — | — | — | — |" : foreignKeys.join("\n")}\n\n### Indexes\n\n| Name | Columns | Unique | Predicate |\n| --- | --- | --- | --- |\n${indexes.length === 0 ? "| — | — | — | — |" : indexes.join("\n")}\n\n### Checks\n\n| Name | Expression |\n| --- | --- |\n${checks.length === 0 ? "| — | — |" : checks.join("\n")}`;
+        });
+    return `${documentHeader("Database Schema", "bun run docs:generate")}This reference is generated from the exact Drizzle schema used by migrations and runtime composition.\n\n${sections.join("\n\n")}\n`;
 }
 
 /** Browser route metadata required by generated documentation. */

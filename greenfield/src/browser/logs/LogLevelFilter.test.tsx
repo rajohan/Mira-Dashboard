@@ -27,11 +27,11 @@ function Fixture() {
 }
 
 describe("log level filter", () => {
-    test("filters every exact legacy level and excludes unknown from every subset", () => {
+    test("filters every exact legacy level and treats unknown as info", () => {
         for (const level of filterableLogLevels) {
             const active = new Set([level]);
             expect(logLevelIsVisible(level, active)).toBe(true);
-            expect(logLevelIsVisible("unknown", active)).toBe(false);
+            expect(logLevelIsVisible("unknown", active)).toBe(level === "info");
             for (const other of filterableLogLevels) {
                 expect(logLevelIsVisible(other, active)).toBe(other === level);
             }

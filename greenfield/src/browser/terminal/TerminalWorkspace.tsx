@@ -1,14 +1,4 @@
-import {
-    ChevronDown,
-    ChevronUp,
-    Clipboard,
-    Eraser,
-    Focus,
-    Keyboard,
-    Play,
-    RefreshCw,
-    SquareTerminal,
-} from "lucide-react";
+import { Clipboard, Eraser, Focus, Play, RefreshCw, SquareTerminal } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import * as v from "valibot";
 
@@ -19,6 +9,7 @@ import {
     type TerminalRuntime,
     type TerminalSessionSummary,
 } from "../../contracts/terminal.ts";
+import { cn } from "../lib/classNames.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Badge } from "../ui/Badge.tsx";
@@ -50,6 +41,7 @@ export interface TerminalWorkspaceProps {
     readonly canvas: ReactNode;
     readonly dimensions: TerminalDimensions;
     readonly endBusy?: boolean;
+    readonly hasRetainedOutput?: boolean;
     readonly inputPaused?: boolean;
     readonly location: TerminalLocation;
     readonly onClear: () => void;
@@ -59,8 +51,6 @@ export interface TerminalWorkspaceProps {
     readonly onLocation: (location: TerminalLocation) => void;
     readonly onRefreshSession: () => void;
     readonly onResume: () => void;
-    readonly onSearch: (query: string, direction: "next" | "previous") => void;
-    readonly onSendInterrupt: () => void;
     readonly onStart: () => void;
     readonly phase: TerminalWorkspacePhase;
     readonly replayGap?: boolean;
@@ -105,6 +95,7 @@ export function TerminalWorkspace({
     canvas,
     dimensions,
     endBusy = false,
+    hasRetainedOutput = false,
     inputPaused = false,
     location,
     onClear,
@@ -114,8 +105,6 @@ export function TerminalWorkspace({
     onLocation,
     onRefreshSession,
     onResume,
-    onSearch,
-    onSendInterrupt,
     onStart,
     phase,
     replayGap = false,
@@ -125,9 +114,8 @@ export function TerminalWorkspace({
     terminalReady,
 }: TerminalWorkspaceProps) {
     const [confirmEnd, setConfirmEnd] = useState(false);
-    const [searchQuery, setSearchQuery] = useState("");
-    const connected = phase === "connected";
     const hasSession = session !== undefined;
+    const showTerminalCanvas = hasSession || hasRetainedOutput;
     const resumeAvailable =
         phase === "active-elsewhere" && session?.state === "awaiting-reconnect";
     const startAvailable = !hasSession && phase !== "starting" && phase !== "connecting";
@@ -158,9 +146,10 @@ export function TerminalWorkspace({
                             {inputPaused && <Badge variant="warning">Input paused</Badge>}
                         </div>
                         <Text className="mt-1" size="sm" tone="muted">
-                            {dimensions.columns} × {dimensions.rows} · Ends automatically
-                            after {Math.round(runtime.sessionMaximumDurationMs / 60_000)}
-                            minutes
+                            {dimensions.columns} × {dimensions.rows} · Ends after{" "}
+                            {Math.round(runtime.idleTimeoutMs / 60_000)} minutes idle ·{" "}
+                            {Math.round(runtime.sessionMaximumDurationMs / 3_600_000)}{" "}
+                            hour limit
                         </Text>
                         {session !== undefined && (
                             <Text className="mt-1" size="sm" tone="muted">
@@ -278,55 +267,14 @@ export function TerminalWorkspace({
 
             <section
                 aria-labelledby="terminal-canvas-heading"
-                className="border-primary-700 bg-primary-950 flex min-h-[28rem] flex-1 flex-col overflow-hidden rounded-xl border shadow-sm shadow-black/20"
+                className="border-primary-700 bg-primary-950 mb-8 flex min-h-[28rem] flex-1 flex-col overflow-hidden rounded-xl border shadow-sm shadow-black/20"
             >
                 <div className="border-primary-700 bg-primary-900 flex shrink-0 flex-wrap items-center gap-2 border-b p-2">
                     <Heading className="sr-only" id="terminal-canvas-heading" level={2}>
                         Terminal canvas
                     </Heading>
                     <Icon className="text-primary-400" icon={SquareTerminal} size="sm" />
-                    <div className="flex min-w-0 flex-1 items-center gap-1 sm:max-w-md">
-                        <Input
-                            aria-label="Search terminal output"
-                            className="h-9"
-                            onChange={(event) =>
-                                setSearchQuery(event.currentTarget.value)
-                            }
-                            onKeyDown={(event) => {
-                                if (event.key === "Enter") {
-                                    onSearch(
-                                        searchQuery,
-                                        event.shiftKey ? "previous" : "next"
-                                    );
-                                }
-                            }}
-                            placeholder="error"
-                            type="search"
-                            value={searchQuery}
-                        />
-                        <IconOnlyButton
-                            disabled={searchQuery.length === 0}
-                            icon={ChevronUp}
-                            label="Previous terminal search result"
-                            onClick={() => onSearch(searchQuery, "previous")}
-                            variant="ghost"
-                        />
-                        <IconOnlyButton
-                            disabled={searchQuery.length === 0}
-                            icon={ChevronDown}
-                            label="Next terminal search result"
-                            onClick={() => onSearch(searchQuery, "next")}
-                            variant="ghost"
-                        />
-                    </div>
                     <div className="ml-auto flex flex-wrap items-center gap-1">
-                        <IconOnlyButton
-                            disabled={!connected}
-                            icon={Keyboard}
-                            label="Send Ctrl+C"
-                            onClick={onSendInterrupt}
-                            variant="ghost"
-                        />
                         <IconOnlyButton
                             icon={Clipboard}
                             label="Copy terminal selection"
@@ -347,7 +295,23 @@ export function TerminalWorkspace({
                         />
                     </div>
                 </div>
-                <div className="min-h-0 flex-1">{canvas}</div>
+                <div className="relative min-h-0 flex-1">
+                    <div className={cn("size-full", !showTerminalCanvas && "invisible")}>
+                        {canvas}
+                    </div>
+                    {!showTerminalCanvas && (
+                        <div className="bg-primary-950/90 pointer-events-none absolute inset-0 flex items-center justify-center p-6 text-center">
+                            <div>
+                                <Text className="font-semibold">
+                                    Terminal not started
+                                </Text>
+                                <Text className="mt-1" size="sm" tone="muted">
+                                    Choose a starting folder to open an interactive shell.
+                                </Text>
+                            </div>
+                        </div>
+                    )}
+                </div>
             </section>
 
             <output aria-live="polite" className="sr-only">

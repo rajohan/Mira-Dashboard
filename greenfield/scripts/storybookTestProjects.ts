@@ -9,6 +9,9 @@ const storyFileSuffix = ".stories.tsx";
 
 /** Story files that require an otherwise idle three-worker Storybook project. */
 export const exclusiveStorybookTestFiles: readonly string[] = Object.freeze([
+    // ResizeObserver and animation-frame driven virtual row remeasurement becomes
+    // timing-sensitive when coverage runs compete with the standard story workers.
+    "src/browser/agents/stories/AgentHistoryTable.stories.tsx",
     "src/browser/ui/stories/SourceViewer.stories.tsx",
 ]);
 

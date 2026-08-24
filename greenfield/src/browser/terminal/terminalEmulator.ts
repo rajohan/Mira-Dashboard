@@ -1,5 +1,4 @@
 import { FitAddon } from "@xterm/addon-fit";
-import { SearchAddon } from "@xterm/addon-search";
 import { Terminal, type IDisposable, type ITerminalOptions } from "@xterm/xterm";
 
 import {
@@ -92,7 +91,6 @@ export interface TerminalEmulator {
     open(container: HTMLElement): void;
     onInput(callback: (data: Uint8Array) => void): () => void;
     reset(): void;
-    search(query: string, direction: "next" | "previous"): boolean;
     setInputEnabled(enabled: boolean): void;
     write(data: Uint8Array, callback: () => void): void;
 }
@@ -119,17 +117,14 @@ function binaryStringBytes(value: string): Uint8Array {
 export function createXtermTerminalEmulator(): TerminalEmulator {
     const terminal = new Terminal(terminalEmulatorOptions);
     const fitAddon = new FitAddon();
-    const searchAddon = new SearchAddon({ highlightLimit: 500 });
     const disposables: IDisposable[] = [];
     const encoder = new TextEncoder();
     terminal.loadAddon(fitAddon);
-    terminal.loadAddon(searchAddon);
     // Explicitly consume remote clipboard writes. No clipboard addon is loaded.
     disposables.push(terminal.parser.registerOscHandler(52, () => true));
 
     const emulator: TerminalEmulator = {
         clear() {
-            searchAddon.clearDecorations();
             terminal.clear();
         },
         async copySelection() {
@@ -147,7 +142,6 @@ export function createXtermTerminalEmulator(): TerminalEmulator {
         },
         dispose() {
             for (const disposable of disposables) disposable.dispose();
-            searchAddon.dispose();
             fitAddon.dispose();
             terminal.dispose();
         },
@@ -189,28 +183,8 @@ export function createXtermTerminalEmulator(): TerminalEmulator {
             };
         },
         reset() {
-            searchAddon.clearDecorations();
             terminal.reset();
             terminal.clear();
-        },
-        search(query, direction) {
-            if (query.length === 0) {
-                searchAddon.clearDecorations();
-                return false;
-            }
-            const options = {
-                caseSensitive: false,
-                decorations: {
-                    activeMatchBackground: "#315b91",
-                    activeMatchColorOverviewRuler: "#a7c7ff",
-                    matchBackground: "#4b3c16",
-                    matchOverviewRuler: "#d9b94f",
-                },
-                incremental: direction === "next",
-            } as const;
-            return direction === "next"
-                ? searchAddon.findNext(query, options)
-                : searchAddon.findPrevious(query, options);
         },
         setInputEnabled(enabled) {
             terminal.options.disableStdin = !enabled;

@@ -27,8 +27,8 @@ export const terminalSocketBufferedMaximumBytes = 1024 * 1024;
 export const terminalOutputReplayMaximumBytes = 256 * 1024;
 export const terminalConnectionTicketTtlMs = 60 * 1000;
 export const terminalReconnectGraceMs = 15 * 1000;
-export const terminalIdleTimeoutMs = 10 * 60 * 1000;
-export const terminalSessionMaximumDurationMs = 30 * 60 * 1000;
+export const terminalIdleTimeoutMs = 30 * 60 * 1000;
+export const terminalSessionMaximumDurationMs = 8 * 60 * 60 * 1000;
 export const terminalConcurrentSessionMaximum = 4;
 /** Binary server frames start with one kind byte and one unsigned 64-bit sequence. */
 export const terminalBinaryOutputKind = 1;

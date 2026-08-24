@@ -155,6 +155,20 @@ describe("source-boundary policy", () => {
         ).toBeUndefined();
         expect(
             validateSourceImport(
+                "src/server/domains/system/procedures.ts",
+                staticImport("../../../../docs/generated/browser-reference.json")
+            )
+        ).toBeUndefined();
+        expect(
+            validateSourceImport(
+                "scripts/documentation/artifacts.ts",
+                staticImport(
+                    "../../migrations/20260804022252_dashboard-foundation/snapshot.json"
+                )
+            )
+        ).toBeUndefined();
+        expect(
+            validateSourceImport(
                 ".storybook/vitest.config.ts",
                 staticImport("../scripts/storybookTestProjects.ts")
             )
@@ -216,6 +230,12 @@ describe("source-boundary policy", () => {
                 staticImport("../../.storybook/main.ts")
             )?.message
         ).toContain("browser may not import storybook-config");
+        expect(
+            validateSourceImport(
+                "src/browser/dashboard.ts",
+                staticImport("../../docs/generated/browser-reference.json")
+            )?.message
+        ).toContain("browser may not import unknown");
         expect(
             validateSourceImport(
                 "src/browser/ui/stories/Button.stories.tsx",

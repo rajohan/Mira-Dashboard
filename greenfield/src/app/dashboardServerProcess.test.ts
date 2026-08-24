@@ -16,6 +16,7 @@ import {
 } from "../shared/releaseManifest.ts";
 import {
     type DashboardWebProcessDependencies,
+    resolveTerminalWorkspaceRoots,
     runDashboardWebProcess,
 } from "./dashboardServer.ts";
 import type { ApplicationServer } from "./server.ts";
@@ -82,6 +83,23 @@ const processOptions = Object.freeze({
         PORT: "3100",
     },
     releaseRoot: release.releaseRoot,
+});
+
+test("resolves configured terminal roots without web-sandbox-only paths", async () => {
+    const roots = await resolveTerminalWorkspaceRoots(
+        openClawRoot,
+        projectRoot,
+        workspaceRoot
+    );
+
+    expect(roots).toEqual([
+        { id: "workspace", label: "Workspace", path: workspaceRoot },
+        { id: "openclaw", label: "OpenClaw", path: openClawRoot },
+        { id: "docker", label: "Docker", optional: true, path: "/opt/docker" },
+        { id: "dashboard", label: "Mira Dashboard", path: projectRoot },
+    ]);
+    expect(Object.isFrozen(roots)).toBe(true);
+    expect(roots.every((root) => Object.isFrozen(root))).toBe(true);
 });
 
 function unhandledFrontendAsset(): Promise<Response | undefined> {
@@ -191,6 +209,29 @@ function processFixture(totpFailure?: Error, cutoverValidation = false) {
             expect(options.terminalBrokerSocket).toBe(
                 layout.production.state.terminalBrokerSocket
             );
+            expect(options.terminalRoots).toEqual([
+                {
+                    id: "workspace",
+                    label: "Workspace",
+                    path: workspaceRoot,
+                },
+                {
+                    id: "openclaw",
+                    label: "OpenClaw",
+                    path: openClawRoot,
+                },
+                {
+                    id: "docker",
+                    label: "Docker",
+                    optional: true,
+                    path: "/opt/docker",
+                },
+                {
+                    id: "dashboard",
+                    label: "Mira Dashboard",
+                    path: layout.root,
+                },
+            ]);
             events.push("server-create");
             const server = Object.freeze({
                 port: 3100,
@@ -225,6 +266,40 @@ function processFixture(totpFailure?: Error, cutoverValidation = false) {
         resolveProjectLayout(observedProjectRoot) {
             events.push(`layout:${observedProjectRoot}`);
             return Promise.resolve(layout);
+        },
+        resolveTerminalRoots(
+            observedOpenClawRoot,
+            observedDashboardRoot,
+            observedWorkspaceRoot
+        ) {
+            expect(observedOpenClawRoot).toBe(openClawRoot);
+            expect(observedDashboardRoot).toBe(layout.root);
+            expect(observedWorkspaceRoot).toBe(workspaceRoot);
+            return Promise.resolve(
+                Object.freeze([
+                    Object.freeze({
+                        id: "workspace",
+                        label: "Workspace",
+                        path: workspaceRoot,
+                    }),
+                    Object.freeze({
+                        id: "openclaw",
+                        label: "OpenClaw",
+                        path: openClawRoot,
+                    }),
+                    Object.freeze({
+                        id: "docker",
+                        label: "Docker",
+                        optional: true,
+                        path: "/opt/docker",
+                    }),
+                    Object.freeze({
+                        id: "dashboard",
+                        label: "Mira Dashboard",
+                        path: layout.root,
+                    }),
+                ])
+            );
         },
         resolveOpenClawFileRoot(observedOpenClawRoot, observedProductionRoot) {
             expect(observedOpenClawRoot).toBe(openClawRoot);

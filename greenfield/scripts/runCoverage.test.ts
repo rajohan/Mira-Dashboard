@@ -64,9 +64,9 @@ describe("coverage runner", () => {
 
     test("discovers exact current inventories and creates nine complete batches", async () => {
         const inventories = await loadCoverageTestInventories(projectRoot);
-        expect(inventories.bun).toHaveLength(510);
-        expect(inventories.browser).toHaveLength(192);
-        expect(inventories.storybook).toHaveLength(89);
+        expect(inventories.bun).toHaveLength(509);
+        expect(inventories.browser).toHaveLength(193);
+        expect(inventories.storybook).toHaveLength(90);
 
         const plans = createCoveragePartitionPlan("/tmp/coverage", inventories);
         expect(plans.map(({ name }) => name)).toEqual([
@@ -91,21 +91,21 @@ describe("coverage runner", () => {
                     .filter(({ partition }) => partition === "bun")
                     .flatMap(({ testFiles }) => testFiles)
             ).size
-        ).toBe(510);
+        ).toBe(509);
         expect(
             new Set(
                 plans
                     .filter(({ partition }) => partition === "browser")
                     .flatMap(({ testFiles }) => testFiles)
             ).size
-        ).toBe(192);
+        ).toBe(193);
         expect(
             new Set(
                 plans
                     .filter(({ partition }) => partition === "storybook")
                     .flatMap(({ testFiles }) => testFiles)
             ).size
-        ).toBe(89);
+        ).toBe(90);
     });
 
     test("keeps timing scheduling and exact parallel-3 in every child", () => {
@@ -162,7 +162,7 @@ describe("coverage runner", () => {
             "/tmp/dashboard",
             storybookPlan as NonNullable<typeof storybookPlan>
         );
-        expect(storybookCommand.slice(0, 11)).toEqual([
+        expect(storybookCommand.slice(0, 12)).toEqual([
             process.execPath,
             "/tmp/dashboard/node_modules/vitest/vitest.mjs",
             "run",
@@ -170,6 +170,7 @@ describe("coverage runner", () => {
             ".storybook/vitest.config.ts",
             "--bail=1",
             "--project=storybook-exclusive-001",
+            "--project=storybook-exclusive-002",
             "--project=storybook",
             "--maxWorkers=3",
             "--no-isolate",
@@ -528,8 +529,23 @@ describe("coverage runner", () => {
                 )
             )
         ).not.toThrow();
+        expect(
+            normalizeStorybookProductionCoverage(
+                [
+                    "SF:docs/generated/browser-reference.json",
+                    "LF:1",
+                    "LH:1",
+                    "end_of_record",
+                    "SF:src/browser/ui/Badge.tsx",
+                    "LF:3",
+                    "LH:3",
+                    "end_of_record",
+                ].join("\n")
+            )
+        ).toBe("SF:src/browser/ui/Badge.tsx\nLF:3\nLH:3\nend_of_record\n");
         for (const sourcePath of [
             ".storybook/preview.tsx",
+            "docs/generated/other.json",
             "src/browser/ui/stories/Badge.stories.tsx",
             "src/browser/storySupport/dashboardPageStoryHarness.tsx",
             "src/browser/ui/Badge.test.tsx",

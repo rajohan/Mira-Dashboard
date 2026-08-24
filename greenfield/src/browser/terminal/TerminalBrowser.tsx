@@ -153,6 +153,7 @@ export function TerminalBrowser({
     const [endBusy, setEndBusy] = useState(false);
     const [inputPaused, setInputPaused] = useState(false);
     const [localPhase, setLocalPhase] = useState<TerminalWorkspacePhase>("idle");
+    const [hasRetainedOutput, setHasRetainedOutput] = useState(false);
     const [localSession, setLocalSession] = useState<TerminalSessionSummary>();
     const [replayGap, setReplayGap] = useState(false);
     const [selectedLocation, setSelectedLocation] = useState<TerminalLocation>();
@@ -365,6 +366,7 @@ export function TerminalBrowser({
                             return false;
                         }
                         pendingOutputBytes.current += data.byteLength;
+                        setHasRetainedOutput(true);
                         terminal.write(data, () => {
                             pendingOutputBytes.current = Math.max(
                                 0,
@@ -492,6 +494,7 @@ export function TerminalBrowser({
         setActionError(undefined);
         setReplayGap(false);
         setStartBusy(true);
+        setHasRetainedOutput(false);
         setLocalPhase("starting");
         setAnnouncement("Starting interactive terminal.");
         terminal.reset();
@@ -604,10 +607,12 @@ export function TerminalBrowser({
             }
             dimensions={dimensions}
             endBusy={endBusy}
+            hasRetainedOutput={hasRetainedOutput}
             inputPaused={inputPaused}
             location={location}
             onClear={() => {
                 emulator.current?.clear();
+                setHasRetainedOutput(false);
                 setAnnouncement("Local terminal buffer cleared.");
             }}
             onCopySelection={() => {
@@ -627,21 +632,6 @@ export function TerminalBrowser({
             onLocation={setSelectedLocation}
             onRefreshSession={() => void activeQuery.refetch()}
             onResume={() => void resumeTerminal()}
-            onSearch={(query, direction) => {
-                const found = emulator.current?.search(query, direction) ?? false;
-                setAnnouncement(
-                    found
-                        ? "Terminal search result selected."
-                        : "No matching terminal text."
-                );
-            }}
-            onSendInterrupt={() => {
-                const sent = socket.current?.sendControl({
-                    signal: "SIGINT",
-                    type: "signal",
-                });
-                setAnnouncement(sent ? "Interrupt sent." : "Interrupt was not sent.");
-            }}
             onStart={() => void startTerminal()}
             phase={workspacePhase}
             replayGap={replayGap}

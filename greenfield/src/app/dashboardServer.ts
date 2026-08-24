@@ -240,7 +240,10 @@ import {
     type DashboardChatRuntimeMaintenance,
 } from "./dashboardChatRuntimeMaintenance.ts";
 import { createDashboardLogsService } from "./dashboardLogs.ts";
-import { createDashboardTerminalComposition } from "./dashboardTerminal.ts";
+import {
+    createDashboardTerminalComposition,
+    type DashboardTerminalWorkspaceRoot,
+} from "./dashboardTerminal.ts";
 import { environmentSource } from "./environmentSource.ts";
 import { createServer, type ApplicationServer, type ServerOptions } from "./server.ts";
 
@@ -319,6 +322,7 @@ export interface DashboardServerOptions extends Omit<
     /** Optional only for isolated composition tests; production supplies both paths. */
     readonly terminalBrokerDirectory?: string;
     readonly terminalBrokerSocket?: string;
+    readonly terminalRoots?: readonly DashboardTerminalWorkspaceRoot[];
     readonly totpSecretCipher: TotpSecretCipher;
     readonly trustedProxyAddresses?: readonly string[];
     /** Explicit WebAuthn trust configuration; request host headers are never used. */
@@ -1102,7 +1106,7 @@ export async function createDashboardServer(
                       ...(domainNow === undefined ? {} : { now: domainNow }),
                       terminalBrokerDirectory: options.terminalBrokerDirectory,
                       terminalBrokerSocket: options.terminalBrokerSocket,
-                      workspaceRoot: options.workspaceFileRoot,
+                      roots: options.terminalRoots ?? [options.workspaceFileRoot],
                       writeAdmission: databaseRuntime,
                   });
         let workspaceFileRawHttpHandler: WorkspaceFileRawHttpHandler | undefined;
@@ -1781,8 +1785,42 @@ export interface DashboardWebProcessDependencies {
     readonly resolveProjectLayout: (
         projectRoot: string
     ) => Promise<DashboardProjectLayout>;
+    readonly resolveTerminalRoots: (
+        openClawRoot: string,
+        dashboardRoot: string,
+        workspaceRoot: string
+    ) => Promise<readonly DashboardTerminalWorkspaceRoot[]>;
     readonly resolveOpenClawFileRoot: typeof resolveReviewedOpenClawFileRoot;
     readonly resolveWorkspaceFileRoot: typeof resolveReviewedWorkspaceFileRoot;
+}
+
+export function resolveTerminalWorkspaceRoots(
+    openClawRoot: string,
+    dashboardRoot: string,
+    workspaceRoot: string
+): Promise<readonly DashboardTerminalWorkspaceRoot[]> {
+    const roots: DashboardTerminalWorkspaceRoot[] = [
+        { id: "workspace", label: "Workspace", path: workspaceRoot },
+    ];
+    if (openClawRoot !== workspaceRoot) {
+        roots.push({ id: "openclaw", label: "OpenClaw", path: openClawRoot });
+    }
+    if (workspaceRoot !== "/opt/docker" && openClawRoot !== "/opt/docker") {
+        roots.push({
+            id: "docker",
+            label: "Docker",
+            optional: true,
+            path: "/opt/docker",
+        });
+    }
+    if (
+        dashboardRoot !== workspaceRoot &&
+        dashboardRoot !== openClawRoot &&
+        dashboardRoot !== "/opt/docker"
+    ) {
+        roots.push({ id: "dashboard", label: "Mira Dashboard", path: dashboardRoot });
+    }
+    return Promise.resolve(Object.freeze(roots.map((root) => Object.freeze(root))));
 }
 
 const defaultWebProcessDependencies = Object.freeze({
@@ -1811,6 +1849,7 @@ const defaultWebProcessDependencies = Object.freeze({
     loadRelease: (releasesDirectory, releaseRoot, processRole) =>
         loadRuntimeRelease(releasesDirectory, releaseRoot, processRole),
     resolveProjectLayout: resolveDashboardProjectLayout,
+    resolveTerminalRoots: resolveTerminalWorkspaceRoots,
     resolveOpenClawFileRoot: resolveReviewedOpenClawFileRoot,
     resolveWorkspaceFileRoot: resolveReviewedWorkspaceFileRoot,
 } satisfies DashboardWebProcessDependencies);
@@ -1875,6 +1914,11 @@ export async function runDashboardWebProcess(
         configuration.openClawRoot,
         layout.production.root
     );
+    const terminalRoots = await dependencies.resolveTerminalRoots(
+        openClawFileRoot.path,
+        layout.root,
+        workspaceFileRoot.path
+    );
     const destination = dependencies.createLogDestination(
         layout.production.state.logs,
         "web"
@@ -1935,6 +1979,7 @@ export async function runDashboardWebProcess(
             sessionIdleDurationMs: configuration.sessionIdleDurationMs,
             terminalBrokerDirectory: layout.production.state.terminalBroker,
             terminalBrokerSocket: layout.production.state.terminalBrokerSocket,
+            terminalRoots,
             totpSecretCipher,
             trustedProxyAddresses: configuration.trustedProxyAddresses,
             verifiedReleaseId: release.manifest.source.commitSha,

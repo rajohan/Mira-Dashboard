@@ -34,7 +34,6 @@
 | `@trpc/client` | `11.18.0` | `11.18.0` | runtime |
 | `@trpc/server` | `11.18.0` | `11.18.0` | runtime |
 | `@xterm/addon-fit` | `0.11.0` | `0.11.0` | runtime |
-| `@xterm/addon-search` | `0.16.0` | `0.16.0` | runtime |
 | `@xterm/xterm` | `6.0.0` | `6.0.0` | runtime |
 | `clsx` | `^2.1.1` | `2.1.1` | runtime |
 | `date-fns` | `^4.4.0` | `4.4.0` | runtime |

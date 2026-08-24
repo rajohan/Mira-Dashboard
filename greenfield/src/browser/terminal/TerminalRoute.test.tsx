@@ -11,7 +11,7 @@ test("terminal route is authenticated, lazy registered, and parity-accounted", (
     expect(dashboardRoutePaths).toContain("/terminal");
 });
 
-test("terminal page uses the shared page container without shrinking its workspace", () => {
+test("terminal page removes the redundant intro and preserves a scrollable workspace", () => {
     const rendered = render(
         <TerminalPageLayout>
             <div aria-label="Terminal canvas fixture" className="h-full" />
@@ -22,15 +22,16 @@ test("terminal page uses the shared page container without shrinking its workspa
 
     expect(layout).not.toBeNull();
     expect(layout?.className.split(" ")).toEqual(
-        expect.arrayContaining([
-            "mx-auto",
-            "w-full",
-            "max-w-7xl",
-            "h-full",
-            "min-h-[calc(100dvh-8rem)]",
-        ])
+        expect.arrayContaining(["mx-auto", "w-full", "max-w-7xl", "min-h-full"])
     );
     expect(canvas.parentElement?.className.split(" ")).toEqual(
-        expect.arrayContaining(["mt-8", "min-h-0", "flex-1", "flex-col"])
+        expect.arrayContaining(["min-h-0", "flex-1", "flex-col"])
     );
+    expect(screen.queryByText("Operations")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Terminal" })).toBeNull();
+    expect(
+        screen.queryByText(
+            "Open an interactive terminal that starts in the folder you choose. The Dashboard does not save terminal input or output."
+        )
+    ).toBeNull();
 });

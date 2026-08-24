@@ -592,6 +592,10 @@
         },
         {
             "kind": "query",
+            "name": "system.documentationReference"
+        },
+        {
+            "kind": "query",
             "name": "system.healthDiagnostics"
         },
         {

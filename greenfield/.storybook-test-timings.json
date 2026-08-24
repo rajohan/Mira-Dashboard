@@ -11,6 +11,7 @@
         "src/browser/chat/stories/ChatRoute.stories.tsx": 10572,
         "src/browser/chat/stories/ChatWorkspace.stories.tsx": 23493,
         "src/browser/database/stories/DatabaseRoute.stories.tsx": 3321,
+        "src/browser/docs/stories/DocsRoute.stories.tsx": 1500,
         "src/browser/delivery/stories/DeliveryRoute.stories.tsx": 11961,
         "src/browser/docker/stories/DockerRoute.stories.tsx": 15984,
         "src/browser/files/stories/FilesRoute.stories.tsx": 3632,

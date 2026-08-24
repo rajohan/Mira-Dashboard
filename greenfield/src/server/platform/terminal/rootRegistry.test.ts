@@ -46,7 +46,7 @@ describe("terminal starting-root registry", () => {
         ).toBe(path.join(root, "workspace"));
     });
 
-    test("sorts public roots without allowing duplicate ids", async () => {
+    test("sorts public roots while preserving the first reviewed root as default", async () => {
         const first = await temporaryDirectory("mira-terminal-first-");
         const second = await temporaryDirectory("mira-terminal-second-");
         const registry = await createTerminalRootRegistry([
@@ -57,6 +57,10 @@ describe("terminal starting-root registry", () => {
             "a-root",
             "z-root",
         ]);
+        expect(registry.runtime().defaultLocation).toEqual({
+            path: "/",
+            rootId: "z-root",
+        });
 
         expect(
             createTerminalRootRegistry([
@@ -64,6 +68,21 @@ describe("terminal starting-root registry", () => {
                 { absolutePath: second, id: "same", label: "B" },
             ])
         ).rejects.toBeInstanceOf(TerminalRootAccessError);
+    });
+
+    test("omits an unavailable optional convenience root", async () => {
+        const root = await temporaryDirectory("mira-terminal-required-");
+        const registry = await createTerminalRootRegistry([
+            { absolutePath: root, id: "workspace", label: "Workspace" },
+            {
+                absolutePath: path.join(root, "missing"),
+                id: "optional",
+                label: "Optional",
+                optional: true,
+            },
+        ]);
+
+        expect(registry.runtime().roots.map(({ id }) => id)).toEqual(["workspace"]);
     });
 
     test("rejects a symlinked starting directory that escapes its reviewed root", async () => {

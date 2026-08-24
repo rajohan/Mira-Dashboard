@@ -121,12 +121,65 @@ const reviewedScriptBrowserTargets: ReadonlyMap<string, ReadonlySet<string>> = n
     ["scripts/developmentFrontend.ts", new Set(["src/browser/index.html"])],
 ]);
 
+const reviewedScriptMigrationTargets: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+    [
+        "scripts/documentation/artifacts.ts",
+        new Set(["migrations/20260804022252_dashboard-foundation/snapshot.json"]),
+    ],
+]);
+
+/**
+ * Checks the exact documentation-generator edge to the checked migration snapshot.
+ * @param importer Normalized script source.
+ * @param target Normalized migration artifact path.
+ * @returns Whether this exact generator input is reviewed.
+ */
+export function isReviewedScriptMigrationTarget(
+    importer: string,
+    target: string
+): boolean {
+    return reviewedScriptMigrationTargets.get(importer)?.has(target) === true;
+}
+
 const reviewedStorybookConfigScriptTargets: ReadonlyMap<
     string,
     ReadonlySet<string>
 > = new Map([
     [".storybook/vitest.config.ts", new Set(["scripts/storybookTestProjects.ts"])],
 ]);
+
+const reviewedBrowserGeneratedDocumentationTargets: ReadonlyMap<
+    string,
+    ReadonlySet<string>
+> = new Map([
+    [
+        "src/server/domains/system/procedures.ts",
+        new Set(["docs/generated/browser-reference.json"]),
+    ],
+    [
+        "src/browser/docs/DocsRoute.test.tsx",
+        new Set(["docs/generated/browser-reference.json"]),
+    ],
+    [
+        "src/browser/docs/stories/DocsRoute.stories.tsx",
+        new Set(["docs/generated/browser-reference.json"]),
+    ],
+]);
+
+/**
+ * Checks reviewed generated-reference edges owned by the authenticated server and test evidence.
+ * @param importer Normalized source path.
+ * @param target Normalized checked-in generated manifest path.
+ * @returns Whether this source may import the generated artifact.
+ */
+export function isReviewedBrowserGeneratedDocumentationTarget(
+    importer: string,
+    target: string
+): boolean {
+    return (
+        reviewedBrowserGeneratedDocumentationTargets.get(importer)?.has(target) === true
+    );
+}
 
 /**
  * Checks the one reviewed Bun full-stack HTML entry edge.
