@@ -3,11 +3,16 @@ export const dashboardRoutePaths = Object.freeze([
     "/",
     "/account-security",
     "/agents",
+    "/incidents",
     "/login",
+    "/reports",
     "/tasks",
 ] as const);
 
 export type DashboardRoutePath = (typeof dashboardRoutePaths)[number];
 
-/** Routes shown inside the authenticated application navigation. */
-export type DashboardNavigationPath = Exclude<DashboardRoutePath, "/login">;
+/** Routes rendered only inside an authenticated application shell. */
+export type DashboardAuthenticatedPath = Exclude<DashboardRoutePath, "/login">;
+
+/** Authenticated routes shown in the main application navigation. */
+export type DashboardNavigationPath = Exclude<DashboardAuthenticatedPath, "/incidents">;

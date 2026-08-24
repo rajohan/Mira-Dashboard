@@ -193,7 +193,7 @@
             "searchNormalizer": null,
             "sourceRouteName": "reports",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "path": "/reports",
                 "phase": "phase-3"
             }

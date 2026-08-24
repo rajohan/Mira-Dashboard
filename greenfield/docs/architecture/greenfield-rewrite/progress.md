@@ -12,7 +12,7 @@ closes a phase; dated entries below provide the evidence, not a second status so
 | 0 — Evidence and qualification      | Complete                             | All eight mandatory spikes pass on exact Bun revision `17d6843606d76620cb55d31424d7fb0aed51c367`: build, transport, cross-process SQLite/outbox, Drizzle/Bun SQLite, browser data, chat batching, shutdown, and capped resources. Source-derived parity and the OpenClaw source audit pass as additional evidence.                                                           |
 | 1 — Foundation                      | Complete                             | The self-contained future root builds immutable browser/web/worker artifacts, protects project-local production state, installs exact Bun and systemd artifacts, migrates a database copy, atomically promotes the release/database pair, serves readiness/browser assets, writes project-local logs, and proves crash-safe rollback and shutdown in a disposable lifecycle. |
 | 2 — Trust and transport             | Complete for the stated server scope | Authentication, MFA, WebAuthn, automation credentials, audit, authenticated renewable SSE, one-shot native Gateway bootstrap verification, and the consolidated [threat model](../../security/greenfield-phase-two-threat-model.md) have executable evidence. Browser UI and production cutover remain later gates.                                                          |
-| 3 — Core operator domains           | Started                              | Task and agent-directory parity are implemented with durable history, realtime invalidation, and browser workflows. Monitoring ingestion plus report, incident, and notification server parity are implemented. Their browser workflows, schedules/jobs, overview, cache/metrics, and the real worker remain open.                                                           |
+| 3 — Core operator domains           | Started                              | Task and agent-directory parity are implemented with durable history, realtime invalidation, and browser workflows. Monitoring ingestion plus report, incident, and notification server parity are implemented; report and incident browser readers are also complete. Notification browser state, schedules/jobs, overview, cache/metrics, and the real worker remain open. |
 | 4 — Gateway and chat                | Not started                          | The Phase 2 verifier is one-shot only. Persistent native Gateway lifecycle, current-protocol re-audit, sessions, chat journal/recovery, attachments, and frontend remain open.                                                                                                                                                                                               |
 | 5 — Privileged and external domains | Not started                          | Worker-owned file/media, Docker, database, OpenClaw, GitHub, deployment, backup, and other privileged adapters remain open.                                                                                                                                                                                                                                                  |
 | 6 — Parity, hardening, and cutover  | Not started                          | Full UI parity, generated `/docs`, load/resource/restore evidence, cutover rehearsal, fresh production database, and legacy removal remain open.                                                                                                                                                                                                                             |
@@ -868,3 +868,25 @@ full-browser parity, production rehearsal, cutover, and legacy deletion remain o
   reader rather than choosing one arbitrary observation report; greenfield stays inactive until
   the complete cutover stack lands. Browser workflows, schedules/jobs, overview, cache/metrics,
   and real worker execution remain open Phase 3 gates.
+
+### 2026-08-07 — Phase 3 report and incident browser readers
+
+- `/reports` now lists only bounded report summaries and loads the potentially large Markdown body
+  through an exact query after explicit selection or a validated UUIDv7 deep link. Status, free-form
+  kind, and source filters apply atomically; overlapping keyset pages are identity-deduplicated;
+  transient refresh failures preserve usable cached rows; and raw HTML remains disabled in the
+  existing shared Markdown renderer.
+- Report deletion has an explicit confirmation boundary, removes the durable success from every
+  cached filtered page before refetch, and presents fixed `NOT_FOUND` and bounded
+  `PRECONDITION_FAILED` outcomes without exposing server text. Exact detail loading remains
+  independent of list availability, so a valid deep link can still render during a catalog-list
+  failure.
+- Net-new `/incidents` is intentionally absent from the main navigation but linked from Reports.
+  It provides kind, monitor, lifecycle-state, and severity filters; a selectable TanStack Table
+  with the shared virtualizer; and exact detail deep links outside the currently loaded page.
+- `monitoring.reports` and `monitoring.incidents` use the shared coalescing invalidation hook,
+  terminal-resync handling, and 30-second fallback refresh. Both routes retain the authenticated
+  boundary, validated lazy tRPC contract loading, cancellation signals, and separate query roots.
+- Frontend parity now marks legacy `/reports` implemented. `/incidents` has no legacy route and is
+  tracked as a net-new reader. The notification center, schedules/jobs, overview, cache/metrics,
+  and the real worker remain open Phase 3 gates.

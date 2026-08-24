@@ -62,6 +62,30 @@ describe("Dashboard browser tRPC client", () => {
         expect(calls).toEqual([{ input: {}, kind: "mutation", path: "auth.logout" }]);
     });
 
+    test("loads report and incident reader contracts on demand", async () => {
+        const reportCalls: TransportCall[] = [];
+        const incidentCalls: TransportCall[] = [];
+        const reportClient = createDashboardTrpcClient(
+            createRecordingTransport({ reports: [] }, reportCalls)
+        );
+        const incidentClient = createDashboardTrpcClient(
+            createRecordingTransport({ incidents: [] }, incidentCalls)
+        );
+
+        expect(await reportClient.query("reports.list", { limit: 50 })).toEqual({
+            reports: [],
+        });
+        expect(await incidentClient.query("incidents.list", { limit: 50 })).toEqual({
+            incidents: [],
+        });
+        expect(reportCalls).toEqual([
+            { input: { limit: 50 }, kind: "query", path: "reports.list" },
+        ]);
+        expect(incidentCalls).toEqual([
+            { input: { limit: 50 }, kind: "query", path: "incidents.list" },
+        ]);
+    });
+
     test("rejects invalid input before transport access", async () => {
         const calls: TransportCall[] = [];
         const client = createDashboardTrpcClient(
