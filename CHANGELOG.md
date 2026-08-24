@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.4](https://github.com/rajohan/Mira-Dashboard/compare/v0.2.3...v0.2.4) (2026-08-24)
+
+
+### Bug Fixes
+
+* **bootstrap:** admit systemd inaccessible mounts ([7ded122](https://github.com/rajohan/Mira-Dashboard/commit/7ded122574d2aad6acd3827bb64ae66e7d609c7e))
+
 ## [0.2.3](https://github.com/rajohan/Mira-Dashboard/compare/v0.2.2...v0.2.3) (2026-08-24)
 
 
