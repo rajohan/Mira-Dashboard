@@ -8,8 +8,11 @@ import {
     type CacheStatusResult,
     type GetCacheEntryInput,
     type RefreshCacheEntryInput,
+    cacheHeartbeatDashboardJobsAreConsistent,
+    cacheHeartbeatDashboardJobsSchema,
     cacheHeartbeatResultSchema,
     cacheHeartbeatSchemaVersion,
+    cacheHeartbeatTasksSchema,
     cacheStatusResultSchema,
 } from "../../../contracts/cache.ts";
 import { type JobRunSummary, jobTimestampSchema } from "../../../contracts/jobModel.ts";
@@ -33,6 +36,7 @@ import {
     CacheNotFoundError,
     type CacheOperationError,
 } from "./errors.ts";
+import type { CacheHeartbeatDashboardJobsRead } from "./heartbeatProjection.ts";
 import { findCacheProviderDefinition } from "./providerRegistry.ts";
 import { toCacheEntry, toCacheEntryStatus } from "./records.ts";
 import type { CacheRepository } from "./repository.ts";
@@ -80,6 +84,17 @@ function readEffect<T, E>(
     );
 }
 
+function asyncReadEffect<T>(operation: () => Promise<T>): Effect.Effect<T> {
+    return Effect.tryPromise({
+        catch: (cause) => new CacheUnexpectedOperationError({ cause }),
+        try: operation,
+    }).pipe(
+        Effect.catchTag("CacheUnexpectedOperationError", (error) =>
+            Effect.die(error.cause)
+        )
+    );
+}
+
 function mutationEffect<T>(
     operation: () => Promise<T>
 ): Effect.Effect<T, CacheOperationError> {
@@ -123,10 +138,34 @@ function demoteCronWhenDisconnected(
     }
     return {
         count: projection.count,
+        health: projection.health,
         observedAtMs: projection.observedAtMs,
         pendingSync: projection.pendingSync,
         staleSinceMs: Math.max(connection.checkedAtMs, projection.observedAtMs),
         state: "last-known-good",
+    };
+}
+
+function demoteTaskCronWhenGlobalCronIsNotFresh(
+    tasks: CacheHeartbeatResult["tasks"],
+    openClawCron: CacheHeartbeatResult["openClawCron"]
+): CacheHeartbeatResult["tasks"] {
+    if (tasks.state === "unavailable" || openClawCron.state === "fresh") {
+        return tasks;
+    }
+    return {
+        ...tasks,
+        items: tasks.items.map((task) =>
+            task.automation === undefined
+                ? task
+                : {
+                      ...task,
+                      automation: {
+                          ...task.automation,
+                          cron: { state: "unavailable" },
+                      },
+                  }
+        ),
     };
 }
 
@@ -153,6 +192,12 @@ export interface CacheServiceDependencies {
     readonly nowMs?: () => number;
     readonly readGatewayConnection?: () => CacheHeartbeatResult["gateway"]["connection"];
     readonly readGatewaySessionsProjection?: () => CacheHeartbeatResult["gateway"]["sessions"];
+    readonly readHeartbeatDashboardJobs?: (
+        generatedAtMs: number
+    ) => CacheHeartbeatDashboardJobsRead;
+    readonly readHeartbeatTasks?: () =>
+        | CacheHeartbeatResult["tasks"]
+        | Promise<CacheHeartbeatResult["tasks"]>;
     readonly readOpenClawCronProjection?: () => CacheHeartbeatResult["openClawCron"];
     readonly wakeEventPump?: () => Promise<void> | void;
 }
@@ -230,6 +275,52 @@ export function createCacheService(
         }
     }
 
+    async function readTasksProjection(): Promise<CacheHeartbeatResult["tasks"]> {
+        try {
+            return v.parse(
+                cacheHeartbeatTasksSchema,
+                (await dependencies.readHeartbeatTasks?.()) ?? {
+                    state: "unavailable",
+                }
+            );
+        } catch {
+            return { state: "unavailable" };
+        }
+    }
+
+    function readDashboardJobsProjection(
+        generatedAtMs: number
+    ): CacheHeartbeatDashboardJobsRead {
+        try {
+            const read = dependencies.readHeartbeatDashboardJobs?.(generatedAtMs) ?? {
+                dashboardJobs: { state: "unavailable" },
+                generatedAtMs,
+            };
+            const clampedGeneratedAtMs = v.parse(
+                jobTimestampSchema,
+                Math.max(generatedAtMs, read.generatedAtMs)
+            );
+            const dashboardJobs = v.parse(
+                cacheHeartbeatDashboardJobsSchema,
+                read.dashboardJobs
+            );
+            if (
+                !cacheHeartbeatDashboardJobsAreConsistent(
+                    dashboardJobs,
+                    clampedGeneratedAtMs
+                )
+            ) {
+                throw new Error("Heartbeat Dashboard-job reader is inconsistent");
+            }
+            return { dashboardJobs, generatedAtMs: clampedGeneratedAtMs };
+        } catch {
+            return {
+                dashboardJobs: { state: "unavailable" },
+                generatedAtMs,
+            };
+        }
+    }
+
     async function wake(): Promise<void> {
         if (dependencies.wakeEventPump === undefined) return;
         try {
@@ -260,49 +351,77 @@ export function createCacheService(
                     error instanceof CacheNotFoundError
             ),
         getHeartbeat: () =>
-            readEffect(
-                () => {
-                    const requestedAtMs = v.parse(jobTimestampSchema, nowMs());
-                    const cache = readCacheStatus(requestedAtMs);
-                    const connection = readConnection(requestedAtMs);
-                    const sessions = demoteSessionsWhenDisconnected(
-                        readSessionsProjection(),
-                        connection
-                    );
-                    const openClawCron = demoteCronWhenDisconnected(
-                        readCronProjection(),
-                        connection
-                    );
-                    const projectionTimestamps = [
-                        cache.generatedAtMs,
-                        connection.checkedAtMs,
-                        ...(sessions.state === "unavailable"
-                            ? []
-                            : [
-                                  sessions.observedAtMs,
-                                  ...(sessions.state === "last-known-good"
-                                      ? [sessions.staleSinceMs]
-                                      : []),
-                              ]),
-                        ...(openClawCron.state === "unavailable"
-                            ? []
-                            : [
-                                  openClawCron.observedAtMs,
-                                  ...(openClawCron.state === "last-known-good"
-                                      ? [openClawCron.staleSinceMs]
-                                      : []),
-                              ]),
-                    ];
-                    return v.parse(cacheHeartbeatResultSchema, {
-                        cache,
-                        gateway: { connection, sessions },
-                        generatedAtMs: Math.max(requestedAtMs, ...projectionTimestamps),
-                        openClawCron,
-                        schemaVersion: cacheHeartbeatSchemaVersion,
-                    });
-                },
-                (_error): _error is never => false
-            ),
+            asyncReadEffect(async () => {
+                const requestedAtMs = v.parse(jobTimestampSchema, nowMs());
+                const cache = readCacheStatus(requestedAtMs);
+                const connection = readConnection(requestedAtMs);
+                const sessions = demoteSessionsWhenDisconnected(
+                    readSessionsProjection(),
+                    connection
+                );
+                const taskProjection = await readTasksProjection();
+                const openClawCron = demoteCronWhenDisconnected(
+                    readCronProjection(),
+                    connection
+                );
+                const heartbeatTasks = demoteTaskCronWhenGlobalCronIsNotFresh(
+                    taskProjection,
+                    openClawCron
+                );
+                const projectionTimestamps = [
+                    cache.generatedAtMs,
+                    connection.checkedAtMs,
+                    ...(sessions.state === "unavailable"
+                        ? []
+                        : [
+                              sessions.observedAtMs,
+                              ...(sessions.state === "last-known-good"
+                                  ? [sessions.staleSinceMs]
+                                  : []),
+                          ]),
+                    ...(openClawCron.state === "unavailable"
+                        ? []
+                        : [
+                              openClawCron.observedAtMs,
+                              ...(openClawCron.state === "last-known-good"
+                                  ? [openClawCron.staleSinceMs]
+                                  : []),
+                          ]),
+                    ...(heartbeatTasks.state === "unavailable"
+                        ? []
+                        : heartbeatTasks.items.flatMap((task) => {
+                              const cron = task.automation?.cron;
+                              return cron?.state === "present"
+                                  ? [
+                                        ...(cron.lastRunAtMs === undefined
+                                            ? []
+                                            : [cron.lastRunAtMs]),
+                                        ...(cron.runningAtMs === undefined
+                                            ? []
+                                            : [cron.runningAtMs]),
+                                    ]
+                                  : [];
+                          })),
+                ];
+                const initialGeneratedAtMs = Math.max(
+                    requestedAtMs,
+                    ...projectionTimestamps
+                );
+                const dashboardJobRead =
+                    readDashboardJobsProjection(initialGeneratedAtMs);
+                return v.parse(cacheHeartbeatResultSchema, {
+                    cache,
+                    dashboardJobs: dashboardJobRead.dashboardJobs,
+                    gateway: { connection, sessions },
+                    generatedAtMs: Math.max(
+                        initialGeneratedAtMs,
+                        dashboardJobRead.generatedAtMs
+                    ),
+                    openClawCron,
+                    schemaVersion: cacheHeartbeatSchemaVersion,
+                    tasks: heartbeatTasks,
+                });
+            }),
         getStatus: () =>
             readEffect(
                 () => readCacheStatus(),

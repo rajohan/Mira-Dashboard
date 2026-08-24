@@ -468,9 +468,14 @@ function parseBoundary<TSchema extends v.GenericSchema>(
 
 function requestOptions(
     signal: AbortSignal | undefined,
-    timeoutMs: number
+    timeoutMs: number,
+    onResponseBytes?: (responseBytes: number) => void
 ): PersistentGatewayRequestOptions {
-    return signal === undefined ? { timeoutMs } : { signal, timeoutMs };
+    return {
+        ...(onResponseBytes === undefined ? {} : { onResponseBytes }),
+        ...(signal === undefined ? {} : { signal }),
+        timeoutMs,
+    };
 }
 
 function safeAbort(): PersistentGatewayAbortError {
@@ -613,15 +618,23 @@ function assertPageRelationships(
 function parseListPage(
     raw: unknown,
     expectedLimit: number,
-    expectedOffset: number
+    expectedOffset: number,
+    responseBytes: number
 ): OpenClawCronProviderListPage {
+    if (!Number.isSafeInteger(responseBytes) || responseBytes < 1) {
+        throw new OpenClawCronProviderError("invalid-data");
+    }
     const page = parseBoundary(upstreamListPageSchema, raw);
     assertPageRelationships(page, page.jobs.length, expectedLimit, expectedOffset);
     const jobs = page.jobs.map(parseJob);
     if (new Set(jobs.map(({ id }) => id)).size !== jobs.length) {
         throw new OpenClawCronProviderError("invalid-data");
     }
-    return Object.freeze({ ...page, jobs: Object.freeze(jobs) });
+    return Object.freeze({
+        ...page,
+        jobs: Object.freeze(jobs),
+        responseBytes,
+    });
 }
 
 function parseRunPage(
@@ -763,6 +776,7 @@ export function createPersistentOpenClawCronProvider(
         } = input;
         const parsed = parseBoundary(listOpenClawCronInputSchema, raw);
         return await providerOperation("list", signal, async () => {
+            let responseBytes: number | undefined;
             const response = await transport.request(
                 "cron.list",
                 {
@@ -777,9 +791,21 @@ export function createPersistentOpenClawCronProvider(
                     sortBy: parsed.sortBy,
                     sortDir: parsed.sortDir,
                 },
-                requestOptions(signal, persistentOpenClawCronReadTimeoutMs)
+                requestOptions(
+                    signal,
+                    persistentOpenClawCronReadTimeoutMs,
+                    (candidate) => {
+                        responseBytes =
+                            responseBytes === undefined ? candidate : Number.NaN;
+                    }
+                )
             );
-            return parseListPage(response, parsed.limit, parsed.offset);
+            return parseListPage(
+                response,
+                parsed.limit,
+                parsed.offset,
+                responseBytes ?? Number.NaN
+            );
         });
     }
 

@@ -283,7 +283,7 @@
             "id": "GET /api/cache/heartbeat",
             "method": "GET",
             "path": "/api/cache/heartbeat",
-            "purpose": "Reads schema v3 cache envelopes plus compact task, OpenClaw cron, and Dashboard-job projections.",
+            "purpose": "Reads legacy schema v3 payload-bearing cache envelopes plus identifiable task, Dashboard-job, and OpenClaw-cron diagnostics. cache.getHeartbeat schema v4 is a bounded secure operational summary, but this legacy row remains planned until every diagnostic capability and the external consumer migration are preserved without loss.",
             "section": "Backups, Cache, Metrics, Ops",
             "target": {
                 "delivery": "planned",
@@ -366,7 +366,7 @@
             "purpose": "Lists OpenClaw cron jobs and open linked tasks.",
             "section": "Jobs And Cron",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["openClawCron.list"],
                 "phase": "phase-4"
@@ -546,10 +546,10 @@
             "id": "GET /api/health/diagnostics",
             "method": "GET",
             "path": "/api/health/diagnostics",
-            "purpose": "Authenticated readiness details and dependency status.",
+            "purpose": "Authenticated readiness details and dependency status. The replacement preserves application, database, frontend, verified-release, exact-release-worker, Gateway, cached-session, and queue health through a bounded identity-free projection; wider legacy application observability remains tracked separately by GET /api/metrics.",
             "section": "Health",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["system.healthDiagnostics"],
                 "phase": "phase-1"
@@ -705,7 +705,7 @@
             "id": "GET /api/metrics",
             "method": "GET",
             "path": "/api/metrics",
-            "purpose": "Reads host metrics.",
+            "purpose": "Reads legacy host and application observability, HTTP counters, polling-snapshot state, token projections, and the wider counters deferred from legacy health diagnostics. The bounded system.metrics host gauges are implemented, but this row remains planned until the complete capability is preserved.",
             "section": "Backups, Cache, Metrics, Ops",
             "target": {
                 "delivery": "planned",
@@ -721,7 +721,7 @@
             "purpose": "Reads feed with query params.",
             "section": "Moltbook And Voice",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["moltbook.feed"],
                 "phase": "phase-5"
@@ -734,7 +734,7 @@
             "purpose": "Reads Moltbook home cache/API.",
             "section": "Moltbook And Voice",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["moltbook.home"],
                 "phase": "phase-5"
@@ -747,7 +747,7 @@
             "purpose": "Reads own content.",
             "section": "Moltbook And Voice",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["moltbook.listMyPosts"],
                 "phase": "phase-5"
@@ -760,7 +760,7 @@
             "purpose": "Reads profile.",
             "section": "Moltbook And Voice",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["moltbook.profile"],
                 "phase": "phase-5"
@@ -1425,7 +1425,7 @@
             "purpose": "Deletes an OpenClaw cron job.",
             "section": "Jobs And Cron",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["openClawCron.delete"],
                 "phase": "phase-4"
@@ -1438,7 +1438,7 @@
             "purpose": "Runs an OpenClaw cron job.",
             "section": "Jobs And Cron",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["openClawCron.run"],
                 "phase": "phase-4"
@@ -1451,7 +1451,7 @@
             "purpose": "Enables/disables an OpenClaw cron job and updates its Dashboard-owned disable intent.",
             "section": "Jobs And Cron",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["openClawCron.setEnabled"],
                 "phase": "phase-4"
@@ -1464,7 +1464,7 @@
             "purpose": "Updates an OpenClaw cron job patch.",
             "section": "Jobs And Cron",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["openClawCron.update"],
                 "phase": "phase-4"
@@ -2053,7 +2053,7 @@
             "purpose": "Browser Dashboard socket for Gateway-backed live updates.",
             "section": "Sessions And Chat",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["events.stream"],
                 "phase": "phase-4"

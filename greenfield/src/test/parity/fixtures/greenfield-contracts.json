@@ -327,6 +327,26 @@
             "name": "logs.tail"
         },
         {
+            "kind": "query",
+            "name": "moltbook.feed"
+        },
+        {
+            "kind": "query",
+            "name": "moltbook.home"
+        },
+        {
+            "kind": "query",
+            "name": "moltbook.listMyPosts"
+        },
+        {
+            "kind": "query",
+            "name": "moltbook.profile"
+        },
+        {
+            "kind": "query",
+            "name": "moltbook.snapshot"
+        },
+        {
             "kind": "mutation",
             "name": "monitoring.submitCompleteSnapshot"
         },
@@ -433,6 +453,10 @@
         {
             "kind": "query",
             "name": "securityAudit.listEvents"
+        },
+        {
+            "kind": "query",
+            "name": "system.healthDiagnostics"
         },
         {
             "kind": "query",

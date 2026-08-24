@@ -2,17 +2,23 @@ import * as v from "valibot";
 
 import {
     cacheEntryKeySchema,
+    cacheEntryPayloadSchema,
     cacheEntrySchemaIdSchema,
     cacheEntrySourceSchema,
     systemHostCachePayloadSchema,
 } from "../../../contracts/cache.ts";
+import { moltbookDashboardCachePayloadSchema } from "../../../contracts/moltbook.ts";
 import type { JsonObject } from "../../../shared/json.ts";
-import { findJobActionDefinition } from "../jobs/actionRegistry.ts";
+import {
+    findJobActionDefinition,
+    moltbookDashboardCacheJobActionKey,
+    moltbookDashboardCacheJobScheduleId,
+} from "../jobs/actionRegistry.ts";
 
 export interface CacheProviderDefinition {
     readonly actionKey: string;
     readonly key: string;
-    readonly payloadSchema: typeof systemHostCachePayloadSchema;
+    readonly payloadSchema: v.GenericSchema;
     readonly scheduleId: string;
     readonly schemaId: string;
     readonly source: string;
@@ -50,8 +56,21 @@ const systemHostProvider = validateCacheProviderDefinition({
     ttlMs: 86_400_000,
 });
 
+const moltbookDashboardProvider = validateCacheProviderDefinition({
+    actionKey: moltbookDashboardCacheJobActionKey,
+    key: "moltbook.dashboard",
+    payloadSchema: moltbookDashboardCachePayloadSchema,
+    scheduleId: moltbookDashboardCacheJobScheduleId,
+    schemaId: "moltbook.dashboard.v1",
+    source: "moltbook.api",
+    ttlMs: 30 * 60_000,
+});
+
 /** Complete local-only provider directory for the implemented cache slice. */
-export const cacheProviderDefinitions = Object.freeze([systemHostProvider]);
+export const cacheProviderDefinitions = Object.freeze([
+    systemHostProvider,
+    moltbookDashboardProvider,
+]);
 
 const providerByKey = new Map(
     cacheProviderDefinitions.map((definition) => [definition.key, definition])
@@ -81,7 +100,7 @@ export function parseCacheProviderPayload(
     definition: CacheProviderDefinition,
     payload: JsonObject
 ): JsonObject {
-    return v.parse(definition.payloadSchema, payload);
+    return v.parse(cacheEntryPayloadSchema, v.parse(definition.payloadSchema, payload));
 }
 
 /**

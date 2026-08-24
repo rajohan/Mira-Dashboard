@@ -1,0 +1,17 @@
+{
+  "$id": "urn:mira-dashboard:moltbook.feed.input.v1",
+  "type": "object",
+  "properties": {
+    "sort": {
+      "enum": [
+        "hot",
+        "new"
+      ],
+      "type": "string",
+      "default": "hot"
+    }
+  },
+  "required": [],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

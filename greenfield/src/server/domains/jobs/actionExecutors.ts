@@ -10,6 +10,7 @@ import {
 import type { JsonObject } from "../../../shared/json.ts";
 import { collectSystemHostPayload } from "../cache/systemHostProvider.ts";
 import { parseWorkspaceFileJobPayload } from "../files/jobPayload.ts";
+import type { MoltbookDashboardCollector } from "../moltbook/provider.ts";
 import {
     type JobActionExecutor,
     type JobExecutableActionDefinition,
@@ -27,6 +28,9 @@ import {
 
 const emptyPayloadSchema = v.strictObject({});
 const systemHostActionPayloadSchema = v.strictObject({ key: v.literal("system.host") });
+const moltbookDashboardActionPayloadSchema = v.strictObject({
+    key: v.literal("moltbook.dashboard"),
+});
 const logMaintenanceActionPayloadSchema = v.pipe(
     v.strictObject({
         dryRun: v.optional(v.boolean("Log maintenance mode is invalid"), false),
@@ -112,6 +116,72 @@ export interface SystemHostExecutorDependencies {
     readonly monotonicNowMs?: () => number;
 }
 
+interface CacheRefreshExecutorSpec<TPayload extends JsonObject> {
+    readonly collect: (signal: AbortSignal) => Promise<TPayload>;
+    readonly failureCode: string;
+    readonly failureMessage: string;
+    readonly key: string;
+    readonly metadata: JsonObject;
+    readonly monotonicNowMs: () => number;
+    readonly schemaId: string;
+    readonly source: string;
+    readonly ttlMs: number;
+    readonly validatePayload: (payload: JsonObject) => void;
+}
+
+function createCacheRefreshExecutor<TPayload extends JsonObject>(
+    spec: CacheRefreshExecutorSpec<TPayload>
+): JobActionExecutor {
+    return (context, payload) =>
+        Effect.suspend(() => {
+            spec.validatePayload(payload);
+            const startedAt = spec.monotonicNowMs();
+            const durationMs = (): number =>
+                Math.max(0, Math.floor(spec.monotonicNowMs() - startedAt));
+            const collected = Effect.tryPromise({
+                catch: (error) => new JobActionRetryableError(error),
+                try: (signal) => spec.collect(signal),
+            }).pipe(
+                Effect.catch((error) =>
+                    Effect.tryPromise(() =>
+                        context.commitCacheAttempt({
+                            durationMs: durationMs(),
+                            failureCode: spec.failureCode,
+                            failureMessage: spec.failureMessage,
+                            key: spec.key,
+                            kind: "failed",
+                        })
+                    ).pipe(Effect.andThen(Effect.fail(error)))
+                )
+            );
+            return collected.pipe(
+                Effect.flatMap((cachePayload) =>
+                    Effect.tryPromise(() =>
+                        context.commitCacheAttempt({
+                            durationMs: durationMs(),
+                            entries: [
+                                {
+                                    key: spec.key,
+                                    metadata: spec.metadata,
+                                    payload: cachePayload,
+                                    schemaId: spec.schemaId,
+                                    source: spec.source,
+                                    ttlMs: spec.ttlMs,
+                                },
+                            ],
+                            kind: "succeeded",
+                        })
+                    ).pipe(
+                        Effect.as({
+                            cacheKeys: [spec.key],
+                            completedAtMs: context.nowMs(),
+                        })
+                    )
+                )
+            );
+        });
+}
+
 /**
  * Creates the worker-only system.host executor with injectable host boundaries.
  * @param dependencies Optional host collector and monotonic clock overrides.
@@ -122,61 +192,50 @@ export function createSystemHostExecutor(
 ): JobActionExecutor {
     const collect = dependencies.collect ?? collectSystemHostPayload;
     const monotonicNowMs = dependencies.monotonicNowMs ?? (() => performance.now());
-    return (context, payload) =>
-        Effect.suspend(() => {
+    return createCacheRefreshExecutor({
+        collect: () => collect(),
+        failureCode: "provider/system-host-unavailable",
+        failureMessage: "System host projection could not be collected.",
+        key: "system.host",
+        metadata: { kind: "host" },
+        monotonicNowMs,
+        schemaId: "system.host.v1",
+        source: "system.host",
+        ttlMs: 86_400_000,
+        validatePayload: (payload) => {
             v.parse(systemHostActionPayloadSchema, payload);
-            const startedAt = monotonicNowMs();
-            const collected = Effect.tryPromise({
-                catch: (error) => new JobActionRetryableError(error),
-                try: () => collect(),
-            }).pipe(
-                Effect.catch((error) => {
-                    const durationMs = Math.max(
-                        0,
-                        Math.floor(monotonicNowMs() - startedAt)
-                    );
-                    return Effect.tryPromise(() =>
-                        context.commitCacheAttempt({
-                            durationMs,
-                            failureCode: "provider/system-host-unavailable",
-                            failureMessage:
-                                "System host projection could not be collected.",
-                            key: "system.host",
-                            kind: "failed",
-                        })
-                    ).pipe(Effect.andThen(Effect.fail(error)));
-                })
-            );
-            return collected.pipe(
-                Effect.flatMap((hostPayload) => {
-                    const durationMs = Math.max(
-                        0,
-                        Math.floor(monotonicNowMs() - startedAt)
-                    );
-                    return Effect.tryPromise(() =>
-                        context.commitCacheAttempt({
-                            durationMs,
-                            entries: [
-                                {
-                                    key: "system.host",
-                                    metadata: { kind: "host" },
-                                    payload: hostPayload,
-                                    schemaId: "system.host.v1",
-                                    source: "system.host",
-                                    ttlMs: 86_400_000,
-                                },
-                            ],
-                            kind: "succeeded",
-                        })
-                    ).pipe(
-                        Effect.as({
-                            cacheKeys: ["system.host"],
-                            completedAtMs: context.nowMs(),
-                        })
-                    );
-                })
-            );
-        });
+        },
+    });
+}
+
+export interface MoltbookDashboardExecutorDependencies {
+    readonly collector: MoltbookDashboardCollector;
+    readonly monotonicNowMs?: () => number;
+}
+
+/**
+ * Creates the worker-only all-or-nothing Moltbook cache refresh executor.
+ * @param dependencies Fixed collector and optional monotonic test clock.
+ * @returns Claim-fenced cache job executor.
+ */
+export function createMoltbookDashboardExecutor(
+    dependencies: MoltbookDashboardExecutorDependencies
+): JobActionExecutor {
+    const monotonicNowMs = dependencies.monotonicNowMs ?? (() => performance.now());
+    return createCacheRefreshExecutor({
+        collect: (signal) => dependencies.collector.collect(signal),
+        failureCode: "provider/moltbook-unavailable",
+        failureMessage: "Moltbook dashboard projection could not be collected.",
+        key: "moltbook.dashboard",
+        metadata: { kind: "dashboard" },
+        monotonicNowMs,
+        schemaId: "moltbook.dashboard.v1",
+        source: "moltbook.api",
+        ttlMs: 30 * 60_000,
+        validatePayload: (payload) => {
+            v.parse(moltbookDashboardActionPayloadSchema, payload);
+        },
+    });
 }
 
 /**
@@ -303,10 +362,16 @@ export function createJobWorkerActionRegistry(
  * Web code can import pure definitions without gaining log-maintenance authority.
  * @returns A fail-closed resolver containing every reviewed worker action.
  */
+export interface JobWorkerActionResolverDependencies {
+    readonly logMaintenance: LogMaintenanceExecutionPort;
+    readonly moltbook: MoltbookDashboardCollector;
+    readonly workspaceFiles?: WorkspaceFileWriteExecutionPort;
+}
+
 export function createJobWorkerActionResolver(
-    logMaintenance: LogMaintenanceExecutionPort,
-    workspaceFiles?: WorkspaceFileWriteExecutionPort
+    dependencies: JobWorkerActionResolverDependencies
 ): JobWorkerActionResolver {
+    const workspaceFiles = dependencies.workspaceFiles;
     const definitions =
         workspaceFiles === undefined
             ? jobActionDefinitions
@@ -321,8 +386,14 @@ export function createJobWorkerActionResolver(
             execute: systemHostExecutor,
         }),
         Object.freeze({
+            actionKey: "cache.refresh.moltbook-dashboard",
+            execute: createMoltbookDashboardExecutor({
+                collector: dependencies.moltbook,
+            }),
+        }),
+        Object.freeze({
             actionKey: logMaintenanceJobActionKey,
-            execute: createLogMaintenanceJobExecutor(logMaintenance),
+            execute: createLogMaintenanceJobExecutor(dependencies.logMaintenance),
         }),
         Object.freeze({
             actionKey: "system.worker-smoke",

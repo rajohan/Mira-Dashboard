@@ -200,6 +200,8 @@ export interface PersistentGatewayListener {
 }
 
 export interface PersistentGatewayRequestOptions {
+    /** Receives the exact authenticated response-frame byte count before payload projection. */
+    readonly onResponseBytes?: (responseBytes: number) => void;
     readonly signal?: AbortSignal;
     readonly timeoutMs?: number;
 }
@@ -364,6 +366,7 @@ interface ResolvedPersistentGatewayOptions {
 
 interface PendingRequest {
     readonly method: string;
+    readonly onResponseBytes?: (responseBytes: number) => void;
     readonly reject: (error: Error) => void;
     readonly resolve: (payload: unknown) => void;
     readonly signal?: AbortSignal;
@@ -928,6 +931,7 @@ class GatewaySocketLane {
         return new Promise<unknown>((resolve, reject) => {
             const pending: PendingRequest = {
                 method,
+                onResponseBytes: options.onResponseBytes,
                 reject,
                 resolve,
                 signal: options.signal,
@@ -1282,7 +1286,12 @@ class GatewaySocketLane {
             this.#stage === "awaiting-challenge"
                 ? persistentGatewayChallengeFrameMaximumBytes
                 : persistentGatewayAuthenticatedFrameMaximumBytes;
-        if (typeof event.data !== "string" || byteLength(event.data) > maximumBytes) {
+        if (typeof event.data !== "string") {
+            this.#fail("protocol", false, policyCloseCode, "invalid gateway frame");
+            return;
+        }
+        const responseBytes = byteLength(event.data);
+        if (responseBytes > maximumBytes) {
             this.#fail("protocol", false, policyCloseCode, "invalid gateway frame");
             return;
         }
@@ -1357,7 +1366,7 @@ class GatewaySocketLane {
         const response = parsePersistentGatewayResponse(decoded);
         if (response !== undefined) {
             this.#markActivity();
-            this.#settleResponse(response);
+            this.#settleResponse(response, responseBytes);
             return;
         }
         if (this.#onAuthenticatedEvent(decoded, true)) return;
@@ -1477,7 +1486,8 @@ class GatewaySocketLane {
     }
 
     #settleResponse(
-        response: NonNullable<ReturnType<typeof parsePersistentGatewayResponse>>
+        response: NonNullable<ReturnType<typeof parsePersistentGatewayResponse>>,
+        responseBytes: number
     ): void {
         const pending = this.#pending.get(response.id);
         if (pending === undefined) {
@@ -1488,6 +1498,11 @@ class GatewaySocketLane {
         this.#pending.delete(response.id);
         this.#cleanupPending(pending);
         if (response.ok) {
+            try {
+                pending.onResponseBytes?.(responseBytes);
+            } catch {
+                // Byte observation is internal bookkeeping and cannot replace a response.
+            }
             pending.resolve(response.payload);
             return;
         }

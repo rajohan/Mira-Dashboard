@@ -76,9 +76,24 @@ test("reads the Gateway token from a private file without following a symlink", 
         const environments = await developmentProcessEnvironments(
             config,
             "serialized-keyring",
-            {}
+            { MOLTBOOK_API_KEY: "private-moltbook-key" }
         );
         expect(environments.web.OPENCLAW_GATEWAY_TOKEN).toBe("private-token");
+        expect(environments.web.MOLTBOOK_API_KEY).toBeUndefined();
+        expect(environments.worker.MOLTBOOK_API_KEY).toBe("private-moltbook-key");
+
+        const missingMoltbookKey = await developmentProcessEnvironments(
+            config,
+            "serialized-keyring",
+            {}
+        ).then(
+            () => null,
+            (error: unknown) => error
+        );
+        expect(missingMoltbookKey).toBeInstanceOf(Error);
+        expect((missingMoltbookKey as Error).message).toBe(
+            "Dashboard dev requires MOLTBOOK_API_KEY"
+        );
 
         await symlink(tokenPath, tokenSymlinkPath);
         const symlinkConfig = Object.freeze({
@@ -88,7 +103,7 @@ test("reads the Gateway token from a private file without following a symlink", 
         const failure = await developmentProcessEnvironments(
             symlinkConfig,
             "serialized-keyring",
-            {}
+            { MOLTBOOK_API_KEY: "private-moltbook-key" }
         ).then(
             () => null,
             (error: unknown) => error

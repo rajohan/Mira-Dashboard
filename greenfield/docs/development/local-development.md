@@ -9,8 +9,9 @@ isolated.
 
 Use the Bun revision selected by `.bun-version` and install the frozen dependency graph. Before
 starting the stack, provide its Gateway credential through either `OPENCLAW_GATEWAY_TOKEN` or the
-absolute owner-only file named by `MIRA_DASHBOARD_DEV_GATEWAY_TOKEN_FILE`. Then start the loopback
-stack:
+absolute owner-only file named by `MIRA_DASHBOARD_DEV_GATEWAY_TOKEN_FILE`, and export the worker-only
+`MOLTBOOK_API_KEY`. `MOLTBOOK_AGENT_NAME` remains optional and defaults to `mira_2026`. Then start
+the loopback stack:
 
 ```bash
 bun install --frozen-lockfile
@@ -18,8 +19,9 @@ bun run dev
 ```
 
 The plain command has no secret-manager dependency. On the owner host, the explicit
-`bun run dev:doppler` convenience wrapper loads the Gateway token and optional session durations
-from the configured Doppler project before invoking the same stack entrypoint.
+`bun run dev:doppler` convenience wrapper loads the required Gateway and Moltbook credentials plus
+optional session durations from the configured Doppler project before invoking the same stack
+entrypoint.
 
 The default listeners are:
 
@@ -64,8 +66,8 @@ For a stable WebAuthn origin and access from another Tailscale device:
 bun run dev:remote
 ```
 
-This command uses the same exported-token or token-file contract as `bun run dev` and does not
-require Doppler. The corresponding owner-host convenience wrapper is
+This command uses the same exported Gateway-token or token-file and `MOLTBOOK_API_KEY` contract as
+`bun run dev` and does not require Doppler. The corresponding owner-host convenience wrapper is
 `bun run dev:remote:doppler`.
 
 The command verifies that port `3445` is free or already maps exactly to the loopback remote bridge,

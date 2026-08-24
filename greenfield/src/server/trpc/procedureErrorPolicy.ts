@@ -427,6 +427,11 @@ export const procedureExpectedErrorPolicy = freezeProcedureExpectedErrorPolicy({
     "logs.requestMaintenance": ["FORBIDDEN", "SERVICE_UNAVAILABLE", "UNAUTHORIZED"],
     "logs.search": ["FORBIDDEN", "NOT_FOUND", "SERVICE_UNAVAILABLE", "UNAUTHORIZED"],
     "logs.tail": ["FORBIDDEN", "NOT_FOUND", "SERVICE_UNAVAILABLE", "UNAUTHORIZED"],
+    "moltbook.feed": ["FORBIDDEN", "SERVICE_UNAVAILABLE", "UNAUTHORIZED"],
+    "moltbook.home": ["FORBIDDEN", "SERVICE_UNAVAILABLE", "UNAUTHORIZED"],
+    "moltbook.listMyPosts": ["FORBIDDEN", "SERVICE_UNAVAILABLE", "UNAUTHORIZED"],
+    "moltbook.profile": ["FORBIDDEN", "SERVICE_UNAVAILABLE", "UNAUTHORIZED"],
+    "moltbook.snapshot": ["FORBIDDEN", "SERVICE_UNAVAILABLE", "UNAUTHORIZED"],
     "monitoring.submitCompleteSnapshot": [
         "BAD_REQUEST",
         "CONFLICT",
@@ -492,6 +497,7 @@ export const procedureExpectedErrorPolicy = freezeProcedureExpectedErrorPolicy({
         "UNAUTHORIZED",
     ],
     "securityAudit.listEvents": ["FORBIDDEN", "UNAUTHORIZED"],
+    "system.healthDiagnostics": ["FORBIDDEN", "UNAUTHORIZED"],
     "system.metrics": ["FORBIDDEN", "SERVICE_UNAVAILABLE", "UNAUTHORIZED"],
     "system.runtimeIdentity": [],
     "tasks.addUpdate": [

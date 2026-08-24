@@ -1,6 +1,7 @@
 import { Dialog, DialogBackdrop, DialogPanel, DialogTitle } from "@headlessui/react";
 import { Outlet, useLocation } from "@tanstack/react-router";
 import {
+    BookOpen,
     Bot,
     CalendarClock,
     FolderOpen,
@@ -48,6 +49,7 @@ const navigationItems: readonly NavigationItem[] = Object.freeze([
     { icon: ListTodo, label: "Tasks", to: "/tasks" },
     { icon: CalendarClock, label: "Jobs", to: "/jobs" },
     { icon: Logs, label: "Logs", to: "/logs" },
+    { icon: BookOpen, label: "Moltbook", to: "/moltbook" },
     { icon: SquareTerminal, label: "Terminal", to: "/terminal" },
     { icon: Newspaper, label: "Reports", to: "/reports" },
     { icon: ShieldCheck, label: "Account security", to: "/account-security" },

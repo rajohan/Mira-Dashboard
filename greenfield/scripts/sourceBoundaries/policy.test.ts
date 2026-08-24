@@ -54,6 +54,12 @@ describe("source-boundary policy", () => {
         expect(
             validateSourceImport(
                 "src/app/worker.ts",
+                staticImport("../server/domains/moltbook/provider.ts")
+            )
+        ).toBeUndefined();
+        expect(
+            validateSourceImport(
+                "src/app/worker.ts",
                 staticImport("../server/platform/gateway/persistentGatewayTransport.ts")
             )
         ).toBeUndefined();

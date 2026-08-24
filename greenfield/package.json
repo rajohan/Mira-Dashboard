@@ -6,10 +6,10 @@
     "scripts": {
         "dev": "bun scripts/developmentStack.ts",
         "dev:database:reset": "bun scripts/developmentStack.ts --reset-database",
-        "dev:doppler": "doppler run --project rajohan --config prd --only-secrets OPENCLAW_GATEWAY_TOKEN,MIRA_DASHBOARD_SESSION_IDLE_MINUTES,MIRA_DASHBOARD_RECENT_AUTH_MINUTES --no-exit-on-missing-only-secrets -- bun scripts/developmentStack.ts",
+        "dev:doppler": "doppler run --project rajohan --config prd --only-secrets OPENCLAW_GATEWAY_TOKEN,MOLTBOOK_API_KEY,MIRA_DASHBOARD_SESSION_IDLE_MINUTES,MIRA_DASHBOARD_RECENT_AUTH_MINUTES --no-exit-on-missing-only-secrets -- bun scripts/developmentStack.ts",
         "dev:remote": "bun scripts/development/developmentTailscale.ts run",
         "dev:remote:disable": "bun scripts/development/developmentTailscale.ts disable",
-        "dev:remote:doppler": "doppler run --project rajohan --config prd --only-secrets OPENCLAW_GATEWAY_TOKEN,MIRA_DASHBOARD_SESSION_IDLE_MINUTES,MIRA_DASHBOARD_RECENT_AUTH_MINUTES --no-exit-on-missing-only-secrets -- bun scripts/development/developmentTailscale.ts run",
+        "dev:remote:doppler": "doppler run --project rajohan --config prd --only-secrets OPENCLAW_GATEWAY_TOKEN,MOLTBOOK_API_KEY,MIRA_DASHBOARD_SESSION_IDLE_MINUTES,MIRA_DASHBOARD_RECENT_AUTH_MINUTES --no-exit-on-missing-only-secrets -- bun scripts/development/developmentTailscale.ts run",
         "dev:remote:enable": "bun scripts/development/developmentTailscale.ts enable",
         "dev:remote:status": "bun scripts/development/developmentTailscale.ts status",
         "dev:state:prepare": "bun scripts/developmentStack.ts --prepare-state",

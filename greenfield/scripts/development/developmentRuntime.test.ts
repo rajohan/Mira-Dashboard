@@ -13,6 +13,9 @@ import { prepareDevelopmentRuntimeState } from "./developmentState.ts";
 
 const repositoryRoot = path.resolve(import.meta.dir, "../..");
 const sourceCommit = "0".repeat(40);
+const developmentTestEnvironment = Object.freeze({
+    MOLTBOOK_API_KEY: "moltbook-development-test-key",
+});
 
 interface FakeChild {
     readonly child: DevelopmentChildProcess;
@@ -123,6 +126,7 @@ describe("development runtime lifecycle", () => {
 
         try {
             const failure = await runDevelopmentStack(config, {
+                environment: developmentTestEnvironment,
                 resolveSourceCommit: () => Promise.resolve(sourceCommit),
                 spawn() {
                     spawnCalls += 1;
@@ -161,6 +165,7 @@ describe("development runtime lifecycle", () => {
 
         try {
             const running = runDevelopmentStack(config, {
+                environment: developmentTestEnvironment,
                 resolveSourceCommit: () => Promise.resolve(sourceCommit),
                 spawn(command) {
                     commands.push(command);
@@ -217,6 +222,7 @@ describe("development runtime lifecycle", () => {
 
         try {
             running = runDevelopmentStack(config, {
+                environment: developmentTestEnvironment,
                 resolveSourceCommit: () => Promise.resolve(sourceCommit),
                 spawn() {
                     const next = children[spawnCalls];

@@ -141,6 +141,7 @@ function processFixture(totpFailure?: Error) {
             );
             expect(options.frontendAssets).toBeFunction();
             expect(options.port).toBe(3100);
+            expect(options.verifiedReleaseId).toBe(releaseId);
             expect(options.openClawFileRoot).toEqual({
                 id: "openclaw-config",
                 label: "OpenClaw Config",

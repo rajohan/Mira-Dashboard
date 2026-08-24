@@ -44,9 +44,14 @@ import {
     cacheEntryPayloadFitsBudget,
     cacheEntryStatusIsConsistent,
     cacheHeartbeatConnectionIsConsistent,
+    cacheHeartbeatCronHealthCountsAreConsistent,
     cacheHeartbeatCronLastKnownGoodIsConsistent,
+    cacheHeartbeatCronProjectionIsConsistent,
+    cacheHeartbeatDashboardJobsAreConsistent,
     cacheHeartbeatResultIsConsistent,
     cacheHeartbeatSessionsLastKnownGoodIsConsistent,
+    cacheHeartbeatTaskCronIsConsistent,
+    cacheHeartbeatTasksAreConsistent,
     cacheStatusEntriesAreCanonical,
     cacheStatusResultIsConsistent,
     systemHostCapacityIsConsistent,
@@ -200,7 +205,14 @@ import {
     securityAuditEventsHaveStableOrder,
     securityAuditPageCursorIsConsistent,
 } from "../../src/contracts/securityAudit.ts";
-import { systemMetricCapacityIsConsistent } from "../../src/contracts/system.ts";
+import {
+    systemHealthDiagnosticsGatewayIsConsistent,
+    systemHealthDiagnosticsIsConsistent,
+    systemHealthDiagnosticsQueueIsConsistent,
+    systemHealthDiagnosticsSessionsAreConsistent,
+    systemHealthDiagnosticsWorkersAreConsistent,
+    systemMetricCapacityIsConsistent,
+} from "../../src/contracts/system.ts";
 import {
     canonicalizeTaskStrings,
     freezeTaskStrings,
@@ -330,6 +342,26 @@ const runtimeCheckComments = new Map<unknown, string>([
     [
         gatewayConnectionSnapshotIsConsistent,
         "Live Valibot validation additionally requires connected phase and fresh state to agree and past transport timestamps not to exceed the check time.",
+    ],
+    [
+        systemHealthDiagnosticsGatewayIsConsistent,
+        "Live Valibot validation additionally requires connected Gateway phase and fresh state to agree.",
+    ],
+    [
+        systemHealthDiagnosticsSessionsAreConsistent,
+        "Live Valibot validation additionally requires last-known-good session staleness not to precede its observation.",
+    ],
+    [
+        systemHealthDiagnosticsWorkersAreConsistent,
+        "Live Valibot validation additionally requires fresh worker count to equal its online and draining partitions, and aggregate capacity to remain a safe integer between one and sixteen slots per fresh worker.",
+    ],
+    [
+        systemHealthDiagnosticsQueueIsConsistent,
+        "Live Valibot validation additionally requires a queued run if and only if an oldest queued timestamp is present.",
+    ],
+    [
+        systemHealthDiagnosticsIsConsistent,
+        "Live Valibot validation additionally requires aggregate readiness to match every gating check, binds database/worker health to an observed queue, forbids future queue/session observations, and permits fresh sessions only with a fresh Gateway.",
     ],
     [
         chatHistoryMessagesHaveUniqueIds,
@@ -560,8 +592,28 @@ const runtimeCheckComments = new Map<unknown, string>([
         "Live Valibot validation additionally requires compact OpenClaw-cron staleness to begin at or after the last observation.",
     ],
     [
+        cacheHeartbeatCronHealthCountsAreConsistent,
+        "Live Valibot validation additionally requires OpenClaw-cron health categories to form consistent inspected, disabled, running, and synchronization subsets.",
+    ],
+    [
+        cacheHeartbeatCronProjectionIsConsistent,
+        "Live Valibot validation additionally requires OpenClaw-cron coverage, truncation, pending synchronization, and freshness to agree.",
+    ],
+    [
+        cacheHeartbeatTaskCronIsConsistent,
+        "Live Valibot validation additionally requires linked-cron actual, desired, and synchronization state to agree.",
+    ],
+    [
+        cacheHeartbeatTasksAreConsistent,
+        "Live Valibot validation additionally requires bounded heartbeat tasks to use strict canonical ID and relevance order with exact totals and truncation.",
+    ],
+    [
+        cacheHeartbeatDashboardJobsAreConsistent,
+        "Live Valibot validation additionally requires the bounded code-owned Dashboard-job inventory and compact run lifecycle to remain canonical.",
+    ],
+    [
         cacheHeartbeatResultIsConsistent,
-        "Live Valibot validation additionally requires nested heartbeat observations not to exceed the clamped response clock and cached projections not to remain fresh while Gateway is disconnected.",
+        "Live Valibot validation additionally requires nested heartbeat observations not to exceed the clamped response clock, disable-intent validity to match expiry, linked cron detail to follow global freshness and coverage, and cached projections not to remain fresh while Gateway is disconnected.",
     ],
     [
         cacheRealtimeIdentityMatches,

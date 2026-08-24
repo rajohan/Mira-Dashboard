@@ -470,20 +470,31 @@ describe("persistent native Gateway transport", () => {
         ]);
         expect(JSON.stringify(events)).not.toContain(secretShapedEventPayload);
 
-        const result = transport.request("sessions.list", { limit: 20 });
+        let responseBytes: number | undefined;
+        const result = transport.request(
+            "sessions.list",
+            { limit: 20 },
+            {
+                onResponseBytes: (candidate) => {
+                    responseBytes = candidate;
+                },
+            }
+        );
         const request = sentFrame(socket, 1);
         expect(request).toMatchObject({
             method: "sessions.list",
             params: { limit: 20 },
             type: "req",
         });
-        socket.receive({
+        const encodedResponse = ` \n${JSON.stringify({
             id: request.id,
             ok: true,
             payload: { sessions: [] },
             type: "res",
-        });
+        })}\t`;
+        socket.receiveRaw(encodedResponse);
         expect(await result).toEqual({ sessions: [] });
+        expect(responseBytes).toBe(Buffer.byteLength(encodedResponse, "utf8"));
         expect(states.map((snapshot) => snapshot.phase)).toContain("connected");
 
         await stopConnected(transport, socket);

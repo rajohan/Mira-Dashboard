@@ -53,6 +53,9 @@ describe("generated contract documentation", () => {
         expect(configurationDocumentation).toContain(
             "| `ELEVENLABS_API_KEY` | `elevenLabsApiKey` | `opaque-secret`; values withheld | When present, a trimmed nonblank control-safe secret at most 4096 code units; never persisted, logged, or browser-exposed. | Optional; no default | `web` | Yes | None |"
         );
+        expect(configurationDocumentation).toContain(
+            "| `MOLTBOOK_API_KEY` | `moltbookApiKey` | `opaque-secret`; values withheld | Trimmed nonblank control-safe secret at most 4096 code units; never persisted, logged, or browser-exposed. | Required; value withheld | `worker` | Yes | None |"
+        );
         const procedureDocumentation = first.get("procedures.md");
         expect(procedureDocumentation).toContain("`auth.bootstrap`");
         expect(procedureDocumentation).toContain("`auth.changePassword`");
@@ -100,6 +103,12 @@ describe("generated contract documentation", () => {
         );
         expect(procedureDocumentation).toContain(
             "| `logs.tail` | query | logs | Authenticated browser session: logs:read |"
+        );
+        expect(procedureDocumentation).toContain(
+            "| `moltbook.feed` | query | moltbook | Authenticated browser session: cache:read |"
+        );
+        expect(procedureDocumentation).toContain(
+            "| `moltbook.snapshot` | query | moltbook | Authenticated browser session: cache:read |"
         );
         expect(procedureDocumentation).toContain(
             "| `terminal.prepareSession` | mutation | terminal | Authenticated browser session: terminal:write; MFA enrollment required; recent MFA when enabled |"
@@ -160,11 +169,16 @@ describe("generated contract documentation", () => {
             "| `/logs` | Browser session | Logs | `logs` |"
         );
         expect(routeDocumentation).toContain(
+            "| `/moltbook` | Browser session | Moltbook | `moltbook` |"
+        );
+        expect(routeDocumentation).toContain(
             "| `/terminal` | Browser session | Terminal | `terminal` |"
         );
-        expect(routeDocumentation?.match(/^\| `\//gmu)).toHaveLength(13);
+        expect(routeDocumentation?.match(/^\| `\//gmu)).toHaveLength(14);
         expect(first.has("schemas/files.upload.accepted.schema.json")).toBe(true);
         expect(first.has("schemas/logs.tail.output.schema.json")).toBe(true);
+        expect(first.has("schemas/moltbook.feed.result.v1.schema.json")).toBe(true);
+        expect(first.has("schemas/moltbook.snapshot.result.v1.schema.json")).toBe(true);
         expect(first.has("schemas/terminal.prepareSession.output.schema.json")).toBe(
             true
         );

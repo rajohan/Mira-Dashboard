@@ -2,6 +2,7 @@ import { TRPCError } from "@trpc/server";
 
 import {
     runtimeIdentityContract,
+    systemHealthDiagnosticsContract,
     systemMetricsContract,
 } from "../../../contracts/system.ts";
 import { readRuntimeIdentity } from "../../platform/runtime/readRuntimeIdentity.ts";
@@ -9,6 +10,10 @@ import { publicProcedure, router, sessionProcedure } from "../../trpc/trpc.ts";
 import { SystemMetricsUnavailableError } from "./systemMetricsService.ts";
 
 const systemRoutes = {
+    healthDiagnostics: sessionProcedure
+        .input(systemHealthDiagnosticsContract.input)
+        .output(systemHealthDiagnosticsContract.output)
+        .query(({ ctx }) => ctx.systemHealthDiagnosticsService.read()),
     metrics: sessionProcedure
         .input(systemMetricsContract.input)
         .output(systemMetricsContract.output)
@@ -33,5 +38,5 @@ const systemRoutes = {
 /** Leaf procedure names owned by the system-router composition. */
 export const systemProcedureNames = Object.freeze(Object.keys(systemRoutes));
 
-/** Public identity and session-only system metric procedures. */
+/** Public identity plus session-only health and system metric procedures. */
 export const systemRouter = router(systemRoutes);

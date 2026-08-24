@@ -2,6 +2,7 @@ import { toDate } from "date-fns";
 import {
     and,
     asc,
+    count,
     desc,
     eq,
     exists,
@@ -27,6 +28,12 @@ import { taskLabels } from "../../database/schema/taskLabels.ts";
 import { tasks } from "../../database/schema/tasks.ts";
 import { taskUpdates } from "../../database/schema/taskUpdates.ts";
 import {
+    taskHeartbeatAgentAssignee,
+    taskHeartbeatAgentPriorities,
+    taskHeartbeatOwnerAssignee,
+    taskHeartbeatOwnerStatus,
+} from "./heartbeatPolicy.ts";
+import {
     parseTaskAutomationProfileRecord,
     parseTaskLabelRecord,
     parseTaskProgressRecord,
@@ -34,11 +41,14 @@ import {
 } from "./repositoryRecords.ts";
 import type {
     TaskAggregateRecord,
+    TaskHeartbeatCandidateSnapshot,
     TaskOpenCronLinkRecord,
     TaskPersistenceDatabase,
     TaskRecord,
     TaskRepositoryReader,
 } from "./repositoryTypes.ts";
+
+const taskHeartbeatCandidateMaximum = 100;
 
 function assertPageLimit(limit: number, maximum: number): void {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > maximum) {
@@ -248,6 +258,69 @@ export class DrizzleTaskRepositoryReader implements TaskRepositoryReader {
             cronJobId,
             task: parseTaskRecord(task),
         }));
+    }
+
+    public readHeartbeatCandidates(): TaskHeartbeatCandidateSnapshot {
+        const linkedAutomation = exists(
+            this.database
+                .select({ taskId: taskAutomationProfiles.taskId })
+                .from(taskAutomationProfiles)
+                .where(eq(taskAutomationProfiles.taskId, tasks.id))
+        );
+        const relevance = and(
+            ne(tasks.status, "done"),
+            or(
+                linkedAutomation,
+                and(
+                    eq(tasks.assignee, taskHeartbeatAgentAssignee),
+                    inArray(tasks.priority, [...taskHeartbeatAgentPriorities])
+                ),
+                and(
+                    eq(tasks.assignee, taskHeartbeatOwnerAssignee),
+                    eq(tasks.status, taskHeartbeatOwnerStatus)
+                )
+            )
+        );
+        const totalCount = this.database
+            .select({ value: count() })
+            .from(tasks)
+            .where(relevance)
+            .get()?.value;
+        if (totalCount === undefined) {
+            throw new Error("Task heartbeat count returned no row");
+        }
+        const rows = this.database
+            .select({
+                assignee: tasks.assignee,
+                automationCronJobId: taskAutomationProfiles.cronJobId,
+                automationRecurring: taskAutomationProfiles.recurring,
+                id: tasks.id,
+                priority: tasks.priority,
+                status: tasks.status,
+            })
+            .from(tasks)
+            .leftJoin(taskAutomationProfiles, eq(taskAutomationProfiles.taskId, tasks.id))
+            .where(relevance)
+            .orderBy(asc(tasks.id))
+            .limit(taskHeartbeatCandidateMaximum)
+            .all();
+        return {
+            rows: rows.map(
+                ({ assignee, automationCronJobId, automationRecurring, ...task }) => ({
+                    ...task,
+                    ...(assignee === null ? {} : { assignee }),
+                    ...(automationCronJobId === null || automationRecurring === null
+                        ? {}
+                        : {
+                              automation: {
+                                  cronJobId: automationCronJobId,
+                                  recurring: automationRecurring,
+                              },
+                          }),
+                })
+            ),
+            totalCount,
+        };
     }
 
     public listTasks(input: ListTasksInput): TaskAggregateRecord[] {

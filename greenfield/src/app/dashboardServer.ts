@@ -10,6 +10,10 @@ import {
 } from "../contracts/chatModel.ts";
 import { createAgentRepository } from "../server/domains/agents/repository.ts";
 import { createAgentService } from "../server/domains/agents/service.ts";
+import {
+    readCacheHeartbeatDashboardJobs,
+    readCacheHeartbeatTasksWithCronRefresh,
+} from "../server/domains/cache/heartbeatProjection.ts";
 import { createCacheRepository } from "../server/domains/cache/repository.ts";
 import { createCacheService } from "../server/domains/cache/service.ts";
 import { createChatRepository } from "../server/domains/chat/repository.ts";
@@ -57,7 +61,10 @@ import {
     OpenClawCronProviderError,
     type OpenClawCronProvider,
 } from "../server/domains/openClawCron/provider.ts";
-import { createOpenClawCronService } from "../server/domains/openClawCron/service.ts";
+import {
+    createOpenClawCronService,
+    type OpenClawCronHeartbeatReader,
+} from "../server/domains/openClawCron/service.ts";
 import { createSqliteOpenClawCronIntentStore } from "../server/domains/openClawCron/sqliteIntentStore.ts";
 import { createOpenClawTasksRealtimePublisher } from "../server/domains/openClawTasks/realtime.ts";
 import {
@@ -90,6 +97,7 @@ import { createRequestAuthenticator } from "../server/domains/security/requestAu
 import { createRequestAuthenticationRepository } from "../server/domains/security/requestAuthenticationRepository.ts";
 import { createSecurityAuditLifecycleService } from "../server/domains/security/securityAuditLifecycle.ts";
 import { createSecurityAuditLifecycleRepository } from "../server/domains/security/securityAuditLifecycleRepository.ts";
+import { createSystemHealthDiagnosticsService } from "../server/domains/system/healthDiagnosticsService.ts";
 import { createTaskRepository } from "../server/domains/tasks/repository.ts";
 import { createTaskService } from "../server/domains/tasks/service.ts";
 import { createElevenLabsSpeechProvider } from "../server/platform/chat/elevenLabsSpeechProvider.ts";
@@ -193,6 +201,7 @@ export interface DashboardServerOptions extends Omit<
     | "openClawCronService"
     | "openClawTasksService"
     | "securityAuditLifecycle"
+    | "systemHealthDiagnosticsService"
     | "taskService"
     | "terminalService"
     | "terminalSocketBoundary"
@@ -218,6 +227,8 @@ export interface DashboardServerOptions extends Omit<
     readonly openClawFileRoot?: WorkspaceFileRootConfiguration;
     readonly recentAuthenticationWindowMs?: number;
     readonly sessionIdleDurationMs?: number;
+    /** Verified immutable release used to require a matching fresh worker. */
+    readonly verifiedReleaseId?: string;
     /** Optional only for isolated composition tests; production supplies both paths. */
     readonly terminalBrokerDirectory?: string;
     readonly terminalBrokerSocket?: string;
@@ -427,6 +438,7 @@ export async function createDashboardServer(
     let chatMaintenance: DashboardChatRuntimeMaintenance | undefined;
     let chatTranscriptLifecycleSupervisor: ChatTranscriptLifecycleSupervisor | undefined;
     let openClawTasksService: OpenClawTasksService | undefined;
+    let openClawCronHeartbeatReader: OpenClawCronHeartbeatReader | undefined;
     let workspaceFilesService: WorkspaceFilesService | undefined;
     let openClawTasksSupervisor:
         | ReturnType<typeof createOpenClawTasksSubscriptionSupervisor>
@@ -452,6 +464,11 @@ export async function createDashboardServer(
         }
         try {
             await workspaceFilesService?.dispose();
+        } catch (error) {
+            failure ??= error;
+        }
+        try {
+            await openClawCronHeartbeatReader?.disposeHeartbeat();
         } catch (error) {
             failure ??= error;
         }
@@ -803,6 +820,17 @@ export async function createDashboardServer(
                 ? {}
                 : { transcriptLifecycle: chatTranscriptLifecycle }),
         });
+        const systemHealthDiagnosticsService = createSystemHealthDiagnosticsService({
+            ...(options.verifiedReleaseId === undefined
+                ? {}
+                : { expectedWorkerReleaseId: options.verifiedReleaseId }),
+            frontendReady: options.frontendAssets !== undefined,
+            gatewayConnectionService,
+            gatewaySessionsReader: gatewaySessionsService,
+            jobHealthReader: jobRepository,
+            ...(domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }),
+            readiness: options.readiness,
+        });
         const agentService = createAgentService({
             ...(domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }),
             gatewaySessionsService,
@@ -983,12 +1011,24 @@ export async function createDashboardServer(
                 options.applicationRuntime.persistentGatewayTransport
             ),
         });
+        openClawCronHeartbeatReader = openClawCronService;
         const cacheService = createCacheService({
             cacheRepository: createCacheRepository(database, databaseRuntime),
             jobRepository,
             ...(domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }),
             readGatewayConnection: gatewayConnectionService.get,
             readGatewaySessionsProjection: gatewaySessionsService.readHeartbeatProjection,
+            readHeartbeatDashboardJobs: (generatedAtMs) =>
+                readCacheHeartbeatDashboardJobs(jobRepository, generatedAtMs),
+            readHeartbeatTasks: () =>
+                readCacheHeartbeatTasksWithCronRefresh(
+                    () =>
+                        taskRepository.withReadTransaction((reader) =>
+                            reader.readHeartbeatCandidates()
+                        ),
+                    openClawCronService.refreshHeartbeatProjection,
+                    openClawCronService.readHeartbeatJobProjection
+                ),
             readOpenClawCronProjection: openClawCronService.readHeartbeatProjection,
             wakeEventPump,
         });
@@ -1053,6 +1093,7 @@ export async function createDashboardServer(
             port: options.port,
             readiness: options.readiness,
             securityAuditLifecycle,
+            systemHealthDiagnosticsService,
             taskService,
             ...(terminalComposition === undefined
                 ? {}
@@ -1266,6 +1307,7 @@ export async function runDashboardWebProcess(
             terminalBrokerSocket: layout.production.state.terminalBrokerSocket,
             totpSecretCipher,
             trustedProxyAddresses: configuration.trustedProxyAddresses,
+            verifiedReleaseId: release.manifest.source.commitSha,
             webAuthnRelyingParty: configuration.webAuthnRelyingParty,
             workspaceFileRoot,
             workspaceFileUploadSpoolRoot: layout.production.state.workspaceFileUploads,

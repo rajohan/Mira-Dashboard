@@ -57,8 +57,10 @@ describe("reviewed pre-cutover parity inventory", () => {
             "/agents",
             "/chat",
             "/files",
+            "/jobs",
             "/login",
             "/logs",
+            "/moltbook",
             "/reports",
             "/sessions",
             "/tasks",
@@ -158,6 +160,84 @@ describe("reviewed pre-cutover parity inventory", () => {
                 )
                 .map(({ id }) => id)
         ).toEqual([]);
+    });
+
+    test("keeps the reviewed Sessions and Chat slice closed", async () => {
+        const reviewed = await loadReviewedParityInventory();
+        const sessionsAndChatEndpoints = reviewed.legacyEndpoints.endpoints.filter(
+            ({ section }) => section === "Sessions And Chat"
+        );
+
+        expect(
+            sessionsAndChatEndpoints.map(({ id, target }) => [
+                id,
+                target.kind === "reviewed-removal" ? target.kind : target.delivery,
+                target.kind === "procedure" ? target.names : undefined,
+            ])
+        ).toEqual([
+            ["DELETE /api/sessions/:id", "implemented", ["gatewaySessions.delete"]],
+            ["GET /api/sessions/list", "implemented", ["gatewaySessions.list"]],
+            ["GET /api/sessions/stats", "implemented", ["gatewaySessions.list"]],
+            [
+                "POST /api/sessions/:id/action",
+                "implemented",
+                ["gatewaySessions.compact", "gatewaySessions.reset"],
+            ],
+            ["WebSocket /ws", "implemented", ["events.stream"]],
+        ]);
+    });
+
+    test("keeps full legacy heartbeat diagnostics planned beside schema v4", async () => {
+        const reviewed = await loadReviewedParityInventory();
+        const heartbeat = reviewed.legacyEndpoints.endpoints.find(
+            ({ id }) => id === "GET /api/cache/heartbeat"
+        );
+
+        expect(heartbeat?.purpose).toContain("legacy schema v3 payload-bearing");
+        expect(heartbeat?.purpose).toContain("schema v4");
+        expect(heartbeat?.purpose).toContain("without loss");
+        expect(heartbeat?.target).toEqual({
+            delivery: "planned",
+            kind: "procedure",
+            names: ["cache.getHeartbeat"],
+            phase: "phase-4",
+        });
+    });
+
+    test("records the identity-free health diagnostics replacement precisely", async () => {
+        const reviewed = await loadReviewedParityInventory();
+        const diagnostics = reviewed.legacyEndpoints.endpoints.find(
+            ({ id }) => id === "GET /api/health/diagnostics"
+        );
+
+        expect(diagnostics?.purpose).toContain("exact-release-worker");
+        expect(diagnostics?.purpose).toContain("identity-free");
+        expect(diagnostics?.purpose).toContain("GET /api/metrics");
+        expect(diagnostics?.target).toEqual({
+            delivery: "implemented",
+            kind: "procedure",
+            names: ["system.healthDiagnostics"],
+            phase: "phase-1",
+        });
+    });
+
+    test("keeps the wider legacy metrics capability planned explicitly", async () => {
+        const reviewed = await loadReviewedParityInventory();
+        const metrics = reviewed.legacyEndpoints.endpoints.find(
+            ({ id }) => id === "GET /api/metrics"
+        );
+
+        expect(metrics?.purpose).toContain("application observability");
+        expect(metrics?.purpose).toContain("HTTP counters");
+        expect(metrics?.purpose).toContain("polling-snapshot");
+        expect(metrics?.purpose).toContain("token projections");
+        expect(metrics?.purpose).toContain("health diagnostics");
+        expect(metrics?.target).toEqual({
+            delivery: "planned",
+            kind: "procedure",
+            names: ["system.metrics"],
+            phase: "phase-3",
+        });
     });
 
     test("keeps the reviewed Phase 5 Logs slice closed", async () => {
@@ -260,5 +340,74 @@ describe("reviewed pre-cutover parity inventory", () => {
             path: "/api/media/*",
             phase: "phase-5",
         });
+    });
+
+    test("keeps the reviewed Phase 5 Moltbook slice closed", async () => {
+        const reviewed = await loadReviewedParityInventory();
+        const moltbookRoute = reviewed.frontend.routes.find(
+            ({ path }) => path === "/moltbook"
+        );
+        const endpoints = reviewed.legacyEndpoints.endpoints.filter(({ id }) =>
+            [
+                "GET /api/moltbook/feed",
+                "GET /api/moltbook/home",
+                "GET /api/moltbook/my-posts",
+                "GET /api/moltbook/profile",
+            ].includes(id)
+        );
+
+        expect(moltbookRoute?.target.delivery).toBe("implemented");
+        expect(
+            endpoints.map(({ id, target }) => [
+                id,
+                target.kind === "reviewed-removal" ? target.kind : target.delivery,
+                target.kind === "procedure" ? target.names : undefined,
+            ])
+        ).toEqual([
+            ["GET /api/moltbook/feed", "implemented", ["moltbook.feed"]],
+            ["GET /api/moltbook/home", "implemented", ["moltbook.home"]],
+            ["GET /api/moltbook/my-posts", "implemented", ["moltbook.listMyPosts"]],
+            ["GET /api/moltbook/profile", "implemented", ["moltbook.profile"]],
+        ]);
+    });
+
+    test("keeps the reviewed jobs and cron slice closed", async () => {
+        const reviewed = await loadReviewedParityInventory();
+        const jobsRoute = reviewed.frontend.routes.find(({ path }) => path === "/jobs");
+        const jobsAndCronEndpoints = reviewed.legacyEndpoints.endpoints.filter(
+            ({ section }) => section === "Jobs And Cron"
+        );
+
+        expect(jobsRoute?.target.delivery).toBe("implemented");
+        expect(
+            jobsAndCronEndpoints.map(({ id, target }) => [
+                id,
+                target.kind === "reviewed-removal" ? target.kind : target.delivery,
+                target.kind === "procedure" ? target.names : undefined,
+            ])
+        ).toEqual([
+            ["GET /api/cron/jobs", "implemented", ["openClawCron.list"]],
+            ["GET /api/job-executions", "implemented", ["jobs.listRuns"]],
+            ["GET /api/job-executions/:id", "implemented", ["jobs.getRun"]],
+            ["GET /api/jobs", "implemented", ["schedules.list"]],
+            ["GET /api/jobs/:id", "implemented", ["schedules.get"]],
+            ["GET /api/jobs/:id/runs", "implemented", ["schedules.listRuns"]],
+            [
+                "PATCH /api/job-executions/claims",
+                "implemented",
+                ["jobs.setClaimingPaused"],
+            ],
+            ["PATCH /api/jobs/:id", "implemented", ["schedules.update"]],
+            ["POST /api/cron/jobs/:id/delete", "implemented", ["openClawCron.delete"]],
+            ["POST /api/cron/jobs/:id/run", "implemented", ["openClawCron.run"]],
+            [
+                "POST /api/cron/jobs/:id/toggle",
+                "implemented",
+                ["openClawCron.setEnabled"],
+            ],
+            ["POST /api/cron/jobs/:id/update", "implemented", ["openClawCron.update"]],
+            ["POST /api/job-executions/:id/cancel", "implemented", ["jobs.cancelRun"]],
+            ["POST /api/jobs/:id/run", "implemented", ["schedules.run"]],
+        ]);
     });
 });

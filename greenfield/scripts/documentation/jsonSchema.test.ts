@@ -25,6 +25,7 @@ import {
     createAutomationPrincipalResultSchema,
     listAutomationPrincipalsResultSchema,
 } from "../../src/contracts/automationSecurity.ts";
+import { cacheHeartbeatResultSchema } from "../../src/contracts/cache.ts";
 import {
     chatRuntimeOutputSchema,
     chatSendInputSchema,
@@ -170,6 +171,25 @@ describe("contract JSON Schema conversion", () => {
         expect(document).toContain(
             "delivery metadata and desired enabled-state synchronization"
         );
+    });
+
+    test("documents heartbeat v4 bounds and secure runtime-only invariants", () => {
+        const document = convertContractSchema(
+            cacheHeartbeatResultSchema,
+            "cache.getHeartbeat",
+            "output"
+        );
+        const serialized = JSON.stringify(document);
+
+        expect(document).toMatchObject({
+            properties: { schemaVersion: { const: 4 } },
+        });
+        expect(serialized).toContain('"maxItems":100');
+        expect(serialized).toContain('"maxItems":32');
+        expect(serialized).toContain("strict canonical ID and relevance order");
+        expect(serialized).toContain("disable-intent validity to match expiry");
+        expect(serialized).toContain("cron health categories");
+        expect(serialized).toContain("linked-cron actual, desired");
     });
 
     test("documents the runtime-only terminal replay window invariant", () => {

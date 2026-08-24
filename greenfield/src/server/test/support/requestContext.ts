@@ -5,6 +5,7 @@ import type {
     ApplicationCapability,
     RequestAuthentication,
 } from "../../../contracts/security.ts";
+import type { SystemHealthDiagnostics } from "../../../contracts/system.ts";
 import type { AgentService } from "../../domains/agents/service.ts";
 import { createTestAgentService } from "../../domains/agents/testSupport/service.ts";
 import type { CacheService } from "../../domains/cache/service.ts";
@@ -41,6 +42,7 @@ import type { AutomationSecurityLifecycleService } from "../../domains/security/
 import type { MfaAccountLifecycleService } from "../../domains/security/mfa/accountLifecycle.ts";
 import type { MfaLoginLifecycleService } from "../../domains/security/mfa/loginLifecycle.ts";
 import type { SecurityAuditLifecycleService } from "../../domains/security/securityAuditLifecycle.ts";
+import type { SystemHealthDiagnosticsService } from "../../domains/system/healthDiagnosticsService.ts";
 import {
     SystemMetricsUnavailableError,
     type SystemMetricsRuntimeService,
@@ -103,6 +105,31 @@ export function createTestGatewayConnectionService(): GatewayConnectionService {
         nowMs: () => 1_800_000_000_000,
         provider: unavailableGatewayConnectionStateProvider,
     });
+}
+
+const unavailableSystemHealthDiagnostics = Object.freeze({
+    checkedAtMs: 1_800_000_000_000,
+    checks: {
+        application: { status: "not-ready" },
+        database: { status: "unavailable" },
+        frontend: { status: "unavailable" },
+        release: { status: "unavailable" },
+        worker: { status: "unavailable" },
+    },
+    dependencies: {
+        gateway: { status: "unavailable" },
+        sessions: { state: "unavailable" },
+    },
+    queue: { status: "unavailable" },
+    status: "not-ready",
+} as const satisfies SystemHealthDiagnostics);
+
+/**
+ * Creates stable fail-closed detailed health for generic request and server tests.
+ * @returns An inert identity-free diagnostics service.
+ */
+export function createTestSystemHealthDiagnosticsService(): SystemHealthDiagnosticsService {
+    return Object.freeze({ read: () => unavailableSystemHealthDiagnostics });
 }
 
 /**
@@ -478,6 +505,7 @@ export interface TestServerSecurityServices {
     readonly monitoringService: MonitoringService["Service"];
     readonly openClawCronService: OpenClawCronService;
     readonly securityAuditLifecycle: SecurityAuditLifecycleService;
+    readonly systemHealthDiagnosticsService: SystemHealthDiagnosticsService;
     readonly taskService: TaskService["Service"];
 }
 
@@ -517,6 +545,9 @@ export function createTestServerSecurityServices(
             overrides.openClawCronService ?? createTestOpenClawCronService(),
         securityAuditLifecycle:
             overrides.securityAuditLifecycle ?? createTestSecurityAuditLifecycleService(),
+        systemHealthDiagnosticsService:
+            overrides.systemHealthDiagnosticsService ??
+            createTestSystemHealthDiagnosticsService(),
         taskService: overrides.taskService ?? createTestTaskService(),
     };
 }
@@ -612,6 +643,7 @@ export function createTestRequestContext(
         readonly requestId?: string;
         readonly responseHeaders?: Headers;
         readonly securityAuditLifecycle?: SecurityAuditLifecycleService;
+        readonly systemHealthDiagnosticsService?: SystemHealthDiagnosticsService;
         readonly taskService?: TaskService["Service"];
     } = {}
 ): Promise<RequestContext> {
@@ -650,6 +682,9 @@ export function createTestRequestContext(
         responseHeaders: options.responseHeaders ?? new Headers(),
         securityAuditLifecycle:
             options.securityAuditLifecycle ?? createTestSecurityAuditLifecycleService(),
+        systemHealthDiagnosticsService:
+            options.systemHealthDiagnosticsService ??
+            createTestSystemHealthDiagnosticsService(),
         taskService: options.taskService ?? createTestTaskService(),
     });
 }

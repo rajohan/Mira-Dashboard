@@ -33,6 +33,10 @@ export type JobCacheAttemptWriteResult = "committed" | "lost-claim";
 export { logMaintenanceJobActionKey } from "../../../shared/logMaintenanceUnits.ts";
 /** Automatic schedule runs only the custom managed application/container policy. */
 export const logMaintenanceJobScheduleId = "maintenance.rotate-managed-logs";
+/** Worker-only fixed-host Moltbook snapshot refresh identity. */
+export const moltbookDashboardCacheJobActionKey = "cache.refresh.moltbook-dashboard";
+/** Durable schedule identity for the all-or-nothing Moltbook projection. */
+export const moltbookDashboardCacheJobScheduleId = "cache.moltbook-dashboard";
 /** Worker-only dynamic action used for one already-spooled structural file write. */
 export const workspaceFileWriteJobActionKey = "workspace-files.apply-write";
 /** Retry-safe worker action backed by a durable replace intent and atomic exchange. */
@@ -290,6 +294,29 @@ const systemHostCacheDefinition = validateJobActionDefinition({
     timeoutMs: 30_000,
 });
 
+const moltbookDashboardCacheDefinition = validateJobActionDefinition({
+    actionKey: moltbookDashboardCacheJobActionKey,
+    actionPayload: Object.freeze({ key: "moltbook.dashboard" }),
+    attemptLimit: 3,
+    cancellationPolicy: "cooperative",
+    defaultEnabled: true,
+    defaultSchedule: Object.freeze({
+        intervalMs: 30 * 60_000,
+        kind: "interval",
+    }),
+    description:
+        "Projects a bounded all-or-nothing Moltbook home, feed, profile, and authored-content snapshot.",
+    displayName: "Moltbook dashboard cache",
+    initialDue: "immediate",
+    manualExposure: "cache-write",
+    priority: 0,
+    resourceClass: "light",
+    resourceKeys: Object.freeze(["network.moltbook"]),
+    retrySafe: true,
+    scheduleId: moltbookDashboardCacheJobScheduleId,
+    timeoutMs: 30_000,
+});
+
 const logMaintenanceDefinition = validateJobActionDefinition({
     actionKey: logMaintenanceJobActionKey,
     actionPayload: Object.freeze({ policyId: "docker-managed" }),
@@ -349,6 +376,7 @@ export const workspaceFileReplaceJobActionDefinition =
 /** Complete reviewed pure-definition registry for this slice. */
 export const jobActionDefinitions = Object.freeze([
     systemHostCacheDefinition,
+    moltbookDashboardCacheDefinition,
     logMaintenanceDefinition,
     workerSmokeDefinition,
 ]);

@@ -14,6 +14,7 @@ import {
 } from "../../database/runtime/databaseService.ts";
 import type { PersistentGatewayTaskNotificationTransport } from "../../platform/gateway/persistentGatewayTransport.ts";
 import { createCacheRepository, type CacheRepository } from "../cache/repository.ts";
+import type { MoltbookDashboardCollector } from "../moltbook/provider.ts";
 import { createTaskNotificationQueue } from "../tasks/taskNotificationQueue.ts";
 import {
     createJobWorkerActionResolver,
@@ -36,6 +37,7 @@ import {
 export interface DashboardWorkerRuntimeOptions {
     readonly database: DatabaseRuntimeLayerOptions;
     readonly logMaintenance: LogMaintenanceExecutionPort;
+    readonly moltbook: MoltbookDashboardCollector;
     readonly workspaceFiles?: WorkspaceFileWriteExecutionPort & {
         readonly dispose: () => Promise<void> | void;
     };
@@ -395,10 +397,13 @@ export function createDashboardWorkerRuntime(
                 database.database,
                 database.writeAdmission
             );
-            const findAction = createJobWorkerActionResolver(
-                options.logMaintenance,
-                options.workspaceFiles
-            );
+            const findAction = createJobWorkerActionResolver({
+                logMaintenance: options.logMaintenance,
+                moltbook: options.moltbook,
+                ...(options.workspaceFiles === undefined
+                    ? {}
+                    : { workspaceFiles: options.workspaceFiles }),
+            });
             coordinator = dependencies.createCoordinator({
                 actionDefinitions: jobActionDefinitions,
                 commitCacheAttempt: (input) => cacheRepository.commitAttempt(input),

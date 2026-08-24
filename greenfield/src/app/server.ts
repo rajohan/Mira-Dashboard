@@ -22,6 +22,7 @@ import type { AutomationSecurityLifecycleService } from "../server/domains/secur
 import type { MfaAccountLifecycleService } from "../server/domains/security/mfa/accountLifecycle.ts";
 import type { MfaLoginLifecycleService } from "../server/domains/security/mfa/loginLifecycle.ts";
 import type { SecurityAuditLifecycleService } from "../server/domains/security/securityAuditLifecycle.ts";
+import type { SystemHealthDiagnosticsService } from "../server/domains/system/healthDiagnosticsService.ts";
 import type { TaskService } from "../server/domains/tasks/service.ts";
 import type { TerminalService } from "../server/domains/terminal/service.ts";
 import type { ReadinessController } from "../server/platform/readiness/readinessState.ts";
@@ -217,6 +218,7 @@ export interface ServerOptions {
     readonly port: number;
     readonly readiness: ReadinessController;
     readonly securityAuditLifecycle: SecurityAuditLifecycleService;
+    readonly systemHealthDiagnosticsService: SystemHealthDiagnosticsService;
     readonly taskService: TaskService["Service"];
     readonly terminalService?: TerminalService;
     /** Browser-session-only upgrade boundary for the worker-owned interactive PTY. */
@@ -272,6 +274,7 @@ export async function createServer(options: ServerOptions): Promise<ApplicationS
             openClawCronService: options.openClawCronService,
             openClawTasksService: options.openClawTasksService,
             securityAuditLifecycle: options.securityAuditLifecycle,
+            systemHealthDiagnosticsService: options.systemHealthDiagnosticsService,
             taskService: options.taskService,
             ...(options.terminalService === undefined
                 ? {}

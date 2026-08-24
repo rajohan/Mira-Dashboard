@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { realtimeEvents } from "../../database/schema/realtime.ts";
 import { testImmediateDatabaseWriteAdmission } from "../../test/support/databaseWriteAdmission.ts";
 import { openFreshMigratedDatabase } from "../../test/support/freshDatabase.ts";
+import { testMoltbookCollector } from "../../test/support/moltbook.ts";
 import { createCacheRepository } from "../cache/repository.ts";
 import {
     createJobWorkerActionResolver,
@@ -30,7 +31,8 @@ const noSideEffects: JobMutationSideEffects = Object.freeze({
 });
 const terminalRunStates = new Set(["cancelled", "failed", "succeeded", "timed-out"]);
 const findJobWorkerAction = createJobWorkerActionResolver({
-    run: () => Promise.resolve(undefined),
+    logMaintenance: { run: () => Promise.resolve(undefined) },
+    moltbook: testMoltbookCollector,
 });
 
 async function waitForTerminal(

@@ -24,6 +24,7 @@ import { incidentProcedureContracts } from "./incidents.ts";
 import { jobRealtimeEventContracts } from "./jobRealtime.ts";
 import { jobProcedureContracts } from "./jobs.ts";
 import { logProcedureContracts } from "./logs.ts";
+import { moltbookProcedureContracts } from "./moltbook.ts";
 import { monitoringProcedureContracts } from "./monitoringIngestion.ts";
 import { monitoringRealtimeEventContracts } from "./monitoringRealtime.ts";
 import { notificationProcedureContracts } from "./notifications.ts";
@@ -60,6 +61,7 @@ const registeredProcedureContracts = [
     ...jobProcedureContracts,
     ...logProcedureContracts,
     ...monitoringProcedureContracts,
+    ...moltbookProcedureContracts,
     ...notificationProcedureContracts,
     ...openClawTaskProcedureContracts,
     ...openClawCronProcedureContracts,

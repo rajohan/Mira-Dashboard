@@ -58,6 +58,16 @@ async function gatewayToken(
     return token;
 }
 
+function moltbookApiKey(
+    environment: Readonly<Record<string, string | undefined>>
+): string {
+    const value = environment.MOLTBOOK_API_KEY;
+    if (value === undefined) {
+        throw new Error("Dashboard dev requires MOLTBOOK_API_KEY");
+    }
+    return value;
+}
+
 function optionalConfiguration(
     target: Record<string, string>,
     environment: Readonly<Record<string, string | undefined>>,
@@ -83,6 +93,7 @@ export async function developmentProcessEnvironments(
     environment: Readonly<Record<string, string | undefined>> = process.env
 ): Promise<Readonly<{ web: Record<string, string>; worker: Record<string, string> }>> {
     const token = await gatewayToken(config, environment);
+    const moltbookCredential = moltbookApiKey(environment);
     const shared = {
         ...inheritedChildEnvironment(environment),
         MIRA_DASHBOARD_OPENCLAW_ROOT: config.openClawRoot,
@@ -102,7 +113,14 @@ export async function developmentProcessEnvironments(
         MIRA_DASHBOARD_WEBAUTHN_RP_NAME: "Mira Dashboard Development",
         PORT: String(config.backendPort),
     };
-    const worker: Record<string, string> = { ...shared };
+    const worker: Record<string, string> = {
+        ...shared,
+        MOLTBOOK_API_KEY: moltbookCredential,
+    };
+    const moltbookAgentName = environment.MOLTBOOK_AGENT_NAME;
+    if (moltbookAgentName !== undefined) {
+        worker.MOLTBOOK_AGENT_NAME = moltbookAgentName;
+    }
     for (const name of [
         "MIRA_DASHBOARD_LOG_LEVEL",
         "MIRA_DASHBOARD_RECENT_AUTH_MINUTES",

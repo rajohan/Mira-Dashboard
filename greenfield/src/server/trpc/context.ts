@@ -20,6 +20,7 @@ import type { AutomationSecurityLifecycleService } from "../domains/security/aut
 import type { MfaAccountLifecycleService } from "../domains/security/mfa/accountLifecycle.ts";
 import type { MfaLoginLifecycleService } from "../domains/security/mfa/loginLifecycle.ts";
 import type { SecurityAuditLifecycleService } from "../domains/security/securityAuditLifecycle.ts";
+import type { SystemHealthDiagnosticsService } from "../domains/system/healthDiagnosticsService.ts";
 import type { TaskService } from "../domains/tasks/service.ts";
 import type { TerminalService } from "../domains/terminal/service.ts";
 import type {
@@ -61,6 +62,7 @@ export interface RequestContextOptions {
     readonly requestId: string;
     readonly responseHeaders: Headers;
     readonly securityAuditLifecycle: SecurityAuditLifecycleService;
+    readonly systemHealthDiagnosticsService: SystemHealthDiagnosticsService;
     readonly taskService: TaskService["Service"];
     readonly terminalService?: TerminalService;
 }
@@ -90,6 +92,7 @@ export interface RequestContext {
     readonly requestId: string;
     readonly responseHeaders: Headers;
     readonly securityAuditLifecycle: SecurityAuditLifecycleService;
+    readonly systemHealthDiagnosticsService: SystemHealthDiagnosticsService;
     readonly taskService: TaskService["Service"];
     readonly terminalService?: TerminalService;
     readonly services: ApplicationRuntimeServices;
@@ -140,6 +143,7 @@ export async function createRequestContext(
         requestId: options.requestId,
         responseHeaders: options.responseHeaders,
         securityAuditLifecycle: options.securityAuditLifecycle,
+        systemHealthDiagnosticsService: options.systemHealthDiagnosticsService,
         taskService: options.taskService,
         ...(options.terminalService === undefined
             ? {}

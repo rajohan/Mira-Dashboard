@@ -77,8 +77,10 @@ Gateway client, chat, production credential cutover, and complete rewrite remain
   audio/text are strictly bounded, abortable, no-store, and never persisted or logged.
 - expose a versioned compact automation heartbeat from process-owned state: bounded payload-free
   cache status, sanitized Gateway phase/freshness, identity-free current-session count/truncation,
-  and global OpenClaw-cron count/pending-sync state. It must not perform an extra upstream refresh,
-  expose raw errors or identities, or claim legacy schema-v3 task/job-row parity.
+  and global OpenClaw-cron count/pending-sync state. It must own a bounded, fresh-only cron
+  inventory refresh rather than infer health from unrelated browser traffic, fetch pages
+  sequentially under explicit row/byte/deadline budgets, immediately retain only heartbeat fields,
+  never expose raw errors or identities, and not claim legacy schema-v3 task/job-row parity.
 
 **Exit gate:** recorded Gateway fixtures and live smoke tests cover every chat parity item,
 including restart during streaming.

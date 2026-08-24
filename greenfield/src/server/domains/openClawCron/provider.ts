@@ -88,6 +88,8 @@ export interface OpenClawCronProviderListPage {
     readonly limit: number;
     readonly nextOffset: number | null;
     readonly offset: number;
+    /** Encoded bytes of the authenticated raw response frame before projection strips fields. */
+    readonly responseBytes: number;
     readonly snapshotRevision: string;
     readonly total: number;
 }

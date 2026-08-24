@@ -3,7 +3,10 @@ import { describe, expect, test } from "bun:test";
 import * as v from "valibot";
 
 import {
+    type SystemHealthDiagnostics,
     type SystemMetrics,
+    systemHealthDiagnosticsContract,
+    systemHealthDiagnosticsSchema,
     systemMetricsContract,
     systemMetricsSchema,
 } from "./system.ts";
@@ -35,6 +38,270 @@ const metrics = Object.freeze({
     sampledAtMs: 1_800_000_000_000,
     uptimeSeconds: 12,
 } as const satisfies SystemMetrics);
+
+const healthDiagnostics = Object.freeze({
+    checkedAtMs: 1_800_000_000_000,
+    checks: {
+        application: { status: "ready" },
+        database: { status: "ready" },
+        frontend: { status: "ready" },
+        release: { status: "verified" },
+        worker: { status: "ready" },
+    },
+    dependencies: {
+        gateway: {
+            freshness: "fresh",
+            phase: "connected",
+            status: "observed",
+        },
+        sessions: {
+            count: 2,
+            observedAtMs: 1_800_000_000_000,
+            state: "fresh",
+            truncated: false,
+        },
+    },
+    queue: {
+        claimingPaused: false,
+        oldestQueuedAtMs: 1_799_999_999_000,
+        runs: { queued: 1, running: 1 },
+        status: "observed",
+        workers: {
+            capacity: 2,
+            drainingCount: 0,
+            freshCount: 1,
+            onlineCount: 1,
+        },
+    },
+    status: "ready",
+} as const satisfies SystemHealthDiagnostics);
+
+describe("system health diagnostics contract", () => {
+    test("accepts one bounded identity-free readiness and queue projection", () => {
+        expect(v.parse(systemHealthDiagnosticsSchema, healthDiagnostics)).toEqual(
+            healthDiagnostics
+        );
+        expect(() =>
+            v.parse(systemHealthDiagnosticsSchema, {
+                ...healthDiagnostics,
+                hostname: "private-host",
+            })
+        ).toThrow();
+        expect(() =>
+            v.parse(systemHealthDiagnosticsSchema, {
+                ...healthDiagnostics,
+                queue: {
+                    ...healthDiagnostics.queue,
+                    workers: {
+                        ...healthDiagnostics.queue.workers,
+                        workerId: "private-worker",
+                    },
+                },
+            })
+        ).toThrow();
+    });
+
+    test("rejects inconsistent aggregate and worker states", () => {
+        expect(() =>
+            v.parse(systemHealthDiagnosticsSchema, {
+                ...healthDiagnostics,
+                status: "not-ready",
+            })
+        ).toThrow("aggregate is inconsistent");
+        expect(() =>
+            v.parse(systemHealthDiagnosticsSchema, {
+                ...healthDiagnostics,
+                queue: { status: "unavailable" },
+            })
+        ).toThrow("aggregate is inconsistent");
+        expect(() =>
+            v.parse(systemHealthDiagnosticsSchema, {
+                ...healthDiagnostics,
+                queue: {
+                    ...healthDiagnostics.queue,
+                    workers: {
+                        capacity: 0,
+                        drainingCount: 0,
+                        freshCount: 0,
+                        onlineCount: 0,
+                    },
+                },
+            })
+        ).toThrow("aggregate is inconsistent");
+        expect(() =>
+            v.parse(systemHealthDiagnosticsSchema, {
+                ...healthDiagnostics,
+                queue: {
+                    ...healthDiagnostics.queue,
+                    workers: {
+                        ...healthDiagnostics.queue.workers,
+                        freshCount: 2,
+                    },
+                },
+            })
+        ).toThrow("worker projection is inconsistent");
+        expect(() =>
+            v.parse(systemHealthDiagnosticsSchema, {
+                ...healthDiagnostics,
+                queue: {
+                    ...healthDiagnostics.queue,
+                    workers: {
+                        capacity: 33,
+                        drainingCount: 0,
+                        freshCount: 33,
+                        onlineCount: 33,
+                    },
+                },
+            })
+        ).toThrow("worker count is outside its budget");
+        expect(() =>
+            v.parse(systemHealthDiagnosticsSchema, {
+                ...healthDiagnostics,
+                queue: {
+                    ...healthDiagnostics.queue,
+                    workers: {
+                        ...healthDiagnostics.queue.workers,
+                        capacity: 0,
+                    },
+                },
+            })
+        ).toThrow("worker projection is inconsistent");
+        expect(() =>
+            v.parse(systemHealthDiagnosticsSchema, {
+                ...healthDiagnostics,
+                queue: {
+                    ...healthDiagnostics.queue,
+                    workers: {
+                        ...healthDiagnostics.queue.workers,
+                        capacity: 17,
+                    },
+                },
+            })
+        ).toThrow("worker projection is inconsistent");
+        expect(() =>
+            v.parse(systemHealthDiagnosticsSchema, {
+                ...healthDiagnostics,
+                checks: {
+                    ...healthDiagnostics.checks,
+                    release: { status: "unavailable" },
+                },
+                status: "not-ready",
+            })
+        ).toThrow("aggregate is inconsistent");
+        expect(() =>
+            v.parse(systemHealthDiagnosticsSchema, {
+                ...healthDiagnostics,
+                checks: {
+                    ...healthDiagnostics.checks,
+                    worker: { status: "unavailable" },
+                },
+                status: "not-ready",
+            })
+        ).toThrow("aggregate is inconsistent");
+        expect(() =>
+            v.parse(systemHealthDiagnosticsSchema, {
+                ...healthDiagnostics,
+                dependencies: {
+                    ...healthDiagnostics.dependencies,
+                    gateway: {
+                        freshness: "stale",
+                        phase: "connected",
+                        status: "observed",
+                    },
+                },
+            })
+        ).toThrow("Gateway projection is inconsistent");
+        expect(() =>
+            v.parse(systemHealthDiagnosticsSchema, {
+                ...healthDiagnostics,
+                dependencies: {
+                    ...healthDiagnostics.dependencies,
+                    gateway: {
+                        freshness: "stale",
+                        phase: "degraded",
+                        status: "observed",
+                    },
+                },
+            })
+        ).toThrow("aggregate is inconsistent");
+        expect(() =>
+            v.parse(systemHealthDiagnosticsSchema, {
+                ...healthDiagnostics,
+                dependencies: {
+                    ...healthDiagnostics.dependencies,
+                    sessions: {
+                        ...healthDiagnostics.dependencies.sessions,
+                        observedAtMs: healthDiagnostics.checkedAtMs + 1,
+                    },
+                },
+            })
+        ).toThrow("aggregate is inconsistent");
+        expect(() =>
+            v.parse(systemHealthDiagnosticsSchema, {
+                ...healthDiagnostics,
+                queue: {
+                    ...healthDiagnostics.queue,
+                    runs: { ...healthDiagnostics.queue.runs, queued: 0 },
+                },
+            })
+        ).toThrow("queue projection is inconsistent");
+        expect(() =>
+            v.parse(systemHealthDiagnosticsSchema, {
+                ...healthDiagnostics,
+                queue: {
+                    ...healthDiagnostics.queue,
+                    oldestQueuedAtMs: healthDiagnostics.checkedAtMs + 1,
+                },
+            })
+        ).toThrow("aggregate is inconsistent");
+    });
+
+    test("rejects inconsistent last-known-good session timestamps", () => {
+        expect(() =>
+            v.parse(systemHealthDiagnosticsSchema, {
+                ...healthDiagnostics,
+                dependencies: {
+                    ...healthDiagnostics.dependencies,
+                    sessions: {
+                        count: 2,
+                        observedAtMs: healthDiagnostics.checkedAtMs,
+                        staleSinceMs: healthDiagnostics.checkedAtMs - 1,
+                        state: "last-known-good",
+                        truncated: false,
+                    },
+                },
+            })
+        ).toThrow("session projection is inconsistent");
+        expect(() =>
+            v.parse(systemHealthDiagnosticsSchema, {
+                ...healthDiagnostics,
+                dependencies: {
+                    ...healthDiagnostics.dependencies,
+                    sessions: {
+                        count: 2,
+                        observedAtMs: healthDiagnostics.checkedAtMs,
+                        staleSinceMs: healthDiagnostics.checkedAtMs + 1,
+                        state: "last-known-good",
+                        truncated: false,
+                    },
+                },
+            })
+        ).toThrow("aggregate is inconsistent");
+    });
+
+    test("is browser-session-only without automation or control authority", () => {
+        expect(systemHealthDiagnosticsContract.access).toEqual({
+            capabilities: [],
+            capabilityPolicy: "all",
+            kind: "authenticated",
+            principalKinds: ["session"],
+        });
+        expect(systemHealthDiagnosticsContract.errors).toEqual([
+            "FORBIDDEN",
+            "UNAUTHORIZED",
+        ]);
+    });
+});
 
 describe("system metrics contract", () => {
     test("accepts only the bounded identity-free operational projection", () => {

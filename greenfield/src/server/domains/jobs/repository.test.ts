@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { asc, count, eq } from "drizzle-orm";
 
-import { jobWorkerSummaryMaximum } from "../../../contracts/jobModel.ts";
+import { jobWorkerSummaryMaximum } from "../../../contracts/jobLimits.ts";
 import { jobRunEvents } from "../../database/schema/jobRunEvents.ts";
 import { jobRuns } from "../../database/schema/jobRuns.ts";
 import { realtimeEvents } from "../../database/schema/realtime.ts";
@@ -2207,6 +2207,160 @@ describe("durable jobs repository", () => {
                     }),
                 },
             ]);
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("aggregates health state beyond the bounded worker inventory on indexed reads", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createJobRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        const matchingReleaseId = "b".repeat(40);
+        const minimumHeartbeatAt = new Date(1000);
+        try {
+            await repository.reconcileSchedules({
+                at: new Date(1000),
+                schedules: [schedule()],
+                sideEffectsForSchedule: () => noSideEffects,
+            });
+            const run = queuedRun(20);
+            await repository.enqueueManualRun({
+                ...noSideEffects,
+                queuedEvent: queuedEvent(run),
+                run,
+            });
+            for (let index = 0; index <= jobWorkerSummaryMaximum; index += 1) {
+                await repository.registerWorker({
+                    ...noSideEffects,
+                    worker: {
+                        ...worker(uuid(500 + index), 2),
+                        ...(index === jobWorkerSummaryMaximum
+                            ? { releaseId: matchingReleaseId }
+                            : {}),
+                    },
+                });
+            }
+
+            expect(
+                repository
+                    .readQueueState({ minimumHeartbeatAt })
+                    .workers.some(
+                        ({ worker: observedWorker }) =>
+                            observedWorker.releaseId === matchingReleaseId
+                    )
+            ).toBe(false);
+            expect(
+                repository.readHealthState({
+                    expectedReleaseId: matchingReleaseId,
+                    minimumHeartbeatAt,
+                })
+            ).toMatchObject({
+                oldestQueuedAt: new Date(1020),
+                queuedRunCount: 1,
+                runningRunCount: 0,
+                workers: {
+                    capacity: (jobWorkerSummaryMaximum + 1) * 2,
+                    drainingCount: 0,
+                    exactReleaseOnline: true,
+                    freshCount: jobWorkerSummaryMaximum + 1,
+                    onlineCount: jobWorkerSummaryMaximum + 1,
+                },
+            });
+
+            const queuedPlan = database.sqlite
+                .query(
+                    "EXPLAIN QUERY PLAN SELECT count(*), min(queued_at) FROM job_runs WHERE state = 'queued'"
+                )
+                .all()
+                .map((row) => JSON.stringify(row))
+                .join(" ");
+            const workerPlan = database.sqlite
+                .query(
+                    "EXPLAIN QUERY PLAN SELECT count(*), coalesce(sum(capacity), 0) FROM worker_instances WHERE state IN ('draining', 'online') AND heartbeat_at >= ?"
+                )
+                .all(minimumHeartbeatAt.getTime())
+                .map((row) => JSON.stringify(row))
+                .join(" ");
+            expect(queuedPlan).toContain("job_runs_claim_idx");
+            expect(queuedPlan).not.toContain("USE TEMP B-TREE");
+            expect(workerPlan).toContain("worker_instances_heartbeat_id_idx");
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("gates exact-release worker health at the durable heartbeat boundary", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createJobRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        const minimumHeartbeatAt = new Date(10_000);
+        const boundaryReleaseId = "b".repeat(40);
+        const excludedReleaseId = "c".repeat(40);
+        try {
+            database.orm
+                .insert(workerInstances)
+                .values([
+                    {
+                        ...worker(uuid(700)),
+                        heartbeatAt: minimumHeartbeatAt,
+                        releaseId: boundaryReleaseId,
+                        startedAt: new Date(9000),
+                    },
+                    {
+                        ...worker(uuid(701)),
+                        heartbeatAt: new Date(minimumHeartbeatAt.getTime() - 1),
+                        releaseId: excludedReleaseId,
+                        startedAt: new Date(9000),
+                    },
+                    {
+                        ...worker(uuid(702)),
+                        heartbeatAt: minimumHeartbeatAt,
+                        releaseId: "a".repeat(40),
+                        startedAt: new Date(9000),
+                    },
+                    {
+                        ...worker(uuid(703)),
+                        drainingAt: minimumHeartbeatAt,
+                        heartbeatAt: minimumHeartbeatAt,
+                        releaseId: excludedReleaseId,
+                        startedAt: new Date(9000),
+                        state: "draining" as const,
+                    },
+                    {
+                        ...worker(uuid(704)),
+                        drainingAt: new Date(9500),
+                        heartbeatAt: new Date(9500),
+                        releaseId: excludedReleaseId,
+                        startedAt: new Date(9000),
+                        state: "stopped" as const,
+                        stoppedAt: minimumHeartbeatAt,
+                    },
+                ])
+                .run();
+
+            expect(
+                repository.readHealthState({
+                    expectedReleaseId: boundaryReleaseId,
+                    minimumHeartbeatAt,
+                }).workers
+            ).toEqual({
+                capacity: 3,
+                drainingCount: 1,
+                exactReleaseOnline: true,
+                freshCount: 3,
+                onlineCount: 2,
+            });
+            expect(
+                repository.readHealthState({
+                    expectedReleaseId: excludedReleaseId,
+                    minimumHeartbeatAt,
+                }).workers.exactReleaseOnline
+            ).toBe(false);
         } finally {
             database.sqlite.close(true);
         }

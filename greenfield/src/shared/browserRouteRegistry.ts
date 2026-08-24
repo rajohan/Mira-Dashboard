@@ -76,6 +76,14 @@ export const dashboardRouteDocumentation = Object.freeze([
     },
     {
         access: "session",
+        featureOwner: "moltbook",
+        navigationLabel: "Moltbook",
+        path: "/moltbook",
+        summary:
+            "Reads the bounded worker-owned Moltbook profile, feeds, posts, and comments snapshot.",
+    },
+    {
+        access: "session",
         featureOwner: "monitoring",
         navigationLabel: "Reports",
         path: "/reports",

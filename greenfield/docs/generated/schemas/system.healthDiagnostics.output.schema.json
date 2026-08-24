@@ -1,0 +1,353 @@
+{
+  "$id": "urn:mira-dashboard:system.healthDiagnostics.output",
+  "type": "object",
+  "properties": {
+    "checkedAtMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 8640000000000000
+    },
+    "checks": {
+      "type": "object",
+      "properties": {
+        "application": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "enum": [
+                "not-ready",
+                "ready"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "additionalProperties": false
+        },
+        "database": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "enum": [
+                "ready",
+                "unavailable"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "additionalProperties": false
+        },
+        "frontend": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "enum": [
+                "ready",
+                "unavailable"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "additionalProperties": false
+        },
+        "release": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "enum": [
+                "unavailable",
+                "verified"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "additionalProperties": false
+        },
+        "worker": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "enum": [
+                "not-ready",
+                "ready",
+                "unavailable"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "application",
+        "database",
+        "frontend",
+        "release",
+        "worker"
+      ],
+      "additionalProperties": false
+    },
+    "dependencies": {
+      "type": "object",
+      "properties": {
+        "gateway": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "freshness": {
+                  "enum": [
+                    "fresh",
+                    "stale",
+                    "unavailable"
+                  ],
+                  "type": "string"
+                },
+                "phase": {
+                  "enum": [
+                    "connected",
+                    "connecting",
+                    "degraded",
+                    "stopped",
+                    "stopping"
+                  ],
+                  "type": "string"
+                },
+                "status": {
+                  "const": "observed"
+                }
+              },
+              "required": [
+                "freshness",
+                "phase",
+                "status"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "const": "unavailable"
+                }
+              },
+              "required": [
+                "status"
+              ],
+              "additionalProperties": false
+            }
+          ],
+          "$comment": "Live Valibot validation additionally requires connected Gateway phase and fresh state to agree."
+        },
+        "sessions": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "const": "unavailable"
+                }
+              },
+              "required": [
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "count": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 200
+                },
+                "observedAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "state": {
+                  "const": "fresh"
+                },
+                "truncated": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "count",
+                "observedAtMs",
+                "state",
+                "truncated"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "count": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 200
+                },
+                "observedAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "staleSinceMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "state": {
+                  "const": "last-known-good"
+                },
+                "truncated": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "count",
+                "observedAtMs",
+                "staleSinceMs",
+                "state",
+                "truncated"
+              ],
+              "additionalProperties": false
+            }
+          ],
+          "$comment": "Live Valibot validation additionally requires last-known-good session staleness not to precede its observation."
+        }
+      },
+      "required": [
+        "gateway",
+        "sessions"
+      ],
+      "additionalProperties": false
+    },
+    "queue": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "claimingPaused": {
+              "type": "boolean"
+            },
+            "oldestQueuedAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            },
+            "runs": {
+              "type": "object",
+              "properties": {
+                "queued": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "running": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "queued",
+                "running"
+              ],
+              "additionalProperties": false
+            },
+            "status": {
+              "const": "observed"
+            },
+            "workers": {
+              "type": "object",
+              "properties": {
+                "capacity": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 512
+                },
+                "drainingCount": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 32
+                },
+                "freshCount": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 32
+                },
+                "onlineCount": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 32
+                }
+              },
+              "required": [
+                "capacity",
+                "drainingCount",
+                "freshCount",
+                "onlineCount"
+              ],
+              "additionalProperties": false,
+              "$comment": "Live Valibot validation additionally requires fresh worker count to equal its online and draining partitions, and aggregate capacity to remain a safe integer between one and sixteen slots per fresh worker."
+            }
+          },
+          "required": [
+            "claimingPaused",
+            "runs",
+            "status",
+            "workers"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "const": "unavailable"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "additionalProperties": false
+        }
+      ],
+      "$comment": "Live Valibot validation additionally requires a queued run if and only if an oldest queued timestamp is present."
+    },
+    "status": {
+      "enum": [
+        "not-ready",
+        "ready"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "checkedAtMs",
+    "checks",
+    "dependencies",
+    "queue",
+    "status"
+  ],
+  "additionalProperties": false,
+  "$comment": "Live Valibot validation additionally requires aggregate readiness to match every gating check, binds database/worker health to an observed queue, forbids future queue/session observations, and permits fresh sessions only with a fresh Gateway.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

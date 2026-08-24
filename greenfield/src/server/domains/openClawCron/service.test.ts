@@ -14,7 +14,13 @@ import {
     OpenClawCronProviderError,
     type OpenClawCronProviderJob,
 } from "./provider.ts";
-import { OpenClawCronServiceError, createOpenClawCronService } from "./service.ts";
+import {
+    OpenClawCronServiceError,
+    createOpenClawCronService,
+    openClawCronHeartbeatFailureBackoffMs,
+    openClawCronHeartbeatInventoryMaximumBytes,
+    openClawCronHeartbeatRefreshIntervalMs,
+} from "./service.ts";
 
 const operator = {
     id: "019fc968-1a9b-7770-8f1b-d5b863b0e7b4",
@@ -117,6 +123,7 @@ class FakeProvider implements OpenClawCronProvider {
             limit: input.limit,
             nextOffset: null,
             offset: input.offset,
+            responseBytes: 1024,
             snapshotRevision: `sha256:${"A".repeat(43)}`,
             total: jobs.length,
         });
@@ -224,13 +231,14 @@ class FakeProvider implements OpenClawCronProvider {
     }
 }
 
-function fixture(clock = () => 1000) {
+function fixture(clock = () => 1000, monotonicClock?: () => number) {
     const provider = new FakeProvider();
     const intentStore = createInMemoryOpenClawCronIntentStore();
     const service = createOpenClawCronService({
         auditRequired: false,
         clock,
         intentStore,
+        ...(monotonicClock === undefined ? {} : { monotonicClock }),
         provider,
     });
     return { intentStore, provider, service };
@@ -245,6 +253,45 @@ function inventoryInput() {
         scheduleKind: "all" as const,
         sortBy: "nextRunAtMs" as const,
         sortDir: "asc" as const,
+    };
+}
+
+function heartbeatJobs(count: number): OpenClawCronProviderJob[] {
+    return Array.from({ length: count }, (_, index) =>
+        providerJob({
+            id: `heartbeat-job-${String(index).padStart(4, "0")}`,
+            name: `Heartbeat job ${index}`,
+        })
+    );
+}
+
+function installHeartbeatPages(
+    provider: FakeProvider,
+    jobs: readonly OpenClawCronProviderJob[],
+    snapshotRevision = `sha256:${"A".repeat(43)}`,
+    total = jobs.length
+): void {
+    provider.list = (input) => {
+        provider.listCalls.push(input);
+        if (provider.listError !== undefined) {
+            return Promise.reject(fakeProviderError(provider.listError));
+        }
+        const pageJobs = jobs.slice(input.offset, input.offset + input.limit);
+        const nextOffset = input.offset + pageJobs.length;
+        const hasMore = nextOffset < total;
+        return Promise.resolve({
+            hasMore,
+            jobs: pageJobs,
+            limit: input.limit,
+            nextOffset: hasMore ? nextOffset : null,
+            offset: input.offset,
+            responseBytes: Math.max(
+                1,
+                Buffer.byteLength(JSON.stringify(pageJobs), "utf8")
+            ),
+            snapshotRevision,
+            total,
+        });
     };
 }
 
@@ -523,7 +570,13 @@ describe("OpenClaw cron service", () => {
             offset: 0,
         });
         expect(service.readHeartbeatProjection()).toEqual({
+            pendingSync: "unknown",
+            state: "unavailable",
+        });
+        await service.refreshHeartbeatProjection();
+        expect(service.readHeartbeatProjection()).toMatchObject({
             count: 1,
+            health: { inspectedCount: 1, truncated: false },
             observedAtMs: 1000,
             pendingSync: "none",
             state: "fresh",
@@ -545,12 +598,11 @@ describe("OpenClaw cron service", () => {
             observedAtMs: 1000,
             staleSinceMs: 2000,
         });
-        expect(service.readHeartbeatProjection()).toEqual({
+        expect(service.readHeartbeatProjection()).toMatchObject({
             count: 1,
             observedAtMs: 1000,
             pendingSync: "none",
-            staleSinceMs: 2000,
-            state: "last-known-good",
+            state: "fresh",
         });
         try {
             await service.list({
@@ -634,7 +686,7 @@ describe("OpenClaw cron service", () => {
         });
     });
 
-    test("does not claim no pending synchronization from a truncated inventory", async () => {
+    test("does not let a truncated UI inventory prime the owned heartbeat", async () => {
         const { provider, service } = fixture();
         provider.list = (input) => {
             provider.listCalls.push(input);
@@ -644,6 +696,7 @@ describe("OpenClaw cron service", () => {
                 limit: input.limit,
                 nextOffset: 1,
                 offset: 0,
+                responseBytes: 1024,
                 snapshotRevision: `sha256:${"A".repeat(43)}`,
                 total: 2,
             });
@@ -651,11 +704,581 @@ describe("OpenClaw cron service", () => {
 
         await service.list({ ...inventoryInput(), limit: 1 });
         expect(service.readHeartbeatProjection()).toEqual({
-            count: 2,
-            observedAtMs: 1000,
             pendingSync: "unknown",
+            state: "unavailable",
+        });
+    });
+
+    test("owns cold refresh, success TTL, LKG fallback, and failure backoff", async () => {
+        let wallClockMs = 1000;
+        let monotonicClockMs = 0;
+        const { provider, service } = fixture(
+            () => wallClockMs,
+            () => monotonicClockMs
+        );
+
+        await service.refreshHeartbeatProjection();
+        expect(provider.listCalls).toHaveLength(1);
+        expect(service.readHeartbeatProjection()).toMatchObject({
+            count: 1,
+            health: { inspectedCount: 1, truncated: false },
+            observedAtMs: 1000,
             state: "fresh",
         });
+        expect(service.readHeartbeatJobProjection("nightly-report")).toMatchObject({
+            enabled: true,
+            state: "present",
+        });
+        expect(service.readHeartbeatJobProjection("absent-job")).toEqual({
+            state: "missing",
+        });
+
+        await service.refreshHeartbeatProjection();
+        expect(provider.listCalls).toHaveLength(1);
+
+        monotonicClockMs = openClawCronHeartbeatRefreshIntervalMs;
+        wallClockMs = 2000;
+        provider.listError = new OpenClawCronProviderError("unavailable");
+        await service.refreshHeartbeatProjection();
+        expect(provider.listCalls).toHaveLength(2);
+        expect(service.readHeartbeatProjection()).toMatchObject({
+            count: 1,
+            observedAtMs: 1000,
+            staleSinceMs: 2000,
+            state: "last-known-good",
+        });
+        expect(service.readHeartbeatJobProjection("nightly-report")).toEqual({
+            state: "unavailable",
+        });
+
+        await service.refreshHeartbeatProjection();
+        expect(provider.listCalls).toHaveLength(2);
+        monotonicClockMs += openClawCronHeartbeatFailureBackoffMs;
+        wallClockMs = 3000;
+        provider.listError = undefined;
+        await service.refreshHeartbeatProjection();
+        expect(provider.listCalls).toHaveLength(3);
+        expect(service.readHeartbeatProjection()).toMatchObject({
+            observedAtMs: 3000,
+            state: "fresh",
+        });
+    });
+
+    test("starts failure backoff when the failed refresh settles", async () => {
+        let monotonicClockMs = 0;
+        const { provider, service } = fixture(
+            () => 1000,
+            () => monotonicClockMs
+        );
+        await service.refreshHeartbeatProjection();
+        const defaultList = provider.list.bind(provider);
+        let failNext = true;
+        provider.list = (input) => {
+            if (!failNext) return defaultList(input);
+            failNext = false;
+            provider.listCalls.push(input);
+            monotonicClockMs += 8000;
+            return Promise.reject(new OpenClawCronProviderError("unavailable"));
+        };
+
+        monotonicClockMs = openClawCronHeartbeatRefreshIntervalMs;
+        await service.refreshHeartbeatProjection();
+        expect(provider.listCalls).toHaveLength(2);
+        expect(service.readHeartbeatProjection()).toMatchObject({
+            state: "last-known-good",
+        });
+
+        monotonicClockMs += openClawCronHeartbeatFailureBackoffMs - 1;
+        await service.refreshHeartbeatProjection();
+        expect(provider.listCalls).toHaveLength(2);
+        monotonicClockMs += 1;
+        await service.refreshHeartbeatProjection();
+        expect(provider.listCalls).toHaveLength(3);
+        expect(service.readHeartbeatProjection()).toMatchObject({ state: "fresh" });
+    });
+
+    test("walks only coherent bounded inventories and keeps truncation truthful", async () => {
+        for (const count of [0, 100, 101, 1000, 1001]) {
+            const { provider, service } = fixture();
+            const jobs = heartbeatJobs(count);
+            installHeartbeatPages(provider, jobs);
+
+            await service.refreshHeartbeatProjection();
+
+            const inspectedCount = Math.min(count, 1000);
+            expect(provider.listCalls).toHaveLength(
+                Math.max(1, Math.ceil(inspectedCount / 100))
+            );
+            expect(service.readHeartbeatProjection()).toMatchObject({
+                count,
+                health: {
+                    inspectedCount,
+                    truncated: count > inspectedCount,
+                },
+                state: "fresh",
+            });
+            if (count > 0) {
+                expect(
+                    service.readHeartbeatJobProjection("heartbeat-job-0000")
+                ).toMatchObject({ state: "present" });
+            }
+            expect(
+                service.readHeartbeatJobProjection(
+                    `heartbeat-job-${String(count).padStart(4, "0")}`
+                )
+            ).toEqual({ state: count > 1000 ? "unavailable" : "missing" });
+        }
+    });
+
+    test("retries one revision race and never commits a mixed inventory", async () => {
+        const { provider, service } = fixture();
+        const jobs = heartbeatJobs(101);
+        let walk = 0;
+        provider.list = (input) => {
+            provider.listCalls.push(input);
+            if (input.offset === 0) walk += 1;
+            const pageJobs = jobs.slice(input.offset, input.offset + input.limit);
+            const nextOffset = input.offset + pageJobs.length;
+            return Promise.resolve({
+                hasMore: nextOffset < jobs.length,
+                jobs: pageJobs,
+                limit: input.limit,
+                nextOffset: nextOffset < jobs.length ? nextOffset : null,
+                offset: input.offset,
+                responseBytes: 1024,
+                snapshotRevision: `sha256:${(walk === 1 && input.offset > 0
+                    ? "B"
+                    : "A"
+                ).repeat(43)}`,
+                total: jobs.length,
+            });
+        };
+
+        await service.refreshHeartbeatProjection();
+
+        expect(provider.listCalls.map(({ offset }) => offset)).toEqual([0, 100, 0, 100]);
+        expect(service.readHeartbeatProjection()).toMatchObject({
+            count: 101,
+            health: { inspectedCount: 101, truncated: false },
+            state: "fresh",
+        });
+    });
+
+    test("retains the whole prior snapshot when every pagination attempt is invalid", async () => {
+        let wallClockMs = 1000;
+        let monotonicClockMs = 0;
+        const { provider, service } = fixture(
+            () => wallClockMs,
+            () => monotonicClockMs
+        );
+        await service.refreshHeartbeatProjection();
+        const oldProjection = service.readHeartbeatProjection();
+        if (oldProjection.state === "unavailable") {
+            throw new Error("Expected the first heartbeat refresh to commit");
+        }
+        const jobs = heartbeatJobs(101);
+        monotonicClockMs = openClawCronHeartbeatRefreshIntervalMs;
+        wallClockMs = 2000;
+        provider.list = (input) => {
+            provider.listCalls.push(input);
+            const pageJobs = jobs.slice(input.offset, input.offset + input.limit);
+            const nextOffset = input.offset + pageJobs.length;
+            return Promise.resolve({
+                hasMore: nextOffset < jobs.length,
+                jobs: pageJobs,
+                limit: input.limit,
+                nextOffset: nextOffset < jobs.length ? nextOffset : null,
+                offset: input.offset,
+                responseBytes: 1024,
+                snapshotRevision: `sha256:${(input.offset === 0 ? "A" : "B").repeat(43)}`,
+                total: jobs.length,
+            });
+        };
+
+        await service.refreshHeartbeatProjection();
+
+        expect(service.readHeartbeatProjection()).toMatchObject({
+            count: oldProjection.count,
+            observedAtMs: oldProjection.observedAtMs,
+            staleSinceMs: 2000,
+            state: "last-known-good",
+        });
+        expect(service.readHeartbeatJobProjection("heartbeat-job-0000")).toEqual({
+            state: "unavailable",
+        });
+    });
+
+    test("rejects duplicate, total, offset, and zero-progress page walks", async () => {
+        for (const defect of ["duplicate", "total", "offset", "zero-progress"] as const) {
+            const { provider, service } = fixture();
+            const jobs = heartbeatJobs(101);
+            provider.list = (input) => {
+                provider.listCalls.push(input);
+                const sourceJobs = jobs.slice(input.offset, input.offset + input.limit);
+                let pageJobs = sourceJobs;
+                if (input.offset === 100 && defect === "duplicate") {
+                    pageJobs = [jobs[0]!];
+                } else if (input.offset === 100 && defect === "zero-progress") {
+                    pageJobs = [];
+                }
+                const nextOffset = input.offset + pageJobs.length;
+                const hasMore = nextOffset < jobs.length;
+                return Promise.resolve({
+                    hasMore,
+                    jobs: pageJobs,
+                    limit: input.limit,
+                    nextOffset: hasMore ? nextOffset : null,
+                    offset:
+                        input.offset === 100 && defect === "offset" ? 99 : input.offset,
+                    responseBytes: 1024,
+                    snapshotRevision: `sha256:${"A".repeat(43)}`,
+                    total:
+                        input.offset === 100 && defect === "total"
+                            ? jobs.length + 1
+                            : jobs.length,
+                });
+            };
+
+            await service.refreshHeartbeatProjection();
+
+            expect(service.readHeartbeatProjection()).toEqual({
+                pendingSync: "unknown",
+                state: "unavailable",
+            });
+            expect(provider.listCalls.map(({ offset }) => offset)).toEqual([
+                0, 100, 0, 100,
+            ]);
+        }
+    });
+
+    test("walks pages sequentially and never starts unread siblings after failure", async () => {
+        const { provider, service } = fixture();
+        const jobs = heartbeatJobs(201);
+        let activeReads = 0;
+        let peakActiveReads = 0;
+        provider.list = async (input) => {
+            provider.listCalls.push(input);
+            activeReads += 1;
+            peakActiveReads = Math.max(peakActiveReads, activeReads);
+            try {
+                await Promise.resolve();
+                if (input.offset === 100) {
+                    throw new OpenClawCronProviderError("unavailable");
+                }
+                const pageJobs = jobs.slice(input.offset, input.offset + input.limit);
+                const nextOffset = input.offset + pageJobs.length;
+                return {
+                    hasMore: nextOffset < jobs.length,
+                    jobs: pageJobs,
+                    limit: input.limit,
+                    nextOffset: nextOffset < jobs.length ? nextOffset : null,
+                    offset: input.offset,
+                    responseBytes: 1024,
+                    snapshotRevision: `sha256:${"A".repeat(43)}`,
+                    total: jobs.length,
+                };
+            } finally {
+                activeReads -= 1;
+            }
+        };
+
+        await service.refreshHeartbeatProjection();
+
+        expect(provider.listCalls.map(({ offset }) => offset)).toEqual([0, 100]);
+        expect(peakActiveReads).toBe(1);
+        expect(service.readHeartbeatProjection()).toEqual({
+            pendingSync: "unknown",
+            state: "unavailable",
+        });
+    });
+
+    test("rejects an aggregate inventory byte overflow without retrying it", async () => {
+        const { provider, service } = fixture();
+        const message = "x".repeat(256 * 1024);
+        const jobs = heartbeatJobs(130).map((job) =>
+            providerJob({
+                ...job,
+                payload: { kind: "agentTurn", message },
+            })
+        );
+        expect(message.length * jobs.length).toBeGreaterThan(
+            openClawCronHeartbeatInventoryMaximumBytes
+        );
+        installHeartbeatPages(provider, jobs);
+
+        await service.refreshHeartbeatProjection();
+
+        expect(provider.listCalls.map(({ offset }) => offset)).toEqual([0, 100]);
+        expect(service.readHeartbeatProjection()).toEqual({
+            pendingSync: "unknown",
+            state: "unavailable",
+        });
+    });
+
+    test("single-flights refresh and aborts the process-owned flight on disposal", async () => {
+        const { provider, service } = fixture();
+        const deferred =
+            Promise.withResolvers<Awaited<ReturnType<OpenClawCronProvider["list"]>>>();
+        provider.list = (input) => {
+            provider.listCalls.push(input);
+            return deferred.promise;
+        };
+        const first = service.refreshHeartbeatProjection();
+        const second = service.refreshHeartbeatProjection();
+        expect(provider.listCalls).toHaveLength(1);
+        deferred.resolve({
+            hasMore: false,
+            jobs: [providerJob()],
+            limit: 100,
+            nextOffset: null,
+            offset: 0,
+            responseBytes: 1024,
+            snapshotRevision: `sha256:${"A".repeat(43)}`,
+            total: 1,
+        });
+        await Promise.all([first, second]);
+        expect(service.readHeartbeatProjection()).toMatchObject({ state: "fresh" });
+
+        const disposable = fixture();
+        let refreshSignal: AbortSignal | undefined;
+        disposable.provider.list = (input) => {
+            disposable.provider.listCalls.push(input);
+            refreshSignal = input.signal;
+            return new Promise((_resolve, reject) => {
+                input.signal?.addEventListener(
+                    "abort",
+                    () => reject(new Error("disposed")),
+                    { once: true }
+                );
+            });
+        };
+        const pending = disposable.service.refreshHeartbeatProjection();
+        await Promise.resolve();
+        await disposable.service.disposeHeartbeat();
+        await pending;
+        expect(refreshSignal?.aborted).toBeTrue();
+        expect(disposable.service.readHeartbeatProjection()).toEqual({
+            pendingSync: "unknown",
+            state: "unavailable",
+        });
+    });
+
+    test("classifies aggregate disabled, conflict, failure, and stuck health", async () => {
+        const provider = new FakeProvider();
+        const intentStore = createInMemoryOpenClawCronIntentStore();
+        await intentStore.replaceActive({
+            actor: operator,
+            externalJobId: "intended-disabled",
+            reason: "Maintenance",
+            recordedAtMs: 100,
+        });
+        await intentStore.replaceActive({
+            actor: operator,
+            externalJobId: "enable-conflict",
+            reason: "Maintenance",
+            recordedAtMs: 100,
+        });
+        await intentStore.replaceActive({
+            actor: operator,
+            expiresAtMs: 1500,
+            externalJobId: "expired-pending",
+            reason: "Short freeze",
+            recordedAtMs: 100,
+        });
+        const jobs = [
+            providerJob({ enabled: false, id: "intended-disabled" }),
+            providerJob({ enabled: false, id: "unexpected-disabled" }),
+            providerJob({ enabled: true, id: "enable-conflict" }),
+            providerJob({ enabled: false, id: "expired-pending" }),
+            providerJob({
+                id: "stuck-failure",
+                state: {
+                    lastRunStatus: "error",
+                    runningAtMs: 1000,
+                },
+            }),
+        ];
+        installHeartbeatPages(provider, jobs);
+        const service = createOpenClawCronService({
+            auditRequired: false,
+            clock: () => 2_000_000,
+            intentStore,
+            provider,
+        });
+
+        await service.refreshHeartbeatProjection();
+
+        expect(service.readHeartbeatProjection()).toMatchObject({
+            health: {
+                disabledCount: 3,
+                enabledCount: 2,
+                inspectedCount: 5,
+                intendedDisabledCount: 1,
+                lastRunErrorCount: 1,
+                runningCount: 1,
+                staleRunningCount: 1,
+                synchronizationConflictCount: 1,
+                synchronizationPendingCount: 1,
+                truncated: false,
+                unexpectedDisabledCount: 2,
+            },
+            pendingSync: "present",
+            state: "fresh",
+        });
+    });
+
+    test("invalidates a successful TTL immediately after a cron mutation", async () => {
+        let monotonicClockMs = 0;
+        const { provider, service } = fixture(
+            () => 1000,
+            () => monotonicClockMs
+        );
+        await service.refreshHeartbeatProjection();
+        expect(provider.listCalls).toHaveLength(1);
+
+        await service.update({
+            expectedConfigRevision: "revision-1",
+            id: "nightly-report",
+            patch: { name: "Morning report" },
+        });
+        expect(service.readHeartbeatProjection()).toMatchObject({
+            state: "last-known-good",
+        });
+        await service.refreshHeartbeatProjection();
+        expect(provider.listCalls).toHaveLength(2);
+        expect(service.readHeartbeatProjection()).toMatchObject({ state: "fresh" });
+        monotonicClockMs += 1;
+    });
+
+    test("discards an in-flight pre-mutation candidate and refreshes waiting callers", async () => {
+        let monotonicClockMs = 0;
+        const { provider, service } = fixture(
+            () => 1000,
+            () => monotonicClockMs
+        );
+        await service.refreshHeartbeatProjection();
+        const defaultList = provider.list.bind(provider);
+        const heldPage =
+            Promise.withResolvers<Awaited<ReturnType<OpenClawCronProvider["list"]>>>();
+        let holdPage = true;
+        provider.list = (input) => {
+            if (!holdPage) return defaultList(input);
+            provider.listCalls.push(input);
+            return heldPage.promise;
+        };
+
+        monotonicClockMs = openClawCronHeartbeatRefreshIntervalMs;
+        const staleFlight = service.refreshHeartbeatProjection();
+        await Promise.resolve();
+        await service.update({
+            expectedConfigRevision: "revision-1",
+            id: "nightly-report",
+            patch: { name: "Morning report" },
+        });
+        const waitingRefresh = service.refreshHeartbeatProjection();
+        holdPage = false;
+        heldPage.resolve({
+            hasMore: false,
+            jobs: [providerJob()],
+            limit: 100,
+            nextOffset: null,
+            offset: 0,
+            responseBytes: 1024,
+            snapshotRevision: `sha256:${"A".repeat(43)}`,
+            total: 1,
+        });
+
+        await Promise.all([staleFlight, waitingRefresh]);
+        expect(provider.listCalls).toHaveLength(3);
+        expect(service.readHeartbeatProjection()).toMatchObject({ state: "fresh" });
+    });
+
+    test("invalidates TTL for pending, conflicting, absent, and expired state changes", async () => {
+        {
+            const { provider, service } = fixture();
+            await service.refreshHeartbeatProjection();
+            provider.updateError = new OpenClawCronProviderError("unavailable");
+            await service.setEnabled(
+                {
+                    disableIntent: { reason: "Maintenance" },
+                    enabled: false,
+                    expectedConfigRevision: "revision-1",
+                    id: "nightly-report",
+                },
+                operator
+            );
+            expect(service.readHeartbeatProjection()).toMatchObject({
+                pendingSync: "present",
+                state: "last-known-good",
+            });
+            provider.updateError = undefined;
+            await service.refreshHeartbeatProjection();
+            expect(provider.listCalls).toHaveLength(2);
+        }
+
+        {
+            const { intentStore, provider, service } = fixture();
+            provider.currentJob = providerJob({ enabled: false });
+            await intentStore.replaceActive({
+                actor: operator,
+                externalJobId: "nightly-report",
+                reason: "Maintenance",
+                recordedAtMs: 100,
+            });
+            await service.refreshHeartbeatProjection();
+            provider.holdUpdateReadback = true;
+            const failure = await captureFailure(() =>
+                service.setEnabled(
+                    {
+                        disableIntent: null,
+                        enabled: true,
+                        expectedConfigRevision: "revision-1",
+                        id: "nightly-report",
+                    },
+                    operator
+                )
+            );
+            expect(failure).toMatchObject({ reason: "conflict" });
+            await service.refreshHeartbeatProjection();
+            expect(provider.listCalls).toHaveLength(2);
+        }
+
+        {
+            const { provider, service } = fixture();
+            await service.refreshHeartbeatProjection();
+            provider.currentJob = undefined;
+            await service.delete(
+                {
+                    expectedConfigRevision: "revision-1",
+                    id: "nightly-report",
+                },
+                operator
+            );
+            await service.refreshHeartbeatProjection();
+            expect(provider.listCalls).toHaveLength(2);
+            expect(service.readHeartbeatProjection()).toMatchObject({
+                count: 0,
+                state: "fresh",
+            });
+        }
+
+        {
+            let wallClockMs = 1000;
+            const { intentStore, provider, service } = fixture(() => wallClockMs);
+            await intentStore.replaceActive({
+                actor: operator,
+                expiresAtMs: 1500,
+                externalJobId: "nightly-report",
+                reason: "Short freeze",
+                recordedAtMs: 500,
+            });
+            await service.refreshHeartbeatProjection();
+            wallClockMs = 2000;
+            await service.get({ id: "nightly-report" });
+            expect(await intentStore.getActive("nightly-report")).toBeUndefined();
+            await service.refreshHeartbeatProjection();
+            expect(provider.listCalls).toHaveLength(2);
+        }
     });
 
     test("enriches fresh and LKG provider pages from the exact open Dashboard task projection", async () => {
@@ -966,7 +1589,7 @@ describe("OpenClaw cron service", () => {
             intentStore,
             provider,
         });
-        await service.list(inventoryInput());
+        await service.refreshHeartbeatProjection();
 
         expect(
             await captureFailure(() => service.reconcileExpired({ id: "nightly-report" }))
@@ -1044,7 +1667,7 @@ describe("OpenClaw cron service", () => {
                 intentStore,
                 provider,
             });
-            await service.list(inventoryInput());
+            await service.refreshHeartbeatProjection();
 
             const result = await service.setEnabled(
                 {
@@ -1105,7 +1728,7 @@ describe("OpenClaw cron service", () => {
                 intentStore,
                 provider,
             });
-            await service.list(inventoryInput());
+            await service.refreshHeartbeatProjection();
 
             const result = await service.setEnabled(
                 {
@@ -1230,7 +1853,7 @@ describe("OpenClaw cron service", () => {
                 intentStore,
                 provider,
             });
-            await service.list(inventoryInput());
+            await service.refreshHeartbeatProjection();
 
             expect(
                 await captureFailure(() =>
@@ -1342,7 +1965,7 @@ describe("OpenClaw cron service", () => {
             intentStore: createInMemoryOpenClawCronIntentStore(),
             provider,
         });
-        await service.list(inventoryInput());
+        await service.refreshHeartbeatProjection();
 
         expect(
             await captureFailure(() =>
@@ -1395,6 +2018,7 @@ describe("OpenClaw cron service", () => {
                 intentStore: createInMemoryOpenClawCronIntentStore(),
                 provider,
             });
+            await service.refreshHeartbeatProjection();
             await service.list(inventoryInput());
 
             const work =
@@ -1589,7 +2213,7 @@ describe("OpenClaw cron service", () => {
             intentStore,
             provider,
         });
-        await service.list(inventoryInput());
+        await service.refreshHeartbeatProjection();
 
         expect(
             await captureFailure(() =>
@@ -1652,7 +2276,7 @@ describe("OpenClaw cron service", () => {
                 intentStore,
                 provider,
             });
-            await service.list(inventoryInput());
+            await service.refreshHeartbeatProjection();
 
             const work =
                 operation === "enable"

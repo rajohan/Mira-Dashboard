@@ -272,6 +272,7 @@ class DirectProcessController implements ProductionServiceController {
                     MIRA_DASHBOARD_LOG_LEVEL: "debug",
                     MIRA_DASHBOARD_OPENCLAW_ROOT: openClawRoot,
                     MIRA_DASHBOARD_PROJECT_ROOT: this.#projectRoot,
+                    MOLTBOOK_API_KEY: "moltbook-key-test-value",
                     NODE_ENV: "production",
                     ...gatewayTestEnvironment,
                 },

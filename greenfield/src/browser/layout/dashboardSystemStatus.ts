@@ -1,20 +1,20 @@
 import { queryOptions } from "@tanstack/react-query";
-import * as v from "valibot";
 
-import type { GatewayConnectionSnapshot } from "../../contracts/gatewayConnection.ts";
-import type { JobQueueSummary } from "../../contracts/jobs.ts";
-import { readinessStatusSchema } from "../../contracts/system.ts";
+import type { SystemHealthDiagnostics } from "../../contracts/system.ts";
 import type { DashboardTrpcClient } from "../api/trpcClient.ts";
 
 const systemStatusRefreshIntervalMs = 15_000;
 
-export const dashboardReadinessQueryKey = ["system-status", "readiness"] as const;
-export const dashboardGatewayConnectionQueryKey = [
+export const dashboardHealthDiagnosticsQueryKey = [
     "system-status",
-    "gateway-connection",
+    "health-diagnostics",
 ] as const;
 
-export type DashboardSystemComponentState = "offline" | "online" | "unavailable";
+export type DashboardSystemComponentState =
+    | "offline"
+    | "online"
+    | "stale"
+    | "unavailable";
 
 export interface DashboardSystemStatus {
     readonly backend: DashboardSystemComponentState;
@@ -24,43 +24,32 @@ export interface DashboardSystemStatus {
 }
 
 /**
- * @param fetcher Injectable same-origin fetch implementation.
- * @returns Bounded same-origin web-process readiness query options.
+ * @param query Retained-data and fetch state from the health query observer.
+ * @returns Whether a prior snapshot is no longer backed by a current observation.
  */
-export function dashboardReadinessQueryOptions(
-    fetcher: typeof globalThis.fetch = globalThis.fetch
-) {
-    return queryOptions({
-        queryFn: async ({ signal }) => {
-            const response = await fetcher("/api/health/ready", {
-                cache: "no-store",
-                credentials: "same-origin",
-                signal,
-            });
-            const candidate: unknown = await response.json();
-            const parsed = v.safeParse(readinessStatusSchema, candidate);
-            if (!parsed.success || (response.status !== 200 && response.status !== 503)) {
-                throw new TypeError("Dashboard readiness response is invalid");
-            }
-            return parsed.output;
-        },
-        queryKey: dashboardReadinessQueryKey,
-        refetchInterval: systemStatusRefreshIntervalMs,
-        refetchIntervalInBackground: false,
-        retry: false,
-        staleTime: systemStatusRefreshIntervalMs,
-    });
+export function dashboardHealthSnapshotIsStale(query: {
+    readonly fetchStatus: "fetching" | "idle" | "paused";
+    readonly hasData: boolean;
+    readonly isError: boolean;
+    readonly isStale: boolean;
+}): boolean {
+    return (
+        query.hasData &&
+        (query.isError ||
+            query.fetchStatus === "paused" ||
+            (query.isStale && query.fetchStatus === "idle"))
+    );
 }
 
 /**
  * @param client Validated Dashboard transport client.
- * @returns Sanitized native Gateway connection query options for the header.
+ * @returns Session-only bounded health diagnostics query options for the header.
  */
-export function dashboardGatewayConnectionQueryOptions(client: DashboardTrpcClient) {
+export function dashboardHealthDiagnosticsQueryOptions(client: DashboardTrpcClient) {
     return queryOptions({
-        queryFn: ({ signal }): Promise<GatewayConnectionSnapshot> =>
-            client.query("gateway.connection.get", {}, { signal }),
-        queryKey: dashboardGatewayConnectionQueryKey,
+        queryFn: ({ signal }): Promise<SystemHealthDiagnostics> =>
+            client.query("system.healthDiagnostics", {}, { signal }),
+        queryKey: dashboardHealthDiagnosticsQueryKey,
         refetchInterval: systemStatusRefreshIntervalMs,
         refetchIntervalInBackground: false,
         retry: false,
@@ -71,52 +60,77 @@ export function dashboardGatewayConnectionQueryOptions(client: DashboardTrpcClie
 function overallSystemState(
     states: readonly DashboardSystemComponentState[]
 ): DashboardSystemComponentState {
-    if (states.every((state) => state === "online")) return "online";
     if (states.some((state) => state === "offline")) return "offline";
+    if (states.every((state) => state === "online")) return "online";
+    if (
+        states.every((state) => state === "online" || state === "stale") &&
+        states.some((state) => state === "stale")
+    ) {
+        return "stale";
+    }
     return "unavailable";
 }
 
-function observedBooleanState(
-    observed: boolean | undefined
+function staleState(
+    state: DashboardSystemComponentState,
+    stale: boolean
 ): DashboardSystemComponentState {
-    if (observed === undefined) return "unavailable";
-    return observed ? "online" : "offline";
+    return stale && state === "online" ? "stale" : state;
 }
 
 function gatewayState(
-    gateway: GatewayConnectionSnapshot | undefined
+    diagnostics: SystemHealthDiagnostics | undefined
 ): DashboardSystemComponentState {
-    if (gateway === undefined) return "unavailable";
+    const gateway = diagnostics?.dependencies.gateway;
+    if (gateway === undefined || gateway.status === "unavailable") {
+        return "unavailable";
+    }
     return gateway.phase === "connected" && gateway.freshness === "fresh"
         ? "online"
         : "offline";
 }
 
 function workerState(
-    workerSummary: JobQueueSummary | undefined
+    diagnostics: SystemHealthDiagnostics | undefined
 ): DashboardSystemComponentState {
-    if (workerSummary === undefined) return "unavailable";
-    return workerSummary.control.claimingPaused ||
-        !workerSummary.workers.some(
-            ({ state }) => state === "online" || state === "draining"
-        )
-        ? "offline"
-        : "online";
+    if (diagnostics === undefined) return "unavailable";
+    if (
+        diagnostics.checks.worker.status === "unavailable" ||
+        diagnostics.queue.status === "unavailable"
+    ) {
+        return "unavailable";
+    }
+    return diagnostics.checks.worker.status === "ready" ? "online" : "offline";
+}
+
+function backendState(
+    diagnostics: SystemHealthDiagnostics | undefined
+): DashboardSystemComponentState {
+    if (diagnostics === undefined) return "unavailable";
+    const checks = diagnostics.checks;
+    if (
+        checks.database.status === "unavailable" ||
+        checks.frontend.status === "unavailable" ||
+        checks.release.status === "unavailable"
+    ) {
+        return "unavailable";
+    }
+    return checks.application.status === "ready" ? "online" : "offline";
 }
 
 /**
  * Projects only directly observed backend, worker, and Gateway availability.
- * @param input Current bounded observations.
+ * @param diagnostics Current bounded diagnostic snapshot, when observed.
+ * @param stale Whether the retained snapshot survived a failed background refresh.
  * @returns Honest aggregate without treating a missing observation as healthy.
  */
-export function projectDashboardSystemStatus(input: {
-    readonly backendReady?: boolean;
-    readonly gateway?: GatewayConnectionSnapshot;
-    readonly workerSummary?: JobQueueSummary;
-}): DashboardSystemStatus {
-    const backend = observedBooleanState(input.backendReady);
-    const gateway = gatewayState(input.gateway);
-    const worker = workerState(input.workerSummary);
+export function projectDashboardSystemStatus(
+    diagnostics: SystemHealthDiagnostics | undefined,
+    stale = false
+): DashboardSystemStatus {
+    const backend = staleState(backendState(diagnostics), stale);
+    const gateway = staleState(gatewayState(diagnostics), stale);
+    const worker = staleState(workerState(diagnostics), stale);
     return {
         backend,
         gateway,
