@@ -526,6 +526,9 @@
             "additionalProperties": false,
             "$comment": "Live Valibot validation additionally requires run provenance, attempts, state, cancellation, and timestamps to agree."
           },
+          "manualRunAvailable": {
+            "type": "boolean"
+          },
           "name": {
             "type": "string",
             "maxLength": 160,
@@ -671,6 +674,7 @@
           "description",
           "enabled",
           "id",
+          "manualRunAvailable",
           "name",
           "priority",
           "resourceClass",

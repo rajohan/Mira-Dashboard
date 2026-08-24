@@ -10,6 +10,11 @@ import {
     agentRealtimeTopicDefinition,
 } from "./agentRealtime.ts";
 import {
+    cacheRealtimeChangeSchema,
+    cacheRealtimeTopic,
+    cacheRealtimeTopicDefinition,
+} from "./cacheRealtime.ts";
+import {
     jobRealtimeChangeSchemas,
     jobRealtimeTopicDefinitions,
     jobRealtimeTopics,
@@ -31,6 +36,7 @@ import {
 /** All topic definitions currently accepted by the realtime transport. */
 export const realtimeTopicDefinitions = Object.freeze([
     agentRealtimeTopicDefinition,
+    cacheRealtimeTopicDefinition,
     ...jobRealtimeTopicDefinitions,
     ...monitoringRealtimeTopicDefinitions,
     taskRealtimeTopicDefinition,
@@ -48,6 +54,7 @@ export function findRealtimeTopicDefinition(topic: string) {
 /** Exact unique capability vocabulary used by registered realtime topics. */
 export const realtimeStreamCapabilities = Object.freeze([
     "agents:read",
+    "cache:read",
     "jobs:read",
     "notifications:read",
     "reports:read",
@@ -57,6 +64,7 @@ export const realtimeStreamCapabilities = Object.freeze([
 /** Exact registered topic vocabulary accepted by the tracked SSE contract. */
 export const realtimeStreamTopics = Object.freeze([
     agentRealtimeTopic,
+    cacheRealtimeTopic,
     jobRealtimeTopics.runs,
     jobRealtimeTopics.schedules,
     monitoringRealtimeTopics.incidents,
@@ -97,6 +105,7 @@ export const realtimeStreamDataSchema = v.variant("kind", [
     v.strictObject({
         event: v.union([
             agentRealtimeChangeSchema,
+            cacheRealtimeChangeSchema,
             ...jobRealtimeChangeSchemas,
             ...monitoringRealtimeChangeSchemas,
             taskRealtimeChangeSchema,

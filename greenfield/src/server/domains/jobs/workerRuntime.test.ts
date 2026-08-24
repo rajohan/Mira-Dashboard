@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import type { SQLiteBunDatabase } from "drizzle-orm/bun-sqlite";
 
 import type { ImmediateDatabaseWriteAdmission } from "../../database/immediateWriteAdmission.ts";
+import type { CacheRepository } from "../cache/repository.ts";
 import type { JobWorkerCoordinator } from "./coordinator.ts";
 import type { JobRepository } from "./repository.ts";
 import {
@@ -74,10 +75,16 @@ function runtimeFixture(initializationFailure?: Error) {
         },
     });
     const repository = Object.freeze({}) as JobRepository;
+    const cacheRepository = Object.freeze({}) as CacheRepository;
     const dependencies = {
+        createCacheRepository() {
+            events.push("cache-repository-create");
+            return cacheRepository;
+        },
         createCoordinator(options) {
             events.push("coordinator-create");
             expect(options.repository).toBe(repository);
+            expect(options.commitCacheAttempt).toBeFunction();
             return coordinator;
         },
         createDatabaseRuntime() {
@@ -189,6 +196,7 @@ describe("Dashboard worker runtime", () => {
         expect(fixture.events).toEqual([
             "database-initialize",
             "repository-create",
+            "cache-repository-create",
             "coordinator-create",
             "coordinator-initialize",
             "coordinator-dispose",

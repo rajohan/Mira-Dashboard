@@ -144,6 +144,7 @@ function schedule(overrides: Partial<ScheduleSummary> = {}): ScheduleSummary {
         enabled: true,
         id: scheduleId,
         latestRun: run,
+        manualRunAvailable: true,
         name: "Worker smoke",
         nextRunAtMs: timestampMs + 60_000,
         priority: 0,

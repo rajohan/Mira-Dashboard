@@ -216,6 +216,26 @@ describe("durable jobs service", () => {
                 { entityId: "system.worker-smoke", topic: "schedules.records" },
             ]);
             expect(repository.findRun(run.id)).toBeDefined();
+            const replayService = createJobService({
+                generateId,
+                nowMs: serviceNowMs,
+                repository: {
+                    ...repository,
+                    findSchedule() {
+                        throw new Error(
+                            "Idempotency replay performed a mutable schedule lookup"
+                        );
+                    },
+                },
+            });
+            expect(
+                await Effect.runPromise(
+                    replayService.runSchedule(principal, {
+                        id: "system.worker-smoke",
+                        idempotencyKey: "e".repeat(32),
+                    })
+                )
+            ).toEqual(run);
         } finally {
             fixture.database.sqlite.close(true);
         }

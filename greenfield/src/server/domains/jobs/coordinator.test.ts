@@ -4,10 +4,12 @@ import { Effect } from "effect";
 
 import { testImmediateDatabaseWriteAdmission } from "../../test/support/databaseWriteAdmission.ts";
 import { openFreshMigratedDatabase } from "../../test/support/freshDatabase.ts";
+import { findJobWorkerAction } from "./actionExecutors.ts";
 import {
     type JobActionRegistration,
+    type JobActionExecutionContext,
     JobActionRetryableError,
-    jobActionRegistrations,
+    jobActionDefinitions,
 } from "./actionRegistry.ts";
 import {
     createJobWorkerCoordinator,
@@ -440,8 +442,14 @@ function coordinatorOptions(
     repository: JobWorkerCoordinatorOptions["repository"],
     workerInstanceId: string
 ): JobWorkerCoordinatorOptions {
+    const smokeDefinition = jobActionDefinitions.find(
+        (definition) => definition.actionKey === "system.worker-smoke"
+    );
+    if (smokeDefinition === undefined) throw new Error("Missing smoke definition");
     return {
         databaseReleaseId: releaseId,
+        actionDefinitions: [smokeDefinition],
+        findAction: findJobWorkerAction,
         generateId: () => Bun.randomUUIDv7(),
         nowMs: () => at.getTime(),
         pid: 100,
@@ -859,7 +867,7 @@ describe("durable job worker coordinator", () => {
             updatedAt: durableHeartbeat,
         };
         const fixture = repositoryFixture({ claim: { kind: "claimed", run } });
-        const baseRegistration = jobActionRegistrations.at(0);
+        const baseRegistration = jobActionDefinitions.at(0);
         if (baseRegistration === undefined) throw new Error("Missing smoke action");
         let logicalNowMs = at.getTime();
         const registration: JobActionRegistration = {
@@ -1249,7 +1257,7 @@ describe("durable job worker coordinator", () => {
             settlementRun,
         });
         const observed: JobWorkerSideEffectInput[] = [];
-        const baseRegistration = jobActionRegistrations.at(0);
+        const baseRegistration = jobActionDefinitions.at(0);
         if (baseRegistration === undefined) throw new Error("Missing smoke action");
         const coordinator = createJobWorkerCoordinator({
             ...coordinatorOptions(fixture.repository, workerId),
@@ -1462,14 +1470,12 @@ describe("durable job worker coordinator", () => {
             },
             claim: { kind: "claimed", run },
         });
-        const baseRegistration = jobActionRegistrations.at(0);
+        const baseRegistration = jobActionDefinitions.at(0);
         if (baseRegistration === undefined) throw new Error("Missing smoke action");
         const registration: JobActionRegistration = {
             ...baseRegistration,
             actionKey: "test.progress",
-            execute: (
-                context: Parameters<(typeof jobActionRegistrations)[0]["execute"]>[0]
-            ) =>
+            execute: (context: JobActionExecutionContext) =>
                 Effect.gen(function* () {
                     yield* context.reportProgress({ completed: 1 });
                     yield* context.writeOutput("stdout", "safe output");
@@ -1579,7 +1585,7 @@ describe("durable job worker coordinator", () => {
             cancellationRequested: true,
             claim: { kind: "claimed", run },
         });
-        const baseRegistration = jobActionRegistrations.at(0);
+        const baseRegistration = jobActionDefinitions.at(0);
         if (baseRegistration === undefined) throw new Error("Missing smoke action");
         const registration: JobActionRegistration = {
             ...baseRegistration,
@@ -1609,7 +1615,7 @@ describe("durable job worker coordinator", () => {
             timeoutMs: 5,
         };
         const fixture = repositoryFixture({ claim: { kind: "claimed", run } });
-        const baseRegistration = jobActionRegistrations.at(0);
+        const baseRegistration = jobActionDefinitions.at(0);
         if (baseRegistration === undefined) throw new Error("Missing smoke action");
         const registration: JobActionRegistration = {
             ...baseRegistration,
@@ -1636,7 +1642,7 @@ describe("durable job worker coordinator", () => {
         const workerId = Bun.randomUUIDv7();
         const run = claimedRun(workerId, "test.retry");
         const fixture = repositoryFixture({ claim: { kind: "claimed", run } });
-        const baseRegistration = jobActionRegistrations.at(0);
+        const baseRegistration = jobActionDefinitions.at(0);
         if (baseRegistration === undefined) throw new Error("Missing smoke action");
         const registration: JobActionRegistration = {
             ...baseRegistration,
@@ -1669,7 +1675,7 @@ describe("durable job worker coordinator", () => {
         const workerId = Bun.randomUUIDv7();
         const run = claimedRun(workerId, "test.permanent-failure");
         const fixture = repositoryFixture({ claim: { kind: "claimed", run } });
-        const baseRegistration = jobActionRegistrations.at(0);
+        const baseRegistration = jobActionDefinitions.at(0);
         if (baseRegistration === undefined) throw new Error("Missing smoke action");
         const registration: JobActionRegistration = {
             ...baseRegistration,
@@ -1693,11 +1699,87 @@ describe("durable job worker coordinator", () => {
         });
     });
 
+    test("settles a synchronous executor-construction defect without failing the worker", async () => {
+        const workerId = Bun.randomUUIDv7();
+        const run = claimedRun(workerId, "test.synchronous-failure");
+        const fixture = repositoryFixture({ claim: { kind: "claimed", run } });
+        const baseRegistration = jobActionDefinitions.at(0);
+        if (baseRegistration === undefined) throw new Error("Missing action definition");
+        const registration: JobActionRegistration = {
+            ...baseRegistration,
+            actionKey: run.actionKey,
+            execute: () => {
+                throw new Error("private synchronous failure");
+            },
+        };
+        const coordinator = createJobWorkerCoordinator({
+            ...coordinatorOptions(fixture.repository, workerId),
+            findAction: (actionKey) =>
+                actionKey === registration.actionKey ? registration : undefined,
+        });
+
+        await coordinator.initialize();
+        await waitUntil(() => fixture.settlements.length === 1);
+        await coordinator.dispose();
+
+        expect(fixture.settlements[0]?.outcome).toEqual({
+            kind: "failed",
+            terminalCode: "action-failed",
+            terminalMessage: "The job action failed.",
+        });
+        expect(await coordinator.completion).toBeUndefined();
+    });
+
+    test("withholds cache persistence from non-cache actions", async () => {
+        const workerId = Bun.randomUUIDv7();
+        const run = claimedRun(workerId, "test.cache-port-denied");
+        const fixture = repositoryFixture({ claim: { kind: "claimed", run } });
+        const baseRegistration = jobActionDefinitions.find(
+            (definition) => definition.actionKey === "system.worker-smoke"
+        );
+        if (baseRegistration === undefined) throw new Error("Missing smoke definition");
+        let cacheCommitCalls = 0;
+        const registration: JobActionRegistration = {
+            ...baseRegistration,
+            actionKey: run.actionKey,
+            execute: (context) =>
+                Effect.tryPromise(() =>
+                    context.commitCacheAttempt({
+                        durationMs: 1,
+                        failureCode: "provider/unavailable",
+                        failureMessage: "Provider unavailable.",
+                        key: "system.host",
+                        kind: "failed",
+                    })
+                ).pipe(Effect.as({})),
+        };
+        const coordinator = createJobWorkerCoordinator({
+            ...coordinatorOptions(fixture.repository, workerId),
+            commitCacheAttempt: () => {
+                cacheCommitCalls += 1;
+                return Promise.resolve("committed");
+            },
+            findAction: (actionKey) =>
+                actionKey === registration.actionKey ? registration : undefined,
+        });
+
+        await coordinator.initialize();
+        await waitUntil(() => fixture.settlements.length === 1);
+        await coordinator.dispose();
+
+        expect(cacheCommitCalls).toBe(0);
+        expect(fixture.settlements[0]?.outcome).toEqual({
+            kind: "failed",
+            terminalCode: "action-failed",
+            terminalMessage: "The job action failed.",
+        });
+    });
+
     test("interrupts and retry-safely settles active work before worker stop", async () => {
         const workerId = Bun.randomUUIDv7();
         const run = claimedRun(workerId, "test.shutdown");
         const fixture = repositoryFixture({ claim: { kind: "claimed", run } });
-        const baseRegistration = jobActionRegistrations.at(0);
+        const baseRegistration = jobActionDefinitions.at(0);
         if (baseRegistration === undefined) throw new Error("Missing smoke action");
         const registration: JobActionRegistration = {
             ...baseRegistration,
@@ -1738,7 +1820,7 @@ describe("durable job worker coordinator", () => {
         const actionGate = deferred<void>();
         const actionStarted = deferred<void>();
         const fixture = repositoryFixture({ claim: { kind: "claimed", run } });
-        const baseRegistration = jobActionRegistrations.at(0);
+        const baseRegistration = jobActionDefinitions.at(0);
         if (baseRegistration === undefined) throw new Error("Missing smoke action");
         const registration: JobActionRegistration = {
             ...baseRegistration,
@@ -1802,7 +1884,7 @@ describe("durable job worker coordinator", () => {
         const actionGate = deferred<void>();
         const actionStarted = deferred<void>();
         const fixture = repositoryFixture({ claim: { kind: "claimed", run } });
-        const baseRegistration = jobActionRegistrations.at(0);
+        const baseRegistration = jobActionDefinitions.at(0);
         if (baseRegistration === undefined) throw new Error("Missing smoke action");
         const registration: JobActionRegistration = {
             ...baseRegistration,
@@ -1851,7 +1933,7 @@ describe("durable job worker coordinator", () => {
             claim: { kind: "claimed", run },
             claimGate: claimGate.promise,
         });
-        const baseRegistration = jobActionRegistrations.at(0);
+        const baseRegistration = jobActionDefinitions.at(0);
         if (baseRegistration === undefined) throw new Error("Missing smoke action");
         let executions = 0;
         const registration: JobActionRegistration = {

@@ -308,6 +308,7 @@ describe("durable job models", () => {
             enabled: true,
             id: scheduleId,
             latestRun: queuedRun(),
+            manualRunAvailable: true,
             name: "Worker smoke",
             nextRunAtMs: 60_000,
             priority: 0,

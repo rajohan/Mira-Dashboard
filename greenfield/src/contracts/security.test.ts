@@ -18,6 +18,8 @@ describe("request authentication contract", () => {
         expect(applicationCapabilities).toEqual([
             "agents:read",
             "agents:write",
+            "cache:read",
+            "cache:write",
             "jobs:read",
             "jobs:write",
             "monitoring:write",

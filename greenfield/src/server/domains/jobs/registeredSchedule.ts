@@ -1,4 +1,4 @@
-import type { JobActionRegistration } from "./actionRegistry.ts";
+import type { JobActionDefinition } from "./actionRegistry.ts";
 import type { ScheduledJobInsert } from "./repository.ts";
 import { nextScheduleOccurrence } from "./scheduleTime.ts";
 
@@ -9,11 +9,14 @@ import { nextScheduleOccurrence } from "./scheduleTime.ts";
  * @returns The complete row, or undefined when no occurrence is representable.
  */
 export function buildRegisteredSchedule(
-    registration: JobActionRegistration,
+    registration: JobActionDefinition,
     at: Date
 ): ScheduledJobInsert | undefined {
     const schedule = registration.defaultSchedule;
-    const nextRunAtMs = nextScheduleOccurrence(schedule, at.getTime());
+    const nextRunAtMs =
+        registration.initialDue === "immediate"
+            ? at.getTime()
+            : nextScheduleOccurrence(schedule, at.getTime());
     if (nextRunAtMs === undefined) return undefined;
 
     return {

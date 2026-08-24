@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import {
-    findJobActionRegistration,
+    findJobActionDefinition,
     isRegisteredJobSchedule,
     parseJobActionOutputMessage,
     parseJobActionProgress,
@@ -9,8 +9,8 @@ import {
 } from "./actionRegistry.ts";
 
 describe("durable job action registry", () => {
-    test("exposes only the safe worker smoke action", () => {
-        const registration = findJobActionRegistration("system.worker-smoke");
+    test("exposes pure smoke and cache definitions without worker authority", () => {
+        const registration = findJobActionDefinition("system.worker-smoke");
 
         expect(registration).toMatchObject({
             cancellationPolicy: "cooperative",
@@ -18,7 +18,12 @@ describe("durable job action registry", () => {
             resourceClass: "light",
             retrySafe: true,
         });
-        expect(findJobActionRegistration("system.shell")).toBeUndefined();
+        expect(findJobActionDefinition("system.shell")).toBeUndefined();
+        expect(findJobActionDefinition("cache.refresh.system-host")).toMatchObject({
+            initialDue: "immediate",
+            manualExposure: "cache-write",
+            scheduleId: "cache.system-host",
+        });
         expect(
             isRegisteredJobSchedule("system.worker-smoke", "system.worker-smoke")
         ).toBe(true);
@@ -31,7 +36,7 @@ describe("durable job action registry", () => {
     });
 
     test("retains the canonical schedule produced while validating a registration", () => {
-        const smoke = findJobActionRegistration("system.worker-smoke");
+        const smoke = findJobActionDefinition("system.worker-smoke");
         if (smoke === undefined) throw new TypeError("Missing smoke registration");
 
         const registration = validateJobActionRegistration({
@@ -40,6 +45,9 @@ describe("durable job action registry", () => {
                 expression: "0\t0 * JAN MON",
                 kind: "cron",
                 timeZone: "UTC",
+            },
+            execute: () => {
+                throw new Error("not executed by this validation test");
             },
             scheduleId: "system.normalized-cron-test",
         });
@@ -53,12 +61,18 @@ describe("durable job action registry", () => {
             validateJobActionRegistration({
                 ...smoke,
                 manualExposure: "administrator" as never,
+                execute: () => {
+                    throw new Error("not executed by this validation test");
+                },
             })
         ).toThrow("Job manual exposure is invalid");
         expect(() =>
             validateJobActionRegistration({
                 ...smoke,
                 retrySafe: "yes" as never,
+                execute: () => {
+                    throw new Error("not executed by this validation test");
+                },
             })
         ).toThrow("Job retry-safe flag is invalid");
         expect(() =>

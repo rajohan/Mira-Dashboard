@@ -27,6 +27,7 @@ import { jobRunSelectSchema } from "../../database/validation/jobRuns.ts";
 import { jobWorkerControlSelectSchema } from "../../database/validation/jobWorkerControl.ts";
 import { scheduledJobSelectSchema } from "../../database/validation/scheduledJobs.ts";
 import { workerInstanceSelectSchema } from "../../database/validation/workerInstances.ts";
+import { findJobActionDefinition, isRegisteredJobSchedule } from "./actionRegistry.ts";
 
 export type JobDisableIntentRecord = v.InferOutput<typeof jobDisableIntentSelectSchema>;
 export type JobRunEventRecord = v.InferOutput<typeof jobRunEventSelectSchema>;
@@ -200,6 +201,9 @@ export function toScheduleSummary(
         ...(relations.latestRun === undefined
             ? {}
             : { latestRun: toJobRunSummary(relations.latestRun) }),
+        manualRunAvailable:
+            isRegisteredJobSchedule(record.id, record.actionKey) &&
+            findJobActionDefinition(record.actionKey)?.manualExposure === "jobs-write",
         name: record.name,
         ...(record.enabled && record.nextRunAt !== null
             ? { nextRunAtMs: getTime(record.nextRunAt) }

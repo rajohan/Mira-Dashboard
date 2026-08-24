@@ -193,7 +193,7 @@ describe("generated contract documentation", () => {
                 type: "object",
             });
         }
-        expect(realtimeDocumentation?.match(/^\| `/gmu)).toHaveLength(7);
+        expect(realtimeDocumentation?.match(/^\| `/gmu)).toHaveLength(8);
         expect(first.get("schemas/schedules.update.input.schema.json")).toContain(
             "Five-field minute cron; live validation accepts JAN-DEC month and SUN-SAT weekday aliases, normalizes aliases and ASCII whitespace, and requires a future occurrence."
         );

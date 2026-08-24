@@ -17,6 +17,7 @@ function intervalSchedule(): ScheduleSummary {
         description: "Checks the worker without host mutation.",
         enabled: true,
         id: "system.worker-smoke",
+        manualRunAvailable: true,
         name: "Worker smoke",
         nextRunAtMs: timestampMs + 60_000,
         priority: 0,

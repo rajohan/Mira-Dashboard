@@ -135,6 +135,8 @@
                   "enum": [
                     "agents:read",
                     "agents:write",
+                    "cache:read",
+                    "cache:write",
                     "jobs:read",
                     "jobs:write",
                     "monitoring:write",
@@ -147,7 +149,7 @@
                   ],
                   "type": "string"
                 },
-                "maxItems": 11,
+                "maxItems": 13,
                 "uniqueItems": true
               },
               "method": {
@@ -192,6 +194,8 @@
                   "enum": [
                     "agents:read",
                     "agents:write",
+                    "cache:read",
+                    "cache:write",
                     "jobs:read",
                     "jobs:write",
                     "monitoring:write",
@@ -204,7 +208,7 @@
                   ],
                   "type": "string"
                 },
-                "maxItems": 11,
+                "maxItems": 13,
                 "uniqueItems": true
               },
               "replacementCredentialId": {

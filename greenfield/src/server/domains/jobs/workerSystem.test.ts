@@ -1,7 +1,17 @@
 import { describe, expect, test } from "bun:test";
 
+import { eq } from "drizzle-orm";
+
+import { realtimeEvents } from "../../database/schema/realtime.ts";
 import { testImmediateDatabaseWriteAdmission } from "../../test/support/databaseWriteAdmission.ts";
 import { openFreshMigratedDatabase } from "../../test/support/freshDatabase.ts";
+import { createCacheRepository } from "../cache/repository.ts";
+import { createSystemHostExecutor, findJobWorkerAction } from "./actionExecutors.ts";
+import {
+    findJobActionDefinition,
+    jobActionDefinitions,
+    validateJobActionRegistration,
+} from "./actionRegistry.ts";
 import { createJobWorkerCoordinator } from "./coordinator.ts";
 import {
     createJobRepository,
@@ -54,7 +64,9 @@ describe("durable job worker system", () => {
         const workerId = Bun.randomUUIDv7();
         const runId = Bun.randomUUIDv7();
         const coordinator = createJobWorkerCoordinator({
+            actionDefinitions: jobActionDefinitions,
             databaseReleaseId: "a".repeat(40),
+            findAction: findJobWorkerAction,
             generateId: () => Bun.randomUUIDv7(),
             nowMs: () => nowMs,
             pid: 1234,
@@ -139,6 +151,111 @@ describe("durable job worker system", () => {
                 resultJson: expect.stringContaining('"status":"ok"'),
                 state: "succeeded",
             });
+        } finally {
+            await coordinator.dispose().catch(() => {});
+            database.sqlite.close(true);
+        }
+    });
+
+    test("runs the initially due system.host schedule through cache and outbox commit", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createJobRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        const nowMs = 10_000;
+        const cacheRepository = createCacheRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission,
+            () => nowMs
+        );
+        const definition = findJobActionDefinition("cache.refresh.system-host");
+        if (definition === undefined) throw new Error("Missing system.host action");
+        const registration = validateJobActionRegistration({
+            ...definition,
+            execute: createSystemHostExecutor({
+                collect: () =>
+                    Promise.resolve({
+                        architecture: "x64",
+                        disk: { freeBytes: 512, path: "/", totalBytes: 1024 },
+                        hostname: "dashboard-host",
+                        memory: { freeBytes: 1024, totalBytes: 2048 },
+                        platform: "linux",
+                        release: "6.8.0",
+                        uptimeSeconds: 42,
+                    }),
+                monotonicNowMs: () => 10,
+            }),
+        });
+        const workerId = Bun.randomUUIDv7();
+        const coordinator = createJobWorkerCoordinator({
+            actionDefinitions: [definition],
+            commitCacheAttempt: (input) => cacheRepository.commitAttempt(input),
+            databaseReleaseId: "a".repeat(40),
+            findAction: (actionKey) =>
+                actionKey === registration.actionKey ? registration : undefined,
+            generateId: () => Bun.randomUUIDv7(),
+            nowMs: () => nowMs,
+            pid: 1234,
+            repository,
+            sideEffects: createSystemJobWorkerSideEffects(),
+            timings: {
+                cancellationPollMs: 2,
+                claimLeaseMs: 100,
+                claimRenewalMs: 20,
+                heartbeatMs: 20,
+                idlePollMs: 2,
+                schedulePollMs: 2,
+                workerFreshnessMs: 50,
+            },
+            workerInstanceId: workerId,
+        });
+        try {
+            await coordinator.initialize();
+
+            expect(
+                await waitForTerminal(
+                    () => repository.findLatestRunForSchedule("cache.system-host")?.state
+                )
+            ).toBe("succeeded");
+            expect(
+                repository.findLatestRunForSchedule("cache.system-host")
+            ).toMatchObject({
+                actionKey: "cache.refresh.system-host",
+                attemptCount: 1,
+                state: "succeeded",
+                triggerType: "schedule",
+            });
+            expect(
+                repository.findSchedule("cache.system-host")?.schedule.nextRunAt
+            ).toEqual(new Date(nowMs + 86_400_000));
+            expect(cacheRepository.findEntry("system.host")).toMatchObject({
+                consecutiveFailures: 0,
+                expiresAt: new Date(nowMs + 86_400_000),
+                key: "system.host",
+                lastAttemptNumber: 1,
+                lastAttemptStatus: "succeeded",
+                payloadJson: expect.stringContaining('"hostname":"dashboard-host"'),
+                schemaId: "system.host.v1",
+                source: "system.host",
+            });
+            expect(
+                database.orm
+                    .select({
+                        entityId: realtimeEvents.entityId,
+                        payloadJson: realtimeEvents.payloadJson,
+                        topic: realtimeEvents.topic,
+                    })
+                    .from(realtimeEvents)
+                    .where(eq(realtimeEvents.topic, "cache.entries"))
+                    .all()
+            ).toEqual([
+                {
+                    entityId: "system.host",
+                    payloadJson: '{"key":"system.host"}',
+                    topic: "cache.entries",
+                },
+            ]);
         } finally {
             await coordinator.dispose().catch(() => {});
             database.sqlite.close(true);

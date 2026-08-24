@@ -12,11 +12,13 @@ import type { JsonObject } from "../../../shared/json.ts";
 import { parseJsonText } from "../../../shared/json.ts";
 import { sha256Hex } from "../../shared/crypto.ts";
 import {
+    type JobActionDefinition,
     type JobActionEventWriteResult,
     type JobActionRegistration,
+    type JobCacheAttemptCommit,
+    type JobCacheAttemptWriteResult,
     JobActionRetryableError,
-    findJobActionRegistration,
-    jobActionRegistrations,
+    jobActionDefinitions,
     parseJobActionOutputMessage,
     parseJobActionProgress,
 } from "./actionRegistry.ts";
@@ -97,7 +99,16 @@ export interface JobWorkerCoordinatorTimings {
 }
 
 export interface JobWorkerCoordinatorOptions {
+    readonly actionDefinitions?: readonly JobActionDefinition[];
     readonly databaseReleaseId: string;
+    readonly commitCacheAttempt?: (input: {
+        readonly at: Date;
+        readonly attempt: number;
+        readonly leaseToken: string;
+        readonly outcome: JobCacheAttemptCommit;
+        readonly runId: string;
+        readonly workerId: string;
+    }) => Promise<JobCacheAttemptWriteResult>;
     readonly findAction?: (actionKey: string) => JobActionRegistration | undefined;
     readonly generateId?: () => string;
     readonly nowMs?: () => number;
@@ -148,6 +159,10 @@ class JobActionFinishedError extends Error {
         super("Durable job action finished");
         this.name = "JobActionFinishedError";
     }
+}
+
+function findNoAction(_actionKey: string): JobActionRegistration | undefined {
+    return;
 }
 
 const defaultTimings: JobWorkerCoordinatorTimings = Object.freeze({
@@ -306,10 +321,7 @@ function durableRunEventSideEffects(
     ]);
 }
 
-function scheduleInsert(
-    registration: JobActionRegistration,
-    at: Date
-): ScheduledJobInsert {
+function scheduleInsert(registration: JobActionDefinition, at: Date): ScheduledJobInsert {
     const schedule = buildRegisteredSchedule(registration, at);
     if (schedule === undefined) {
         throw new RangeError("Default job schedule has no representable occurrence");
@@ -514,6 +526,7 @@ async function waitForActiveExecution(
 }
 
 interface ExecuteClaimOptions {
+    readonly commitCacheAttempt: JobWorkerCoordinatorOptions["commitCacheAttempt"];
     readonly databaseReleaseId: string;
     readonly findAction: (actionKey: string) => JobActionRegistration | undefined;
     readonly lifecycleSignal: AbortSignal;
@@ -644,17 +657,37 @@ async function executeClaim(options: ExecuteClaimOptions): Promise<void> {
         return result.kind;
     };
 
-    const action = registration.execute(
-        Object.freeze({
-            databaseReleaseId: options.databaseReleaseId,
-            nowMs: options.nowMs,
-            reportProgress: (progress: JsonObject) =>
-                Effect.tryPromise(() => appendEvent("progress", progress)),
-            workerInstanceId: options.workerInstanceId,
-            writeOutput: (kind: "stderr" | "stdout", message: string) =>
-                Effect.tryPromise(() => appendEvent(kind, message)),
-        }),
-        v.parse(jobPayloadSchema, parseJsonText(run.payloadJson))
+    const action = Effect.suspend(() =>
+        registration.execute(
+            Object.freeze({
+                commitCacheAttempt: async (outcome: JobCacheAttemptCommit) => {
+                    if (
+                        registration.manualExposure !== "cache-write" ||
+                        options.commitCacheAttempt === undefined
+                    ) {
+                        throw new Error("Cache attempt persistence is unavailable");
+                    }
+                    const result = await options.commitCacheAttempt({
+                        at: new Date(options.nowMs()),
+                        attempt: run.attemptCount,
+                        leaseToken,
+                        outcome,
+                        runId: run.id,
+                        workerId: options.workerInstanceId,
+                    });
+                    if (result === "lost-claim") throw new JobClaimLostError();
+                    return result;
+                },
+                databaseReleaseId: options.databaseReleaseId,
+                nowMs: options.nowMs,
+                reportProgress: (progress: JsonObject) =>
+                    Effect.tryPromise(() => appendEvent("progress", progress)),
+                workerInstanceId: options.workerInstanceId,
+                writeOutput: (kind: "stderr" | "stdout", message: string) =>
+                    Effect.tryPromise(() => appendEvent(kind, message)),
+            }),
+            v.parse(jobPayloadSchema, parseJsonText(run.payloadJson))
+        )
     );
     const monitorPromise = monitor().catch((error: unknown) => {
         if (!actionController.signal.aborted) {
@@ -717,7 +750,8 @@ export function createJobWorkerCoordinator(
     const timings = resolveTimings(options.timings);
     const nowMs = options.nowMs ?? Date.now;
     const generateId = options.generateId ?? (() => Bun.randomUUIDv7());
-    const findAction = options.findAction ?? findJobActionRegistration;
+    const findAction = options.findAction ?? findNoAction;
+    const actionDefinitions = options.actionDefinitions ?? jobActionDefinitions;
     const abortController = new AbortController();
     let activeExecution: Promise<void> | undefined;
     let initializePromise: Promise<void> | undefined;
@@ -984,6 +1018,7 @@ export function createJobWorkerCoordinator(
             return;
         }
         activeExecution = executeClaim({
+            commitCacheAttempt: options.commitCacheAttempt,
             databaseReleaseId: options.databaseReleaseId,
             findAction,
             lifecycleSignal: signal,
@@ -1012,8 +1047,8 @@ export function createJobWorkerCoordinator(
 
     const initialize = async (): Promise<void> => {
         const at = new Date(nowMs());
-        const schedules = jobActionRegistrations.map((registration) =>
-            scheduleInsert(registration, at)
+        const schedules = actionDefinitions.map((definition) =>
+            scheduleInsert(definition, at)
         );
         await options.repository.reconcileSchedules({
             at,

@@ -1,6 +1,7 @@
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 
 import type { AgentService } from "../server/domains/agents/service.ts";
+import type { CacheService } from "../server/domains/cache/service.ts";
 import type { JobService } from "../server/domains/jobs/service.ts";
 import type { MonitoringCatalogService } from "../server/domains/monitoring/catalogService.ts";
 import type { MonitoringService } from "../server/domains/monitoring/service.ts";
@@ -38,6 +39,7 @@ export interface TrpcHttpHandlerOptions {
     readonly authenticationLifecycle: AuthenticationLifecycleService;
     readonly automationSecurityLifecycle: AutomationSecurityLifecycleService;
     readonly browserOrigin?: string;
+    readonly cacheService: CacheService["Service"];
     readonly mfaAccountLifecycle: MfaAccountLifecycleService;
     readonly mfaLoginLifecycle: MfaLoginLifecycleService;
     readonly jobService: JobService["Service"];
@@ -217,6 +219,7 @@ export function createTrpcHttpHandler(options: TrpcHttpHandlerOptions) {
                     authenticationLifecycle: options.authenticationLifecycle,
                     automationSecurityLifecycle: options.automationSecurityLifecycle,
                     authenticateCredential: options.authenticateCredential,
+                    cacheService: options.cacheService,
                     mfaAccountLifecycle: options.mfaAccountLifecycle,
                     mfaLoginLifecycle: options.mfaLoginLifecycle,
                     jobService: options.jobService,

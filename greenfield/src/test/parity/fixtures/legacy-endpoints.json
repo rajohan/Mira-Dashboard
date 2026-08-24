@@ -273,7 +273,7 @@
             "purpose": "Reads one cache entry.",
             "section": "Backups, Cache, Metrics, Ops",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["cache.getEntry"],
                 "phase": "phase-3"
@@ -299,7 +299,7 @@
             "purpose": "Reads cache envelopes without payload data for lightweight UI polling.",
             "section": "Backups, Cache, Metrics, Ops",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["cache.getStatus"],
                 "phase": "phase-3"
@@ -1413,7 +1413,7 @@
             "purpose": "Queues and observes one cache refresh.",
             "section": "Backups, Cache, Metrics, Ops",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["cache.refreshEntry"],
                 "phase": "phase-3"
