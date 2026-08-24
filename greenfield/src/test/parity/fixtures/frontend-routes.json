@@ -113,7 +113,7 @@
             "searchNormalizer": null,
             "sourceRouteName": "files",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "path": "/files",
                 "phase": "phase-5"
             }

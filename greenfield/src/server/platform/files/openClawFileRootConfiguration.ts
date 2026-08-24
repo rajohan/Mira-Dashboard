@@ -10,14 +10,16 @@ import type {
 const openClawManifest = Object.freeze([
     Object.freeze({
         contentPolicy: "redacted-config-json",
-        maximumSizeBytes: workspaceFileLimits.maximumTextPreviewBytes,
+        maximumSizeBytes: workspaceFileLimits.maximumManifestFileBytes,
         segments: Object.freeze(["openclaw.json"]),
+        uploadContentPolicy: "reject-redaction-sentinel",
         writable: true,
     }),
     Object.freeze({
         contentPolicy: "raw",
-        maximumSizeBytes: workspaceFileLimits.maximumTextPreviewBytes,
+        maximumSizeBytes: workspaceFileLimits.maximumManifestFileBytes,
         segments: Object.freeze(["hooks", "transforms", "agentmail.ts"]),
+        uploadContentPolicy: "reject-redaction-sentinel",
         writable: true,
     }),
 ] satisfies readonly WorkspaceFileManifestEntry[]);
@@ -52,6 +54,7 @@ export function assertReviewedOpenClawFileRoot(
                 candidate !== undefined &&
                 candidate.contentPolicy === reviewed.contentPolicy &&
                 candidate.maximumSizeBytes === reviewed.maximumSizeBytes &&
+                candidate.uploadContentPolicy === reviewed.uploadContentPolicy &&
                 candidate.writable === reviewed.writable &&
                 sameSegments(candidate.segments, reviewed.segments)
             );

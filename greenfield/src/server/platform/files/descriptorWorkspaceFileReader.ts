@@ -190,11 +190,12 @@ function isManifestEntry(value: unknown): value is WorkspaceFileManifestEntry {
         ) &&
         (candidate.contentPolicy === "raw" ||
             candidate.contentPolicy === "redacted-config-json") &&
+        candidate.uploadContentPolicy === "reject-redaction-sentinel" &&
         typeof candidate.writable === "boolean" &&
         typeof maximumSizeBytes === "number" &&
         Number.isSafeInteger(maximumSizeBytes) &&
         maximumSizeBytes >= 1 &&
-        maximumSizeBytes <= workspaceFileLimits.maximumTextPreviewBytes
+        maximumSizeBytes <= workspaceFileLimits.maximumManifestFileBytes
     );
 }
 
@@ -229,6 +230,7 @@ function compileManifest(
                 contentPolicy: entry.contentPolicy,
                 maximumSizeBytes: entry.maximumSizeBytes,
                 segments: Object.freeze([...entry.segments]),
+                uploadContentPolicy: entry.uploadContentPolicy,
                 writable: entry.writable,
             })
         );
@@ -636,6 +638,9 @@ function nodeFromStat(
             : {}),
         revision: workspaceFileRevisionForStat(root.id, locator.segments, stat),
         sizeBytes,
+        ...(entry?.uploadContentPolicy === undefined
+            ? {}
+            : { uploadContentPolicy: entry.uploadContentPolicy }),
         ...(entry === undefined ? {} : { writeMaximumSizeBytes: entry.maximumSizeBytes }),
         writable: entry?.writable ?? root.writable,
     };
@@ -656,10 +661,14 @@ function openedFilePresentation(
     const fileName = locator.segments.at(-1);
     if (fileName === undefined) throw new WorkspaceFileError("not-file");
     const redacted = stableManifestBytes(locator, root, fd, stat, signal, contentAccess);
-    const sizeBytes = redacted?.byteLength ?? numberSize(stat);
-    const bytes = redacted ?? readPrefix(fd, sizeBytes);
+    const sourceSizeBytes = numberSize(stat);
+    const bytes = redacted ?? readPrefix(fd, sourceSizeBytes);
+    const presentationSizeBytes = Math.max(
+        sourceSizeBytes,
+        redacted?.byteLength ?? sourceSizeBytes
+    );
     return {
-        ...contentPresentation(fileName, bytes, sizeBytes),
+        ...contentPresentation(fileName, bytes, presentationSizeBytes),
         ...(redacted === undefined ? {} : { sizeBytes: redacted.byteLength }),
     };
 }
@@ -960,7 +969,9 @@ export function createDescriptorWorkspaceFileReader(
                     signal,
                     contentAccess
                 );
-                const sizeBytes = redactedBytes?.byteLength ?? numberSize(opened.stat);
+                const sourceSizeBytes = numberSize(opened.stat);
+                const sizeBytes = redactedBytes?.byteLength ?? sourceSizeBytes;
+                const presentationSizeBytes = Math.max(sourceSizeBytes, sizeBytes);
                 if (sizeBytes > workspaceFileLimits.maximumDownloadBytes) {
                     throw new WorkspaceFileError("too-large");
                 }
@@ -1023,7 +1034,11 @@ export function createDescriptorWorkspaceFileReader(
                         Math.min(redactedBytes.length, contentSniffBytes)
                     );
                 }
-                const presentation = contentPresentation(fileName, prefix, sizeBytes);
+                const presentation = contentPresentation(
+                    fileName,
+                    prefix,
+                    presentationSizeBytes
+                );
                 return {
                     bytes,
                     fileName,

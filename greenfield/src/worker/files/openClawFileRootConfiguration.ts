@@ -6,11 +6,13 @@ import type { WorkerWorkspaceFileRootConfiguration } from "./descriptorWorkspace
 
 const reviewedReplacementManifest = Object.freeze([
     Object.freeze({
-        maximumSizeBytes: workspaceFileLimits.maximumTextPreviewBytes,
+        backupPolicy: "sibling-dot-bak",
+        maximumSizeBytes: workspaceFileLimits.maximumManifestFileBytes,
         segments: Object.freeze(["openclaw.json"]),
     }),
     Object.freeze({
-        maximumSizeBytes: workspaceFileLimits.maximumTextPreviewBytes,
+        backupPolicy: "sibling-dot-bak",
+        maximumSizeBytes: workspaceFileLimits.maximumManifestFileBytes,
         segments: Object.freeze(["hooks", "transforms", "agentmail.ts"]),
     }),
 ]);

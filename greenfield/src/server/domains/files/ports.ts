@@ -21,11 +21,16 @@ export interface WorkspaceFileRootPolicy {
 /** Server-only content handling for one exact reviewed manifest entry. */
 export type WorkspaceFileManifestContentPolicy = "raw" | "redacted-config-json";
 
+/** Server-only upload handling selected by one reviewed manifest entry. */
+export type WorkspaceFileUploadContentPolicy = "reject-redaction-sentinel";
+
 /** One exact regular file made visible beneath an otherwise opaque root. */
 export interface WorkspaceFileManifestEntry {
     readonly contentPolicy: WorkspaceFileManifestContentPolicy;
+    /** Source/list/replacement ceiling; presentation retains its separate preview limit. */
     readonly maximumSizeBytes: number;
     readonly segments: readonly string[];
+    readonly uploadContentPolicy: WorkspaceFileUploadContentPolicy;
     readonly writable: boolean;
 }
 
@@ -46,6 +51,7 @@ export interface WorkspaceFileNode {
     readonly requiresSecretReveal?: boolean;
     readonly revision: string;
     readonly sizeBytes?: number;
+    readonly uploadContentPolicy?: WorkspaceFileUploadContentPolicy;
     readonly writeMaximumSizeBytes?: number;
     readonly writable: boolean;
 }

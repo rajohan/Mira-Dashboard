@@ -341,7 +341,7 @@
             "target": {
                 "delivery": "planned",
                 "kind": "procedure",
-                "names": ["openClawSettings.listConfigFiles"],
+                "names": ["files.list", "files.listRoots"],
                 "phase": "phase-5"
             }
         },
@@ -353,8 +353,9 @@
             "section": "Files, Config Files, Logs, Media",
             "target": {
                 "delivery": "planned",
-                "kind": "procedure",
-                "names": ["openClawSettings.getConfigFile"],
+                "kind": "raw-http",
+                "method": "GET",
+                "path": "/api/files/content/:ticketId",
                 "phase": "phase-5"
             }
         },
@@ -523,7 +524,7 @@
             "target": {
                 "delivery": "implemented",
                 "kind": "procedure",
-                "names": ["files.list"],
+                "names": ["files.list", "files.listRoots"],
                 "phase": "phase-5"
             }
         },
@@ -2011,9 +2012,10 @@
             "purpose": "Writes a config file under OpenClaw root.",
             "section": "Files, Config Files, Logs, Media",
             "target": {
-                "delivery": "planned",
-                "kind": "procedure",
-                "names": ["openClawSettings.updateConfigFile"],
+                "delivery": "implemented",
+                "kind": "raw-http",
+                "method": "PUT",
+                "path": "/api/files/uploads/:ticketId",
                 "phase": "phase-5"
             }
         },

@@ -56,6 +56,7 @@ describe("reviewed pre-cutover parity inventory", () => {
         ).toEqual([
             "/agents",
             "/chat",
+            "/files",
             "/login",
             "/logs",
             "/reports",
@@ -180,5 +181,84 @@ describe("reviewed pre-cutover parity inventory", () => {
                 target.kind === "reviewed-removal" ? target.kind : target.delivery
             )
         ).toEqual(["implemented", "implemented", "implemented"]);
+    });
+
+    test("records the reviewed Phase 5 Files boundary accurately", async () => {
+        const reviewed = await loadReviewedParityInventory();
+        const filesRoute = reviewed.frontend.routes.find(({ path }) => path === "/files");
+        const fileEndpoints = reviewed.legacyEndpoints.endpoints.filter(
+            ({ id }) =>
+                id === "GET /api/config-files" ||
+                id === "GET /api/config-files/*" ||
+                id === "GET /api/files" ||
+                id === "GET /api/files/*" ||
+                id === "PUT /api/config-files/*" ||
+                id === "PUT /api/files/*"
+        );
+        const mediaEndpoint = reviewed.legacyEndpoints.endpoints.find(
+            ({ id }) => id === "GET /api/media"
+        );
+
+        expect(filesRoute?.target.delivery).toBe("implemented");
+        expect(
+            fileEndpoints.map(({ id, target }) => {
+                let targetIdentity: readonly string[] | string | undefined;
+                if (target.kind === "procedure") {
+                    targetIdentity = target.names;
+                } else if (target.kind === "raw-http") {
+                    targetIdentity = `${target.method} ${target.path}`;
+                }
+                return [
+                    id,
+                    target.kind === "reviewed-removal" ? target.kind : target.delivery,
+                    target.kind,
+                    targetIdentity,
+                ];
+            })
+        ).toEqual([
+            [
+                "GET /api/config-files",
+                "planned",
+                "procedure",
+                ["files.list", "files.listRoots"],
+            ],
+            [
+                "GET /api/config-files/*",
+                "planned",
+                "raw-http",
+                "GET /api/files/content/:ticketId",
+            ],
+            [
+                "GET /api/files",
+                "implemented",
+                "procedure",
+                ["files.list", "files.listRoots"],
+            ],
+            [
+                "GET /api/files/*",
+                "implemented",
+                "raw-http",
+                "GET /api/files/content/:ticketId",
+            ],
+            [
+                "PUT /api/config-files/*",
+                "implemented",
+                "raw-http",
+                "PUT /api/files/uploads/:ticketId",
+            ],
+            [
+                "PUT /api/files/*",
+                "implemented",
+                "raw-http",
+                "PUT /api/files/uploads/:ticketId",
+            ],
+        ]);
+        expect(mediaEndpoint?.target).toEqual({
+            delivery: "planned",
+            kind: "raw-http",
+            method: "GET",
+            path: "/api/media/*",
+            phase: "phase-5",
+        });
     });
 });

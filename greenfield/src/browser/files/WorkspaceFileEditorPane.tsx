@@ -378,6 +378,14 @@ export function WorkspaceFileEditorPane({
                 </div>
             </header>
 
+            {entry.requiresSecretReveal === true &&
+                preview.prepared?.secretsRevealed !== true && (
+                    <Alert
+                        focusOnError={false}
+                        message="If needed, enroll and confirm MFA in Account security before revealing. Reveal exposes raw secrets only in this pane; inspect and repair invalid JSON without copying secrets into logs or messages."
+                        variant="info"
+                    />
+                )}
             <Alert message={preview.error} />
             <Alert message={preview.revealError} />
             <Alert message={saveError} onDismiss={() => setSaveError(undefined)} />

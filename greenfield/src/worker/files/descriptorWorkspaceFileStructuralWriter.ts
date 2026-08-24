@@ -6,8 +6,10 @@ import { workspaceFileLimits } from "../../contracts/files.ts";
 import {
     linuxRenameExchange,
     linuxRenameNoReplace,
+    linuxRenameReplace,
     type LinuxRenameExchange,
     type LinuxRenameNoReplace,
+    type LinuxRenameReplace,
 } from "./linuxRenameExchange.ts";
 import {
     createWorkspaceFileReplaceIntent,
@@ -32,6 +34,7 @@ const visibleDotNames: ReadonlySet<string> = new Set([
     ".environment.example",
 ]);
 const copyChunkBytes = 64 * 1024;
+const siblingDotBakPolicy = "sibling-dot-bak";
 
 export type WorkspaceFileStructuralWriteErrorReason =
     | "access-denied"
@@ -71,19 +74,23 @@ export interface WorkerWorkspaceFileWriteCommand {
     readonly ticketId: string;
 }
 
+interface WorkerWorkspaceFileReplacementManifestEntry {
+    readonly backupPolicy?: typeof siblingDotBakPolicy;
+    readonly maximumSizeBytes: number;
+    readonly segments: readonly string[];
+}
+
 export interface WorkerWorkspaceFileRootConfiguration {
     readonly id: string;
     readonly path: string;
-    readonly replacementManifest?: readonly {
-        readonly maximumSizeBytes: number;
-        readonly segments: readonly string[];
-    }[];
+    readonly replacementManifest?: readonly WorkerWorkspaceFileReplacementManifestEntry[];
     readonly writable: boolean;
 }
 
 export interface DescriptorWorkspaceFileStructuralWriterOptions {
     readonly renameExchange?: LinuxRenameExchange;
     readonly renameNoReplace?: LinuxRenameNoReplace;
+    readonly renameReplace?: LinuxRenameReplace;
     readonly roots: readonly WorkerWorkspaceFileRootConfiguration[];
     readonly spoolRoot: string;
 }
@@ -132,17 +139,20 @@ function validReplacementManifest(value: unknown): boolean {
     if (!Array.isArray(value) || value.length === 0 || value.length > 16) {
         return false;
     }
+    const backupPaths = new Set<string>();
     const seenPaths = new Set<string>();
     for (const entry of value as unknown[]) {
         if (typeof entry !== "object" || entry === null) return false;
         const candidate = entry as Record<string, unknown>;
         const maximumSizeBytes = candidate["maximumSizeBytes"];
+        const backupPolicy = candidate["backupPolicy"];
         const rawSegments = candidate["segments"];
         if (
+            (backupPolicy !== undefined && backupPolicy !== siblingDotBakPolicy) ||
             typeof maximumSizeBytes !== "number" ||
             !Number.isSafeInteger(maximumSizeBytes) ||
             maximumSizeBytes < 1 ||
-            maximumSizeBytes > workspaceFileLimits.maximumUploadBytes ||
+            maximumSizeBytes > workspaceFileLimits.maximumManifestFileBytes ||
             !Array.isArray(rawSegments) ||
             rawSegments.length === 0 ||
             rawSegments.length > 256
@@ -159,9 +169,21 @@ function validReplacementManifest(value: unknown): boolean {
         }
         const pathKey = JSON.stringify(segments);
         if (seenPaths.has(pathKey)) return false;
+        const fileName = segments.at(-1);
+        if (
+            backupPolicy === siblingDotBakPolicy &&
+            (typeof fileName !== "string" || !isVisibleSegment(`${fileName}.bak`))
+        ) {
+            return false;
+        }
+        if (backupPolicy === siblingDotBakPolicy) {
+            backupPaths.add(
+                JSON.stringify([...segments.slice(0, -1), `${String(fileName)}.bak`])
+            );
+        }
         seenPaths.add(pathKey);
     }
-    return true;
+    return [...backupPaths].every((pathKey) => !seenPaths.has(pathKey));
 }
 
 function failure(
@@ -294,11 +316,7 @@ function validateCommand(
         throw failure("invalid-input");
     }
     if (root.replacementManifest !== undefined) {
-        const reviewed = root.replacementManifest.find(
-            ({ segments }) =>
-                segments.length === locator.segments.length &&
-                segments.every((segment, index) => segment === locator.segments[index])
-        );
+        const reviewed = reviewedReplacementEntry(root, command);
         if (
             command.operation !== "replace" ||
             reviewed === undefined ||
@@ -308,6 +326,29 @@ function validateCommand(
         }
     }
     return root;
+}
+
+function reviewedReplacementEntry(
+    root: OpenRoot,
+    command: WorkerWorkspaceFileWriteCommand
+): WorkerWorkspaceFileReplacementManifestEntry | undefined {
+    return root.replacementManifest?.find(
+        ({ segments }) =>
+            segments.length === command.locator.segments.length &&
+            segments.every(
+                (segment, index) => segment === command.locator.segments[index]
+            )
+    );
+}
+
+function replacementBackupName(
+    reviewed: WorkerWorkspaceFileReplacementManifestEntry | undefined,
+    command: WorkerWorkspaceFileWriteCommand
+): string | undefined {
+    if (command.operation !== "replace") return;
+    return reviewed?.backupPolicy === siblingDotBakPolicy
+        ? `${command.fileName}.bak`
+        : undefined;
 }
 
 function rootDirectoryIsSafe(root: OpenRoot, stat: Fs.BigIntStats): boolean {
@@ -359,6 +400,39 @@ async function openDirectory(
     } catch (error) {
         await Promise.allSettled(handles.toReversed().map((handle) => handle.close()));
         throw classifiedFailure(error);
+    }
+}
+
+function reviewedChildIsSafe(directory: OpenDirectory, stat: Fs.BigIntStats): boolean {
+    return (
+        stat.isFile() &&
+        stat.nlink === 1n &&
+        stat.dev === directory.root.device &&
+        stat.uid === directory.root.ownerId &&
+        (stat.mode & 0o002n) === 0n
+    );
+}
+
+async function assertSafeExistingBackup(
+    directory: OpenDirectory,
+    backupName: string
+): Promise<void> {
+    let handle: Fs.promises.FileHandle | undefined;
+    try {
+        handle = await Fs.promises.open(
+            anchoredChild(directory.fd, backupName),
+            Fs.constants.O_RDONLY | Fs.constants.O_NOFOLLOW | Fs.constants.O_NONBLOCK
+        );
+        const stat = await handle.stat({ bigint: true });
+        if (!reviewedChildIsSafe(directory, stat)) {
+            throw failure("access-denied");
+        }
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+            throw classifiedFailure(error);
+        }
+    } finally {
+        await handle?.close().catch(() => {});
     }
 }
 
@@ -555,13 +629,19 @@ function matchesStageIdentity(
     expected: WorkspaceFileReplaceStageIdentity
 ): boolean {
     return (
-        stat.dev.toString() === expected.dev &&
-        stat.ino.toString() === expected.ino &&
+        matchesStageInode(stat, expected) &&
         stat.mode.toString() === expected.mode &&
         stat.nlink.toString() === expected.nlink &&
         stat.uid.toString() === expected.uid &&
         stat.gid.toString() === expected.gid
     );
+}
+
+function matchesStageInode(
+    stat: Fs.BigIntStats,
+    expected: WorkspaceFileReplaceStageIdentity
+): boolean {
+    return stat.dev.toString() === expected.dev && stat.ino.toString() === expected.ino;
 }
 
 async function writeExact(
@@ -637,6 +717,7 @@ function revisionForStat(
 async function replacementStat(
     directory: OpenDirectory,
     command: WorkerWorkspaceFileWriteCommand,
+    maximumSizeBytes: number,
     signal?: AbortSignal
 ): Promise<OpenReplacement> {
     let handle: Fs.promises.FileHandle | undefined;
@@ -651,11 +732,11 @@ async function replacementStat(
             stat.nlink !== 1n ||
             stat.dev !== directory.root.device ||
             (directory.root.replacementManifest !== undefined &&
-                (stat.uid !== directory.root.ownerId || (stat.mode & 0o002n) !== 0n))
+                !reviewedChildIsSafe(directory, stat))
         ) {
             throw failure("access-denied");
         }
-        if (stat.size > BigInt(workspaceFileLimits.maximumDownloadBytes)) {
+        if (stat.size > BigInt(maximumSizeBytes)) {
             throw failure("too-large");
         }
         if (
@@ -664,12 +745,7 @@ async function replacementStat(
         ) {
             throw failure("conflict");
         }
-        const sha256 = await hashOpenFile(
-            handle,
-            stat,
-            workspaceFileLimits.maximumDownloadBytes,
-            signal
-        );
+        const sha256 = await hashOpenFile(handle, stat, maximumSizeBytes, signal);
         return { handle, sha256, stat };
     } catch (error) {
         await handle?.close().catch(() => {});
@@ -749,6 +825,48 @@ async function closeHashedChildren(
     );
 }
 
+async function exchangeAndOpenHashedChildren(
+    directory: OpenDirectory,
+    targetName: string,
+    temporaryName: string,
+    target: HashedChild | undefined,
+    temporary: HashedChild | undefined,
+    renameExchange: LinuxRenameExchange,
+    signal?: AbortSignal
+): Promise<{
+    readonly target: HashedChild | undefined;
+    readonly temporary: HashedChild | undefined;
+}> {
+    await closeHashedChildren(target, temporary);
+    renameExchange(directory.fd, temporaryName, targetName);
+    Fs.fsyncSync(directory.fd);
+    let reopenedTarget: HashedChild | undefined;
+    try {
+        reopenedTarget = await openHashedChild(directory, targetName, signal);
+        const reopenedTemporary = await openHashedChild(directory, temporaryName, signal);
+        return { target: reopenedTarget, temporary: reopenedTemporary };
+    } catch (error) {
+        await closeHashedChildren(reopenedTarget);
+        throw error;
+    }
+}
+
+async function removeRolledBackStage(
+    directory: OpenDirectory,
+    temporaryName: string,
+    temporary: HashedChild | undefined,
+    intent: WorkspaceFileReplaceIntent,
+    intentStore: WorkspaceFileReplaceIntentStore,
+    spoolId: string,
+    loaded: LoadedWorkspaceFileReplaceIntent
+): Promise<void> {
+    if (temporary === undefined || !childMatchesStage(temporary, intent)) {
+        throw failure("unavailable");
+    }
+    await unlinkExactChild(directory, temporaryName, temporary.stat);
+    await removeWorkspaceFileReplaceIntent(intentStore, spoolId, loaded);
+}
+
 function intentMatchesCommand(
     intent: WorkspaceFileReplaceIntent,
     command: WorkerWorkspaceFileWriteCommand,
@@ -804,12 +922,48 @@ function childMatchesStage(
     );
 }
 
+async function rollbackUninspectableTemporary(
+    directory: OpenDirectory,
+    targetName: string,
+    temporaryName: string,
+    target: HashedChild,
+    intent: WorkspaceFileReplaceIntent,
+    intentStore: WorkspaceFileReplaceIntentStore,
+    spoolId: string,
+    loaded: LoadedWorkspaceFileReplaceIntent,
+    renameExchange: LinuxRenameExchange,
+    cause: unknown
+): Promise<never> {
+    if (!childMatchesStage(target, intent)) throw classifiedFailure(cause);
+    await closeHashedChildren(target);
+    renameExchange(directory.fd, temporaryName, targetName);
+    Fs.fsyncSync(directory.fd);
+    let rolledBackStage: HashedChild | undefined;
+    try {
+        rolledBackStage = await openHashedChild(directory, temporaryName);
+        await removeRolledBackStage(
+            directory,
+            temporaryName,
+            rolledBackStage,
+            intent,
+            intentStore,
+            spoolId,
+            loaded
+        );
+    } finally {
+        await closeHashedChildren(rolledBackStage);
+    }
+    throw classifiedFailure(cause);
+}
+
 async function recoverWorkspaceFileReplacement(
     directory: OpenDirectory,
     command: WorkerWorkspaceFileWriteCommand,
     loaded: LoadedWorkspaceFileReplaceIntent,
     intentStore: WorkspaceFileReplaceIntentStore,
+    backupName: string | undefined,
     renameExchange: LinuxRenameExchange,
+    renameReplace: LinuxRenameReplace,
     signal?: AbortSignal
 ): Promise<Fs.BigIntStats> {
     const { intent } = loaded;
@@ -817,12 +971,65 @@ async function recoverWorkspaceFileReplacement(
     if (!intentMatchesCommand(intent, command, temporaryName)) {
         throw failure("access-denied");
     }
+    if (backupName !== undefined) {
+        await assertSafeExistingBackup(directory, backupName);
+    }
 
     let target: HashedChild | undefined;
     let temporary: HashedChild | undefined;
+    let backup: HashedChild | undefined;
     try {
-        target = await openHashedChild(directory, command.fileName, signal);
-        temporary = await openHashedChild(directory, temporaryName, signal);
+        try {
+            target = await openHashedChild(directory, command.fileName, signal);
+        } catch (error) {
+            if (backupName !== undefined) {
+                temporary = await openHashedChild(directory, temporaryName, signal);
+                if (temporary === undefined) {
+                    const uninspectableTarget = await Fs.promises.lstat(
+                        anchoredChild(directory.fd, command.fileName),
+                        { bigint: true }
+                    );
+                    if (!matchesStageInode(uninspectableTarget, intent.stage)) {
+                        Fs.fsyncSync(directory.fd);
+                        await removeWorkspaceFileReplaceIntent(
+                            intentStore,
+                            command.spoolId,
+                            loaded
+                        );
+                    }
+                } else if (childMatchesStage(temporary, intent)) {
+                    await removeRolledBackStage(
+                        directory,
+                        temporaryName,
+                        temporary,
+                        intent,
+                        intentStore,
+                        command.spoolId,
+                        loaded
+                    );
+                }
+            }
+            throw error;
+        }
+        try {
+            temporary = await openHashedChild(directory, temporaryName, signal);
+        } catch (error) {
+            if (target !== undefined && childMatchesStage(target, intent)) {
+                await rollbackUninspectableTemporary(
+                    directory,
+                    command.fileName,
+                    temporaryName,
+                    target,
+                    intent,
+                    intentStore,
+                    command.spoolId,
+                    loaded,
+                    renameExchange,
+                    error
+                );
+            }
+            throw error;
+        }
         const targetIsOld = childMatchesOld(target, intent);
         const temporaryIsStage = childMatchesStage(temporary, intent);
 
@@ -833,32 +1040,150 @@ async function recoverWorkspaceFileReplacement(
             renameExchange(directory.fd, temporaryName, command.fileName);
             Fs.fsyncSync(directory.fd);
             target = await openHashedChild(directory, command.fileName, signal);
-            temporary = await openHashedChild(directory, temporaryName, signal);
+            try {
+                temporary = await openHashedChild(directory, temporaryName, signal);
+            } catch (error) {
+                if (target !== undefined && childMatchesStage(target, intent)) {
+                    await rollbackUninspectableTemporary(
+                        directory,
+                        command.fileName,
+                        temporaryName,
+                        target,
+                        intent,
+                        intentStore,
+                        command.spoolId,
+                        loaded,
+                        renameExchange,
+                        error
+                    );
+                }
+                throw error;
+            }
+        }
+
+        if (
+            backupName !== undefined &&
+            !childMatchesStage(target, intent) &&
+            childMatchesStage(temporary, intent)
+        ) {
+            const failureReason =
+                target !== undefined && !reviewedChildIsSafe(directory, target.stat)
+                    ? "access-denied"
+                    : "conflict";
+            await removeRolledBackStage(
+                directory,
+                temporaryName,
+                temporary,
+                intent,
+                intentStore,
+                command.spoolId,
+                loaded
+            );
+            throw failure(failureReason);
+        }
+        if (
+            backupName !== undefined &&
+            target !== undefined &&
+            !targetIsOld &&
+            !childMatchesStage(target, intent) &&
+            temporary === undefined
+        ) {
+            const failureReason = reviewedChildIsSafe(directory, target.stat)
+                ? "conflict"
+                : "access-denied";
+            Fs.fsyncSync(directory.fd);
+            await removeWorkspaceFileReplaceIntent(intentStore, command.spoolId, loaded);
+            throw failure(failureReason);
         }
 
         if (childMatchesStage(target, intent)) {
             if (target === undefined) throw failure("unavailable");
+            if (backupName !== undefined) {
+                if (childMatchesExchangedOld(temporary, intent)) {
+                    await temporary?.handle.close();
+                    temporary = undefined;
+                    renameReplace(directory.fd, temporaryName, backupName);
+                    Fs.fsyncSync(directory.fd);
+                } else if (temporary !== undefined) {
+                    const observedConcurrent = temporary;
+                    const concurrentIsSafe = reviewedChildIsSafe(
+                        directory,
+                        observedConcurrent.stat
+                    );
+                    const previousTarget = target;
+                    const previousTemporary = temporary;
+                    target = undefined;
+                    temporary = undefined;
+                    const exchanged = await exchangeAndOpenHashedChildren(
+                        directory,
+                        command.fileName,
+                        temporaryName,
+                        previousTarget,
+                        previousTemporary,
+                        renameExchange,
+                        signal
+                    );
+                    target = exchanged.target;
+                    temporary = exchanged.temporary;
+                    if (
+                        target !== undefined &&
+                        sameStableIdentity(target.stat, observedConcurrent.stat) &&
+                        sameDigest(target.sha256, observedConcurrent.sha256) &&
+                        temporary !== undefined &&
+                        childMatchesStage(temporary, intent)
+                    ) {
+                        await removeRolledBackStage(
+                            directory,
+                            temporaryName,
+                            temporary,
+                            intent,
+                            intentStore,
+                            command.spoolId,
+                            loaded
+                        );
+                        throw failure(concurrentIsSafe ? "conflict" : "access-denied");
+                    }
+                    throw failure("unavailable");
+                }
+                backup = await openHashedChild(directory, backupName, signal);
+                if (!childMatchesExchangedOld(backup, intent)) {
+                    throw failure("unavailable");
+                }
+                Fs.fsyncSync(directory.fd);
+                return target.stat;
+            }
             if (temporary === undefined) return target.stat;
             if (childMatchesExchangedOld(temporary, intent)) {
                 await unlinkExactChild(directory, temporaryName, temporary.stat);
                 return target.stat;
             }
             if (matchesOldInode(temporary.stat, intent.old)) {
-                await closeHashedChildren(target, temporary);
+                const previousTarget = target;
+                const previousTemporary = temporary;
                 target = undefined;
                 temporary = undefined;
-                renameExchange(directory.fd, temporaryName, command.fileName);
-                Fs.fsyncSync(directory.fd);
-                target = await openHashedChild(directory, command.fileName, signal);
-                temporary = await openHashedChild(directory, temporaryName, signal);
+                const exchanged = await exchangeAndOpenHashedChildren(
+                    directory,
+                    command.fileName,
+                    temporaryName,
+                    previousTarget,
+                    previousTemporary,
+                    renameExchange,
+                    signal
+                );
+                target = exchanged.target;
+                temporary = exchanged.temporary;
                 if (
                     target !== undefined &&
                     matchesOldInode(target.stat, intent.old) &&
                     temporary !== undefined &&
                     childMatchesStage(temporary, intent)
                 ) {
-                    await unlinkExactChild(directory, temporaryName, temporary.stat);
-                    await removeWorkspaceFileReplaceIntent(
+                    await removeRolledBackStage(
+                        directory,
+                        temporaryName,
+                        temporary,
+                        intent,
                         intentStore,
                         command.spoolId,
                         loaded
@@ -881,7 +1206,7 @@ async function recoverWorkspaceFileReplacement(
         }
         throw failure("unavailable");
     } finally {
-        await closeHashedChildren(target, temporary);
+        await closeHashedChildren(target, temporary, backup);
     }
 }
 
@@ -1060,6 +1385,7 @@ export function createDescriptorWorkspaceFileStructuralWriter(
     const spoolStat = Fs.fstatSync(requiredSpoolFd, { bigint: true });
     const renameExchange = options.renameExchange ?? linuxRenameExchange;
     const renameNoReplace = options.renameNoReplace ?? linuxRenameNoReplace;
+    const renameReplace = options.renameReplace ?? linuxRenameReplace;
     const intentStore: WorkspaceFileReplaceIntentStore = Object.freeze({
         ownerId,
         renameNoReplace,
@@ -1073,6 +1399,11 @@ export function createDescriptorWorkspaceFileStructuralWriter(
             if (disposed) throw failure("unavailable");
             abortIfRequested(signal);
             const root = validateCommand(command, roots);
+            const reviewedReplacement = reviewedReplacementEntry(root, command);
+            const backupName = replacementBackupName(reviewedReplacement, command);
+            const replacementSizeLimit =
+                reviewedReplacement?.maximumSizeBytes ??
+                workspaceFileLimits.maximumDownloadBytes;
             const parentSegments =
                 command.operation === "create"
                     ? command.locator.segments
@@ -1098,7 +1429,9 @@ export function createDescriptorWorkspaceFileStructuralWriter(
                             command,
                             existingIntent,
                             intentStore,
+                            backupName,
                             renameExchange,
+                            renameReplace,
                             undefined
                         );
                         await settleWorkspaceFileReplaceIntent(
@@ -1114,7 +1447,15 @@ export function createDescriptorWorkspaceFileStructuralWriter(
                 await removeAbandonedStage(directory, temporaryName, ownerId);
                 spool = await openSpool(requiredSpoolFd, spoolStat.dev, ownerId, command);
                 if (command.operation === "replace") {
-                    replacement = await replacementStat(directory, command, signal);
+                    replacement = await replacementStat(
+                        directory,
+                        command,
+                        replacementSizeLimit,
+                        signal
+                    );
+                    if (backupName !== undefined) {
+                        await assertSafeExistingBackup(directory, backupName);
+                    }
                 }
                 stage = await Fs.promises.open(
                     temporaryPath,
@@ -1161,7 +1502,9 @@ export function createDescriptorWorkspaceFileStructuralWriter(
                         command,
                         loadedIntent,
                         intentStore,
+                        backupName,
                         renameExchange,
+                        renameReplace,
                         undefined
                     );
                     await settleWorkspaceFileReplaceIntent(

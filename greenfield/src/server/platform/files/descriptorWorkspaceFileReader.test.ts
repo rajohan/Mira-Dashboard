@@ -50,14 +50,16 @@ function openClawFixture() {
                 manifest: [
                     {
                         contentPolicy: "redacted-config-json",
-                        maximumSizeBytes: 1_048_576,
+                        maximumSizeBytes: workspaceFileLimits.maximumManifestFileBytes,
                         segments: ["openclaw.json"],
+                        uploadContentPolicy: "reject-redaction-sentinel",
                         writable: true,
                     },
                     {
                         contentPolicy: "raw",
-                        maximumSizeBytes: 1_048_576,
+                        maximumSizeBytes: workspaceFileLimits.maximumManifestFileBytes,
                         segments: ["hooks", "transforms", "agentmail.ts"],
+                        uploadContentPolicy: "reject-redaction-sentinel",
                         writable: true,
                     },
                 ],
@@ -173,8 +175,9 @@ describe("descriptor workspace file reader", () => {
         expect(text).not.toContain("raw-plugin-secret");
         expect(described).toMatchObject({
             requiresSecretReveal: true,
+            uploadContentPolicy: "reject-redaction-sentinel",
             writable: true,
-            writeMaximumSizeBytes: 1_048_576,
+            writeMaximumSizeBytes: workspaceFileLimits.maximumManifestFileBytes,
         });
         const revealed = await reader.describe(locator, undefined, "reveal-secrets");
         const revealedResult = await reader.read(
@@ -193,7 +196,10 @@ describe("descriptor workspace file reader", () => {
             segments: ["hooks", "transforms", "agentmail.ts"],
         } as const;
         const transform = await reader.describe(transformLocator);
-        expect(transform.writable).toBe(true);
+        expect(transform).toMatchObject({
+            uploadContentPolicy: "reject-redaction-sentinel",
+            writable: true,
+        });
         const transformResult = await reader.read(
             transformLocator,
             transform.revision,
@@ -304,18 +310,93 @@ describe("descriptor workspace file reader", () => {
         expect(revealed.previewKind).toBe("text");
     });
 
-    test("rejects an oversized exact manifest file", async () => {
+    test("keeps reviewed files above the text-preview budget download-only", async () => {
         const { reader, root } = openClawFixture();
+        const secretPrefix = "raw-oversized-secret";
+        const rawConfig = JSON.stringify({
+            token: secretPrefix + "a".repeat(workspaceFileLimits.maximumTextPreviewBytes),
+        });
+        expect(Buffer.byteLength(rawConfig)).toBeGreaterThan(
+            workspaceFileLimits.maximumTextPreviewBytes
+        );
+        expect(Buffer.byteLength(rawConfig)).toBeLessThanOrEqual(
+            workspaceFileLimits.maximumManifestFileBytes
+        );
+        const configPath = Path.join(root, "openclaw.json");
+        Fs.writeFileSync(configPath, rawConfig);
+        Fs.chmodSync(configPath, 0o600);
+
         const transformPath = Path.join(root, "hooks", "transforms", "agentmail.ts");
-        Fs.writeFileSync(transformPath, Buffer.alloc(1_048_577, 0x61));
+        Fs.writeFileSync(
+            transformPath,
+            Buffer.alloc(workspaceFileLimits.maximumTextPreviewBytes + 1, 0x61)
+        );
         Fs.chmodSync(transformPath, 0o664);
 
-        const caught = await reader
-            .describe({
-                rootId: "openclaw-config",
-                segments: ["hooks", "transforms", "agentmail.ts"],
-            })
-            .catch((error: unknown) => error);
+        const configLocator = {
+            rootId: "openclaw-config",
+            segments: ["openclaw.json"],
+        } as const;
+        const rootListing = await reader.list({
+            rootId: "openclaw-config",
+            segments: [],
+        });
+        expect(
+            rootListing.entries.find(({ name }) => name === "openclaw.json")
+        ).toMatchObject({
+            previewKind: "download-only",
+            requiresSecretReveal: true,
+            writeMaximumSizeBytes: workspaceFileLimits.maximumManifestFileBytes,
+        });
+        const config = await reader.describe(configLocator);
+        expect(config).toMatchObject({
+            previewKind: "download-only",
+            requiresSecretReveal: true,
+            writeMaximumSizeBytes: workspaceFileLimits.maximumManifestFileBytes,
+        });
+        expect(config.sizeBytes).toBeLessThan(
+            workspaceFileLimits.maximumTextPreviewBytes
+        );
+        const configResult = await reader.read(configLocator, config.revision, undefined);
+        const redacted = new TextDecoder().decode(configResult.bytes);
+        expect(configResult.previewKind).toBe("download-only");
+        expect(redacted).toContain(CONFIG_REDACTION_SENTINEL);
+        expect(redacted).not.toContain(secretPrefix);
+
+        const transforms = await reader.list({
+            rootId: "openclaw-config",
+            segments: ["hooks", "transforms"],
+        });
+        expect(
+            transforms.entries.find(({ name }) => name === "agentmail.ts")
+        ).toMatchObject({
+            previewKind: "download-only",
+            sizeBytes: workspaceFileLimits.maximumTextPreviewBytes + 1,
+            writeMaximumSizeBytes: workspaceFileLimits.maximumManifestFileBytes,
+        });
+    });
+
+    test("accepts the exact reviewed manifest ceiling and rejects one byte more", async () => {
+        const { reader, root } = openClawFixture();
+        const transformPath = Path.join(root, "hooks", "transforms", "agentmail.ts");
+        const locator = {
+            rootId: "openclaw-config",
+            segments: ["hooks", "transforms", "agentmail.ts"],
+        } as const;
+        Fs.writeFileSync(
+            transformPath,
+            Buffer.alloc(workspaceFileLimits.maximumManifestFileBytes, 0x61)
+        );
+        Fs.chmodSync(transformPath, 0o664);
+
+        expect(await reader.describe(locator)).toMatchObject({
+            previewKind: "download-only",
+            sizeBytes: workspaceFileLimits.maximumManifestFileBytes,
+            writeMaximumSizeBytes: workspaceFileLimits.maximumManifestFileBytes,
+        });
+
+        Fs.appendFileSync(transformPath, "a");
+        const caught = await reader.describe(locator).catch((error: unknown) => error);
         expect(reason(caught)).toBe("access-denied");
     });
 

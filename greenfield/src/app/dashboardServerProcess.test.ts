@@ -147,14 +147,16 @@ function processFixture(totpFailure?: Error) {
                 manifest: [
                     {
                         contentPolicy: "redacted-config-json",
-                        maximumSizeBytes: 1_048_576,
+                        maximumSizeBytes: 2_097_152,
                         segments: ["openclaw.json"],
+                        uploadContentPolicy: "reject-redaction-sentinel",
                         writable: true,
                     },
                     {
                         contentPolicy: "raw",
-                        maximumSizeBytes: 1_048_576,
+                        maximumSizeBytes: 2_097_152,
                         segments: ["hooks", "transforms", "agentmail.ts"],
+                        uploadContentPolicy: "reject-redaction-sentinel",
                         writable: true,
                     },
                 ],
@@ -219,18 +221,20 @@ function processFixture(totpFailure?: Error) {
                     manifest: Object.freeze([
                         Object.freeze({
                             contentPolicy: "redacted-config-json" as const,
-                            maximumSizeBytes: 1_048_576,
+                            maximumSizeBytes: 2_097_152,
                             segments: Object.freeze(["openclaw.json"]),
+                            uploadContentPolicy: "reject-redaction-sentinel" as const,
                             writable: true,
                         }),
                         Object.freeze({
                             contentPolicy: "raw" as const,
-                            maximumSizeBytes: 1_048_576,
+                            maximumSizeBytes: 2_097_152,
                             segments: Object.freeze([
                                 "hooks",
                                 "transforms",
                                 "agentmail.ts",
                             ]),
+                            uploadContentPolicy: "reject-redaction-sentinel" as const,
                             writable: true,
                         }),
                     ]),

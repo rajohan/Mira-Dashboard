@@ -488,19 +488,34 @@ proxy mode names exact proxies and requires them to overwrite forwarded identity
   keeps descriptor-anchored containment for each operation. Terminal uses the same named root only
   to select the interactive shell's initial working directory: it is not a filesystem sandbox, and
   the shell may leave it wherever the worker's OS identity has access.
-- Files' separate web-and-worker `MIRA_DASHBOARD_OPENCLAW_ROOT` is not a recursive OpenClaw browser. Its
-  descriptor adapter synthesizes a tree from the exact reviewed `openclaw.json` and
-  `hooks/transforms/agentmail.ts` manifest, verifies same-owner/same-device regular files, rejects
-  links, world-writable nodes, traversal, and oversized content, and redacts configuration JSON
-  before default ticket creation or range selection. Raw configuration is available only through
-  an explicit recent-MFA mutation and a short-lived actor-bound no-store ticket; the browser keeps
-  it out of Query caches, and config replacement requires that same reveal ticket and revision.
-  The worker receives the root only as a descriptor-anchored replacement manifest for those two
-  exact existing files, with bounded size, CAS, ownership/mode checks, fsync, and atomic exchange.
-  It cannot create, delete, rename, or replace any unreviewed OpenClaw path through the Files job
-  protocol. Atomic exchange creates a private stage file beside the target, so the worker unit
-  deliberately retains its prior writable OpenClaw namespace rather than claiming an exact-file
-  systemd exception that Linux VFS cannot enforce; the descriptor manifest is the write boundary.
+- Files' separate web-and-worker `MIRA_DASHBOARD_OPENCLAW_ROOT` is not a general recursive browser.
+  Its descriptor adapter synthesizes only the directory prefixes needed to reach the exact reviewed
+  `openclaw.json` and `hooks/transforms/agentmail.ts` manifest entries, verifies
+  same-owner/same-device regular files, rejects links, world-writable nodes, traversal, and
+  oversized content, and redacts valid configuration JSON before default ticket creation or range
+  selection. The two reviewed full-redaction/replacement entries have a 2 MiB bound, while text
+  preview remains capped at 1 MiB and larger admitted text is download-only. Legacy configuration
+  GET parity therefore remains planned: legacy lists unbounded source sizes and returns a bounded
+  prefix for oversized files, which this stricter manifest does not claim to reproduce. Invalid JSON
+  publishes only safe listing metadata so the reviewed entry stays selectable; its masked preview
+  fails closed without returning bytes. Raw configuration is available only through an explicit
+  recent-MFA mutation and a short-lived actor-bound no-store ticket, which lets the operator inspect
+  and repair invalid JSON. The browser keeps raw content out of Query caches, and config replacement
+  validates that same reveal ticket and exact revision before requesting the raw descriptor view.
+  Upload tickets inherit a server-only content policy from the reviewed manifest node. A bounded
+  streaming matcher rejects the redaction sentinel even across body chunks for both manifest
+  entries, removes any partial spool, and stops before job enqueue; ordinary workspace content is
+  not subject to that manifest-only rule. The worker receives the root only as a
+  descriptor-anchored replacement manifest for those two exact existing files, with bounded size,
+  CAS, ownership/mode checks, fsync, and atomic exchange. Each successful reviewed replacement
+  atomically publishes the exchanged old inode as the exact hidden sibling `.bak`, preserving its
+  bytes and mode as one rolling backup; descriptor-anchored recovery finishes that publication
+  idempotently after interruption. Both targets must exist before cutover: replacement-only
+  authority does not repair or create a missing file. It cannot create, delete, rename, or replace
+  any unreviewed OpenClaw path through the Files job protocol. Atomic exchange creates a private
+  stage file beside the target, so the worker unit deliberately retains its prior writable OpenClaw
+  namespace rather than claiming an exact-file systemd exception that Linux VFS cannot enforce; the
+  descriptor manifest is the write boundary.
 - Dashboard's worker-owned rotation engine uses an exact reviewed per-file manifest for Dashboard,
   OpenClaw, and managed application/container logs rather than treating a directory as a recursive
   wildcard. Ubuntu system logrotate remains responsible only for the exact `rsyslog`, `apport`,
