@@ -3,6 +3,7 @@ import type { AgentService } from "../domains/agents/service.ts";
 import type { CacheService } from "../domains/cache/service.ts";
 import type { ChatService } from "../domains/chat/service.ts";
 import type { DatabaseObservabilityService } from "../domains/database/service.ts";
+import type { DockerService } from "../domains/docker/service.ts";
 import type { WorkspaceFilesService } from "../domains/files/service.ts";
 import type { GatewayConnectionService } from "../domains/gatewayConnection/service.ts";
 import type { GatewaySessionsService } from "../domains/gatewaySessions/service.ts";
@@ -50,6 +51,7 @@ export interface RequestContextOptions {
     readonly cacheService: CacheService["Service"];
     readonly chatService?: ChatService;
     readonly databaseObservabilityService: DatabaseObservabilityService;
+    readonly dockerService?: DockerService;
     readonly workspaceFilesService?: WorkspaceFilesService;
     readonly gatewayConnectionService: GatewayConnectionService;
     readonly gatewaySessionsService: GatewaySessionsService;
@@ -84,6 +86,7 @@ export interface RequestContext {
     readonly cacheService: CacheService["Service"];
     readonly chatService?: ChatService;
     readonly databaseObservabilityService: DatabaseObservabilityService;
+    readonly dockerService?: DockerService;
     readonly workspaceFilesService?: WorkspaceFilesService;
     readonly gatewayConnectionService: GatewayConnectionService;
     readonly gatewaySessionsService: GatewaySessionsService;
@@ -131,6 +134,9 @@ export async function createRequestContext(
             ? {}
             : { chatService: options.chatService }),
         databaseObservabilityService: options.databaseObservabilityService,
+        ...(options.dockerService === undefined
+            ? {}
+            : { dockerService: options.dockerService }),
         ...(options.workspaceFilesService === undefined
             ? {}
             : { workspaceFilesService: options.workspaceFilesService }),

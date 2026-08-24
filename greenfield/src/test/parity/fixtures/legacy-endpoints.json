@@ -52,9 +52,9 @@
             "purpose": "Queues image deletion.",
             "section": "Docker",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
-                "names": ["docker.deleteImage"],
+                "names": ["docker.requestOperation"],
                 "phase": "phase-5"
             }
         },
@@ -65,9 +65,9 @@
             "purpose": "Queues volume deletion.",
             "section": "Docker",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
-                "names": ["docker.deleteVolume"],
+                "names": ["docker.requestOperation"],
                 "phase": "phase-5"
             }
         },
@@ -392,9 +392,9 @@
             "purpose": "Lists containers.",
             "section": "Docker",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
-                "names": ["docker.listContainers"],
+                "names": ["docker.overview"],
                 "phase": "phase-5"
             }
         },
@@ -405,9 +405,9 @@
             "purpose": "Reads container details.",
             "section": "Docker",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
-                "names": ["docker.getContainer"],
+                "names": ["docker.overview"],
                 "phase": "phase-5"
             }
         },
@@ -418,9 +418,9 @@
             "purpose": "Reads container logs.",
             "section": "Docker",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
-                "names": ["docker.listContainerLogs"],
+                "names": ["docker.getContainerLogs"],
                 "phase": "phase-5"
             }
         },
@@ -431,9 +431,9 @@
             "purpose": "Reads the current container stats snapshot.",
             "section": "Docker",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
-                "names": ["docker.getContainerStats"],
+                "names": ["docker.overview"],
                 "phase": "phase-5"
             }
         },
@@ -441,12 +441,12 @@
             "id": "GET /api/docker/exec/:jobId",
             "method": "GET",
             "path": "/api/docker/exec/:jobId",
-            "purpose": "Reads persisted exec output/state.",
+            "purpose": "Reads the caller's active bounded Terminal session as the interactive Docker-console replacement without persisting shell contents.",
             "section": "Docker",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
-                "names": ["docker.getExec"],
+                "names": ["terminal.getActiveSession"],
                 "phase": "phase-5"
             }
         },
@@ -457,9 +457,9 @@
             "purpose": "Lists images.",
             "section": "Docker",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
-                "names": ["docker.listImages"],
+                "names": ["docker.overview"],
                 "phase": "phase-5"
             }
         },
@@ -470,9 +470,9 @@
             "purpose": "Lists update events.",
             "section": "Docker",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
-                "names": ["docker.listUpdateEvents"],
+                "names": ["docker.overview"],
                 "phase": "phase-5"
             }
         },
@@ -483,9 +483,9 @@
             "purpose": "Lists managed update services.",
             "section": "Docker",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
-                "names": ["docker.listManagedServices"],
+                "names": ["docker.overview"],
                 "phase": "phase-5"
             }
         },
@@ -496,9 +496,9 @@
             "purpose": "Lists volumes.",
             "section": "Docker",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
-                "names": ["docker.listVolumes"],
+                "names": ["docker.overview"],
                 "phase": "phase-5"
             }
         },
@@ -1480,9 +1480,9 @@
             "purpose": "Queues a container start/stop/restart.",
             "section": "Docker",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
-                "names": ["docker.performContainerAction"],
+                "names": ["docker.requestOperation"],
                 "phase": "phase-5"
             }
         },
@@ -1490,12 +1490,12 @@
             "id": "POST /api/docker/exec/:jobId/stop",
             "method": "POST",
             "path": "/api/docker/exec/:jobId/stop",
-            "purpose": "Requests exec cancellation.",
+            "purpose": "Terminates the caller's bounded interactive Terminal session used for Docker-console work.",
             "section": "Docker",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
-                "names": ["docker.stopExec"],
+                "names": ["terminal.terminateSession"],
                 "phase": "phase-5"
             }
         },
@@ -1503,12 +1503,12 @@
             "id": "POST /api/docker/exec/start",
             "method": "POST",
             "path": "/api/docker/exec/start",
-            "purpose": "Queues a worker-owned container exec job.",
+            "purpose": "Hands the exact selected container into the bounded interactive Terminal and starts a fixed Docker shell; arbitrary follow-up input stays inside the audited PTY while fixed automation remains typed Docker jobs.",
             "section": "Docker",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
-                "names": ["docker.startExec"],
+                "names": ["terminal.prepareSession"],
                 "phase": "phase-5"
             }
         },
@@ -1519,9 +1519,9 @@
             "purpose": "Queues a Docker prune target.",
             "section": "Docker",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
-                "names": ["docker.prune"],
+                "names": ["docker.preparePrune", "docker.requestOperation"],
                 "phase": "phase-5"
             }
         },
@@ -1532,9 +1532,9 @@
             "purpose": "Queues a Compose stack action.",
             "section": "Docker",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
-                "names": ["docker.performStackAction"],
+                "names": ["docker.requestOperation"],
                 "phase": "phase-5"
             }
         },
@@ -1545,9 +1545,9 @@
             "purpose": "Queues an updater scan.",
             "section": "Docker",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
-                "names": ["docker.runUpdater"],
+                "names": ["docker.requestOperation"],
                 "phase": "phase-5"
             }
         },
@@ -1558,9 +1558,9 @@
             "purpose": "Queues one managed service update.",
             "section": "Docker",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
-                "names": ["docker.updateService"],
+                "names": ["docker.requestOperation"],
                 "phase": "phase-5"
             }
         },

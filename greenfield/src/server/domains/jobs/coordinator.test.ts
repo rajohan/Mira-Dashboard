@@ -9,6 +9,7 @@ import { createJobWorkerActionResolver } from "./actionExecutors.ts";
 import {
     type JobActionRegistration,
     type JobActionExecutionContext,
+    dockerFreeJobActionDefinitions,
     JobActionOutcomeUnknownError,
     JobActionRetryableError,
     jobActionDefinitions,
@@ -555,7 +556,10 @@ describe("durable job worker coordinator", () => {
         };
         const fixture = repositoryFixture({ claim: { kind: "claimed", run } });
         let restartCount = 0;
-        const actionDefinitions = Object.freeze([...jobActionDefinitions, definition]);
+        const actionDefinitions = Object.freeze([
+            ...dockerFreeJobActionDefinitions,
+            definition,
+        ]);
         const coordinator = createJobWorkerCoordinator({
             ...coordinatorOptions(fixture.repository, workerId),
             actionDefinitions,
@@ -576,7 +580,9 @@ describe("durable job worker coordinator", () => {
         await waitUntil(() => fixture.settlements.length === 1);
         await coordinator.dispose();
 
-        expect(fixture.events).toContain(`reconcile:${jobActionDefinitions.length}`);
+        expect(fixture.events).toContain(
+            `reconcile:${dockerFreeJobActionDefinitions.length}`
+        );
         expect(restartCount).toBe(1);
         expect(fixture.settlements[0]?.outcome).toMatchObject({
             kind: "succeeded",

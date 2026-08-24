@@ -57,6 +57,7 @@ describe("reviewed pre-cutover parity inventory", () => {
             "/agents",
             "/chat",
             "/database",
+            "/docker",
             "/files",
             "/jobs",
             "/login",
@@ -369,6 +370,95 @@ describe("reviewed pre-cutover parity inventory", () => {
                     target.kind === "procedure" && target.delivery === "planned"
             )
         ).toBeTrue();
+    });
+
+    test("closes Docker observability, fixed operations, and interactive console parity", async () => {
+        const reviewed = await loadReviewedParityInventory();
+        const dockerRoute = reviewed.frontend.routes.find(
+            ({ path }) => path === "/docker"
+        );
+        const endpoints = reviewed.legacyEndpoints.endpoints.filter(
+            ({ section }) => section === "Docker"
+        );
+
+        expect(dockerRoute).toMatchObject({
+            access: "session",
+            featureOwner: "docker",
+            target: {
+                delivery: "implemented",
+                path: "/docker",
+                phase: "phase-5",
+            },
+        });
+        expect(dashboardRoutePaths).toContain("/docker");
+        expect(endpoints).toHaveLength(18);
+        expect(
+            endpoints.map(({ id, target }) => [
+                id,
+                target.kind === "reviewed-removal" ? target.kind : target.delivery,
+                target.kind === "procedure" ? target.names : undefined,
+            ])
+        ).toEqual([
+            [
+                "DELETE /api/docker/images/:imageId",
+                "implemented",
+                ["docker.requestOperation"],
+            ],
+            [
+                "DELETE /api/docker/volumes/:volumeName",
+                "implemented",
+                ["docker.requestOperation"],
+            ],
+            ["GET /api/docker/containers", "implemented", ["docker.overview"]],
+            [
+                "GET /api/docker/containers/:containerId",
+                "implemented",
+                ["docker.overview"],
+            ],
+            [
+                "GET /api/docker/containers/:containerId/logs",
+                "implemented",
+                ["docker.getContainerLogs"],
+            ],
+            ["GET /api/docker/containers/stats", "implemented", ["docker.overview"]],
+            ["GET /api/docker/exec/:jobId", "implemented", ["terminal.getActiveSession"]],
+            ["GET /api/docker/images", "implemented", ["docker.overview"]],
+            ["GET /api/docker/updater/events", "implemented", ["docker.overview"]],
+            ["GET /api/docker/updater/services", "implemented", ["docker.overview"]],
+            ["GET /api/docker/volumes", "implemented", ["docker.overview"]],
+            [
+                "POST /api/docker/containers/:containerId/action",
+                "implemented",
+                ["docker.requestOperation"],
+            ],
+            [
+                "POST /api/docker/exec/:jobId/stop",
+                "implemented",
+                ["terminal.terminateSession"],
+            ],
+            ["POST /api/docker/exec/start", "implemented", ["terminal.prepareSession"]],
+            [
+                "POST /api/docker/prune",
+                "implemented",
+                ["docker.preparePrune", "docker.requestOperation"],
+            ],
+            ["POST /api/docker/stack/action", "implemented", ["docker.requestOperation"]],
+            ["POST /api/docker/updater/run", "implemented", ["docker.requestOperation"]],
+            [
+                "POST /api/docker/updater/services/:serviceId/update",
+                "implemented",
+                ["docker.requestOperation"],
+            ],
+        ]);
+        expect(
+            endpoints.filter(({ target }) => target.kind === "reviewed-removal")
+        ).toEqual([]);
+        expect(
+            endpoints.find(({ id }) => id === "POST /api/docker/exec/start")?.purpose
+        ).toContain("exact selected container");
+        expect(
+            endpoints.find(({ id }) => id === "POST /api/docker/exec/start")?.purpose
+        ).toContain("fixed Docker shell");
     });
 
     test("records the bounded OpenClaw settings and operations slice", async () => {

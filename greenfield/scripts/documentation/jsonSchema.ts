@@ -102,6 +102,22 @@ import {
     sqliteMigrationStateIsConsistent,
 } from "../../src/contracts/database.ts";
 import {
+    dockerContainerIsConsistent,
+    dockerContainerMountDestinationIsAbsolute,
+    dockerContainerMountsAreCanonical,
+    dockerContainerNetworksAreCanonical,
+    dockerContainerPortsAreCanonical,
+    dockerGetContainerLogsResultFitsBudget,
+    dockerObjectsByIdAreCanonical,
+    dockerObjectsByNameAreCanonical,
+    dockerOverviewCachePayloadIsConsistent,
+    dockerOverviewIsConsistent,
+    dockerPruneConfirmationMatchesTarget,
+    dockerPrunePreviewTicketIsConsistent,
+    dockerStringListIsCanonical,
+    dockerUpdaterEventsAreCanonical,
+} from "../../src/contracts/docker.ts";
+import {
     workspaceFileContentTicketIsConsistent,
     workspaceFileNameIsSafe,
 } from "../../src/contracts/files.ts";
@@ -288,6 +304,58 @@ const controlSafeTextJsonSchemaPattern = `^(?![\\s\\S]*(?:${controlSafeTextExclu
 const noNulJsonSchemaPattern = String.raw`^[^\u0000]*$`;
 
 const runtimeCheckComments = new Map<unknown, string>([
+    [
+        dockerContainerNetworksAreCanonical,
+        "Live Valibot validation additionally requires Docker container networks to be strictly ordered by name.",
+    ],
+    [
+        dockerContainerMountsAreCanonical,
+        "Live Valibot validation additionally requires Docker container mounts to be unique and strictly ordered.",
+    ],
+    [
+        dockerContainerPortsAreCanonical,
+        "Live Valibot validation additionally requires Docker port rows to be strictly ordered and requires host port and host scope to be present or absent together.",
+    ],
+    [
+        dockerContainerIsConsistent,
+        "Live Valibot validation additionally requires complete Compose identity pairs, causal container lifecycle timestamps, and memory usage not to exceed a nonzero memory limit.",
+    ],
+    [
+        dockerStringListIsCanonical,
+        "Live Valibot validation additionally requires Docker string inventories to be unique and strictly ordered.",
+    ],
+    [
+        dockerObjectsByIdAreCanonical,
+        "Live Valibot validation additionally requires Docker object IDs to be unique and strictly ordered.",
+    ],
+    [
+        dockerObjectsByNameAreCanonical,
+        "Live Valibot validation additionally requires Docker object names to be unique and strictly ordered.",
+    ],
+    [
+        dockerUpdaterEventsAreCanonical,
+        "Live Valibot validation additionally requires Docker updater event IDs to be unique and events to be ordered newest-first with stable ID tie-breaking.",
+    ],
+    [
+        dockerOverviewCachePayloadIsConsistent,
+        "Live Valibot validation additionally enforces the Docker 256 KiB UTF-8 payload budget and requires every image and volume container reference and every container image reference to resolve within the same complete snapshot.",
+    ],
+    [
+        dockerOverviewIsConsistent,
+        "Live Valibot validation additionally enforces the complete Docker snapshot invariants and requires observation, staleness, and response-check timestamps to be causally ordered.",
+    ],
+    [
+        dockerGetContainerLogsResultFitsBudget,
+        "Live Valibot validation additionally limits the serialized sanitized Docker log response to 256 KiB of UTF-8.",
+    ],
+    [
+        dockerPrunePreviewTicketIsConsistent,
+        "Live Valibot validation additionally requires Docker prune tickets to expire after issuance and within five minutes.",
+    ],
+    [
+        dockerPruneConfirmationMatchesTarget,
+        "Live Valibot validation additionally requires the destructive Docker prune confirmation to name the selected target exactly.",
+    ],
     [
         databaseObservabilityNameFitsPostgresqlByteLimit,
         "Live Valibot validation additionally limits PostgreSQL identifiers to 63 UTF-8 bytes.",
@@ -1082,6 +1150,12 @@ export function convertContractSchema(
                 // JSON numbers are finite by definition: NaN and infinities are
                 // not valid JSON values. Valibot still enforces this at runtime.
                 if (valibotAction.type === "finite") return jsonSchema;
+                if (valibotAction.type === "ip") {
+                    return {
+                        ...jsonSchema,
+                        anyOf: [{ format: "ipv4" }, { format: "ipv6" }],
+                    };
+                }
                 // JSON Schema carries a pattern but no flags. The transport uses
                 // Unicode mode only for ASCII-bounded expressions, for which
                 // dropping the flag does not change accepted values.
@@ -1146,6 +1220,12 @@ export function convertContractSchema(
                         jsonSchema,
                         controlSafeTextJsonSchemaPattern
                     );
+                }
+                if (
+                    valibotAction.type === "check" &&
+                    requirement === dockerContainerMountDestinationIsAbsolute
+                ) {
+                    return appendJsonSchemaPattern(jsonSchema, "^/");
                 }
                 if (
                     valibotAction.type === "check" &&

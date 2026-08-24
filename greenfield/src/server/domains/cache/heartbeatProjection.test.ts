@@ -335,6 +335,11 @@ describe("cache heartbeat projection", () => {
                     state: "missing",
                 },
                 {
+                    defaultEnabled: true,
+                    id: "cache.docker-overview",
+                    state: "missing",
+                },
+                {
                     activeRun: { state: "running" },
                     defaultEnabled: true,
                     enabled: true,
@@ -356,6 +361,11 @@ describe("cache heartbeat projection", () => {
                 {
                     defaultEnabled: true,
                     id: "database.sqlite-maintenance",
+                    state: "missing",
+                },
+                {
+                    defaultEnabled: true,
+                    id: "docker.updater",
                     state: "missing",
                 },
                 {

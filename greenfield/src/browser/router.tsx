@@ -15,6 +15,7 @@ import {
     parseReportsRouteSearch,
 } from "./monitoring/monitoringRouteSearch.ts";
 import { normalizeSettingsSearch } from "./settings/settingsRouteSearch.ts";
+import { parseTerminalRouteSearch } from "./terminal/terminalRouteSearch.ts";
 import { LoadingState } from "./ui/LoadingState.tsx";
 
 const rootRoute = createRootRoute({ component: DashboardShell });
@@ -52,6 +53,10 @@ const databaseRoute = createRoute({
     path: "/database",
     validateSearch: normalizeDatabaseSearch,
 }).lazy(() => import("./routes/database.lazy.tsx").then((module) => module.Route));
+const dockerRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/docker",
+}).lazy(() => import("./routes/docker.lazy.tsx").then((module) => module.Route));
 const logsRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/logs",
@@ -63,6 +68,7 @@ const moltbookRoute = createRoute({
 const terminalRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/terminal",
+    validateSearch: parseTerminalRouteSearch,
 }).lazy(() => import("./routes/terminal.lazy.tsx").then((module) => module.Route));
 const jobsRoute = createRoute({
     getParentRoute: () => rootRoute,
@@ -95,6 +101,7 @@ const routeTree = rootRoute.addChildren([
     agentsRoute,
     chatRoute,
     databaseRoute,
+    dockerRoute,
     filesRoute,
     incidentsRoute,
     jobsRoute,

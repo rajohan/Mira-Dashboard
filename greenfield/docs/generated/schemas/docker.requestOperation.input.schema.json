@@ -1,0 +1,425 @@
+{
+  "$id": "urn:mira-dashboard:docker.requestOperation.input",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "confirmation": {
+          "const": "restart-docker-container"
+        },
+        "containerId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "operation": {
+          "const": "container-restart"
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 32,
+          "maxLength": 128,
+          "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
+        },
+        "sourceRevision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "confirmation",
+        "containerId",
+        "operation",
+        "idempotencyKey",
+        "sourceRevision"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "confirmation": {
+          "const": "start-docker-container"
+        },
+        "containerId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "operation": {
+          "const": "container-start"
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 32,
+          "maxLength": 128,
+          "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
+        },
+        "sourceRevision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "confirmation",
+        "containerId",
+        "operation",
+        "idempotencyKey",
+        "sourceRevision"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "confirmation": {
+          "const": "stop-docker-container"
+        },
+        "containerId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "operation": {
+          "const": "container-stop"
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 32,
+          "maxLength": 128,
+          "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
+        },
+        "sourceRevision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "confirmation",
+        "containerId",
+        "operation",
+        "idempotencyKey",
+        "sourceRevision"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "confirmation": {
+          "const": "delete-docker-image"
+        },
+        "imageId": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "operation": {
+          "const": "image-delete"
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 32,
+          "maxLength": 128,
+          "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
+        },
+        "sourceRevision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "confirmation",
+        "imageId",
+        "operation",
+        "idempotencyKey",
+        "sourceRevision"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "confirmation": {
+          "enum": [
+            "prune-docker-images",
+            "prune-docker-volumes"
+          ],
+          "type": "string"
+        },
+        "operation": {
+          "const": "prune-execute"
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 32,
+          "maxLength": 128,
+          "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
+        },
+        "sourceRevision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "target": {
+          "enum": [
+            "images",
+            "volumes"
+          ],
+          "type": "string"
+        },
+        "ticketId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        }
+      },
+      "required": [
+        "confirmation",
+        "operation",
+        "idempotencyKey",
+        "sourceRevision",
+        "target",
+        "ticketId"
+      ],
+      "additionalProperties": false,
+      "$comment": "Live Valibot validation additionally requires the destructive Docker prune confirmation to name the selected target exactly."
+    },
+    {
+      "type": "object",
+      "properties": {
+        "confirmation": {
+          "const": "restart-docker-stack"
+        },
+        "operation": {
+          "const": "stack-restart"
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 32,
+          "maxLength": 128,
+          "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
+        },
+        "sourceRevision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "confirmation",
+        "operation",
+        "idempotencyKey",
+        "sourceRevision"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "confirmation": {
+          "const": "start-docker-stack"
+        },
+        "operation": {
+          "const": "stack-start"
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 32,
+          "maxLength": 128,
+          "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
+        },
+        "sourceRevision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "confirmation",
+        "operation",
+        "idempotencyKey",
+        "sourceRevision"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "confirmation": {
+          "const": "stop-docker-stack"
+        },
+        "operation": {
+          "const": "stack-stop"
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 32,
+          "maxLength": 128,
+          "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
+        },
+        "sourceRevision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "confirmation",
+        "operation",
+        "idempotencyKey",
+        "sourceRevision"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "confirmation": {
+          "const": "run-docker-updates"
+        },
+        "operation": {
+          "const": "updater-run"
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 32,
+          "maxLength": 128,
+          "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
+        },
+        "sourceRevision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "confirmation",
+        "operation",
+        "idempotencyKey",
+        "sourceRevision"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "confirmation": {
+          "const": "scan-docker-updates"
+        },
+        "operation": {
+          "const": "updater-scan"
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 32,
+          "maxLength": 128,
+          "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
+        },
+        "sourceRevision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "confirmation",
+        "operation",
+        "idempotencyKey",
+        "sourceRevision"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "candidateImage": {
+          "type": "string",
+          "maxLength": 512,
+          "minLength": 1,
+          "pattern": "\\S",
+          "allOf": [
+            {
+              "pattern": "^[^\\u0000]*$"
+            },
+            {
+              "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+            }
+          ]
+        },
+        "confirmation": {
+          "const": "update-docker-service"
+        },
+        "currentImage": {
+          "type": "string",
+          "maxLength": 512,
+          "minLength": 1,
+          "pattern": "\\S",
+          "allOf": [
+            {
+              "pattern": "^[^\\u0000]*$"
+            },
+            {
+              "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+            }
+          ]
+        },
+        "operation": {
+          "const": "updater-update-service"
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 32,
+          "maxLength": 128,
+          "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
+        },
+        "sourceRevision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "serviceId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "candidateImage",
+        "confirmation",
+        "currentImage",
+        "operation",
+        "idempotencyKey",
+        "sourceRevision",
+        "serviceId"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "confirmation": {
+          "const": "delete-docker-volume"
+        },
+        "operation": {
+          "const": "volume-delete"
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 32,
+          "maxLength": 128,
+          "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
+        },
+        "sourceRevision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "volumeName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+        }
+      },
+      "required": [
+        "confirmation",
+        "operation",
+        "idempotencyKey",
+        "sourceRevision",
+        "volumeName"
+      ],
+      "additionalProperties": false
+    }
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

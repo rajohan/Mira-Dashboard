@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import path from "node:path";
+import { inspect } from "node:util";
 
 import { Redacted } from "effect";
 
@@ -17,8 +18,10 @@ import type { ManagedLogManifest } from "../worker/logs/managedLogManifest.ts";
 import type { DashboardWorkerRuntime } from "../worker/runtime.ts";
 import {
     createDefaultDashboardWorkerProcessDependencies,
+    createWorkerDockerComposition,
     createWorkerLogMaintenanceExecutor,
     type DashboardWorkerProcessDependencies,
+    type WorkerDockerCompositionOptions,
     runDashboardWorkerProcess,
 } from "./worker.ts";
 
@@ -535,6 +538,68 @@ describe("Dashboard worker process", () => {
 
         expect(fixture.events).toContain("database-observability-discovery-create");
         expect(fixture.events).toContain("database-observability-reconciler-create");
+    });
+
+    test("passes optional registry and Git credentials only to Docker updater boundaries", async () => {
+        const fixture = processFixture();
+        let observedOptions: WorkerDockerCompositionOptions | undefined;
+        const dependencies = Object.freeze({
+            ...fixture.dependencies,
+            createDocker(options: WorkerDockerCompositionOptions) {
+                observedOptions = options;
+                return createWorkerDockerComposition(options);
+            },
+        }) satisfies DashboardWorkerProcessDependencies;
+        const registrySecrets = Object.freeze({
+            DOCKER_LOGIN: "docker-user-sentinel",
+            DOCKER_TOKEN: "docker-token-sentinel",
+            MIRA_GITHUB_USERNAME: "github-user-sentinel",
+            MIRA_GITHUB_TOKEN: "github-token-sentinel",
+        });
+
+        await runDashboardWorkerProcess(
+            {
+                ...processOptions,
+                configurationSource: {
+                    ...processOptions.configurationSource,
+                    ...registrySecrets,
+                },
+            },
+            dependencies
+        );
+
+        expect(Object.keys(observedOptions ?? {})).toEqual([
+            "gitCredentials",
+            "registryCredentials",
+        ]);
+        const credentials = observedOptions?.registryCredentials;
+        expect(Object.keys(credentials ?? {})).toEqual([
+            "docker.io",
+            "ghcr.io",
+            "lscr.io",
+        ]);
+        expect(Redacted.value(credentials!["docker.io"]!.username)).toBe(
+            registrySecrets.DOCKER_LOGIN
+        );
+        expect(Redacted.value(credentials!["docker.io"]!.password)).toBe(
+            registrySecrets.DOCKER_TOKEN
+        );
+        expect(credentials!["ghcr.io"]).toBe(credentials!["lscr.io"]);
+        expect(observedOptions?.gitCredentials).toBe(credentials!["ghcr.io"]);
+        expect(Redacted.value(credentials!["ghcr.io"]!.username)).toBe(
+            registrySecrets.MIRA_GITHUB_USERNAME
+        );
+        expect(Redacted.value(credentials!["ghcr.io"]!.password)).toBe(
+            registrySecrets.MIRA_GITHUB_TOKEN
+        );
+        expect(Object.isFrozen(credentials)).toBe(true);
+        expect(Object.isFrozen(credentials!["docker.io"])).toBe(true);
+        expect(Object.isFrozen(credentials!["ghcr.io"])).toBe(true);
+        for (const secret of Object.values(registrySecrets)) {
+            expect(JSON.stringify(observedOptions)).not.toContain(secret);
+            expect(inspect(observedOptions)).not.toContain(secret);
+            expect(fixture.logLines.join("\n")).not.toContain(secret);
+        }
     });
 
     test("disposes partial ownership and reports a redacted startup failure", () => {

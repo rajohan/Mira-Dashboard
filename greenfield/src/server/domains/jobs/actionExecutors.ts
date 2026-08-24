@@ -39,6 +39,11 @@ import {
     JobActionOutcomeUnknownError,
     JobActionRetryableError,
     databaseObservabilityCacheJobActionKey,
+    dockerFreeJobActionDefinitions,
+    dockerOperationJobActionDefinition,
+    dockerOperationJobActionKey,
+    dockerOverviewCacheJobActionKey,
+    dockerUpdaterJobActionKey,
     hostSystemCleanupJobActionDefinition,
     hostSystemCleanupJobActionKey,
     hostSystemCleanupJobResultSchema,
@@ -66,6 +71,12 @@ import {
     workspaceFileWriteJobActionDefinition,
     workspaceFileWriteJobActionKey,
 } from "./actionRegistry.ts";
+import {
+    createDockerOperationJobExecutor,
+    createDockerOverviewJobExecutor,
+    createDockerUpdaterJobExecutor,
+    type DockerJobExecutionPort,
+} from "./dockerActionExecutors.ts";
 
 export { hostOperationIds } from "../../../shared/hostOperations.ts";
 
@@ -644,6 +655,7 @@ export interface JobWorkerActionResolverDependencies {
     readonly actionDefinitions?: readonly JobExecutableActionDefinition[];
     readonly databaseObservability?: DatabaseObservabilityCollector;
     readonly databaseObservabilityReconciler?: DatabaseObservabilityReconciliationPort;
+    readonly docker?: DockerJobExecutionPort;
     readonly logMaintenance: LogMaintenanceExecutionPort;
     readonly hostOperations?: FixedHostOperationsExecutionPort;
     readonly moltbook: MoltbookDashboardCollector;
@@ -673,7 +685,9 @@ export function createJobWorkerActionResolver(
     const definitions =
         dependencies.actionDefinitions ??
         Object.freeze([
-            ...jobActionDefinitions,
+            ...(dependencies.docker === undefined
+                ? dockerFreeJobActionDefinitions
+                : jobActionDefinitions),
             ...(dependencies.openClawGateway === undefined
                 ? []
                 : [openClawGatewayRestartJobActionDefinition]),
@@ -696,6 +710,9 @@ export function createJobWorkerActionResolver(
                       workspaceFileWriteJobActionDefinition,
                       workspaceFileReplaceJobActionDefinition,
                   ]),
+            ...(dependencies.docker === undefined
+                ? []
+                : [dockerOperationJobActionDefinition]),
         ]);
     const registeredActionKeys = new Set(definitions.map(({ actionKey }) => actionKey));
     const gatedExecutor = (
@@ -723,6 +740,24 @@ export function createJobWorkerActionResolver(
                 reconciler: dependencies.databaseObservabilityReconciler,
             }),
         }),
+        ...gatedExecutor(
+            dockerOverviewCacheJobActionKey,
+            dependencies.docker === undefined
+                ? undefined
+                : createDockerOverviewJobExecutor(dependencies.docker)
+        ),
+        ...gatedExecutor(
+            dockerUpdaterJobActionKey,
+            dependencies.docker === undefined
+                ? undefined
+                : createDockerUpdaterJobExecutor(dependencies.docker)
+        ),
+        ...gatedExecutor(
+            dockerOperationJobActionKey,
+            dependencies.docker === undefined
+                ? undefined
+                : createDockerOperationJobExecutor(dependencies.docker)
+        ),
         Object.freeze({
             actionKey: sqliteMaintenanceJobActionKey,
             execute: createSqliteMaintenanceJobExecutor(sqliteMaintenance),

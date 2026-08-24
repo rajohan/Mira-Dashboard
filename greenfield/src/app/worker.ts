@@ -1,7 +1,10 @@
 import { realpath } from "node:fs/promises";
 import path from "node:path";
 
+import * as v from "valibot";
+
 import type { DatabaseObservabilityCollector } from "../contracts/databaseObservabilityCollector.ts";
+import type { DockerJobExecutionPort } from "../contracts/dockerWorker.ts";
 import type { FixedHostOperationsExecutionPort } from "../server/domains/jobs/actionExecutors.ts";
 import {
     createDashboardWorkerRuntime,
@@ -49,6 +52,23 @@ import { createBunSqlDatabaseObservabilityCollector } from "../worker/database/b
 import { createDockerDatabaseObservabilityConnectionResolver } from "../worker/database/dockerDatabaseObservabilityEndpointResolver.ts";
 import { createFixedDatabaseObservabilityReconciler } from "../worker/database/fixedDatabaseObservabilityReconciler.ts";
 import { createFixedSqliteLifecycleMaintenance } from "../worker/database/fixedSqliteLifecycleMaintenance.ts";
+import {
+    createFixedDockerOperations,
+    fixedDockerOperationPayloadSchema,
+    FixedDockerOperationsError,
+    type FixedDockerOperations,
+} from "../worker/docker/fixedDockerOperations.ts";
+import {
+    createDynamicDockerUpdaterGitSync,
+    type DockerUpdaterGitCredentials,
+} from "../worker/docker/gitSync.ts";
+import { createDockerOverviewCollector } from "../worker/docker/overviewCollector.ts";
+import type { DockerRegistryClientOptions } from "../worker/docker/registryClient.ts";
+import { createDockerUpdaterService } from "../worker/docker/updaterService.ts";
+import {
+    startWorkerDockerBroker,
+    type WorkerDockerBroker,
+} from "../worker/docker/workerDockerBroker.ts";
 import {
     createDescriptorWorkspaceFileStructuralWriter,
     type WorkerWorkspaceFileRootConfiguration,
@@ -108,6 +128,9 @@ export interface DashboardWorkerProcessDependencies {
         layout: DashboardProjectLayout
     ) => LogMaintenanceExecutor;
     readonly createHostOperations?: () => FixedHostOperationsExecutionPort | undefined;
+    readonly createDocker?: (
+        options: WorkerDockerCompositionOptions
+    ) => WorkerDockerComposition;
     readonly createOpenClawGatewayLifecycle: (
         openClawRoot: string
     ) => OpenClawGatewayLifecycleExecutionPort | undefined;
@@ -130,7 +153,8 @@ export interface DashboardWorkerProcessDependencies {
             | DatabaseObservabilityReconciliationPort
             | undefined,
         hostOperations: FixedHostOperationsExecutionPort | undefined,
-        bootIdentity: LinuxBootIdentity
+        bootIdentity: LinuxBootIdentity,
+        docker: Omit<DockerJobExecutionPort, "publishEvents" | "readPrevious"> | undefined
     ) => DashboardWorkerRuntime;
     readonly createTerminationController: () => ProcessTerminationController;
     readonly loadRelease: (
@@ -146,10 +170,96 @@ export interface DashboardWorkerProcessDependencies {
     readonly startTerminalBroker: (
         options: WorkerTerminalBrokerLifecycleOptions
     ) => Promise<WorkerTerminalBrokerLifecycle>;
+    readonly startDockerBroker?: (options: {
+        readonly operations: FixedDockerOperations;
+        readonly socketPath: string;
+    }) => Promise<WorkerDockerBroker>;
     readonly startLogMaintenanceAvailability: (options: {
         readonly availablePolicies: LogMaintenanceExecutor["availablePolicies"];
         readonly logMaintenanceRoot: string;
     }) => Promise<LogMaintenanceAvailabilityPublisher>;
+}
+
+export interface WorkerDockerComposition {
+    readonly operations: FixedDockerOperations;
+    readonly runtime: Omit<DockerJobExecutionPort, "publishEvents" | "readPrevious">;
+}
+
+export interface WorkerDockerCompositionOptions {
+    readonly gitCredentials?: DockerUpdaterGitCredentials;
+    readonly registryCredentials?: DockerRegistryClientOptions["credentials"];
+}
+
+/**
+ * Creates one shared discovery graph for Docker reads, mutations, scans, and updates.
+ * @returns Frozen worker-owned Docker operations and updater runtime.
+ */
+export function createWorkerDockerComposition(
+    options: WorkerDockerCompositionOptions = {}
+): WorkerDockerComposition {
+    const collector = createDockerOverviewCollector();
+    const operations = createFixedDockerOperations({ overview: collector });
+    const updater = createDockerUpdaterService({
+        collector,
+        git: createDynamicDockerUpdaterGitSync(
+            options.gitCredentials === undefined
+                ? {}
+                : { credentials: options.gitCredentials }
+        ),
+        ...(options.registryCredentials === undefined
+            ? {}
+            : {
+                  scan: Object.freeze({
+                      registry: Object.freeze({
+                          credentials: options.registryCredentials,
+                      }),
+                  }),
+              }),
+    });
+    const runtime: WorkerDockerComposition["runtime"] = Object.freeze({
+        async execute(
+            payload: Parameters<DockerJobExecutionPort["execute"]>[0],
+            signal?: AbortSignal
+        ) {
+            try {
+                const result = await operations.execute(
+                    v.parse(fixedDockerOperationPayloadSchema, payload),
+                    signal
+                );
+                return { ...result, outcome: "completed" as const };
+            } catch (error) {
+                if (
+                    error instanceof FixedDockerOperationsError &&
+                    error.reason === "unknown-outcome"
+                ) {
+                    return {
+                        operation: payload.operation,
+                        outcome: "unknown-outcome" as const,
+                        targetCount: 0,
+                    };
+                }
+                throw error;
+            }
+        },
+        refresh: updater.refresh,
+        runUpdater: async (
+            input: Parameters<DockerJobExecutionPort["runUpdater"]>[0],
+            signal?: AbortSignal
+        ) => {
+            const result = await updater.run(input, signal);
+            return {
+                failedCount: result.failedCount,
+                outcome: result.outcome,
+                payload: result.payload,
+                updatedCount: result.updatedCount,
+            };
+        },
+        scan: updater.scan,
+    });
+    return Object.freeze({
+        operations,
+        runtime,
+    });
 }
 
 function runtimeManagedLogManifest(layout: DashboardProjectLayout): ManagedLogManifest {
@@ -199,6 +309,7 @@ export function createWorkerLogMaintenanceExecutor(
 }
 
 const defaultDependencies = Object.freeze({
+    createDocker: createWorkerDockerComposition,
     createDatabaseObservabilityConnectionResolver:
         createDockerDatabaseObservabilityConnectionResolver,
     createDatabaseObservabilityReconciler: createFixedDatabaseObservabilityReconciler,
@@ -223,7 +334,8 @@ const defaultDependencies = Object.freeze({
         databaseObservability,
         databaseObservabilityReconciler,
         hostOperations,
-        bootIdentity
+        bootIdentity,
+        docker
     ) => {
         const writer = createDescriptorWorkspaceFileStructuralWriter({
             roots: [workspaceRoot, openClawRoot],
@@ -246,6 +358,7 @@ const defaultDependencies = Object.freeze({
             ...(openClawGateway === undefined ? {} : { openClawGateway }),
             ...(openClawServiceActions === undefined ? {} : { openClawServiceActions }),
             ...(hostOperations === undefined ? {} : { hostOperations }),
+            ...(docker === undefined ? {} : { docker }),
             persistentGatewayTransport: gatewayTransport,
             pid: process.pid,
             releaseId: release.manifest.source.commitSha,
@@ -270,6 +383,7 @@ const defaultDependencies = Object.freeze({
     readBootIdentity: readLinuxBootIdentity,
     startLogMaintenanceAvailability: startLogMaintenanceAvailabilityPublisher,
     startTerminalBroker: startWorkerTerminalBrokerLifecycle,
+    startDockerBroker: startWorkerDockerBroker,
 } satisfies DashboardWorkerProcessDependencies);
 
 /**
@@ -308,6 +422,31 @@ function normalizeWorkerProcessFailure(error: unknown): Error {
         : new Error("Dashboard worker process failed", { cause: error });
 }
 
+function dockerRegistryLookupCredentials(
+    configuration: WorkerConfiguration
+): DockerRegistryClientOptions["credentials"] {
+    const configured = configuration.dockerRegistryCredentials;
+    if (configured === undefined) return undefined;
+    const dockerHub =
+        configured.dockerHub === undefined
+            ? undefined
+            : Object.freeze({
+                  password: configured.dockerHub.token,
+                  username: configured.dockerHub.username,
+              });
+    const github =
+        configured.github === undefined
+            ? undefined
+            : Object.freeze({
+                  password: configured.github.token,
+                  username: configured.github.username,
+              });
+    return Object.freeze({
+        ...(dockerHub === undefined ? {} : { "docker.io": dockerHub }),
+        ...(github === undefined ? {} : { "ghcr.io": github, "lscr.io": github }),
+    });
+}
+
 /**
  * Runs durable schedule and job execution until a signal or coordinator defect wins.
  * @param options Typed environment source and exact immutable release root.
@@ -342,6 +481,7 @@ export async function runDashboardWorkerProcess(
     let gatewayTransport: PersistentGatewayTaskNotificationTransport | undefined;
     let logMaintenanceAvailability: LogMaintenanceAvailabilityPublisher | undefined;
     let terminalBroker: WorkerTerminalBrokerLifecycle | undefined;
+    let dockerBroker: WorkerDockerBroker | undefined;
     let failure: Error | undefined;
     try {
         terminalBroker = await dependencies.startTerminalBroker({
@@ -351,6 +491,25 @@ export async function runDashboardWorkerProcess(
             await terminalBroker.stop().catch(() => {});
             terminalBroker = undefined;
             throw new Error("Terminal broker socket identity is invalid");
+        }
+        const registryCredentials = dockerRegistryLookupCredentials(configuration);
+        const gitCredentials = registryCredentials?.["ghcr.io"];
+        const docker = dependencies.createDocker?.(
+            Object.freeze({
+                ...(gitCredentials === undefined ? {} : { gitCredentials }),
+                ...(registryCredentials === undefined ? {} : { registryCredentials }),
+            })
+        );
+        if (docker !== undefined && dependencies.startDockerBroker !== undefined) {
+            dockerBroker = await dependencies.startDockerBroker({
+                operations: docker.operations,
+                socketPath: layout.production.state.dockerBrokerSocket,
+            });
+            if (dockerBroker.socketPath !== layout.production.state.dockerBrokerSocket) {
+                await dockerBroker.stop().catch(() => {});
+                dockerBroker = undefined;
+                throw new Error("Docker broker socket identity is invalid");
+            }
         }
         gatewayTransport = dependencies.createGatewayTransport({
             clientVersion: release.manifest.source.commitSha,
@@ -406,7 +565,8 @@ export async function runDashboardWorkerProcess(
             databaseObservability,
             databaseObservabilityReconciler,
             hostOperations,
-            bootIdentity
+            bootIdentity,
+            docker?.runtime
         );
         const runtimeCompletion = runtime.completion.then(
             () => ({ kind: "stopped" as const }),
@@ -451,6 +611,7 @@ export async function runDashboardWorkerProcess(
         }
         await logMaintenanceAvailability.stop();
         await terminalBroker.stop();
+        await dockerBroker?.stop();
         await runtime.dispose(termination.forceSignal);
         await runtime.completion;
         logger.info({
@@ -470,6 +631,13 @@ export async function runDashboardWorkerProcess(
         if (terminalBroker) {
             try {
                 await terminalBroker.stop();
+            } catch {
+                // Preserve the initiating process failure.
+            }
+        }
+        if (dockerBroker) {
+            try {
+                await dockerBroker.stop();
             } catch {
                 // Preserve the initiating process failure.
             }

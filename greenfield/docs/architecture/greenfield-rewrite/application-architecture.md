@@ -943,31 +943,98 @@ suppress the next session's transport request.
 The rewrite may replace every component, store, hook, and API call, but it is incomplete until
 the following behavior is covered by automated tests and a manual parity checklist.
 
-| Surface       | Required behavior after rewrite                                                                                                                                                                                                                               |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Global shell  | Authentication boundary, responsive navigation, theme/layout behavior, notification bell/modal, connection status, errors, and route recovery.                                                                                                                |
-| `/`           | Health, agent, task, job, notification, Docker, Git, database, quota, weather, and operational overview cards retain cached values through transient refresh errors.                                                                                          |
-| `/tasks`      | Kanban/list behavior, create/edit/delete, status and assignee movement, labels, updates, automation configuration, full current search/filter semantics, and live deltas.                                                                                     |
-| `/agents`     | Agent state, metadata, current task, history, status transitions, and live updates.                                                                                                                                                                           |
-| `/sessions`   | Gateway session listing, filtering, metadata, actions, refresh, and live state.                                                                                                                                                                               |
-| `/chat`       | All streaming, thinking/tool display, cancel/retry/steer/concurrent send, history, attachment, settings, session, unread/follow/scroll, compaction, and restart/reconnect behavior described above.                                                           |
-| `/logs`       | Named-source selection, redacted bounded tail/search, custom reviewed app/container rotation, fixed system-logrotate host policies, and non-blocking errors.                                                                                                  |
-| `/jobs`       | Dashboard schedules, OpenClaw cron jobs, the full six-item fixed Service Action inventory even before its first run, exact run-ID detail links, enable/disable intent and expiry, run history, manual run/cancel, worker state, output, and aggregate counts. |
-| `/reports`    | Daily briefs, summaries, heartbeats, custom reports, filters, pagination/detail linking, Markdown display, cached refresh behavior, and incident links.                                                                                                       |
-| Notifications | Read/unread behavior, source links, filtering, badges, and exactly-once notification per active incident generation.                                                                                                                                          |
-| `/delivery`   | PR review queues, trusted PR development, previews, release records, deploy/rollback actions, progress, blocking reasons, and retention.                                                                                                                      |
-| `/files`      | Safe workspace browsing, edit/save, upload/download/preview, Markdown/code rendering, path policy, and conflict/error handling.                                                                                                                               |
-| `/docker`     | Inventory, independently refreshed live stats, managed update policy, checks/actions, history, console commands, and duplicate-submit prevention.                                                                                                             |
-| `/database`   | PostgreSQL/PgBouncer and Dashboard SQLite views, source picker, bounded metrics, maintenance assessment, cached fallback, and balanced layout. Privileged backup, restore, and maintenance actions remain owned by their purpose-built domains.               |
-| `/moltbook`   | Cached/API data, refresh behavior, status and error presentation, and existing actions.                                                                                                                                                                       |
-| `/settings`   | Persistent OpenClaw/Dashboard tab, OpenClaw configuration, password, WebAuthn/passkeys, TOTP, recovery codes, browser sessions, secret handling, and restart actions.                                                                                         |
-| `/terminal`   | Real PTY input/output, ANSI/UTF-8, resize, signals, bounded reconnect replay, cancellation, backpressure, and narrow-screen interaction. The selected workspace root is a starting location, not a filesystem sandbox.                                        |
-| Media/STT/TTS | Existing upload constraints, MIME normalization, preview/download, transcription, speech generation, and scoped errors.                                                                                                                                       |
-| New `/docs`   | Generated procedure, raw HTTP, realtime, database, configuration, runtime, package, and route references, searchable without exposing secrets.                                                                                                                |
+| Surface       | Required behavior after rewrite                                                                                                                                                                                                                                           |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Global shell  | Authentication boundary, responsive navigation, theme/layout behavior, notification bell/modal, connection status, errors, and route recovery.                                                                                                                            |
+| `/`           | Health, agent, task, job, notification, Docker, Git, database, quota, weather, and operational overview cards retain cached values through transient refresh errors.                                                                                                      |
+| `/tasks`      | Kanban/list behavior, create/edit/delete, status and assignee movement, labels, updates, automation configuration, full current search/filter semantics, and live deltas.                                                                                                 |
+| `/agents`     | Agent state, metadata, current task, history, status transitions, and live updates.                                                                                                                                                                                       |
+| `/sessions`   | Gateway session listing, filtering, metadata, actions, refresh, and live state.                                                                                                                                                                                           |
+| `/chat`       | All streaming, thinking/tool display, cancel/retry/steer/concurrent send, history, attachment, settings, session, unread/follow/scroll, compaction, and restart/reconnect behavior described above.                                                                       |
+| `/logs`       | Named-source selection, redacted bounded tail/search, custom reviewed app/container rotation, fixed system-logrotate host policies, and non-blocking errors.                                                                                                              |
+| `/jobs`       | Dashboard schedules, OpenClaw cron jobs, the full six-item fixed Service Action inventory even before its first run, exact run-ID detail links, enable/disable intent and expiry, run history, manual run/cancel, worker state, output, and aggregate counts.             |
+| `/reports`    | Daily briefs, summaries, heartbeats, custom reports, filters, pagination/detail linking, Markdown display, cached refresh behavior, and incident links.                                                                                                                   |
+| Notifications | Read/unread behavior, source links, filtering, badges, and exactly-once notification per active incident generation.                                                                                                                                                      |
+| `/delivery`   | PR review queues, trusted PR development, previews, release records, deploy/rollback actions, progress, blocking reasons, and retention.                                                                                                                                  |
+| `/files`      | Safe workspace browsing, edit/save, upload/download/preview, Markdown/code rendering, path policy, and conflict/error handling.                                                                                                                                           |
+| `/docker`     | Dynamic Engine/Compose inventory, live stats/logs, cache/LKG, fixed controls, updater checks/history/notifications, exact updates/deletes/prune, stale/duplicate-intent prevention, and a link to the existing bounded interactive Terminal for operator Docker CLI work. |
+| `/database`   | PostgreSQL/PgBouncer and Dashboard SQLite views, source picker, bounded metrics, maintenance assessment, cached fallback, and balanced layout. Privileged backup, restore, and maintenance actions remain owned by their purpose-built domains.                           |
+| `/moltbook`   | Cached/API data, refresh behavior, status and error presentation, and existing actions.                                                                                                                                                                                   |
+| `/settings`   | Persistent OpenClaw/Dashboard tab, OpenClaw configuration, password, WebAuthn/passkeys, TOTP, recovery codes, browser sessions, secret handling, and restart actions.                                                                                                     |
+| `/terminal`   | Real PTY input/output, ANSI/UTF-8, resize, signals, bounded reconnect replay, cancellation, backpressure, and narrow-screen interaction. The selected workspace root is a starting location, not a filesystem sandbox.                                                    |
+| Media/STT/TTS | Existing upload constraints, MIME normalization, preview/download, transcription, speech generation, and scoped errors.                                                                                                                                                   |
+| New `/docs`   | Generated procedure, raw HTTP, realtime, database, configuration, runtime, package, and route references, searchable without exposing secrets.                                                                                                                            |
 
 The existing API endpoint list is an input to the parity inventory, not a contract to preserve.
 Each old endpoint must map to a new procedure, a raw protocol route, or an explicit removal
 reason showing that no current frontend or automation behavior depends on it.
+
+### Implemented Docker vertical
+
+The Docker vertical is a worker-owned control plane over the separate `/opt/docker` source of
+truth. Every overview refresh derives membership from a bounded Docker Engine enumeration plus
+batched projected inspect data. Standard Compose project, service, and config-file labels enrich
+that observed identity; they are never a Dashboard-maintained service allowlist. The worker then
+resolves the canonical `/opt/docker/compose.yaml` include graph beneath `/opt/docker`, joins each
+observed Compose identity to its one owning per-app Compose file, and deterministically reconciles
+additions, removals, and renames. The `mira.updater.*` labels define only update policy: missing,
+disabled, ambiguous, or invalid policy leaves the discovered service visible and inventory-only.
+
+The server exposes four strict procedures: the cached overview, bounded source-revision-fenced
+container logs, actor-bound prune preparation, and recent-MFA durable operation admission. The
+overview is the validated `docker.overview` cache row, with a five-minute freshness window and a
+bounded 24-hour last-known-good fallback after a failed refresh. Updater service state and the
+newest bounded updater events live inside that projection. Docker has no separate service or event
+tables: durable operation state/history lives in `job_runs`/`job_run_events`, audit in
+`audit_events`, and material updater transitions are copied idempotently into the existing
+`notifications` catalog. Every successful projection republishes its bounded event window through
+idempotent notification upsert, so a transient or partial publication failure is retried without
+duplicating notifications. Queue admission is represented only by the atomically inserted Jobs run
+and `queued` run event; there is no separate Docker `update-queued` event or notification.
+
+The existing worker lifecycle owns both the one-minute overview schedule, the same idempotent
+cache job when `/docker` requests an immediate refresh, and the daily updater schedule. The
+generic refresh returns only a Jobs run; the domain-only Docker payload remains available solely
+through `docker.overview`. The worker also owns a protected local Unix broker that exposes only two live read capabilities
+to the web process: redacted container log tails and prune previews. The broker is a `0600` socket
+inside a `0700` worker state directory and shuts down with the worker; it adds no service, timer,
+shell, arbitrary argv, or container-exec authority. All mutations remain durable worker jobs,
+source-revision fenced and globally serialized by Docker mutation/source resource locks. The fixed
+operation set covers container start/stop/restart, whole-stack start/stop/restart, exact unused
+image/volume deletion, preview-bound prune execution, updater scan/run, and one exact service
+update. The three actively consumed legacy Docker-console routes map to the existing authenticated,
+bounded interactive Terminal lifecycle instead of creating a second generic exec/job/output API.
+The Docker page passes only the Valibot-validated exact container ID to `/terminal`; after recent-MFA
+admission the Terminal sends one fixed `/usr/bin/docker exec --interactive --tty <id> /bin/sh`
+handoff before normal interactive PTY input begins. Fixed automation remains typed Docker operations.
+
+Compose mutation accepts no browser path or arguments. The worker invokes only
+`/opt/docker/bin/docker-compose-doppler` from `/opt/docker` with worker-built argv. A service update
+re-discovers the exact owner file and source revision, replaces only the admitted image-scalar byte
+range, and preserves indentation, spacing, comments, quoting, line endings, and all other bytes.
+It validates the complete root project before applying the service. Before that apply it also
+captures the exact running image ID. A pre-Git rollback rebinds any mutable prior tag to that
+captured ID, recreates without pulling, and succeeds only when both the restored Compose bytes and
+the running image ID match; an unverifiable restore remains an explicit unknown outcome. The Git adapter then stages
+only the exact changed app Compose paths, verifies their before/after identities, creates one
+fixed-identity commit, and pushes the configured `github.com` upstream. Before the first Compose
+mutation it performs authenticated remote read and dry-run-push probes with the worker-only
+`MIRA_GITHUB_USERNAME`/`MIRA_GITHUB_TOKEN` pair; ambient host Git configuration and credential
+stores are disabled. It distinguishes pushed,
+committed-push-pending, unavailable, and unknown outcomes without replaying uncertainty.
+The repository root is canonicalized again at the start of each Git operation; an absent source
+makes Docker source synchronization unavailable without preventing worker startup, and a later
+valid source can recover without a Dashboard restart.
+
+`/docker` renders the fresh, last-known-good, or unavailable projection; summary and resource
+usage; searchable containers and live log dialogs; stack/container controls; managed versus
+inventory-only updater policy; registry status, update availability, manual scan/run/exact-service
+actions, and bounded event history; plus images, volumes, exact deletion, and actor-bound prune
+previews. Material discovery, availability, success, failure, source-sync-pending, and
+unknown-outcome transitions use the global notification surface and link back to `/docker`; a
+queued mutation returns its exact durable Jobs run link, and Jobs is its authoritative queue
+status. Cached data may remain visible during a
+transient source failure, but every control requires the current fresh source revision.
 
 The implemented Database vertical is one read-only slice rather than an implicit backup or Docker
 control plane. `database.overview` exposes a session-only, bounded projection: live

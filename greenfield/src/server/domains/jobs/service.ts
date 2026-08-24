@@ -125,7 +125,10 @@ export interface JobServiceDependencies {
     readonly wakeEventPump?: () => Promise<void> | void;
 }
 
-export type JobScheduleReconciliationDependencies = JobServiceDependencies;
+export interface JobScheduleReconciliationDependencies extends JobServiceDependencies {
+    /** Exact scheduled actions owned by this process's available capabilities. */
+    readonly actionDefinitions?: readonly JobActionDefinition[];
+}
 
 interface AuthenticatedJobActor {
     readonly id: string;
@@ -864,6 +867,7 @@ export async function reconcileJobSchedules(
     const generateId = dependencies.generateId ?? (() => Bun.randomUUIDv7());
     const nowMs = dependencies.nowMs ?? Date.now;
     const at = toDate(v.parse(jobTimestampSchema, nowMs()));
+    const actionDefinitions = dependencies.actionDefinitions ?? jobActionDefinitions;
     await dependencies.repository.reconcileSchedules({
         at,
         retiredRunCancellation: {
@@ -888,7 +892,7 @@ export async function reconcileJobSchedules(
             terminalCode: retiredScheduledActionTerminalCode,
             terminalMessage: retiredScheduledActionTerminalMessage,
         },
-        schedules: jobActionDefinitions.map((definition) =>
+        schedules: actionDefinitions.map((definition) =>
             scheduleInsertShape(definition, at)
         ),
         sideEffectsForSchedule: (schedule) =>

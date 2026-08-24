@@ -2,7 +2,12 @@ import { Cause, Effect, Exit, Fiber, ManagedRuntime } from "effect";
 
 import type { SqliteMaintenanceExecutionPort } from "../../../contracts/database.ts";
 import type { DatabaseObservabilityCollector } from "../../../contracts/databaseObservabilityCollector.ts";
+import {
+    dockerOverviewCacheKey,
+    type DockerUpdaterEvent,
+} from "../../../contracts/docker.ts";
 import type { DatabaseObservabilityReconciliationPort } from "../../../shared/databaseObservabilityReconciliation.ts";
+import { parseJsonText } from "../../../shared/json.ts";
 import type { LinuxBootIdentity } from "../../../shared/linuxBootIdentity.ts";
 import type { OpenClawGatewayLifecycleExecutionPort } from "../../../shared/openClawGatewayLifecycle.ts";
 import type { OpenClawServiceActionsExecutionPort } from "../../../shared/openClawServiceActions.ts";
@@ -21,6 +26,8 @@ import {
 import type { PersistentGatewayTaskNotificationTransport } from "../../platform/gateway/persistentGatewayTransport.ts";
 import { createCacheRepository, type CacheRepository } from "../cache/repository.ts";
 import type { MoltbookDashboardCollector } from "../moltbook/provider.ts";
+import { createMonitoringCatalogService } from "../monitoring/catalogService.ts";
+import { createMonitoringRepository } from "../monitoring/repository.ts";
 import { createTaskNotificationQueue } from "../tasks/taskNotificationQueue.ts";
 import {
     createJobWorkerActionResolver,
@@ -30,6 +37,8 @@ import {
     type WorkspaceFileWriteExecutionPort,
 } from "./actionExecutors.ts";
 import {
+    dockerFreeJobActionDefinitions,
+    dockerOperationJobActionDefinition,
     jobActionDefinitions,
     hostSystemCleanupJobActionDefinition,
     hostSystemRestartJobActionDefinition,
@@ -46,6 +55,10 @@ import {
     type JobWorkerSideEffectFactory,
     type JobWorkerSideEffectInput,
 } from "./coordinator.ts";
+import {
+    dockerUpdaterEventNotification,
+    type DockerJobExecutionPort,
+} from "./dockerActionExecutors.ts";
 import { createJobRepository, type JobRepository } from "./repository.ts";
 import {
     createJobMutationSideEffects,
@@ -57,6 +70,10 @@ export interface DashboardWorkerRuntimeOptions {
     readonly database: DatabaseRuntimeLayerOptions;
     readonly databaseObservability: DatabaseObservabilityCollector;
     readonly databaseObservabilityReconciler?: DatabaseObservabilityReconciliationPort;
+    readonly docker?: Omit<
+        DockerJobExecutionPort,
+        "publishEvents" | "readPrevious" | "readPreviousAttemptStatus"
+    >;
     readonly logMaintenance: LogMaintenanceExecutionPort;
     readonly hostOperations?: FixedHostOperationsExecutionPort;
     readonly moltbook: MoltbookDashboardCollector;
@@ -435,8 +452,12 @@ export function createDashboardWorkerRuntime(
                 throw new Error("Fixed host operation availability is invalid");
             }
             const availableHostOperationSet = new Set(availableHostOperations);
+            const baseActionDefinitions =
+                options.docker === undefined
+                    ? dockerFreeJobActionDefinitions
+                    : jobActionDefinitions;
             const actionDefinitions = Object.freeze([
-                ...jobActionDefinitions,
+                ...baseActionDefinitions,
                 ...(options.openClawGateway === undefined
                     ? []
                     : [openClawGatewayRestartJobActionDefinition]),
@@ -461,7 +482,48 @@ export function createDashboardWorkerRuntime(
                           workspaceFileWriteJobActionDefinition,
                           workspaceFileReplaceJobActionDefinition,
                       ]),
+                ...(options.docker === undefined
+                    ? []
+                    : [dockerOperationJobActionDefinition]),
             ]);
+            const monitoringCatalog =
+                options.docker === undefined
+                    ? undefined
+                    : createMonitoringCatalogService({
+                          repository: createMonitoringRepository(
+                              database.database,
+                              database.writeAdmission
+                          ),
+                      });
+            const docker: DockerJobExecutionPort | undefined =
+                options.docker === undefined
+                    ? undefined
+                    : Object.freeze({
+                          ...options.docker,
+                          async publishEvents(events: readonly DockerUpdaterEvent[]) {
+                              if (monitoringCatalog === undefined) return;
+                              for (const event of events) {
+                                  const notification =
+                                      dockerUpdaterEventNotification(event);
+                                  if (notification === undefined) continue;
+                                  await Effect.runPromise(
+                                      monitoringCatalog.upsertNotification(notification)
+                                  );
+                              }
+                          },
+                          readPrevious() {
+                              const record =
+                                  cacheRepository.findEntry(dockerOverviewCacheKey);
+                              return record?.payloadJson === null ||
+                                  record?.payloadJson === undefined
+                                  ? undefined
+                                  : parseJsonText(record.payloadJson);
+                          },
+                          readPreviousAttemptStatus() {
+                              return cacheRepository.findEntry(dockerOverviewCacheKey)
+                                  ?.lastAttemptStatus;
+                          },
+                      });
             const findAction = createJobWorkerActionResolver({
                 actionDefinitions,
                 databaseObservability: options.databaseObservability,
@@ -471,6 +533,7 @@ export function createDashboardWorkerRuntime(
                           databaseObservabilityReconciler:
                               options.databaseObservabilityReconciler,
                       }),
+                ...(docker === undefined ? {} : { docker }),
                 ...(availableHostOperations.length === 0 ||
                 options.hostOperations === undefined
                     ? {}

@@ -195,6 +195,82 @@ describe("interactive terminal browser lifecycle", () => {
         }
     });
 
+    test("opens a fixed shell in one exact container from the Docker handoff", async () => {
+        const containerId = "1".repeat(64);
+        const queryClient = createDashboardQueryClient();
+        const trpcClient = createDashboardTrpcClient({
+            mutation(path) {
+                if (path === "terminal.prepareSession") return Promise.resolve(ticket);
+                return Promise.reject(new TypeError("Unexpected terminal mutation"));
+            },
+            query(path) {
+                if (path === "terminal.getRuntime") return Promise.resolve(runtime);
+                if (path === "terminal.getActiveSession") {
+                    return Promise.resolve({ status: "none" });
+                }
+                return Promise.reject(new TypeError("Unexpected terminal query"));
+            },
+        });
+        const fakeEmulator = createFakeEmulator();
+        const socketOptions: CreateTerminalSocketConnectionOptions[] = [];
+        const sentInput: Uint8Array[] = [];
+        const view = render(
+            <QueryClientProvider client={queryClient}>
+                <DashboardTrpcProvider client={trpcClient}>
+                    <TerminalBrowser
+                        createEmulator={() => fakeEmulator.emulator}
+                        createSocketConnection={(options) => {
+                            socketOptions.push(options);
+                            return {
+                                afterSequence: 0,
+                                close() {},
+                                sendControl: () => true,
+                                sendInput(data) {
+                                    sentInput.push(new Uint8Array(data));
+                                    return true;
+                                },
+                            };
+                        }}
+                        dockerContainerId={containerId}
+                    />
+                </DashboardTrpcProvider>
+            </QueryClientProvider>
+        );
+
+        try {
+            await userEvent
+                .setup()
+                .click(await screen.findByRole("button", { name: "Start terminal" }));
+            await waitFor(() => expect(socketOptions).toHaveLength(1));
+            act(() => {
+                socketOptions[0]?.callbacks.onControl({
+                    replayAvailableFromSequence: 1,
+                    resumed: false,
+                    session: connectedSession,
+                    type: "ready",
+                });
+            });
+
+            expect(new TextDecoder().decode(sentInput[0])).toBe(
+                `/usr/bin/docker exec --interactive --tty ${containerId} /bin/sh\r`
+            );
+            expect(await screen.findByText(/Opening an interactive shell/i)).toBeTruthy();
+
+            act(() => {
+                socketOptions[0]?.callbacks.onControl({
+                    replayAvailableFromSequence: 1,
+                    resumed: false,
+                    session: connectedSession,
+                    type: "ready",
+                });
+            });
+            expect(sentInput).toHaveLength(1);
+        } finally {
+            view.unmount();
+            queryClient.clear();
+        }
+    });
+
     test("fresh pages manually resume from the oldest retained replay sequence", async () => {
         const queryClient = createDashboardQueryClient();
         const resumeInputs: unknown[] = [];

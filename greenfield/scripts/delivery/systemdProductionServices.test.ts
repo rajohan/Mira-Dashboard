@@ -445,7 +445,7 @@ describe("production user-systemd service control", () => {
         );
         expect(webExecStart).not.toContain("MOLTBOOK_API_KEY");
         expect(web).toContain(
-            "UnsetEnvironment=MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD MOLTBOOK_API_KEY MOLTBOOK_AGENT_NAME"
+            "UnsetEnvironment=MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD DOCKER_LOGIN DOCKER_TOKEN MIRA_GITHUB_USERNAME MIRA_GITHUB_TOKEN MOLTBOOK_API_KEY MOLTBOOK_AGENT_NAME"
         );
         expect(worker).toContain("Environment=MIRA_DASHBOARD_OPENCLAW_ROOT=%h/.openclaw");
         expect(worker).toContain(
@@ -462,6 +462,10 @@ describe("production user-systemd service control", () => {
         expect(web).toContain("MemoryMax=1G");
         expect(web).toContain("TasksMax=96");
         expect(web).toContain("ReadOnlyPaths=%h/.openclaw");
+        expect(web).toContain(
+            "InaccessiblePaths=-/run/docker.sock -/var/run/docker.sock -/opt/docker"
+        );
+        expect(worker).not.toContain("InaccessiblePaths=");
         expect(web).toContain("PrivateTmp=true\nBindReadOnlyPaths=-/tmp/openclaw");
         expect(web).not.toContain("\nBindPaths=-/tmp/openclaw");
         // Atomic replacement creates a stage file beside its target before

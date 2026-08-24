@@ -44,6 +44,16 @@ export const databaseObservabilityCacheJobActionKey =
     "cache.refresh.database-observability";
 /** Durable hourly schedule identity for the external database projection. */
 export const databaseObservabilityCacheJobScheduleId = "cache.database-observability";
+/** Worker-only dynamic Docker Engine and updater snapshot refresh identity. */
+export const dockerOverviewCacheJobActionKey = "cache.refresh.docker-overview";
+/** Durable minute-level schedule for the Docker overview projection. */
+export const dockerOverviewCacheJobScheduleId = "cache.docker-overview";
+/** Worker-only operator-requested Docker mutation identity. */
+export const dockerOperationJobActionKey = "docker.operation";
+/** Worker-only scheduled full Docker updater identity. */
+export const dockerUpdaterJobActionKey = "docker.updater";
+/** Durable daily Docker updater schedule identity. */
+export const dockerUpdaterJobScheduleId = "docker.updater";
 /** Fixed worker-only online SQLite backup and upkeep identity. */
 export const sqliteMaintenanceJobActionKey = "database.sqlite-maintenance";
 /** Durable daily SQLite backup and upkeep schedule identity. */
@@ -447,6 +457,58 @@ const databaseObservabilityCacheDefinition = validateJobActionDefinition({
     timeoutMs: 7 * 60_000,
 });
 
+const dockerOverviewCacheDefinition = validateJobActionDefinition({
+    actionKey: dockerOverviewCacheJobActionKey,
+    actionPayload: Object.freeze({ key: "docker.overview" }),
+    attemptLimit: 3,
+    cancellationPolicy: "cooperative",
+    defaultEnabled: true,
+    defaultSchedule: Object.freeze({
+        intervalMs: 60_000,
+        kind: "interval",
+    }),
+    description:
+        "Projects bounded Docker Engine, storage, and updater state from dynamic discovery.",
+    displayName: "Docker overview cache",
+    initialDue: "immediate",
+    // The generic refresh mutation returns only a durable Job summary; the
+    // Docker payload remains unavailable through generic cache reads.
+    manualExposure: "cache-write",
+    priority: 0,
+    resourceClass: "host-heavy",
+    resourceKeys: Object.freeze(["docker.engine"]),
+    retrySafe: true,
+    scheduleId: dockerOverviewCacheJobScheduleId,
+    timeoutMs: 45_000,
+});
+
+/** Daily source-derived registry scan and approved automatic update run. */
+export const dockerUpdaterJobActionDefinition = validateJobActionDefinition({
+    actionKey: dockerUpdaterJobActionKey,
+    actionPayload: Object.freeze({ kind: "updater-run" }),
+    attemptLimit: 1,
+    cancellationPolicy: "never",
+    defaultEnabled: true,
+    defaultSchedule: Object.freeze({
+        kind: "daily",
+        timeOfDay: "04:10",
+        timeZone: "Europe/Oslo",
+    }),
+    description:
+        "Scans source-derived Docker services and applies only explicitly approved automatic updates.",
+    displayName: "Docker updater",
+    initialDue: "next-occurrence",
+    // Persists the domain-only post-update snapshot without exposing a generic
+    // cache read or refresh surface.
+    manualExposure: "cache-internal",
+    priority: 10,
+    resourceClass: "exclusive",
+    resourceKeys: Object.freeze(["docker.engine", "docker.mutation", "docker.source"]),
+    retrySafe: false,
+    scheduleId: dockerUpdaterJobScheduleId,
+    timeoutMs: 35 * 60_000,
+});
+
 /** Daily online SQLite snapshot, restore verification, retention, and fixed upkeep. */
 export const sqliteMaintenanceJobActionDefinition = validateJobActionDefinition({
     actionKey: sqliteMaintenanceJobActionKey,
@@ -527,6 +589,24 @@ export const workspaceFileReplaceJobActionDefinition =
         retrySafe: true,
         timeoutMs: 2 * 60_000,
     });
+
+/** Purpose-built Docker mutation selected only through the Docker domain queue. */
+export const dockerOperationJobActionDefinition = validateJobUnscheduledActionDefinition({
+    actionKey: dockerOperationJobActionKey,
+    attemptLimit: 1,
+    cancellationPolicy: "never",
+    description:
+        "Executes one source-revalidated Docker operation without generic shell authority.",
+    displayName: "Docker operation",
+    // Docker mutations refresh only the domain-owned snapshot after their
+    // external effects settle; callers still cannot access generic cache APIs.
+    manualExposure: "cache-internal",
+    priority: 20,
+    resourceClass: "exclusive",
+    resourceKeys: Object.freeze(["docker.engine", "docker.mutation", "docker.source"]),
+    retrySafe: false,
+    timeoutMs: 35 * 60_000,
+});
 
 /** Exclusive non-cancellable action that must never be replayed after an uncertain claim. */
 export const openClawGatewayRestartJobActionDefinition =
@@ -615,10 +695,21 @@ export const jobActionDefinitions = Object.freeze([
     systemHostCacheDefinition,
     moltbookDashboardCacheDefinition,
     databaseObservabilityCacheDefinition,
+    dockerOverviewCacheDefinition,
+    dockerUpdaterJobActionDefinition,
     sqliteMaintenanceJobActionDefinition,
     logMaintenanceDefinition,
     workerSmokeDefinition,
 ]);
+
+/** Base worker definitions for runtimes that deliberately have no Docker authority. */
+export const dockerFreeJobActionDefinitions = Object.freeze(
+    jobActionDefinitions.filter(
+        ({ actionKey }) =>
+            actionKey !== dockerOverviewCacheJobActionKey &&
+            actionKey !== dockerUpdaterJobActionKey
+    )
+);
 
 const definitionByKey = new Map(
     jobActionDefinitions.map((definition) => [definition.actionKey, definition])

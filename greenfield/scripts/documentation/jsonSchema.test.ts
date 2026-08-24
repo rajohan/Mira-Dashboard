@@ -123,6 +123,15 @@ describe("contract JSON Schema conversion", () => {
         });
     });
 
+    test("documents IP-address validation for both supported address families", () => {
+        const schema = v.pipe(v.string(), v.ip());
+
+        expect(convertContractSchema(schema, "test.ip", "input")).toMatchObject({
+            anyOf: [{ format: "ipv4" }, { format: "ipv6" }],
+            type: "string",
+        });
+    });
+
     test("documents the named array uniqueness validator", () => {
         const schema = v.pipe(v.array(v.string()), v.check(hasUniqueArrayItems<string>));
 
@@ -308,6 +317,8 @@ describe("contract JSON Schema conversion", () => {
                     "chat:read",
                     "chat:write",
                     "database:read",
+                    "docker:read",
+                    "docker:write",
                     "files:read",
                     "files:write",
                     "gateway-sessions:read",
@@ -333,7 +344,7 @@ describe("contract JSON Schema conversion", () => {
                     "terminal:write",
                 ],
             },
-            maxItems: 30,
+            maxItems: 32,
             type: "array",
             uniqueItems: true,
         });

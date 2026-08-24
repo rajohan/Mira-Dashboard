@@ -13,11 +13,19 @@ import {
     databaseObservabilityCacheSchemaId,
     databaseObservabilityCacheSource,
 } from "../../../contracts/database.ts";
+import {
+    dockerOverviewCacheKey,
+    dockerOverviewCachePayloadSchema,
+    dockerOverviewCacheSchemaId,
+    dockerOverviewCacheSource,
+} from "../../../contracts/docker.ts";
 import { moltbookDashboardCachePayloadSchema } from "../../../contracts/moltbook.ts";
 import type { JsonObject } from "../../../shared/json.ts";
 import {
     databaseObservabilityCacheJobActionKey,
     databaseObservabilityCacheJobScheduleId,
+    dockerOverviewCacheJobActionKey,
+    dockerOverviewCacheJobScheduleId,
     findJobActionDefinition,
     moltbookDashboardCacheJobActionKey,
     moltbookDashboardCacheJobScheduleId,
@@ -26,6 +34,7 @@ import {
 export interface CacheProviderDefinition {
     readonly actionKey: string;
     readonly key: string;
+    readonly manualRefresh: boolean;
     readonly payloadSchema: v.GenericSchema;
     readonly payloadExposure: "cache-read" | "domain-only";
     readonly scheduleId: string;
@@ -48,9 +57,7 @@ function validateCacheProviderDefinition(
         action === undefined ||
         action.scheduleId !== definition.scheduleId ||
         action.manualExposure !==
-            (definition.payloadExposure === "cache-read"
-                ? "cache-write"
-                : "cache-internal") ||
+            (definition.manualRefresh ? "cache-write" : "cache-internal") ||
         action.actionPayload.key !== definition.key
     ) {
         throw new Error("Cache provider does not match its exact job action definition");
@@ -61,6 +68,7 @@ function validateCacheProviderDefinition(
 const systemHostProvider = validateCacheProviderDefinition({
     actionKey: "cache.refresh.system-host",
     key: "system.host",
+    manualRefresh: true,
     payloadSchema: systemHostCachePayloadSchema,
     payloadExposure: "cache-read",
     scheduleId: "cache.system-host",
@@ -72,6 +80,7 @@ const systemHostProvider = validateCacheProviderDefinition({
 const moltbookDashboardProvider = validateCacheProviderDefinition({
     actionKey: moltbookDashboardCacheJobActionKey,
     key: "moltbook.dashboard",
+    manualRefresh: true,
     payloadSchema: moltbookDashboardCachePayloadSchema,
     payloadExposure: "cache-read",
     scheduleId: moltbookDashboardCacheJobScheduleId,
@@ -83,6 +92,7 @@ const moltbookDashboardProvider = validateCacheProviderDefinition({
 const databaseObservabilityProvider = validateCacheProviderDefinition({
     actionKey: databaseObservabilityCacheJobActionKey,
     key: databaseObservabilityCacheKey,
+    manualRefresh: false,
     payloadSchema: databaseObservabilityCachePayloadSchema,
     payloadExposure: "domain-only",
     scheduleId: databaseObservabilityCacheJobScheduleId,
@@ -91,11 +101,24 @@ const databaseObservabilityProvider = validateCacheProviderDefinition({
     ttlMs: 90 * 60_000,
 });
 
+const dockerOverviewProvider = validateCacheProviderDefinition({
+    actionKey: dockerOverviewCacheJobActionKey,
+    key: dockerOverviewCacheKey,
+    manualRefresh: true,
+    payloadSchema: dockerOverviewCachePayloadSchema,
+    payloadExposure: "domain-only",
+    scheduleId: dockerOverviewCacheJobScheduleId,
+    schemaId: dockerOverviewCacheSchemaId,
+    source: dockerOverviewCacheSource,
+    ttlMs: 5 * 60_000,
+});
+
 /** Complete local-only provider directory for the implemented cache slice. */
 export const cacheProviderDefinitions = Object.freeze([
     systemHostProvider,
     moltbookDashboardProvider,
     databaseObservabilityProvider,
+    dockerOverviewProvider,
 ]);
 
 const providerByKey = new Map(
@@ -139,6 +162,7 @@ export function cacheManualRunAvailable(key: string): boolean {
     if (provider === undefined) return false;
     const action = findJobActionDefinition(provider.actionKey);
     return (
+        provider.manualRefresh &&
         action?.manualExposure === "cache-write" &&
         action.scheduleId === provider.scheduleId
     );
