@@ -6,10 +6,8 @@ export function assertProductionBootstrapDopplerEnvironment(
 ): void {
     for (const entry of applicationConfigurationRegistry) {
         const requiredForBootstrap =
-            entry.secret &&
-            (entry.required ||
-                entry.environmentName ===
-                    "MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD");
+            entry.required ||
+            entry.environmentName === "MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD";
         if (
             requiredForBootstrap &&
             (environment[entry.environmentName]?.trim() ?? "") === ""

@@ -17,10 +17,8 @@ const maximumOutputBytes = 1024 * 1024;
 const dopplerConfigurationNames = applicationConfigurationRegistry
     .filter(
         (entry) =>
-            entry.secret &&
-            (entry.required ||
-                entry.environmentName ===
-                    "MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD")
+            entry.required ||
+            entry.environmentName === "MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD"
     )
     .map((entry) => entry.environmentName)
     .join(",");
@@ -494,25 +492,36 @@ export async function verifyProductionBootstrapPrerequisites(
             filesystem.canonical(dopplerConfig),
         ]
     );
-    const [
-        runtimeStatus,
-        openClawStatus,
-        dopplerStatus,
-        dopplerConfigStatus,
-        runtimeBytes,
-    ] = await Promise.all([
-        filesystem.status(runtimePath),
-        filesystem.status(openClawPath),
-        filesystem.status(dopplerPath),
-        filesystem.status(dopplerConfigPath),
-        filesystem.read(runtimePath),
-    ]);
+    const runtimeAncestorPaths: string[] = [];
+    let runtimeAncestor = path.dirname(runtimePath);
+    while (true) {
+        runtimeAncestorPaths.push(runtimeAncestor);
+        if (runtimeAncestor === path.parse(runtimeAncestor).root) break;
+        runtimeAncestor = path.dirname(runtimeAncestor);
+    }
+    const [runtimeStatus, openClawStatus, dopplerStatus, dopplerConfigStatus] =
+        await Promise.all([
+            filesystem.status(runtimePath),
+            filesystem.status(openClawPath),
+            filesystem.status(dopplerPath),
+            filesystem.status(dopplerConfigPath),
+        ]);
+    const runtimeAncestorStatuses = await Promise.all(
+        runtimeAncestorPaths.map((ancestor) => filesystem.status(ancestor))
+    );
     if (
         !runtimeStatus.isFile() ||
         runtimeStatus.uid !== 0 ||
         runtimeStatus.gid !== 0 ||
         (runtimeStatus.mode & 0o022) !== 0 ||
         (runtimeStatus.mode & 0o111) === 0 ||
+        runtimeAncestorStatuses.some(
+            (status) =>
+                !status.isDirectory() ||
+                status.uid !== 0 ||
+                status.gid !== 0 ||
+                (status.mode & 0o022) !== 0
+        ) ||
         openClawPath !== "/home/ubuntu/.openclaw" ||
         !openClawStatus.isDirectory() ||
         openClawStatus.uid !== userId ||
@@ -532,6 +541,7 @@ export async function verifyProductionBootstrapPrerequisites(
     ) {
         throw new Error(failureMessage);
     }
+    const runtimeBytes = await filesystem.read(runtimePath);
     await requireSuccess(
         dependencies,
         [
@@ -633,6 +643,7 @@ export async function bootstrapProduction(
             `--release-root=${admitted.releaseRoot}`,
             `--runtime-source=${process.execPath}`,
             "--readiness-url=http://127.0.0.1:3100/api/health/ready",
+            "--activation-mode=greenfield",
         ]);
     } finally {
         await rm(temporaryRoot, { force: true, recursive: true });

@@ -64,6 +64,7 @@ interface SubscribeToJobRunsInput extends JobRunRealtimeObserver {
 
 /** Deterministic transport and filesystem seams used only by focused smoke tests. */
 export interface ProductionDeliverySmokeTestHooks {
+    readonly allowEmptyOperator?: boolean;
     readonly afterDocumentationOpen?: () => Promise<void> | void;
     readonly authoritySmoke?: typeof runProductionAuthoritySmoke;
     readonly fetch?: ProductionDeliverySmokeFetch;
@@ -315,6 +316,26 @@ export async function runProductionDeliveryTargetSmoke(
             )
             .all();
         const user = users[0];
+        if (user === undefined && testHooks.allowEmptyOperator === true) {
+            const runtimeIdentity = v.parse(
+                runtimeIdentitySchema,
+                await trpcJson(baseUrl, "system.runtimeIdentity", {}, {}, fetcher)
+            );
+            if (runtimeIdentity.revision !== runtime.identity.revision) throw failure();
+            await (testHooks.authoritySmoke ?? runProductionAuthoritySmoke)();
+            const frontend = await fetcher(baseUrl, {
+                redirect: "error",
+                signal: AbortSignal.timeout(requestTimeoutMs),
+            });
+            if (
+                frontend.status !== 200 ||
+                !frontend.headers.get("content-type")?.includes("text/html")
+            ) {
+                throw failure();
+            }
+            await requireProductionDeliveryGeneratedDocumentation(release, testHooks);
+            return;
+        }
         if (
             user === undefined ||
             !Number.isSafeInteger(user.authenticationVersion) ||

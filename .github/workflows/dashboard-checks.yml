@@ -17,7 +17,6 @@ concurrency:
 jobs:
     conventional-pr-title:
         name: conventional-pr-title
-        if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
         runs-on: ubuntu-latest
         timeout-minutes: 5
         steps:
@@ -50,6 +49,10 @@ jobs:
               run: |
                   title="$(gh pr view "$HEAD_BRANCH" --json title --jq .title)"
                   [[ "$title" =~ ^(build|chore|ci|docs|feat|fix|perf|refactor|revert|test)\([a-z0-9][a-z0-9-]*\)!?:\ .+ ]]
+
+            - name: Accept direct main checks without a PR title
+              if: ${{ github.event_name == 'push' }}
+              run: test "${GITHUB_REF_NAME}" = "main"
 
     dashboard-static-checks:
         name: dashboard-static-checks
@@ -128,7 +131,7 @@ jobs:
         name: dashboard-checks
         runs-on: ubuntu-latest
         timeout-minutes: 15
-        needs: [dashboard-static-checks, dashboard-coverage]
+        needs: [conventional-pr-title, dashboard-static-checks, dashboard-coverage]
         if: ${{ always() }}
         env:
             CODECOV_TOKEN_PRESENT: ${{ secrets.CODECOV_TOKEN != '' }}
@@ -136,8 +139,10 @@ jobs:
             - name: Require static checks and every coverage partition
               env:
                   COVERAGE_MATRIX_RESULT: ${{ needs['dashboard-coverage'].result }}
+                  PR_TITLE_RESULT: ${{ needs['conventional-pr-title'].result }}
                   STATIC_CHECKS_RESULT: ${{ needs['dashboard-static-checks'].result }}
               run: |
+                  test "${PR_TITLE_RESULT}" = "success"
                   test "${STATIC_CHECKS_RESULT}" = "success"
                   test "${COVERAGE_MATRIX_RESULT}" = "success"
 

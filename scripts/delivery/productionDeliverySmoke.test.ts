@@ -212,6 +212,55 @@ function trpcResponse(value: unknown): Response {
 }
 
 describe("production Delivery target smoke", () => {
+    test("smokes a greenfield release before the first operator exists", async () => {
+        const { databasePath, paths, release, runtime } = await fixture();
+        const database = new Database(databasePath, { strict: true });
+        database.exec("DELETE FROM users");
+        database.close(true);
+        let authoritySmokeCount = 0;
+
+        await runProductionDeliveryTargetSmoke(
+            paths,
+            release,
+            runtime,
+            "http://127.0.0.1:3100/readyz",
+            "018f6f50-6a9e-7b88-8000-000000000004",
+            {
+                allowEmptyOperator: true,
+                authoritySmoke() {
+                    authoritySmokeCount += 1;
+                    return Promise.resolve();
+                },
+                fetch(input) {
+                    const url = new URL(
+                        input instanceof Request ? input.url : input.toString()
+                    );
+                    if (url.pathname === "/") {
+                        return Promise.resolve(
+                            new Response("<!doctype html>", {
+                                headers: {
+                                    "content-type": "text/html; charset=utf-8",
+                                },
+                            })
+                        );
+                    }
+                    if (url.pathname === "/trpc/system.runtimeIdentity") {
+                        return Promise.resolve(
+                            trpcResponse({
+                                revision: runtimeRevision,
+                                version: "1.4.0",
+                                versionWithRevision: `1.4.0+${runtimeRevision.slice(0, 8)}`,
+                            })
+                        );
+                    }
+                    return Promise.resolve(new Response(null, { status: 404 }));
+                },
+            }
+        );
+
+        expect(authoritySmokeCount).toBe(1);
+    });
+
     test("authorizes an MFA-enabled operator and retains an event emitted before enqueue returns", async () => {
         const { databasePath, paths, release, runtime } = await fixture();
         let observer:

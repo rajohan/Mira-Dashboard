@@ -3,6 +3,7 @@ import { cp, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { applicationConfigurationRegistry } from "../src/shared/configuration/applicationConfigurationRegistry.ts";
 import { packageProductionReleaseArtifact } from "./delivery/packageProductionReleaseArtifact.ts";
 import {
     admitProductionBootstrapRelease,
@@ -54,18 +55,19 @@ async function captureFailure(operation: Promise<unknown>): Promise<unknown> {
 describe("production bootstrap admission", () => {
     test("requires every production credential without exposing values", () => {
         const environment = Object.fromEntries(
-            [
-                "MOLTBOOK_API_KEY",
-                "OPENCLAW_GATEWAY_TOKEN",
-                "MIRA_DASHBOARD_TOTP_KEYRING",
-                "RESEND_API_KEY",
-                "MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD",
-            ].map((name) => [name, "present"])
+            applicationConfigurationRegistry
+                .filter(
+                    (entry) =>
+                        entry.required ||
+                        entry.environmentName ===
+                            "MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD"
+                )
+                .map((entry) => [entry.environmentName, "present"])
         );
         expect(() =>
             assertProductionBootstrapDopplerEnvironment(environment)
         ).not.toThrow();
-        delete environment.MIRA_DASHBOARD_TOTP_KEYRING;
+        delete environment.MIRA_DASHBOARD_PUBLIC_ORIGIN;
         expect(() => assertProductionBootstrapDopplerEnvironment(environment)).toThrow(
             "Production Doppler configuration is incomplete"
         );
@@ -188,20 +190,30 @@ describe("production bootstrap admission", () => {
                 },
                 read: () => Promise.resolve(runtimeBytes),
                 status: (target) => {
+                    const runtimeControlled =
+                        target === "/" ||
+                        target === "/usr" ||
+                        target === "/usr/local" ||
+                        target === "/usr/local/bin" ||
+                        target === "/usr/local/bin/bun";
                     let mode = 0o700;
                     if (target === "/usr/local/bin/bun") mode = 0o755;
+                    if (runtimeControlled && target !== "/usr/local/bin/bun") {
+                        mode = 0o755;
+                    }
                     if (target.endsWith(".doppler.yaml")) mode = 0o600;
                     return Promise.resolve({
-                        gid: target === "/usr/local/bin/bun" ? 0 : 1000,
+                        gid: runtimeControlled ? 0 : 1000,
                         isDirectory: () =>
                             target === "/home/ubuntu/.openclaw" ||
-                            target === "/home/ubuntu/.doppler",
+                            target === "/home/ubuntu/.doppler" ||
+                            (runtimeControlled && target !== "/usr/local/bin/bun"),
                         isFile: () =>
                             target === "/usr/local/bin/bun" ||
                             target === "/home/ubuntu/.doppler/.doppler.yaml",
                         mode,
                         nlink: 1,
-                        uid: target === "/usr/local/bin/bun" ? 0 : 1000,
+                        uid: runtimeControlled ? 0 : 1000,
                     });
                 },
             },
@@ -542,5 +554,6 @@ describe("production bootstrap admission", () => {
             commands.some((command) => command.includes("delivery prepare-state"))
         ).toBe(true);
         expect(commands.at(-1)).toContain("delivery activate");
+        expect(commands.at(-1)).toContain("--activation-mode=greenfield");
     });
 });
