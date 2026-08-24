@@ -12,7 +12,7 @@ closes a phase; dated entries below provide the evidence, not a second status so
 | 0 — Evidence and qualification      | Complete                             | All eight mandatory spikes pass on exact Bun revision `17d6843606d76620cb55d31424d7fb0aed51c367`: build, transport, cross-process SQLite/outbox, Drizzle/Bun SQLite, browser data, chat batching, shutdown, and capped resources. Source-derived parity and the OpenClaw source audit pass as additional evidence.                                                           |
 | 1 — Foundation                      | Complete                             | The self-contained future root builds immutable browser/web/worker artifacts, protects project-local production state, installs exact Bun and systemd artifacts, migrates a database copy, atomically promotes the release/database pair, serves readiness/browser assets, writes project-local logs, and proves crash-safe rollback and shutdown in a disposable lifecycle. |
 | 2 — Trust and transport             | Complete for the stated server scope | Authentication, MFA, WebAuthn, automation credentials, audit, authenticated renewable SSE, one-shot native Gateway bootstrap verification, and the consolidated [threat model](../../security/greenfield-phase-two-threat-model.md) have executable evidence. Browser UI and production cutover remain later gates.                                                          |
-| 3 — Core operator domains           | Started                              | Task and agent-directory parity are implemented with durable history, realtime invalidation, and browser workflows. Monitoring ingestion plus report, incident, and notification server parity are implemented; report and incident browser readers are also complete. Notification browser state, schedules/jobs, overview, cache/metrics, and the real worker remain open. |
+| 3 — Core operator domains           | Started                              | Task and agent-directory parity are implemented with durable history, realtime invalidation, and browser workflows. Monitoring ingestion plus report, incident, and notification server parity are implemented; report, incident, and global notification browser state are also complete. Schedules/jobs, overview, cache/metrics, and the real worker remain open.         |
 | 4 — Gateway and chat                | Not started                          | The Phase 2 verifier is one-shot only. Persistent native Gateway lifecycle, current-protocol re-audit, sessions, chat journal/recovery, attachments, and frontend remain open.                                                                                                                                                                                               |
 | 5 — Privileged and external domains | Not started                          | Worker-owned file/media, Docker, database, OpenClaw, GitHub, deployment, backup, and other privileged adapters remain open.                                                                                                                                                                                                                                                  |
 | 6 — Parity, hardening, and cutover  | Not started                          | Full UI parity, generated `/docs`, load/resource/restore evidence, cutover rehearsal, fresh production database, and legacy removal remain open.                                                                                                                                                                                                                             |
@@ -890,3 +890,29 @@ full-browser parity, production rehearsal, cutover, and legacy deletion remain o
 - Frontend parity now marks legacy `/reports` implemented. `/incidents` has no legacy route and is
   tracked as a net-new reader. The notification center, schedules/jobs, overview, cache/metrics,
   and the real worker remain open Phase 3 gates.
+
+### 2026-08-07 — Phase 3 notification browser state
+
+- The authenticated global shell now owns an accessible shared popover notification center. Its
+  bell uses the server-owned global unread count independently of the currently materialized rows;
+  cached rows and counts remain usable through transient refresh failures.
+- A query-backed TanStack DB collection materializes the named newest 100-row window while the
+  complete query result retains global read/unread counts and the exact history cursor. Older
+  filtered history loads lazily one keyset page at a time with stable newer/older controls; the
+  selected page is identity-deduplicated against the newest window without changing newest-first
+  order or hiding older catalog rows.
+- Read-state and severity filters, safe same-origin report/incident links, single mark-read and
+  delete actions, and confirmed clear-read behavior use the shared Dashboard presentation and
+  fixed-error boundaries. Titles and messages remain ordinary React text rather than Markdown or
+  raw HTML.
+- Bounded mark-all-read and clear-read operations run sequentially with identical filters until
+  the server reports completion, with a defensive 32-batch browser ceiling. Invalid continuation
+  fails closed, partial completion is disclosed, all actions are disabled during the loop, and
+  notification queries are invalidated even after a later batch fails.
+- `monitoring.notifications` uses the shared coalescing invalidation hook, terminal-resync
+  handling, and 30-second fallback refresh. Logout/session loss serially cleans the notification
+  collection with the other authenticated collections. A root identity-transition boundary also
+  clears mutation state and gates private UI until a fresh registry exists, so reauthentication
+  performs a new transport request instead of reviving an empty ready instance.
+- Notification server and browser parity are now complete. Schedules/jobs, overview,
+  cache/metrics, and real worker execution remain open Phase 3 gates.

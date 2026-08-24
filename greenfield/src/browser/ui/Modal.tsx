@@ -42,7 +42,7 @@ export function Modal({
 }: ModalProps) {
     return (
         <Dialog
-            className="relative z-50"
+            className="relative z-70"
             onClose={dismissible ? onClose : () => {}}
             open={open}
         >

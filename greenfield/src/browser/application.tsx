@@ -10,6 +10,7 @@ import {
 import { DashboardRealtimeProvider } from "./api/realtimeContext.tsx";
 import { createDashboardTrpcClient, type DashboardTrpcClient } from "./api/trpcClient.ts";
 import { DashboardTrpcProvider } from "./api/trpcContext.tsx";
+import { AuthenticatedBrowserCacheBoundary } from "./auth/AuthenticatedBrowserCacheBoundary.tsx";
 import { AuthenticatedSessionActivity } from "./auth/AuthenticatedSessionActivity.tsx";
 import {
     createDashboardBrowserCollections,
@@ -60,10 +61,12 @@ export function DashboardBrowserApplication({
                 <DashboardCollectionsProvider collections={collections}>
                     <DashboardRealtimeProvider client={realtimeClient}>
                         <DashboardTrpcProvider client={trpcClient}>
-                            <AuthenticatedSessionActivity />
-                            <DashboardWebAuthnProvider client={webAuthnClient}>
-                                <RouterProvider router={router} />
-                            </DashboardWebAuthnProvider>
+                            <AuthenticatedBrowserCacheBoundary>
+                                <AuthenticatedSessionActivity />
+                                <DashboardWebAuthnProvider client={webAuthnClient}>
+                                    <RouterProvider router={router} />
+                                </DashboardWebAuthnProvider>
+                            </AuthenticatedBrowserCacheBoundary>
                         </DashboardTrpcProvider>
                     </DashboardRealtimeProvider>
                 </DashboardCollectionsProvider>

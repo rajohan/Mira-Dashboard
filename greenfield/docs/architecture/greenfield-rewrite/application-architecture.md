@@ -595,6 +595,17 @@ adapter because TanStack DB is still pre-1.0. The exact-qualified package set is
 route subscription; it does not destroy and recreate an asynchronous collection under the same
 cache key. A server snapshot always wins over conflicting speculative collection state.
 
+The global notification center uses one explicitly named newest-window collection rather than
+pretending its first page is the complete catalog. Its query always requests the newest 100 rows;
+the collection `select` materializes only those entities while TanStack Query retains the complete
+response with global read/unread counts and the continuation cursor. Older filtered history is a
+separate, lazy keyset page beginning at that cursor. The panel retains only the selected older page
+in the DOM and uses stable newer/older controls, so every matching row remains reachable without an
+unbounded interactive list. Authentication identity transitions gate the application while queries,
+mutations, and collections reset; focus/visibility reconciliation detects cross-tab session changes
+before a later session subscribes. A ready-but-empty collection therefore cannot survive logout and
+suppress the next session's transport request.
+
 ### Component and route rules
 
 - Keep the current public route paths and query-string behavior unless a separately approved

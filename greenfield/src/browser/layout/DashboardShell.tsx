@@ -16,6 +16,7 @@ import type {
     DashboardAuthenticatedPath,
     DashboardNavigationPath,
 } from "../lib/dashboardRoutes.ts";
+import { AuthenticatedNotificationCenter } from "../notifications/AuthenticatedNotificationCenter.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { IconOnlyButton } from "../ui/IconOnlyButton.tsx";
 import { NavigationLink } from "../ui/NavigationLink.tsx";
@@ -171,6 +172,9 @@ export function DashboardShell() {
                         variant="ghost"
                     />
                     <p className="text-primary-100 font-semibold">{currentTitle}</p>
+                    <div className="ml-auto">
+                        <AuthenticatedNotificationCenter />
+                    </div>
                 </header>
                 <main
                     className="min-h-0 flex-1 overflow-y-auto px-4 py-8 sm:px-6 lg:px-8"

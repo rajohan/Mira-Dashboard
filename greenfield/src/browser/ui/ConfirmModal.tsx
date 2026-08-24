@@ -1,5 +1,5 @@
 import { TriangleAlert, X } from "lucide-react";
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 
 import { Button } from "./Button.tsx";
 import { Icon } from "./Icon.tsx";
@@ -8,6 +8,7 @@ import { Modal } from "./Modal.tsx";
 interface ConfirmModalProps {
     readonly busy?: boolean;
     readonly confirmLabel?: string;
+    readonly confirmButtonRef?: Ref<HTMLButtonElement>;
     readonly danger?: boolean;
     readonly description: ReactNode;
     readonly onCancel: () => void;
@@ -22,6 +23,7 @@ interface ConfirmModalProps {
  */
 export function ConfirmModal({
     busy = false,
+    confirmButtonRef,
     confirmLabel = "Confirm",
     danger = false,
     description,
@@ -51,6 +53,7 @@ export function ConfirmModal({
                     busy={busy}
                     busyLabel={`${confirmLabel}…`}
                     onClick={onConfirm}
+                    ref={confirmButtonRef}
                     variant={danger ? "danger" : "primary"}
                 >
                     {confirmLabel}

@@ -40,7 +40,7 @@ export function Button({
     return (
         <HeadlessButton
             {...properties}
-            aria-busy={busy || undefined}
+            aria-busy={busy || properties["aria-busy"] || undefined}
             className={buttonClassNames({ className, fullWidth, size, variant })}
             disabled={unavailable}
             ref={ref}

@@ -5,7 +5,7 @@
     "affectedCount": {
       "type": "integer",
       "minimum": 0,
-      "maximum": 9007199254740991
+      "maximum": 100
     },
     "completedAtMs": {
       "type": "integer",
@@ -22,5 +22,29 @@
     "remaining"
   ],
   "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "remaining": {
+            "const": true
+          }
+        },
+        "required": [
+          "remaining"
+        ]
+      },
+      "then": {
+        "properties": {
+          "affectedCount": {
+            "const": 100
+          }
+        },
+        "required": [
+          "affectedCount"
+        ]
+      }
+    }
+  ],
   "$schema": "https://json-schema.org/draft/2020-12/schema"
 }
