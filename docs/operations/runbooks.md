@@ -1,367 +1,159 @@
-# Operations Runbooks
+# Operator runbooks
 
-For symptom-oriented triage, see [Troubleshooting](troubleshooting.md). For
-Docker image update behavior, see [Docker updater](docker-updater.md).
+## Fresh checkout and local first start
 
-## Check Dashboard Health
-
-```bash
-curl --fail http://127.0.0.1:3100/api/health/ready
-systemctl --user status mira-dashboard.service --no-pager
-systemctl --user status mira-dashboard-worker.service --no-pager
-journalctl --user -u mira-dashboard.service -n 120 --no-pager
-journalctl --user -u mira-dashboard-worker.service -n 120 --no-pager
-```
-
-Expected health:
-
-```json
-{ "status": "isReady", "checks": { "worker": { "ready": true } } }
-```
-
-## Restart Dashboard
+Install the exact Bun version in `.bun-version`, clone the repository, and enter its root. Then run:
 
 ```bash
-systemctl --user restart mira-dashboard.service
-systemctl --user status mira-dashboard.service --no-pager
-wait_for_dashboard_ready() {
-  for attempt in {1..20}; do
-    if curl --fail --silent --show-error --connect-timeout 2 --max-time 5 \
-      http://127.0.0.1:3100/api/health/ready >/dev/null; then
-      return 0
-    fi
-    sleep 1
-  done
-  return 1
-}
-wait_for_dashboard_ready
+bun run bootstrap
 ```
 
-## Dashboard Shows WebSocket Disconnected
+The command verifies Bun, performs a frozen install, checks generated documentation and the
+database schema, prepares isolated development state, and starts the loopback Dashboard. It does
+not use sudo, install system units, read Doppler, mutate production, or create credentials. Use
+`bun run bootstrap --no-start` for preparation only, `--with-browser` when the host will run
+Storybook browser tests, or `--doppler` to start through the fixed allowlist on a configured host.
 
-1. Check `/api/health/live` and `/api/health/ready`.
-2. Check OpenClaw Gateway:
+If bootstrap fails, fix the first reported prerequisite and rerun it. Resolve frozen-install
+failures in the lockfile on a development branch; never weaken the target-host install.
+
+## Production candidate preflight
+
+Run against one clean reviewed candidate with the exact `.bun-version` runtime:
 
 ```bash
-systemctl --user status openclaw-gateway.service --no-pager
-openclaw status
+bun run preflight
 ```
 
-3. Check Dashboard logs for `gateway token mismatch`.
-4. Verify token precedence:
-    - `OPENCLAW_GATEWAY_TOKEN`
-    - persisted `app_config.gateway_token`
-5. If bootstrap was just reset, ensure the new token was accepted by bootstrap.
+This performs frozen install, dependency audit, static checks, formatting check, complete coverage,
+Storybook build, and immutable release build sequentially. Record the candidate commit, Bun
+revision, release-manifest digest, and results in cutover evidence. Preflight qualifies an artifact;
+it does not provision root-owned files or activate production.
 
-## Reset Dashboard Users And Sessions
+## Production rehearsal and activation
 
-Use only when Raymond wants to re-run bootstrap.
+Rehearse first in a disposable project root with the same project layout, systemd bytes,
+release/runtime artifact, migration graph, readiness URL, and cgroup limits as production.
 
-```bash
-set -euo pipefail
-export MIRA_DASHBOARD_PROJECT_ROOT=/home/ubuntu/projects/mira-dashboard
-backend_dir="$MIRA_DASHBOARD_PROJECT_ROOT/production/releases/current/backend"
-db_path="$MIRA_DASHBOARD_PROJECT_ROOT/production/state/mira-dashboard.db"
-cd "$backend_dir"
-/usr/local/bin/doppler run --config prd --project rajohan -- \
-  env NODE_ENV=production bun run db:preflight
-sqlite3 -cmd ".timeout 5000" "$db_path" "DELETE FROM auth_sessions; DELETE FROM users;"
-sqlite3 -cmd ".timeout 5000" "$db_path" "PRAGMA integrity_check;"
-curl http://127.0.0.1:3100/api/auth/bootstrap
-```
+1. Confirm the candidate is clean and passed `bun run preflight` unchanged.
+2. Prepare project-local production state:
 
-To force Gateway token entry during bootstrap too:
+    ```bash
+    bun run delivery prepare-state --project-root=/absolute/dashboard/project/root
+    ```
 
-```bash
-db_path="$MIRA_DASHBOARD_PROJECT_ROOT/production/state/mira-dashboard.db"
-sqlite3 "$db_path" "DELETE FROM app_config WHERE key='gateway_token';"
-```
+3. Independently approve the release-manifest digest. Transfer the exact candidate and Bun runtime
+   into the root-owned staging roots described by the host-operations provisioning README.
+4. Invoke the manifest-bound root installer from that staging root. Never expose it as a package
+   script or derive its trust digest from the application checkout.
+5. Verify installed unit bytes and principals. The installer enables but does not start services.
+6. Activate with explicit absolute paths and a loopback readiness endpoint:
 
-## Reset A Forgotten Dashboard Password
+    ```bash
+    bun run delivery activate \
+      --project-root=/absolute/dashboard/project/root \
+      --release-root=/absolute/immutable/release \
+      --readiness-url=http://127.0.0.1:PORT/api/health/ready
+    ```
 
-There is intentionally no password-reset page, email reset, recovery file
-watched by the web service, or unauthenticated reset endpoint. Use the
-host-local interactive command from an SSH/console TTY:
+7. Verify liveness, readiness, principals, restart counts, structured logs, worker claiming, one
+   safe worker job, and every major external dependency before accepting activation.
 
-```bash
-export MIRA_DASHBOARD_PROJECT_ROOT=/home/ubuntu/projects/mira-dashboard
-cd "$MIRA_DASHBOARD_PROJECT_ROOT/production/releases/current/backend"
-bun run auth:reset-password -- --username <username>
-```
+Never restart the existing `mira-dashboard.service` while rehearsing from a development worktree.
+Resolve the exact service, working directory, executable, release pointers, and port before any
+lifecycle operation.
 
-The single standalone `--` ends Bun script options; `--username` is passed to
-the reset program. The package script preserves the project root through
-Doppler, and the backend derives the stable database path. The program reads
-the new password twice with terminal echo
-disabled, preserves MFA, revokes every session and pending ceremony, clears
-authentication cooldowns, and appends an audit event. It never accepts password
-material through command arguments or environment variables.
+## Failed activation and paired rollback
 
-Only when all registered second factors are also lost, run the deliberate
-break-glass variant:
+Activation is authoritative only after its record commits. Never improvise pointer or database
+changes outside the activation journal.
 
-```bash
-bun run auth:reset-password -- --username <username> --reset-mfa
-```
+- Before commit, preserve logs and the journal, rerun recovery with the same candidate, and prove
+  that the previous release/database pair remains authoritative.
+- After commit, use Delivery paired rollback so release, runtime, and database snapshot move
+  together. Never roll back code without its paired database.
+- If root-owned authority changed, reinstall the previous root-owned immutable release through the
+  same manifest-digest handoff.
+- For an unknown outcome, stop retries until activation record, pointers, journal, systemd state,
+  readiness, and live process identities agree.
 
-`--reset-mfa` deletes registered WebAuthn credentials, encrypted TOTP factors,
-and recovery-code validators. Sign in with the new password and immediately
-enroll two named security keys (or a key plus TOTP), then store the newly shown
-recovery codes offline.
+After recovery, verify release identities, database integrity, readiness, worker claiming, recent
+jobs, and logs. Retain failed-candidate evidence until the incident is closed.
 
-## Inspect Gateway Token Metadata Without Printing It
+## Restore drill
 
-```bash
-db_path=/home/ubuntu/projects/mira-dashboard/production/state/mira-dashboard.db
-sqlite3 "$db_path" \
-  "SELECT key, length(value), updated_at FROM app_config WHERE key='gateway_token';"
-```
+The UI intentionally exposes no general database-restore control. Perform restore drills through
+reviewed activation/rollback and backup-provider procedures in an isolated target:
 
-Do not print token values. A current row must contain a versioned encrypted
-envelope. Unsupported plaintext or malformed values fail startup closed.
+1. Record candidate, snapshot identity, database size, WAL state, and expected schema.
+2. Restore into an isolated path; never overwrite the live database during a drill.
+3. Verify snapshot identity, SQLite integrity, migration graph, schema introspection, WAL handling,
+   and readiness against the restored copy.
+4. Exercise paired rollback across promotion and verify interrupted recovery does not replay an
+   external effect.
+5. Record elapsed time, peak disk/inodes and memory, result, and cleanup confirmation.
 
-## Provision Or Rotate OpenClaw Dashboard Callers
+Kopia and WAL-G restore remain provider-owned. Credentials and resolved backup payloads must not
+enter Dashboard arguments, logs, state, or evidence.
 
-Client bearer tokens live only as regular owner-only `0600` files in:
+## External integration and credential cutover
 
-```text
-/home/ubuntu/.config/mira-dashboard/automation/
-```
+After the Greenfield release is ready, an operator must:
 
-Use the tracked workspace provisioner; it writes the full token directly to
-the file and prints only the Dashboard-side hash/scopes object:
+- provision and smoke the dedicated PostgreSQL/PgBouncer observer and control alias;
+- replace the tracked PgBouncer verifier with private runtime provisioning, rotate the affected
+  credential, and retain a tested rollback;
+- create the heartbeat principal with exactly `cache:read` and `monitoring:write`, atomically
+  install its private credential, and CAS-update the OpenClaw heartbeat prompt; and
+- prove exactly one heartbeat collection followed by one report.
+
+Never pass secrets through arguments, URLs, messages, logs, artifacts, or evidence. Failed
+credential cutover restores the prior private provider state and retries only from a known state.
+
+## Post-cutover monitoring
+
+Observe at least one full operational cycle before declaring Greenfield production-ready:
+
+- readiness, liveness, restarts, cgroup resources, and disk/inode reserve;
+- Gateway sessions/chat reconnect, one safe worker job, schedules, and heartbeat;
+- SQLite maintenance, PostgreSQL/PgBouncer, Kopia/WAL-G, Docker updater, logs, Git, quotas,
+  weather, notifications, incidents, and Delivery history; and
+- current and rollback release/runtime/database identities.
+
+Unknown activation, failed heartbeat or backup, repeated restart, readiness loss, integrity
+failure, or a resource-limit event blocks completion and starts recovery.
+
+## Forgotten Dashboard password
+
+Use this host-local recovery path only when the Dashboard account cannot authenticate normally.
+It operates on the active production release and never accepts a password through arguments or
+environment variables.
+
+1. Open an interactive terminal on the Dashboard host as the Dashboard operator.
+2. Run the password-only recovery command:
+
+    ```bash
+    cd /home/ubuntu/projects/mira-dashboard/production/checkout
+    bun run auth:reset-password -- --username <username>
+    ```
+
+3. Enter the new password twice at the hidden prompts.
+4. Confirm the command reports that the password was reset and every session was revoked.
+5. Sign in again with the new password. Existing MFA remains required.
+
+If the user has also lost every MFA factor and recovery code, use the explicit break-glass mode:
 
 ```bash
 cd /home/ubuntu/projects/mira-dashboard/production/checkout
-bun scripts/provisionDashboardAutomationCredential.ts <profile>
+bun run auth:reset-password -- --username <username> --reset-mfa
 ```
 
-Valid profiles are `heartbeat`, `daily-summary`, `daily-brief`, and
-`task-tracking`. The provisioner refuses to overwrite an existing file. For
-rotation, first move the existing `0600` token file to an owner-only
-`.previous` file in the same `0700` directory. Run the provisioner to create
-the replacement at the canonical path, replace the matching hash-only object
-in `MIRA_DASHBOARD_AUTOMATION_CREDENTIALS`, restart the Dashboard web service,
-and smoke-test the caller. Keep the old hash only in an owner-protected offline
-rollback record; never leave its object in the active credential array. The
-wrapper ignores the disabled `.previous` token file. Remove both rollback
-artifacts through the normal secret-retirement procedure as soon as the smoke
-test succeeds. Reactivate the previous hash and restore the previous file
-together only during an explicit rollback. Never expose either full token
-through a command argument, prompt, terminal transcript, or Dashboard-managed
-exec output.
+`--reset-mfa` removes registered authenticator apps, security keys, and recovery codes in the same
+transaction as the password reset. Both modes revoke all sessions and pending login ceremonies,
+discard unconfirmed authenticator enrollment, clear only that user's account-password and
+account-MFA cooldowns, advance the authentication version, and append an `auth.password.reset`
+security-audit event. A failure rolls back the complete transaction; rerun only after resolving
+the reported host or release problem.
 
-The authoritative file names, scopes, caller commands, and new-host procedure
-are in [Auth and trust boundaries](../security/auth-and-trust-boundaries.md#scoped-automation-credentials)
-and [New VPS setup](../setup/new-vps.md#provision-local-openclaw-api-callers).
-
-## Frontend Not Built
-
-Symptom: browser shows `Frontend Not Built` or `/` returns 503.
-
-The managed deploy executor verifies `dist/index.html`, every declared frontend
-artifact, and both component identities before activation. Do not build inside
-the control checkout or active release. Inspect `/api/health/ready`, both unit
-logs, and the managed `current`/`previous` state, then use the automatic/manual
-release rollback procedure in
-[Production deploy](../setup/production-deploy.md#rollback). An incomplete
-release must be restaged from its exact Git commit rather than repaired in
-place.
-
-## SQLite Locked
-
-Transient `database is locked` can happen when a write transaction is active.
-Retry once after a short delay. If persistent:
-
-```bash
-journalctl --user -u mira-dashboard.service -n 200 --no-pager
-journalctl --user -u mira-dashboard-worker.service -n 200 --no-pager
-systemctl --user status mira-dashboard.service --no-pager
-systemctl --user status mira-dashboard-worker.service --no-pager
-```
-
-Avoid running multiple manual `sqlite3` write sessions while the service is
-busy.
-
-## Restore Dashboard SQLite
-
-Use only after an explicit restore decision. Pair the snapshot with code that
-is compatible with its schema. Never overwrite the live database or remove
-`-wal`/`-shm` while either Dashboard process is running.
-
-1. Confirm the execution queue is idle and record the absolute snapshot path.
-2. In one shell invocation, use the managed production database path, verify
-   the snapshot, stop worker then web, preserve the current SQLite files,
-   install and validate the standalone snapshot, and only then start web and
-   worker:
-
-```bash
-set -euo pipefail
-backup_path=/absolute/path/to/selected/mira-dashboard-....db
-db_path=/home/ubuntu/projects/mira-dashboard/production/state/mira-dashboard.db
-test -f "$backup_path"
-test "$(sqlite3 -readonly "$backup_path" "PRAGMA quick_check;")" = "ok"
-has_migration_history="$(
-  sqlite3 -readonly "$backup_path" \
-    "SELECT COUNT(*) FROM sqlite_schema WHERE type = 'table' AND name = 'schema_migrations';"
-)"
-test "$has_migration_history" = "1"
-sqlite3 -readonly "$backup_path" \
-  "SELECT version, name FROM schema_migrations ORDER BY version;"
-systemctl --user stop mira-dashboard-worker.service
-systemctl --user stop mira-dashboard.service
-db_dir="$(dirname "$db_path")"
-recovery_dir="$(mktemp -d "$db_dir/.sqlite-pre-restore.XXXXXX")"
-chmod 0700 "$recovery_dir"
-for suffix in "" "-wal" "-shm"; do
-  current_path="${db_path}${suffix}"
-  if test -e "$current_path"; then
-    mv "$current_path" "$recovery_dir/$(basename "$current_path")"
-  fi
-done
-install -m 0600 "$backup_path" "$db_path"
-test "$(sqlite3 -readonly "$db_path" "PRAGMA quick_check;")" = "ok"
-systemctl --user start mira-dashboard.service
-systemctl --user start mira-dashboard-worker.service
-wait_for_dashboard_ready() {
-  for attempt in {1..20}; do
-    if curl --fail --silent --show-error --connect-timeout 2 --max-time 5 \
-      http://127.0.0.1:3100/api/health/ready >/dev/null; then
-      return 0
-    fi
-    sleep 1
-  done
-  return 1
-}
-wait_for_dashboard_ready
-printf '\nRecovery files retained at %s\n' "$recovery_dir"
-```
-
-3. Verify Database → Dashboard SQLite, migrations, and queue state. Keep the
-   printed recovery directory until the restore has been validated. Removing
-   it later is a separate destructive cleanup decision.
-
-## PostgreSQL Maintenance Review
-
-The Database page uses catalog statistics for a conservative heap-bloat
-estimate. `Review` can also include slow-query or high-dead-tuple signals, so
-inspect the detail fields before interpreting the status as reclaimable disk.
-The high-dead-tuple signal requires at least 20% and 1,000 dead tuples on a
-table with at least 64 MiB of heap; smaller high-churn tables remain visible in
-the autovacuum detail table without changing the aggregate status.
-`Not assessed` means at least 1 GiB of physical table heap lacks usable row-width
-or live-tuple statistics.
-
-Run `ANALYZE` when statistics are missing, then let the hourly database cache
-refresh. Do not run `VACUUM FULL` from the status alone: it takes exclusive
-locks, requires explicit approval, and must be planned as service disruption.
-
-The bloat query intentionally excludes the default `postgres` database and
-reports only user-database scope shown by Dashboard.
-
-## Dashboard SQLite Requests Review
-
-The Dashboard SQLite source and heartbeat mark review when:
-
-- journal mode is not WAL or foreign keys are disabled;
-- migration history is not current;
-- the data directory/database/sidecar modes are not `0700`/`0600`;
-- no verified snapshot exists or the newest is older than 48 hours;
-- the maintenance job is missing or disabled, has never succeeded, or its
-  newest successful run is older than 48 hours;
-- the latest SQLite maintenance run ended in a non-success terminal state;
-- reusable pages are at least 1 GiB, or both at least 256 MiB and at least 50%
-  of the database, indicating that a planned file compaction may be worthwhile.
-
-Inspect the `database.maintenance` job on Jobs and the Database page's attention
-list. A manual deploy preflight can create and restore-verify a fresh snapshot:
-
-```bash
-cd /home/ubuntu/projects/mira-dashboard/production/releases/current/backend
-/usr/local/bin/doppler run --config prd --project rajohan -- \
-  env MIRA_DASHBOARD_PROJECT_ROOT=/home/ubuntu/projects/mira-dashboard \
-    NODE_ENV=production bun run db:preflight
-```
-
-“Reusable space” is SQLite freelist capacity that can be reused by future
-writes. It has no configured maximum and is not PostgreSQL-style dead tuples.
-The absolute-or-combined review threshold keeps ordinary churn in small
-databases informational and catches only material file savings. A review is
-still advisory: file shrinking with `VACUUM` requires a separate maintenance
-decision with enough temporary disk and service planning.
-
-## Reports Smoke Test
-
-`/api/reports` is authenticated. Prefer the browser, or use a dedicated
-temporary automation credential with only `reports:read` and `reports:write`.
-Read its bearer token without echo and pass it to curl through standard input,
-not a command argument:
-
-```bash
-read -r -s -p "Dashboard reports bearer: " dashboard_reports_bearer
-printf "\n"
-dashboard_reports_curl() {
-  printf 'header = "Authorization: Bearer %s"\n' \
-    "$dashboard_reports_bearer" | curl --config - "$@"
-}
-```
-
-Create:
-
-```bash
-dashboard_reports_curl -sS -X POST http://127.0.0.1:3100/api/reports \
-  -H "Content-Type: application/json" \
-  -d '{
-    "type":"custom",
-    "status":"ok",
-    "title":"Smoke test",
-    "bodyMd":"Smoke test body",
-    "summary":"Smoke test",
-    "source":"manual",
-    "notify":false
-  }'
-```
-
-List:
-
-```bash
-dashboard_reports_curl -sS \
-  "http://127.0.0.1:3100/api/reports?type=custom"
-unset dashboard_reports_bearer
-unset -f dashboard_reports_curl
-```
-
-Delete the smoke report from the UI or with `DELETE /api/reports/:id`.
-
-## PR Worktree Cleanup
-
-Dashboard PR worktrees live under:
-
-```text
-/home/ubuntu/projects/mira-dashboard/development/worktrees
-```
-
-List:
-
-```bash
-git -C /home/ubuntu/projects/mira-dashboard/production/checkout worktree list
-```
-
-Remove only clean, known worktrees:
-
-```bash
-git -C /home/ubuntu/projects/mira-dashboard/production/checkout worktree remove /home/ubuntu/projects/mira-dashboard/development/worktrees/<name>
-git -C /home/ubuntu/projects/mira-dashboard/production/checkout worktree prune
-```
-
-## Docker Compose Validation
-
-For Docker/Stremio operations under `/opt/docker`, use the Doppler-aware wrapper:
-
-```bash
-cd /opt/docker
-/opt/docker/bin/docker-compose-doppler config
-```
-
-Do not run ad hoc compose commands that bypass the documented wrapper unless
-Raymond explicitly asks.
+Do not use a source checkout entrypoint, an unpinned Bun binary, a copied database, or a password
+provided through `--password`, stdin redirection, an environment variable, or a message.

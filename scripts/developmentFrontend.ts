@@ -1,185 +1,109 @@
-import type { Server } from "bun";
-
-import dashboard from "../frontend/index.html";
+import dashboard from "../src/browser/index.html";
 import {
-    addForwardedClientHeaders,
-    createDevelopmentForwardedProtocolResolver,
-    developmentCookieHeader,
-} from "../frontend/src/lib/developmentProxyHeaders.ts";
+    type DevelopmentFrontendConfiguration,
+    resolveDevelopmentFrontendConfiguration,
+} from "./development/developmentFrontendConfig.ts";
+import {
+    developmentWebSocketHandler,
+    type DevelopmentProxySocketData,
+    proxyDevelopmentHttp,
+    proxyDevelopmentWebSocket,
+} from "./development/developmentProxy.ts";
+import {
+    type DevelopmentRemoteProxySocketData,
+    startDevelopmentRemoteProxy,
+} from "./development/developmentRemoteProxy.ts";
 
-const host = process.env.HOST || "127.0.0.1";
-const port = Number(process.env.PORT || "5173");
-const apiTarget = process.env.DASHBOARD_API_TARGET || "http://127.0.0.1:3101";
-const backendWebSocketTarget = apiTarget.replace(/^http/u, "ws");
-const cookieNamespace =
-    process.env.MIRA_DASHBOARD_DEV_COOKIE_NAMESPACE || `mira_dashboard_dev_${port}`;
-const forwardedProtocol = createDevelopmentForwardedProtocolResolver(
-    process.env.MIRA_DASHBOARD_DEV_PUBLIC_ORIGIN
-);
-const isHotReloadEnabled = process.env.MIRA_DASHBOARD_DEV_HOT_RELOAD !== "0";
-
-interface WebSocketProxyData {
-    backend?: WebSocket;
-    clientAddress?: string;
-    cookie?: string;
-    origin?: string;
-    pendingMessages: Array<string | ArrayBuffer | Uint8Array>;
-    protocol: string;
+export interface DevelopmentFrontendRuntime {
+    readonly frontend: Bun.Server<DevelopmentProxySocketData>;
+    readonly remoteProxy?: Bun.Server<DevelopmentRemoteProxySocketData>;
+    stop(closeActiveConnections?: boolean): Promise<void>;
 }
 
-function forwardedBrowserOrigin(
-    request: Request,
-    targetOrigin: string
-): string | undefined {
-    const sourceUrl = new URL(request.url);
-    const origin = request.headers.get("origin");
-    return origin === sourceUrl.origin ? targetOrigin : origin || undefined;
+interface DevelopmentFrontendDependencies {
+    readonly dashboardRoute?: Bun.HTMLBundle;
 }
 
-async function proxyApi(
-    request: Request,
-    server: Server<WebSocketProxyData>
-): Promise<Response> {
-    const sourceUrl = new URL(request.url);
-    const targetUrl = new URL(`${sourceUrl.pathname}${sourceUrl.search}`, apiTarget);
-    const headers = new Headers(request.headers);
-    headers.set("host", targetUrl.host);
-    const cookie = developmentCookieHeader(
-        request.headers.get("cookie"),
-        cookieNamespace
-    );
-    if (cookie) {
-        headers.set("cookie", cookie);
-    } else {
-        headers.delete("cookie");
-    }
-    const clientAddress = server.requestIP(request)?.address;
-    addForwardedClientHeaders(headers, clientAddress, forwardedProtocol(request.url));
-    const forwardedOrigin = forwardedBrowserOrigin(request, targetUrl.origin);
-    if (forwardedOrigin) {
-        headers.set("origin", forwardedOrigin);
+/**
+ * Starts Bun's full-stack HTML server and the reviewed loopback API proxy.
+ * @param configuration Validated listener, HMR, origin, and backend configuration.
+ * @returns The active frontend and optional remote-proxy lifecycle.
+ */
+export async function startDevelopmentFrontend(
+    configuration: DevelopmentFrontendConfiguration,
+    dependencies: DevelopmentFrontendDependencies = {}
+): Promise<DevelopmentFrontendRuntime> {
+    const backendRequest = (
+        request: Request,
+        server: Bun.Server<DevelopmentProxySocketData>
+    ): Promise<Response> | Response | undefined =>
+        request.headers.get("upgrade")?.toLowerCase() === "websocket"
+            ? proxyDevelopmentWebSocket(request, server, configuration)
+            : proxyDevelopmentHttp(request, server, configuration);
+
+    const frontend = Bun.serve<DevelopmentProxySocketData>({
+        development: { console: true, hmr: configuration.hotReload },
+        hostname: configuration.host,
+        idleTimeout: 0,
+        port: configuration.port,
+        routes: {
+            "/api": backendRequest,
+            "/api/*": backendRequest,
+            "/trpc": backendRequest,
+            "/trpc/*": backendRequest,
+            "/*": dependencies.dashboardRoute ?? dashboard,
+        },
+        websocket: developmentWebSocketHandler(configuration),
+    });
+    let remoteProxy: Bun.Server<DevelopmentRemoteProxySocketData> | undefined;
+    try {
+        if (configuration.remoteProxyPort !== undefined) {
+            const frontendPort = frontend.port;
+            if (frontendPort === undefined) {
+                throw new Error("Development frontend did not open a TCP listener");
+            }
+            remoteProxy = startDevelopmentRemoteProxy({
+                frontendTarget: `http://127.0.0.1:${frontendPort}`,
+                port: configuration.remoteProxyPort,
+                publicOrigin: configuration.publicOrigin,
+            });
+        }
+    } catch (error) {
+        await frontend.stop(true);
+        throw error;
     }
 
-    return fetch(targetUrl, {
-        body: request.body,
-        duplex: "half",
-        headers,
-        method: request.method,
-        redirect: "manual",
+    return Object.freeze({
+        frontend,
+        ...(remoteProxy === undefined ? {} : { remoteProxy }),
+        async stop(closeActiveConnections = false): Promise<void> {
+            await Promise.all([
+                frontend.stop(closeActiveConnections),
+                ...(remoteProxy === undefined
+                    ? []
+                    : [remoteProxy.stop(closeActiveConnections)]),
+            ]);
+        },
     });
 }
 
-function upgradeWebSocket(
-    request: Request,
-    server: Server<WebSocketProxyData>
-): Response {
-    if (
-        server.upgrade(request, {
-            data: {
-                clientAddress: server.requestIP(request)?.address,
-                cookie: developmentCookieHeader(
-                    request.headers.get("cookie"),
-                    cookieNamespace
-                ),
-                origin: forwardedBrowserOrigin(request, new URL(apiTarget).origin),
-                pendingMessages: [],
-                protocol: forwardedProtocol(request.url),
-            },
-        })
-    ) {
-        return new Response(undefined, { status: 204 });
-    }
-
-    return new Response("WebSocket upgrade failed", { status: 400 });
-}
-
-const server = Bun.serve<WebSocketProxyData>({
-    development: { console: true, hmr: isHotReloadEnabled },
-    fetch(request, server) {
-        const url = new URL(request.url);
-        if (url.pathname === "/ws") {
-            return upgradeWebSocket(request, server);
-        }
-
-        if (url.pathname.startsWith("/api")) {
-            return proxyApi(request, server);
-        }
-
-        return new Response("Not found", { status: 404 });
-    },
-    hostname: host,
-    port,
-    routes: {
-        "/api/*": proxyApi,
-        "/ws": upgradeWebSocket,
-        "/*": dashboard,
-    },
-    websocket: {
-        close(socket) {
-            socket.data.backend?.close();
-        },
-        message(socket, message) {
-            const backend = socket.data.backend;
-            if (backend?.readyState === WebSocket.OPEN) {
-                backend.send(message);
-                return;
-            }
-            socket.data.pendingMessages.push(message);
-        },
-        open(socket) {
-            const headers = new Headers();
-            if (socket.data.cookie) {
-                headers.set("cookie", socket.data.cookie);
-            }
-            if (socket.data.origin) {
-                headers.set("origin", socket.data.origin);
-            }
-            addForwardedClientHeaders(
-                headers,
-                socket.data.clientAddress,
-                socket.data.protocol
+if (import.meta.main) {
+    const configuration = resolveDevelopmentFrontendConfiguration();
+    const runtime = await startDevelopmentFrontend(configuration);
+    let stopping = false;
+    const stop = () => {
+        if (stopping) return;
+        stopping = true;
+        void runtime.stop(true).catch((error: unknown) => {
+            process.stderr.write(
+                `${error instanceof Error ? error.message : "Development frontend shutdown failed"}\n`
             );
-            const backend = new WebSocket(`${backendWebSocketTarget}/ws`, {
-                headers: Object.fromEntries(headers),
-            });
-            socket.data.backend = backend;
-
-            backend.addEventListener("open", () => {
-                for (const message of socket.data.pendingMessages) {
-                    backend.send(message);
-                }
-                socket.data.pendingMessages = [];
-            });
-            backend.addEventListener("message", (event) => {
-                if (socket.readyState !== WebSocket.OPEN) {
-                    return;
-                }
-
-                if (typeof event.data === "string" || event.data instanceof ArrayBuffer) {
-                    socket.send(event.data);
-                    return;
-                }
-
-                if (ArrayBuffer.isView(event.data)) {
-                    const bytes = new Uint8Array(event.data.byteLength);
-                    bytes.set(
-                        new Uint8Array(
-                            event.data.buffer,
-                            event.data.byteOffset,
-                            event.data.byteLength
-                        )
-                    );
-                    socket.send(bytes);
-                }
-            });
-            backend.addEventListener("close", () => {
-                socket.close();
-            });
-            backend.addEventListener("error", () => {
-                socket.close();
-            });
-        },
-    },
-});
-
-console.log(`Bun dev server listening on ${server.url.href}`);
+            process.exitCode = 1;
+        });
+    };
+    process.once("SIGINT", stop);
+    process.once("SIGTERM", stop);
+    process.stdout.write(
+        `Dashboard Bun dev server listening on ${configuration.publicOrigin}\n`
+    );
+}

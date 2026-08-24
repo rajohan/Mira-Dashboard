@@ -10,12 +10,10 @@
 
 <!-- Check everything you ran. Leave unchecked with a short reason if not applicable. -->
 
-- [ ] Repository lint: `bun run lint`
-- [ ] Repository formatting: `bun run format:check`
-- [ ] Frontend build: `bun run build:frontend`
-- [ ] Frontend tests/coverage: `bun run test:frontend:coverage`
-- [ ] Backend build: `bun run build:backend`
-- [ ] Backend tests/coverage: `bun run test:backend:coverage`
+- [ ] Repository checks (format, lint, types, boundaries, docs, database): `bun run check`
+- [ ] Dashboard tests: `bun run test`
+- [ ] Coverage threshold: `bun run test coverage`
+- [ ] Storybook build: `bun run build storybook`
 - [ ] Focused regression tests: <!-- command(s) -->
 - [ ] Manual UI/API smoke check, if relevant
 

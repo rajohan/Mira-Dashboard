@@ -1,0 +1,567 @@
+import reactEffectPlugin from "eslint-plugin-react-you-might-not-need-an-effect";
+import { configs as storybookConfigs } from "eslint-plugin-storybook";
+import { defineConfig, type OxlintOverride } from "oxlint";
+import eslintRecommended from "oxlint-config-presets/@eslint/recommended.json" with { type: "json" };
+import typescriptRecommended from "oxlint-config-presets/@typescript-eslint/recommended-type-checked.json" with { type: "json" };
+import importRecommended from "oxlint-config-presets/import/recommended.json" with { type: "json" };
+import jestRecommended from "oxlint-config-presets/jest/recommended.json" with { type: "json" };
+import jsdocRecommended from "oxlint-config-presets/jsdoc/recommended-typescript-error.json" with { type: "json" };
+import jsxA11yRecommended from "oxlint-config-presets/jsx-a11y/recommended.json" with { type: "json" };
+import nodeRecommended from "oxlint-config-presets/n/recommended-module.json" with { type: "json" };
+import promiseRecommended from "oxlint-config-presets/promise/recommended.json" with { type: "json" };
+import reactHooksRecommended from "oxlint-config-presets/react-hooks/recommended.json" with { type: "json" };
+import reactRefreshRecommended from "oxlint-config-presets/react-refresh/recommended.json" with { type: "json" };
+import reactJsxRuntime from "oxlint-config-presets/react/jsx-runtime.json" with { type: "json" };
+import reactRecommended from "oxlint-config-presets/react/recommended.json" with { type: "json" };
+import unicornRecommended from "oxlint-config-presets/unicorn/recommended.json" with { type: "json" };
+
+function extglobToFastglob(pattern: string): string {
+    return pattern.replace("@(", "{").replaceAll("|", ",").replace(")", "}");
+}
+
+interface LegacyPluginConfig {
+    readonly overrides?: readonly OxlintOverride[];
+    readonly rules?: OxlintOverride["rules"];
+}
+
+interface LegacyPlugin {
+    readonly configs: Readonly<Record<string, LegacyPluginConfig | undefined>>;
+}
+
+function pluginOverrides(config: unknown): readonly OxlintOverride[] {
+    const overrides = (config as LegacyPluginConfig).overrides ?? [];
+    return overrides.map((override) => ({
+        ...override,
+        files: override.files?.map(extglobToFastglob),
+    }));
+}
+
+const reactEffectStrictRules =
+    (reactEffectPlugin as unknown as LegacyPlugin).configs.strict?.rules ?? {};
+
+export default defineConfig({
+    $schema: "./node_modules/oxlint/configuration_schema.json",
+    categories: {
+        correctness: "error",
+    },
+    env: {
+        builtin: true,
+        es2026: true,
+    },
+    extends: [
+        eslintRecommended,
+        typescriptRecommended,
+        importRecommended,
+        unicornRecommended,
+        reactRecommended,
+        reactJsxRuntime,
+        reactHooksRecommended,
+        reactRefreshRecommended,
+        jsxA11yRecommended,
+        jestRecommended,
+        jsdocRecommended,
+        nodeRecommended,
+        promiseRecommended,
+    ],
+    ignorePatterns: [
+        "**/coverage/**",
+        "data/**",
+        "**/dist/**",
+        "**/node_modules/**",
+        "**/*.log",
+        "**/*.tsbuildinfo",
+        ".git/**",
+        ".vscode/**",
+    ],
+    options: {
+        denyWarnings: true,
+        reportUnusedDisableDirectives: "error",
+        typeAware: true,
+        typeCheck: true,
+    },
+    jsPlugins: ["eslint-plugin-storybook"],
+    plugins: [
+        "eslint",
+        "import",
+        "jest",
+        "jsdoc",
+        "jsx-a11y",
+        "node",
+        "oxc",
+        "promise",
+        "react",
+        "react-perf",
+        "typescript",
+        "unicorn",
+    ],
+    rules: {
+        "jsdoc/require-param": [
+            "error",
+            {
+                checkDestructured: false,
+                checkDestructuredRoots: false,
+                interfaceExemptsParamsCheck: true,
+            },
+        ],
+        "jsx-a11y/no-noninteractive-tabindex": [
+            "error",
+            {
+                roles: ["log", "region", "tabpanel"],
+                tags: ["section"],
+            },
+        ],
+        "jsdoc/require-throws-description": "error",
+        "jsdoc/require-yields-description": "error",
+        "react/unsupported-syntax": "error",
+        "require-await": "off",
+        "typescript/require-await": "error",
+        "unicorn/no-null": "off",
+        // Oxfmt owns numeric-literal casing and canonicalizes hexadecimal digits to lowercase.
+        "unicorn/number-literal-case": "off",
+        "unicorn/no-useless-undefined": [
+            "error",
+            {
+                checkArguments: false,
+            },
+        ],
+        "unicorn/filename-case": [
+            "error",
+            {
+                cases: {
+                    camelCase: true,
+                    pascalCase: true,
+                },
+            },
+        ],
+        "unicorn/max-nested-calls": [
+            "error",
+            {
+                max: 6,
+            },
+        ],
+    },
+    settings: {
+        react: {
+            version: "19.2.0",
+        },
+        tailwindcss: {
+            entryPoint: "src/browser/index.css",
+        },
+    },
+    overrides: [
+        {
+            env: {
+                node: true,
+            },
+            files: [
+                ".storybook/main.ts",
+                ".storybook/vitest.config.ts",
+                "scripts/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
+                "src/app/dashboardServer.ts",
+                "src/app/databaseMaintenance.ts",
+                "src/app/environmentSource.ts",
+                "src/app/server.ts",
+                "src/app/trpcHttpHandler.ts",
+                "src/app/trpcRequestPolicy.ts",
+                "src/app/worker.ts",
+                "src/server/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
+                "src/test/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
+                "src/worker/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
+                "*.config.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
+            ],
+            globals: {
+                Bun: "readonly",
+            },
+        },
+        {
+            files: ["src/app/worker.{cjs,cts,js,jsx,mjs,mts,ts,tsx}"],
+            rules: {
+                "no-restricted-imports": [
+                    "error",
+                    {
+                        patterns: [
+                            {
+                                group: ["**/browser/**", "**/scripts/**"],
+                                message:
+                                    "The worker composition root may import only worker, server, contract, and environment-neutral shared modules.",
+                            },
+                        ],
+                    },
+                ],
+            },
+        },
+        {
+            files: ["src/app/databaseMaintenance.{cjs,cts,js,jsx,mjs,mts,ts,tsx}"],
+            rules: {
+                "no-restricted-imports": [
+                    "error",
+                    {
+                        patterns: [
+                            {
+                                group: ["**/browser/**", "**/scripts/**", "**/worker/**"],
+                                message:
+                                    "The database maintenance composition root may import only reviewed server and environment-neutral shared modules.",
+                            },
+                        ],
+                    },
+                ],
+            },
+        },
+        {
+            excludeFiles: [
+                "**/*.spec.*",
+                "**/*.test.*",
+                "**/__tests__/**",
+                "**/test/**",
+                "**/testSupport/**",
+                "src/app/environmentSource.ts",
+            ],
+            files: [
+                "src/app/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
+                "src/server/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
+                "src/worker/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
+            ],
+            rules: {
+                "no-restricted-properties": [
+                    "error",
+                    {
+                        message:
+                            "Read the process environment only through the typed environment source.",
+                        object: "process",
+                        property: "env",
+                    },
+                    {
+                        message:
+                            "Read the process environment only through the typed environment source.",
+                        object: "Bun",
+                        property: "env",
+                    },
+                    {
+                        message:
+                            "Read the process environment only through the typed environment source.",
+                        object: "Deno",
+                        property: "env",
+                    },
+                ],
+            },
+        },
+        {
+            env: {
+                browser: true,
+            },
+            excludeFiles: [
+                "**/*.spec.*",
+                "**/*.test.*",
+                "**/__tests__/**",
+                "**/test/**",
+                "**/testSupport/**",
+            ],
+            files: [
+                ".storybook/manager.ts",
+                ".storybook/preview.tsx",
+                "src/app/browser.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
+                "src/browser/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
+            ],
+            jsPlugins: [
+                "eslint-plugin-react-you-might-not-need-an-effect",
+                "oxlint-tailwindcss",
+            ],
+            rules: {
+                ...reactEffectStrictRules,
+                "no-restricted-imports": [
+                    "error",
+                    {
+                        paths: [
+                            {
+                                importNames: ["memo", "useCallback", "useMemo"],
+                                message:
+                                    "React Compiler owns routine memoization; keep explicit memoization out of application code.",
+                                name: "react",
+                            },
+                        ],
+                    },
+                ],
+                "tailwindcss/consistent-variant-order": "error",
+                "tailwindcss/enforce-canonical": "error",
+                "tailwindcss/enforce-consistent-important-position": "error",
+                "tailwindcss/enforce-consistent-variable-syntax": "error",
+                "tailwindcss/enforce-negative-arbitrary-values": "error",
+                "tailwindcss/enforce-shorthand": "error",
+                "tailwindcss/no-conflicting-classes": "error",
+                "tailwindcss/no-dark-without-light": "error",
+                "tailwindcss/no-deprecated-classes": "error",
+                "tailwindcss/no-duplicate-classes": "error",
+                "tailwindcss/no-unknown-classes": [
+                    "error",
+                    {
+                        ignorePrefixes: ["language-"],
+                    },
+                ],
+                "tailwindcss/no-unnecessary-arbitrary-value": "error",
+                "tailwindcss/no-unnecessary-whitespace": "error",
+            },
+        },
+        {
+            excludeFiles: [
+                "**/*.spec.*",
+                "**/*.test.*",
+                "**/__tests__/**",
+                "**/test/**",
+                "**/testSupport/**",
+            ],
+            files: [
+                "src/contracts/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
+                "src/shared/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
+            ],
+            rules: {
+                "no-restricted-globals": [
+                    "error",
+                    {
+                        checkGlobalObject: true,
+                        globals: [
+                            "Bun",
+                            "Buffer",
+                            "Deno",
+                            "document",
+                            "navigator",
+                            "process",
+                            "window",
+                        ],
+                    },
+                ],
+                "no-restricted-imports": [
+                    "error",
+                    {
+                        patterns: [
+                            {
+                                group: [
+                                    "**/app/**",
+                                    "**/browser/**",
+                                    "**/scripts/**",
+                                    "**/server/**",
+                                    "**/worker/**",
+                                    "bun",
+                                    "bun:*",
+                                    "node:*",
+                                ],
+                                message:
+                                    "Contracts and shared source must remain environment-neutral.",
+                            },
+                        ],
+                    },
+                ],
+            },
+        },
+        {
+            excludeFiles: [
+                "**/*.spec.*",
+                "**/*.test.*",
+                "**/__tests__/**",
+                "**/test/**",
+                "**/testSupport/**",
+            ],
+            files: [
+                ".storybook/manager.ts",
+                ".storybook/preview.tsx",
+                "src/app/browser.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
+                "src/browser/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
+            ],
+            rules: {
+                "no-restricted-globals": [
+                    "error",
+                    {
+                        checkGlobalObject: true,
+                        globals: ["Bun", "Buffer", "Deno", "process"],
+                    },
+                ],
+                "no-restricted-imports": [
+                    "error",
+                    {
+                        paths: [
+                            {
+                                importNames: ["memo", "useCallback", "useMemo"],
+                                message:
+                                    "React Compiler owns routine memoization; keep explicit memoization out of application code.",
+                                name: "react",
+                            },
+                        ],
+                        patterns: [
+                            {
+                                group: [
+                                    "**/app/**",
+                                    "**/scripts/**",
+                                    "**/server/**",
+                                    "**/worker/**",
+                                    "@simplewebauthn/server",
+                                    "@simplewebauthn/server/**",
+                                    "@trpc/server",
+                                    "@trpc/server/**",
+                                    "bun",
+                                    "bun:*",
+                                    "drizzle-orm",
+                                    "drizzle-orm/**",
+                                    "node:*",
+                                ],
+                                message:
+                                    "Browser source may import only browser, contract, and environment-neutral shared modules.",
+                            },
+                        ],
+                    },
+                ],
+            },
+        },
+        {
+            excludeFiles: [
+                "**/*.spec.*",
+                "**/*.test.*",
+                "**/__tests__/**",
+                "**/test/**",
+                "**/testSupport/**",
+            ],
+            files: ["src/server/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}"],
+            rules: {
+                "no-restricted-imports": [
+                    "error",
+                    {
+                        patterns: [
+                            {
+                                group: [
+                                    "**/app/**",
+                                    "**/browser/**",
+                                    "**/scripts/**",
+                                    "**/worker/**",
+                                ],
+                                message:
+                                    "Server source may import only server, contract, and environment-neutral shared modules.",
+                            },
+                        ],
+                    },
+                ],
+            },
+        },
+        {
+            files: [
+                "src/app/dashboardServer.ts",
+                "src/app/server.ts",
+                "src/app/trpcHttpHandler.ts",
+                "src/app/trpcRequestPolicy.ts",
+            ],
+            rules: {
+                "no-restricted-imports": [
+                    "error",
+                    {
+                        patterns: [
+                            {
+                                group: ["**/browser/**", "**/scripts/**", "**/worker/**"],
+                                message:
+                                    "The web composition root may not import browser, worker, or script source.",
+                            },
+                        ],
+                    },
+                ],
+            },
+        },
+        {
+            excludeFiles: [
+                "**/*.spec.*",
+                "**/*.test.*",
+                "**/__tests__/**",
+                "**/test/**",
+                "**/testSupport/**",
+            ],
+            files: ["src/worker/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}"],
+            rules: {
+                "no-restricted-imports": [
+                    "error",
+                    {
+                        patterns: [
+                            {
+                                group: [
+                                    "**/app/**",
+                                    "**/browser/**",
+                                    "**/scripts/**",
+                                    "**/server/**",
+                                ],
+                                message:
+                                    "Worker source may import only worker, contract, and environment-neutral shared modules.",
+                            },
+                        ],
+                    },
+                ],
+            },
+        },
+        {
+            excludeFiles: [
+                "**/*.spec.*",
+                "**/*.test.*",
+                "**/__tests__/**",
+                "**/test/**",
+                "**/testSupport/**",
+            ],
+            files: [
+                "*.config.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
+                "scripts/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
+            ],
+            rules: {
+                "no-restricted-imports": [
+                    "error",
+                    {
+                        patterns: [
+                            {
+                                group: [
+                                    "**/src/app/**",
+                                    "**/src/browser/**",
+                                    "**/src/server/**",
+                                    "**/src/worker/**",
+                                ],
+                                message:
+                                    "Repository scripts may import only script, contract, and environment-neutral shared source.",
+                            },
+                        ],
+                    },
+                ],
+            },
+        },
+        {
+            files: ["scripts/developmentFrontend.ts"],
+            rules: {
+                "no-restricted-imports": [
+                    "error",
+                    {
+                        patterns: [
+                            {
+                                group: [
+                                    "**/src/app/**",
+                                    "**/src/server/**",
+                                    "**/src/worker/**",
+                                ],
+                                message:
+                                    "The Bun full-stack development frontend may import only its reviewed browser HTML root plus script, contract, and environment-neutral shared source.",
+                            },
+                        ],
+                    },
+                ],
+            },
+        },
+        {
+            files: [
+                "src/app/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
+                "src/server/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
+                "src/worker/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
+            ],
+            rules: {
+                "no-console": "error",
+            },
+        },
+        {
+            files: ["src/browser/ui/Virtualizer.tsx"],
+            rules: {
+                // directDomUpdates is TanStack's compiler-compatible path, but Oxlint cannot infer the runtime option.
+                "react/incompatible-library": "off",
+            },
+        },
+        ...pluginOverrides(storybookConfigs.recommended),
+        ...pluginOverrides(storybookConfigs.csf),
+        ...pluginOverrides(storybookConfigs["csf-strict"]),
+    ],
+});

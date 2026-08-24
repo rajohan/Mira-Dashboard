@@ -21,5 +21,9 @@
         "erasableSyntaxOnly": true
     },
     "files": [],
-    "references": [{ "path": "./tsconfig.app.json" }, { "path": "./tsconfig.node.json" }]
+    "references": [
+        { "path": "./tsconfig.browser.json" },
+        { "path": "./tsconfig.bun.json" },
+        { "path": "./tsconfig.storybook.json" }
+    ]
 }
