@@ -161,6 +161,50 @@
         {
             "kind": "query",
             "name": "system.runtimeIdentity"
+        },
+        {
+            "kind": "mutation",
+            "name": "tasks.addUpdate"
+        },
+        {
+            "kind": "mutation",
+            "name": "tasks.assign"
+        },
+        {
+            "kind": "mutation",
+            "name": "tasks.create"
+        },
+        {
+            "kind": "mutation",
+            "name": "tasks.delete"
+        },
+        {
+            "kind": "mutation",
+            "name": "tasks.deleteProgress"
+        },
+        {
+            "kind": "query",
+            "name": "tasks.get"
+        },
+        {
+            "kind": "query",
+            "name": "tasks.list"
+        },
+        {
+            "kind": "query",
+            "name": "tasks.listUpdates"
+        },
+        {
+            "kind": "mutation",
+            "name": "tasks.move"
+        },
+        {
+            "kind": "mutation",
+            "name": "tasks.update"
+        },
+        {
+            "kind": "mutation",
+            "name": "tasks.updateProgress"
         }
     ],
     "rawHttp": [

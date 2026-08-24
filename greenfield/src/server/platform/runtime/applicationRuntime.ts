@@ -48,6 +48,8 @@ export interface RealtimeEventRuntimeService {
         options: RealtimeEventStreamOptions,
         lease: RenewableStreamLease
     ): Promise<AsyncIterable<RealtimeEventDelivery>>;
+    /** Coalesces an immediate outbox poll after a local producer commits. */
+    wake(): Promise<void>;
 }
 
 /** Request-safe process services without lifecycle controls. */
@@ -369,6 +371,13 @@ function createApplicationRuntimeFromManagedRuntime<RuntimeError>(
                                       );
                             return Stream.toAsyncIterableEffect(interruptible);
                         })
+                    )
+                );
+            },
+            wake() {
+                return runtime.runPromise(
+                    RealtimeEventPumpService.pipe(
+                        Effect.flatMap((service) => service.wake)
                     )
                 );
             },

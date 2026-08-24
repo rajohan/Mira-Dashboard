@@ -98,7 +98,7 @@ const frontendRouteSchema = v.strictObject({
     ),
     sourceRouteName: v.pipe(v.string(), v.regex(/^[a-z][A-Za-z0-9]*$/u)),
     target: v.strictObject({
-        delivery: v.literal("planned"),
+        delivery: deliverySchema,
         path: routePathSchema,
         phase: phaseSchema,
     }),

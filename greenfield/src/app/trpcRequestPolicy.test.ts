@@ -4,6 +4,20 @@ import * as v from "valibot";
 
 import { confirmWebAuthnEnrollmentInputSchema } from "../contracts/accountSecurity.ts";
 import {
+    taskAutomationScheduleSummaryMaximumLength,
+    taskAutomationTextMaximumLength,
+    taskBodyMaximumLength,
+    taskLabelMaximumLength,
+    taskMaximumLabels,
+    taskProgressMaximumLength,
+    taskTitleMaximumLength,
+} from "../contracts/taskModel.ts";
+import {
+    createTaskInputSchema,
+    updateTaskInputSchema,
+    updateTaskProgressInputSchema,
+} from "../contracts/tasks.ts";
+import {
     webAuthnAttestationObjectMaximumLength,
     webAuthnAuthenticatorDataMaximumLength,
     webAuthnClientDataMaximumLength,
@@ -17,6 +31,9 @@ import {
     authenticationRequestBodyMaximumBytes,
     isTrpcRequestPath,
     readTrpcRequestPolicy,
+    serverRequestBodyMaximumBytes,
+    taskContentRequestBodyMaximumBytes,
+    taskProgressRequestBodyMaximumBytes,
     trpcRequestBodyMaximumBytes,
     webAuthnRequestBodyMaximumBytes,
 } from "./trpcRequestPolicy.ts";
@@ -71,6 +88,26 @@ describe("tRPC request policy", () => {
             rejectsBatch: false,
             requestBodyMaximumBytes: trpcRequestBodyMaximumBytes,
         });
+        expect(policy("/trpc/tasks.create")).toEqual({
+            rejectsBatch: false,
+            requestBodyMaximumBytes: taskContentRequestBodyMaximumBytes,
+        });
+        expect(policy("/trpc/tasks.update")).toEqual({
+            rejectsBatch: false,
+            requestBodyMaximumBytes: taskContentRequestBodyMaximumBytes,
+        });
+        expect(policy("/trpc/tasks.assign")).toEqual({
+            rejectsBatch: false,
+            requestBodyMaximumBytes: trpcRequestBodyMaximumBytes,
+        });
+        expect(policy("/trpc/tasks.addUpdate")).toEqual({
+            rejectsBatch: false,
+            requestBodyMaximumBytes: taskProgressRequestBodyMaximumBytes,
+        });
+        expect(policy("/trpc/tasks.updateProgress")).toEqual({
+            rejectsBatch: false,
+            requestBodyMaximumBytes: taskProgressRequestBodyMaximumBytes,
+        });
     });
 
     test("combines mixed batches using the strictest applicable policies", () => {
@@ -118,6 +155,72 @@ describe("tRPC request policy", () => {
         expect(encodedBytes).toBeLessThan(webAuthnRequestBodyMaximumBytes);
     });
 
+    test("fits the largest canonical task content requests inside their budget", () => {
+        const firstSurrogateCodePoint = 55_296;
+        const jsonExpandingCodePoint = "\uD800";
+        const maximumLabels = Array.from({ length: taskMaximumLabels }, (_, index) =>
+            String.fromCodePoint(firstSurrogateCodePoint + index).repeat(
+                taskLabelMaximumLength
+            )
+        );
+        const maximumTaskContent = {
+            automation: {
+                cronJobId: jsonExpandingCodePoint.repeat(taskAutomationTextMaximumLength),
+                kind: "openclaw-cron",
+                model: jsonExpandingCodePoint.repeat(taskAutomationTextMaximumLength),
+                recurring: false,
+                scheduleSummary: jsonExpandingCodePoint.repeat(
+                    taskAutomationScheduleSummaryMaximumLength
+                ),
+                sessionTarget: jsonExpandingCodePoint.repeat(
+                    taskAutomationTextMaximumLength
+                ),
+                thinking: jsonExpandingCodePoint.repeat(taskAutomationTextMaximumLength),
+            },
+            bodyMarkdown: jsonExpandingCodePoint.repeat(taskBodyMaximumLength),
+            labels: maximumLabels,
+            priority: "medium",
+            title: jsonExpandingCodePoint.repeat(taskTitleMaximumLength),
+        } as const;
+        const createInput = v.parse(createTaskInputSchema, {
+            ...maximumTaskContent,
+            assignee: "mira-2026",
+            status: "in-progress",
+        });
+        const updateInput = v.parse(updateTaskInputSchema, {
+            expectedVersion: Number.MAX_SAFE_INTEGER,
+            id: "019fd300-0000-7000-8000-000000000001",
+            patch: maximumTaskContent,
+        });
+        const encodedBytes = [createInput, updateInput].map((input) =>
+            Buffer.byteLength(JSON.stringify({ json: input }))
+        );
+
+        expect(encodedBytes).toEqual([617_232, 617_275]);
+        expect(Math.min(...encodedBytes)).toBeGreaterThan(trpcRequestBodyMaximumBytes);
+        expect(Math.max(...encodedBytes)).toBeLessThan(
+            taskContentRequestBodyMaximumBytes
+        );
+        expect(taskContentRequestBodyMaximumBytes).toBe(serverRequestBodyMaximumBytes);
+    });
+
+    test("fits the largest canonical progress update inside its exact budget", () => {
+        const input = v.parse(updateTaskProgressInputSchema, {
+            expectedVersion: Number.MAX_SAFE_INTEGER,
+            messageMarkdown: "\u0001".repeat(taskProgressMaximumLength),
+            taskId: "019fd300-0000-7000-8000-000000000001",
+            updateId: "019fd300-0000-7000-8000-000000000002",
+        });
+        const encodedBytes = Buffer.byteLength(JSON.stringify({ json: input }));
+
+        expect(encodedBytes).toBe(120_164);
+        expect(encodedBytes).toBeGreaterThan(trpcRequestBodyMaximumBytes);
+        expect(encodedBytes).toBeLessThan(taskProgressRequestBodyMaximumBytes);
+        expect(taskProgressRequestBodyMaximumBytes).toBeLessThan(
+            taskContentRequestBodyMaximumBytes
+        );
+    });
+
     test("fails closed for unknown names in registered authentication namespaces", () => {
         for (const path of [
             "/trpc/auth.future?batch=1",
@@ -133,9 +236,28 @@ describe("tRPC request policy", () => {
         }
     });
 
+    test("keeps unknown and malformed task procedures on the default budget", () => {
+        for (const path of [
+            "/trpc/tasks.future",
+            "/trpc/tasks.createExtra",
+            "/trpc/tasks.create,unknown.future",
+            "/trpc/tasks.updateProgress,unknown.future",
+            "/trpc/tasks.create%2F",
+            "/trpc/tasks.create///",
+            "/trpc/tasks%2Ecreate%",
+        ]) {
+            expect(policy(path)).toEqual({
+                rejectsBatch: false,
+                requestBodyMaximumBytes: trpcRequestBodyMaximumBytes,
+            });
+        }
+    });
+
     test("fails closed for malformed and encoded authentication paths", () => {
         for (const path of [
             "/trpc/auth.login%?batch=1",
+            "/trpc/%61uth.login%?batch=1",
+            "/trpc/a%75th.login%?batch=1",
             "/trpc/auth%2Elogin%?batch=1",
             "/trpc/system.runtimeIdentity%2Cauth.login%?batch=1",
             "/trpc/ACCOUNTSECURITY%2EstepUpTotp%?batch=1",

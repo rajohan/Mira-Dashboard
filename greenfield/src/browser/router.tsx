@@ -21,10 +21,15 @@ const accountSecurityRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/account-security",
 }).lazy(() => import("./routes/accountSecurity.lazy.tsx").then((module) => module.Route));
+const tasksRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/tasks",
+}).lazy(() => import("./routes/tasks.lazy.tsx").then((module) => module.Route));
 const routeTree = rootRoute.addChildren([
     overviewRoute,
     loginRoute,
     accountSecurityRoute,
+    tasksRoute,
 ]);
 
 /**

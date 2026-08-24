@@ -88,6 +88,15 @@ describe("automation identity schema", () => {
                 ) VALUES ('notifications:read', 1000, 'openclaw-task-tracking')
             `);
             database.sqlite.run(`
+                INSERT INTO automation_principal_capabilities (
+                    capability,
+                    granted_at,
+                    principal_id
+                ) VALUES
+                    ('tasks:read', 1000, 'openclaw-task-tracking'),
+                    ('tasks:write', 1000, 'openclaw-task-tracking')
+            `);
+            database.sqlite.run(`
                 INSERT INTO automation_credentials (
                     created_at,
                     expires_at,

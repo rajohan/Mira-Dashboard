@@ -104,6 +104,31 @@ export function boundedNonBlankTextSchema(
 }
 
 /**
+ * Tests whether text excludes Unicode control and format code points.
+ * @param value Text value to inspect.
+ * @returns Whether the text is safe for compact operator-facing labels and headings.
+ */
+export function hasNoUnicodeControlOrFormat(value: string): boolean {
+    return !/[\p{Cc}\p{Cf}]/u.test(value);
+}
+
+/**
+ * Builds bounded operator-facing text that cannot contain hidden control or format characters.
+ * @param maximumLength Maximum accepted Unicode code-point length.
+ * @param message Validation failure message.
+ * @returns Valibot schema for bounded, nonblank, control-safe text.
+ */
+export function boundedControlSafeTextSchema(
+    maximumLength: number,
+    message = "Expected bounded control-safe text."
+) {
+    return v.pipe(
+        boundedNonBlankTextSchema(maximumLength, message),
+        v.check(hasNoUnicodeControlOrFormat, message)
+    );
+}
+
+/**
  * Reads the Unicode code-point budget carried by a bounded-text requirement.
  * @param requirement Valibot check requirement to inspect.
  * @returns The registered maximum code-point length, when this module created it.
@@ -126,6 +151,18 @@ export function hasUniqueArrayItems<TItem extends boolean | null | number | stri
     values: TItem[]
 ): boolean {
     return new Set(values).size === values.length;
+}
+
+/**
+ * Compares strings by exact code-unit order without locale-dependent behavior.
+ * @param left First string.
+ * @param right Second string.
+ * @returns Negative, zero, or positive ordering result.
+ */
+export function compareStrings(left: string, right: string): number {
+    if (left < right) return -1;
+    if (left > right) return 1;
+    return 0;
 }
 
 /**

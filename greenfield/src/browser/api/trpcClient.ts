@@ -88,6 +88,10 @@ async function procedureContractsFor(
             const module = await import("../../contracts/system.ts");
             return module.systemProcedureContracts;
         }
+        case "tasks": {
+            const module = await import("../../contracts/tasks.ts");
+            return module.taskProcedureContracts;
+        }
         default: {
             throw new DashboardProtocolError();
         }

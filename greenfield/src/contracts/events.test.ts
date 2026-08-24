@@ -2,13 +2,33 @@ import { describe, expect, test } from "bun:test";
 
 import * as v from "valibot";
 
-import { realtimeStreamInputSchema, realtimeStreamOutputSchema } from "./events.ts";
+import {
+    eventsStreamContract,
+    realtimeStreamCapabilities,
+    realtimeStreamInputSchema,
+    realtimeStreamOutputSchema,
+    realtimeTopicDefinitions,
+} from "./events.ts";
 import {
     monitoringRealtimeRoutingSchema,
     monitoringRealtimeTopics,
 } from "./monitoringRealtime.ts";
 
 describe("realtime transport contracts", () => {
+    test("documents only capabilities required by registered topics", () => {
+        expect(realtimeStreamCapabilities).toEqual([
+            "notifications:read",
+            "reports:read",
+            "tasks:read",
+        ]);
+        expect(eventsStreamContract.access.capabilities).toBe(realtimeStreamCapabilities);
+        expect(
+            [
+                ...new Set(realtimeTopicDefinitions.map(({ capability }) => capability)),
+            ].toSorted()
+        ).toEqual(realtimeStreamCapabilities);
+    });
+
     test("defaults the initial cursor and preserves unique registered topics", () => {
         const input = v.parse(realtimeStreamInputSchema, {
             topics: [

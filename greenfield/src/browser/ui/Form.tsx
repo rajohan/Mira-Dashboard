@@ -5,7 +5,7 @@ interface FormProps extends Omit<
     "children" | "onSubmit"
 > {
     readonly children: ReactNode;
-    readonly onSubmit: () => void;
+    readonly onSubmit: () => Promise<void> | void;
 }
 
 /**
@@ -25,7 +25,7 @@ export function Form({
             onSubmit={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
-                onSubmit();
+                void onSubmit();
             }}
         >
             {children}

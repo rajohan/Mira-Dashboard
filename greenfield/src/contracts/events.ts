@@ -6,22 +6,45 @@ import {
 } from "../shared/validation.ts";
 import {
     monitoringRealtimeChangeSchemas,
+    monitoringRealtimeTopicDefinitions,
     monitoringRealtimeTopics,
 } from "./monitoringRealtime.ts";
 import { realtimeSubscriptionMaximumTopics } from "./realtime.ts";
 import type { ProcedureContract } from "./registry.ts";
-import { applicationCapabilities } from "./security.ts";
+import type { ApplicationCapability } from "./security.ts";
+import {
+    taskRealtimeChangeSchema,
+    taskRealtimeTopic,
+    taskRealtimeTopicDefinition,
+} from "./taskRealtime.ts";
 
 /** All topic definitions currently accepted by the realtime transport. */
-export {
-    findMonitoringRealtimeTopicDefinition as findRealtimeTopicDefinition,
-    monitoringRealtimeTopicDefinitions as realtimeTopicDefinitions,
-} from "./monitoringRealtime.ts";
+export const realtimeTopicDefinitions = Object.freeze([
+    ...monitoringRealtimeTopicDefinitions,
+    taskRealtimeTopicDefinition,
+] as const);
+
+/**
+ * Finds one exact durable realtime topic policy.
+ * @param topic Candidate durable topic.
+ * @returns Its registered definition, when present.
+ */
+export function findRealtimeTopicDefinition(topic: string) {
+    return realtimeTopicDefinitions.find((definition) => definition.topic === topic);
+}
+
+/** Exact unique capability vocabulary used by registered realtime topics. */
+export const realtimeStreamCapabilities = Object.freeze([
+    "notifications:read",
+    "reports:read",
+    "tasks:read",
+] as const satisfies readonly ApplicationCapability[]);
 
 const realtimeStreamTopics = [
     monitoringRealtimeTopics.incidents,
     monitoringRealtimeTopics.notifications,
     monitoringRealtimeTopics.reports,
+    taskRealtimeTopic,
 ] as const;
 
 const realtimeCursorSchema = canonicalNonnegativeSafeIntegerStringSchema(
@@ -54,7 +77,10 @@ export const realtimeStreamInputSchema = v.strictObject({
 /** Data inside one tRPC tracked SSE envelope. */
 export const realtimeStreamDataSchema = v.variant("kind", [
     v.strictObject({
-        event: v.variant("topic", monitoringRealtimeChangeSchemas),
+        event: v.variant("topic", [
+            ...monitoringRealtimeChangeSchemas,
+            taskRealtimeChangeSchema,
+        ]),
         kind: v.literal("change"),
     }),
     v.strictObject({
@@ -72,7 +98,7 @@ export const realtimeStreamOutputSchema = v.strictObject({
 /** Authenticated resumable realtime stream contract. */
 export const eventsStreamContract = {
     access: {
-        capabilities: applicationCapabilities,
+        capabilities: realtimeStreamCapabilities,
         capabilityPolicy: "per-topic",
         kind: "authenticated",
     },

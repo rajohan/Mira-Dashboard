@@ -26,6 +26,7 @@ import {
 } from "../api/trpcClient.ts";
 import { DashboardBrowserApplication } from "../application.tsx";
 import { createDashboardRouter } from "../router.tsx";
+import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
 import type { DashboardWebAuthnClient } from "./webauthn/webauthnClient.ts";
 
 const { render, screen, waitFor } = await import("@testing-library/react");
@@ -264,6 +265,7 @@ function renderAccountSecurity(
     render(
         <DashboardBrowserApplication
             queryClient={queryClient}
+            realtimeClient={noOpDashboardRealtimeClient}
             router={router}
             trpcClient={createDashboardTrpcClient(transport)}
             webAuthnClient={webAuthnClient}

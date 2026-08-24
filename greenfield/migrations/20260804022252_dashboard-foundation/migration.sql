@@ -139,7 +139,7 @@ CREATE TABLE `automation_principal_capabilities` (
 	`principal_id` text NOT NULL,
 	CONSTRAINT `automation_principal_capabilities_pk` PRIMARY KEY(`principal_id`, `capability`),
 	CONSTRAINT `fk_automation_principal_capabilities_principal_id_automation_principals_id_fk` FOREIGN KEY (`principal_id`) REFERENCES `automation_principals`(`id`) ON DELETE CASCADE,
-	CONSTRAINT "automation_principal_capabilities_capability_check" CHECK("capability" IN ('notifications:read', 'reports:read')),
+	CONSTRAINT "automation_principal_capabilities_capability_check" CHECK("capability" IN ('notifications:read', 'reports:read', 'tasks:read', 'tasks:write')),
 	CONSTRAINT "automation_principal_capabilities_granted_at_check" CHECK("granted_at" BETWEEN 0 AND 8640000000000000)
 ) STRICT;
 --> statement-breakpoint
@@ -372,6 +372,116 @@ CREATE UNIQUE INDEX `automation_credentials_prefix_unique` ON `automation_creden
 CREATE UNIQUE INDEX `automation_credentials_validator_unique` ON `automation_credentials` (`validator_version`,`validator_hash`);--> statement-breakpoint
 CREATE INDEX `automation_principals_created_id_idx` ON `automation_principals` (`created_at`,`id`);--> statement-breakpoint
 CREATE INDEX `automation_principals_active_created_id_idx` ON `automation_principals` (`created_at`,`id`) WHERE "automation_principals"."disabled_at" IS NULL;--> statement-breakpoint
+CREATE TABLE `task_automation_profiles` (
+	`cron_job_id` text NOT NULL,
+	`kind` text NOT NULL,
+	`model` text,
+	`recurring` integer NOT NULL,
+	`schedule_summary` text,
+	`session_target` text,
+	`task_id` text PRIMARY KEY NOT NULL,
+	`thinking` text,
+	CONSTRAINT `fk_task_automation_profiles_task_id_tasks_id_fk` FOREIGN KEY (`task_id`) REFERENCES `tasks`(`id`) ON DELETE CASCADE,
+	CONSTRAINT "task_automation_profiles_cron_job_id_check" CHECK(length("cron_job_id") BETWEEN 1 AND 200 AND instr("cron_job_id", char(0)) = 0 AND length(trim("cron_job_id", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND "cron_job_id" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*')),
+	CONSTRAINT "task_automation_profiles_kind_check" CHECK("kind" = 'openclaw-cron'),
+	CONSTRAINT "task_automation_profiles_model_check" CHECK("model" IS NULL OR (length("model") BETWEEN 1 AND 200 AND instr("model", char(0)) = 0 AND length(trim("model", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND "model" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*'))),
+	CONSTRAINT "task_automation_profiles_recurring_check" CHECK("recurring" IN (0, 1)),
+	CONSTRAINT "task_automation_profiles_schedule_summary_check" CHECK("schedule_summary" IS NULL OR (length("schedule_summary") BETWEEN 1 AND 500 AND instr("schedule_summary", char(0)) = 0 AND length(trim("schedule_summary", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND "schedule_summary" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*'))),
+	CONSTRAINT "task_automation_profiles_session_target_check" CHECK("session_target" IS NULL OR (length("session_target") BETWEEN 1 AND 200 AND instr("session_target", char(0)) = 0 AND length(trim("session_target", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND "session_target" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*'))),
+	CONSTRAINT "task_automation_profiles_task_id_check" CHECK(length("task_id") = 36 AND instr("task_id", char(0)) = 0 AND length(replace("task_id", '-', '')) = 32 AND replace("task_id", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr("task_id", 9, 1) = '-' AND substr("task_id", 14, 1) = '-' AND substr("task_id", 15, 1) = '7' AND substr("task_id", 19, 1) = '-' AND substr("task_id", 20, 1) GLOB '[89ab]' AND substr("task_id", 24, 1) = '-'),
+	CONSTRAINT "task_automation_profiles_thinking_check" CHECK("thinking" IS NULL OR (length("thinking") BETWEEN 1 AND 200 AND instr("thinking", char(0)) = 0 AND length(trim("thinking", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND "thinking" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*')))
+) STRICT;
+--> statement-breakpoint
+CREATE TABLE `task_events` (
+	`actor_id` text NOT NULL,
+	`actor_kind` text NOT NULL,
+	`created_at` integer NOT NULL,
+	`event_type` text NOT NULL,
+	`id` text PRIMARY KEY NOT NULL,
+	`payload_json` text DEFAULT '{}' NOT NULL,
+	`task_id` text NOT NULL,
+	CONSTRAINT "task_events_actor_check" CHECK(("actor_kind" = 'user' AND length("actor_id") = 36 AND instr("actor_id", char(0)) = 0 AND length(replace("actor_id", '-', '')) = 32 AND replace("actor_id", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr("actor_id", 9, 1) = '-' AND substr("actor_id", 14, 1) = '-' AND substr("actor_id", 15, 1) = '7' AND substr("actor_id", 19, 1) = '-' AND substr("actor_id", 20, 1) GLOB '[89ab]' AND substr("actor_id", 24, 1) = '-') OR ("actor_kind" = 'automation' AND length("actor_id") BETWEEN 1 AND 64 AND instr("actor_id", char(0)) = 0 AND "actor_id" = lower("actor_id") AND substr("actor_id", 1, 1) GLOB '[a-z0-9]' AND "actor_id" NOT GLOB '*[^a-z0-9._-]*')),
+	CONSTRAINT "task_events_created_at_check" CHECK("created_at" BETWEEN 0 AND 8640000000000000),
+	CONSTRAINT "task_events_event_type_check" CHECK("event_type" IN ('assigned', 'created', 'deleted', 'moved', 'progress-added', 'progress-deleted', 'progress-updated', 'updated')),
+	CONSTRAINT "task_events_id_check" CHECK(length("id") = 36 AND instr("id", char(0)) = 0 AND length(replace("id", '-', '')) = 32 AND replace("id", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr("id", 9, 1) = '-' AND substr("id", 14, 1) = '-' AND substr("id", 15, 1) = '7' AND substr("id", 19, 1) = '-' AND substr("id", 20, 1) GLOB '[89ab]' AND substr("id", 24, 1) = '-'),
+	CONSTRAINT "task_events_payload_json_check" CHECK(length(CAST("payload_json" AS BLOB)) <= 4096 AND CASE WHEN json_valid("payload_json") THEN json_type("payload_json") = 'object' ELSE 0 END),
+	CONSTRAINT "task_events_task_id_check" CHECK(length("task_id") = 36 AND instr("task_id", char(0)) = 0 AND length(replace("task_id", '-', '')) = 32 AND replace("task_id", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr("task_id", 9, 1) = '-' AND substr("task_id", 14, 1) = '-' AND substr("task_id", 15, 1) = '7' AND substr("task_id", 19, 1) = '-' AND substr("task_id", 20, 1) GLOB '[89ab]' AND substr("task_id", 24, 1) = '-')
+) STRICT, WITHOUT ROWID;
+--> statement-breakpoint
+CREATE TABLE `task_notification_outbox` (
+	`attempt_count` integer DEFAULT 0 NOT NULL,
+	`available_at` integer NOT NULL,
+	`created_at` integer NOT NULL,
+	`delivered_at` integer,
+	`event_id` text PRIMARY KEY NOT NULL,
+	`lease_expires_at` integer,
+	`lease_owner` text,
+	`message` text NOT NULL,
+	CONSTRAINT `fk_task_notification_outbox_event_id_task_events_id_fk` FOREIGN KEY (`event_id`) REFERENCES `task_events`(`id`) ON UPDATE RESTRICT ON DELETE RESTRICT,
+	CONSTRAINT "task_notification_outbox_attempt_count_check" CHECK("attempt_count" BETWEEN 0 AND 9007199254740991),
+	CONSTRAINT "task_notification_outbox_available_at_check" CHECK("available_at" BETWEEN 0 AND 8640000000000000 AND "available_at" >= "created_at"),
+	CONSTRAINT "task_notification_outbox_created_at_check" CHECK("created_at" BETWEEN 0 AND 8640000000000000),
+	CONSTRAINT "task_notification_outbox_delivered_at_check" CHECK("delivered_at" IS NULL OR ("delivered_at" BETWEEN 0 AND 8640000000000000 AND "delivered_at" >= "created_at")),
+	CONSTRAINT "task_notification_outbox_event_id_check" CHECK(length("event_id") = 36 AND instr("event_id", char(0)) = 0 AND length(replace("event_id", '-', '')) = 32 AND replace("event_id", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr("event_id", 9, 1) = '-' AND substr("event_id", 14, 1) = '-' AND substr("event_id", 15, 1) = '7' AND substr("event_id", 19, 1) = '-' AND substr("event_id", 20, 1) GLOB '[89ab]' AND substr("event_id", 24, 1) = '-'),
+	CONSTRAINT "task_notification_outbox_lease_check" CHECK(("lease_owner" IS NULL AND "lease_expires_at" IS NULL) OR ("delivered_at" IS NULL AND "lease_owner" IS NOT NULL AND length("lease_owner") = 36 AND instr("lease_owner", char(0)) = 0 AND length(replace("lease_owner", '-', '')) = 32 AND replace("lease_owner", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr("lease_owner", 9, 1) = '-' AND substr("lease_owner", 14, 1) = '-' AND substr("lease_owner", 15, 1) = '7' AND substr("lease_owner", 19, 1) = '-' AND substr("lease_owner", 20, 1) GLOB '[89ab]' AND substr("lease_owner", 24, 1) = '-' AND "lease_expires_at" IS NOT NULL AND "lease_expires_at" BETWEEN 0 AND 8640000000000000)),
+	CONSTRAINT "task_notification_outbox_message_check" CHECK(length("message") BETWEEN 1 AND 2048 AND instr("message", char(0)) = 0 AND length(trim("message", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND "message" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*') AND length(CAST("message" AS BLOB)) <= 2048)
+) STRICT, WITHOUT ROWID;
+--> statement-breakpoint
+CREATE TABLE `task_labels` (
+	`label` text NOT NULL,
+	`task_id` text NOT NULL,
+	CONSTRAINT `task_labels_pk` PRIMARY KEY(`task_id`, `label`),
+	CONSTRAINT `fk_task_labels_task_id_tasks_id_fk` FOREIGN KEY (`task_id`) REFERENCES `tasks`(`id`) ON DELETE CASCADE,
+	CONSTRAINT "task_labels_label_check" CHECK(length("label") BETWEEN 1 AND 64 AND instr("label", char(0)) = 0 AND length(trim("label", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND "label" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*')),
+	CONSTRAINT "task_labels_task_id_check" CHECK(length("task_id") = 36 AND instr("task_id", char(0)) = 0 AND length(replace("task_id", '-', '')) = 32 AND replace("task_id", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr("task_id", 9, 1) = '-' AND substr("task_id", 14, 1) = '-' AND substr("task_id", 15, 1) = '7' AND substr("task_id", 19, 1) = '-' AND substr("task_id", 20, 1) GLOB '[89ab]' AND substr("task_id", 24, 1) = '-')
+) STRICT;
+--> statement-breakpoint
+CREATE TABLE `task_updates` (
+	`author_id` text NOT NULL,
+	`author_kind` text NOT NULL,
+	`created_at` integer NOT NULL,
+	`id` text PRIMARY KEY NOT NULL,
+	`message_markdown` text NOT NULL,
+	`task_id` text NOT NULL,
+	`updated_at` integer NOT NULL,
+	`version` integer DEFAULT 1 NOT NULL,
+	CONSTRAINT `fk_task_updates_task_id_tasks_id_fk` FOREIGN KEY (`task_id`) REFERENCES `tasks`(`id`) ON DELETE CASCADE,
+	CONSTRAINT "task_updates_author_check" CHECK(("author_kind" = 'user' AND length("author_id") = 36 AND instr("author_id", char(0)) = 0 AND length(replace("author_id", '-', '')) = 32 AND replace("author_id", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr("author_id", 9, 1) = '-' AND substr("author_id", 14, 1) = '-' AND substr("author_id", 15, 1) = '7' AND substr("author_id", 19, 1) = '-' AND substr("author_id", 20, 1) GLOB '[89ab]' AND substr("author_id", 24, 1) = '-') OR ("author_kind" = 'automation' AND length("author_id") BETWEEN 1 AND 64 AND instr("author_id", char(0)) = 0 AND "author_id" = lower("author_id") AND substr("author_id", 1, 1) GLOB '[a-z0-9]' AND "author_id" NOT GLOB '*[^a-z0-9._-]*')),
+	CONSTRAINT "task_updates_id_check" CHECK(length("id") = 36 AND instr("id", char(0)) = 0 AND length(replace("id", '-', '')) = 32 AND replace("id", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr("id", 9, 1) = '-' AND substr("id", 14, 1) = '-' AND substr("id", 15, 1) = '7' AND substr("id", 19, 1) = '-' AND substr("id", 20, 1) GLOB '[89ab]' AND substr("id", 24, 1) = '-'),
+	CONSTRAINT "task_updates_message_markdown_check" CHECK(length("message_markdown") BETWEEN 1 AND 20000 AND instr("message_markdown", char(0)) = 0 AND length(trim("message_markdown", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0),
+	CONSTRAINT "task_updates_task_id_check" CHECK(length("task_id") = 36 AND instr("task_id", char(0)) = 0 AND length(replace("task_id", '-', '')) = 32 AND replace("task_id", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr("task_id", 9, 1) = '-' AND substr("task_id", 14, 1) = '-' AND substr("task_id", 15, 1) = '7' AND substr("task_id", 19, 1) = '-' AND substr("task_id", 20, 1) GLOB '[89ab]' AND substr("task_id", 24, 1) = '-'),
+	CONSTRAINT "task_updates_time_check" CHECK("created_at" BETWEEN 0 AND 8640000000000000 AND "updated_at" BETWEEN 0 AND 8640000000000000 AND "updated_at" >= "created_at"),
+	CONSTRAINT "task_updates_version_check" CHECK("version" BETWEEN 1 AND 9007199254740991)
+) STRICT;
+--> statement-breakpoint
+CREATE TABLE `tasks` (
+	`assignee` text,
+	`body_markdown` text,
+	`created_at` integer NOT NULL,
+	`id` text PRIMARY KEY NOT NULL,
+	`priority` text NOT NULL,
+	`status` text NOT NULL,
+	`title` text NOT NULL,
+	`updated_at` integer NOT NULL,
+	`version` integer DEFAULT 1 NOT NULL,
+	CONSTRAINT "tasks_assignee_check" CHECK("assignee" IS NULL OR "assignee" IN ('mira-2026', 'rajohan')),
+	CONSTRAINT "tasks_body_markdown_check" CHECK("body_markdown" IS NULL OR (length("body_markdown") BETWEEN 1 AND 100000 AND instr("body_markdown", char(0)) = 0 AND length(trim("body_markdown", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0)),
+	CONSTRAINT "tasks_id_check" CHECK(length("id") = 36 AND instr("id", char(0)) = 0 AND length(replace("id", '-', '')) = 32 AND replace("id", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr("id", 9, 1) = '-' AND substr("id", 14, 1) = '-' AND substr("id", 15, 1) = '7' AND substr("id", 19, 1) = '-' AND substr("id", 20, 1) GLOB '[89ab]' AND substr("id", 24, 1) = '-'),
+	CONSTRAINT "tasks_priority_check" CHECK("priority" IN ('low', 'medium', 'high')),
+	CONSTRAINT "tasks_status_check" CHECK("status" IN ('todo', 'in-progress', 'blocked', 'done')),
+	CONSTRAINT "tasks_title_check" CHECK(length("title") BETWEEN 1 AND 240 AND instr("title", char(0)) = 0 AND length(trim("title", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND "title" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*')),
+	CONSTRAINT "tasks_time_check" CHECK("created_at" BETWEEN 0 AND 8640000000000000 AND "updated_at" BETWEEN 0 AND 8640000000000000 AND "updated_at" >= "created_at"),
+	CONSTRAINT "tasks_version_check" CHECK("version" BETWEEN 1 AND 9007199254740991)
+) STRICT;
+--> statement-breakpoint
+CREATE UNIQUE INDEX `task_automation_profiles_cron_job_id_unique` ON `task_automation_profiles` (`cron_job_id`);--> statement-breakpoint
+CREATE INDEX `task_events_task_created_id_idx` ON `task_events` (`task_id`,`created_at`,`id`);--> statement-breakpoint
+CREATE INDEX `task_notification_outbox_eligible_idx` ON `task_notification_outbox` (`delivered_at`,`available_at`,`lease_expires_at`,`created_at`,`event_id`);--> statement-breakpoint
+CREATE INDEX `task_labels_label_task_idx` ON `task_labels` (`label`,`task_id`);--> statement-breakpoint
+CREATE INDEX `task_updates_task_created_id_idx` ON `task_updates` (`task_id`,`created_at`,`id`);--> statement-breakpoint
+CREATE INDEX `tasks_updated_id_idx` ON `tasks` (`updated_at`,`id`);--> statement-breakpoint
+CREATE INDEX `tasks_status_priority_updated_id_idx` ON `tasks` (`status`,`priority`,`updated_at`,`id`);--> statement-breakpoint
+CREATE INDEX `tasks_assignee_status_updated_id_idx` ON `tasks` (`assignee`,`status`,`updated_at`,`id`);--> statement-breakpoint
 CREATE TRIGGER automation_credentials_validate_replacement_insert
 BEFORE INSERT ON automation_credentials
 WHEN NEW.replaces_credential_id IS NOT NULL
@@ -636,4 +746,53 @@ CREATE TRIGGER schema_migrations_reject_delete
 BEFORE DELETE ON schema_migrations
 BEGIN
 	SELECT RAISE(ABORT, 'schema_migrations is append-only');
+END;
+--> statement-breakpoint
+CREATE TRIGGER task_events_validate_payload
+BEFORE INSERT ON task_events
+WHEN EXISTS (
+	WITH RECURSIVE
+	payload_tree(id, parent, key, type, atom) AS (
+		SELECT id, parent, key, type, atom FROM json_tree(NEW.payload_json)
+	),
+	payload_depth(id, type, atom, depth) AS (
+		SELECT id, type, atom, 0 FROM payload_tree WHERE parent IS NULL
+		UNION ALL
+		SELECT child.id, child.type, child.atom, parent.depth + 1
+		FROM payload_tree AS child
+		JOIN payload_depth AS parent ON child.parent = parent.id
+	)
+	SELECT 1
+	FROM payload_depth
+	WHERE (type IN ('object', 'array') AND depth > 12)
+		OR (type IN ('integer', 'real') AND (atom > 9007199254740991 OR atom < -9007199254740991))
+	UNION ALL
+	SELECT 1
+	FROM payload_tree AS member
+	JOIN payload_tree AS parent ON parent.id = member.parent
+	WHERE parent.type = 'object'
+	GROUP BY member.parent, member.key
+	HAVING count(*) > 1
+)
+BEGIN
+	SELECT RAISE(ABORT, 'task_events payload must be a bounded JSON object');
+END;
+--> statement-breakpoint
+CREATE TRIGGER task_events_reject_replace
+BEFORE INSERT ON task_events
+WHEN EXISTS (SELECT 1 FROM task_events WHERE id = NEW.id)
+BEGIN
+	SELECT RAISE(ABORT, 'task_events is append-only');
+END;
+--> statement-breakpoint
+CREATE TRIGGER task_events_reject_update
+BEFORE UPDATE ON task_events
+BEGIN
+	SELECT RAISE(ABORT, 'task_events is append-only');
+END;
+--> statement-breakpoint
+CREATE TRIGGER task_events_reject_delete
+BEFORE DELETE ON task_events
+BEGIN
+	SELECT RAISE(ABORT, 'task_events is append-only');
 END;

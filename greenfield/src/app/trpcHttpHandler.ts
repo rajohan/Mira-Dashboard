@@ -5,6 +5,7 @@ import type { AutomationSecurityLifecycleService } from "../server/domains/secur
 import type { MfaAccountLifecycleService } from "../server/domains/security/mfa/accountLifecycle.ts";
 import type { MfaLoginLifecycleService } from "../server/domains/security/mfa/loginLifecycle.ts";
 import type { SecurityAuditLifecycleService } from "../server/domains/security/securityAuditLifecycle.ts";
+import type { TaskService } from "../server/domains/tasks/service.ts";
 import type { ApplicationRuntime } from "../server/platform/runtime/applicationRuntime.ts";
 import { createAuthenticationClientSourceResolver } from "../server/rawHttp/authenticationClientSource.ts";
 import { readAuthenticationHttpCredentials } from "../server/rawHttp/authenticationCredentials.ts";
@@ -35,6 +36,7 @@ export interface TrpcHttpHandlerOptions {
     readonly mfaAccountLifecycle: MfaAccountLifecycleService;
     readonly mfaLoginLifecycle: MfaLoginLifecycleService;
     readonly securityAuditLifecycle: SecurityAuditLifecycleService;
+    readonly taskService: TaskService["Service"];
     readonly trustedProxyAddresses?: readonly string[];
 }
 
@@ -213,6 +215,7 @@ export function createTrpcHttpHandler(options: TrpcHttpHandlerOptions) {
                     requestId,
                     responseHeaders: resHeaders,
                     securityAuditLifecycle: options.securityAuditLifecycle,
+                    taskService: options.taskService,
                 }),
             endpoint: trpcEndpoint,
             maxBatchSize: trpcMaximumBatchSize,

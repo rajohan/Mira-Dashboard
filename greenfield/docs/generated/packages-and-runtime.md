@@ -15,9 +15,7 @@
 | Package | Declared | Resolved | Scope |
 | --- | --- | --- | --- |
 | `@daypicker/react` | `10.0.1` | `10.0.1` | runtime |
-| `@dnd-kit/core` | `^6.3.1` | `6.3.1` | runtime |
 | `@dnd-kit/react` | `^0.5.0` | `0.5.0` | runtime |
-| `@dnd-kit/sortable` | `^10.0.0` | `10.0.0` | runtime |
 | `@headlessui/react` | `^2.2.10` | `2.2.10` | runtime |
 | `@microlink/react-json-view` | `^1.31.28` | `1.31.28` | runtime |
 | `@simplewebauthn/browser` | `13.3.0` | `13.3.0` | runtime |
