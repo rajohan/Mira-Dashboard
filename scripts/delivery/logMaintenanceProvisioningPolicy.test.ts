@@ -83,14 +83,19 @@ describe("log-maintenance provisioning artifact policy", () => {
             "d /opt/docker/data/prowlarr/logs 2770 1001 mira-dashboard-log-maintenance - -",
             "a /opt/docker/data/prowlarr/logs - - - - d:group:mira-dashboard-log-maintenance:rwx,d:mask::rwx",
             "f /opt/docker/data/prowlarr/logs/prowlarr.debug.txt 0660 1001 mira-dashboard-log-maintenance - -",
+            "a /opt/docker/data/prowlarr/logs/prowlarr.debug.txt - - - - group:mira-dashboard-log-maintenance:rw,mask::rw",
             "f /opt/docker/data/prowlarr/logs/prowlarr.trace.txt 0660 1001 mira-dashboard-log-maintenance - -",
+            "a /opt/docker/data/prowlarr/logs/prowlarr.trace.txt - - - - group:mira-dashboard-log-maintenance:rw,mask::rw",
             "f /opt/docker/data/prowlarr/logs/prowlarr.txt 0660 1001 mira-dashboard-log-maintenance - -",
+            "a /opt/docker/data/prowlarr/logs/prowlarr.txt - - - - group:mira-dashboard-log-maintenance:rw,mask::rw",
             "d /opt/docker/data/submaker/logs 2770 1001 mira-dashboard-log-maintenance - -",
             "a /opt/docker/data/submaker/logs - - - - user:1000:rwx,d:user:1000:rwx,d:group:mira-dashboard-log-maintenance:rwx,d:mask::rwx",
             "f /opt/docker/data/submaker/logs/app.log 0660 1000 mira-dashboard-log-maintenance - -",
+            "a /opt/docker/data/submaker/logs/app.log - - - - group:mira-dashboard-log-maintenance:rw,mask::rw",
             "d /opt/docker/data/traefik 2770 1001 mira-dashboard-log-maintenance - -",
             "a /opt/docker/data/traefik - - - - d:group:mira-dashboard-log-maintenance:rwx,d:mask::rwx",
             "f /opt/docker/data/traefik/access.log 0660 1001 mira-dashboard-log-maintenance - -",
+            "a /opt/docker/data/traefik/access.log - - - - group:mira-dashboard-log-maintenance:rw,mask::rw",
         ]);
     });
 });

@@ -87,6 +87,7 @@ interface OpenedFile {
     readonly fileName: string;
     readonly handle: FileHandle;
     readonly status: Stats;
+    readonly trustedWritableGroupId?: number;
 }
 
 interface ArchiveEntry {
@@ -127,17 +128,13 @@ function ownerIsTrusted(ownerId: number, trustedOwnerIds: readonly number[]): bo
     return trustedOwnerIds.includes(ownerId);
 }
 
-function runtimeGroupIds(): readonly number[] {
-    const groupIds =
-        typeof process.getgroups === "function"
-            ? process.getgroups()
-            : [typeof process.getgid === "function" ? process.getgid() : 0];
-    return groupIds;
-}
-
-function fileStatusIsTrusted(status: Stats, trustedOwnerIds: readonly number[]): boolean {
+function fileStatusIsTrusted(
+    status: Stats,
+    trustedOwnerIds: readonly number[],
+    trustedWritableGroupId?: number
+): boolean {
     const groupWriteIsTrusted =
-        (status.mode & 0o020) === 0 || runtimeGroupIds().includes(status.gid);
+        (status.mode & 0o020) === 0 || status.gid === trustedWritableGroupId;
     return (
         status.isFile() &&
         status.nlink === 1 &&
@@ -204,7 +201,8 @@ async function openFileTarget(
     filePath: string,
     trustedOwnerIds: readonly number[],
     maximumBytes: number,
-    writable = false
+    writable = false,
+    trustedWritableGroupId?: number
 ): Promise<OpenedFile | undefined> {
     const directory = await openDirectory(path.dirname(filePath), trustedOwnerIds);
     const fileName = path.basename(filePath);
@@ -217,10 +215,19 @@ async function openFileTarget(
                 : readFlags
         );
         const status = await handle.stat();
-        if (!fileStatusIsTrusted(status, trustedOwnerIds) || status.size > maximumBytes) {
+        if (
+            !fileStatusIsTrusted(status, trustedOwnerIds, trustedWritableGroupId) ||
+            status.size > maximumBytes
+        ) {
             throw sanitizedFailure();
         }
-        return { directory, fileName, handle, status };
+        return {
+            directory,
+            fileName,
+            handle,
+            status,
+            ...(trustedWritableGroupId === undefined ? {} : { trustedWritableGroupId }),
+        };
     } catch (error) {
         await handle?.close().catch(() => {});
         await directory.handle.close().catch(() => {});
@@ -273,7 +280,7 @@ async function verifyIdentity(file: OpenedFile): Promise<void> {
         descriptorStatus.size !== file.status.size ||
         pathStatus.dev !== file.status.dev ||
         pathStatus.ino !== file.status.ino ||
-        !fileStatusIsTrusted(pathStatus, [file.status.uid])
+        !fileStatusIsTrusted(pathStatus, [file.status.uid], file.trustedWritableGroupId)
     ) {
         throw sanitizedFailure();
     }
@@ -411,7 +418,8 @@ async function rotateRename(
             file.directory,
             archiveFileName,
             target.trustedOwnerIds,
-            target.maximumSourceBytes
+            target.maximumSourceBytes,
+            target.trustedWritableGroupId
         );
     }
 }
@@ -447,7 +455,8 @@ async function trustedArchiveEntries(
     directory: OpenedDirectory,
     matches: (fileName: string) => boolean,
     trustedOwnerIds: readonly number[],
-    maximumSourceBytes: number
+    maximumSourceBytes: number,
+    trustedWritableGroupId?: number
 ): Promise<readonly ArchiveEntry[]> {
     const entries: ArchiveEntry[] = [];
     for (const fileName of await listDirectoryNames(directory)) {
@@ -457,7 +466,7 @@ async function trustedArchiveEntries(
             handle = await open(descriptorChild(directory, fileName), readFlags);
             const status = await handle.stat();
             if (
-                !fileStatusIsTrusted(status, trustedOwnerIds) ||
+                !fileStatusIsTrusted(status, trustedOwnerIds, trustedWritableGroupId) ||
                 status.size > maximumSourceBytes
             ) {
                 throw sanitizedFailure();
@@ -478,13 +487,15 @@ async function applyRetention(
     retentionCount: number,
     retentionAgeMs: number,
     nowMs: number,
-    dryRun: boolean
+    dryRun: boolean,
+    trustedWritableGroupId?: number
 ): Promise<number> {
     const archiveEntries = await trustedArchiveEntries(
         directory,
         matches,
         trustedOwnerIds,
-        maximumSourceBytes
+        maximumSourceBytes,
+        trustedWritableGroupId
     );
     const entries = archiveEntries.toSorted(
         (left, right) =>
@@ -500,7 +511,9 @@ async function applyRetention(
             const verified = await openFileTarget(
                 path.join(directory.path, entry.fileName),
                 trustedOwnerIds,
-                maximumSourceBytes
+                maximumSourceBytes,
+                false,
+                trustedWritableGroupId
             );
             if (verified === undefined) continue;
             try {
@@ -519,12 +532,15 @@ async function compressArchive(
     directory: OpenedDirectory,
     fileName: string,
     trustedOwnerIds: readonly number[],
-    maximumSourceBytes: number
+    maximumSourceBytes: number,
+    trustedWritableGroupId?: number
 ): Promise<void> {
     const source = await openFileTarget(
         path.join(directory.path, fileName),
         trustedOwnerIds,
-        maximumSourceBytes
+        maximumSourceBytes,
+        false,
+        trustedWritableGroupId
     );
     if (source === undefined) return;
     try {
@@ -559,7 +575,8 @@ async function processFileTarget(
         target.filePath,
         target.trustedOwnerIds,
         target.maximumSourceBytes,
-        true
+        true,
+        target.trustedWritableGroupId
     );
     if (recoveringCopyTruncate && target.strategy !== "copytruncate") {
         await closeOpenedFile(file);
@@ -608,7 +625,8 @@ async function processFileTarget(
             target.retentionCount,
             target.retentionAgeMs,
             nowMs,
-            dryRun
+            dryRun,
+            target.trustedWritableGroupId
         );
         let reason: ManagedLogTargetResult["reason"] = "not-due";
         if (recoveringCopyTruncate) reason = "recovery";

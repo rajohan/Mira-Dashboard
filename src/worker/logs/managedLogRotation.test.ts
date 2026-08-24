@@ -29,6 +29,7 @@ import { createManagedLogRotationEngine } from "./managedLogRotation.ts";
 
 const roots: string[] = [];
 const ownerId = typeof process.getuid === "function" ? process.getuid() : 0;
+const groupId = typeof process.getgid === "function" ? process.getgid() : 0;
 const retainedEpoch = "019feb02-8b7e-72ab-8f76-19b2ce15c8ef";
 
 interface Deferred {
@@ -253,7 +254,7 @@ describe("managed log rotation engine", () => {
         const engine = createManagedLogRotationEngine({
             manifest: {
                 ...base.manifest,
-                fileTargets: [fileTarget(source)],
+                fileTargets: [fileTarget(source, { trustedWritableGroupId: groupId })],
             },
         });
 
@@ -263,6 +264,32 @@ describe("managed log rotation engine", () => {
         expect(summary.results).toContainEqual({
             action: "rotated",
             reason: "size",
+            targetId: "dashboard.test",
+        });
+    });
+
+    test("rejects group-writable logs outside the reviewed maintenance group", async () => {
+        const base = await fixture();
+        const source = path.join(base.logDirectory, "container.log");
+        await writeFile(source, "container payload\n", { mode: 0o660 });
+        await chmod(source, 0o660);
+        const engine = createManagedLogRotationEngine({
+            manifest: {
+                ...base.manifest,
+                fileTargets: [
+                    fileTarget(source, {
+                        trustedWritableGroupId: groupId + 1,
+                    }),
+                ],
+            },
+        });
+
+        const summary = await engine.run();
+
+        expect(summary.ok).toBe(false);
+        expect(summary.results).toContainEqual({
+            action: "error",
+            reason: "invalid-source",
             targetId: "dashboard.test",
         });
     });

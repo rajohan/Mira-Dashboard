@@ -5,6 +5,7 @@ import {
     lstat,
     mkdir,
     mkdtemp,
+    rename,
     rm,
     symlink,
     writeFile,
@@ -119,6 +120,27 @@ describe("managed application log migration", () => {
                 requireRoot: () => true,
             })
         );
+        expect(failure.message).toBe("Managed application log migration failed");
+    });
+
+    test("rejects a path replacement after migrating held descriptors", async () => {
+        const item = await fixture();
+        const detached = `${item.directory}-detached`;
+
+        const failure = await captureFailure(
+            migrateManagedApplicationLogs(testUserId, {
+                afterMigration: async () => {
+                    await rename(item.directory, detached);
+                    await mkdir(item.directory, { mode: 0o700 });
+                    if ((process.getuid?.() ?? 1) === 0) {
+                        await chown(item.directory, testUserId, 0);
+                    }
+                },
+                directoryPath: item.directory,
+                requireRoot: () => true,
+            })
+        );
+
         expect(failure.message).toBe("Managed application log migration failed");
     });
 });

@@ -57,6 +57,25 @@ function trustedLogFile(
     );
 }
 
+function migratedLogFile(
+    status: BigIntStats,
+    directoryStatus: BigIntStats,
+    expectedStatus: BigIntStats,
+    userId: number
+): boolean {
+    return (
+        status.isFile() &&
+        !status.isSymbolicLink() &&
+        status.nlink === 1n &&
+        status.dev === directoryStatus.dev &&
+        status.dev === expectedStatus.dev &&
+        status.ino === expectedStatus.ino &&
+        status.uid === BigInt(userId) &&
+        status.gid === directoryStatus.gid &&
+        (status.mode & 0o7777n) === 0o600n
+    );
+}
+
 /**
  * Migrates the four fixed application log files from the legacy root launcher owner.
  * Missing fixed files are created only after non-root state preparation has admitted the
@@ -67,6 +86,7 @@ function trustedLogFile(
 export async function migrateManagedApplicationLogs(
     userId: number,
     options: {
+        readonly afterMigration?: () => Promise<void> | void;
         readonly directoryPath?: string;
         readonly requireRoot?: () => boolean;
     } = {}
@@ -80,7 +100,11 @@ export async function migrateManagedApplicationLogs(
     }
     const directoryPath = options.directoryPath ?? logsDirectory;
     let directory: FileHandle | undefined;
-    const files: FileHandle[] = [];
+    const files: Array<{
+        readonly fileName: string;
+        readonly handle: FileHandle;
+        readonly status: BigIntStats;
+    }> = [];
     try {
         try {
             directory = await open(directoryPath, directoryFlags);
@@ -105,20 +129,60 @@ export async function migrateManagedApplicationLogs(
                 );
                 const status = await file.stat({ bigint: true });
                 if (!trustedLogFile(status, directoryStatus, userId)) throw failure();
-                files.push(file);
+                files.push({ fileName, handle: file, status });
                 file = undefined;
             } finally {
                 await close(file);
             }
         }
         for (const file of files) {
-            await file.chown(userId, Number(directoryStatus.gid));
-            await file.chmod(0o600);
+            await file.handle.chown(userId, Number(directoryStatus.gid));
+            await file.handle.chmod(0o600);
+        }
+        await options.afterMigration?.();
+        let verifiedDirectory: FileHandle | undefined;
+        try {
+            verifiedDirectory = await open(directoryPath, directoryFlags);
+            const [verifiedDirectoryStatus, verifiedCanonical] = await Promise.all([
+                verifiedDirectory.stat({ bigint: true }),
+                realpath(`/proc/self/fd/${verifiedDirectory.fd}`),
+            ]);
+            if (
+                verifiedCanonical !== directoryPath ||
+                verifiedDirectoryStatus.dev !== directoryStatus.dev ||
+                verifiedDirectoryStatus.ino !== directoryStatus.ino ||
+                !trustedDirectory(verifiedDirectoryStatus, userId)
+            ) {
+                throw failure();
+            }
+            for (const file of files) {
+                const verifiedFile = await open(
+                    path.join(`/proc/self/fd/${verifiedDirectory.fd}`, file.fileName),
+                    constants.O_RDWR | constants.O_NOFOLLOW | constants.O_NONBLOCK
+                );
+                try {
+                    const verifiedStatus = await verifiedFile.stat({ bigint: true });
+                    if (
+                        !migratedLogFile(
+                            verifiedStatus,
+                            verifiedDirectoryStatus,
+                            file.status,
+                            userId
+                        )
+                    ) {
+                        throw failure();
+                    }
+                } finally {
+                    await close(verifiedFile);
+                }
+            }
+        } finally {
+            await close(verifiedDirectory);
         }
     } catch {
         throw failure();
     } finally {
-        await Promise.all(files.map((file) => close(file)));
+        await Promise.all(files.map((file) => close(file.handle)));
         await close(directory);
     }
 }
