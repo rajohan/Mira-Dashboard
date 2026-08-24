@@ -340,6 +340,7 @@ describe("production bootstrap admission", () => {
     test("stages every fixed root authority command without shell interpretation", async () => {
         const commands: string[][] = [];
         let groupLookupCount = 0;
+        let maintenanceGroupLine = "";
         const dependencies: ProductionBootstrapDependencies = {
             run: (command) => {
                 commands.push([...command]);
@@ -349,18 +350,30 @@ describe("production bootstrap admission", () => {
                         ? `${"e".repeat(64)}  bun\n`
                         : `${"d".repeat(64)}  release.tar\n`;
                 }
-                const isGroupLookup =
-                    command[0] === "/usr/bin/getent" && command[1] === "group";
-                if (isGroupLookup) {
+                const isNamedGroupLookup =
+                    command[0] === "/usr/bin/getent" &&
+                    command[1] === "group" &&
+                    command.length === 3;
+                const isGroupInventory =
+                    command[0] === "/usr/bin/getent" &&
+                    command[1] === "group" &&
+                    command.length === 2;
+                if (isNamedGroupLookup) {
                     groupLookupCount += 1;
                     if (groupLookupCount === 2) {
-                        stdout = "mira-dashboard-log-maintenance:x:986:\n";
+                        maintenanceGroupLine =
+                            "mira-dashboard-log-maintenance:x:986:\n";
                     } else if (groupLookupCount === 3) {
-                        stdout = "mira-dashboard-log-maintenance:x:986:ubuntu\n";
+                        maintenanceGroupLine =
+                            "mira-dashboard-log-maintenance:x:986:ubuntu\n";
                     }
+                    stdout = maintenanceGroupLine;
+                } else if (isGroupInventory) {
+                    stdout = maintenanceGroupLine;
                 }
                 return Promise.resolve({
-                    exitCode: isGroupLookup && groupLookupCount === 1 ? 2 : 0,
+                    exitCode:
+                        isNamedGroupLookup && groupLookupCount === 1 ? 2 : 0,
                     stdout,
                 });
             },
@@ -454,6 +467,94 @@ describe("production bootstrap admission", () => {
                 )
             )
         ).toBe(false);
+        expect(commands.some((command) => command.includes("/usr/sbin/usermod"))).toBe(
+            false
+        );
+    });
+
+    test("rejects a privileged maintenance-group id", async () => {
+        const commands: string[][] = [];
+        const failure = await captureFailure(
+            stageProductionBootstrapRootAuthority(
+                "/tmp/artifact",
+                releaseId,
+                "c".repeat(64),
+                "d".repeat(64),
+                "e".repeat(64),
+                1000,
+                {
+                    run: (command) => {
+                        commands.push([...command]);
+                        if (command.includes("/usr/bin/sha256sum")) {
+                            return Promise.resolve({
+                                exitCode: 0,
+                                stdout: command.at(-1)?.endsWith("/runtime/bun")
+                                    ? `${"e".repeat(64)}  bun\n`
+                                    : `${"d".repeat(64)}  release.tar\n`,
+                            });
+                        }
+                        if (command[0] === "/usr/bin/getent") {
+                            return Promise.resolve({
+                                exitCode: 0,
+                                stdout: "mira-dashboard-log-maintenance:x:0:\n",
+                            });
+                        }
+                        return Promise.resolve({ exitCode: 0, stdout: "" });
+                    },
+                }
+            )
+        );
+
+        expect(failure).toEqual(new Error("Production bootstrap failed"));
+        expect(commands.some((command) => command.includes("/usr/sbin/usermod"))).toBe(
+            false
+        );
+    });
+
+    test("rejects an aliased maintenance-group id", async () => {
+        const commands: string[][] = [];
+        const failure = await captureFailure(
+            stageProductionBootstrapRootAuthority(
+                "/tmp/artifact",
+                releaseId,
+                "c".repeat(64),
+                "d".repeat(64),
+                "e".repeat(64),
+                1000,
+                {
+                    run: (command) => {
+                        commands.push([...command]);
+                        if (command.includes("/usr/bin/sha256sum")) {
+                            return Promise.resolve({
+                                exitCode: 0,
+                                stdout: command.at(-1)?.endsWith("/runtime/bun")
+                                    ? `${"e".repeat(64)}  bun\n`
+                                    : `${"d".repeat(64)}  release.tar\n`,
+                            });
+                        }
+                        if (
+                            command[0] === "/usr/bin/getent" &&
+                            command.length === 3
+                        ) {
+                            return Promise.resolve({
+                                exitCode: 0,
+                                stdout: "mira-dashboard-log-maintenance:x:986:\n",
+                            });
+                        }
+                        if (command[0] === "/usr/bin/getent") {
+                            return Promise.resolve({
+                                exitCode: 0,
+                                stdout:
+                                    "mira-dashboard-log-maintenance:x:986:\nprivileged-alias:x:986:\n",
+                            });
+                        }
+                        return Promise.resolve({ exitCode: 0, stdout: "" });
+                    },
+                }
+            )
+        );
+
+        expect(failure).toEqual(new Error("Production bootstrap failed"));
         expect(commands.some((command) => command.includes("/usr/sbin/usermod"))).toBe(
             false
         );
@@ -558,6 +659,7 @@ describe("production bootstrap admission", () => {
         const commands: string[] = [];
         let prerequisitesInspected = false;
         let groupLookupCount = 0;
+        let maintenanceGroupLine = "";
         const dependencies: ProductionBootstrapDependencies = {
             inspectPrerequisites: () => {
                 prerequisitesInspected = true;
@@ -607,15 +709,20 @@ describe("production bootstrap admission", () => {
                         return { exitCode: 2, stdout: "" };
                     }
                     if (groupLookupCount === 2) {
-                        return {
-                            exitCode: 0,
-                            stdout: "mira-dashboard-log-maintenance:x:986:\n",
-                        };
+                        maintenanceGroupLine =
+                            "mira-dashboard-log-maintenance:x:986:\n";
+                    } else {
+                        maintenanceGroupLine =
+                            "mira-dashboard-log-maintenance:x:986:ubuntu\n";
                     }
-                    return {
-                        exitCode: 0,
-                        stdout: "mira-dashboard-log-maintenance:x:986:ubuntu\n",
-                    };
+                    return { exitCode: 0, stdout: maintenanceGroupLine };
+                }
+                if (
+                    command[0] === "/usr/bin/getent" &&
+                    command[1] === "group" &&
+                    command.length === 2
+                ) {
+                    return { exitCode: 0, stdout: maintenanceGroupLine };
                 }
                 return { exitCode: 0, stdout: "" };
             },

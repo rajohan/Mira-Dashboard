@@ -25,6 +25,7 @@ const dopplerConfigurationNames = applicationConfigurationRegistry
     )
     .map((entry) => entry.environmentName)
     .join(",");
+const minimumUnprivilegedGroupId = 100;
 
 interface CommandResult {
     readonly exitCode: number;
@@ -63,6 +64,36 @@ interface ProductionBootstrapPathStatus {
     readonly uid: number;
     isDirectory(): boolean;
     isFile(): boolean;
+}
+
+function parseMaintenanceGroup(
+    stdout: string,
+    expectedMembers: string
+): Readonly<{ groupId: number; line: string }> | undefined {
+    const line = stdout.endsWith("\n") ? stdout.slice(0, -1) : stdout;
+    const match =
+        /^mira-dashboard-log-maintenance:[^:\n]*:(\d{1,10}):([^\n]*)$/u.exec(line);
+    if (!match || match[2] !== expectedMembers) return undefined;
+    const groupId = Number(match[1]);
+    return Number.isSafeInteger(groupId) && groupId >= minimumUnprivilegedGroupId
+        ? Object.freeze({ groupId, line })
+        : undefined;
+}
+
+async function maintenanceGroupIsUnique(
+    dependencies: ProductionBootstrapDependencies,
+    group: Readonly<{ groupId: number; line: string }>
+): Promise<boolean> {
+    const inventory = await dependencies.run(["/usr/bin/getent", "group"]);
+    if (inventory.exitCode !== 0) return false;
+    const aliases = inventory.stdout
+        .split("\n")
+        .filter(Boolean)
+        .filter((line) => {
+            const fields = line.split(":");
+            return fields.length === 4 && Number(fields[2]) === group.groupId;
+        });
+    return aliases.length === 1 && aliases[0] === group.line;
 }
 
 export interface ProductionBootstrapPrerequisiteFilesystem {
@@ -456,13 +487,9 @@ export async function stageProductionBootstrapRootAuthority(
             "mira-dashboard-log-maintenance",
         ]);
     }
-    let groupMatch =
-        group.exitCode === 0
-            ? /^mira-dashboard-log-maintenance:[^:\n]*:(\d{1,10}):([^\n]*)\n?$/u.exec(
-                  group.stdout
-              )
-            : null;
-    if (!groupMatch || (groupMatch[2] !== "" && groupMatch[2] !== "ubuntu")) {
+    let admittedGroup =
+        group.exitCode === 0 ? parseMaintenanceGroup(group.stdout, "") : undefined;
+    if (!admittedGroup || !(await maintenanceGroupIsUnique(dependencies, admittedGroup))) {
         throw new Error(failureMessage);
     }
     await requireSuccess(dependencies, [
@@ -478,13 +505,11 @@ export async function stageProductionBootstrapRootAuthority(
         "group",
         "mira-dashboard-log-maintenance",
     ]);
-    groupMatch =
+    admittedGroup =
         group.exitCode === 0
-            ? /^mira-dashboard-log-maintenance:[^:\n]*:(\d{1,10}):(ubuntu)\n?$/u.exec(
-                  group.stdout
-              )
-            : null;
-    if (!groupMatch) {
+            ? parseMaintenanceGroup(group.stdout, "ubuntu")
+            : undefined;
+    if (!admittedGroup || !(await maintenanceGroupIsUnique(dependencies, admittedGroup))) {
         throw new Error(failureMessage);
     }
     await requireSuccess(dependencies, [
